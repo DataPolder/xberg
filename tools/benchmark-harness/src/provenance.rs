@@ -372,6 +372,9 @@ fn worker_semantics(mode: BenchmarkMode, capability: Option<BatchCapability>) ->
         (BenchmarkMode::Batch, Some(BatchEntryPoint::LiteparseBatchParse)) => {
             "OCR page workers; not document-level concurrency"
         }
+        (BenchmarkMode::Batch, Some(BatchEntryPoint::MineruDoParse)) => {
+            "MinerU 3.4.4 do_parse pipeline; model batches span documents through doc_analyze_streaming processing windows"
+        }
         (BenchmarkMode::Batch, None) => "batch harness concurrency",
     }
 }
@@ -439,6 +442,21 @@ mod tests {
                 })
             ),
             "configured document concurrency cap; Xberg thread budget is recorded separately"
+        );
+    }
+
+    #[test]
+    fn mineru_batch_provenance_labels_cross_document_model_batching() {
+        assert_eq!(
+            worker_semantics(
+                BenchmarkMode::Batch,
+                Some(BatchCapability {
+                    entry_point: BatchEntryPoint::MineruDoParse,
+                    timing_scope: crate::types::BatchTimingScope::ColdEndToEndSubprocess,
+                    per_item_timing: false,
+                })
+            ),
+            "MinerU 3.4.4 do_parse pipeline; model batches span documents through doc_analyze_streaming processing windows"
         );
     }
 
