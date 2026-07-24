@@ -87,7 +87,13 @@ tasks:
     deps: [mock-server:build]
     cmds:
       - composer install
-      - vendor/bin/phpunit
+      # install.sh (alef-generated) installs the native extension via PIE and appends
+      # `extension=xberg` to php.ini; that append persists across steps even though PIE's
+      # own env vars don't, so it must run before the test invocation but can be a
+      # separate step. run_tests.php (alef-generated) is the extension-load-aware runner —
+      # bare `vendor/bin/phpunit` never loads the extension. ~keep
+      - bash install.sh
+      - php run_tests.php
 
   smoke:rust:
     desc: Run Rust test_app smoke test
