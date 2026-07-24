@@ -216,6 +216,14 @@ repository state, ordered fixture/document digests, framework executable identit
 timing configuration, worker semantics, and the actual Xberg thread budget reported by the
 adapter. It deliberately stores no local absolute paths.
 
+Local profile runs also write `benchmark-profile.json`. Its `run_identity_sha256` binds the
+selected binary, profile configuration, and recursive Git worktree state at execution time,
+including executable modes, untracked files, and submodules. Untracked-file selection follows
+repository `.gitignore` files only; global and repository-local exclusion configuration is
+ignored. Hashing reads index and filesystem state directly without invoking configured Git
+filters, fsmonitor hooks, or external diff helpers. This identifies the binary and checkout used
+for a run; it does not claim that the binary was built from that checkout.
+
 ### `consolidate` -- Merge multi-job results
 
 Combines benchmark results from parallel CI jobs into a single aggregated report with percentiles.
@@ -244,6 +252,12 @@ benchmark-harness compare \
 | `--dump-outputs` | Write extraction outputs to `/tmp/xberg_compare/` |
 | `--guardrails`   | Fail on quality regressions (non-zero exit)           |
 | `--filter`       | Only run documents matching this substring            |
+
+Guardrail contracts may include a `relative_order` array of exact text anchors. The comparison
+fails unless every anchor is present in the listed order, allowing focused reading-order checks
+that are independent of aggregate SF1 thresholds. The known `681693`
+`pdf-oxide+layout+reading-order` sequence is installed when guardrails are loaded or generated,
+including for legacy guardrail files without `relative_order`.
 
 ### `pipeline-benchmark` -- 6-path extraction matrix
 
