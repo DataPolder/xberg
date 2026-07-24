@@ -2124,13 +2124,27 @@ jobs:
           path: dist/go-ffi
           merge-multiple: true
 
+      # The generated Go cmd/setup tool verifies each downloaded archive against
+      # its .sha256 sidecar before extracting (dart download_libs parity), so the
+      # sidecars must ship as release assets alongside the tarballs. ~keep
+      - name: Generate SHA-256 sidecars for cmd/setup verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist/go-ffi
+          for t in xberg-go-*.tar.gz; do
+            sha256sum "$t" > "$t.sha256"
+          done
+          ls -la
+
       - uses: xberg-io/actions/upload-release-assets@v1
         with:
           tag: ${{ needs.prepare.outputs.tag }}
           working-directory: dist/go-ffi
           dry-run: ${{ needs.prepare.outputs.dry_run }}
           token: ${{ steps.app-token.outputs.token }}
-          assets: xberg-go-*.tar.gz
+          # Trailing * includes the .sha256 sidecars (same pattern as dart). ~keep
+          assets: xberg-go-*.tar.gz*
 
   tag-go-module:
     name: Tag Go module for pkg.go.dev resolution
