@@ -77,7 +77,7 @@ pub fn with_timeout(promise: js_sys::Promise, ms: u32) -> js_sys::Promise {
         Err(_) => {
             // Arming the race can only fail on engine-level errors (e.g. OOM).
             // Degrade to the untimed promise, but say so instead of silently
-            // dropping the timeout.
+            // dropping the timeout. ~keep
             warn("xberg-wasm: failed to arm bridge timeout; proceeding without one");
             promise
         }

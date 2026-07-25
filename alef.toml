@@ -202,11 +202,16 @@ traineddata = "traineddata"
 "Package.swift" = ["comment", "doc-comment"]
 "packages/**" = ["comment", "doc-comment"]
 "crates/xberg-node/**" = ["comment", "doc-comment"]
-"crates/xberg-wasm/**" = ["comment", "doc-comment"]
-"crates/xberg-ffi/**" = ["comment", "doc-comment"]
-"crates/xberg-py/**" = ["comment", "doc-comment"]
 "crates/xberg-php/**" = ["comment", "doc-comment"]
 "crates/xberg-jni/**" = ["comment", "doc-comment"]
+# xberg-ffi/py/wasm are MIXED: only src/lib.rs (+ ffi build.rs/cbindgen.toml) is
+# alef-generated; the other modules are hand-written and get the uncomment sweep. ~keep
+"crates/xberg-ffi/src/lib.rs" = ["comment", "doc-comment"]
+"crates/xberg-ffi/build.rs" = ["comment", "doc-comment"]
+"crates/xberg-ffi/cbindgen.toml" = ["comment", "doc-comment"]
+"crates/xberg-ffi/include/xberg.h" = ["comment", "doc-comment"]
+"crates/xberg-py/src/lib.rs" = ["comment", "doc-comment"]
+"crates/xberg-wasm/src/lib.rs" = ["comment", "doc-comment"]
 "**/text_repair.rs" = ["typo"]
 # Executable CI helper (git mode 100755); poly runs ruff via stdin and cannot
 # see the exec bit, so EXE001 always false-fires on shebang'd scripts. ~keep

@@ -41,9 +41,7 @@ fn required_bytes(obj: &JsValue, field: &str) -> Result<Vec<u8>, JsValue> {
     } else if value.is_instance_of::<js_sys::ArrayBuffer>() {
         js_sys::Uint8Array::new(&value).to_vec()
     } else {
-        return Err(js_from_any(format!(
-            "'{field}' must be a Uint8Array or ArrayBuffer"
-        )));
+        return Err(js_from_any(format!("'{field}' must be a Uint8Array or ArrayBuffer")));
     };
 
     if bytes.is_empty() {
@@ -167,7 +165,8 @@ mod tests {
 
     #[wasm_bindgen_test]
     async fn load_rejects_wrong_type_by_name() {
-        let options = eval("({ weights: 'not bytes', tokenizer: new Uint8Array([1]), encoderConfig: new Uint8Array([1]) })");
+        let options =
+            eval("({ weights: 'not bytes', tokenizer: new Uint8Array([1]), encoderConfig: new Uint8Array([1]) })");
         let err = NerModel::load(options).await.err().expect("must fail");
         let text = err_text(err);
         assert!(text.contains("weights") && text.contains("Uint8Array"), "got: {text}");
@@ -175,8 +174,9 @@ mod tests {
 
     #[wasm_bindgen_test]
     async fn load_rejects_empty_buffer() {
-        let options =
-            eval("({ weights: new Uint8Array([]), tokenizer: new Uint8Array([1]), encoderConfig: new Uint8Array([1]) })");
+        let options = eval(
+            "({ weights: new Uint8Array([]), tokenizer: new Uint8Array([1]), encoderConfig: new Uint8Array([1]) })",
+        );
         let err = NerModel::load(options).await.err().expect("must fail");
         assert!(err_text(err).contains("empty"));
     }
@@ -184,13 +184,15 @@ mod tests {
     #[wasm_bindgen_test]
     async fn load_accepts_array_buffer_and_fails_on_content_not_type() {
         // ArrayBuffer must pass the type check and fail on the bytes instead. ~keep
-        let options = eval(
-            "({ weights: new ArrayBuffer(8), tokenizer: new ArrayBuffer(8), encoderConfig: new ArrayBuffer(8) })",
-        );
+        let options =
+            eval("({ weights: new ArrayBuffer(8), tokenizer: new ArrayBuffer(8), encoderConfig: new ArrayBuffer(8) })");
         let err = NerModel::load(options).await.err().expect("must fail");
         let text = err_text(err);
         assert!(text.contains("NerModel.load:"), "expected a parse failure, got: {text}");
-        assert!(!text.contains("must be a Uint8Array"), "ArrayBuffer must be accepted: {text}");
+        assert!(
+            !text.contains("must be a Uint8Array"),
+            "ArrayBuffer must be accepted: {text}"
+        );
     }
 
     #[wasm_bindgen_test]
