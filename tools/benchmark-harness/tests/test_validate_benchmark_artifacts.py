@@ -7,6 +7,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -42,9 +43,9 @@ class ValidateBenchmarkArtifactsTests(unittest.TestCase):
         self.args = Args()
         self.args.artifacts_dir = self.root / "artifacts"
         self.args.cohort_manifest = self.root / "cohort.json"
-        self.args.fixtures_root = self.root / "fixtures"
+        self.args.fixtures_root = self.root / "tools/benchmark-harness/fixtures"
         self.args.artifacts_dir.mkdir()
-        self.args.fixtures_root.mkdir()
+        self.args.fixtures_root.mkdir(parents=True)
         self.contract = validator.CONTRACTS["native"]
         self.write_manifest_and_fixtures()
         self.write_artifacts()
@@ -59,21 +60,41 @@ class ValidateBenchmarkArtifactsTests(unittest.TestCase):
         path.write_text(json.dumps(value), encoding="utf-8")
 
     def write_manifest_and_fixtures(self) -> None:
-        """Write the cohort and referenced fixture descriptors."""
-        self.write_json(
-            self.args.cohort_manifest,
-            {
-                "schema_version": 1,
-                "name": self.contract.manifest_name,
-                "batch_size": self.contract.batch_size,
-                "fixtures": list(self.contract.fixtures),
-            },
-        )
+        """Copy the exact cohort and create real referenced fixture documents."""
+        cohort_name = validator.NATIVE_COHORT if self.args.cohort == "native" else validator.OCR_COHORT
+        source_manifest = ROOT / "tools/benchmark-harness/cohorts" / f"{cohort_name}.json"
+        shutil.copyfile(source_manifest, self.args.cohort_manifest)
+        self.fixture_provenance = []
         for fixture, document_stem in zip(self.contract.fixtures, self.contract.document_stems, strict=True):
-            self.write_json(
-                self.args.fixtures_root / fixture,
-                {"document": f"../../../test_documents/{document_stem}.pdf"},
+            source_fixture = ROOT / "tools/benchmark-harness/fixtures" / fixture
+            descriptor_path = self.args.fixtures_root / fixture
+            descriptor_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source_fixture, descriptor_path)
+            descriptor = json.loads(descriptor_path.read_text(encoding="utf-8"))
+            document_path = descriptor_path.parent / descriptor["document"]
+            document_path.parent.mkdir(parents=True, exist_ok=True)
+            document_path.write_bytes(f"temporary benchmark document: {document_stem}\n".encode())
+            self.fixture_provenance.append(
+                {
+                    "fixture": fixture,
+                    "fixture_blake3": self.blake3(descriptor_path),
+                    "document_blake3": self.blake3(document_path),
+                    "document_bytes": document_path.stat().st_size,
+                }
             )
+
+    def blake3(self, path: Path) -> str:
+        """Return the real BLAKE3 digest produced by b3sum."""
+        b3sum = shutil.which("b3sum")
+        if b3sum is None:
+            self.fail("b3sum is required for benchmark validator tests")
+        result = subprocess.run(
+            [b3sum, str(path)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout.split(maxsplit=1)[0]
 
     def provenance(self, entry: validator.MatrixEntry) -> dict[str, object]:
         """Build valid provenance for one matrix entry."""
@@ -83,16 +104,8 @@ class ValidateBenchmarkArtifactsTests(unittest.TestCase):
             "repository": {"commit": self.args.source_sha, "dirty": False},
             "corpus": {
                 "cohort": self.contract.manifest_name,
-                "cohort_manifest_blake3": self.contract.manifest_blake3,
-                "ordered_fixtures": [
-                    {
-                        "fixture": fixture,
-                        "fixture_blake3": "b" * 64,
-                        "document_blake3": "c" * 64,
-                        "document_bytes": 100,
-                    }
-                    for fixture in self.contract.fixtures
-                ],
+                "cohort_manifest_blake3": self.blake3(self.args.cohort_manifest),
+                "ordered_fixtures": self.fixture_provenance,
             },
             "frameworks": [
                 {
@@ -195,10 +208,76 @@ class ValidateBenchmarkArtifactsTests(unittest.TestCase):
         """The full exact native contract is accepted."""
         validator.validate_artifacts(self.args, self.contract)
 
+    def test_raw_cli_subprocess_accepts_exact_native_contract(self) -> None:
+        """The public CLI accepts a complete raw artifact tree."""
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "--cohort",
+                self.args.cohort,
+                "--artifacts-dir",
+                str(self.args.artifacts_dir),
+                "--cohort-manifest",
+                str(self.args.cohort_manifest),
+                "--fixtures-root",
+                str(self.args.fixtures_root),
+                "--source-sha",
+                self.args.source_sha,
+                "--run-id",
+                self.args.run_id,
+                "--iterations",
+                str(self.args.iterations),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "validated 23 native benchmark artifacts\n")
+        self.assertEqual(result.stderr, "")
+
     def test_accepts_exact_ocr_contract(self) -> None:
         """The full exact OCR contract is accepted."""
         self.select_contract("ocr")
         validator.validate_artifacts(self.args, self.contract)
+
+    def test_rejects_tampered_manifest_bytes(self) -> None:
+        """Semantically equivalent manifest bytes cannot bypass the pinned digest."""
+        with self.args.cohort_manifest.open("a", encoding="utf-8") as manifest:
+            manifest.write(" ")
+        with self.assertRaisesRegex(validator.ContractError, "manifest BLAKE3 mismatch"):
+            validator.validate_artifacts(self.args, self.contract)
+
+    def test_rejects_wrong_fixture_digest_for_real_descriptor(self) -> None:
+        """Fixture provenance must match the temporary descriptor bytes."""
+        entry = self.contract.matrix[0]
+        path = self.args.artifacts_dir / f"{entry.artifact}-{self.args.run_id}" / "run/provenance.json"
+        provenance = json.loads(path.read_text(encoding="utf-8"))
+        provenance["corpus"]["ordered_fixtures"][0]["fixture_blake3"] = "0" * 64
+        self.write_json(path, provenance)
+        with self.assertRaisesRegex(validator.ContractError, "descriptor BLAKE3 mismatch"):
+            validator.validate_artifacts(self.args, self.contract)
+
+    def test_rejects_wrong_document_digest_for_real_document(self) -> None:
+        """Document provenance must match the temporary document bytes."""
+        entry = self.contract.matrix[0]
+        path = self.args.artifacts_dir / f"{entry.artifact}-{self.args.run_id}" / "run/provenance.json"
+        provenance = json.loads(path.read_text(encoding="utf-8"))
+        provenance["corpus"]["ordered_fixtures"][0]["document_blake3"] = "0" * 64
+        self.write_json(path, provenance)
+        with self.assertRaisesRegex(validator.ContractError, "document BLAKE3 mismatch"):
+            validator.validate_artifacts(self.args, self.contract)
+
+    def test_rejects_wrong_document_bytes_for_real_document(self) -> None:
+        """Document size provenance must match the temporary document bytes."""
+        entry = self.contract.matrix[0]
+        path = self.args.artifacts_dir / f"{entry.artifact}-{self.args.run_id}" / "run/provenance.json"
+        provenance = json.loads(path.read_text(encoding="utf-8"))
+        provenance["corpus"]["ordered_fixtures"][0]["document_bytes"] += 1
+        self.write_json(path, provenance)
+        with self.assertRaisesRegex(validator.ContractError, "document size mismatch"):
+            validator.validate_artifacts(self.args, self.contract)
 
     def test_rejects_unexpected_artifact(self) -> None:
         """Unexpected artifact names fail closed."""
@@ -245,6 +324,34 @@ class ValidateBenchmarkArtifactsTests(unittest.TestCase):
         with self.assertRaisesRegex(validator.ContractError, "malformed"):
             validator.validate_artifacts(self.args, self.contract)
 
+    def test_rejects_manifest_fixtures_when_not_an_array_with_contract_error(self) -> None:
+        """A malformed manifest fixture collection fails with ContractError."""
+        manifest = json.loads(self.args.cohort_manifest.read_text(encoding="utf-8"))
+        manifest["fixtures"] = {}
+        self.write_json(self.args.cohort_manifest, manifest)
+        with self.assertRaises(validator.ContractError):
+            validator.validate_artifacts(self.args, self.contract)
+
+    def test_rejects_framework_when_not_an_object_with_contract_error(self) -> None:
+        """A malformed framework entry fails with ContractError."""
+        entry = self.contract.matrix[0]
+        path = self.args.artifacts_dir / f"{entry.artifact}-{self.args.run_id}" / "run/provenance.json"
+        provenance = json.loads(path.read_text(encoding="utf-8"))
+        provenance["frameworks"] = [None]
+        self.write_json(path, provenance)
+        with self.assertRaises(validator.ContractError):
+            validator.validate_artifacts(self.args, self.contract)
+
+    def test_rejects_result_row_when_not_an_object_with_contract_error(self) -> None:
+        """A malformed raw result row fails with ContractError."""
+        entry = self.contract.matrix[0]
+        path = self.args.artifacts_dir / f"{entry.artifact}-{self.args.run_id}" / "run/results.json"
+        results = json.loads(path.read_text(encoding="utf-8"))
+        results[0] = None
+        self.write_json(path, results)
+        with self.assertRaises(validator.ContractError):
+            validator.validate_artifacts(self.args, self.contract)
+
     def test_accepts_exact_aggregate_contract(self) -> None:
         """The consolidated cohort must retain every exact capability key."""
         path = self.root / "aggregated.json"
@@ -273,6 +380,65 @@ class ValidateBenchmarkArtifactsTests(unittest.TestCase):
         )
         self.args.aggregated_file = path
         with self.assertRaisesRegex(validator.ContractError, "unexpected"):
+            validator.validate_aggregate(self.args, self.contract)
+
+    def test_rejects_native_aggregate_with_only_with_ocr_bucket(self) -> None:
+        """Native aggregates cannot substitute forced-OCR metrics."""
+        aggregate = self.aggregate()
+        for group in aggregate["by_framework_mode"].values():
+            file_group = group["by_file_type"]["pdf"]
+            file_group["with_ocr"] = file_group["no_ocr"]
+            file_group["no_ocr"] = None
+        path = self.root / "aggregated-native-with-ocr.json"
+        self.write_json(path, aggregate)
+        self.args.aggregated_file = path
+        with self.assertRaises(validator.ContractError):
+            validator.validate_aggregate(self.args, self.contract)
+
+    def test_rejects_ocr_aggregate_with_only_no_ocr_bucket(self) -> None:
+        """OCR aggregates cannot substitute native metrics."""
+        self.select_contract("ocr")
+        aggregate = self.aggregate()
+        for group in aggregate["by_framework_mode"].values():
+            file_group = group["by_file_type"]["pdf"]
+            file_group["no_ocr"] = file_group["with_ocr"]
+            file_group["with_ocr"] = None
+        path = self.root / "aggregated-ocr-no-ocr.json"
+        self.write_json(path, aggregate)
+        self.args.aggregated_file = path
+        with self.assertRaises(validator.ContractError):
+            validator.validate_aggregate(self.args, self.contract)
+
+    def test_rejects_aggregate_missing_pdf_file_type(self) -> None:
+        """Every aggregate group must contain the PDF file type."""
+        aggregate = self.aggregate()
+        first_group = next(iter(aggregate["by_framework_mode"].values()))
+        first_group["by_file_type"].pop("pdf")
+        path = self.root / "aggregated-missing-pdf.json"
+        self.write_json(path, aggregate)
+        self.args.aggregated_file = path
+        with self.assertRaises(validator.ContractError):
+            validator.validate_aggregate(self.args, self.contract)
+
+    def test_rejects_aggregate_extra_file_type(self) -> None:
+        """Aggregate groups cannot contain unrequested file types."""
+        aggregate = self.aggregate()
+        first_group = next(iter(aggregate["by_framework_mode"].values()))
+        first_group["by_file_type"]["docx"] = first_group["by_file_type"]["pdf"]
+        path = self.root / "aggregated-extra-docx.json"
+        self.write_json(path, aggregate)
+        self.args.aggregated_file = path
+        with self.assertRaises(validator.ContractError):
+            validator.validate_aggregate(self.args, self.contract)
+
+    def test_rejects_aggregate_row_when_not_an_object_with_contract_error(self) -> None:
+        """A malformed aggregate fixture row fails with ContractError."""
+        aggregate = self.aggregate()
+        aggregate["per_fixture_results"][0] = None
+        path = self.root / "aggregated-malformed-row.json"
+        self.write_json(path, aggregate)
+        self.args.aggregated_file = path
+        with self.assertRaises(validator.ContractError):
             validator.validate_aggregate(self.args, self.contract)
 
     def test_contract_key_counts_are_exact(self) -> None:

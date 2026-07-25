@@ -6,10 +6,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import TypeAlias
+
+JsonScalar: TypeAlias = None | bool | int | float | str
+JsonValue: TypeAlias = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
 
 
 @dataclass(frozen=True)
@@ -35,6 +40,15 @@ class CohortContract:
     fixtures: tuple[str, ...]
     document_stems: tuple[str, ...]
     matrix: tuple[MatrixEntry, ...]
+
+
+@dataclass(frozen=True)
+class ExpectedFixture:
+    fixture: str
+    fixture_blake3: str
+    document_blake3: str
+    document_bytes: int
+    document_name: str
 
 
 def matrix_entry(
@@ -178,7 +192,7 @@ class ContractError(ValueError):
     """An artifact violates the benchmark release contract."""
 
 
-def load_json(path: Path) -> Any:
+def load_json(path: Path) -> JsonValue:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
@@ -190,30 +204,65 @@ def require(condition: bool, message: str) -> None:
         raise ContractError(message)
 
 
-def validate_manifest(path: Path, contract: CohortContract) -> None:
+def blake3_file(path: Path) -> str:
+    require(path.is_file(), f"{path}: expected a regular file")
+    try:
+        result = subprocess.run(
+            ["b3sum", str(path)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise ContractError(f"{path}: failed to compute BLAKE3: {error}") from error
+    digest = result.stdout.split(maxsplit=1)[0] if result.stdout else ""
+    require(
+        len(digest) == 64 and all(char in "0123456789abcdef" for char in digest),
+        f"{path}: b3sum returned a malformed digest",
+    )
+    return digest
+
+
+def validate_manifest(path: Path, contract: CohortContract) -> str:
     manifest = load_json(path)
     require(isinstance(manifest, dict), f"{path}: manifest must be an object")
     require(manifest.get("schema_version") == 1, f"{path}: unexpected schema_version")
     require(manifest.get("name") == contract.manifest_name, f"{path}: unexpected cohort name")
     require(manifest.get("batch_size") == contract.batch_size, f"{path}: unexpected batch_size")
-    require(tuple(manifest.get("fixtures", ())) == contract.fixtures, f"{path}: fixture order/content mismatch")
+    fixtures = manifest.get("fixtures")
+    require(isinstance(fixtures, list), f"{path}: fixtures must be an array")
+    require(tuple(fixtures) == contract.fixtures, f"{path}: fixture order/content mismatch")
+    digest = blake3_file(path)
+    require(digest == contract.manifest_blake3, f"{path}: cohort manifest BLAKE3 mismatch")
+    return digest
 
 
-def expected_document_names(fixtures_root: Path, contract: CohortContract) -> tuple[str, ...]:
-    names = []
+def expected_fixtures(fixtures_root: Path, contract: CohortContract) -> tuple[ExpectedFixture, ...]:
+    expected = []
     for fixture in contract.fixtures:
         descriptor_path = fixtures_root / fixture
         descriptor = load_json(descriptor_path)
         require(isinstance(descriptor, dict), f"{descriptor_path}: fixture descriptor must be an object")
         document = descriptor.get("document")
         require(isinstance(document, str) and document, f"{descriptor_path}: document must be a non-empty string")
-        names.append(PurePosixPath(document.replace("\\", "/")).name)
+        document_path = descriptor_path.parent / document
+        document_name = PurePosixPath(document.replace("\\", "/")).name
+        expected.append(
+            ExpectedFixture(
+                fixture=fixture,
+                fixture_blake3=blake3_file(descriptor_path),
+                document_blake3=blake3_file(document_path),
+                document_bytes=document_path.stat().st_size,
+                document_name=document_name,
+            )
+        )
+    names = tuple(item.document_name for item in expected)
     require(len(set(names)) == len(names), "cohort document basenames must be unique")
     require(
         tuple(Path(name).stem for name in names) == contract.document_stems,
         "cohort document identities do not match the release contract",
     )
-    return tuple(names)
+    return tuple(expected)
 
 
 def only_file(root: Path, filename: str) -> Path:
@@ -223,11 +272,13 @@ def only_file(root: Path, filename: str) -> Path:
 
 
 def validate_provenance(
-    provenance: Any,
+    provenance: JsonValue,
     path: Path,
     *,
     entry: MatrixEntry,
     contract: CohortContract,
+    manifest_blake3: str,
+    expected: tuple[ExpectedFixture, ...],
     source_sha: str,
     iterations: int,
 ) -> None:
@@ -242,26 +293,29 @@ def validate_provenance(
     require(isinstance(corpus, dict), f"{path}: corpus provenance missing")
     require(corpus.get("cohort") == contract.manifest_name, f"{path}: cohort name mismatch")
     require(
-        corpus.get("cohort_manifest_blake3") == contract.manifest_blake3,
+        corpus.get("cohort_manifest_blake3") == manifest_blake3,
         f"{path}: cohort manifest hash mismatch",
     )
     ordered = corpus.get("ordered_fixtures")
     require(isinstance(ordered, list), f"{path}: ordered_fixtures must be an array")
-    require(
-        tuple(item.get("fixture") for item in ordered if isinstance(item, dict)) == contract.fixtures,
-        f"{path}: fixture count/order mismatch",
-    )
-    for index, item in enumerate(ordered):
+    require(len(ordered) == len(expected), f"{path}: fixture count mismatch")
+    for index, (item, expected_item) in enumerate(zip(ordered, expected, strict=True)):
         require(isinstance(item, dict), f"{path}: fixture provenance {index} must be an object")
-        for digest_name in ("fixture_blake3", "document_blake3"):
-            digest = item.get(digest_name)
-            require(
-                isinstance(digest, str) and len(digest) == 64 and all(char in "0123456789abcdef" for char in digest),
-                f"{path}: fixture {index} has malformed {digest_name}",
-            )
         require(
-            isinstance(item.get("document_bytes"), int) and item["document_bytes"] > 0,
-            f"{path}: fixture {index} has invalid document_bytes",
+            item.get("fixture") == expected_item.fixture,
+            f"{path}: fixture {index} identity/order mismatch",
+        )
+        require(
+            item.get("fixture_blake3") == expected_item.fixture_blake3,
+            f"{path}: fixture {index} descriptor BLAKE3 mismatch",
+        )
+        require(
+            item.get("document_blake3") == expected_item.document_blake3,
+            f"{path}: fixture {index} document BLAKE3 mismatch",
+        )
+        require(
+            item.get("document_bytes") == expected_item.document_bytes,
+            f"{path}: fixture {index} document size mismatch",
         )
 
     timing = provenance.get("timing")
@@ -275,14 +329,16 @@ def validate_provenance(
 
     frameworks = provenance.get("frameworks")
     require(isinstance(frameworks, list) and len(frameworks) == 1, f"{path}: expected one framework")
-    require(frameworks[0].get("name") == entry.framework, f"{path}: framework mismatch")
-    require(frameworks[0].get("eligible_documents") == len(contract.fixtures), f"{path}: fixture count mismatch")
+    framework = frameworks[0]
+    require(isinstance(framework, dict), f"{path}: framework provenance must be an object")
+    require(framework.get("name") == entry.framework, f"{path}: framework mismatch")
+    require(framework.get("eligible_documents") == len(contract.fixtures), f"{path}: fixture count mismatch")
     expected_partitions = len(contract.fixtures) // contract.batch_size if entry.mode == "batch" else None
-    require(frameworks[0].get("batch_partitions") == expected_partitions, f"{path}: batch partition mismatch")
+    require(framework.get("batch_partitions") == expected_partitions, f"{path}: batch partition mismatch")
 
 
 def validate_results(
-    results: Any,
+    results: JsonValue,
     path: Path,
     *,
     entry: MatrixEntry,
@@ -319,8 +375,9 @@ def validate_results(
 
 
 def validate_artifacts(args: argparse.Namespace, contract: CohortContract) -> None:
-    validate_manifest(args.cohort_manifest, contract)
-    documents = expected_document_names(args.fixtures_root, contract)
+    manifest_blake3 = validate_manifest(args.cohort_manifest, contract)
+    fixtures = expected_fixtures(args.fixtures_root, contract)
+    documents = tuple(item.document_name for item in fixtures)
     expected_names = {f"{entry.artifact}-{args.run_id}": entry for entry in contract.matrix}
     actual_dirs = {path.name: path for path in args.artifacts_dir.iterdir() if path.is_dir()}
     require(set(actual_dirs) == set(expected_names), describe_set_mismatch("artifacts", expected_names, actual_dirs))
@@ -334,6 +391,8 @@ def validate_artifacts(args: argparse.Namespace, contract: CohortContract) -> No
             provenance_path,
             entry=entry,
             contract=contract,
+            manifest_blake3=manifest_blake3,
+            expected=fixtures,
             source_sha=args.source_sha,
             iterations=args.iterations,
         )
@@ -348,7 +407,7 @@ def validate_artifacts(args: argparse.Namespace, contract: CohortContract) -> No
     print(f"validated {len(expected_names)} {args.cohort} benchmark artifacts")
 
 
-def describe_set_mismatch(label: str, expected: Any, actual: Any) -> str:
+def describe_set_mismatch(label: str, expected: Iterable[object], actual: Iterable[object]) -> str:
     missing = sorted(set(expected) - set(actual))
     unexpected = sorted(set(actual) - set(expected))
     return f"{label} mismatch; missing={missing}, unexpected={unexpected}"
@@ -366,27 +425,32 @@ def validate_aggregate(args: argparse.Namespace, contract: CohortContract) -> No
         require(isinstance(group, dict), f"{args.aggregated_file}: group {key} must be an object")
         by_file_type = group.get("by_file_type")
         require(isinstance(by_file_type, dict), f"{args.aggregated_file}: group {key} missing by_file_type")
-        for file_group in by_file_type.values():
-            require(isinstance(file_group, dict), f"{args.aggregated_file}: malformed file group in {key}")
-            buckets = [file_group.get("no_ocr"), file_group.get("with_ocr")]
-            populated = [bucket for bucket in buckets if bucket is not None]
-            require(len(populated) == 1, f"{args.aggregated_file}: group {key} has ambiguous OCR buckets")
-            bucket = populated[0]
-            require(isinstance(bucket, dict), f"{args.aggregated_file}: malformed metrics bucket in {key}")
-            require(bucket.get("total_sample_count") == len(contract.fixtures), f"{key}: fixture count mismatch")
-            for error_field in (
-                "framework_errors",
-                "harness_errors",
-                "config_setup_errors",
-                "timeouts",
-                "empty_content",
-            ):
-                require(bucket.get(error_field) == 0, f"{key}: nonzero {error_field}")
+        require(set(by_file_type) == {"pdf"}, f"{args.aggregated_file}: group {key} must contain only pdf metrics")
+        file_group = by_file_type["pdf"]
+        require(isinstance(file_group, dict), f"{args.aggregated_file}: malformed file group in {key}")
+        expected_bucket = "with_ocr" if args.cohort == "ocr" else "no_ocr"
+        opposite_bucket = "no_ocr" if args.cohort == "ocr" else "with_ocr"
+        require(file_group.get(opposite_bucket) is None, f"{args.aggregated_file}: group {key} has wrong OCR bucket")
+        bucket = file_group.get(expected_bucket)
+        require(isinstance(bucket, dict), f"{args.aggregated_file}: group {key} missing {expected_bucket}")
+        require(bucket.get("total_sample_count") == len(contract.fixtures), f"{key}: fixture count mismatch")
+        for error_field in (
+            "framework_errors",
+            "harness_errors",
+            "config_setup_errors",
+            "timeouts",
+            "empty_content",
+        ):
+            require(bucket.get(error_field) == 0, f"{key}: nonzero {error_field}")
 
     rows = aggregate.get("per_fixture_results")
     require(isinstance(rows, list), f"{args.aggregated_file}: per_fixture_results missing")
     expected_rows = len(contract.matrix) * len(contract.fixtures)
     require(len(rows) == expected_rows, f"{args.aggregated_file}: expected {expected_rows} fixture rows")
+    require(
+        all(isinstance(row, dict) for row in rows),
+        f"{args.aggregated_file}: every fixture row must be an object",
+    )
     identities = {
         (
             row.get("framework"),
@@ -414,7 +478,10 @@ def validate_aggregate(args: argparse.Namespace, contract: CohortContract) -> No
         identities == expected_identities,
         describe_set_mismatch("aggregate fixture rows", expected_identities, identities),
     )
-    require(all(row.get("success") is True for row in rows), f"{args.aggregated_file}: failed fixture rows")
+    require(
+        all(isinstance(row, dict) and row.get("success") is True for row in rows),
+        f"{args.aggregated_file}: failed fixture rows",
+    )
     print(f"validated {len(expected_keys)} {args.cohort} aggregate keys and {len(rows)} fixture rows")
 
 
@@ -432,7 +499,8 @@ def parse_args() -> argparse.Namespace:
     if args.aggregated_file is None:
         required = ("artifacts_dir", "cohort_manifest", "fixtures_root", "source_sha", "run_id")
         missing = [name.replace("_", "-") for name in required if getattr(args, name) in (None, "")]
-        parser.error(f"artifact validation requires: {', '.join(missing)}" if missing else "")
+        if missing:
+            parser.error(f"artifact validation requires: {', '.join(missing)}")
     return args
 
 
