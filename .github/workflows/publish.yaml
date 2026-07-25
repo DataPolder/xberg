@@ -3218,7 +3218,6 @@ jobs:
           github-repo: xberg-io/xberg
           upload: false
 
-      # Mint the token AFTER the slow build so its full 1h TTL is available for the upload.
       - uses: actions/create-github-app-token@v2
         id: app-token
         with:

@@ -61,11 +61,6 @@ let package = Package(
         // symbols like `_lzma_stream_decoder` surface at the swift link step. Link
         // the system library here. `liblzma` ships in the macOS SDK and on Linux.
         .linkedLibrary("lzma"),
-        // `bzip2-sys` (pulled via the HWP `unhwp` → `zip 2.4.2` path) links system
-        // libbz2 on macOS/iOS instead of vendoring, leaving `BZ2_bzDecompress*`
-        // undefined in the `.a`. `libbz2` ships in the macOS SDK; Linux vendors the
-        // C source into the `.a`, so it is only needed on Apple platforms.
-        .linkedLibrary("bz2", .when(platforms: [.macOS, .iOS])),
         // The Rust staticlib pulls in C++ dependencies (onnxruntime, tesseract,
         // ClipperLib) that reference the C++ runtime/ABI (`__cxa_throw`,
         // `__gxx_personality_v0`, `__cxa_guard_acquire`, ...). A `staticlib` `.a`

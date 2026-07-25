@@ -40,8 +40,7 @@ def _load_mineru_api():
     installed_version = importlib_metadata.version("mineru")
     if installed_version != PINNED_MINERU_VERSION:
         raise RuntimeError(
-            f"MinerU {PINNED_MINERU_VERSION} is required by the benchmark harness; "
-            f"found {installed_version}"
+            f"MinerU {PINNED_MINERU_VERSION} is required by the benchmark harness; found {installed_version}"
         )
 
     from mineru.cli.common import do_parse, read_fn
@@ -69,9 +68,7 @@ def _native_pipeline_markdown(file_paths: list[str], ocr_enabled: bool) -> tuple
 
     with tempfile.TemporaryDirectory() as output_dir:
         output_root = Path(output_dir)
-        expected_markdown_paths = [
-            Path(task_stem) / parse_method / f"{task_stem}.md" for task_stem in task_stems
-        ]
+        expected_markdown_paths = [Path(task_stem) / parse_method / f"{task_stem}.md" for task_stem in task_stems]
         start = time.perf_counter()
         do_parse(
             output_dir=output_dir,
@@ -89,9 +86,7 @@ def _native_pipeline_markdown(file_paths: list[str], ocr_enabled: bool) -> tuple
             f_dump_content_list=False,
         )
 
-        produced_markdown_paths = sorted(
-            path.relative_to(output_root) for path in output_root.rglob("*.md")
-        )
+        produced_markdown_paths = sorted(path.relative_to(output_root) for path in output_root.rglob("*.md"))
         expected_markdown_paths.sort()
         if produced_markdown_paths != expected_markdown_paths:
             missing = sorted(set(expected_markdown_paths) - set(produced_markdown_paths))
@@ -105,8 +100,7 @@ def _native_pipeline_markdown(file_paths: list[str], ocr_enabled: bool) -> tuple
             )
 
         markdown_outputs = [
-            (output_root / markdown_path).read_text(encoding="utf-8")
-            for markdown_path in expected_markdown_paths
+            (output_root / markdown_path).read_text(encoding="utf-8") for markdown_path in expected_markdown_paths
         ]
         total_duration_ms = (time.perf_counter() - start) * 1000.0
 

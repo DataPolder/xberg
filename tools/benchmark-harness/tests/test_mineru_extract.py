@@ -69,10 +69,7 @@ class MineruBatchConformanceTest(unittest.TestCase):
         assert payload["total_ms"] == 42.5
         assert payload["per_file_ms"] == [None, None]
         assert all("_extraction_time_ms" not in item for item in payload["results"])
-        assert (
-            payload["metadata"]["model_batching"]
-            == "cross_document_processing_windows_via_doc_analyze_streaming"
-        )
+        assert payload["metadata"]["model_batching"] == "cross_document_processing_windows_via_doc_analyze_streaming"
 
     def test_missing_native_output_fails_strict_cardinality(self) -> None:
         """Reject a batch when MinerU omits any ordered output."""
