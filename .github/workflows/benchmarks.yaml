@@ -90,6 +90,11 @@ jobs:
       - name: Install Task
         uses: xberg-io/actions/install-task@v1
 
+      - name: Install BLAKE3 verifier
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y b3sum
+
       - name: Validate benchmark scripts
         run: task benchmark:validate:scripts
 
@@ -211,10 +216,10 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: benchmark-corpus-cache
-          path: .
+          path: ${{ runner.temp }}/benchmark-corpus-cache
 
       - name: Unpack reference corpus cache
-        run: tar -C test_documents -xf corpus-cache.tar
+        run: tar -C test_documents -xf "${RUNNER_TEMP}/benchmark-corpus-cache/corpus-cache.tar"
 
       - name: Setup ONNX Runtime
         uses: ./.github/actions/setup-onnx-runtime
@@ -285,10 +290,10 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: benchmark-corpus-cache
-          path: .
+          path: ${{ runner.temp }}/benchmark-corpus-cache
 
       - name: Unpack reference corpus cache
-        run: tar -C test_documents -xf corpus-cache.tar
+        run: tar -C test_documents -xf "${RUNNER_TEMP}/benchmark-corpus-cache/corpus-cache.tar"
 
       - name: Install system dependencies (libheif + native libs for harness binary)
         uses: ./.github/actions/install-system-deps
@@ -372,10 +377,10 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: benchmark-corpus-cache
-          path: .
+          path: ${{ runner.temp }}/benchmark-corpus-cache
 
       - name: Unpack reference corpus cache
-        run: tar -C test_documents -xf corpus-cache.tar
+        run: tar -C test_documents -xf "${RUNNER_TEMP}/benchmark-corpus-cache/corpus-cache.tar"
 
       - name: Install system dependencies (libheif + native libs for harness binary)
         uses: ./.github/actions/install-system-deps
@@ -424,7 +429,7 @@ jobs:
       fail-fast: false
       matrix:
         mode: [single-file]
-        output_format: [markdown, plaintext]
+        output_format: [plaintext]
     steps:
       - uses: actions/checkout@v6
         with:
@@ -451,10 +456,10 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: benchmark-corpus-cache
-          path: .
+          path: ${{ runner.temp }}/benchmark-corpus-cache
 
       - name: Unpack reference corpus cache
-        run: tar -C test_documents -xf corpus-cache.tar
+        run: tar -C test_documents -xf "${RUNNER_TEMP}/benchmark-corpus-cache/corpus-cache.tar"
 
       - name: Install system dependencies (libheif + native libs for harness binary)
         uses: ./.github/actions/install-system-deps
@@ -537,10 +542,10 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: benchmark-corpus-cache
-          path: .
+          path: ${{ runner.temp }}/benchmark-corpus-cache
 
       - name: Unpack reference corpus cache
-        run: tar -C test_documents -xf corpus-cache.tar
+        run: tar -C test_documents -xf "${RUNNER_TEMP}/benchmark-corpus-cache/corpus-cache.tar"
 
       - name: Install system dependencies (libheif + native libs for harness binary)
         uses: ./.github/actions/install-system-deps
@@ -623,10 +628,10 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: benchmark-corpus-cache
-          path: .
+          path: ${{ runner.temp }}/benchmark-corpus-cache
 
       - name: Unpack reference corpus cache
-        run: tar -C test_documents -xf corpus-cache.tar
+        run: tar -C test_documents -xf "${RUNNER_TEMP}/benchmark-corpus-cache/corpus-cache.tar"
 
       - name: Install system dependencies (libheif + native libs for harness binary)
         uses: ./.github/actions/install-system-deps
@@ -711,10 +716,10 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: benchmark-corpus-cache
-          path: .
+          path: ${{ runner.temp }}/benchmark-corpus-cache
 
       - name: Unpack reference corpus cache
-        run: tar -C test_documents -xf corpus-cache.tar
+        run: tar -C test_documents -xf "${RUNNER_TEMP}/benchmark-corpus-cache/corpus-cache.tar"
 
       - name: Install system dependencies (libheif + native libs for harness binary)
         uses: ./.github/actions/install-system-deps
@@ -797,10 +802,10 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: benchmark-corpus-cache
-          path: .
+          path: ${{ runner.temp }}/benchmark-corpus-cache
 
       - name: Unpack reference corpus cache
-        run: tar -C test_documents -xf corpus-cache.tar
+        run: tar -C test_documents -xf "${RUNNER_TEMP}/benchmark-corpus-cache/corpus-cache.tar"
 
       - name: Install system dependencies (libheif + native libs for harness binary)
         uses: ./.github/actions/install-system-deps
@@ -823,7 +828,7 @@ jobs:
 
       - name: Install liteparse CLI (lit)
         run: |
-          cargo install liteparse --locked
+          cargo install liteparse --version 2.9.0 --locked
           lit --version
 
       - name: Run benchmark
@@ -991,7 +996,7 @@ jobs:
             --arg run_id "${{ github.run_id }}" \
             --arg run_url "$RUN_URL" \
             --arg updated_at "$UPDATED_AT" \
-            '{cohort: $cohort, cohort_manifest_blake3: $cohort_hash, expected_matrix_keys: 23, commit: $commit, run_id: $run_id, run_url: $run_url, updated_at: $updated_at}' \
+            '{cohort: $cohort, cohort_manifest_blake3: $cohort_hash, expected_matrix_keys: 22, commit: $commit, run_id: $run_id, run_url: $run_url, updated_at: $updated_at}' \
             > release-assets/benchmarks-native-metadata.json
           jq -n \
             --arg cohort "ocr-pdf-fast-b4-v1" \

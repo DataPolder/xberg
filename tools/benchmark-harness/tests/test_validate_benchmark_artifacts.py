@@ -234,7 +234,7 @@ class ValidateBenchmarkArtifactsTests(unittest.TestCase):
             text=True,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, "validated 23 native benchmark artifacts\n")
+        self.assertEqual(result.stdout, "validated 22 native benchmark artifacts\n")
         self.assertEqual(result.stderr, "")
 
     def test_accepts_exact_ocr_contract(self) -> None:
@@ -443,7 +443,7 @@ class ValidateBenchmarkArtifactsTests(unittest.TestCase):
 
     def test_contract_key_counts_are_exact(self) -> None:
         """Capability matrices contain the documented unique keys."""
-        self.assertEqual(len(validator.CONTRACTS["native"].matrix), 23)
+        self.assertEqual(len(validator.CONTRACTS["native"].matrix), 22)
         self.assertEqual(len(validator.CONTRACTS["ocr"].matrix), 18)
         for contract in validator.CONTRACTS.values():
             self.assertEqual(len({entry.artifact for entry in contract.matrix}), len(contract.matrix))

@@ -8,12 +8,14 @@ import argparse
 import json
 import subprocess
 import sys
-from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import TypeAlias
+from typing import TYPE_CHECKING, TypeAlias
 
-JsonScalar: TypeAlias = None | bool | int | float | str
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+JsonScalar: TypeAlias = bool | int | float | str | None
 JsonValue: TypeAlias = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
 
 
@@ -135,12 +137,6 @@ CONTRACTS = {
                 matrix_entry(
                     f"benchmarks-markitdown-markdown-single-file-{NATIVE_COHORT}",
                     "markitdown",
-                    "markdown",
-                    "single-file",
-                ),
-                matrix_entry(
-                    f"benchmarks-unstructured-markdown-single-file-{NATIVE_COHORT}",
-                    "unstructured",
                     "markdown",
                     "single-file",
                 ),

@@ -217,7 +217,7 @@ timing configuration, worker semantics, and the actual Xberg thread budget repor
 adapter. It deliberately stores no local absolute paths.
 
 The remote comparative workflow publishes native and forced-OCR cohorts independently. Native
-releases contain exactly 23 framework/format/mode keys; OCR releases contain exactly 18. Before a
+releases contain exactly 22 framework/format/mode keys; OCR releases contain exactly 18. Before a
 release is created, every raw artifact is matched to the expected matrix cell and checked against
 the pinned source revision, ordered cohort manifest and BLAKE3 digest, fixed batch size, output
 format, OCR mode, fixture cardinality, iteration count, and zero-error result contract. The
@@ -226,8 +226,8 @@ release attaches separate `benchmarks-native-*` and `benchmarks-ocr-*` data/meta
 
 The capability matrix never fabricates an unsupported format or batch mode. Docling and LiteParse
 have native Markdown/plaintext plus single/batch entry points. MarkItDown and PyMuPDF4LLM are
-Markdown-only single-file tools; Tika is plaintext-only; Unstructured exposes both renderings but
-has no verified native multi-document call. MinerU's canonical output is Markdown, so only its
+Markdown-only single-file tools; Tika and Unstructured are plaintext-only single-file tools.
+MinerU's canonical output is Markdown, so only its
 single-document and native `do_parse` batch entries are included in native and forced-OCR cohorts.
 
 Local profile runs also write `benchmark-profile.json`. Its `run_identity_sha256` binds the
