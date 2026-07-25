@@ -243,6 +243,10 @@ pub struct PipelineResult {
     pub pipeline: Pipeline,
     pub sf1: f64,
     pub tf1: f64,
+    /// Order-/character-sensitive text similarity (`1 − CER`, 0.0–1.0). Report-only
+    /// OCR diagnostic; NaN for empty or very long documents (see `quality`).
+    #[serde(default)]
+    pub char_similarity: f64,
     /// Reading order score (LIS-based, 0.0-1.0).
     #[serde(default)]
     pub order_score: f64,
@@ -766,6 +770,12 @@ async fn run_pipeline(
         score_document(&content, gt_text, gt_markdown)
     };
 
+    let char_similarity = if extraction_failed {
+        f64::NAN
+    } else {
+        crate::quality::normalized_edit_similarity(&content, gt_text)
+    };
+
     let ext_tokens = tokenize(&content);
     let gt_tokens = tokenize(gt_text);
     let (mut missing_tokens, mut extra_tokens) = compute_token_diff(&ext_tokens, &gt_tokens);
@@ -776,6 +786,7 @@ async fn run_pipeline(
         pipeline,
         sf1: structural.sf1,
         tf1,
+        char_similarity,
         order_score: structural.order_score,
         per_type_sf1: structural.per_type_sf1,
         per_type_precision: structural.per_type_precision,
@@ -1742,6 +1753,7 @@ mod tests {
                 pipeline: Pipeline::Docling,
                 sf1: f64::NAN,
                 tf1: f64::NAN,
+                char_similarity: f64::NAN,
                 order_score: f64::NAN,
                 per_type_sf1: HashMap::new(),
                 per_type_precision: HashMap::new(),
@@ -1794,6 +1806,7 @@ mod tests {
                     pipeline: Pipeline::PdfOxideReadingOrder,
                     sf1: 0.9,
                     tf1: 0.9,
+                    char_similarity: 0.9,
                     order_score: 0.9,
                     per_type_sf1: HashMap::new(),
                     per_type_precision: HashMap::new(),
@@ -1909,6 +1922,7 @@ mod tests {
                 pipeline: Pipeline::Docling,
                 sf1: f64::NAN,
                 tf1: f64::NAN,
+                char_similarity: f64::NAN,
                 order_score: f64::NAN,
                 per_type_sf1: HashMap::new(),
                 per_type_precision: HashMap::new(),

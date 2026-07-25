@@ -166,6 +166,12 @@ async fn extract_and_score(
         },
     };
 
+    let char_similarity = if extraction_failed {
+        f64::NAN
+    } else {
+        crate::quality::normalized_edit_similarity(&content, gt_text)
+    };
+
     let ext_tokens = crate::quality::tokenize(&content);
     let gt_tok = crate::quality::tokenize(gt_text);
     let (mut missing_tokens, mut extra_tokens) = crate::quality::compute_token_diff(&ext_tokens, &gt_tok);
@@ -176,6 +182,7 @@ async fn extract_and_score(
         pipeline,
         sf1: structural.sf1,
         tf1,
+        char_similarity,
         order_score: structural.order_score,
         per_type_sf1: structural.per_type_sf1,
         per_type_precision: structural.per_type_precision,
@@ -513,10 +520,17 @@ pub fn print_triage_blocks(results: &[PipelineDocResult], sort_by: SortMetric, b
                 })
                 .collect::<Vec<_>>()
                 .join("  ");
+            let sim_str = if pr.char_similarity.is_nan() {
+                String::new()
+            } else {
+                format!("  Sim:{:.0}%", pr.char_similarity * 100.0)
+            };
             eprintln!(
-                "    {:<18} SF1:{:.0}%  {}",
+                "    {:<18} SF1:{:.0}%  TF1:{:.0}%{}  {}",
                 pr.pipeline.name(),
                 pr.sf1 * 100.0,
+                pr.tf1 * 100.0,
+                sim_str,
                 blocks_str
             );
         }
@@ -853,6 +867,7 @@ mod tests {
             pipeline: Pipeline::Docling,
             sf1: tf1,
             tf1,
+            char_similarity: tf1,
             order_score: tf1,
             per_type_sf1: HashMap::new(),
             per_type_precision: HashMap::new(),
@@ -892,6 +907,7 @@ mod tests {
                 pipeline: Pipeline::Docling,
                 sf1: f64::NAN,
                 tf1: f64::NAN,
+                char_similarity: f64::NAN,
                 order_score: f64::NAN,
                 per_type_sf1: HashMap::new(),
                 per_type_precision: HashMap::new(),
