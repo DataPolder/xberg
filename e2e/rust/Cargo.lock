@@ -862,9 +862,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.3.0"
+version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c89588d05638b5b4594a3348a2d6c20277e43a7f5c5202b05cc56888475a47b8"
+checksum = "5add81bb678e6cb321aff7fa0dc7689ad82b112dbc032cea19f91d6b8e3582b9"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -8640,7 +8640,7 @@ dependencies = [
 
 [[package]]
 name = "xberg"
-version = "1.0.0-rc.37"
+version = "1.0.0-rc.38"
 dependencies = [
  "aes-gcm",
  "ahash 0.8.12",
@@ -8762,7 +8762,7 @@ dependencies = [
 
 [[package]]
 name = "xberg-e2e-rust"
-version = "1.0.0-rc.37"
+version = "1.0.0-rc.38"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -8777,7 +8777,7 @@ dependencies = [
 
 [[package]]
 name = "xberg-gliner"
-version = "1.0.0-rc.37"
+version = "1.0.0-rc.38"
 dependencies = [
  "getrandom 0.2.17",
  "getrandom 0.3.4",
@@ -8791,7 +8791,7 @@ dependencies = [
 
 [[package]]
 name = "xberg-libheif"
-version = "1.0.0-rc.37"
+version = "1.0.0-rc.38"
 dependencies = [
  "cfg-if 1.0.4",
  "enumn",
@@ -8802,7 +8802,7 @@ dependencies = [
 
 [[package]]
 name = "xberg-paddle-ocr"
-version = "1.0.0-rc.37"
+version = "1.0.0-rc.38"
 dependencies = [
  "geo-clipper",
  "geo-types",
@@ -8817,7 +8817,7 @@ dependencies = [
 
 [[package]]
 name = "xberg-tesseract"
-version = "1.0.0-rc.37"
+version = "1.0.0-rc.38"
 dependencies = [
  "cc",
  "cmake",
