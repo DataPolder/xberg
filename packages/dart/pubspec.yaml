@@ -1,6 +1,6 @@
 name: xberg
 description: High-performance document intelligence library
-version: 1.0.0-rc.38
+version: 1.0.0-rc.39
 repository: https://github.com/xberg-io/xberg
 homepage: https://xberg.io
 environment:
@@ -20,6 +20,6 @@ dev_dependencies:
   test: "^1.25.0"
   lints: "^6.1.0"
   # Required by flutter_rust_bridge_codegen 2.x for sealed classes.
-  freezed: ^4.0.0-dev.3
+  freezed: "^3.2.5"
   build_runner: "^2.15.0"
   json_serializable: "^6.13.2"
