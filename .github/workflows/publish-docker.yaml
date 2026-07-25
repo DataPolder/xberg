@@ -254,7 +254,10 @@ jobs:
             org.opencontainers.image.licenses=MIT
           outputs: type=image,name=${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=publish-docker-${{ matrix.variant }}-${{ matrix.platform.name }}
-          cache-to: type=gha,mode=max,scope=publish-docker-${{ matrix.variant }}-${{ matrix.platform.name }}
+          # ignore-error: the image is already pushed by digest above; a transient
+          # GitHub Actions cache-export failure (buildx `not_found`) must not fail the
+          # whole build/publish. ~keep
+          cache-to: type=gha,mode=max,ignore-error=true,scope=publish-docker-${{ matrix.variant }}-${{ matrix.platform.name }}
 
       - name: Export digest
         if: ${{ steps.gate.outputs.go == 'true' && needs.prepare.outputs.dry_run != 'true' }}
