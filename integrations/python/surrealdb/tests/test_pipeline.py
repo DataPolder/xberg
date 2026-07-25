@@ -247,6 +247,9 @@ async def test_pipeline_chunk_without_page_metadata(
         total_chunks=1,
         heading_path=[],
         image_indices=[],
+        node_ids=[],
+        page_spans=[],
+        classifications=[],
         token_count=None,
         first_page=None,
         last_page=None,
@@ -385,6 +388,9 @@ async def test_embed_query_raises_on_none_embedding(mock_extract: AsyncMock, moc
         total_chunks=1,
         heading_path=[],
         image_indices=[],
+        node_ids=[],
+        page_spans=[],
+        classifications=[],
     )
     chunk = Chunk(content="x", chunk_type=ChunkType.UNKNOWN, metadata=meta, embedding=None)
     mock_extract.return_value = ExtractionResult(results=[make_document(chunks=[chunk])])
