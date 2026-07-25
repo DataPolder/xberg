@@ -346,10 +346,10 @@ pub fn print_pipeline_table(results: &[PipelineDocResult], sort_by: SortMetric, 
 
     eprint!("{:<30} {:>5}", "Document", "Type");
     for p in &pipelines {
-        eprint!(" {:>8} {:>8} {:>7}", format!("{} SF1", p), "TF1", "ms");
+        eprint!(" {:>8} {:>8} {:>8} {:>7}", format!("{} SF1", p), "TF1", "Ord", "ms");
     }
     eprintln!();
-    eprintln!("{}", "-".repeat(36 + pipelines.len() * 26));
+    eprintln!("{}", "-".repeat(36 + pipelines.len() * 35));
 
     for doc in &display_results {
         eprint!(
@@ -372,18 +372,23 @@ pub fn print_pipeline_table(results: &[PipelineDocResult], sort_by: SortMetric, 
             } else {
                 format!("{:>7.1}%", pr.tf1 * 100.0)
             };
+            let ord_str = if pr.order_score.is_nan() {
+                "    —   ".to_string()
+            } else {
+                format!("{:>7.1}%", pr.order_score * 100.0)
+            };
             let time_str = if pr.time_ms.is_nan() {
                 "    N/A".to_string()
             } else {
                 format!("{:>7.0}", pr.time_ms)
             };
-            eprint!(" {} {} {}", sf1_str, tf1_str, time_str);
+            eprint!(" {} {} {} {}", sf1_str, tf1_str, ord_str, time_str);
         }
         eprintln!();
     }
 
     let total_docs = results.len();
-    eprintln!("{}", "-".repeat(36 + pipelines.len() * 26));
+    eprintln!("{}", "-".repeat(36 + pipelines.len() * 35));
     eprint!("{:<30} {:>5}", "AVERAGE", "");
     for (i, _) in pipelines.iter().enumerate() {
         let sf1_vals: Vec<f64> = results
@@ -406,16 +411,32 @@ pub fn print_pipeline_table(results: &[PipelineDocResult], sort_by: SortMetric, 
         } else {
             0.0
         };
+        let order_vals: Vec<f64> = results
+            .iter()
+            .map(|r| r.results[i].order_score)
+            .filter(|v| v.is_finite())
+            .collect();
+        let order = if !order_vals.is_empty() {
+            order_vals.iter().sum::<f64>() / order_vals.len() as f64
+        } else {
+            0.0
+        };
         let time_vals: Vec<f64> = results
             .iter()
             .map(|r| r.results[i].time_ms)
             .filter(|v| v.is_finite())
             .collect();
         if time_vals.is_empty() {
-            eprint!(" {:>7.1}% {:>7.1}% {:>7}", sf1 * 100.0, tf1 * 100.0, "N/A");
+            eprint!(" {:>7.1}% {:>7.1}% {:>7.1}% {:>7}", sf1 * 100.0, tf1 * 100.0, order * 100.0, "N/A");
         } else {
             let ms: f64 = time_vals.iter().sum::<f64>() / time_vals.len() as f64;
-            eprint!(" {:>7.1}% {:>7.1}% {:>7.0}", sf1 * 100.0, tf1 * 100.0, ms);
+            eprint!(
+                " {:>7.1}% {:>7.1}% {:>7.1}% {:>7.0}",
+                sf1 * 100.0,
+                tf1 * 100.0,
+                order * 100.0,
+                ms
+            );
         }
     }
     eprintln!();
