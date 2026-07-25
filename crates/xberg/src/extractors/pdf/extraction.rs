@@ -23,8 +23,6 @@ pub(crate) type PdfExtractionPhaseResult = (
     Vec<crate::types::PdfFormField>,
 );
 
-type CachedStructureSegments = (Vec<Vec<crate::pdf::hierarchy::SegmentData>>, bool);
-
 /// Extract text, metadata, tables, and annotations from a PDF document using the pdf_oxide backend.
 ///
 /// Accepts an authenticated `OxideDocument`, then delegates to each oxide extraction module.
@@ -88,31 +86,14 @@ pub(crate) fn extract_all_from_oxide_document(
     #[cfg(not(feature = "layout-detection"))]
     let _ = layout_hints;
 
-    let ocr_inline_images = config
-        .pdf_options
-        .as_ref()
-        .map(|p| p.ocr_inline_images)
-        .unwrap_or(false);
-    let hierarchy_enabled = config
-        .pdf_options
-        .as_ref()
-        .is_some_and(|opts| opts.hierarchy.as_ref().is_some_and(|h| h.enabled));
-    let needs_structured = hierarchy_enabled
-        || matches!(
-            config.output_format,
-            OutputFormat::Markdown | OutputFormat::Djot | OutputFormat::Html
-        )
-        || ocr_inline_images;
-    let retain_structure_segments = needs_structured && !config.force_ocr;
-
     let extract_tables_flag = config.pdf_options.as_ref().is_none_or(|opts| opts.extract_tables);
     let allow_single_column = config
         .pdf_options
         .as_ref()
         .is_some_and(|o| o.allow_single_column_tables);
-    let (tables, mut cached_structure_segments) = if extract_tables_flag {
+    let tables = if extract_tables_flag {
         crate::pdf::oxide::guard_oxide_panic(
-            || -> Result<(Vec<Table>, Option<CachedStructureSegments>)> {
+            || -> Result<Vec<Table>> {
                 let mut combined = crate::pdf::oxide::table::extract_tables_native(&mut doc).unwrap_or_else(|e| {
                     tracing::warn!("pdf_oxide native table extraction failed, skipping tables: {e}");
                     Vec::new()
@@ -125,22 +106,14 @@ pub(crate) fn extract_all_from_oxide_document(
                     });
                 combined.extend(bordered);
                 let covered_pages: std::collections::HashSet<u32> = combined.iter().map(|t| t.page_number).collect();
-                let (heuristic, cached_segments) = match crate::pdf::oxide::table::extract_tables_heuristic(
-                    &mut doc,
-                    allow_single_column,
-                    &covered_pages,
-                ) {
-                    Ok((tables, segments, used_structure_tree)) => (
-                        tables,
-                        retain_structure_segments.then_some((segments, used_structure_tree)),
-                    ),
-                    Err(e) => {
-                        tracing::warn!("pdf_oxide heuristic table extraction failed, skipping tables: {e}");
-                        (Vec::new(), None)
-                    }
-                };
+                let heuristic =
+                    crate::pdf::oxide::table::extract_tables_heuristic(&mut doc, allow_single_column, &covered_pages)
+                        .unwrap_or_else(|e| {
+                            tracing::warn!("pdf_oxide heuristic table extraction failed, skipping tables: {e}");
+                            Vec::new()
+                        });
                 combined.extend(heuristic);
-                Ok((combined, cached_segments))
+                Ok(combined)
             },
             |panic| crate::error::XbergError::Parsing {
                 message: format!("pdf_oxide panicked during table extraction: {panic}"),
@@ -149,10 +122,10 @@ pub(crate) fn extract_all_from_oxide_document(
         )
         .unwrap_or_else(|e| {
             tracing::warn!("pdf_oxide table extraction panicked, skipping tables: {e}");
-            (Vec::new(), None)
+            Vec::new()
         })
     } else {
-        (Vec::new(), None)
+        Vec::new()
     };
 
     let annotations = if config.pdf_options.as_ref().is_some_and(|opts| opts.extract_annotations) {
@@ -164,6 +137,12 @@ pub(crate) fn extract_all_from_oxide_document(
 
     let images_extraction_enabled =
         config.needs_image_data() || config.pdf_options.as_ref().map(|p| p.extract_images).unwrap_or(false);
+
+    let ocr_inline_images = config
+        .pdf_options
+        .as_ref()
+        .map(|p| p.ocr_inline_images)
+        .unwrap_or(false);
 
     let (images, image_positions) = if images_extraction_enabled || ocr_inline_images {
         let max_images = config.images.as_ref().and_then(|i| i.max_images_per_page);
@@ -187,6 +166,17 @@ pub(crate) fn extract_all_from_oxide_document(
         return Err(crate::error::XbergError::Cancelled);
     }
 
+    let hierarchy_enabled = config
+        .pdf_options
+        .as_ref()
+        .is_some_and(|opts| opts.hierarchy.as_ref().is_some_and(|h| h.enabled));
+    let needs_structured = hierarchy_enabled
+        || matches!(
+            config.output_format,
+            OutputFormat::Markdown | OutputFormat::Djot | OutputFormat::Html
+        )
+        || ocr_inline_images;
+
     let pre_rendered_doc = if needs_structured && !config.force_ocr {
         let k = config
             .pdf_options
@@ -201,15 +191,11 @@ pub(crate) fn extract_all_from_oxide_document(
             .map(|cf| (cf.strip_repeating_text, cf.include_headers, cf.include_footers))
             .unwrap_or((true, false, false));
 
-        let (all_page_segments, used_structure_tree) = match cached_structure_segments.take() {
-            Some(cached) => cached,
-            None => crate::pdf::oxide::hierarchy::extract_all_segments(&mut doc).map_err(|e| {
-                crate::error::XbergError::Parsing {
-                    message: format!("pdf_oxide hierarchy extraction failed: {e}"),
-                    source: None,
-                }
-            })?,
-        };
+        let (all_page_segments, used_structure_tree) = crate::pdf::oxide::hierarchy::extract_all_segments(&mut doc)
+            .map_err(|e| crate::error::XbergError::Parsing {
+                message: format!("pdf_oxide hierarchy extraction failed: {e}"),
+                source: None,
+            })?;
 
         let total_segs: usize = all_page_segments.iter().map(|s| s.len()).sum();
         tracing::debug!(
