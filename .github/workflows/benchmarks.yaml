@@ -674,13 +674,6 @@ jobs:
           path: benchmark-results/
           retention-days: 30
 
-  # MinerU lazy-downloads ~1-2 GB of pipeline weights (layout, OCR, table, formula)
-  # from the Hugging Face Hub on first extraction. When that download happens inside
-  # the benchmark's timed warmup it blows past the per-extraction timeout and the whole
-  # run fails, which blocks the release that carries the xberg and liteparse results.
-  # This pre-job warms the weights once (outside any timed path) into the standard
-  # Hugging Face cache and persists them with actions/cache, so every bench-mineru cell
-  # restores a populated cache and its warmup only pays CPU inference.
   prefetch-mineru-models:
     name: Prefetch MinerU model weights
     needs: setup
@@ -746,6 +739,26 @@ jobs:
             --ocr --format=markdown sync "$ocr_fixture" > /dev/null
           echo "MinerU model cache populated at $HF_HUB_CACHE"
           du -sh "$HF_HUB_CACHE" || true
+
+      # actions/cache is best-effort cross-run only: a ~1.1 GB blob gets evicted
+      # from the shared 10 GB repo budget by concurrent CI before bench-mineru
+      # runs. Deliver the weights to the bench jobs via a run-scoped artifact,
+      # which is immune to cache eviction. tar preserves the Hugging Face hub
+      # blob/snapshot symlink layout that a plain artifact upload would flatten.
+      - name: Package MinerU model cache
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/mineru-model-cache"
+          tar -C "$HOME/.cache/huggingface" -cf "$RUNNER_TEMP/mineru-model-cache/mineru-models.tar" hub
+          ls -lh "$RUNNER_TEMP/mineru-model-cache/mineru-models.tar"
+
+      - name: Upload MinerU model cache
+        uses: actions/upload-artifact@v7
+        with:
+          name: mineru-model-cache-${{ github.run_id }}
+          path: ${{ runner.temp }}/mineru-model-cache/mineru-models.tar
+          retention-days: 1
+          if-no-files-found: error
 
   bench-mineru:
     name: mineru (${{ matrix.output_format }}, ${{ matrix.mode }}, ${{ matrix.cohort }})
@@ -823,11 +836,21 @@ jobs:
             echo "MINERU_MODEL_SOURCE=huggingface"
           } >> "$GITHUB_ENV"
 
-      - name: Restore MinerU model cache
-        uses: actions/cache/restore@v5
+      # Model weights arrive as a run-scoped artifact from prefetch-mineru-models
+      # (actions/cache is unreliable here: the ~1.1 GB blob is evicted from the
+      # shared repo cache budget by concurrent CI before this job runs).
+      - name: Download MinerU model cache
+        uses: actions/download-artifact@v8
         with:
-          path: ~/.cache/huggingface/hub
-          key: mineru-models-3.4.4-${{ runner.os }}-${{ runner.arch }}
+          name: mineru-model-cache-${{ github.run_id }}
+          path: ${{ runner.temp }}/mineru-model-cache
+
+      - name: Unpack MinerU model cache
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.cache/huggingface"
+          tar -C "$HOME/.cache/huggingface" -xf "$RUNNER_TEMP/mineru-model-cache/mineru-models.tar"
+          du -sh "$HOME/.cache/huggingface/hub" || true
 
       - name: Run benchmark
         env:
