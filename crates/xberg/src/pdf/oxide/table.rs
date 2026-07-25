@@ -266,16 +266,16 @@ pub(crate) fn extract_tables_bordered(doc: &mut OxideDocument, skip_pages: &Hash
 /// whose tables aren't drawn with explicit rule lines that pdf_oxide's grid
 /// detector can lock onto.
 ///
-/// Returns an empty vec on any extraction failure (the caller treats this as
-/// "no heuristic tables found" and keeps going).
+/// Returns the detected tables together with the exact hierarchy segments used
+/// for reconstruction and whether they came from the PDF structure tree.
 pub(crate) fn extract_tables_heuristic(
     doc: &mut OxideDocument,
     allow_single_column: bool,
     skip_pages: &HashSet<u32>,
-) -> Result<Vec<Table>> {
+) -> Result<(Vec<Table>, Vec<Vec<crate::pdf::hierarchy::SegmentData>>, bool)> {
     use crate::pdf::table_reconstruct::{HocrWord, segments_to_words};
 
-    let (per_page_segments, _used_structure_tree) =
+    let (per_page_segments, used_structure_tree) =
         crate::pdf::oxide::hierarchy::extract_all_segments(doc).map_err(|e| {
             PdfError::TextExtractionFailed(format!(
                 "pdf_oxide hierarchy extraction failed for heuristic tables: {e}"
@@ -334,7 +334,7 @@ pub(crate) fn extract_tables_heuristic(
         }
     }
 
-    Ok(tables)
+    Ok((tables, per_page_segments, used_structure_tree))
 }
 
 fn reconstruct_region_tables(
@@ -1740,7 +1740,8 @@ mod tests {
         let bytes = std::fs::read(&path).expect("read tiny.pdf");
         let mut doc = OxideDocument::open_bytes(&bytes).expect("open tiny.pdf");
         let skip = HashSet::new();
-        let tables = extract_tables_heuristic(&mut doc, false, &skip).expect("heuristic must not error on minimal PDF");
+        let (tables, _, _) =
+            extract_tables_heuristic(&mut doc, false, &skip).expect("heuristic must not error on minimal PDF");
         assert!(tables.is_empty(), "expected no tables on minimal PDF, got: {tables:?}");
     }
 
@@ -1757,7 +1758,14 @@ mod tests {
         let mut doc = OxideDocument::open_bytes(&bytes).expect("open table_document.pdf");
 
         let skip = HashSet::new();
-        let tables = extract_tables_heuristic(&mut doc, false, &skip).expect("heuristic must not error");
+        let page_count = doc.doc.page_count().expect("table fixture page count");
+        let (tables, cached_segments, _) =
+            extract_tables_heuristic(&mut doc, false, &skip).expect("heuristic must not error");
+        assert_eq!(
+            cached_segments.len(),
+            page_count,
+            "cached hierarchy segments must preserve one slot per PDF page"
+        );
 
         if tables.is_empty() {
             eprintln!(
@@ -1797,7 +1805,7 @@ mod tests {
         let bytes = std::fs::read(&path).expect("read embedded table fixture");
         let mut doc = OxideDocument::open_bytes(&bytes).expect("open embedded table fixture");
 
-        let tables = extract_tables_heuristic(&mut doc, false, &HashSet::new()).expect("heuristic extraction");
+        let (tables, _, _) = extract_tables_heuristic(&mut doc, false, &HashSet::new()).expect("heuristic extraction");
         let table = tables
             .iter()
             .find(|table| table.cells[0].iter().any(|cell| cell.contains("Inhibitor")))
@@ -1838,14 +1846,14 @@ mod tests {
         let bytes = std::fs::read(&path).expect("read table_document.pdf");
         let mut doc = OxideDocument::open_bytes(&bytes).expect("open table_document.pdf");
 
-        let baseline = extract_tables_heuristic(&mut doc, false, &HashSet::new()).expect("baseline heuristic");
+        let (baseline, _, _) = extract_tables_heuristic(&mut doc, false, &HashSet::new()).expect("baseline heuristic");
         if baseline.is_empty() {
             return;
         }
         let pages_baseline_touched: HashSet<u32> = baseline.iter().map(|t| t.page_number).collect();
 
         let skip = pages_baseline_touched.clone();
-        let suppressed = extract_tables_heuristic(&mut doc, false, &skip).expect("skip-pages heuristic");
+        let (suppressed, _, _) = extract_tables_heuristic(&mut doc, false, &skip).expect("skip-pages heuristic");
 
         for t in &suppressed {
             assert!(
