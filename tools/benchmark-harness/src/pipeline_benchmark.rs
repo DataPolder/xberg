@@ -17,7 +17,6 @@ use crate::comparison::{Pipeline, PipelineResult};
 use crate::corpus::{self, CorpusDocument, CorpusFilter};
 use crate::quality::structural_sidecar::{self, StructuralNode, StructuralSidecar};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -155,15 +154,16 @@ async fn extract_and_score(
     let tf1 = if extraction_failed {
         f64::NAN
     } else {
-        let (tf1, _basic_sf1, _basic_order, _basic_per_type) =
-            crate::comparison::score_document(&content, gt_text, gt_markdown);
-        tf1
+        crate::comparison::score_document(&content, gt_text, gt_markdown).0
     };
 
-    let (sf1, order_score, per_type_sf1) = match (extraction_failed, gt_markdown) {
-        (true, _) => (f64::NAN, f64::NAN, HashMap::new()),
+    let structural = match (extraction_failed, gt_markdown) {
         (false, Some(md)) => score_structural_markdown(&content, md),
-        (false, None) => (f64::NAN, f64::NAN, HashMap::new()),
+        _ => crate::comparison::StructuralBreakdown {
+            sf1: f64::NAN,
+            order_score: f64::NAN,
+            ..Default::default()
+        },
     };
 
     let ext_tokens = crate::quality::tokenize(&content);
@@ -174,10 +174,12 @@ async fn extract_and_score(
 
     PipelineResult {
         pipeline,
-        sf1,
+        sf1: structural.sf1,
         tf1,
-        order_score,
-        per_type_sf1,
+        order_score: structural.order_score,
+        per_type_sf1: structural.per_type_sf1,
+        per_type_precision: structural.per_type_precision,
+        per_type_recall: structural.per_type_recall,
         time_ms,
         missing_tokens,
         extra_tokens,
@@ -185,7 +187,9 @@ async fn extract_and_score(
     }
 }
 
-fn score_structural_markdown(predicted: &str, ground_truth: &str) -> (f64, f64, HashMap<String, f64>) {
+fn score_structural_markdown(predicted: &str, ground_truth: &str) -> crate::comparison::StructuralBreakdown {
+    use crate::comparison::StructuralBreakdown;
+
     let gt_sidecar = StructuralSidecar::from_markdown(ground_truth);
     let has_structure = gt_sidecar
         .nodes
@@ -193,16 +197,15 @@ fn score_structural_markdown(predicted: &str, ground_truth: &str) -> (f64, f64, 
         .any(|node| !matches!(node, StructuralNode::Paragraph { .. }));
 
     if !has_structure {
-        return (f64::NAN, f64::NAN, HashMap::new());
+        return StructuralBreakdown {
+            sf1: f64::NAN,
+            order_score: f64::NAN,
+            ..Default::default()
+        };
     }
 
     let score = structural_sidecar::score_structural(&StructuralSidecar::from_markdown(predicted), &gt_sidecar);
-    let dimensions = score
-        .dimensions()
-        .into_iter()
-        .map(|(name, value)| (name.to_string(), value))
-        .collect();
-    (score.sf1, score.d5_order, dimensions)
+    StructuralBreakdown::from_score(&score)
 }
 
 /// Run the pipeline benchmark.
@@ -427,7 +430,13 @@ pub fn print_pipeline_table(results: &[PipelineDocResult], sort_by: SortMetric, 
             .filter(|v| v.is_finite())
             .collect();
         if time_vals.is_empty() {
-            eprint!(" {:>7.1}% {:>7.1}% {:>7.1}% {:>7}", sf1 * 100.0, tf1 * 100.0, order * 100.0, "N/A");
+            eprint!(
+                " {:>7.1}% {:>7.1}% {:>7.1}% {:>7}",
+                sf1 * 100.0,
+                tf1 * 100.0,
+                order * 100.0,
+                "N/A"
+            );
         } else {
             let ms: f64 = time_vals.iter().sum::<f64>() / time_vals.len() as f64;
             eprint!(
@@ -482,7 +491,18 @@ pub fn print_triage_blocks(results: &[PipelineDocResult], sort_by: SortMetric, b
         for pr in &doc.results {
             let blocks_str: String = STRUCTURAL_DIMENSIONS
                 .iter()
-                .filter_map(|bt| pr.per_type_sf1.get(*bt).map(|v| format!("{}:{:.0}%", bt, v * 100.0)))
+                .filter_map(|bt| {
+                    pr.per_type_sf1.get(*bt).map(|f1| {
+                        // Show the precision/recall split when present so a low F1
+                        // reads as fabrication (low p) vs omission (low r).
+                        match (pr.per_type_precision.get(*bt), pr.per_type_recall.get(*bt)) {
+                            (Some(p), Some(r)) => {
+                                format!("{}:{:.0}%(p{:.0}/r{:.0})", bt, f1 * 100.0, p * 100.0, r * 100.0)
+                            }
+                            _ => format!("{}:{:.0}%", bt, f1 * 100.0),
+                        }
+                    })
+                })
                 .collect::<Vec<_>>()
                 .join("  ");
             eprintln!(
@@ -791,6 +811,8 @@ fn write_summary(summary: &PipelineRunSummary, path: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
 
     fn test_config(fixtures_dir: PathBuf) -> PipelineBenchmarkConfig {
@@ -812,9 +834,9 @@ mod tests {
         let prefix = format!("{}\n\n", "plain text ".repeat(6_000));
         assert!(prefix.len() > 50 * 1024);
         let markdown = format!("{prefix}# Tail heading\n");
-        let (sf1, _, dimensions) = score_structural_markdown(&markdown, &markdown);
-        assert_eq!(sf1, 1.0);
-        assert_eq!(dimensions.get("heading"), Some(&1.0));
+        let structural = score_structural_markdown(&markdown, &markdown);
+        assert_eq!(structural.sf1, 1.0);
+        assert_eq!(structural.per_type_sf1.get("heading"), Some(&1.0));
     }
 
     #[test]
@@ -825,6 +847,8 @@ mod tests {
             tf1,
             order_score: tf1,
             per_type_sf1: HashMap::new(),
+            per_type_precision: HashMap::new(),
+            per_type_recall: HashMap::new(),
             time_ms: 10.0,
             missing_tokens: Vec::new(),
             extra_tokens: Vec::new(),
@@ -862,6 +886,8 @@ mod tests {
                 tf1: f64::NAN,
                 order_score: f64::NAN,
                 per_type_sf1: HashMap::new(),
+                per_type_precision: HashMap::new(),
+                per_type_recall: HashMap::new(),
                 time_ms: f64::NAN,
                 missing_tokens: Vec::new(),
                 extra_tokens: Vec::new(),

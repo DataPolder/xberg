@@ -169,6 +169,16 @@ pub struct StructuralSidecar {
     pub reading_order: Vec<usize>,
 }
 
+/// Precision/recall/F1 split for one structural dimension. Report-only: it does
+/// not feed the SF1 rollup, but lets a low dimension F1 be read as fabrication
+/// (low precision) vs omission (low recall) — the crux of the #36 table work.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Default)]
+pub struct DimBreakdown {
+    pub f1: f64,
+    pub precision: f64,
+    pub recall: f64,
+}
+
 /// The six-dimension structural score and the rolled-up SF1.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct StructuralScore {
@@ -186,6 +196,10 @@ pub struct StructuralScore {
     pub d5_order: f64,
     /// Weighted, order-folded SF1 rollup.
     pub sf1: f64,
+    /// Per-dimension precision/recall split, parallel to [`Self::dimensions`].
+    /// Report-only diagnostics; absent on scores deserialized from older data.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub breakdown: Vec<DimBreakdown>,
 }
 
 impl StructuralScore {
@@ -199,6 +213,21 @@ impl StructuralScore {
             ("edges", self.d4_edges),
             ("order", self.d5_order),
         ]
+    }
+
+    /// Named dimensions paired with their precision/recall breakdown. Empty
+    /// breakdowns (older data) fall back to a zeroed split carrying the F1.
+    pub fn dimensions_pr(&self) -> [(&'static str, DimBreakdown); 6] {
+        let dims = self.dimensions();
+        std::array::from_fn(|i| {
+            let (name, f1) = dims[i];
+            let bd = self.breakdown.get(i).copied().unwrap_or(DimBreakdown {
+                f1,
+                precision: f1,
+                recall: f1,
+            });
+            (name, bd)
+        })
     }
 }
 
@@ -584,21 +613,29 @@ fn greedy_match(pred: &[String], gt: &[String]) -> Vec<(usize, usize, f64)> {
     out
 }
 
-/// F1 from a sum of matched credit against pred and gt cardinalities.
-fn f1_from(matched_credit: f64, n_pred: usize, n_gt: usize) -> f64 {
+/// Precision, recall, and F1 from a sum of matched credit against pred and gt
+/// cardinalities. Precision reads as "how much of what we emitted was right"
+/// (over-fabrication when low), recall as "how much of the truth we recovered".
+fn f1_parts_from(matched_credit: f64, n_pred: usize, n_gt: usize) -> (f64, f64, f64) {
     if n_pred == 0 && n_gt == 0 {
-        return 1.0;
+        return (1.0, 1.0, 1.0);
     }
     if n_pred == 0 || n_gt == 0 {
-        return 0.0;
+        return (0.0, 0.0, 0.0);
     }
     let precision = matched_credit / n_pred as f64;
     let recall = matched_credit / n_gt as f64;
-    if precision + recall > 0.0 {
+    let f1 = if precision + recall > 0.0 {
         2.0 * precision * recall / (precision + recall)
     } else {
         0.0
-    }
+    };
+    (f1, precision, recall)
+}
+
+/// F1 from a sum of matched credit against pred and gt cardinalities.
+fn f1_from(matched_credit: f64, n_pred: usize, n_gt: usize) -> f64 {
+    f1_parts_from(matched_credit, n_pred, n_gt).0
 }
 
 fn jaccard(a: &HashSet<String>, b: &HashSet<String>) -> f64 {
@@ -638,6 +675,42 @@ pub fn score_structural(pred: &StructuralSidecar, gt: &StructuralSidecar) -> Str
     let base = if weight_sum > 0.0 { score_sum / weight_sum } else { 1.0 };
     let sf1 = fold_order_into_sf1(base, d5, matched);
 
+    // Report-only P/R split, parallel to `dimensions()`. Reading order (D5) is a
+    // sequence agreement, not a set match, so its "precision"/"recall" mirror the
+    // score rather than being computed independently.
+    let breakdown = vec![
+        DimBreakdown {
+            f1: d0.value,
+            precision: d0.precision,
+            recall: d0.recall,
+        },
+        DimBreakdown {
+            f1: d1.value,
+            precision: d1.precision,
+            recall: d1.recall,
+        },
+        DimBreakdown {
+            f1: d2.value,
+            precision: d2.precision,
+            recall: d2.recall,
+        },
+        DimBreakdown {
+            f1: d3.value,
+            precision: d3.precision,
+            recall: d3.recall,
+        },
+        DimBreakdown {
+            f1: d4.value,
+            precision: d4.precision,
+            recall: d4.recall,
+        },
+        DimBreakdown {
+            f1: d5,
+            precision: d5,
+            recall: d5,
+        },
+    ];
+
     StructuralScore {
         d0_paragraph: d0.value,
         d1_heading: d1.value,
@@ -646,6 +719,7 @@ pub fn score_structural(pred: &StructuralSidecar, gt: &StructuralSidecar) -> Str
         d4_edges: d4.value,
         d5_order: d5,
         sf1,
+        breakdown,
     }
 }
 
@@ -664,10 +738,42 @@ pub(crate) fn diagnostic_matches(pred: &StructuralSidecar, gt: &StructuralSideca
     greedy_match(&pred_text, &gt_text)
 }
 
-/// A dimension score plus a `present` flag isn't needed post-rollup, so the
-/// helpers return a thin wrapper carrying only the value.
+/// A dimension score: the F1 `value` that feeds the SF1 rollup, plus the
+/// precision/recall split kept for report-only diagnostics.
 struct Dim {
     value: f64,
+    precision: f64,
+    recall: f64,
+}
+
+impl Dim {
+    /// Build a dimension score from matched credit against pred/gt cardinalities.
+    fn from_credit(matched_credit: f64, n_pred: usize, n_gt: usize) -> Self {
+        let (value, precision, recall) = f1_parts_from(matched_credit, n_pred, n_gt);
+        Self {
+            value,
+            precision,
+            recall,
+        }
+    }
+
+    /// A dimension both sides agree is absent (or a perfect match): all 1.0.
+    fn perfect() -> Self {
+        Self {
+            value: 1.0,
+            precision: 1.0,
+            recall: 1.0,
+        }
+    }
+
+    /// A dimension present on exactly one side (fabricated or dropped): all 0.0.
+    fn zero() -> Self {
+        Self {
+            value: 0.0,
+            precision: 0.0,
+            recall: 0.0,
+        }
+    }
 }
 
 fn paragraph_texts(s: &StructuralSidecar) -> Vec<String> {
@@ -690,9 +796,7 @@ fn score_paragraphs(pred: &StructuralSidecar, gt: &StructuralSidecar) -> Dim {
     let pp = paragraph_texts(pred);
     let gg = paragraph_texts(gt);
     let credit: f64 = greedy_match(&pp, &gg).iter().map(|(_, _, s)| *s).sum();
-    Dim {
-        value: f1_from(credit, pp.len(), gg.len()),
-    }
+    Dim::from_credit(credit, pp.len(), gg.len())
 }
 
 struct HeadingInfo {
@@ -738,9 +842,7 @@ fn score_headings(pred: &StructuralSidecar, gt: &StructuralSidecar) -> Dim {
             sim * (STRUCT_SPLIT * level_score + STRUCT_SPLIT * ancestor_sim)
         })
         .sum();
-    Dim {
-        value: f1_from(credit, ph.len(), gh.len()),
-    }
+    Dim::from_credit(credit, ph.len(), gh.len())
 }
 
 struct ListInfo {
@@ -788,9 +890,7 @@ fn score_lists(pred: &StructuralSidecar, gt: &StructuralSidecar) -> Dim {
             sim * (STRUCT_SPLIT * depth_score + STRUCT_SPLIT * ordered_score)
         })
         .sum();
-    Dim {
-        value: f1_from(credit, pl.len(), gl.len()),
-    }
+    Dim::from_credit(credit, pl.len(), gl.len())
 }
 
 fn tables(s: &StructuralSidecar) -> Vec<&TableNode> {
@@ -832,11 +932,11 @@ fn score_tables(pred: &StructuralSidecar, gt: &StructuralSidecar) -> Dim {
     let pt = tables(pred);
     let gt_tables = tables(gt);
     if pt.is_empty() && gt_tables.is_empty() {
-        return Dim { value: 1.0 };
+        return Dim::perfect();
     }
     if pt.is_empty() || gt_tables.is_empty() {
         // A fabricated table (pred-only) or a dropped table (gt-only) scores 0. ~keep
-        return Dim { value: 0.0 };
+        return Dim::zero();
     }
     let ptext: Vec<String> = pt
         .iter()
@@ -850,9 +950,7 @@ fn score_tables(pred: &StructuralSidecar, gt: &StructuralSidecar) -> Dim {
         .iter()
         .map(|(i, j, _)| grits(pt[*i], gt_tables[*j]))
         .sum();
-    Dim {
-        value: f1_from(credit, pt.len(), gt_tables.len()),
-    }
+    Dim::from_credit(credit, pt.len(), gt_tables.len())
 }
 
 struct Edge {
@@ -899,9 +997,7 @@ fn score_edges(pred: &StructuralSidecar, gt: &StructuralSidecar) -> Dim {
             sim * target_sim
         })
         .sum();
-    Dim {
-        value: f1_from(credit, pe.len(), ge.len()),
-    }
+    Dim::from_credit(credit, pe.len(), ge.len())
 }
 
 /// D5: match every node by content, then score reading order via LIS.
@@ -973,6 +1069,55 @@ Figure 1: The overall system architecture and its components.
 
     fn sf1(pred: &StructuralSidecar, gt: &StructuralSidecar) -> f64 {
         score_structural(pred, gt).sf1
+    }
+
+    #[test]
+    fn f1_parts_from_splits_precision_and_recall() {
+        // Empty on both sides is a perfect (vacuous) match.
+        assert_eq!(f1_parts_from(0.0, 0, 0), (1.0, 1.0, 1.0));
+        // Present on one side only scores zero across the board.
+        assert_eq!(f1_parts_from(0.0, 3, 0), (0.0, 0.0, 0.0));
+        // Over-emission: 1 unit of credit against 4 predicted / 1 truth ⇒ p<r.
+        let (f1, precision, recall) = f1_parts_from(1.0, 4, 1);
+        assert!((precision - 0.25).abs() < 1e-9, "precision {precision}");
+        assert!((recall - 1.0).abs() < 1e-9, "recall {recall}");
+        assert!(precision < recall, "over-emission should read as low precision");
+        assert!(f1 > 0.0 && f1 < 1.0);
+    }
+
+    #[test]
+    fn breakdown_reads_fabrication_as_low_precision() {
+        // GT has one heading; prediction fabricates three extra unmatched ones.
+        let gt = StructuralSidecar::from_markdown("# Real\n\nBody paragraph text here.\n");
+        let pred = StructuralSidecar::from_markdown(
+            "# Real\n\n## Fabricated one\n\n## Fabricated two\n\n## Fabricated three\n\nBody paragraph text here.\n",
+        );
+        let score = score_structural(&pred, &gt);
+        // dimensions()/breakdown are parallel; heading is index 1.
+        let (name, heading) = score.dimensions_pr()[1];
+        assert_eq!(name, "heading");
+        assert!(
+            heading.precision < heading.recall,
+            "fabricated headings should depress precision below recall: p{} r{}",
+            heading.precision,
+            heading.recall
+        );
+    }
+
+    #[test]
+    fn breakdown_reads_omission_as_low_recall() {
+        // Mirror image: GT has four headings, prediction recovers only one.
+        let gt = StructuralSidecar::from_markdown(
+            "# Real\n\n## Second\n\n## Third\n\n## Fourth\n\nBody paragraph text here.\n",
+        );
+        let pred = StructuralSidecar::from_markdown("# Real\n\nBody paragraph text here.\n");
+        let heading = score_structural(&pred, &gt).dimensions_pr()[1].1;
+        assert!(
+            heading.recall < heading.precision,
+            "dropped headings should depress recall below precision: p{} r{}",
+            heading.precision,
+            heading.recall
+        );
     }
 
     #[test]
