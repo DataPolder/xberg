@@ -33,7 +33,7 @@ urls.Homepage = "https://github.com/xberg-io/xberg/tree/main/integrations/python
 urls.Repository = "https://github.com/xberg-io/xberg/tree/main/integrations/python/crewai"
 
 [dependency-groups]
-dev = ["mypy>=1.19", "pre-commit>=4", "pytest>=9", "pytest-asyncio>=1", "pytest-cov>=6", "ruff>=0.14"]
+dev = ["mypy>=1.19", "pre-commit>=4", "pytest>=9", "pytest-asyncio>=1", "pytest-cov>=6"]
 
 [tool.hatch]
 build.targets.sdist.include = ["src/crewai_xberg", "CHANGELOG.md", "LICENSE", "README.md", "pyproject.toml"]
