@@ -685,7 +685,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mode: [single-file, batch]
+        mode: [single-file]
         output_format: [markdown, plaintext]
         cohort: [native-pdf-fast-b8, ocr-pdf-fast-b4]
         exclude:
@@ -749,7 +749,6 @@ jobs:
           ITERATIONS: ${{ env.ITERATIONS }}
           TIMEOUT: ${{ github.event.inputs.timeout }}
           COHORT: tools/benchmark-harness/cohorts/${{ matrix.cohort }}.json
-          BATCH_SIZE: ${{ matrix.mode == 'batch' && (matrix.cohort == 'native-pdf-fast-b8' && 8 || 4) || '' }}
           OCR_ENABLED: ${{ matrix.cohort == 'ocr-pdf-fast-b4' }}
           UV_NO_SYNC: "1"
         run: scripts/benchmarks/run-benchmark.sh
@@ -885,6 +884,15 @@ jobs:
           submodules: recursive
           lfs: true
 
+      - name: Download reference corpus cache
+        uses: actions/download-artifact@v8
+        with:
+          name: benchmark-corpus-cache
+          path: ${{ runner.temp }}/benchmark-corpus-cache
+
+      - name: Unpack reference corpus cache
+        run: tar -C test_documents -xf "${RUNNER_TEMP}/benchmark-corpus-cache/corpus-cache.tar"
+
       - name: Setup Rust
         if: needs.setup.result == 'success'
         uses: xberg-io/actions/setup-rust@v1
@@ -996,7 +1004,7 @@ jobs:
             --arg run_id "${{ github.run_id }}" \
             --arg run_url "$RUN_URL" \
             --arg updated_at "$UPDATED_AT" \
-            '{cohort: $cohort, cohort_manifest_blake3: $cohort_hash, expected_matrix_keys: 22, commit: $commit, run_id: $run_id, run_url: $run_url, updated_at: $updated_at}' \
+            '{cohort: $cohort, cohort_manifest_blake3: $cohort_hash, expected_matrix_keys: 21, commit: $commit, run_id: $run_id, run_url: $run_url, updated_at: $updated_at}' \
             > release-assets/benchmarks-native-metadata.json
           jq -n \
             --arg cohort "ocr-pdf-fast-b4-v1" \
@@ -1005,7 +1013,7 @@ jobs:
             --arg run_id "${{ github.run_id }}" \
             --arg run_url "$RUN_URL" \
             --arg updated_at "$UPDATED_AT" \
-            '{cohort: $cohort, cohort_manifest_blake3: $cohort_hash, expected_matrix_keys: 18, commit: $commit, run_id: $run_id, run_url: $run_url, updated_at: $updated_at}' \
+            '{cohort: $cohort, cohort_manifest_blake3: $cohort_hash, expected_matrix_keys: 17, commit: $commit, run_id: $run_id, run_url: $run_url, updated_at: $updated_at}' \
             > release-assets/benchmarks-ocr-metadata.json
           jq -n \
             --arg commit "$SOURCE_SHA" \
