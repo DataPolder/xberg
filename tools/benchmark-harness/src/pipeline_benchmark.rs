@@ -466,7 +466,15 @@ pub fn print_triage_blocks(results: &[PipelineDocResult], sort_by: SortMetric, b
         return;
     }
 
-    const STRUCTURAL_DIMENSIONS: [&str; 6] = ["paragraph", "heading", "list", "table", "edges", "order"];
+    const STRUCTURAL_DIMENSIONS: [&str; 7] = [
+        "paragraph",
+        "heading",
+        "list",
+        "table",
+        "table_content",
+        "edges",
+        "order",
+    ];
 
     let mut sorted: Vec<&PipelineDocResult> = results.iter().collect();
     sorted.sort_by(|a, b| {
