@@ -1262,17 +1262,39 @@ pub fn check_guardrails(results: &[DocResult], config: &GuardrailsConfig) -> Vec
 }
 
 fn check_relative_order(content: &str, anchors: &[String]) -> std::result::Result<(), String> {
-    let mut remainder = content;
+    let normalized_content = normalize_order_text(content);
+    let mut remainder = normalized_content.as_str();
     for anchor in anchors {
         if anchor.is_empty() {
             return Err("contains an empty anchor".to_string());
         }
-        let Some(position) = remainder.find(anchor) else {
+        let normalized_anchor = normalize_order_text(anchor);
+        let Some(position) = remainder.find(&normalized_anchor) else {
             return Err(format!("missing or out-of-order anchor {anchor:?}"));
         };
-        remainder = &remainder[position + anchor.len()..];
+        remainder = &remainder[position + normalized_anchor.len()..];
     }
     Ok(())
+}
+
+fn normalize_order_text(value: &str) -> String {
+    let mut normalized = String::with_capacity(value.len());
+    let mut characters = value.chars().peekable();
+    while let Some(character) = characters.next() {
+        if character == '\\'
+            && let Some(escaped) = characters.peek()
+            && escaped.is_ascii_punctuation()
+        {
+            normalized.push(characters.next().expect("peeked escaped punctuation"));
+            continue;
+        }
+        match character {
+            '\u{00a0}' => normalized.push(' '),
+            '\u{2010}' | '\u{2011}' | '\u{2012}' | '\u{2013}' | '\u{2212}' => normalized.push('-'),
+            _ => normalized.push(character),
+        }
+    }
+    normalized
 }
 
 /// Run comparison with guardrails and return exit code (0 = pass, 1 = fail).
@@ -1801,6 +1823,31 @@ mod tests {
         assert_eq!(
             check_relative_order("content", &["".to_string()]),
             Err("contains an empty anchor".to_string())
+        );
+    }
+
+    #[test]
+    fn relative_order_normalizes_markdown_escapes_and_unicode_hyphens() {
+        let anchors = vec![
+            "maintainers wanted".to_string(),
+            "See #182".to_string(),
+            "MongoKit".to_string(),
+            "MongoDB is a great schema-less document oriented database".to_string(),
+            "Philosophy".to_string(),
+        ];
+        let equivalent = "maintainers wanted\nSee \\#182\n# MongoKit\n\
+            MongoDB is a great schema‑less document oriented database\n### Philosophy";
+        assert_eq!(check_relative_order(equivalent, &anchors), Ok(()));
+
+        let wrong_order = "maintainers wanted\n\
+            MongoDB is a great schema‑less document oriented database\n\
+            See \\#182\n# MongoKit\n### Philosophy";
+        assert_eq!(
+            check_relative_order(wrong_order, &anchors),
+            Err(
+                "missing or out-of-order anchor \"MongoDB is a great schema-less document oriented database\""
+                    .to_string()
+            )
         );
     }
 
