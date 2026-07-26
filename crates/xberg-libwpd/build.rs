@@ -15,8 +15,9 @@
 //! mirroring how `xberg-tesseract` provisions its native dependencies, so the
 //! extraction survives `cargo clean` instead of being re-downloaded from
 //! `OUT_DIR` on every build. librevenge and libwpd both require boost headers
-//! at build time (header-only `boost::spirit`), which must be present on the
-//! system.
+//! at build time — header-only `boost::spirit` (parsing) and
+//! `boost::archive`/`boost::serialization` (the `base64_from_binary` iterator
+//! librevenge uses) — which must be present on the system.
 
 // Host-side gate: these `cfg`s mirror the `[target.'cfg(...)'.build-dependencies]`
 // block in Cargo.toml, which Cargo resolves against the host, so the module only
@@ -82,39 +83,58 @@ mod build_libwpd {
         vcpkg_root().join("installed").join(VCPKG_TRIPLET)
     }
 
-    /// Locate a directory containing `boost/version.hpp`. Honors
+    /// Headers that must all be present under a candidate include directory
+    /// for it to be usable: `boost/version.hpp` alone is not sufficient,
+    /// since minimal boost installs (e.g. just `libboost-dev`'s metapackage
+    /// stub on some distros) can provide the version header without the
+    /// header-only `spirit` and `archive`/`serialization` pieces librevenge
+    /// and libwpd actually compile against. ~keep
+    const REQUIRED_BOOST_HEADERS: [&str; 3] = [
+        "boost/version.hpp",
+        "boost/spirit/include/qi.hpp",
+        "boost/archive/iterators/base64_from_binary.hpp",
+    ];
+
+    fn has_all_boost_headers(dir: &Path) -> bool {
+        REQUIRED_BOOST_HEADERS.iter().all(|h| dir.join(h).is_file())
+    }
+
+    /// Locate a directory containing all of `REQUIRED_BOOST_HEADERS`. Honors
     /// `BOOST_INCLUDE_DIR`, otherwise probes the usual system locations
     /// (a vcpkg install on Windows, Homebrew/system paths elsewhere).
     fn find_boost_include() -> PathBuf {
         if let Ok(dir) = env::var("BOOST_INCLUDE_DIR") {
             let p = PathBuf::from(dir);
-            if p.join("boost/version.hpp").is_file() {
+            if has_all_boost_headers(&p) {
                 return p;
             }
-            panic!("BOOST_INCLUDE_DIR={p:?} does not contain boost/version.hpp");
+            panic!("BOOST_INCLUDE_DIR={p:?} is missing one or more of {REQUIRED_BOOST_HEADERS:?}");
         }
 
         if targeting_windows() {
             let vcpkg_include = vcpkg_triplet_dir().join("include");
-            if vcpkg_include.join("boost/version.hpp").is_file() {
+            if has_all_boost_headers(&vcpkg_include) {
                 return vcpkg_include;
             }
             panic!(
                 "boost headers not found under {vcpkg_include:?}. Install via \
-                 `vcpkg install boost-spirit:{VCPKG_TRIPLET}` or set BOOST_INCLUDE_DIR."
+                 `vcpkg install boost-spirit:{VCPKG_TRIPLET} boost-serialization:{VCPKG_TRIPLET}` \
+                 or set BOOST_INCLUDE_DIR."
             );
         }
 
         let candidates = ["/opt/homebrew/include", "/usr/local/include", "/usr/include"];
         for c in candidates {
-            if Path::new(c).join("boost/version.hpp").is_file() {
-                return PathBuf::from(c);
+            let p = Path::new(c);
+            if has_all_boost_headers(p) {
+                return p.to_path_buf();
             }
         }
         panic!(
-            "boost headers not found. librevenge and libwpd need boost::spirit at \
-             build time. Install boost (e.g. `brew install boost` or \
-             `apt-get install libboost-dev`) or set BOOST_INCLUDE_DIR."
+            "boost headers not found. librevenge and libwpd need boost::spirit (parsing) and \
+             boost::archive/boost::serialization (base64_from_binary) at build time. Install \
+             boost (e.g. `brew install boost` or `apt-get install libboost-dev`) or set \
+             BOOST_INCLUDE_DIR."
         );
     }
 
@@ -211,38 +231,49 @@ mod build_libwpd {
     }
 
     /// Cache directory for the downloaded librevenge/libwpd sources: honors
-    /// `XBERG_LIBWPD_CACHE_DIR`, else a workspace-relative path derived from
-    /// `OUT_DIR`, else a `$HOME`-based fallback. The `cfg!`s below are
-    /// deliberately host-based: this is a directory on the build machine.
+    /// `XBERG_LIBWPD_CACHE_DIR`, else a platform/`$HOME`-based directory, else
+    /// a workspace-relative path derived from `OUT_DIR` as a last resort. The
+    /// `$HOME`-based directory is the *default*, not the fallback: it lives
+    /// outside `target/`, so the multi-hundred-MB source extraction survives
+    /// `cargo clean` instead of being silently wiped and re-downloaded on the
+    /// next build, which is the entire point of caching it. The `OUT_DIR`
+    /// derived path is kept only for the case where `$HOME`/`USER` are both
+    /// unset. The `cfg!`s below are deliberately host-based: this is a
+    /// directory on the build machine. ~keep
     fn cache_dir() -> PathBuf {
         if let Ok(custom) = env::var("XBERG_LIBWPD_CACHE_DIR") {
             return PathBuf::from(custom);
         }
 
-        if let Some(workspace_cache) = workspace_cache_dir_from_out_dir() {
-            return workspace_cache;
+        if let Some(home_based) = home_cache_dir() {
+            return home_based;
         }
 
+        workspace_cache_dir_from_out_dir()
+            .expect("neither a home-based cache dir nor OUT_DIR-derived cache dir is available")
+    }
+
+    /// The platform-appropriate `$HOME`-rooted cache directory, or `None` if
+    /// neither `HOME`/`LOCALAPPDATA` nor `USER` is set.
+    fn home_cache_dir() -> Option<PathBuf> {
         if cfg!(target_os = "windows") {
-            let local_app_data = env::var("LOCALAPPDATA").unwrap_or_else(|_| r"C:\".to_string());
-            PathBuf::from(local_app_data).join("xberg-libwpd")
+            let local_app_data = env::var("LOCALAPPDATA").ok()?;
+            Some(PathBuf::from(local_app_data).join("xberg-libwpd"))
         } else if cfg!(target_os = "macos") {
-            let home_dir = env::var("HOME").unwrap_or_else(|_| {
-                env::var("USER")
-                    .map(|user| format!("/Users/{user}"))
-                    .expect("neither HOME nor USER environment variable set")
-            });
-            PathBuf::from(home_dir)
-                .join("Library")
-                .join("Caches")
-                .join("xberg-libwpd")
+            let home_dir = env::var("HOME")
+                .ok()
+                .or_else(|| env::var("USER").ok().map(|user| format!("/Users/{user}")))?;
+            Some(
+                PathBuf::from(home_dir)
+                    .join("Library")
+                    .join("Caches")
+                    .join("xberg-libwpd"),
+            )
         } else {
-            let home_dir = env::var("HOME").unwrap_or_else(|_| {
-                env::var("USER")
-                    .map(|user| format!("/home/{user}"))
-                    .expect("neither HOME nor USER environment variable set")
-            });
-            PathBuf::from(home_dir).join(".cache").join("xberg-libwpd")
+            let home_dir = env::var("HOME")
+                .ok()
+                .or_else(|| env::var("USER").ok().map(|user| format!("/home/{user}")))?;
+            Some(PathBuf::from(home_dir).join(".cache").join("xberg-libwpd"))
         }
     }
 
@@ -314,6 +345,7 @@ mod build_libwpd {
         link_zlib();
 
         println!("cargo:rerun-if-changed=src/shim.cpp");
+        println!("cargo:rerun-if-changed=src/msvc_compat.h");
         println!("cargo:rerun-if-env-changed=BOOST_INCLUDE_DIR");
         println!("cargo:rerun-if-env-changed=XBERG_LIBWPD_CACHE_DIR");
         if targeting_windows() {
