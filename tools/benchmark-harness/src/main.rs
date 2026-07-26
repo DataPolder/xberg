@@ -853,7 +853,7 @@ async fn main() -> Result<()> {
             output,
             baseline: _baseline,
         } => {
-            use benchmark_harness::load_run_results;
+            use benchmark_harness::{load_run_provenance, load_run_results};
 
             if inputs.is_empty() {
                 return Err(benchmark_harness::Error::Benchmark(
@@ -864,6 +864,7 @@ async fn main() -> Result<()> {
             println!("Loading benchmark results from {} directory(ies)...", inputs.len());
 
             let mut all_results = Vec::new();
+            let mut all_provenance = Vec::new();
             for input in &inputs {
                 if !input.is_dir() {
                     return Err(benchmark_harness::Error::Benchmark(format!(
@@ -875,10 +876,12 @@ async fn main() -> Result<()> {
                 let run_results = load_run_results(input)?;
                 println!("    Loaded {} results", run_results.len());
                 all_results.extend(run_results);
+                all_provenance.extend(load_run_provenance(input)?);
             }
 
             println!("\nAggregating {} results...", all_results.len());
-            let aggregated = benchmark_harness::aggregate_new_format(&all_results);
+            let mut aggregated = benchmark_harness::aggregate_new_format(&all_results);
+            aggregated.run_provenance = all_provenance;
             println!(
                 "  Aggregated {} frameworks across {} file types",
                 aggregated.by_framework_mode.len(),

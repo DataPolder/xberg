@@ -1,8 +1,8 @@
-//! Aggregation module for benchmark results (v2.6.0 output schema).
+//! Aggregation module for benchmark results (v2.8.0 output schema).
 //!
 //! Groups [`BenchmarkResult`] records by framework-and-mode, output format, file type, and
 //! OCR usage (yes/no), then computes percentile-based statistics for each
-//! group. The output schema (`schema_version: "2.6.0"`) surfaces TF1 and SF1 separately
+//! group. The output schema (`schema_version: "2.8.0"`) surfaces TF1 and SF1 separately
 //! with per-fixture rows preserved and split rankings by output format.
 //!
 //! # Percentile methodology
@@ -39,9 +39,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Schema version for the aggregated output format.
-pub const SCHEMA_VERSION: &str = "2.7.0";
+pub const SCHEMA_VERSION: &str = "2.8.0";
 
-/// Consolidated results using aggregation format v2.6.0.
+/// Consolidated results using aggregation format v2.8.0.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NewConsolidatedResults {
     /// Schema version for this output format
@@ -56,9 +56,24 @@ pub struct NewConsolidatedResults {
     pub per_fixture_results: Vec<PerFixtureRow>,
     /// Metadata about the consolidation
     pub metadata: ConsolidationMetadata,
+    /// Run provenance sidecars folded in from every consolidated input directory (v2.8.0+).
+    ///
+    /// [`aggregate_new_format`] always leaves this empty: it has no filesystem access and only
+    /// sees already-loaded [`BenchmarkResult`]s. The `consolidate` CLI command populates it after
+    /// aggregation by pairing [`crate::consolidate::load_run_provenance`]'s output with the same
+    /// input directories passed to [`crate::consolidate::load_run_results`]. `#[serde(default)]`
+    /// so aggregates produced before this field existed still deserialize.
+    #[serde(default)]
+    pub run_provenance: Vec<crate::consolidate::RunProvenanceRecord>,
 }
 
 /// Per-fixture benchmark result row
+///
+/// The scalar fields below (`duration_ms`, `peak_memory_mb`, `f1_text`, …) are the original
+/// v2.3.0 convenience projection and are kept as-is for backward compatibility. The fields added
+/// in v2.8.0 (`file_size` onward) make each row losslessly carry every measured field from its
+/// source `BenchmarkResult`, including ones with no earlier scalar equivalent (e.g. the free-text
+/// `error_message`, or the full `quality.missing_tokens`/`extra_tokens` token lists).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PerFixtureRow {
     /// Framework name
@@ -91,6 +106,73 @@ pub struct PerFixtureRow {
     pub success: bool,
     /// Error kind if failed (optional)
     pub error_kind: Option<String>,
+
+    /// File size in bytes of the source document (v2.8.0+).
+    #[serde(default)]
+    pub file_size: u64,
+    /// Raw throughput in bytes/sec, prior to the `peak_memory_mb`-style MB conversion
+    /// used elsewhere on this row (v2.8.0+).
+    #[serde(default)]
+    pub throughput_bytes_per_sec: f64,
+    /// Average CPU usage percentage (0-100) for this extraction (v2.8.0+).
+    #[serde(default)]
+    pub avg_cpu_percent: f64,
+    /// Total process-tree CPU-time consumed, in core-seconds (v2.8.0+).
+    #[serde(default)]
+    pub cpu_seconds: f64,
+    /// RSS captured immediately after the monitor attached to the target (v2.8.0+).
+    #[serde(default)]
+    pub baseline_memory_bytes: u64,
+    /// Peak RSS above the captured baseline (v2.8.0+).
+    #[serde(default)]
+    pub peak_memory_delta_bytes: u64,
+    /// 50th percentile memory usage in bytes, from this single measurement's own resource
+    /// sampler timeline — not a cross-fixture percentile (v2.8.0+).
+    #[serde(default)]
+    pub p50_memory_bytes: u64,
+    /// 95th percentile memory usage in bytes (see `p50_memory_bytes`) (v2.8.0+).
+    #[serde(default)]
+    pub p95_memory_bytes: u64,
+    /// 99th percentile memory usage in bytes (see `p50_memory_bytes`) (v2.8.0+).
+    #[serde(default)]
+    pub p99_memory_bytes: u64,
+    /// Pure extraction time reported by the framework, in milliseconds (v2.8.0+).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extraction_duration_ms: Option<f64>,
+    /// Subprocess overhead outside framework-reported extraction work, in milliseconds
+    /// (v2.8.0+).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subprocess_overhead_ms: Option<f64>,
+    /// Cold start duration, in milliseconds (v2.8.0+).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cold_start_duration_ms: Option<f64>,
+    /// Free-text error message, when the extraction failed (v2.8.0+).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_message: Option<String>,
+    /// Full quality metrics, including the token-level `missing_tokens`/`extra_tokens` detail
+    /// that has no scalar equivalent among this row's `f1_*`/`quality_score`/`correct` fields
+    /// (v2.8.0+).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quality: Option<crate::types::QualityMetrics>,
+    /// PDF-specific metadata (text layer detection, OCR strategy), when the fixture is a PDF
+    /// (v2.8.0+).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pdf_metadata: Option<crate::types::PdfMetadata>,
+    /// Framework capability metadata as reported at the time of this extraction, including
+    /// `batch_capability` (entry point/timing scope), which has no other home in this schema
+    /// (v2.8.0+).
+    #[serde(default)]
+    pub framework_capabilities: crate::types::FrameworkCapabilities,
+    /// System load captured at measurement time, when recorded (v2.8.0+).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_load: Option<crate::system_load::SystemLoad>,
+    /// Per-iteration results, when multiple iterations were run for this fixture (v2.8.0+).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub iterations: Vec<crate::types::IterationResult>,
+    /// Statistical analysis of durations across iterations, when multiple iterations were run
+    /// (v2.8.0+).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub statistics: Option<crate::types::DurationStatistics>,
 }
 
 /// Cross-framework comparison rankings and deltas
@@ -205,6 +287,12 @@ pub struct ConsolidationMetadata {
     pub shared_corpus_plaintext: Vec<String>,
     /// Timestamp of consolidation
     pub timestamp: String,
+    /// Frameworks for which two or more results reported a different `installation_size`
+    /// (`disk_sizes` keeps only the last-seen value per framework). Empty in the overwhelmingly
+    /// common case where a framework's installation size is stable across every result that
+    /// reports it (v2.8.0+).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub disk_size_conflicts: Vec<String>,
 }
 
 /// Aggregated results for a specific framework, output format, and mode combination
@@ -299,6 +387,17 @@ pub struct PerformancePercentiles {
     /// this group. `None` when no result in the group carries a load snapshot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system_load: Option<SystemLoadPercentiles>,
+    /// Number of successful performance samples excluded from the `throughput` percentiles
+    /// because their `throughput_bytes_per_sec` was zero, negative, or non-finite (v2.8.0+).
+    ///
+    /// The exclusion itself is unchanged from pre-v2.8.0 behavior (throughput percentiles have
+    /// always required a positive, finite value); this field only makes the exclusion visible
+    /// instead of silent. A nonzero count does not necessarily indicate a problem — for example
+    /// a batch's non-anchor rows legitimately report `0.0` throughput (see
+    /// `successful_performance_samples`) — but it lets a consumer distinguish "no samples" from
+    /// "some samples, all excluded."
+    #[serde(default)]
+    pub throughput_excluded_sample_count: usize,
 }
 
 /// Aggregated system-load contention qualifier for a group of results.
@@ -409,12 +508,15 @@ pub fn aggregate_new_format(results: &[BenchmarkResult]) -> NewConsolidatedResul
                 shared_corpus_markdown: Vec::new(),
                 shared_corpus_plaintext: Vec::new(),
                 timestamp: chrono::Utc::now().to_rfc3339(),
+                disk_size_conflicts: Vec::new(),
             },
+            run_provenance: Vec::new(),
         };
     }
 
     let mut by_framework_mode_format: HashMap<String, HashMap<String, Vec<&BenchmarkResult>>> = HashMap::new();
     let mut disk_sizes: HashMap<String, DiskSizeInfo> = HashMap::new();
+    let mut disk_size_conflicts: Vec<String> = Vec::new();
     let mut file_types = std::collections::HashSet::new();
 
     for result in results {
@@ -431,6 +533,15 @@ pub fn aggregate_new_format(results: &[BenchmarkResult]) -> NewConsolidatedResul
         file_types.insert(result.file_extension.clone());
 
         if let Some(disk_size) = &result.framework_capabilities.installation_size {
+            if let Some(existing) = disk_sizes.get(framework)
+                && (existing.size_bytes != disk_size.size_bytes || existing.method != disk_size.method)
+            {
+                disk_size_conflicts.push(format!(
+                    "{framework}: installation_size conflict ({} bytes via {:?} vs {} bytes via {:?}); \
+                     disk_sizes keeps the last-seen value",
+                    existing.size_bytes, existing.method, disk_size.size_bytes, disk_size.method
+                ));
+            }
             disk_sizes.insert(framework.to_string(), disk_size.clone());
         }
     }
@@ -502,6 +613,7 @@ pub fn aggregate_new_format(results: &[BenchmarkResult]) -> NewConsolidatedResul
             OutputFormat::Plaintext,
         ),
         timestamp: chrono::Utc::now().to_rfc3339(),
+        disk_size_conflicts,
     };
 
     let comparison = build_comparison(&aggregated_by_framework_mode);
@@ -513,6 +625,7 @@ pub fn aggregate_new_format(results: &[BenchmarkResult]) -> NewConsolidatedResul
         comparison,
         per_fixture_results,
         metadata,
+        run_provenance: Vec::new(),
     }
 }
 
@@ -571,6 +684,25 @@ fn build_per_fixture_results(results: &[BenchmarkResult]) -> Vec<PerFixtureRow> 
             correct,
             success: result.success,
             error_kind,
+            file_size: result.file_size,
+            throughput_bytes_per_sec: result.metrics.throughput_bytes_per_sec,
+            avg_cpu_percent: result.metrics.avg_cpu_percent,
+            cpu_seconds: result.metrics.cpu_seconds,
+            baseline_memory_bytes: result.metrics.baseline_memory_bytes,
+            peak_memory_delta_bytes: result.metrics.peak_memory_delta_bytes,
+            p50_memory_bytes: result.metrics.p50_memory_bytes,
+            p95_memory_bytes: result.metrics.p95_memory_bytes,
+            p99_memory_bytes: result.metrics.p99_memory_bytes,
+            extraction_duration_ms: result.extraction_duration.map(|d| d.as_secs_f64() * 1000.0),
+            subprocess_overhead_ms: result.subprocess_overhead.map(|d| d.as_secs_f64() * 1000.0),
+            cold_start_duration_ms: result.cold_start_duration.map(|d| d.as_secs_f64() * 1000.0),
+            error_message: result.error_message.clone(),
+            quality: result.quality.clone(),
+            pdf_metadata: result.pdf_metadata.clone(),
+            framework_capabilities: result.framework_capabilities.clone(),
+            system_load: result.system_load,
+            iterations: result.iterations.clone(),
+            statistics: result.statistics.clone(),
         });
     }
 
@@ -633,6 +765,16 @@ fn calculate_percentiles(results: &[&BenchmarkResult]) -> PerformancePercentiles
         .map(|r| r.metrics.throughput_bytes_per_sec / 1_000_000.0)
         .filter(|&v| v > 0.0 && v.is_finite())
         .collect();
+    // Every performance sample not represented in `throughputs` above was excluded because its
+    // throughput was non-positive or non-finite; surface the count so a 0-valued percentile
+    // group can be told apart from one with no samples at all. ~keep
+    let throughput_excluded_sample_count = performance_samples
+        .iter()
+        .filter(|r| {
+            let v = r.metrics.throughput_bytes_per_sec / 1_000_000.0;
+            !(v > 0.0 && v.is_finite())
+        })
+        .count();
 
     let mut memories: Vec<f64> = performance_samples
         .iter()
@@ -835,6 +977,7 @@ fn calculate_percentiles(results: &[&BenchmarkResult]) -> PerformancePercentiles
         cpu_seconds,
         batch_size,
         system_load,
+        throughput_excluded_sample_count,
     }
 }
 
@@ -1488,6 +1631,48 @@ mod tests {
         );
     }
 
+    /// Defensive regression test for the aggregate-key design documented on
+    /// [`make_aggregate_key`]: xberg keys omit `output_format` because the format is already
+    /// baked into the framework name (`xberg-markdown-baseline` vs `xberg-plaintext-baseline`).
+    /// This is not a live bug — real xberg framework names never collide — but pins the current
+    /// safe behavior instead of changing the key format, which would break `bench_matrix`'s
+    /// pinned exact-key-string tests and the published release-contract keys downstream
+    /// consumers already depend on.
+    #[test]
+    fn xberg_aggregate_keys_never_collide_across_real_framework_name_variants() {
+        let xberg_variants = [
+            ("xberg-markdown-baseline", OutputFormat::Markdown),
+            ("xberg-markdown-layout", OutputFormat::Markdown),
+            ("xberg-plaintext-baseline", OutputFormat::Plaintext),
+            ("xberg-plaintext-layout", OutputFormat::Plaintext),
+            ("xberg-markdown-paddle-ocr", OutputFormat::Markdown),
+            ("xberg-plaintext-paddle-ocr", OutputFormat::Plaintext),
+        ];
+
+        let mut keys = std::collections::HashSet::new();
+        for (framework, format) in xberg_variants {
+            for mode in ["single", "batch"] {
+                let key = make_aggregate_key(framework, format, mode);
+                assert!(keys.insert(key.clone()), "duplicate aggregate key: {key}");
+            }
+        }
+    }
+
+    /// A same-name-different-format xberg pair *would* collide under the current key format
+    /// (`{framework}:{mode}`, no format component). This cannot happen with real xberg naming
+    /// (format is always baked into the name), but pinning the mechanism here makes a future
+    /// change to it deliberate rather than accidental.
+    #[test]
+    fn hypothetical_same_name_different_format_xberg_pair_collides_by_design() {
+        let markdown_key = make_aggregate_key("xberg-shared-name", OutputFormat::Markdown, "single");
+        let plaintext_key = make_aggregate_key("xberg-shared-name", OutputFormat::Plaintext, "single");
+        assert_eq!(
+            markdown_key, plaintext_key,
+            "xberg keys intentionally omit output_format; real xberg framework names never share \
+             a name across formats, so this collision is theoretical, not a live bug"
+        );
+    }
+
     #[test]
     fn test_aggregate_new_format_xberg_key_shape() {
         let results = vec![
@@ -1661,6 +1846,60 @@ mod tests {
             assert_eq!(docx.throughput.p50, 3.0);
             assert_eq!(aggregated.comparison.throughput_ranking[0].value, 3.0);
         }
+    }
+
+    /// While `PerformancePercentiles.performance_sample_count` dedupes a native batch down to
+    /// one process-level sample (see `batch_process_metrics_are_sampled_once_...` above),
+    /// `per_fixture_results` must still carry every per-document row: quality metrics,
+    /// `error_message`, `pdf_metadata`, and every other per-document field are only meaningful
+    /// per document, not per batch process. Regression-locks oracle item 7 (B2): batch
+    /// per-document rows are not lost, only the process-level percentile sample is deduped. ~keep
+    #[test]
+    fn batch_mode_preserves_every_per_document_row_in_per_fixture_results() {
+        let capability = crate::types::BatchCapability {
+            entry_point: crate::types::BatchEntryPoint::XbergCliExtractBatch,
+            timing_scope: crate::types::BatchTimingScope::ColdEndToEndSubprocess,
+            per_item_timing: true,
+        };
+        let mut results = Vec::new();
+        for (index, name) in ["doc_a", "doc_b", "doc_c", "doc_d"].iter().enumerate() {
+            let mut result = create_test_result(
+                "xberg-batch",
+                "pdf",
+                OcrStatus::NotUsed,
+                100 + index as u64,
+                3_000_000.0,
+                10_000_000,
+            );
+            result.file_path = PathBuf::from(format!("{name}.pdf"));
+            result.framework_capabilities.batch_support = true;
+            result.framework_capabilities.batch_capability = Some(capability);
+            result.framework_capabilities.batch_performance_sample = Some(index == 0);
+            result.framework_capabilities.batch_sample_id = Some("batch-of-4".to_string());
+            results.push(result);
+        }
+
+        let aggregated = aggregate_new_format(&results);
+
+        // The process-level metrics are deduped to exactly one performance sample...
+        let overall = aggregated.by_framework_mode["xberg:markdown:batch"]
+            .overall_performance
+            .as_ref()
+            .expect("overall process metrics");
+        assert_eq!(overall.performance_sample_count, 1);
+        assert_eq!(overall.successful_sample_count, 4);
+
+        // ...but every per-document row survives in per_fixture_results, none deduped away.
+        assert_eq!(aggregated.per_fixture_results.len(), 4);
+        let fixture_ids: std::collections::HashSet<&str> = aggregated
+            .per_fixture_results
+            .iter()
+            .map(|row| row.fixture_id.as_str())
+            .collect();
+        assert_eq!(
+            fixture_ids,
+            std::collections::HashSet::from(["doc_a", "doc_b", "doc_c", "doc_d"])
+        );
     }
 
     #[test]
@@ -2761,5 +3000,185 @@ mod tests {
             ranking[1].relative > 1.0,
             "the higher-CPU framework's relative value should exceed the lowest-CPU baseline"
         );
+    }
+
+    /// A successful sample with zero throughput is dropped from the `throughput` percentile
+    /// calculation (unchanged pre-v2.8.0 behavior), but the exclusion must now be visible via
+    /// `throughput_excluded_sample_count` instead of silent.
+    #[test]
+    fn zero_throughput_successful_sample_is_counted_as_excluded() {
+        let zero = create_test_result("framework-x", "pdf", OcrStatus::NotUsed, 100, 0.0, 10_000_000);
+        let positive = create_test_result("framework-x", "pdf", OcrStatus::NotUsed, 100, 1_000_000.0, 10_000_000);
+
+        let percentiles = calculate_percentiles(&[&zero, &positive]);
+
+        assert_eq!(percentiles.successful_sample_count, 2);
+        assert_eq!(percentiles.throughput_excluded_sample_count, 1);
+        assert!(percentiles.throughput.p50 > 0.0);
+    }
+
+    #[test]
+    fn no_throughput_exclusions_when_all_samples_are_positive() {
+        let a = create_test_result("framework-x", "pdf", OcrStatus::NotUsed, 100, 1_000_000.0, 10_000_000);
+        let b = create_test_result("framework-x", "pdf", OcrStatus::NotUsed, 100, 2_000_000.0, 10_000_000);
+
+        let percentiles = calculate_percentiles(&[&a, &b]);
+
+        assert_eq!(percentiles.throughput_excluded_sample_count, 0);
+    }
+
+    /// `disk_sizes` keeps only the last-seen `installation_size` per framework (documented
+    /// last-writer-wins behavior). When two results for the same framework disagree, the
+    /// conflict must now be surfaced in `metadata.disk_size_conflicts` instead of silently
+    /// overwritten with no trace.
+    #[test]
+    fn conflicting_installation_size_for_same_framework_is_recorded() {
+        let mut first = create_test_result("framework-x", "pdf", OcrStatus::NotUsed, 100, 1_000_000.0, 10_000_000);
+        first.framework_capabilities.installation_size = Some(DiskSizeInfo {
+            size_bytes: 1_000,
+            package_bytes: 1_000,
+            system_deps_bytes: 0,
+            model_bytes: 0,
+            method: "binary_size".to_string(),
+            description: "first measurement".to_string(),
+            system_deps_detail: HashMap::new(),
+        });
+
+        let mut second = create_test_result("framework-x", "pdf", OcrStatus::NotUsed, 100, 1_000_000.0, 10_000_000);
+        second.framework_capabilities.installation_size = Some(DiskSizeInfo {
+            size_bytes: 2_000,
+            package_bytes: 2_000,
+            system_deps_bytes: 0,
+            model_bytes: 0,
+            method: "binary_size".to_string(),
+            description: "second measurement".to_string(),
+            system_deps_detail: HashMap::new(),
+        });
+
+        let aggregated = aggregate_new_format(&[first, second]);
+
+        assert_eq!(aggregated.disk_sizes["framework-x"].size_bytes, 2_000);
+        assert_eq!(aggregated.metadata.disk_size_conflicts.len(), 1);
+        assert!(aggregated.metadata.disk_size_conflicts[0].contains("framework-x"));
+    }
+
+    #[test]
+    fn agreeing_installation_size_across_results_records_no_conflict() {
+        let disk_size = DiskSizeInfo {
+            size_bytes: 1_000,
+            package_bytes: 1_000,
+            system_deps_bytes: 0,
+            model_bytes: 0,
+            method: "binary_size".to_string(),
+            description: "measurement".to_string(),
+            system_deps_detail: HashMap::new(),
+        };
+        let mut first = create_test_result("framework-x", "pdf", OcrStatus::NotUsed, 100, 1_000_000.0, 10_000_000);
+        first.framework_capabilities.installation_size = Some(disk_size.clone());
+        let mut second = create_test_result("framework-x", "pdf", OcrStatus::NotUsed, 100, 1_000_000.0, 10_000_000);
+        second.framework_capabilities.installation_size = Some(disk_size);
+
+        let aggregated = aggregate_new_format(&[first, second]);
+
+        assert!(aggregated.metadata.disk_size_conflicts.is_empty());
+    }
+
+    /// Every measured field on a `BenchmarkResult` must reach its `PerFixtureRow` (the row-level
+    /// half of B2 losslessness; see `tests/lossless_aggregation.rs` for the provenance half and
+    /// the full round-trip test).
+    #[test]
+    fn per_fixture_row_carries_every_measured_field_losslessly() {
+        let mut result = create_test_result("framework-x", "pdf", OcrStatus::NotUsed, 100, 1_000_000.0, 10_000_000);
+        result.file_size = 4_096;
+        result.metrics.baseline_memory_bytes = 111;
+        result.metrics.peak_memory_delta_bytes = 222;
+        result.metrics.avg_cpu_percent = 42.5;
+        result.metrics.cpu_seconds = 1.25;
+        result.metrics.p50_memory_bytes = 300;
+        result.metrics.p95_memory_bytes = 400;
+        result.metrics.p99_memory_bytes = 500;
+        result.extraction_duration = Some(std::time::Duration::from_millis(77));
+        result.subprocess_overhead = Some(std::time::Duration::from_millis(23));
+        result.cold_start_duration = Some(std::time::Duration::from_millis(555));
+        result.success = false;
+        result.error_message = Some("framework exploded".to_string());
+        result.quality = Some(QualityMetrics {
+            f1_score_text: 0.9,
+            f1_score_numeric: 0.8,
+            f1_score_layout: Some(0.7),
+            quality_score: 0.85,
+            missing_tokens: vec![("foo".to_string(), 2)],
+            extra_tokens: vec![("bar".to_string(), 1)],
+            correct: false,
+        });
+        result.pdf_metadata = Some(PdfMetadata {
+            has_text_layer: true,
+            detection_method: "pdftotext".to_string(),
+            page_count: Some(3),
+            ocr_enabled: false,
+            text_quality_score: Some(0.6),
+        });
+        result.framework_capabilities.version = "9.9.9".to_string();
+        result.framework_capabilities.ocr_support = true;
+        result.framework_capabilities.async_support = true;
+        result.framework_capabilities.supported_extensions = vec!["pdf".to_string()];
+        result.framework_capabilities.supported_output_formats = vec![OutputFormat::Markdown];
+        result.framework_capabilities.batch_capability = Some(crate::types::BatchCapability {
+            entry_point: crate::types::BatchEntryPoint::XbergCliExtractBatch,
+            timing_scope: crate::types::BatchTimingScope::ColdEndToEndSubprocess,
+            per_item_timing: true,
+        });
+        result.system_load = Some(SystemLoad {
+            load_avg_1m: 1.0,
+            load_avg_5m: 2.0,
+            load_avg_15m: 3.0,
+            logical_cores: 8,
+            physical_cores: 4,
+        });
+        result.iterations = vec![crate::types::IterationResult {
+            iteration: 0,
+            duration: std::time::Duration::from_millis(10),
+            extraction_duration: None,
+            metrics: result.metrics.clone(),
+        }];
+        result.statistics = Some(crate::types::DurationStatistics {
+            mean: std::time::Duration::from_millis(100),
+            median: std::time::Duration::from_millis(95),
+            std_dev_ms: 5.0,
+            min: std::time::Duration::from_millis(80),
+            max: std::time::Duration::from_millis(150),
+            p95: std::time::Duration::from_millis(140),
+            p99: std::time::Duration::from_millis(148),
+            sample_count: 3,
+        });
+
+        let aggregated = aggregate_new_format(&[result.clone()]);
+        let row = &aggregated.per_fixture_results[0];
+
+        assert_eq!(row.file_size, 4_096);
+        assert_eq!(row.baseline_memory_bytes, 111);
+        assert_eq!(row.peak_memory_delta_bytes, 222);
+        assert_eq!(row.avg_cpu_percent, 42.5);
+        assert_eq!(row.cpu_seconds, 1.25);
+        assert_eq!(row.p50_memory_bytes, 300);
+        assert_eq!(row.p95_memory_bytes, 400);
+        assert_eq!(row.p99_memory_bytes, 500);
+        assert_eq!(row.extraction_duration_ms, Some(77.0));
+        assert_eq!(row.subprocess_overhead_ms, Some(23.0));
+        assert_eq!(row.cold_start_duration_ms, Some(555.0));
+        assert_eq!(row.error_message.as_deref(), Some("framework exploded"));
+        let quality = row.quality.as_ref().expect("quality present");
+        assert_eq!(quality.missing_tokens, vec![("foo".to_string(), 2)]);
+        assert_eq!(quality.extra_tokens, vec![("bar".to_string(), 1)]);
+        let pdf_metadata = row.pdf_metadata.as_ref().expect("pdf_metadata present");
+        assert_eq!(pdf_metadata.text_quality_score, Some(0.6));
+        assert_eq!(pdf_metadata.page_count, Some(3));
+        assert_eq!(row.framework_capabilities.version, "9.9.9");
+        assert!(row.framework_capabilities.batch_capability.is_some());
+        let system_load = row.system_load.expect("system_load present");
+        assert_eq!(system_load.load_avg_1m, 1.0);
+        assert_eq!(system_load.logical_cores, 8);
+        assert_eq!(row.iterations.len(), 1);
+        assert_eq!(row.statistics.as_ref().expect("statistics present").sample_count, 3);
     }
 }

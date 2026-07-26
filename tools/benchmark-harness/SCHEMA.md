@@ -1,4 +1,4 @@
-# Aggregation Schema v2.7.0
+# Aggregation Schema v2.8.0
 
 This document describes the structure of `aggregated.json` produced by `benchmark-harness consolidate`.
 
@@ -6,7 +6,7 @@ This document describes the structure of `aggregated.json` produced by `benchmar
 
 ```json
 {
-  "schema_version": "2.7.0",
+  "schema_version": "2.8.0",
   "by_framework_mode": {
     "<aggregate_key>": {
       /* FrameworkModeAggregation */
@@ -25,7 +25,10 @@ This document describes the structure of `aggregated.json` produced by `benchmar
   ],
   "metadata": {
     /* ConsolidationMetadata */
-  }
+  },
+  "run_provenance": [
+    /* RunProvenanceRecord[] — v2.8.0+, see "Migration from v2.7.0 to v2.8.0" */
+  ]
 }
 ```
 
@@ -105,7 +108,8 @@ Contains p50, p95, p99 for all metrics:
   "batch_size": 8, // Optional (v2.7.0+)
   "system_load": {
     /* SystemLoadPercentiles */
-  } // Optional (v2.7.0+)
+  }, // Optional (v2.7.0+)
+  "throughput_excluded_sample_count": 0 // v2.8.0+
 }
 ```
 
@@ -147,7 +151,10 @@ metrics" migration notes below for how to read `load_per_core`.
 
 ## PerFixtureRow
 
-One row per unique combination of (framework, output_format, execution_mode, fixture_id, ocr):
+One row per unique combination of (framework, output_format, execution_mode, fixture_id, ocr).
+The batch dedup that collapses a native batch to one `performance_sample_count` in
+`PerformancePercentiles` does **not** apply here: every per-document row from a batch is present
+(see "Migration from v2.7.0 to v2.8.0").
 
 ```json
 {
@@ -165,11 +172,86 @@ One row per unique combination of (framework, output_format, execution_mode, fix
   "quality_score": 0.85,
   "correct": true,
   "success": true,
-  "error_kind": null // "FrameworkError", "HarnessError", "Timeout", etc. if !success
+  "error_kind": null, // "FrameworkError", "HarnessError", "Timeout", etc. if !success
+  "file_size": 45210, // v2.8.0+
+  "throughput_bytes_per_sec": 361280.5, // v2.8.0+
+  "avg_cpu_percent": 42.1, // v2.8.0+
+  "cpu_seconds": 0.31, // v2.8.0+
+  "baseline_memory_bytes": 12582912, // v2.8.0+
+  "peak_memory_delta_bytes": 176160768, // v2.8.0+
+  "p50_memory_bytes": 150000000, // v2.8.0+, this single measurement's own sampler percentile
+  "p95_memory_bytes": 175000000, // v2.8.0+
+  "p99_memory_bytes": 189000000, // v2.8.0+
+  "extraction_duration_ms": 98.0, // Optional, v2.8.0+
+  "subprocess_overhead_ms": 27.4, // Optional, v2.8.0+
+  "cold_start_duration_ms": 210.0, // Optional, v2.8.0+
+  "error_message": null, // Optional free-text error, v2.8.0+
+  "quality": {
+    /* QualityMetrics, including missing_tokens/extra_tokens — Optional, v2.8.0+ */
+  },
+  "pdf_metadata": {
+    /* PdfMetadata — Optional, v2.8.0+ */
+  },
+  "framework_capabilities": {
+    /* FrameworkCapabilities, including batch_capability — v2.8.0+ */
+  },
+  "system_load": {
+    /* SystemLoad — Optional, v2.8.0+ */
+  },
+  "iterations": [
+    /* IterationResult[] — v2.8.0+, empty unless multiple iterations were run */
+  ],
+  "statistics": {
+    /* DurationStatistics — Optional, v2.8.0+ */
+  }
 }
 ```
 
 `ocr` is `true` or `false` only when actual OCR usage is known. It is `null` when the framework did not report OCR usage.
+
+The `duration_ms`/`peak_memory_mb`/`f1_*`/`quality_score`/`correct` fields are the original
+v2.3.0 convenience projection and remain unchanged. The v2.8.0 fields above make each row
+losslessly carry every measured field from its source `BenchmarkResult` — including ones with no
+earlier scalar equivalent, like the free-text `error_message` or the token-level
+`quality.missing_tokens`/`extra_tokens` lists.
+
+## Migration from v2.7.0 to v2.8.0
+
+Additive only — no key-format change, no field removed or renamed. Motivated by an aggregation
+audit that found several measured fields from `results.json` (and the entire `provenance.json`
+sidecar) were silently dropped during consolidation.
+
+- **`run_provenance`** (`RunProvenanceRecord[]`, top-level, new): one entry per input directory
+  the `consolidate` command read from, folding in the `provenance.json` sidecar that
+  `load_run_results` previously ignored entirely. `aggregate_new_format` itself always leaves
+  this empty (it has no filesystem access); the `consolidate` CLI command populates it. Shape:
+
+  ```json
+  {
+    "source_dir": "xberg-markdown-baseline-batch",
+    "provenance": {
+      /* RunProvenance — see "Run provenance sidecar" below — or null */
+    },
+    "missing_reason": "provenance.json not found in ..." // Present only when provenance is null
+  }
+  ```
+
+  A missing `provenance.json` is recorded, not treated as an error — see
+  `consolidate::load_run_provenance`.
+- **`PerFixtureRow`**: extended with `file_size`, `throughput_bytes_per_sec`, `avg_cpu_percent`,
+  `cpu_seconds`, `baseline_memory_bytes`, `peak_memory_delta_bytes`, `p50/p95/p99_memory_bytes`,
+  `extraction_duration_ms`, `subprocess_overhead_ms`, `cold_start_duration_ms`, `error_message`,
+  `quality` (the full `QualityMetrics`, including `missing_tokens`/`extra_tokens`),
+  `pdf_metadata`, `framework_capabilities` (including `batch_capability`), `system_load`,
+  `iterations`, and `statistics`. See the `PerFixtureRow` section above for the full shape.
+- **`PerformancePercentiles.throughput_excluded_sample_count`** (`usize`, new): the number of
+  successful performance samples excluded from the `throughput` percentiles because their
+  throughput was zero, negative, or non-finite. The exclusion rule itself is unchanged from
+  pre-v2.8.0 behavior; this field only makes a previously-silent exclusion visible.
+- **`ConsolidationMetadata.disk_size_conflicts`** (`string[]`, new, defaults to `[]`): human-
+  readable notes for any framework where two or more results reported a different
+  `installation_size`. `disk_sizes` has always kept only the last-seen value per framework; this
+  field surfaces when that last-writer-wins behavior actually discarded a conflicting value.
 
 ## Migration from v2.6.0 to v2.7.0
 
@@ -340,6 +422,12 @@ explicit model revision identities, timing configuration, fixed batch partitions
 workers, framework-specific worker semantics, and the configured Xberg thread budget.
 Local absolute paths are never serialized.
 
+Since v2.8.0, the `consolidate` command reads every `provenance.json` sidecar it finds alongside
+a `results.json` (via `consolidate::load_run_provenance`) and folds it into the aggregate's
+top-level `run_provenance` array — see "Migration from v2.7.0 to v2.8.0" above. A directory with
+`results.json` but no `provenance.json` is recorded with `provenance: null`, not treated as an
+error.
+
 For Xberg rows, `frameworks[].configured_thread_budget` records an explicit
 `--xberg-max-threads` value in either mode. For native batch rows without an explicit
 value, it records the legacy `--max-concurrent` fallback passed to `xberg batch
@@ -395,7 +483,8 @@ Competitor names carry no format information, so they continue to need it in the
   "file_type_count": 8,
   "shared_corpus_markdown": ["pdf"],
   "shared_corpus_plaintext": ["pdf"],
-  "timestamp": "2025-05-09T10:15:30Z"
+  "timestamp": "2025-05-09T10:15:30Z",
+  "disk_size_conflicts": [] // v2.8.0+, see "Migration from v2.7.0 to v2.8.0"
 }
 ```
 

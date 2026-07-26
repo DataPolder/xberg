@@ -490,6 +490,7 @@ fn zero_bucket(total_sample_count: usize) -> PerformancePercentiles {
         cpu_seconds: Percentiles::default(),
         batch_size: None,
         system_load: None,
+        throughput_excluded_sample_count: 0,
     }
 }
 
@@ -543,6 +544,25 @@ fn build_aggregate(contract: &CohortContract, cohort: Cohort) -> NewConsolidated
                 correct: None,
                 success: true,
                 error_kind: None,
+                file_size: 1,
+                throughput_bytes_per_sec: 0.0,
+                avg_cpu_percent: 0.0,
+                cpu_seconds: 0.0,
+                baseline_memory_bytes: 0,
+                peak_memory_delta_bytes: 0,
+                p50_memory_bytes: 0,
+                p95_memory_bytes: 0,
+                p99_memory_bytes: 0,
+                extraction_duration_ms: None,
+                subprocess_overhead_ms: None,
+                cold_start_duration_ms: None,
+                error_message: None,
+                quality: None,
+                pdf_metadata: None,
+                framework_capabilities: FrameworkCapabilities::default(),
+                system_load: None,
+                iterations: Vec::new(),
+                statistics: None,
             })
         })
         .collect();
@@ -574,7 +594,9 @@ fn build_aggregate(contract: &CohortContract, cohort: Cohort) -> NewConsolidated
             shared_corpus_markdown: Vec::new(),
             shared_corpus_plaintext: Vec::new(),
             timestamp: "2026-01-01T00:00:00Z".to_string(),
+            disk_size_conflicts: Vec::new(),
         },
+        run_provenance: Vec::new(),
     }
 }
 

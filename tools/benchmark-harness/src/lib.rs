@@ -118,7 +118,7 @@ pub use aggregate::{
 };
 pub use cohort::CohortManifest;
 pub use config::{BenchmarkConfig, BenchmarkMode, ProfilingConfig, load_framework_sizes};
-pub use consolidate::load_run_results;
+pub use consolidate::{RunProvenanceRecord, load_run_provenance, load_run_results};
 pub use error::{Error, Result};
 pub use fixture::{Fixture, FixtureManager};
 pub use monitoring::{ResourceMonitor, ResourceSample, ResourceStats};
