@@ -871,6 +871,22 @@ jobs:
           test -f "$HOME/mineru.json" || { echo "mineru.json not restored from cache artifact"; exit 1; }
           du -sh "$HOME/.cache/huggingface/hub" || true
 
+      - name: Log MinerU offline env and restored cache state
+        if: always()
+        run: |
+          set -uo pipefail
+          echo "=== MinerU offline env ==="
+          echo "HF_HOME=${HF_HOME:-<unset>}"
+          echo "HF_HUB_CACHE=${HF_HUB_CACHE:-<unset>}"
+          echo "HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-<unset>}"
+          echo "TRANSFORMERS_OFFLINE=${TRANSFORMERS_OFFLINE:-<unset>}"
+          echo "MINERU_MODEL_SOURCE=${MINERU_MODEL_SOURCE:-<unset>}"
+          echo "=== ~/mineru.json (drives the offline model short-circuit; absence => gcore fetch hang) ==="
+          cat "$HOME/mineru.json" || echo "!! mineru.json absent"
+          echo "=== HF hub cache contents ==="
+          ls -1 "$HOME/.cache/huggingface/hub" 2>/dev/null || echo "!! hub dir absent"
+          du -sh "$HOME/.cache/huggingface/hub" 2>/dev/null || true
+
       - name: Run benchmark
         env:
           FRAMEWORK: mineru
@@ -1063,6 +1079,24 @@ jobs:
           path: benchmark-artifacts/ocr/
           merge-multiple: false
 
+      - name: Log downloaded benchmark artifact inventory
+        if: always()
+        run: |
+          set -uo pipefail
+          for cohort in native ocr; do
+            root="benchmark-artifacts/${cohort}"
+            echo "=== ${cohort} artifacts (${root}) ==="
+            if [ ! -d "$root" ]; then
+              echo "!! no artifact directory (all ${cohort} jobs missing?)"
+              continue
+            fi
+            find "$root" -mindepth 1 -maxdepth 1 -type d | sort | while read -r dir; do
+              n_results=$(find "$dir" -name results.json | wc -l | tr -d ' ')
+              n_prov=$(find "$dir" -name provenance.json | wc -l | tr -d ' ')
+              echo "  $(basename "$dir"): results.json=${n_results} provenance.json=${n_prov}"
+            done
+          done
+
       - name: Validate native benchmark artifacts
         id: validate-native
         if: always()
@@ -1159,6 +1193,25 @@ jobs:
                 ocr: {aggregated: "benchmarks-ocr-aggregated.json", metadata: "benchmarks-ocr-metadata.json"}
               }
             }' > release-assets/benchmarks-index.json
+
+      - name: Log aggregation gate status
+        if: always()
+        run: |
+          echo "=== Upstream job results ==="
+          echo "setup=${{ needs.setup.result }}"
+          echo "bench-rust=${{ needs.bench-rust.result }}"
+          echo "bench-docling=${{ needs.bench-docling.result }}"
+          echo "bench-markitdown=${{ needs.bench-markitdown.result }}"
+          echo "bench-unstructured=${{ needs.bench-unstructured.result }}"
+          echo "bench-tika=${{ needs.bench-tika.result }}"
+          echo "bench-pymupdf4llm=${{ needs.bench-pymupdf4llm.result }}"
+          echo "bench-mineru=${{ needs.bench-mineru.result }} (optional; NOT a release gate)"
+          echo "bench-liteparse=${{ needs.bench-liteparse.result }}"
+          echo "=== Aggregation step outcomes ==="
+          echo "validate-native=${{ steps.validate-native.outcome }}"
+          echo "validate-ocr=${{ steps.validate-ocr.outcome }}"
+          echo "validate-aggregates=${{ steps.validate-aggregates.outcome }}"
+          echo "prepare-release-assets=${{ steps.prepare-release-assets.outcome }}"
 
       - name: Create GitHub Release with benchmark results
         if: >-
