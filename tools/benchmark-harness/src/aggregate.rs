@@ -1304,11 +1304,8 @@ fn build_comparison(by_framework_mode: &HashMap<String, FrameworkModeAggregation
     let pdf_tf1_ranking_plaintext = build_ranking(&mut pdf_tf1_plaintext);
     let pdf_sf1_ranking_markdown = build_ranking(&mut pdf_sf1_markdown);
 
-    // Higher pages/sec is better, so the shared descending `build_ranking` closure applies as-is.
     let pages_per_sec_ranking = build_ranking(&mut pages_per_sec_metrics);
 
-    // Lower CPU-seconds is better: sort ascending, with the best (lowest) value as the `1.0`
-    // relative baseline — mirrors `memory_ranking`'s ascending treatment above.
     cpu_seconds_metrics.retain(|(_, v)| v.is_finite());
     cpu_seconds_metrics.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
     let baseline_cpu_seconds = cpu_seconds_metrics.first().map(|(_, v)| *v).unwrap_or(1.0);
@@ -2380,7 +2377,6 @@ mod tests {
 
         let percentiles = calculate_percentiles(&[&result]);
 
-        // 20 pages / 2.0 seconds = 10.0 pages/sec.
         let pages_per_sec = percentiles.pages_per_sec.expect("pages_per_sec must be populated");
         assert_eq!(pages_per_sec.p50, 10.0);
         assert_eq!(pages_per_sec.p95, 10.0);
@@ -2441,7 +2437,6 @@ mod tests {
 
         let percentiles = calculate_percentiles(&[&doc_a, &doc_b]);
 
-        // Total 20 pages across the one batch invocation, over its shared 4-second makespan.
         let pages_per_sec = percentiles
             .pages_per_sec
             .expect("pages_per_sec must be populated for the batch");
@@ -2597,7 +2592,6 @@ mod tests {
             system_load.contended_sample_count, 1,
             "only the busy sample (load_per_core 1.2 > 0.7 threshold) should count as contended"
         );
-        // R7 median of [0.1, 1.2] (load_avg_1m / logical_cores, sorted).
         assert!((system_load.load_per_core_p50 - 0.65).abs() < 1e-9);
     }
 

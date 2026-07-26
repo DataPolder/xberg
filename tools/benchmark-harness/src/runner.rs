@@ -251,9 +251,6 @@ fn aggregate_metrics(iterations: &[IterationResult]) -> PerformanceMetrics {
 
     let avg_cpu_percent = iterations.iter().map(|i| i.metrics.avg_cpu_percent).sum::<f64>() / count;
 
-    // Mean, not sum: `duration` (and every other metric in this struct) is likewise the mean
-    // across iterations, so `cpu_seconds` stays consistent as "typical CPU-seconds for one
-    // iteration" rather than a total across the whole repeated run.
     let cpu_seconds = iterations.iter().map(|i| i.metrics.cpu_seconds).sum::<f64>() / count;
 
     let throughput_bytes_per_sec = iterations

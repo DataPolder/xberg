@@ -3702,9 +3702,9 @@ checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 
 [[package]]
 name = "liter-llm"
-version = "1.11.0"
+version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "016fbd9e5fc66d4cb10eb5faa45242e54add93101816926fe9348bcfb0cb051a"
+checksum = "5ab4c485c50d51312eaa119a9f837a5de21fc85f20f17dd0bd193f1d1f081e65"
 dependencies = [
  "ahash 0.8.12",
  "arc-swap",
@@ -8740,7 +8740,7 @@ dependencies = [
 
 [[package]]
 name = "xberg"
-version = "1.0.0-rc.38"
+version = "1.0.0-rc.40"
 dependencies = [
  "aes-gcm",
  "ahash 0.8.12",
@@ -8862,7 +8862,7 @@ dependencies = [
 
 [[package]]
 name = "xberg-e2e-rust"
-version = "1.0.0-rc.38"
+version = "1.0.0-rc.40"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -8877,7 +8877,7 @@ dependencies = [
 
 [[package]]
 name = "xberg-gliner"
-version = "1.0.0-rc.38"
+version = "1.0.0-rc.40"
 dependencies = [
  "getrandom 0.2.17",
  "getrandom 0.3.4",
@@ -8891,7 +8891,7 @@ dependencies = [
 
 [[package]]
 name = "xberg-libheif"
-version = "1.0.0-rc.38"
+version = "1.0.0-rc.40"
 dependencies = [
  "cfg-if 1.0.4",
  "enumn",
@@ -8902,7 +8902,7 @@ dependencies = [
 
 [[package]]
 name = "xberg-paddle-ocr"
-version = "1.0.0-rc.38"
+version = "1.0.0-rc.40"
 dependencies = [
  "geo-clipper",
  "geo-types",
@@ -8917,7 +8917,7 @@ dependencies = [
 
 [[package]]
 name = "xberg-tesseract"
-version = "1.0.0-rc.38"
+version = "1.0.0-rc.40"
 dependencies = [
  "cc",
  "cmake",

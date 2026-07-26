@@ -788,9 +788,6 @@ mod tests {
 
     #[test]
     fn integrate_cpu_core_seconds_trapezoidal_two_samples() {
-        // Normalized cpu_percent of 25% and 50% on a 2-core machine recovers raw (un-normalized)
-        // percentages of 50% and 100%. Trapezoidal average = 75% = 0.75 cores, held for 1 second
-        // => 0.75 core-seconds.
         let samples = [
             ResourceSample {
                 memory_bytes: 0,
@@ -818,8 +815,6 @@ mod tests {
 
     #[test]
     fn integrate_cpu_core_seconds_sums_across_multiple_windows() {
-        // Three samples of constant raw 100% (normalized 25% on a 4-core machine) held for 500ms
-        // each => 1.0 core * 1.0 total second = 1.0 core-second.
         let samples = [
             ResourceSample {
                 memory_bytes: 0,

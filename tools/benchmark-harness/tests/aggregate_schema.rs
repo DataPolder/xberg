@@ -457,7 +457,6 @@ fn test_pages_per_sec_and_cpu_seconds_populate_in_public_schema() {
             correct: true,
         }),
     );
-    // duration is fixed at 100ms in `make_benchmark_result`; 5 pages / 0.1s = 50.0 pages/sec.
     result.pdf_metadata = Some(PdfMetadata {
         has_text_layer: true,
         detection_method: "pdftotext".to_string(),
@@ -554,8 +553,6 @@ fn test_pareto_frontier_reaches_public_schema() {
 
     let aggregated = aggregate_new_format(&[result]);
 
-    // A single markdown candidate with a defined SF1 term and pages/sec observation is
-    // trivially non-dominated, so it must appear on the frontier by construction.
     assert_eq!(aggregated.comparison.pareto_frontier.len(), 1);
     let point = &aggregated.comparison.pareto_frontier[0];
     assert_eq!(point.framework_mode, "xberg-markdown-baseline:single");
