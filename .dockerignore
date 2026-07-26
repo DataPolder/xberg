@@ -17,6 +17,7 @@
 !crates/xberg-candle-ocr/
 !crates/xberg-ffi/
 !crates/xberg-libheif/
+!crates/xberg-libwpd/
 !crates/xberg-py/
 !crates/xberg-node/
 !crates/xberg-wasm/
