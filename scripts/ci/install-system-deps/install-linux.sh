@@ -42,8 +42,6 @@ packages=(
   # `-llzma` at the swift link step; the runner ships liblzma5 (runtime) but
   # not the dev symlink, so ld.gold fails with "cannot find -llzma". ~keep
   liblzma-dev
-  php-cli
-  php-dev
 )
 
 echo "Installing dependencies..."
@@ -64,6 +62,19 @@ else
       fi
     done
   fi
+fi
+
+# Install PHP dev headers only when no PHP is already active. The php-extension
+# build matrix runs shivammathur/setup-php first (matrix.php), putting phpX.Y and
+# its -dev headers on PATH; apt's unversioned php-cli/php-dev pull Ubuntu Noble's
+# default (8.3) and reset php-config, so ext-php-rs builds against the wrong PHP
+# version. Guard on `command -v php`, mirroring the Windows/macOS scripts. ~keep
+if command -v php >/dev/null 2>&1; then
+  echo "✓ PHP already active: $(php --version | head -1)"
+else
+  echo "Installing PHP (php-cli, php-dev)..."
+  retry_with_backoff_timeout 300 sudo apt-get install -y php-cli php-dev ||
+    echo "::warning::Failed to install php-cli/php-dev"
 fi
 
 echo "::endgroup::"

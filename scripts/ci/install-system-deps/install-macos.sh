@@ -95,19 +95,22 @@ else
   echo "✓ pkg-config already installed"
 fi
 
-if ! brew list php &>/dev/null; then
+# Only install PHP if none is active. When a job has already run
+# shivammathur/setup-php (the php-extension build matrix does, per matrix.php),
+# an active `php` is on PATH — brew-installing the unversioned `php` formula
+# pours the latest (e.g. 8.5) and UNLINKS the matrix-selected keg (php@8.4),
+# so ext-php-rs then builds against the wrong PHP. Guard on `command -v php`,
+# not `brew list php` (which misses the versioned php@X.Y keg setup-php links),
+# mirroring the Windows script. ~keep
+if command -v php >/dev/null 2>&1; then
+  echo "✓ PHP already active: $(php --version | head -1)"
+else
   echo "Installing PHP..."
   retry_with_backoff brew install php || {
     echo "::error::Failed to install PHP after retries"
     exit 1
   }
-else
-  echo "✓ PHP already installed"
-fi
-
-if ! command -v php >/dev/null 2>&1; then
-  echo "PHP not on PATH after install; attempting brew link..."
-  brew link --overwrite php >/dev/null 2>&1 || true
+  command -v php >/dev/null 2>&1 || brew link --overwrite php >/dev/null 2>&1 || true
 fi
 
 echo "::endgroup::"
