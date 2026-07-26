@@ -6,4 +6,4 @@ package xberg
 // module is upgraded without re-running `cmd/setup`, the previously written shim (built
 // against the old version) references an identifier that no longer exists here, turning
 // silent native-library skew into a compile-time error instead of a runtime crash.
-const RequireNativeSetup_1_0_0_rc_39 = "1.0.0-rc.39"
+const RequireNativeSetup_1_0_0_rc_40 = "1.0.0-rc.40"
