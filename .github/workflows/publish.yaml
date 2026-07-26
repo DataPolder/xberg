@@ -114,6 +114,11 @@ jobs:
         id: meta
         uses: xberg-io/actions/prepare-release-metadata@v1
 
+      # Created NON-draft (published) so the `release: [created]` event fires
+      # immediately and publish-docker.yaml runs as an independent parallel
+      # workflow (App-token-created events do trigger workflows). Assets upload
+      # into the live release over the run; finalize-release is idempotent and
+      # just confirms the prerelease flag at the end. ~keep
       - name: Ensure GitHub Release exists for tag
         if: ${{ steps.meta.outputs.is_tag == 'true' && steps.meta.outputs.dry_run != 'true' }}
         uses: xberg-io/actions/publish-github-release@v1
@@ -121,7 +126,7 @@ jobs:
           tag: ${{ steps.meta.outputs.tag }}
           target: ${{ steps.meta.outputs.target_sha }}
           notes: "Release ${{ steps.meta.outputs.tag }}"
-          draft: "true"
+          draft: "false"
           prerelease: ${{ steps.meta.outputs.is_prerelease }}
           token: ${{ steps.app-token.outputs.token }}
 
@@ -1950,7 +1955,6 @@ jobs:
           # `swift package compute-checksum`. Using the released asset guarantees
           # Package.swift matches what consumers fetch, regardless of rebuild
           # non-determinism, and avoids the flaky download-artifact digest check.
-          # The App token can read the still-draft release.
           gh release download "$TAG" --repo "${{ github.repository }}" \
             --pattern 'Xberg-rs.artifactbundle.zip' --dir bundle-dl --clobber
           CHECKSUM=$(sha256sum bundle-dl/Xberg-rs.artifactbundle.zip | cut -d' ' -f1)
@@ -2307,12 +2311,10 @@ jobs:
     if: ${{ always() && needs.prepare.outputs.is_tag == 'true' && needs.prepare.outputs.dry_run != 'true' && !contains(needs.*.result, 'failure') }}
     runs-on: ubuntu-latest
     steps:
-      # The release is still a DRAFT at this point (finalize un-drafts it, and
-      # finalize runs AFTER this job). The default GITHUB_TOKEN only has
-      # `contents: read`, which cannot see draft releases, so the lookup fails
-      # all its retries with "release not found" — which then skips finalize and
-      # cascades into skipping the Homebrew bottle build (issue #1247). Mint the
-      # App token (push access → draft visibility), same as finalize does. ~keep
+      # Mint the App token for release asset lookups (push access), consistent
+      # with finalize and the other release-writing jobs. Without it the lookup
+      # failed every retry with "release not found", skipping finalize and
+      # cascading into a skipped Homebrew bottle build (issue #1247). ~keep
       - uses: actions/create-github-app-token@v2
         id: app-token
         with:

@@ -21,8 +21,13 @@ on:
         required: false
         type: boolean
         default: false
+  # Fire the instant the GitHub Release is created (publish.yaml creates it
+  # non-draft, so `created` fires up front) — this workflow then builds and
+  # publishes images in parallel with, and independent of, publish.yaml. Do NOT
+  # use `published`: that only fires when a draft is un-drafted at finalize,
+  # which would serialize Docker behind the entire publish run. ~keep
   release:
-    types: [published]
+    types: [created]
   repository_dispatch:
     types: [publish-docker]
 
