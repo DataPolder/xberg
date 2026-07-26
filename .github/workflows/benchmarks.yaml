@@ -716,7 +716,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cache/huggingface/hub
-          key: mineru-models-3.4.4-${{ runner.os }}-${{ runner.arch }}
+          key: mineru-models-3.4.4-offline-v2-${{ runner.os }}-${{ runner.arch }}
 
       - name: Warm MinerU model weights (native + OCR pipelines)
         if: steps.mineru-model-cache.outputs.cache-hit != 'true'
@@ -824,6 +824,8 @@ jobs:
             echo "HF_HOME=$HOME/.cache/huggingface"
             echo "HF_HUB_CACHE=$HOME/.cache/huggingface/hub"
             echo "MINERU_MODEL_SOURCE=huggingface"
+            echo "HF_HUB_OFFLINE=1"
+            echo "TRANSFORMERS_OFFLINE=1"
           } >> "$GITHUB_ENV"
 
       - name: Download MinerU model cache

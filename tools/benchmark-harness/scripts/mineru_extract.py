@@ -13,14 +13,9 @@ windows batch model inference across document boundaries.
 
 from __future__ import annotations
 
-import os
-
-os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
-os.environ.setdefault("ONNXRUNTIME_PROVIDERS", "CPUExecutionProvider")
-os.environ.setdefault("MINERU_DEVICE_MODE", "cpu")
-
 import json
 import multiprocessing as _mp
+import os
 import platform
 import resource
 import sys
@@ -30,8 +25,31 @@ from importlib import metadata as importlib_metadata
 from pathlib import Path
 from typing import Any
 
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
+os.environ.setdefault("ONNXRUNTIME_PROVIDERS", "CPUExecutionProvider")
+os.environ.setdefault("MINERU_DEVICE_MODE", "cpu")
+
+# MinerU's content-assembly tags each block's language via fast-langdetect
+# (mineru/utils/language.py -> detect_lang), which runs for every document
+# regardless of the OCR lang and, on first use, downloads lid.176.bin from a
+# hardcoded GitHub-release URL with no request timeout. On an egress-restricted
+# runner that fetch blocks until the harness timeout. Point FTLANG_CACHE inside
+# the Hugging Face hub cache dir the benchmark workflow already prefetches,
+# packages, and restores, so the model travels with the HF cache and no network
+# fetch happens at bench time. Set before mineru is imported (done lazily below). ~keep
+_hf_hub_cache = os.environ.get("HF_HUB_CACHE") or str(
+    Path(os.environ.get("HF_HOME") or Path.home() / ".cache" / "huggingface") / "hub"
+)
+os.environ.setdefault("FTLANG_CACHE", str(Path(_hf_hub_cache) / "fasttext-langdetect"))
+
 PINNED_MINERU_VERSION = "3.4.4"
-DEFAULT_OCR_LANGUAGE = "ch"
+# The benchmark corpus is English and the competitor wrappers request English
+# (PaddleOCR lang="en", unstructured languages=["eng"]). MinerU exposes no
+# English-only OCR model: normalize_ocr_model_lang aliases "en" -> "ch", so this
+# selects the same CN+EN PP-OCRv6 model MinerU uses for English while making the
+# requested language explicit and consistent with the other frameworks. It does
+# not change the model or the scores; it removes a misleading Chinese default. ~keep
+DEFAULT_OCR_LANGUAGE = "en"
 PIPELINE_BACKEND = "pipeline"
 
 
