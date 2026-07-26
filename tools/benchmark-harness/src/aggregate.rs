@@ -39,7 +39,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Schema version for the aggregated output format.
-pub const SCHEMA_VERSION: &str = "2.6.0";
+pub const SCHEMA_VERSION: &str = "2.7.0";
 
 /// Consolidated results using aggregation format v2.6.0.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -768,7 +768,7 @@ fn extract_framework_and_mode(framework_name: &str) -> (&str, &str) {
 /// - `xberg-*` frameworks already encode the output format in their name, so the key is
 ///   `"{framework}:{mode}"` — no redundant format component.
 /// - All other (competitor) frameworks use `"{framework}:{output_format}:{mode}"`.
-fn make_aggregate_key(framework: &str, output_format: OutputFormat, mode: &str) -> String {
+pub(crate) fn make_aggregate_key(framework: &str, output_format: OutputFormat, mode: &str) -> String {
     if framework.starts_with("xberg-") {
         format!("{framework}:{mode}")
     } else {

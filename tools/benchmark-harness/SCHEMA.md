@@ -1,4 +1,4 @@
-# Aggregation Schema v2.6.0
+# Aggregation Schema v2.7.0
 
 This document describes the structure of `aggregated.json` produced by `benchmark-harness consolidate`.
 
@@ -6,7 +6,7 @@ This document describes the structure of `aggregated.json` produced by `benchmar
 
 ```json
 {
-  "schema_version": "2.6.0",
+  "schema_version": "2.7.0",
   "by_framework_mode": {
     "<aggregate_key>": {
       /* FrameworkModeAggregation */
@@ -150,6 +150,15 @@ One row per unique combination of (framework, output_format, execution_mode, fix
 ```
 
 `ocr` is `true` or `false` only when actual OCR usage is known. It is `null` when the framework did not report OCR usage.
+
+## Migration from v2.6.0 to v2.7.0
+
+- The published SF1 (`f1_layout`) now folds in the D6 table cell-content dimension
+  (GriTS-Con), weighted `1.5` — equal to table topology. A table with the right grid
+  but wrong cell text now scores lower than one with correct content. D6 was already
+  computed and reported in prior versions; it is now part of the rollup, so SF1 values
+  and PDF rankings shift downward for frameworks that reconstruct grids but garble cells.
+  Table-less documents are unaffected (D6 is gated on table presence).
 
 ## Migration from v2.5.0 to v2.6.0
 

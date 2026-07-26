@@ -19,10 +19,10 @@
 //!
 //! # The metric: [`score_structural`]
 //!
-//! Six dimensions are scored, then rolled up with structural weights (heading
-//! 2.0 / table 1.5 / list 1.0 / paragraph 0.5, plus binding-edges 0.5),
-//! normalized over the dimensions actually present in either document, and
-//! finally folded with the LIS reading-order score via
+//! Seven dimensions are scored, then rolled up with structural weights (heading
+//! 2.0 / table topology 1.5 / table content 1.5 / list 1.0 / paragraph 0.5, plus
+//! binding-edges 0.5), normalized over the dimensions actually present in either
+//! document, and finally folded with the LIS reading-order score via
 //! [`crate::markdown_quality::fold_order_into_sf1`]:
 //!
 //! - **D0** paragraph content-F1
@@ -31,8 +31,8 @@
 //! - **D3** table topology, a GriTS-like grid F1 (a fabricated table scores 0)
 //! - **D4** caption / footnote binding-edge F1
 //! - **D5** reading order via longest-increasing-subsequence
-//! - **D6** table cell-content F1 (GriTS-Con, position-independent) —
-//!   report-only, not folded into SF1 (see Phase 2 of the metrics plan)
+//! - **D6** table cell-content F1 (GriTS-Con, position-independent), folded into
+//!   the rollup at weight 1.5 (equal to D3 topology), gated on table presence
 //!
 //! A fabricated table — a predicted table where the GT has none — scores 0 on
 //! D3, which then pulls the whole SF1 down (it can no longer hide as matched
@@ -50,6 +50,10 @@ const WEIGHT_TABLE: f64 = 1.5;
 const WEIGHT_LIST: f64 = 1.0;
 const WEIGHT_PARAGRAPH: f64 = 0.5;
 const WEIGHT_EDGES: f64 = 0.5;
+/// Table cell-content quality (D6, GriTS-Con). Weighted equally to table topology
+/// (`WEIGHT_TABLE`) so a table's total SF1 influence is topology + content = 3.0 —
+/// getting the grid right but the cell text wrong now costs as much as a broken grid.
+const WEIGHT_TABLE_CONTENT: f64 = 1.5;
 
 /// Per-heading-level partial credit: score drops by this per level of distance.
 const HEADING_LEVEL_STEP: f64 = 0.25;
@@ -181,8 +185,8 @@ pub struct DimBreakdown {
     pub recall: f64,
 }
 
-/// The scored structural dimensions and the rolled-up SF1. D0–D5 feed the
-/// weighted, order-folded rollup; D6 (table content) is report-only for now.
+/// The scored structural dimensions and the rolled-up SF1. D0–D4 and D6 feed the
+/// weighted rollup (D6 gated on table presence), which is then order-folded by D5.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct StructuralScore {
     /// D0 — paragraph/content F1.
@@ -682,6 +686,9 @@ pub fn score_structural(pred: &StructuralSidecar, gt: &StructuralSidecar) -> Str
         (present_lists(pred, gt), WEIGHT_LIST, d2.value),
         (present_tables(pred, gt), WEIGHT_TABLE, d3.value),
         (present_edges(pred, gt), WEIGHT_EDGES, d4.value),
+        // D6 cell-content, gated on the same `present_tables` as topology so
+        // table-less docs are unaffected. Folded additively into `base`.
+        (present_tables(pred, gt), WEIGHT_TABLE_CONTENT, d6.value),
     ];
     for (present, weight, value) in dims {
         if present {
@@ -1194,7 +1201,7 @@ Figure 1: The overall system architecture and its components.
     }
 
     #[test]
-    fn table_content_dimension_is_reported_but_unfolded() {
+    fn table_content_dimension_is_reported_and_folded() {
         let score = score_markdown(SAMPLE, SAMPLE);
         let dims = score.dimensions();
         assert_eq!(dims.len(), 7);
@@ -1204,6 +1211,46 @@ Figure 1: The overall system architecture and its components.
             "identical doc ⇒ content F1 1.0"
         );
         assert!((score.sf1 - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn folding_table_content_lifts_sf1_above_topology_alone() {
+        // Content is fully recovered but two data cells are transposed: the
+        // position-locked topology dimension (d3, GriTS-Top) is penalised while
+        // the position-free content dimension (d6, GriTS-Con) stays 1.0. For a
+        // table-only doc the reading-order fold is a no-op (<3 matched blocks),
+        // so sf1 is the weighted mean of (d3, d6). If D6 were NOT folded, sf1
+        // would equal d3; asserting sf1 > d3 proves the fold is live and would
+        // fail if the D6 rollup term were removed.
+        const GT: &str = "\
+| H1 | H2 |
+|----|----|
+| a | b |
+| c | d |
+";
+        const PRED_TRANSPOSED: &str = "\
+| H1 | H2 |
+|----|----|
+| a | c |
+| b | d |
+";
+        let score = score_markdown(PRED_TRANSPOSED, GT);
+        assert!(
+            score.d3_table < 1.0,
+            "transposed cells must lower topology, got d3 {}",
+            score.d3_table
+        );
+        assert!(
+            (score.d6_table_content - 1.0).abs() < 1e-9,
+            "content set is identical, d6 must be 1.0, got {}",
+            score.d6_table_content
+        );
+        assert!(
+            score.sf1 > score.d3_table + 1e-9,
+            "folding d6 must lift sf1 above topology-only: sf1 {} vs d3 {}",
+            score.sf1,
+            score.d3_table
+        );
     }
 
     #[test]
