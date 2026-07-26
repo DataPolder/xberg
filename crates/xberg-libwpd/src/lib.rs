@@ -7,12 +7,18 @@
 //!
 //! libwpd has no `extract()` entry point; it drives a librevenge callback
 //! interface. A hand-written C++ shim (`src/shim.cpp`) implements that
-//! interface, accumulates a text or (via [`extract_markdown`]) lightly
-//! Markdown-marked-up rendering, and exposes a flat C API this crate wraps.
-//! Footnotes, endnotes, comments, text boxes, headers and footers are always
-//! bracketed apart from body text rather than concatenated into it. WordPerfect
-//! support targets Linux, macOS and Windows; on other platforms the functions
-//! return [`WpdError::UnsupportedPlatform`].
+//! interface, records a flat, format-agnostic internal document as libwpd
+//! walks the input, and renders that one document to text or (via
+//! [`extract_markdown`]) lightly Markdown-marked-up text, exposing the result
+//! through a flat C API this crate wraps. Footnotes and endnotes are tracked
+//! as distinct, separately-numbered sequences; comments, text boxes, headers
+//! and footers are always bracketed apart from body text rather than
+//! concatenated into it. Tables render as GitHub-flavored Markdown pipe
+//! tables in [`extract_markdown`] and as a tab/newline grid in
+//! [`extract_text`]. Hyperlinks, page/date fields and a handful of common
+//! document metadata fields (title, author, subject, keywords) are also
+//! captured. WordPerfect support targets Linux, macOS and Windows; on other
+//! platforms the functions return [`WpdError::UnsupportedPlatform`].
 
 mod error;
 
@@ -38,6 +44,8 @@ mod imp {
         fn xberg_wpd_free_string(s: *mut c_char);
         #[cfg(test)]
         fn xberg_wpd_self_test_separation() -> c_int;
+        #[cfg(test)]
+        fn xberg_wpd_self_test_features() -> c_int;
     }
 
     /// Returns true if `data` looks like a WordPerfect document libwpd can parse.
@@ -56,9 +64,9 @@ mod imp {
     }
 
     /// Extract a Markdown-marked-up rendering of a WordPerfect document:
-    /// heading paragraphs, bold/italic spans and list items are rendered as
-    /// Markdown syntax. Tables remain tab/newline-separated in both modes (see
-    /// the shim's `render` for why). Footnotes, endnotes, comments, text
+    /// heading paragraphs, bold/italic/strikethrough spans, list items,
+    /// hyperlinks and tables are rendered as Markdown syntax (tables as
+    /// GitHub-flavored pipe tables). Footnotes, endnotes, comments, text
     /// boxes, headers and footers are always bracketed apart from body text,
     /// in this mode as in [`extract_text`].
     pub fn extract_markdown(data: &[u8]) -> Result<String, WpdError> {
@@ -99,6 +107,16 @@ mod imp {
             tracing::warn!(code, error = %detail, "libwpd raised an exception during extraction");
         }
         if code != 0 {
+            // Defensive: the FFI contract is that `out` stays null on any
+            // non-zero return, but a future shim regression that sets it
+            // anyway must not leak the buffer it allocated. ~keep
+            if !out.is_null() {
+                // SAFETY: `out` would only be non-null here if the shim
+                // violated its own contract by allocating a buffer on an
+                // error path; if so it is still the same malloc'd buffer
+                // `xberg_wpd_free_string` is designed to free. ~keep
+                unsafe { xberg_wpd_free_string(out) };
+            }
             return Err(WpdError::from_code(code));
         }
         if out.is_null() {
@@ -126,6 +144,12 @@ mod imp {
         fn collector_separates_asides_from_body() {
             // SAFETY: takes no arguments and only touches its own stack-local state. ~keep
             assert_eq!(unsafe { xberg_wpd_self_test_separation() }, 1);
+        }
+
+        #[test]
+        fn collector_captures_links_tables_fields_and_notes() {
+            // SAFETY: takes no arguments and only touches its own stack-local state. ~keep
+            assert_eq!(unsafe { xberg_wpd_self_test_features() }, 1);
         }
     }
 }

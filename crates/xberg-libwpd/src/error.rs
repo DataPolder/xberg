@@ -23,6 +23,13 @@ pub enum WpdError {
     #[error("libwpd raised an unexpected error")]
     Internal,
 
+    /// The document is encrypted or password-protected; libwpd cannot parse
+    /// it without a matching password, which this crate never supplies. This
+    /// is distinct from `ParseError` so a caller can tell "needs a password"
+    /// from "the file is corrupt".
+    #[error("libwpd document is encrypted or password-protected")]
+    Encrypted,
+
     /// The extracted text was not valid UTF-8.
     #[error("libwpd returned invalid UTF-8")]
     InvalidUtf8,
@@ -42,6 +49,7 @@ impl WpdError {
             2 => WpdError::UnsupportedFormat,
             3 => WpdError::ParseError,
             4 => WpdError::OutOfMemory,
+            6 => WpdError::Encrypted,
             _ => WpdError::Internal,
         }
     }
