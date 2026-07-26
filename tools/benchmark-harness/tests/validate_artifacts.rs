@@ -285,18 +285,62 @@ fn assert_err_contains<T: std::fmt::Debug>(result: Result<T, Error>, needle: &st
     );
 }
 
+fn required_count(contract: &CohortContract) -> usize {
+    contract.matrix.iter().filter(|entry| !entry.optional).count()
+}
+
+fn optional_artifact_dir(scenario: &ArtifactScenario) -> PathBuf {
+    let entry = scenario
+        .contract
+        .matrix
+        .iter()
+        .find(|entry| entry.optional)
+        .expect("cohort has an optional (best-effort) entry");
+    scenario
+        .args
+        .artifacts_dir
+        .as_ref()
+        .unwrap()
+        .join(format!("{}-{RUN_ID}", entry.artifact))
+}
+
 #[test]
 fn accepts_exact_native_contract() {
     let scenario = artifact_scenario(Cohort::Native);
+    let required = required_count(&scenario.contract);
     let message = validate(&scenario.args).expect("native contract should validate");
-    assert_eq!(message, "validated 21 native benchmark artifacts");
+    assert_eq!(message, format!("validated {required} native benchmark artifacts"));
 }
 
 #[test]
 fn accepts_exact_ocr_contract() {
     let scenario = artifact_scenario(Cohort::Ocr);
+    let required = required_count(&scenario.contract);
     let message = validate(&scenario.args).expect("ocr contract should validate");
-    assert_eq!(message, "validated 17 ocr benchmark artifacts");
+    assert_eq!(message, format!("validated {required} ocr benchmark artifacts"));
+}
+
+#[test]
+fn accepts_native_contract_when_optional_mineru_absent() {
+    // A best-effort framework (MinerU) that never produced an artifact must not fail
+    // validation: the baseline still publishes with the required frameworks.
+    let scenario = artifact_scenario(Cohort::Native);
+    std::fs::remove_dir_all(optional_artifact_dir(&scenario)).expect("remove optional artifact dir");
+    let required = required_count(&scenario.contract);
+    let message = validate(&scenario.args).expect("native contract should validate without mineru");
+    assert_eq!(message, format!("validated {required} native benchmark artifacts"));
+}
+
+#[test]
+fn accepts_native_contract_when_optional_mineru_failed() {
+    // A present-but-failed best-effort artifact is ignored, not rejected.
+    let scenario = artifact_scenario(Cohort::Native);
+    let results = optional_artifact_dir(&scenario).join("run/results.json");
+    tamper_json(&results, |value| {
+        value[0]["success"] = serde_json::Value::Bool(false);
+        value[0]["error_kind"] = serde_json::Value::String("timeout".to_string());
+    });
+    validate(&scenario.args).expect("a failed optional framework must not fail validation");
 }
 
 #[test]
@@ -559,13 +603,13 @@ fn accepts_exact_native_aggregate_contract() {
     let contract = Cohort::Native.contract();
     let aggregate = build_aggregate(&contract, Cohort::Native);
     let (_root, path) = write_aggregate(&aggregate);
+    let required = required_count(&contract);
     let message = validate(&aggregate_args(Cohort::Native, path)).expect("native aggregate should validate");
     assert_eq!(
         message,
         format!(
-            "validated {} native aggregate keys and {} fixture rows",
-            contract.matrix.len(),
-            contract.matrix.len() * contract.fixtures.len()
+            "validated {required} native aggregate keys and {} fixture rows",
+            required * contract.fixtures.len()
         )
     );
 }
@@ -575,13 +619,45 @@ fn accepts_exact_ocr_aggregate_contract() {
     let contract = Cohort::Ocr.contract();
     let aggregate = build_aggregate(&contract, Cohort::Ocr);
     let (_root, path) = write_aggregate(&aggregate);
+    let required = required_count(&contract);
     let message = validate(&aggregate_args(Cohort::Ocr, path)).expect("ocr aggregate should validate");
     assert_eq!(
         message,
         format!(
-            "validated {} ocr aggregate keys and {} fixture rows",
-            contract.matrix.len(),
-            contract.matrix.len() * contract.fixtures.len()
+            "validated {required} ocr aggregate keys and {} fixture rows",
+            required * contract.fixtures.len()
+        )
+    );
+}
+
+#[test]
+fn accepts_native_aggregate_when_optional_mineru_absent() {
+    // The aggregate legitimately lacks the best-effort framework's key/rows when it failed;
+    // validation must still pass on the required frameworks.
+    let contract = Cohort::Native.contract();
+    let optional_entry = contract
+        .matrix
+        .iter()
+        .find(|entry| entry.optional)
+        .expect("native cohort has an optional entry");
+    let optional_key = optional_entry.aggregate_key();
+    let optional_framework = optional_entry.framework.clone();
+
+    let mut aggregate = build_aggregate(&contract, Cohort::Native);
+    aggregate.by_framework_mode.remove(&optional_key);
+    aggregate
+        .per_fixture_results
+        .retain(|row| row.framework != optional_framework);
+
+    let (_root, path) = write_aggregate(&aggregate);
+    let required = required_count(&contract);
+    let message =
+        validate(&aggregate_args(Cohort::Native, path)).expect("native aggregate should validate without mineru");
+    assert_eq!(
+        message,
+        format!(
+            "validated {required} native aggregate keys and {} fixture rows",
+            required * contract.fixtures.len()
         )
     );
 }

@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 
 use serde::de::DeserializeOwned;
 
-use crate::aggregate::{NewConsolidatedResults, PerformancePercentiles, SCHEMA_VERSION};
+use crate::aggregate::{NewConsolidatedResults, PerFixtureRow, PerformancePercentiles, SCHEMA_VERSION};
 use crate::bench_matrix::{Cohort, CohortContract, ExecutionMode, MatrixEntry};
 use crate::provenance::RunProvenance;
 use crate::types::{BenchmarkResult, ErrorKind, OcrStatus, OutputFormat};
@@ -501,12 +501,25 @@ fn validate_raw_artifacts(
     let expected_names: std::collections::HashMap<String, &MatrixEntry> = contract
         .matrix
         .iter()
+        .filter(|entry| !entry.optional)
         .map(|entry| (format!("{}-{run_id}", entry.artifact), entry))
+        .collect();
+    // Best-effort (optional) frameworks are not part of the required contract: their
+    // artifact directories are neither required to be present nor rejected as unexpected.
+    let optional_names: HashSet<String> = contract
+        .matrix
+        .iter()
+        .filter(|entry| entry.optional)
+        .map(|entry| format!("{}-{run_id}", entry.artifact))
         .collect();
     let actual_dirs = read_artifact_dirs(artifacts_dir)?;
 
     let expected_key_set: HashSet<&str> = expected_names.keys().map(String::as_str).collect();
-    let actual_key_set: HashSet<&str> = actual_dirs.keys().map(String::as_str).collect();
+    let actual_key_set: HashSet<&str> = actual_dirs
+        .keys()
+        .map(String::as_str)
+        .filter(|name| !optional_names.contains(*name))
+        .collect();
     require(
         expected_key_set == actual_key_set,
         describe_set_mismatch(
@@ -577,8 +590,30 @@ fn validate_aggregate(path: &Path, cohort: Cohort, contract: &CohortContract) ->
         format!("{}: unexpected schema", path.display()),
     )?;
 
-    let expected_keys: HashSet<String> = contract.matrix.iter().map(MatrixEntry::aggregate_key).collect();
-    let actual_keys: HashSet<String> = aggregate.by_framework_mode.keys().cloned().collect();
+    // Best-effort (optional) frameworks are excluded from the required contract on both
+    // sides of every comparison: they may be absent, and if present they still ship in the
+    // aggregate but do not gate validation (e.g. a failed/hung MinerU run).
+    let required_entries: Vec<&MatrixEntry> = contract.matrix.iter().filter(|entry| !entry.optional).collect();
+    let optional_agg_keys: HashSet<String> = contract
+        .matrix
+        .iter()
+        .filter(|entry| entry.optional)
+        .map(MatrixEntry::aggregate_key)
+        .collect();
+    let optional_frameworks: HashSet<&str> = contract
+        .matrix
+        .iter()
+        .filter(|entry| entry.optional)
+        .map(|entry| entry.framework.as_str())
+        .collect();
+
+    let expected_keys: HashSet<String> = required_entries.iter().map(|entry| entry.aggregate_key()).collect();
+    let actual_keys: HashSet<String> = aggregate
+        .by_framework_mode
+        .keys()
+        .filter(|key| !optional_agg_keys.contains(*key))
+        .cloned()
+        .collect();
     require(
         expected_keys == actual_keys,
         describe_set_mismatch(
@@ -590,6 +625,9 @@ fn validate_aggregate(path: &Path, cohort: Cohort, contract: &CohortContract) ->
 
     let expects_ocr = cohort.expects_ocr();
     for (key, group) in &aggregate.by_framework_mode {
+        if optional_agg_keys.contains(key) {
+            continue;
+        }
         require(
             group.by_file_type.len() == 1 && group.by_file_type.contains_key("pdf"),
             format!("{}: group {key} must contain only pdf metrics", path.display()),
@@ -622,8 +660,12 @@ fn validate_aggregate(path: &Path, cohort: Cohort, contract: &CohortContract) ->
         }
     }
 
-    let rows = &aggregate.per_fixture_results;
-    let expected_row_count = contract.matrix.len() * contract.fixtures.len();
+    let rows: Vec<&PerFixtureRow> = aggregate
+        .per_fixture_results
+        .iter()
+        .filter(|row| !optional_frameworks.contains(row.framework.as_str()))
+        .collect();
+    let expected_row_count = required_entries.len() * contract.fixtures.len();
     require(
         rows.len() == expected_row_count,
         format!("{}: expected {expected_row_count} fixture rows", path.display()),
@@ -641,8 +683,7 @@ fn validate_aggregate(path: &Path, cohort: Cohort, contract: &CohortContract) ->
             )
         })
         .collect();
-    let expected_identities: HashSet<String> = contract
-        .matrix
+    let expected_identities: HashSet<String> = required_entries
         .iter()
         .flat_map(|entry| {
             contract.document_stems.iter().map(move |stem| {

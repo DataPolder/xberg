@@ -57,6 +57,11 @@ pub struct MatrixEntry {
     pub output_format: OutputFormat,
     /// Execution mode this cell was produced with.
     pub mode: ExecutionMode,
+    /// When true, this cell is best-effort: its absence must not fail validation and it is
+    /// excluded from the required release contract (e.g. MinerU, whose offline model-config
+    /// fetch can hang). A present, well-formed optional artifact still flows into the
+    /// aggregate; the validator simply does not gate publication on it.
+    pub optional: bool,
 }
 
 impl MatrixEntry {
@@ -64,6 +69,12 @@ impl MatrixEntry {
     /// builder the `consolidate` command uses, so the contract can never drift from it.
     pub fn aggregate_key(&self) -> String {
         make_aggregate_key(&self.framework, self.output_format, self.mode.aggregate_slug())
+    }
+
+    /// Mark this cell best-effort (non-contractual). See [`MatrixEntry::optional`].
+    pub fn into_optional(mut self) -> Self {
+        self.optional = true;
+        self
     }
 }
 
@@ -176,6 +187,7 @@ fn matrix_entry(
         framework: framework.into(),
         output_format,
         mode,
+        optional: false,
     }
 }
 
@@ -257,7 +269,7 @@ fn native_matrix() -> Vec<MatrixEntry> {
         OutputFormat::Markdown,
         ExecutionMode::SingleFile,
     ));
-    matrix.push(markdown_single_file_entry("mineru", NATIVE_COHORT));
+    matrix.push(markdown_single_file_entry("mineru", NATIVE_COHORT).into_optional());
     matrix.extend(grid_entries("liteparse", NATIVE_COHORT));
     matrix
 }
@@ -265,7 +277,7 @@ fn native_matrix() -> Vec<MatrixEntry> {
 fn ocr_matrix() -> Vec<MatrixEntry> {
     let mut matrix = xberg_entries(OCR_COHORT);
     matrix.extend(grid_entries("docling", OCR_COHORT));
-    matrix.push(markdown_single_file_entry("mineru", OCR_COHORT));
+    matrix.push(markdown_single_file_entry("mineru", OCR_COHORT).into_optional());
     matrix.extend(grid_entries("liteparse", OCR_COHORT));
     matrix
 }

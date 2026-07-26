@@ -1175,7 +1175,6 @@ jobs:
             needs.bench-unstructured.result == 'success' &&
             needs.bench-tika.result == 'success' &&
             needs.bench-pymupdf4llm.result == 'success' &&
-            needs.bench-mineru.result == 'success' &&
             needs.bench-liteparse.result == 'success'
           }}
         env:
