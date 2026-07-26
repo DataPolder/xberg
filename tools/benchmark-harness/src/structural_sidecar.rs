@@ -687,7 +687,7 @@ pub fn score_structural(pred: &StructuralSidecar, gt: &StructuralSidecar) -> Str
         (present_tables(pred, gt), WEIGHT_TABLE, d3.value),
         (present_edges(pred, gt), WEIGHT_EDGES, d4.value),
         // D6 cell-content, gated on the same `present_tables` as topology so
-        // table-less docs are unaffected. Folded additively into `base`.
+        // table-less docs are unaffected. Folded additively into `base`. ~keep
         (present_tables(pred, gt), WEIGHT_TABLE_CONTENT, d6.value),
     ];
     for (present, weight, value) in dims {
@@ -1221,7 +1221,7 @@ Figure 1: The overall system architecture and its components.
         // table-only doc the reading-order fold is a no-op (<3 matched blocks),
         // so sf1 is the weighted mean of (d3, d6). If D6 were NOT folded, sf1
         // would equal d3; asserting sf1 > d3 proves the fold is live and would
-        // fail if the D6 rollup term were removed.
+        // fail if the D6 rollup term were removed. ~keep
         const GT: &str = "\
 | H1 | H2 |
 |----|----|
