@@ -5,7 +5,7 @@
 //! It re-exports core types from `table_core` and adds PDF-specific
 //! conversion helpers.
 
-pub(crate) use crate::table_core::{HocrWord, reconstruct_table, table_to_markdown};
+pub(crate) use crate::table_core::{reconstruct_table, table_to_markdown, HocrWord};
 
 const DENSE_NUMERIC_MIN_DATA_ROWS: usize = 6;
 const DENSE_NUMERIC_MIN_COLUMNS: usize = 6;
@@ -761,6 +761,123 @@ fn looks_like_prose_in_columns(data_rows: &[Vec<String>], num_cols: usize) -> bo
     eligible_rows >= 3 && prose_rows * 2 > eligible_rows
 }
 
+/// A cell containing at least one alphabetic run but not itself a numeric value.
+/// Word cells are the signal of wrapped prose (as opposed to numeric table data)
+/// when the grid's cells are too thin to average four words.
+fn is_word_cell(cell: &str) -> bool {
+    !is_numeric_value_cell(cell) && cell.chars().any(|c| c.is_alphabetic())
+}
+
+/// Decide whether a 1–2 data-row grid is really a wrapped-prose passage split
+/// across columns rather than a genuine short table. This closes the short-grid
+/// hole where the ≥3-row alpha guard, the ≥4-row uniformity/vocabulary guards,
+/// and the shredded-prose branch (which demands *every* row end on clause-
+/// terminal punctuation) all miss it, so it reaches `return true` and is
+/// fabricated as a table (xberg-io/xberg#36).
+///
+/// Two prose shapes are detected, both applied per row:
+/// - **phrase-per-cell** — cells average ≥ `PROSE_WORDS_PER_CELL` words and the
+///   row is alphabetic (`alpha_ratio > 0.8`): columns of full phrases (a 2–5
+///   column reflow of body text).
+/// - **wide-shredded** — a wide row (≥ `MIN_SHREDDED_WORD_CELLS` filled cells)
+///   of thin cells (≤ 2.5 words each) that are mostly word cells: a single
+///   prose line chopped into one-or-two-word columns (the multi-column academic
+///   misparse, e.g. arxiv 0903.1810).
+///
+/// Genuine short tables survive via a numeric-**fraction** exemption: a real
+/// numeric table is mostly value cells, whereas prose that merely contains an
+/// equation or a stray number is not. Requiring *every* eligible row to read as
+/// prose is deliberately conservative — at 1–2 rows there is no cross-row
+/// evidence to average over.
+fn looks_like_short_columned_prose(data_rows: &[Vec<String>], num_cols: usize) -> bool {
+    /// A cell averaging this many words or more reads as a phrase, not a value.
+    /// Mirrors `PROSE_WORDS_PER_CELL` in [`looks_like_prose_in_columns`].
+    const SHORT_PROSE_WORDS_PER_CELL: f64 = 4.0;
+    /// Above this alphabetic+whitespace fraction a phrase row reads as prose.
+    /// Mirrors the alpha-ratio cutoff in [`is_well_formed_table`].
+    const SHORT_PROSE_ALPHA_RATIO: f64 = 0.8;
+    /// Minimum concatenated row text length to be eligible. Mirrors the 15-char
+    /// floor in [`looks_like_prose_in_columns`].
+    const SHORT_PROSE_MIN_CONCAT_LEN: usize = 15;
+    /// A numeric-value cell fraction at or above this keeps the grid: a genuine
+    /// short table is mostly values; prose with an incidental number is not.
+    const SHORT_PROSE_NUMERIC_EXEMPT_PERCENT: usize = 30;
+    /// A shredded row needs at least this many filled cells — narrow grids are
+    /// left to the phrase-per-cell shape so 2-column key/value stays a table.
+    const MIN_SHREDDED_WORD_CELLS: usize = 4;
+    /// A shredded row's cells average at most this many words (one-or-two-word
+    /// fragments). Mirrors `SHREDDED_PROSE_MAX_AVG_WORDS_PER_CELL`.
+    const SHREDDED_MAX_AVG_WORDS: f64 = 2.5;
+    /// At least this fraction of a shredded row's filled cells must be word
+    /// cells (not numbers) for it to read as prose rather than a numeric row.
+    const SHREDDED_MIN_WORD_CELL_FRACTION: f64 = 0.6;
+
+    if num_cols < 2 {
+        return false;
+    }
+
+    let mut filled_cells = 0usize;
+    let mut numeric_value_cells = 0usize;
+    for row in data_rows {
+        for cell in row {
+            let trimmed = cell.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            filled_cells += 1;
+            if is_numeric_value_cell(trimmed) {
+                numeric_value_cells += 1;
+            }
+        }
+    }
+    if filled_cells == 0 {
+        return false;
+    }
+    // Numeric-fraction exemption: mostly-value grids are real tables.
+    if numeric_value_cells * 100 >= filled_cells * SHORT_PROSE_NUMERIC_EXEMPT_PERCENT {
+        return false;
+    }
+
+    let mut eligible_rows = 0usize;
+    let mut prose_rows = 0usize;
+    for row in data_rows {
+        let cells: Vec<&str> = row.iter().map(|c| c.trim()).filter(|c| !c.is_empty()).collect();
+        if cells.len() < 2 {
+            continue;
+        }
+        let concatenated = cells.join(" ");
+        if concatenated.len() < SHORT_PROSE_MIN_CONCAT_LEN {
+            continue;
+        }
+        eligible_rows += 1;
+
+        let total_words: usize = cells.iter().map(|c| c.split_whitespace().count()).sum();
+        let avg_words = total_words as f64 / cells.len() as f64;
+        let alpha_ratio = {
+            let alpha = concatenated
+                .chars()
+                .filter(|c| c.is_alphabetic() || c.is_whitespace())
+                .count();
+            alpha as f64 / concatenated.len() as f64
+        };
+        let is_phrase_prose = avg_words >= SHORT_PROSE_WORDS_PER_CELL && alpha_ratio > SHORT_PROSE_ALPHA_RATIO;
+
+        let word_cells = cells.iter().filter(|c| is_word_cell(c)).count();
+        let is_shredded_prose = cells.len() >= MIN_SHREDDED_WORD_CELLS
+            && avg_words <= SHREDDED_MAX_AVG_WORDS
+            && word_cells as f64 >= cells.len() as f64 * SHREDDED_MIN_WORD_CELL_FRACTION;
+
+        if is_phrase_prose || is_shredded_prose {
+            prose_rows += 1;
+        }
+    }
+
+    // Majority of eligible rows must read as prose. For 1–2 rows this reduces to
+    // "every row" (no cross-row evidence to average over); for 3+ rows it mirrors
+    // the majority rule the other prose guards use.
+    eligible_rows >= 1 && prose_rows * 2 > eligible_rows
+}
+
 /// Validate whether a reconstructed table grid represents a well-formed table
 /// rather than multi-column prose or a repeated page element.
 ///
@@ -808,6 +925,25 @@ pub(crate) fn is_well_formed_table(grid: &[Vec<String>]) -> bool {
         }
     }
 
+    // Columned-prose guard (xberg-io/xberg#36). The alpha-ratio guard below only
+    // fires on ≥3 rows AND only catches phrase-per-cell prose whose rows are
+    // ≥80% alphabetic; the shredded-prose branch above only rejects a 1–2 row
+    // grid when EVERY row reads as a shredded-prose row at ≥6 columns. A
+    // wrapped-prose passage split across columns (a common misparse of
+    // multi-column academic text, incl. equation fragments that drop the alpha
+    // ratio below 0.8) therefore reaches `return true` and is fabricated as a
+    // table — and the corpus fabrications are wide (8–15 columns), not narrow.
+    // Recovering them as prose both removes the fabrication and restores readable
+    // text. The helper handles both the phrase-per-cell and wide-shredded prose
+    // shapes and exempts genuine short tables via a numeric-value fraction.
+    if !data_rows.is_empty()
+        && num_cols >= 2
+        && !dense_numeric_grid
+        && looks_like_short_columned_prose(data_rows, num_cols)
+    {
+        return false;
+    }
+
     if data_rows.len() >= 3 && num_cols >= 2 {
         let mut prose_like_rows = 0usize;
         let mut eligible_rows = 0usize;
@@ -848,7 +984,11 @@ pub(crate) fn is_well_formed_table(grid: &[Vec<String>]) -> bool {
                     .iter()
                     .filter_map(|row| {
                         let cell = row.get(c).map(|s| s.trim()).unwrap_or("");
-                        if cell.is_empty() { None } else { Some(cell.len() as f64) }
+                        if cell.is_empty() {
+                            None
+                        } else {
+                            Some(cell.len() as f64)
+                        }
                     })
                     .collect();
                 if lengths.is_empty() {
@@ -1343,11 +1483,9 @@ mod tests {
 
     #[test]
     fn dense_numeric_matrix_survives_anti_prose_guards() {
-        let mut table = vec![
-            (0..DENSE_NUMERIC_MIN_COLUMNS)
-                .map(|col| format!("Column {col}"))
-                .collect(),
-        ];
+        let mut table = vec![(0..DENSE_NUMERIC_MIN_COLUMNS)
+            .map(|col| format!("Column {col}"))
+            .collect()];
         for row in 0..DENSE_NUMERIC_MIN_DATA_ROWS {
             table.push(
                 (0..DENSE_NUMERIC_MIN_COLUMNS)
@@ -1403,13 +1541,11 @@ mod tests {
 
         assert!(prune_spurious_interior_column(&mut table, true));
         assert_eq!(table[0].len(), 6);
-        assert!(
-            table
-                .last()
-                .expect("data row")
-                .iter()
-                .any(|cell| cell.contains("sustained"))
-        );
+        assert!(table
+            .last()
+            .expect("data row")
+            .iter()
+            .any(|cell| cell.contains("sustained")));
     }
 
     #[test]
@@ -2154,6 +2290,287 @@ mod tests {
         assert!(
             !is_well_formed_table(&grid),
             "3-column prose with short cells (nougat_008 pattern) should be rejected"
+        );
+    }
+
+    #[test]
+    fn test_well_formed_rejects_two_row_columned_prose() {
+        // The #36 shape: the four-row prose grid at test_well_formed_rejects_prose_rows
+        // truncated to two data rows, which the ≥3-row alpha guard never inspects.
+        let grid = vec![
+            vec!["Column A".into(), "Column B".into(), "Column C".into()],
+            vec![
+                "The experiment was conducted over".into(),
+                "several weeks and the results clearly".into(),
+                "demonstrate that the proposed method is".into(),
+            ],
+            vec![
+                "superior to existing approaches because".into(),
+                "it leverages novel techniques developed".into(),
+                "in our laboratory during the past decade".into(),
+            ],
+        ];
+        assert!(
+            !is_well_formed_table(&grid),
+            "Two-row column-aligned prose should be demoted (issue #36)"
+        );
+    }
+
+    #[test]
+    fn test_well_formed_rejects_two_col_two_row_prose() {
+        let grid = vec![
+            vec!["Column A".into(), "Column B".into()],
+            vec![
+                "The experiment was conducted over".into(),
+                "several weeks and the results clearly".into(),
+            ],
+            vec![
+                "demonstrate that the proposed method".into(),
+                "is superior to existing approaches here".into(),
+            ],
+        ];
+        assert!(
+            !is_well_formed_table(&grid),
+            "Two-column, two-row prose should be demoted (issue #36)"
+        );
+    }
+
+    #[test]
+    fn test_well_formed_rejects_single_data_row_prose() {
+        let grid = vec![
+            vec!["Column A".into(), "Column B".into(), "Column C".into()],
+            vec![
+                "The experiment was conducted over".into(),
+                "several weeks and the results clearly".into(),
+                "demonstrate that the proposed method is".into(),
+            ],
+        ];
+        assert!(
+            !is_well_formed_table(&grid),
+            "Single-data-row column-aligned prose should be demoted (issue #36)"
+        );
+    }
+
+    #[test]
+    fn test_well_formed_rejects_five_col_short_prose() {
+        // Upper column boundary of the guard (num_cols == 5).
+        let grid = vec![
+            vec!["A".into(), "B".into(), "C".into(), "D".into(), "E".into()],
+            vec![
+                "conducted over several weeks".into(),
+                "and the results clearly show".into(),
+                "that the proposed method here".into(),
+                "is superior to existing work".into(),
+                "because of novel techniques used".into(),
+            ],
+            vec![
+                "developed in our laboratory over".into(),
+                "the past decade of intensive".into(),
+                "research on machine learning here".into(),
+                "and its applications to natural".into(),
+                "language processing of documents".into(),
+            ],
+        ];
+        assert!(
+            !is_well_formed_table(&grid),
+            "Five-column short prose (upper boundary) should be demoted (issue #36)"
+        );
+    }
+
+    #[test]
+    fn test_well_formed_keeps_two_row_numeric_table() {
+        let grid = vec![
+            vec!["Q1".into(), "Q2".into(), "Q3".into()],
+            vec!["12".into(), "8".into(), "20".into()],
+            vec!["15".into(), "9".into(), "24".into()],
+        ];
+        assert!(
+            is_well_formed_table(&grid),
+            "Two-row numeric table must survive the short-prose guard"
+        );
+    }
+
+    #[test]
+    fn test_well_formed_keeps_key_value_numeric() {
+        let grid = vec![
+            vec!["Metric".into(), "Value".into()],
+            vec!["Total".into(), "$1,299.00".into()],
+        ];
+        assert!(
+            is_well_formed_table(&grid),
+            "Key/value pair with a numeric value must survive the short-prose guard"
+        );
+    }
+
+    #[test]
+    fn test_well_formed_keeps_unit_rows() {
+        let grid = vec![
+            vec!["Property".into(), "Measurement".into()],
+            vec!["Length".into(), "45 mm".into()],
+            vec!["Voltage".into(), "3.3 V".into()],
+        ];
+        assert!(
+            is_well_formed_table(&grid),
+            "Unit-bearing rows must survive the short-prose guard (digit-bearing exemption)"
+        );
+    }
+
+    #[test]
+    fn test_well_formed_keeps_short_label_key_value() {
+        let grid = vec![
+            vec!["Field".into(), "Entry".into()],
+            vec!["Status".into(), "Active".into()],
+            vec!["Country".into(), "France".into()],
+        ];
+        assert!(
+            is_well_formed_table(&grid),
+            "Short-label key/value (< 4 words/cell) must survive the short-prose guard"
+        );
+    }
+
+    #[test]
+    fn test_well_formed_rejects_wide_two_row_shredded_prose() {
+        // The observed #36 shape: a wrapped-prose passage split across many
+        // columns in a 2-data-row grid (arxiv 0903.1810 line 65). The ≥3-row
+        // alpha guard never sees it and the ≥6-col shredded branch only rejects
+        // when every row ends on clause-terminal punctuation, so without the
+        // widened short-grid guard it survives as a fabricated table.
+        let grid = vec![
+            vec!["A".into(), "B".into(), "C".into(), "D".into(), "E".into(), "F".into()],
+            vec![
+                "the above equation by".into(),
+                "the factor applied to".into(),
+                "the initial density field".into(),
+                "yields a cloud radius".into(),
+                "of roughly ten to the".into(),
+                "seventeen centimeters here".into(),
+            ],
+            vec![
+                "which is approximately equal".into(),
+                "to point zero three parsec".into(),
+                "measured for all of the".into(),
+                "models considered throughout".into(),
+                "the present numerical study".into(),
+                "of collapsing molecular clouds".into(),
+            ],
+        ];
+        assert!(
+            !is_well_formed_table(&grid),
+            "Wide two-row phrase-per-cell prose should be demoted (issue #36, wide variant)"
+        );
+    }
+
+    #[test]
+    fn test_well_formed_rejects_wide_shredded_prose_with_incidental_numbers() {
+        // The exact arxiv 0903.1810 line-65 shape: a wrapped prose passage
+        // shredded into ~15 thin one-or-two-word columns over 2 data rows, with
+        // incidental equation fragments ("10 17", "1 . 0"). The numeric-value
+        // fraction stays low, so the numeric exemption does not fire and the
+        // wide-shredded signal demotes it.
+        let grid = vec![
+            vec![
+                "oblate range".into(),
+                "clouds".into(),
+                "have are used".into(),
+                "ra = to add".into(),
+                "rb = noise".into(),
+                "R and to".into(),
+                "rc = initial".into(),
+                "density".into(),
+                "R . Random".into(),
+                "distributions".into(),
+                "numbers".into(),
+                "by multiplying".into(),
+                "( x, y,".into(),
+                "z )) in".into(),
+                "the from".into(),
+            ],
+            vec![
+                "the".into(),
+                "above".into(),
+                "equation".into(),
+                "by".into(),
+                "the factor".into(),
+                "0 . 1 ran".into(),
+                "( x, y,".into(),
+                "z )].".into(),
+                "The".into(),
+                "cloud radius".into(),
+                "is".into(),
+                "R =".into(),
+                "1 . 0".into(),
+                "10 17".into(),
+                "cm".into(),
+            ],
+        ];
+        assert!(
+            !is_well_formed_table(&grid),
+            "Wide shredded prose with incidental numbers should be demoted (issue #36)"
+        );
+    }
+
+    #[test]
+    fn test_well_formed_keeps_wide_short_value_grid() {
+        // A genuine wide short table (6 columns of short values) must survive the
+        // widened guard: cells average < 4 words, so they do not read as prose.
+        let grid = vec![
+            vec![
+                "Q1".into(),
+                "Q2".into(),
+                "Q3".into(),
+                "Q4".into(),
+                "FY".into(),
+                "YoY".into(),
+            ],
+            vec![
+                "12".into(),
+                "8".into(),
+                "20".into(),
+                "15".into(),
+                "55".into(),
+                "+4%".into(),
+            ],
+            vec![
+                "14".into(),
+                "9".into(),
+                "22".into(),
+                "17".into(),
+                "62".into(),
+                "+7%".into(),
+            ],
+        ];
+        assert!(
+            is_well_formed_table(&grid),
+            "Wide numeric short-value grid must survive the widened short-prose guard"
+        );
+    }
+
+    #[test]
+    fn test_looks_like_short_columned_prose_signal() {
+        let prose = vec![
+            vec![
+                "The experiment was conducted over".into(),
+                "several weeks and the results clearly".into(),
+                "demonstrate that the proposed method is".into(),
+            ],
+            vec![
+                "superior to existing approaches because".into(),
+                "it leverages novel techniques developed".into(),
+                "in our laboratory during the past decade".into(),
+            ],
+        ];
+        assert!(
+            looks_like_short_columned_prose(&prose, 3),
+            "phrase-per-cell prose rows read as prose"
+        );
+
+        let numeric = vec![vec!["12".into(), "8".into(), "20".into()]];
+        assert!(!looks_like_short_columned_prose(&numeric, 3), "numeric rows are exempt");
+
+        let short_labels = vec![vec!["Status".into(), "Active".into()]];
+        assert!(
+            !looks_like_short_columned_prose(&short_labels, 2),
+            "short-label rows (< 4 words/cell) are not prose"
         );
     }
 
