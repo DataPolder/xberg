@@ -716,7 +716,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cache/huggingface/hub
-          key: mineru-models-3.4.4-offline-v2-${{ runner.os }}-${{ runner.arch }}
+          key: mineru-models-3.4.4-offline-v3-${{ runner.os }}-${{ runner.arch }}
 
       - name: Warm MinerU model weights (native + OCR pipelines)
         if: steps.mineru-model-cache.outputs.cache-hit != 'true'
@@ -734,6 +734,39 @@ jobs:
             --ocr --format=markdown sync "$ocr_fixture" > /dev/null
           echo "MinerU model cache populated at $HF_HUB_CACHE"
           du -sh "$HF_HUB_CACHE" || true
+
+      - name: Prefetch fast-langdetect model into HF cache (offline-safe langdetect)
+        env:
+          UV_NO_SYNC: "1"
+        run: |
+          set -euo pipefail
+          uv run --no-sync python - <<'PY'
+          import os
+          from pathlib import Path
+
+          # MinerU content assembly calls fast_langdetect.detect_language for every
+          # block (pipeline_middle_json_mkcontent.py, para_split.py); on first use it
+          # downloads lid.176.bin from a hardcoded GitHub URL with no request timeout.
+          # HF_HUB_OFFLINE does not govern that GitHub fetch, so on the egress-restricted
+          # bench runner it blocks until the per-document timeout. The MinerU warmup above
+          # does not reliably reach detect_lang, so force the download here (online) into
+          # the same FTLANG_CACHE mineru_extract.py uses (inside the packaged HF hub dir),
+          # and fail the prefetch loudly if it cannot be cached rather than letting the
+          # offline bench hang the full timeout.
+          ftlang = os.environ.get("FTLANG_CACHE") or str(
+              Path(os.environ["HF_HUB_CACHE"]) / "fasttext-langdetect"
+          )
+          os.environ["FTLANG_CACHE"] = ftlang
+          Path(ftlang).mkdir(parents=True, exist_ok=True)
+
+          from fast_langdetect import detect_language
+
+          detect_language("The quick brown fox jumps over the lazy dog")
+          cached = [name for _, _, files in os.walk(ftlang) for name in files if "lid.176" in name]
+          if not cached:
+              raise SystemExit(f"lid.176 langdetect model not cached under {ftlang}")
+          print(f"fast-langdetect model cached: {cached} at {ftlang}")
+          PY
 
       - name: Package MinerU model cache
         run: |
