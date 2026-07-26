@@ -55,7 +55,6 @@ tasks:
       GOWORK: "off"
     cmds:
       # The cgo binding needs the native lib resolved via `cmd/setup -print-env`
-      # (the module's baked -L points at the read-only, empty module-cache .lib);
       # export CGO_LDFLAGS in the same shell as the build so it is inherited.
       - rm -rf .lib
       - |

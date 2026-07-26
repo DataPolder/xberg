@@ -129,12 +129,10 @@ pub(crate) async fn extract_file(
         Box::pin(extract_file_with_extractor(path, &detected_mime, config)).await
     });
 
-    // `std::time::Instant::now()` panics on `wasm32-unknown-unknown` (no clock source
     // without a JS/WASI shim), which aborts the whole module with an uncatchable
     // `unreachable` trap. `tokio-runtime` can be enabled transitively on that target
     // (e.g. by `layout-tract` inside `wasm-target`), so gating on the feature alone is
     // not enough — explicitly exclude wasm32 here, matching `run_timed_extraction` in
-    // `batch.rs`, which already carries the `not(target_arch = "wasm32")` guard.
     #[cfg(all(feature = "tokio-runtime", not(target_arch = "wasm32")))]
     let result = if let Some(secs) = config.extraction_timeout_secs {
         let start = std::time::Instant::now();

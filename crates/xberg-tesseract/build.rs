@@ -1149,7 +1149,6 @@ mod build_tesseract {
                 // previously left every one of those symbols unresolved in the linked
                 // wasm module; wasm-bindgen's import handling silently resolved them to
                 // no-op stubs returning 0/null instead of failing the link, so
-                // `TessBaseAPICreate()` (and everything downstream) always returned a
                 // null pointer at runtime. `renderer.cpp`/`altorenderer.cpp`/
                 // `lstmboxrenderer.cpp`/`pdfrenderer.cpp`/`wordstrboxrenderer.cpp` are
                 // pulled in too because `capi.cpp`'s renderer-constructor functions
@@ -1288,7 +1287,6 @@ mod build_tesseract {
             // NOTE: src/api/{capi,renderer,altorenderer,hocrrenderer,lstmboxrenderer,
             // pdfrenderer,wordstrboxrenderer}.cpp are intentionally NOT stripped here.
             // `capi.cpp` is the C-style API surface (`TessBaseAPICreate`, `TessBaseAPIInit5`,
-            // `TessMonitorCreate`, etc.) that `xberg-tesseract`'s Rust FFI binds to directly;
             // dropping it left those symbols unresolved, silently stubbed to 0/null by
             // wasm-bindgen's import handling instead of failing the link, so every
             // WASM Tesseract call returned a null pointer at runtime. The renderer files

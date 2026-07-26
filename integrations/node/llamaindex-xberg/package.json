@@ -1,6 +1,6 @@
 {
   "name": "@xberg-io/llamaindex-xberg",
-  "version": "1.0.0-rc.40",
+  "version": "1.0.0-rc.41",
   "description": "LlamaIndex.TS reader and node parser for Xberg — extract text, tables, metadata, and structure-aware nodes from 90+ document formats with optional OCR.",
   "keywords": [
     "llamaindex",
@@ -44,14 +44,16 @@
       }
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
-    "@xberg-io/xberg": "1.0.0-rc.40"
+    "@xberg-io/xberg": "1.0.0-rc.41"
   },
   "peerDependencies": {
     "@llamaindex/core": "^0.6.0"

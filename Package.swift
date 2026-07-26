@@ -33,7 +33,7 @@ let package = Package(
     // sibling RustBridge target below and link against this binary.
     .binaryTarget(
       name: "RustBridgeBinary",
-      url: "https://github.com/xberg-io/xberg/releases/download/v1.0.0-rc.40/Xberg-rs.artifactbundle.zip",
+      url: "https://github.com/xberg-io/xberg/releases/download/v1.0.0-rc.41/Xberg-rs.artifactbundle.zip",
       checksum: "__ALEF_SWIFT_CHECKSUM__"
     ),
     // RustBridge: Swift wrapper module owning the swift-bridge generated
@@ -52,6 +52,10 @@ let package = Package(
       // Linux.
       linkerSettings: [
         .linkedLibrary("lzma"),
+        // Same reasoning as lzma: the bzip2 crates (archive/zip/unhwp) emit
+        // `-lbz2`, surfacing undefined `_BZ2_bzDecompress*`. `libbz2` ships in
+        // the macOS SDK and on Linux.
+        .linkedLibrary("bz2"),
         // The pre-built static library pulls in C++ dependencies (onnxruntime,
         // tesseract, ClipperLib) that reference the C++ runtime/ABI
         // (`__cxa_throw`, `__gxx_personality_v0`, `__cxa_guard_acquire`, ...). A

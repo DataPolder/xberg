@@ -6,4 +6,3 @@ BreakBeforeBraces: Attach
 AllowShortFunctionsOnASingleLine: Empty
 AllowShortIfStatementsOnASingleLine: false
 SortIncludes: true
-FixNamespaceComments: false

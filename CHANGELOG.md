@@ -9,8 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-rc.41] - 2026-07-26
+
+Hardening release over rc.40, fixing packaging and correctness defects found by running the test
+apps against the published rc.40 artifacts, plus two WASM correctness fixes and a PDF
+table-extraction quality fix.
+
 ### Added
 
+- **WordPerfect extraction (`xberg-libwpd`).** A new crate on crates.io extracts text and Markdown
+  from WordPerfect `.wpd`/`.wp` documents — tables as GFM pipe tables, hyperlinks, fields, document
+  metadata, footnotes/endnotes, and strikethrough. It ships as a standalone Rust crate and is not
+  yet wired into the main `xberg` extractor pipeline.
 - **Entity detection runs in the browser.** The WASM package exposes `NerModel`, which loads GLiNER2
   weights into the page and detects entities locally — no server round-trip and no ONNX Runtime.
   The host fetches the model and hands over the bytes:
@@ -30,7 +40,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **WASM extraction no longer traps.** `Instant::now()` is unsupported on `wasm32` and aborted the
+  byte/file extract paths with `unreachable` whenever the `tokio-runtime` feature was pulled in
+  transitively (for example via the tract layout backend). The timed path is now compiled out on
+  `wasm32`, matching the batch path.
+- **WASM OCR returns text again.** The bundled Tesseract WASM build had dropped `capi.cpp` and the
+  renderer sources from its source list, so wasm-bindgen silently stubbed the C-API symbols to null
+  and OCR ran but produced nothing. The C API and the alto/hOCR/lstmbox/PDF/wordstrbox renderers are
+  restored.
+- **PHP binaries target the correct PHP version.** System-dependency setup was overwriting the
+  matrix-selected PHP, so published PHP packages could be built against the wrong ABI on some
+  platforms.
+- **PDF tables are no longer over-fabricated from prose.** Short, column-aligned prose blocks were
+  being promoted to tables; the short-table prose gate now demotes them.
+- **Dart package reports the right native module version.** The Dart binding's `nativeModuleVersion`
+  was left at `rc.39` in the rc.40 package; all bindings' baked versions are now synced to the
+  release version.
 - PaddleOCR now applies `PaddleOcrConfig::rec_batch_num` to recognition inference.
+
+### Changed
+
+- Bundled Tesseract updated 5.5.2 → 5.5.3.
 
 ## [1.0.0-rc.37] - 2026-07-24
 

@@ -4,7 +4,8 @@
  * librevenge 0.0.6 uses the POSIX `S_ISREG`/`S_ISDIR` macros in
  * RVNGDirectoryStream.cpp and RVNGStreamImplementation.cpp. MSVC's <sys/stat.h>
  * defines the `_S_IF*` mode bits but not these classification macros, so the
- * sources fail to compile with "identifier not found" there and only there. ~keep
+ * sources fail to compile with "identifier not found" there and only there.
+ * ~keep
  */
 #ifndef XBERG_LIBWPD_MSVC_COMPAT_H
 #define XBERG_LIBWPD_MSVC_COMPAT_H

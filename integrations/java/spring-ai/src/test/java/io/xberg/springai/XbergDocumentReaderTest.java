@@ -4,12 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 
-import io.xberg.ExtractionResultFactory;
 import io.xberg.ExtractInput;
 import io.xberg.ExtractInputKind;
 import io.xberg.ExtractionConfig;
 import io.xberg.ExtractionErrorItem;
 import io.xberg.ExtractionResult;
+import io.xberg.ExtractionResultFactory;
 import io.xberg.Xberg;
 import io.xberg.XbergRsException;
 import java.io.IOException;
@@ -28,239 +28,300 @@ import org.springframework.core.io.Resource;
 
 class XbergDocumentReaderTest {
 
-    private static ExtractionResult createResult(String json) {
-        return ExtractionResultFactory.fromJson(json);
+  private static ExtractionResult createResult(String json) {
+    return ExtractionResultFactory.fromJson(json);
+  }
+
+  /** Stubs the single-input {@code Xberg.extract} entry point. */
+  private static void mockExtract(MockedStatic<Xberg> mocked,
+                                  ExtractionResult result)
+      throws XbergRsException {
+    mocked
+        .when(()
+                  -> Xberg.extract(any(ExtractInput.class),
+                                   any(ExtractionConfig.class)))
+        .thenReturn(result);
+  }
+
+  /** Stubs the multi-input {@code Xberg.extractBatch} entry point. */
+  @SuppressWarnings("unchecked")
+  private static void mockExtractBatch(MockedStatic<Xberg> mocked,
+                                       ExtractionResult result)
+      throws XbergRsException {
+    mocked
+        .when(()
+                  -> Xberg.extractBatch(any(List.class),
+                                        any(ExtractionConfig.class)))
+        .thenReturn(result);
+  }
+
+  @Nested
+  class BuilderValidation {
+
+    @Test
+    void shouldThrowWhenResourceIsNull() {
+      assertThatThrownBy(() -> XbergDocumentReader.builder().build())
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("resource is required");
     }
 
-    /** Stubs the single-input {@code Xberg.extract} entry point. */
-    private static void mockExtract(MockedStatic<Xberg> mocked, ExtractionResult result) throws XbergRsException {
-        mocked.when(() -> Xberg.extract(any(ExtractInput.class), any(ExtractionConfig.class))).thenReturn(result);
+    @Test
+    void shouldThrowWhenByteArrayResourceWithoutMimeType() {
+      ByteArrayResource resource = new ByteArrayResource(new byte[] {1, 2, 3});
+      assertThatThrownBy(
+          () -> XbergDocumentReader.builder().resource(resource).build())
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("mimeType is required");
     }
 
-    /** Stubs the multi-input {@code Xberg.extractBatch} entry point. */
-    @SuppressWarnings("unchecked")
-    private static void mockExtractBatch(MockedStatic<Xberg> mocked, ExtractionResult result) throws XbergRsException {
-        mocked.when(() -> Xberg.extractBatch(any(List.class), any(ExtractionConfig.class))).thenReturn(result);
+    @Test
+    void shouldBuildWithFileSystemResource() {
+      FileSystemResource resource =
+          new FileSystemResource("src/test/resources/fixtures/sample.pdf");
+      XbergDocumentReader reader =
+          XbergDocumentReader.builder().resource(resource).build();
+      assertThat(reader).isNotNull();
     }
 
-
-    @Nested
-    class BuilderValidation {
-
-        @Test
-        void shouldThrowWhenResourceIsNull() {
-            assertThatThrownBy(() -> XbergDocumentReader.builder().build())
-            .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("resource is required");
-        }
-
-        @Test
-        void shouldThrowWhenByteArrayResourceWithoutMimeType() {
-            ByteArrayResource resource = new ByteArrayResource(new byte[]{1, 2, 3});
-            assertThatThrownBy(() -> XbergDocumentReader.builder().resource(resource).build())
-            .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("mimeType is required");
-        }
-
-        @Test
-        void shouldBuildWithFileSystemResource() {
-            FileSystemResource resource = new FileSystemResource("src/test/resources/fixtures/sample.pdf");
-            XbergDocumentReader reader = XbergDocumentReader.builder().resource(resource).build();
-            assertThat(reader).isNotNull();
-        }
-
-        @Test
-        void shouldBuildWithByteArrayResourceAndMimeType() {
-            ByteArrayResource resource = new ByteArrayResource(new byte[]{1, 2, 3});
-            XbergDocumentReader reader = XbergDocumentReader.builder().resource(resource)
-            .mimeType("application/pdf").build();
-            assertThat(reader).isNotNull();
-        }
-
-        @Test
-        void shouldThrowWhenNoResource() {
-            assertThatThrownBy(() -> XbergDocumentReader.builder().mimeType("application/pdf").build())
-            .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("at least one resource");
-        }
-
-        @Test
-        void shouldRejectMimeTypeWithMultipleResources() {
-            FileSystemResource first = new FileSystemResource("src/test/resources/fixtures/sample.pdf");
-            FileSystemResource second = new FileSystemResource("src/test/resources/fixtures/sample.docx");
-            assertThatThrownBy(() -> XbergDocumentReader.builder().resources(List.of(first, second))
-                .mimeType("application/pdf").build()).isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("single resource");
-        }
-
-        @Test
-        void shouldThrowWhenBatchResourceMissingFilename() {
-            FileSystemResource named = new FileSystemResource("src/test/resources/fixtures/sample.pdf");
-            ByteArrayResource unnamed = new ByteArrayResource(new byte[]{1, 2, 3});
-            assertThatThrownBy(() -> XbergDocumentReader.builder().resources(List.of(named, unnamed)).build())
-            .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("must have a filename");
-        }
+    @Test
+    void shouldBuildWithByteArrayResourceAndMimeType() {
+      ByteArrayResource resource = new ByteArrayResource(new byte[] {1, 2, 3});
+      XbergDocumentReader reader = XbergDocumentReader.builder()
+                                       .resource(resource)
+                                       .mimeType("application/pdf")
+                                       .build();
+      assertThat(reader).isNotNull();
     }
 
+    @Test
+    void shouldThrowWhenNoResource() {
+      assertThatThrownBy(()
+                             -> XbergDocumentReader.builder()
+                                    .mimeType("application/pdf")
+                                    .build())
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("at least one resource");
+    }
 
-    @Nested
-    class FileSystemResourceExtraction {
+    @Test
+    void shouldRejectMimeTypeWithMultipleResources() {
+      FileSystemResource first =
+          new FileSystemResource("src/test/resources/fixtures/sample.pdf");
+      FileSystemResource second =
+          new FileSystemResource("src/test/resources/fixtures/sample.docx");
+      assertThatThrownBy(()
+                             -> XbergDocumentReader.builder()
+                                    .resources(List.of(first, second))
+                                    .mimeType("application/pdf")
+                                    .build())
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("single resource");
+    }
 
-        @Test
-        void shouldExtractFromFileSystemResourceUsingUriInput() throws Exception {
-            FileSystemResource resource = new FileSystemResource("src/test/resources/fixtures/sample.pdf");
-            ExtractionResult result = createResult("""
+    @Test
+    void shouldThrowWhenBatchResourceMissingFilename() {
+      FileSystemResource named =
+          new FileSystemResource("src/test/resources/fixtures/sample.pdf");
+      ByteArrayResource unnamed = new ByteArrayResource(new byte[] {1, 2, 3});
+      assertThatThrownBy(()
+                             -> XbergDocumentReader.builder()
+                                    .resources(List.of(named, unnamed))
+                                    .build())
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("must have a filename");
+    }
+  }
+
+  @Nested
+  class FileSystemResourceExtraction {
+
+    @Test
+    void shouldExtractFromFileSystemResourceUsingUriInput() throws Exception {
+      FileSystemResource resource =
+          new FileSystemResource("src/test/resources/fixtures/sample.pdf");
+      ExtractionResult result = createResult("""
 					{"content":"Hello","mime_type":"application/pdf","metadata":{},\
 					"tables":[],"detected_languages":["en"],"chunks":[],"images":[],\
 					"pages":[],"elements":[]}""");
 
-            try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
-                mockExtract(mocked, result);
+      try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
+        mockExtract(mocked, result);
 
-                List<Document> docs = XbergDocumentReader.builder().resource(resource).build().get();
+        List<Document> docs =
+            XbergDocumentReader.builder().resource(resource).build().get();
 
-                assertThat(docs).hasSize(1);
-                assertThat(docs.getFirst().getText()).isEqualTo("Hello");
+        assertThat(docs).hasSize(1);
+        assertThat(docs.getFirst().getText()).isEqualTo("Hello");
 
-                ArgumentCaptor<ExtractInput> captor = ArgumentCaptor.forClass(ExtractInput.class);
-                mocked.verify(() -> Xberg.extract(captor.capture(), any(ExtractionConfig.class)));
-                ExtractInput input = captor.getValue();
-                assertThat(input.kind()).isEqualTo(ExtractInputKind.Uri);
-                assertThat(input.uri()).endsWith("sample.pdf");
-                assertThat(input.filename()).isEqualTo("sample.pdf");
-            }
-        }
+        ArgumentCaptor<ExtractInput> captor =
+            ArgumentCaptor.forClass(ExtractInput.class);
+        mocked.verify(
+            () -> Xberg.extract(captor.capture(), any(ExtractionConfig.class)));
+        ExtractInput input = captor.getValue();
+        assertThat(input.kind()).isEqualTo(ExtractInputKind.Uri);
+        assertThat(input.uri()).endsWith("sample.pdf");
+        assertThat(input.filename()).isEqualTo("sample.pdf");
+      }
+    }
 
-        @Test
-        void shouldPassExtractionConfigToExtract() throws Exception {
-            FileSystemResource resource = new FileSystemResource("src/test/resources/fixtures/sample.pdf");
-            ExtractionConfig config = ExtractionConfig.builder().build();
-            ExtractionResult result = createResult("""
+    @Test
+    void shouldPassExtractionConfigToExtract() throws Exception {
+      FileSystemResource resource =
+          new FileSystemResource("src/test/resources/fixtures/sample.pdf");
+      ExtractionConfig config = ExtractionConfig.builder().build();
+      ExtractionResult result = createResult("""
 					{"content":"Hello","mime_type":"application/pdf","metadata":{},\
 					"tables":[],"detected_languages":[],"chunks":[],"images":[],\
 					"pages":[],"elements":[]}""");
 
-            try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
-                mockExtract(mocked, result);
+      try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
+        mockExtract(mocked, result);
 
-                List<Document> docs = XbergDocumentReader.builder().resource(resource).extractionConfig(config)
-                .build().get();
+        List<Document> docs = XbergDocumentReader.builder()
+                                  .resource(resource)
+                                  .extractionConfig(config)
+                                  .build()
+                                  .get();
 
-                assertThat(docs).hasSize(1);
+        assertThat(docs).hasSize(1);
 
-                ArgumentCaptor<ExtractionConfig> captor = ArgumentCaptor.forClass(ExtractionConfig.class);
-                mocked.verify(() -> Xberg.extract(any(ExtractInput.class), captor.capture()));
-                assertThat(captor.getValue()).isSameAs(config);
-            }
-        }
+        ArgumentCaptor<ExtractionConfig> captor =
+            ArgumentCaptor.forClass(ExtractionConfig.class);
+        mocked.verify(
+            () -> Xberg.extract(any(ExtractInput.class), captor.capture()));
+        assertThat(captor.getValue()).isSameAs(config);
+      }
     }
+  }
 
+  @Nested
+  class ByteArrayResourceExtraction {
 
-    @Nested
-    class ByteArrayResourceExtraction {
-
-        @Test
-        void shouldExtractFromByteArrayResourceUsingBytesInput() throws Exception {
-            byte[] data = new byte[]{1, 2, 3};
-            ByteArrayResource resource = new ByteArrayResource(data);
-            ExtractionResult result = createResult("""
+    @Test
+    void shouldExtractFromByteArrayResourceUsingBytesInput() throws Exception {
+      byte[] data = new byte[] {1, 2, 3};
+      ByteArrayResource resource = new ByteArrayResource(data);
+      ExtractionResult result = createResult("""
 					{"content":"Bytes content","mime_type":"application/pdf","metadata":{},\
 					"tables":[],"detected_languages":[],"chunks":[],"images":[],\
 					"pages":[],"elements":[]}""");
 
-            try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
-                mockExtract(mocked, result);
+      try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
+        mockExtract(mocked, result);
 
-                List<Document> docs = XbergDocumentReader.builder().resource(resource).mimeType("application/pdf")
-                .build().get();
+        List<Document> docs = XbergDocumentReader.builder()
+                                  .resource(resource)
+                                  .mimeType("application/pdf")
+                                  .build()
+                                  .get();
 
-                assertThat(docs).hasSize(1);
-                assertThat(docs.getFirst().getText()).isEqualTo("Bytes content");
+        assertThat(docs).hasSize(1);
+        assertThat(docs.getFirst().getText()).isEqualTo("Bytes content");
 
-                ArgumentCaptor<ExtractInput> captor = ArgumentCaptor.forClass(ExtractInput.class);
-                mocked.verify(() -> Xberg.extract(captor.capture(), any(ExtractionConfig.class)));
-                ExtractInput input = captor.getValue();
-                assertThat(input.kind()).isEqualTo(ExtractInputKind.Bytes);
-                assertThat(input.mimeType()).isEqualTo("application/pdf");
-                assertThat(input.bytes()).isEqualTo(data);
-            }
-        }
+        ArgumentCaptor<ExtractInput> captor =
+            ArgumentCaptor.forClass(ExtractInput.class);
+        mocked.verify(
+            () -> Xberg.extract(captor.capture(), any(ExtractionConfig.class)));
+        ExtractInput input = captor.getValue();
+        assertThat(input.kind()).isEqualTo(ExtractInputKind.Bytes);
+        assertThat(input.mimeType()).isEqualTo("application/pdf");
+        assertThat(input.bytes()).isEqualTo(data);
+      }
+    }
 
-        @Test
-        void shouldPassMimeTypeToBytesInput() throws Exception {
-            byte[] data = new byte[]{4, 5, 6};
-            ByteArrayResource resource = new ByteArrayResource(data);
-            ExtractionResult result = createResult(
-                """
+    @Test
+    void shouldPassMimeTypeToBytesInput() throws Exception {
+      byte[] data = new byte[] {4, 5, 6};
+      ByteArrayResource resource = new ByteArrayResource(data);
+      ExtractionResult result = createResult("""
 							{"content":"DOCX content","mime_type":"application/vnd.openxmlformats-officedocument.wordprocessingml.document",\
 							"metadata":{},"tables":[],"detected_languages":[],"chunks":[],"images":[],\
 							"pages":[],"elements":[]}""");
 
-            String docxMime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+      String docxMime =
+          "application/"
+          + "vnd.openxmlformats-officedocument.wordprocessingml.document";
 
-            try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
-                mockExtract(mocked, result);
+      try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
+        mockExtract(mocked, result);
 
-                XbergDocumentReader.builder().resource(resource).mimeType(docxMime).build().get();
+        XbergDocumentReader.builder()
+            .resource(resource)
+            .mimeType(docxMime)
+            .build()
+            .get();
 
-                ArgumentCaptor<ExtractInput> captor = ArgumentCaptor.forClass(ExtractInput.class);
-                mocked.verify(() -> Xberg.extract(captor.capture(), any(ExtractionConfig.class)));
-                assertThat(captor.getValue().mimeType()).isEqualTo(docxMime);
-            }
-        }
+        ArgumentCaptor<ExtractInput> captor =
+            ArgumentCaptor.forClass(ExtractInput.class);
+        mocked.verify(
+            () -> Xberg.extract(captor.capture(), any(ExtractionConfig.class)));
+        assertThat(captor.getValue().mimeType()).isEqualTo(docxMime);
+      }
     }
+  }
 
+  @Nested
+  class ClassPathResourceExtraction {
 
-    @Nested
-    class ClassPathResourceExtraction {
-
-        @Test
-        void shouldExtractFromClassPathResource() throws Exception {
-            ClassPathResource resource = new ClassPathResource("fixtures/sample.pdf");
-            ExtractionResult result = createResult("""
+    @Test
+    void shouldExtractFromClassPathResource() throws Exception {
+      ClassPathResource resource = new ClassPathResource("fixtures/sample.pdf");
+      ExtractionResult result = createResult("""
 					{"content":"ClassPath content","mime_type":"application/pdf","metadata":{},\
 					"tables":[],"detected_languages":[],"chunks":[],"images":[],\
 					"pages":[],"elements":[]}""");
 
-            try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
-                mockExtract(mocked, result);
+      try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
+        mockExtract(mocked, result);
 
-                List<Document> docs = XbergDocumentReader.builder().resource(resource).build().get();
+        List<Document> docs =
+            XbergDocumentReader.builder().resource(resource).build().get();
 
-                assertThat(docs).hasSize(1);
-                assertThat(docs.getFirst().getText()).isEqualTo("ClassPath content");
+        assertThat(docs).hasSize(1);
+        assertThat(docs.getFirst().getText()).isEqualTo("ClassPath content");
 
-                ArgumentCaptor<ExtractInput> captor = ArgumentCaptor.forClass(ExtractInput.class);
-                mocked.verify(() -> Xberg.extract(captor.capture(), any(ExtractionConfig.class)));
-                assertThat(captor.getValue().kind()).isEqualTo(ExtractInputKind.Bytes);
-            }
-        }
+        ArgumentCaptor<ExtractInput> captor =
+            ArgumentCaptor.forClass(ExtractInput.class);
+        mocked.verify(
+            () -> Xberg.extract(captor.capture(), any(ExtractionConfig.class)));
+        assertThat(captor.getValue().kind()).isEqualTo(ExtractInputKind.Bytes);
+      }
+    }
 
-        @Test
-        void shouldUseExplicitMimeTypeOverFilename() throws Exception {
-            ClassPathResource resource = new ClassPathResource("fixtures/sample.pdf");
-            ExtractionResult result = createResult("""
+    @Test
+    void shouldUseExplicitMimeTypeOverFilename() throws Exception {
+      ClassPathResource resource = new ClassPathResource("fixtures/sample.pdf");
+      ExtractionResult result = createResult("""
 					{"content":"Override content","mime_type":"text/plain","metadata":{},\
 					"tables":[],"detected_languages":[],"chunks":[],"images":[],\
 					"pages":[],"elements":[]}""");
 
-            try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
-                mockExtract(mocked, result);
+      try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
+        mockExtract(mocked, result);
 
-                XbergDocumentReader.builder().resource(resource).mimeType("text/plain").build().get();
+        XbergDocumentReader.builder()
+            .resource(resource)
+            .mimeType("text/plain")
+            .build()
+            .get();
 
-                ArgumentCaptor<ExtractInput> captor = ArgumentCaptor.forClass(ExtractInput.class);
-                mocked.verify(() -> Xberg.extract(captor.capture(), any(ExtractionConfig.class)));
-                assertThat(captor.getValue().mimeType()).isEqualTo("text/plain");
-            }
-        }
+        ArgumentCaptor<ExtractInput> captor =
+            ArgumentCaptor.forClass(ExtractInput.class);
+        mocked.verify(
+            () -> Xberg.extract(captor.capture(), any(ExtractionConfig.class)));
+        assertThat(captor.getValue().mimeType()).isEqualTo("text/plain");
+      }
     }
+  }
 
+  @Nested
+  class BaseMetadataMapping {
 
-    @Nested
-    class BaseMetadataMapping {
-
-        @Test
-        void shouldMapAllExplicitMetadataFields() throws Exception {
-            FileSystemResource resource = new FileSystemResource("src/test/resources/fixtures/sample.pdf");
-            ExtractionResult result = createResult("""
+    @Test
+    void shouldMapAllExplicitMetadataFields() throws Exception {
+      FileSystemResource resource =
+          new FileSystemResource("src/test/resources/fixtures/sample.pdf");
+      ExtractionResult result = createResult("""
 					{
 					  "content": "Text",
 					  "mime_type": "application/pdf",
@@ -291,66 +352,73 @@ class XbergDocumentReaderTest {
 					  "processing_warnings": [{"source": "ocr", "message": "Low confidence"}]
 					}""");
 
-            try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
-                mockExtract(mocked, result);
+      try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
+        mockExtract(mocked, result);
 
-                List<Document> docs = XbergDocumentReader.builder().resource(resource).build().get();
+        List<Document> docs =
+            XbergDocumentReader.builder().resource(resource).build().get();
 
-                Map<String, Object> metadata = docs.getFirst().getMetadata();
-                assertThat(metadata.get("source")).isEqualTo("sample.pdf");
-                assertThat(metadata.get("mime_type")).isEqualTo("application/pdf");
-                assertThat(metadata.get("title")).isEqualTo("Test Document");
-                assertThat(metadata.get("subject")).isEqualTo("Testing");
-                assertThat(metadata.get("authors")).isEqualTo("John Doe, Jane Smith");
-                assertThat(metadata.get("keywords")).isEqualTo("test, document");
-                assertThat(metadata.get("language")).isEqualTo("en");
-                assertThat(metadata.get("created_at")).isEqualTo("2025-01-01T00:00:00Z");
-                assertThat(metadata.get("modified_at")).isEqualTo("2025-06-01T00:00:00Z");
-                assertThat(metadata.get("created_by")).isEqualTo("TestUser");
-                assertThat(metadata.get("modified_by")).isEqualTo("TestEditor");
-                assertThat(metadata.get("category")).isEqualTo("Testing");
-                assertThat(metadata.get("tags")).isEqualTo("unit-test, integration");
-                assertThat(metadata.get("document_version")).isEqualTo("1.0");
-                assertThat(metadata.get("abstract_text")).isEqualTo("A test document abstract");
-                assertThat(metadata.get("output_format")).isEqualTo("plain");
-                assertThat(metadata.get("detected_languages")).isEqualTo("en, de");
-                assertThat(metadata.get("quality_score")).isEqualTo(0.95);
-                assertThat(metadata.get("table_count")).isEqualTo(1);
-                assertThat(metadata).containsKey("tables");
-                assertThat(metadata).containsKey("extracted_keywords");
-                assertThat(metadata).containsKey("processing_warnings");
-            }
-        }
+        Map<String, Object> metadata = docs.getFirst().getMetadata();
+        assertThat(metadata.get("source")).isEqualTo("sample.pdf");
+        assertThat(metadata.get("mime_type")).isEqualTo("application/pdf");
+        assertThat(metadata.get("title")).isEqualTo("Test Document");
+        assertThat(metadata.get("subject")).isEqualTo("Testing");
+        assertThat(metadata.get("authors")).isEqualTo("John Doe, Jane Smith");
+        assertThat(metadata.get("keywords")).isEqualTo("test, document");
+        assertThat(metadata.get("language")).isEqualTo("en");
+        assertThat(metadata.get("created_at"))
+            .isEqualTo("2025-01-01T00:00:00Z");
+        assertThat(metadata.get("modified_at"))
+            .isEqualTo("2025-06-01T00:00:00Z");
+        assertThat(metadata.get("created_by")).isEqualTo("TestUser");
+        assertThat(metadata.get("modified_by")).isEqualTo("TestEditor");
+        assertThat(metadata.get("category")).isEqualTo("Testing");
+        assertThat(metadata.get("tags")).isEqualTo("unit-test, integration");
+        assertThat(metadata.get("document_version")).isEqualTo("1.0");
+        assertThat(metadata.get("abstract_text"))
+            .isEqualTo("A test document abstract");
+        assertThat(metadata.get("output_format")).isEqualTo("plain");
+        assertThat(metadata.get("detected_languages")).isEqualTo("en, de");
+        assertThat(metadata.get("quality_score")).isEqualTo(0.95);
+        assertThat(metadata.get("table_count")).isEqualTo(1);
+        assertThat(metadata).containsKey("tables");
+        assertThat(metadata).containsKey("extracted_keywords");
+        assertThat(metadata).containsKey("processing_warnings");
+      }
+    }
 
-        @Test
-        void shouldMapMinimalMetadata() throws Exception {
-            FileSystemResource resource = new FileSystemResource("src/test/resources/fixtures/sample.pdf");
-            ExtractionResult result = createResult("""
+    @Test
+    void shouldMapMinimalMetadata() throws Exception {
+      FileSystemResource resource =
+          new FileSystemResource("src/test/resources/fixtures/sample.pdf");
+      ExtractionResult result = createResult("""
 					{"content":"Minimal","mime_type":"application/pdf","metadata":{},\
 					"tables":[],"detected_languages":["en"],"chunks":[],"images":[],\
 					"pages":[],"elements":[]}""");
 
-            try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
-                mockExtract(mocked, result);
+      try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
+        mockExtract(mocked, result);
 
-                List<Document> docs = XbergDocumentReader.builder().resource(resource).build().get();
+        List<Document> docs =
+            XbergDocumentReader.builder().resource(resource).build().get();
 
-                Map<String, Object> metadata = docs.getFirst().getMetadata();
-                assertThat(metadata).containsKey("source");
-                assertThat(metadata).containsKey("mime_type");
-                assertThat(metadata).containsKey("page_count");
-                assertThat(metadata).containsKey("detected_languages");
-                assertThat(metadata).containsKey("table_count");
-                assertThat(metadata).doesNotContainKey("title");
-                assertThat(metadata).doesNotContainKey("subject");
-                assertThat(metadata).doesNotContainKey("authors");
-            }
-        }
+        Map<String, Object> metadata = docs.getFirst().getMetadata();
+        assertThat(metadata).containsKey("source");
+        assertThat(metadata).containsKey("mime_type");
+        assertThat(metadata).containsKey("page_count");
+        assertThat(metadata).containsKey("detected_languages");
+        assertThat(metadata).containsKey("table_count");
+        assertThat(metadata).doesNotContainKey("title");
+        assertThat(metadata).doesNotContainKey("subject");
+        assertThat(metadata).doesNotContainKey("authors");
+      }
+    }
 
-        @Test
-        void shouldJoinListMetadata() throws Exception {
-            FileSystemResource resource = new FileSystemResource("src/test/resources/fixtures/sample.pdf");
-            ExtractionResult result = createResult("""
+    @Test
+    void shouldJoinListMetadata() throws Exception {
+      FileSystemResource resource =
+          new FileSystemResource("src/test/resources/fixtures/sample.pdf");
+      ExtractionResult result = createResult("""
 					{
 					  "content": "Text",
 					  "mime_type": "application/pdf",
@@ -367,23 +435,25 @@ class XbergDocumentReaderTest {
 					  "elements": []
 					}""");
 
-            try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
-                mockExtract(mocked, result);
+      try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
+        mockExtract(mocked, result);
 
-                List<Document> docs = XbergDocumentReader.builder().resource(resource).build().get();
+        List<Document> docs =
+            XbergDocumentReader.builder().resource(resource).build().get();
 
-                Map<String, Object> metadata = docs.getFirst().getMetadata();
-                assertThat(metadata.get("authors")).isEqualTo("John, Jane");
-                assertThat(metadata.get("keywords")).isEqualTo("a, b, c");
-                assertThat(metadata.get("tags")).isEqualTo("x, y");
-                assertThat(metadata.get("detected_languages")).isEqualTo("en, de");
-            }
-        }
+        Map<String, Object> metadata = docs.getFirst().getMetadata();
+        assertThat(metadata.get("authors")).isEqualTo("John, Jane");
+        assertThat(metadata.get("keywords")).isEqualTo("a, b, c");
+        assertThat(metadata.get("tags")).isEqualTo("x, y");
+        assertThat(metadata.get("detected_languages")).isEqualTo("en, de");
+      }
+    }
 
-        @Test
-        void shouldMergeUserMetadata() throws Exception {
-            FileSystemResource resource = new FileSystemResource("src/test/resources/fixtures/sample.pdf");
-            ExtractionResult result = createResult("""
+    @Test
+    void shouldMergeUserMetadata() throws Exception {
+      FileSystemResource resource =
+          new FileSystemResource("src/test/resources/fixtures/sample.pdf");
+      ExtractionResult result = createResult("""
 					{
 					  "content": "Text",
 					  "mime_type": "application/pdf",
@@ -396,27 +466,31 @@ class XbergDocumentReaderTest {
 					  "elements": []
 					}""");
 
-            try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
-                mockExtract(mocked, result);
+      try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
+        mockExtract(mocked, result);
 
-                List<Document> docs = XbergDocumentReader.builder().resource(resource)
-                .metadata("title", "User Title").metadata("custom_key", "custom_value").build().get();
+        List<Document> docs = XbergDocumentReader.builder()
+                                  .resource(resource)
+                                  .metadata("title", "User Title")
+                                  .metadata("custom_key", "custom_value")
+                                  .build()
+                                  .get();
 
-                Map<String, Object> metadata = docs.getFirst().getMetadata();
-                assertThat(metadata.get("title")).isEqualTo("User Title");
-                assertThat(metadata.get("custom_key")).isEqualTo("custom_value");
-            }
-        }
+        Map<String, Object> metadata = docs.getFirst().getMetadata();
+        assertThat(metadata.get("title")).isEqualTo("User Title");
+        assertThat(metadata.get("custom_key")).isEqualTo("custom_value");
+      }
     }
+  }
 
+  @Nested
+  class MetadataSerialization {
 
-    @Nested
-    class MetadataSerialization {
-
-        @Test
-        void shouldSerializeTablesToJson() throws Exception {
-            FileSystemResource resource = new FileSystemResource("src/test/resources/fixtures/sample.pdf");
-            ExtractionResult result = createResult("""
+    @Test
+    void shouldSerializeTablesToJson() throws Exception {
+      FileSystemResource resource =
+          new FileSystemResource("src/test/resources/fixtures/sample.pdf");
+      ExtractionResult result = createResult("""
 					{
 					  "content": "Text",
 					  "mime_type": "application/pdf",
@@ -429,23 +503,25 @@ class XbergDocumentReaderTest {
 					  "elements": []
 					}""");
 
-            try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
-                mockExtract(mocked, result);
+      try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
+        mockExtract(mocked, result);
 
-                List<Document> docs = XbergDocumentReader.builder().resource(resource).build().get();
+        List<Document> docs =
+            XbergDocumentReader.builder().resource(resource).build().get();
 
-                Map<String, Object> metadata = docs.getFirst().getMetadata();
-                assertThat(metadata.get("table_count")).isEqualTo(1);
-                assertThat(metadata.get("tables")).isInstanceOf(String.class);
-                String tablesJson = (String) metadata.get("tables");
-                assertThat(tablesJson).contains("| A | B |");
-            }
-        }
+        Map<String, Object> metadata = docs.getFirst().getMetadata();
+        assertThat(metadata.get("table_count")).isEqualTo(1);
+        assertThat(metadata.get("tables")).isInstanceOf(String.class);
+        String tablesJson = (String)metadata.get("tables");
+        assertThat(tablesJson).contains("| A | B |");
+      }
+    }
 
-        @Test
-        void shouldPassThroughFormatSpecificMetadata() throws Exception {
-            FileSystemResource resource = new FileSystemResource("src/test/resources/fixtures/sample.pdf");
-            ExtractionResult result = createResult("""
+    @Test
+    void shouldPassThroughFormatSpecificMetadata() throws Exception {
+      FileSystemResource resource =
+          new FileSystemResource("src/test/resources/fixtures/sample.pdf");
+      ExtractionResult result = createResult("""
 					{
 					  "content": "Text",
 					  "mime_type": "application/pdf",
@@ -464,22 +540,24 @@ class XbergDocumentReaderTest {
 					  "elements": []
 					}""");
 
-            try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
-                mockExtract(mocked, result);
+      try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
+        mockExtract(mocked, result);
 
-                List<Document> docs = XbergDocumentReader.builder().resource(resource).build().get();
+        List<Document> docs =
+            XbergDocumentReader.builder().resource(resource).build().get();
 
-                Map<String, Object> metadata = docs.getFirst().getMetadata();
-                assertThat(metadata.get("pdf_version")).isEqualTo("1.7");
-                assertThat(metadata.get("producer")).isEqualTo("TestProducer");
-                assertThat(metadata.get("custom_list")).isInstanceOf(String.class);
-            }
-        }
+        Map<String, Object> metadata = docs.getFirst().getMetadata();
+        assertThat(metadata.get("pdf_version")).isEqualTo("1.7");
+        assertThat(metadata.get("producer")).isEqualTo("TestProducer");
+        assertThat(metadata.get("custom_list")).isInstanceOf(String.class);
+      }
+    }
 
-        @Test
-        void shouldLetExplicitFieldsOverrideAdditional() throws Exception {
-            FileSystemResource resource = new FileSystemResource("src/test/resources/fixtures/sample.pdf");
-            ExtractionResult result = createResult("""
+    @Test
+    void shouldLetExplicitFieldsOverrideAdditional() throws Exception {
+      FileSystemResource resource =
+          new FileSystemResource("src/test/resources/fixtures/sample.pdf");
+      ExtractionResult result = createResult("""
 					{
 					  "content": "Text",
 					  "mime_type": "application/pdf",
@@ -495,26 +573,27 @@ class XbergDocumentReaderTest {
 					  "elements": []
 					}""");
 
-            try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
-                mockExtract(mocked, result);
+      try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
+        mockExtract(mocked, result);
 
-                List<Document> docs = XbergDocumentReader.builder().resource(resource).build().get();
+        List<Document> docs =
+            XbergDocumentReader.builder().resource(resource).build().get();
 
-                Map<String, Object> metadata = docs.getFirst().getMetadata();
-                assertThat(metadata.get("title")).isEqualTo("Typed Title");
-                assertThat(metadata.get("subject")).isEqualTo("Typed Subject");
-            }
-        }
+        Map<String, Object> metadata = docs.getFirst().getMetadata();
+        assertThat(metadata.get("title")).isEqualTo("Typed Title");
+        assertThat(metadata.get("subject")).isEqualTo("Typed Subject");
+      }
     }
+  }
 
+  @Nested
+  class ChunkBasedSplitting {
 
-    @Nested
-    class ChunkBasedSplitting {
-
-        @Test
-        void shouldCreateDocumentsFromChunks() throws Exception {
-            FileSystemResource resource = new FileSystemResource("src/test/resources/fixtures/sample.pdf");
-            ExtractionResult result = createResult("""
+    @Test
+    void shouldCreateDocumentsFromChunks() throws Exception {
+      FileSystemResource resource =
+          new FileSystemResource("src/test/resources/fixtures/sample.pdf");
+      ExtractionResult result = createResult("""
 					{
 					  "content": "Full text",
 					  "mime_type": "application/pdf",
@@ -536,21 +615,23 @@ class XbergDocumentReaderTest {
 					  "elements": []
 					}""");
 
-            try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
-                mockExtract(mocked, result);
+      try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
+        mockExtract(mocked, result);
 
-                List<Document> docs = XbergDocumentReader.builder().resource(resource).build().get();
+        List<Document> docs =
+            XbergDocumentReader.builder().resource(resource).build().get();
 
-                assertThat(docs).hasSize(2);
-                assertThat(docs.get(0).getText()).isEqualTo("Chunk 1 text");
-                assertThat(docs.get(1).getText()).isEqualTo("Chunk 2 text");
-            }
-        }
+        assertThat(docs).hasSize(2);
+        assertThat(docs.get(0).getText()).isEqualTo("Chunk 1 text");
+        assertThat(docs.get(1).getText()).isEqualTo("Chunk 2 text");
+      }
+    }
 
-        @Test
-        void shouldPopulateChunkMetadata() throws Exception {
-            FileSystemResource resource = new FileSystemResource("src/test/resources/fixtures/sample.pdf");
-            ExtractionResult result = createResult("""
+    @Test
+    void shouldPopulateChunkMetadata() throws Exception {
+      FileSystemResource resource =
+          new FileSystemResource("src/test/resources/fixtures/sample.pdf");
+      ExtractionResult result = createResult("""
 					{
 					  "content": "Full text",
 					  "mime_type": "application/pdf",
@@ -579,27 +660,30 @@ class XbergDocumentReaderTest {
 					  "elements": []
 					}""");
 
-            try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
-                mockExtract(mocked, result);
+      try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
+        mockExtract(mocked, result);
 
-                List<Document> docs = XbergDocumentReader.builder().resource(resource).build().get();
+        List<Document> docs =
+            XbergDocumentReader.builder().resource(resource).build().get();
 
-                assertThat(docs).hasSize(1);
-                Map<String, Object> metadata = docs.getFirst().getMetadata();
-                assertThat(metadata.get("chunk_index")).isEqualTo(0L);
-                assertThat(metadata.get("total_chunks")).isEqualTo(1L);
-                assertThat(metadata.get("token_count")).isEqualTo(10L);
-                assertThat(metadata.get("first_page")).isEqualTo(1);
-                assertThat(metadata.get("last_page")).isEqualTo(2);
-                assertThat(metadata.get("heading_context")).isInstanceOf(String.class);
-                assertThat((String) metadata.get("heading_context")).contains("Introduction");
-            }
-        }
+        assertThat(docs).hasSize(1);
+        Map<String, Object> metadata = docs.getFirst().getMetadata();
+        assertThat(metadata.get("chunk_index")).isEqualTo(0L);
+        assertThat(metadata.get("total_chunks")).isEqualTo(1L);
+        assertThat(metadata.get("token_count")).isEqualTo(10L);
+        assertThat(metadata.get("first_page")).isEqualTo(1);
+        assertThat(metadata.get("last_page")).isEqualTo(2);
+        assertThat(metadata.get("heading_context")).isInstanceOf(String.class);
+        assertThat((String)metadata.get("heading_context"))
+            .contains("Introduction");
+      }
+    }
 
-        @Test
-        void shouldJoinHeadingPath() throws Exception {
-            FileSystemResource resource = new FileSystemResource("src/test/resources/fixtures/sample.pdf");
-            ExtractionResult result = createResult("""
+    @Test
+    void shouldJoinHeadingPath() throws Exception {
+      FileSystemResource resource =
+          new FileSystemResource("src/test/resources/fixtures/sample.pdf");
+      ExtractionResult result = createResult("""
 					{
 					  "content": "Full text",
 					  "mime_type": "application/pdf",
@@ -624,99 +708,131 @@ class XbergDocumentReaderTest {
 					  "elements": []
 					}""");
 
-            try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
-                mockExtract(mocked, result);
+      try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
+        mockExtract(mocked, result);
 
-                List<Document> docs = XbergDocumentReader.builder().resource(resource).build().get();
+        List<Document> docs =
+            XbergDocumentReader.builder().resource(resource).build().get();
 
-                Map<String, Object> metadata = docs.getFirst().getMetadata();
-                assertThat(metadata.get("heading_path")).isEqualTo("Chapter 1 > Section 1.2");
-                assertThat(metadata.get("chunk_type")).isEqualTo("heading");
-            }
-        }
+        Map<String, Object> metadata = docs.getFirst().getMetadata();
+        assertThat(metadata.get("heading_path"))
+            .isEqualTo("Chapter 1 > Section 1.2");
+        assertThat(metadata.get("chunk_type")).isEqualTo("heading");
+      }
     }
+  }
 
+  @Nested
+  class BatchExtraction {
 
-    @Nested
-    class BatchExtraction {
-
-        private static final String DOC_A = """
+    private static final String DOC_A = """
 				{"content":"Doc A","mime_type":"application/pdf","metadata":{},\
 				"tables":[],"detected_languages":[],"chunks":[],"images":[],\
 				"pages":[],"elements":[]}""";
 
-        private static final String DOC_B = """
+    private static final String DOC_B = """
 				{"content":"Doc B","mime_type":\
 				"application/vnd.openxmlformats-officedocument.wordprocessingml.document","metadata":{},\
 				"tables":[],"detected_languages":[],"chunks":[],"images":[],\
 				"pages":[],"elements":[]}""";
 
-        @Test
-        void shouldExtractMultipleResourcesViaExtractBatch() throws Exception {
-            FileSystemResource first = new FileSystemResource("src/test/resources/fixtures/sample.pdf");
-            FileSystemResource second = new FileSystemResource("src/test/resources/fixtures/sample.docx");
-            ExtractionResult result = ExtractionResultFactory.fromDocuments(List.of(DOC_A, DOC_B));
+    @Test
+    void shouldExtractMultipleResourcesViaExtractBatch() throws Exception {
+      FileSystemResource first =
+          new FileSystemResource("src/test/resources/fixtures/sample.pdf");
+      FileSystemResource second =
+          new FileSystemResource("src/test/resources/fixtures/sample.docx");
+      ExtractionResult result =
+          ExtractionResultFactory.fromDocuments(List.of(DOC_A, DOC_B));
 
-            try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
-                mockExtractBatch(mocked, result);
+      try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
+        mockExtractBatch(mocked, result);
 
-                List<Document> docs = XbergDocumentReader.builder().resources(List.of(first, second)).build().get();
+        List<Document> docs = XbergDocumentReader.builder()
+                                  .resources(List.of(first, second))
+                                  .build()
+                                  .get();
 
-                assertThat(docs).hasSize(2);
-                assertThat(docs.get(0).getText()).isEqualTo("Doc A");
-                assertThat(docs.get(1).getText()).isEqualTo("Doc B");
+        assertThat(docs).hasSize(2);
+        assertThat(docs.get(0).getText()).isEqualTo("Doc A");
+        assertThat(docs.get(1).getText()).isEqualTo("Doc B");
 
-                ArgumentCaptor<List<ExtractInput>> captor = ArgumentCaptor.forClass(List.class);
-                mocked.verify(() -> Xberg.extractBatch(captor.capture(), any(ExtractionConfig.class)));
-                assertThat(captor.getValue()).hasSize(2);
-                mocked.verify(() -> Xberg.extract(any(ExtractInput.class), any(ExtractionConfig.class)),
-                    Mockito.never());
-            }
-        }
-
-        @Test
-        void shouldMapSourcePerDocument() throws Exception {
-            FileSystemResource first = new FileSystemResource("src/test/resources/fixtures/sample.pdf");
-            FileSystemResource second = new FileSystemResource("src/test/resources/fixtures/sample.docx");
-            ExtractionResult result = ExtractionResultFactory.fromDocuments(List.of(DOC_A, DOC_B));
-
-            try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
-                mockExtractBatch(mocked, result);
-
-                List<Document> docs = XbergDocumentReader.builder().resources(List.of(first, second)).build().get();
-
-                assertThat(docs.get(0).getMetadata().get("source")).isEqualTo("sample.pdf");
-                assertThat(docs.get(1).getMetadata().get("source")).isEqualTo("sample.docx");
-            }
-        }
-
-        @Test
-        void shouldThrowWhenBatchReportsErrors() throws Exception {
-            FileSystemResource first = new FileSystemResource("src/test/resources/fixtures/sample.pdf");
-            FileSystemResource second = new FileSystemResource("src/test/resources/fixtures/sample.docx");
-            ExtractionErrorItem error = ExtractionErrorItem.builder().withIndex(1).withCode(1000)
-            .withErrorType("Extraction").withSource("sample.docx").withMessage("boom").build();
-            ExtractionResult result = ExtractionResultFactory.withErrors(List.of(DOC_A), List.of(error));
-
-            try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
-                mockExtractBatch(mocked, result);
-
-                XbergDocumentReader reader = XbergDocumentReader.builder().resources(List.of(first, second)).build();
-
-                assertThatThrownBy(reader::get).isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("sample.docx").hasMessageContaining("boom");
-            }
-        }
+        ArgumentCaptor<List<ExtractInput>> captor =
+            ArgumentCaptor.forClass(List.class);
+        mocked.verify(()
+                          -> Xberg.extractBatch(captor.capture(),
+                                                any(ExtractionConfig.class)));
+        assertThat(captor.getValue()).hasSize(2);
+        mocked.verify(()
+                          -> Xberg.extract(any(ExtractInput.class),
+                                           any(ExtractionConfig.class)),
+                      Mockito.never());
+      }
     }
 
+    @Test
+    void shouldMapSourcePerDocument() throws Exception {
+      FileSystemResource first =
+          new FileSystemResource("src/test/resources/fixtures/sample.pdf");
+      FileSystemResource second =
+          new FileSystemResource("src/test/resources/fixtures/sample.docx");
+      ExtractionResult result =
+          ExtractionResultFactory.fromDocuments(List.of(DOC_A, DOC_B));
 
-    @Nested
-    class ElementBasedSplitting {
+      try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
+        mockExtractBatch(mocked, result);
 
-        @Test
-        void shouldCreateDocumentsFromElements() throws Exception {
-            FileSystemResource resource = new FileSystemResource("src/test/resources/fixtures/sample.pdf");
-            ExtractionResult result = createResult("""
+        List<Document> docs = XbergDocumentReader.builder()
+                                  .resources(List.of(first, second))
+                                  .build()
+                                  .get();
+
+        assertThat(docs.get(0).getMetadata().get("source"))
+            .isEqualTo("sample.pdf");
+        assertThat(docs.get(1).getMetadata().get("source"))
+            .isEqualTo("sample.docx");
+      }
+    }
+
+    @Test
+    void shouldThrowWhenBatchReportsErrors() throws Exception {
+      FileSystemResource first =
+          new FileSystemResource("src/test/resources/fixtures/sample.pdf");
+      FileSystemResource second =
+          new FileSystemResource("src/test/resources/fixtures/sample.docx");
+      ExtractionErrorItem error = ExtractionErrorItem.builder()
+                                      .withIndex(1)
+                                      .withCode(1000)
+                                      .withErrorType("Extraction")
+                                      .withSource("sample.docx")
+                                      .withMessage("boom")
+                                      .build();
+      ExtractionResult result =
+          ExtractionResultFactory.withErrors(List.of(DOC_A), List.of(error));
+
+      try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
+        mockExtractBatch(mocked, result);
+
+        XbergDocumentReader reader = XbergDocumentReader.builder()
+                                         .resources(List.of(first, second))
+                                         .build();
+
+        assertThatThrownBy(reader::get)
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessageContaining("sample.docx")
+            .hasMessageContaining("boom");
+      }
+    }
+  }
+
+  @Nested
+  class ElementBasedSplitting {
+
+    @Test
+    void shouldCreateDocumentsFromElements() throws Exception {
+      FileSystemResource resource =
+          new FileSystemResource("src/test/resources/fixtures/sample.pdf");
+      ExtractionResult result = createResult("""
 					{
 					  "content": "Title text\\nParagraph text",
 					  "mime_type": "application/pdf",
@@ -740,21 +856,23 @@ class XbergDocumentReaderTest {
 					  ]
 					}""");
 
-            try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
-                mockExtract(mocked, result);
+      try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
+        mockExtract(mocked, result);
 
-                List<Document> docs = XbergDocumentReader.builder().resource(resource).build().get();
+        List<Document> docs =
+            XbergDocumentReader.builder().resource(resource).build().get();
 
-                assertThat(docs).hasSize(2);
-                assertThat(docs.get(0).getText()).isEqualTo("Title text");
-                assertThat(docs.get(1).getText()).isEqualTo("Paragraph text");
-            }
-        }
+        assertThat(docs).hasSize(2);
+        assertThat(docs.get(0).getText()).isEqualTo("Title text");
+        assertThat(docs.get(1).getText()).isEqualTo("Paragraph text");
+      }
+    }
 
-        @Test
-        void shouldPopulateElementMetadata() throws Exception {
-            FileSystemResource resource = new FileSystemResource("src/test/resources/fixtures/sample.pdf");
-            ExtractionResult result = createResult("""
+    @Test
+    void shouldPopulateElementMetadata() throws Exception {
+      FileSystemResource resource =
+          new FileSystemResource("src/test/resources/fixtures/sample.pdf");
+      ExtractionResult result = createResult("""
 					{
 					  "content": "Title text",
 					  "mime_type": "application/pdf",
@@ -777,32 +895,33 @@ class XbergDocumentReaderTest {
 					  ]
 					}""");
 
-            try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
-                mockExtract(mocked, result);
+      try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
+        mockExtract(mocked, result);
 
-                List<Document> docs = XbergDocumentReader.builder().resource(resource).build().get();
+        List<Document> docs =
+            XbergDocumentReader.builder().resource(resource).build().get();
 
-                assertThat(docs).hasSize(1);
-                Map<String, Object> metadata = docs.getFirst().getMetadata();
-                assertThat(metadata.get("element_type")).isEqualTo("title");
-                assertThat(metadata.get("page_number")).isEqualTo(1);
-                assertThat(metadata.get("element_index")).isEqualTo(0L);
-                assertThat(metadata.get("bbox_x0")).isEqualTo(10.0);
-                assertThat(metadata.get("bbox_y0")).isEqualTo(20.0);
-                assertThat(metadata.get("bbox_x1")).isEqualTo(500.0);
-                assertThat(metadata.get("bbox_y1")).isEqualTo(50.0);
-            }
-        }
+        assertThat(docs).hasSize(1);
+        Map<String, Object> metadata = docs.getFirst().getMetadata();
+        assertThat(metadata.get("element_type")).isEqualTo("title");
+        assertThat(metadata.get("page_number")).isEqualTo(1);
+        assertThat(metadata.get("element_index")).isEqualTo(0L);
+        assertThat(metadata.get("bbox_x0")).isEqualTo(10.0);
+        assertThat(metadata.get("bbox_y0")).isEqualTo(20.0);
+        assertThat(metadata.get("bbox_x1")).isEqualTo(500.0);
+        assertThat(metadata.get("bbox_y1")).isEqualTo(50.0);
+      }
     }
+  }
 
+  @Nested
+  class PageSplitting {
 
-    @Nested
-    class PageSplitting {
-
-        @Test
-        void shouldCreateDocumentsFromPages() throws Exception {
-            FileSystemResource resource = new FileSystemResource("src/test/resources/fixtures/sample.pdf");
-            ExtractionResult result = createResult("""
+    @Test
+    void shouldCreateDocumentsFromPages() throws Exception {
+      FileSystemResource resource =
+          new FileSystemResource("src/test/resources/fixtures/sample.pdf");
+      ExtractionResult result = createResult("""
 					{
 					  "content": "Page 1 text\\nPage 2 text",
 					  "mime_type": "application/pdf",
@@ -818,28 +937,29 @@ class XbergDocumentReaderTest {
 					  "elements": []
 					}""");
 
-            try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
-                mockExtract(mocked, result);
+      try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
+        mockExtract(mocked, result);
 
-                List<Document> docs = XbergDocumentReader.builder().resource(resource).build().get();
+        List<Document> docs =
+            XbergDocumentReader.builder().resource(resource).build().get();
 
-                assertThat(docs).hasSize(2);
-                assertThat(docs.get(0).getText()).isEqualTo("Page 1 text");
-                assertThat(docs.get(1).getText()).isEqualTo("Page 2 text");
-                assertThat(docs.get(0).getMetadata().get("page")).isEqualTo(1);
-                assertThat(docs.get(1).getMetadata().get("page")).isEqualTo(2);
-            }
-        }
+        assertThat(docs).hasSize(2);
+        assertThat(docs.get(0).getText()).isEqualTo("Page 1 text");
+        assertThat(docs.get(1).getText()).isEqualTo("Page 2 text");
+        assertThat(docs.get(0).getMetadata().get("page")).isEqualTo(1);
+        assertThat(docs.get(1).getMetadata().get("page")).isEqualTo(2);
+      }
     }
+  }
 
+  @Nested
+  class SplittingPriority {
 
-    @Nested
-    class SplittingPriority {
-
-        @Test
-        void shouldPreferChunksOverPages() throws Exception {
-            FileSystemResource resource = new FileSystemResource("src/test/resources/fixtures/sample.pdf");
-            ExtractionResult result = createResult("""
+    @Test
+    void shouldPreferChunksOverPages() throws Exception {
+      FileSystemResource resource =
+          new FileSystemResource("src/test/resources/fixtures/sample.pdf");
+      ExtractionResult result = createResult("""
 					{
 					  "content": "Full text",
 					  "mime_type": "application/pdf",
@@ -859,20 +979,22 @@ class XbergDocumentReaderTest {
 					  "elements": []
 					}""");
 
-            try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
-                mockExtract(mocked, result);
+      try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
+        mockExtract(mocked, result);
 
-                List<Document> docs = XbergDocumentReader.builder().resource(resource).build().get();
+        List<Document> docs =
+            XbergDocumentReader.builder().resource(resource).build().get();
 
-                assertThat(docs).hasSize(1);
-                assertThat(docs.getFirst().getText()).isEqualTo("Chunk content");
-            }
-        }
+        assertThat(docs).hasSize(1);
+        assertThat(docs.getFirst().getText()).isEqualTo("Chunk content");
+      }
+    }
 
-        @Test
-        void shouldPreferElementsOverPages() throws Exception {
-            FileSystemResource resource = new FileSystemResource("src/test/resources/fixtures/sample.pdf");
-            ExtractionResult result = createResult("""
+    @Test
+    void shouldPreferElementsOverPages() throws Exception {
+      FileSystemResource resource =
+          new FileSystemResource("src/test/resources/fixtures/sample.pdf");
+      ExtractionResult result = createResult("""
 					{
 					  "content": "Full text",
 					  "mime_type": "application/pdf",
@@ -893,105 +1015,123 @@ class XbergDocumentReaderTest {
 					  ]
 					}""");
 
-            try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
-                mockExtract(mocked, result);
+      try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
+        mockExtract(mocked, result);
 
-                List<Document> docs = XbergDocumentReader.builder().resource(resource).build().get();
+        List<Document> docs =
+            XbergDocumentReader.builder().resource(resource).build().get();
 
-                assertThat(docs).hasSize(1);
-                assertThat(docs.getFirst().getText()).isEqualTo("Element content");
-            }
-        }
+        assertThat(docs).hasSize(1);
+        assertThat(docs.getFirst().getText()).isEqualTo("Element content");
+      }
+    }
 
-        @Test
-        void shouldReturnSingleDocumentWhenNothingPresent() throws Exception {
-            FileSystemResource resource = new FileSystemResource("src/test/resources/fixtures/sample.pdf");
-            ExtractionResult result = createResult("""
+    @Test
+    void shouldReturnSingleDocumentWhenNothingPresent() throws Exception {
+      FileSystemResource resource =
+          new FileSystemResource("src/test/resources/fixtures/sample.pdf");
+      ExtractionResult result = createResult("""
 					{"content":"Single content","mime_type":"application/pdf","metadata":{},\
 					"tables":[],"detected_languages":[],"chunks":[],"images":[],\
 					"pages":[],"elements":[]}""");
 
-            try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
-                mockExtract(mocked, result);
+      try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
+        mockExtract(mocked, result);
 
-                List<Document> docs = XbergDocumentReader.builder().resource(resource).build().get();
+        List<Document> docs =
+            XbergDocumentReader.builder().resource(resource).build().get();
 
-                assertThat(docs).hasSize(1);
-                assertThat(docs.getFirst().getText()).isEqualTo("Single content");
-            }
-        }
+        assertThat(docs).hasSize(1);
+        assertThat(docs.getFirst().getText()).isEqualTo("Single content");
+      }
     }
+  }
 
+  @Nested
+  class SourceResolution {
 
-    @Nested
-    class SourceResolution {
-
-        @Test
-        void shouldResolveSourceFromFilename() throws Exception {
-            FileSystemResource resource = new FileSystemResource("src/test/resources/fixtures/sample.pdf");
-            ExtractionResult result = createResult("""
+    @Test
+    void shouldResolveSourceFromFilename() throws Exception {
+      FileSystemResource resource =
+          new FileSystemResource("src/test/resources/fixtures/sample.pdf");
+      ExtractionResult result = createResult("""
 					{"content":"Text","mime_type":"application/pdf","metadata":{},\
 					"tables":[],"detected_languages":[],"chunks":[],"images":[],\
 					"pages":[],"elements":[]}""");
 
-            try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
-                mockExtract(mocked, result);
+      try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
+        mockExtract(mocked, result);
 
-                List<Document> docs = XbergDocumentReader.builder().resource(resource).build().get();
+        List<Document> docs =
+            XbergDocumentReader.builder().resource(resource).build().get();
 
-                assertThat(docs.getFirst().getMetadata().get("source")).isEqualTo("sample.pdf");
-            }
-        }
+        assertThat(docs.getFirst().getMetadata().get("source"))
+            .isEqualTo("sample.pdf");
+      }
+    }
 
-        @Test
-        void shouldResolveSourceForByteArrayResource() throws Exception {
-            ByteArrayResource resource = new ByteArrayResource(new byte[]{1, 2, 3});
-            ExtractionResult result = createResult("""
+    @Test
+    void shouldResolveSourceForByteArrayResource() throws Exception {
+      ByteArrayResource resource = new ByteArrayResource(new byte[] {1, 2, 3});
+      ExtractionResult result = createResult("""
 					{"content":"Text","mime_type":"application/pdf","metadata":{},\
 					"tables":[],"detected_languages":[],"chunks":[],"images":[],\
 					"pages":[],"elements":[]}""");
 
-            try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
-                mockExtract(mocked, result);
+      try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
+        mockExtract(mocked, result);
 
-                List<Document> docs = XbergDocumentReader.builder().resource(resource).mimeType("application/pdf")
-                .build().get();
+        List<Document> docs = XbergDocumentReader.builder()
+                                  .resource(resource)
+                                  .mimeType("application/pdf")
+                                  .build()
+                                  .get();
 
-                assertThat(docs.getFirst().getMetadata().get("source")).isEqualTo("bytes://application/pdf");
-            }
-        }
+        assertThat(docs.getFirst().getMetadata().get("source"))
+            .isEqualTo("bytes://application/pdf");
+      }
+    }
+  }
+
+  @Nested
+  class ErrorHandling {
+
+    @Test
+    void shouldWrapXbergRsException() {
+      FileSystemResource resource =
+          new FileSystemResource("src/test/resources/fixtures/sample.pdf");
+
+      try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
+        mocked
+            .when(()
+                      -> Xberg.extract(any(ExtractInput.class),
+                                       any(ExtractionConfig.class)))
+            .thenThrow(new XbergRsException(1000, "extraction failed"));
+
+        XbergDocumentReader reader =
+            XbergDocumentReader.builder().resource(resource).build();
+
+        assertThatThrownBy(reader::get)
+            .isInstanceOf(RuntimeException.class)
+            .hasMessageContaining("Xberg extraction failed")
+            .hasCauseInstanceOf(XbergRsException.class);
+      }
     }
 
+    @Test
+    void shouldWrapIOException() throws Exception {
+      Resource mockResource = Mockito.mock(Resource.class);
+      Mockito.when(mockResource.getFilename()).thenReturn("test.pdf");
+      Mockito.when(mockResource.getInputStream())
+          .thenThrow(new IOException("read failed"));
 
-    @Nested
-    class ErrorHandling {
+      XbergDocumentReader reader =
+          XbergDocumentReader.builder().resource(mockResource).build();
 
-        @Test
-        void shouldWrapXbergRsException() {
-            FileSystemResource resource = new FileSystemResource("src/test/resources/fixtures/sample.pdf");
-
-            try (MockedStatic<Xberg> mocked = Mockito.mockStatic(Xberg.class)) {
-                mocked.when(() -> Xberg.extract(any(ExtractInput.class), any(ExtractionConfig.class)))
-                .thenThrow(new XbergRsException(1000, "extraction failed"));
-
-                XbergDocumentReader reader = XbergDocumentReader.builder().resource(resource).build();
-
-                assertThatThrownBy(reader::get).isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("Xberg extraction failed")
-                .hasCauseInstanceOf(XbergRsException.class);
-            }
-        }
-
-        @Test
-        void shouldWrapIOException() throws Exception {
-            Resource mockResource = Mockito.mock(Resource.class);
-            Mockito.when(mockResource.getFilename()).thenReturn("test.pdf");
-            Mockito.when(mockResource.getInputStream()).thenThrow(new IOException("read failed"));
-
-            XbergDocumentReader reader = XbergDocumentReader.builder().resource(mockResource).build();
-
-            assertThatThrownBy(reader::get).isInstanceOf(RuntimeException.class)
-            .hasMessageContaining("Failed to extract document").hasCauseInstanceOf(IOException.class);
-        }
+      assertThatThrownBy(reader::get)
+          .isInstanceOf(RuntimeException.class)
+          .hasMessageContaining("Failed to extract document")
+          .hasCauseInstanceOf(IOException.class);
     }
+  }
 }

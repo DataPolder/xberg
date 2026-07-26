@@ -8,18 +8,19 @@ const EBADF = 8;
 const ENOSYS = 63;
 
 module.exports = new Proxy(
-  {
-    fd_close: () => 0,
-    sched_yield: () => 0,
-    environ_get: () => 0,
-    environ_sizes_get: () => 0,
-    fd_prestat_get: () => EBADF,
-    fd_prestat_dir_name: () => EBADF,
-  },
-  {
-    get(target, prop) {
-      if (prop in target) return target[prop];
-      return () => ENOSYS;
+    {
+      fd_close : () => 0,
+      sched_yield : () => 0,
+      environ_get : () => 0,
+      environ_sizes_get : () => 0,
+      fd_prestat_get : () => EBADF,
+      fd_prestat_dir_name : () => EBADF,
     },
-  },
+    {
+      get(target, prop) {
+        if (prop in target)
+          return target[prop];
+        return () => ENOSYS;
+      },
+    },
 );

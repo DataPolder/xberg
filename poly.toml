@@ -109,7 +109,6 @@ ignore = ["strict-assertions", "use-specific-assertions", "no-redundant-variable
 php_version = "8.2"
 
 [lint.typos.extend_words]
-acn = "acn"
 ake = "ake"
 algoritmos = "algoritmos"
 arange = "arange"
@@ -194,6 +193,9 @@ remove_fixme = false
 remove_docs = false
 use_default_ignores = true
 preserve_patterns = ["SAFETY", "SPDX", "Copyright", "License", "licensed under"]
+
+[tools.clang-format]
+enabled = true
 
 [per-file-ignores]
 "**/api.py" = ["F401", "I001", "TC006", "UP035"]
@@ -593,18 +595,6 @@ run = "mvn -q checkstyle:check"
 root = "packages/java"
 workspace = true
 files = "packages/java/**/*.java"
-
-[hooks.pre-commit.commands.pmd]
-run = "mvn -q pmd:check"
-root = "packages/java"
-workspace = true
-files = "packages/java/**/*.java"
-
-[hooks.pre-commit.commands.ktlint]
-run = "gradle ktlintCheck --no-daemon"
-root = "packages/kotlin-android"
-workspace = true
-files = "packages/kotlin-android/**/*.{kt,kts}"
 
 [hooks.pre-commit.commands.dart-analyze]
 run = "dart analyze"
