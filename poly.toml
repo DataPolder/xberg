@@ -109,6 +109,7 @@ ignore = ["strict-assertions", "use-specific-assertions", "no-redundant-variable
 php_version = "8.2"
 
 [lint.typos.extend_words]
+acn = "acn"
 ake = "ake"
 algoritmos = "algoritmos"
 arange = "arange"
@@ -142,6 +143,7 @@ legt = "legt"
 markitdown = "markitdown"
 ment = "ment"
 mis = "mis"
+missmatch = "missmatch"
 mmaped = "mmaped"
 multline = "multline"
 odf = "odf"

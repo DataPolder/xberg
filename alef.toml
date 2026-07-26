@@ -187,6 +187,10 @@ cursos = "cursos"
 excepcional = "excepcional"
 ein = "ein"
 legt = "legt"
+# libwpd upstream enum WPD_PASSWORD_MISSMATCH_ERROR (inc/libwpd/WPDocument.h) — upstream's own spelling, cannot rename. ~keep
+missmatch = "missmatch"
+# benchmark fixture id ft_ACN_2009_page_102_t0 in bench_matrix.rs. ~keep
+acn = "acn"
 
 [workspace.poly.typos.extend-identifiers]
 PyMuPDF = "PyMuPDF"
