@@ -59,12 +59,7 @@ ort-dynamic = ["legacy-base", "xberg/ort-dynamic"]
 # dynamically). Used by the bindings via alef target overrides; the CLI release
 # build instead keeps its default features and adds `ort-dynamic` for exact
 # parity with the aarch64 CLI.
-macos-intel = [
-    "legacy-base",
-    "ocr-surface",
-    "pdf-surface",
-    "xberg/macos-intel-target",
-]
+macos-intel = ["legacy-base", "ocr-surface", "pdf-surface", "xberg/macos-intel-target"]
 
 # Dependency-free marker for OCR-capable CLI flags. Candle/VLM backends enable
 # this without pulling the native Tesseract implementation.

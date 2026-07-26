@@ -48,7 +48,14 @@ tokio-runtime = ["dep:tokio", "dep:futures"]
 
 # PDF extraction is currently backed by pdf_oxide. Keep this as the canonical
 # `pdf` feature until/unless a second PDF backend is introduced.
-pdf = ["dep:pdf_oxide", "dep:lopdf", "dep:image", "dep:flate2", "html", "image-encode"]
+pdf = [
+    "dep:pdf_oxide",
+    "dep:lopdf",
+    "dep:image",
+    "dep:flate2",
+    "html",
+    "image-encode",
+]
 excel = ["dep:calamine", "tokio-runtime"]
 excel-wasm = ["dep:calamine"]
 office = [
@@ -70,7 +77,15 @@ notebook = ["html"]
 hwp = ["dep:cfb", "dep:flate2"]
 hwpx = ["dep:unhwp", "dep:zip"]
 iwork = ["dep:zip", "dep:snap"]
-email = ["dep:mail-parser", "dep:cfb", "dep:outlook-pst", "dep:tempfile", "dep:chrono", "dep:chardetng", "html"]
+email = [
+    "dep:mail-parser",
+    "dep:cfb",
+    "dep:outlook-pst",
+    "dep:tempfile",
+    "dep:chrono",
+    "dep:chardetng",
+    "html",
+]
 html = ["dep:html-to-markdown-rs", "dep:v_htmlescape"]
 xml = ["dep:quick-xml", "dep:roxmltree"]
 archives = ["dep:zip", "dep:tar", "dep:sevenz-rust2", "dep:flate2"]
@@ -112,7 +127,14 @@ ocr = [
 bundle-tessdata-eng = ["xberg-tesseract/bundle-tessdata-eng"]
 # WASM OCR: Minimal Tesseract backend without html-to-markdown (which has WASI imports)
 # Includes only the core OCR processing dependencies needed for Tesseract on WASM
-ocr-wasm = ["ocr-pipeline", "dep:xberg-tesseract", "dep:image", "dep:nom-exif", "dep:hayro-jpeg2000", "dep:hayro-jbig2"]
+ocr-wasm = [
+    "ocr-pipeline",
+    "dep:xberg-tesseract",
+    "dep:image",
+    "dep:nom-exif",
+    "dep:hayro-jpeg2000",
+    "dep:hayro-jbig2",
+]
 # HEIF / HEIC / AVIF / HEICS / AVCS decoding via vendored libheif bindings.
 # Native-only — libheif is a C library with no working WASM/Android story.
 # Pulls in `nom-exif` so HEIC EXIF blocks are readable even without the full `ocr` feature.
@@ -151,7 +173,12 @@ candle-glm-ocr = ["candle-ocr", "xberg-candle-ocr/glm-ocr", "layout-detection"]
 # DeepSeek-OCR backend: aggregate feature enabling candle-ocr with deepseek-ocr sub-feature
 candle-deepseek-ocr = ["candle-ocr", "xberg-candle-ocr/deepseek-ocr"]
 # Umbrella aggregate for all candle VLM OCR backends (not in full/formats/wasm-target/android-target)
-candle-vlm-ocr = ["candle-deepseek-ocr", "candle-paddleocr-vl", "candle-glm-ocr", "candle-trocr"]
+candle-vlm-ocr = [
+    "candle-deepseek-ocr",
+    "candle-paddleocr-vl",
+    "candle-glm-ocr",
+    "candle-trocr",
+]
 # Candle GPU acceleration pass-throughs. Enable alongside any candle-* backend
 # to compile the corresponding candle backend (CUDA / Metal / Accelerate /
 # MKL) — CPU decode of the larger VLM backends is impractically slow.
@@ -287,7 +314,14 @@ transcription = [
     "tokio-runtime",
 ]
 
-chunking = ["dep:auto_enums", "dep:either", "dep:icu_provider", "dep:icu_segmenter", "dep:itertools", "dep:strum"]
+chunking = [
+    "dep:auto_enums",
+    "dep:either",
+    "dep:icu_provider",
+    "dep:icu_segmenter",
+    "dep:itertools",
+    "dep:strum",
+]
 chunking-tokenizers = [
     "chunking",
     "tokio-runtime",
@@ -315,7 +349,13 @@ onnx-runtime = [
 embedding-presets = []
 # embeddings: full embedding generation with ONNX Runtime (ORT-dependent, WASM-incompatible)
 # NOTE: embedding-presets is a subset of embeddings (no ORT); always implied by embeddings.
-embeddings = ["onnx-runtime", "dep:ndarray", "chunking", "tokio-runtime", "embedding-presets"]
+embeddings = [
+    "onnx-runtime",
+    "dep:ndarray",
+    "chunking",
+    "tokio-runtime",
+    "embedding-presets",
+]
 # static-embeddings: pure-Rust static (model2vec) embedding inference — no ONNX Runtime.
 # The only dense embedder available on `no-ort-target` (WASM/Android). Model download is
 # native-only (hf-hub); WASM/Android load model bytes via `StaticEmbeddingEngine::from_bytes`.
@@ -380,7 +420,9 @@ ner-candle = ["ner-candle-backend", "tokio-runtime"]
 # natively too, for callers wanting candle NER without a runtime dependency.
 ner-candle-wasm = ["ner-candle-backend"]
 ner = [] # NER result types only; safe on every target.
-ner-llm-types = ["ner"] # LlmBackend stub for targets without full ner-llm (Windows, Android x86_64, WASM).
+ner-llm-types = [
+    "ner",
+] # LlmBackend stub for targets without full ner-llm (Windows, Android x86_64, WASM).
 ner-llm = ["ner", "liter-llm"] # LLM-driven zero-shot NER (no ORT).
 ner-onnx = [
     # xberg-gliner ONNX backend with Hugging Face model download.
@@ -394,17 +436,26 @@ ner-onnx = [
     "tokio-runtime",
 ]
 
-presets = ["dep:include_dir", "dep:jsonschema", "dep:sha2"] # Preset format + registry + loader + resolver; pure-Rust.
+presets = [
+    "dep:include_dir",
+    "dep:jsonschema",
+    "dep:sha2",
+] # Preset format + registry + loader + resolver; pure-Rust.
 
 # Compatibility feature for public LLM structured extraction through
 # `ExtractionConfig::structured_extraction`.
 structured = ["liter-llm", "tokio-runtime"]
 
-redaction = ["dep:sha2"]                                                        # Pattern-based PII engine; pure-Rust.
-redaction-rehydrate = ["redaction", "dep:aes-gcm", "dep:scrypt", "dep:zeroize"] # Encrypted rehydration map capture.
-redaction-ml = ["redaction", "ner"]                                             # Couple in NER for PERSON/ORG/LOC redaction.
+redaction = ["dep:sha2"] # Pattern-based PII engine; pure-Rust.
+redaction-rehydrate = [
+    "redaction",
+    "dep:aes-gcm",
+    "dep:scrypt",
+    "dep:zeroize",
+] # Encrypted rehydration map capture.
+redaction-ml = ["redaction", "ner"] # Couple in NER for PERSON/ORG/LOC redaction.
 
-summarization = ["stopwords"]                      # TextRank extractive only; pure-Rust (uses stopword tables).
+summarization = ["stopwords"] # TextRank extractive only; pure-Rust (uses stopword tables).
 summarization-llm = ["summarization", "liter-llm"]
 
 translation = ["liter-llm"]
@@ -633,9 +684,9 @@ windows-target = [
     # markdown-footnotes = [] (pure Rust, no deps). The generated bindings
     # re-export FootnoteConfig/FootnoteAnchor/FootnoteDefinition/Citation
     # unconditionally, so the defining feature must be enabled on Windows too.
-    "markdown-footnotes",
     # late-interaction-presets is implied by "late-interaction" above (the ORT
     # ML feature added for full Windows ONNX Runtime parity).
+    "markdown-footnotes",
 ]
 # macos-intel-target: native Intel macOS (x86_64-apple-darwin). FULL feature
 # parity with every other platform — including all ONNX Runtime ML (paddle-ocr,
@@ -679,7 +730,14 @@ formats = [
     "heic",
 ]
 # Text processing and analysis capabilities.
-analysis = ["language-detection", "chunking", "quality", "keywords", "markdown-footnotes", "diff"]
+analysis = [
+    "language-detection",
+    "chunking",
+    "quality",
+    "keywords",
+    "markdown-footnotes",
+    "diff",
+]
 # Network services and observability infrastructure.
 services = ["api", "mcp", "otel"]
 # Everything — all formats, analysis, services, OCR, ML, and code intelligence.
@@ -720,7 +778,15 @@ full = [
     "heic",
 ]
 # Server deployment preset — formats + analysis + services + OCR.
-server = ["formats", "analysis", "services", "url-ingestion", "ocr", "paddle-ocr", "layout-detection"]
+server = [
+    "formats",
+    "analysis",
+    "services",
+    "url-ingestion",
+    "ocr",
+    "paddle-ocr",
+    "layout-detection",
+]
 # CLI-only features (thin gate for xberg-cli).
 cli = ["services", "chunking", "url-ingestion"]
 
