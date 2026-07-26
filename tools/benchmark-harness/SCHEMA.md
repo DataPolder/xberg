@@ -95,12 +95,17 @@ Contains p50, p95, p99 for all metrics:
   "duration": { "p50": 100.5, "p95": 150.2, "p99": 199.9 },
   "throughput": { "p50": 5.2, "p95": 4.8, "p99": 3.1 },
   "memory": { "p50": 150.0, "p95": 200.0, "p99": 250.0 },
-  "cpu": { "p50": 50.0, "p95": 75.0, "p99": 90.0 }, // Optional
   "extraction_duration": { "p50": 80.0, "p95": 120.0, "p99": 160.0 }, // Optional
   "quality": {
     /* QualityPercentiles */
   }, // Optional, if quality data available
-  "success_rate_percent": 84.0
+  "success_rate_percent": 84.0,
+  "pages_per_sec": { "p50": 12.5, "p95": 8.0, "p99": 5.0 }, // Optional (v2.7.0+, PDF only)
+  "cpu_seconds": { "p50": 1.2, "p95": 2.1, "p99": 3.4 }, // v2.7.0+
+  "batch_size": 8, // Optional (v2.7.0+)
+  "system_load": {
+    /* SystemLoadPercentiles */
+  } // Optional (v2.7.0+)
 }
 ```
 
@@ -122,6 +127,21 @@ Includes p50, p95, p99 for all F1 metrics. Layout percentiles are `null` for pla
   "quality_score_p50": 0.85,
   "quality_score_p95": 0.8,
   "quality_score_p99": 0.7
+}
+```
+
+## SystemLoadPercentiles (v2.7.0+)
+
+A contention qualifier aggregated from `BenchmarkResult.system_load` snapshots in the group.
+`null` when no result in the group carries a snapshot. See the "Tier A comparative performance
+metrics" migration notes below for how to read `load_per_core`.
+
+```json
+{
+  "load_per_core_p50": 0.35,
+  "load_per_core_p95": 0.9,
+  "contended_sample_count": 3,
+  "total_sample_count": 20
 }
 ```
 
@@ -160,6 +180,52 @@ One row per unique combination of (framework, output_format, execution_mode, fix
   and PDF rankings shift downward for frameworks that reconstruct grids but garble cells.
   Table-less documents are unaffected (D6 is gated on table presence).
 
+### Tier A comparative performance metrics (additive)
+
+All fields below are additive to the `2.7.0` schema (no version bump, no key-format change).
+Consumers built against the fields documented in "Migration from v2.5.0" and earlier remain
+compatible: every new field is either optional (`null`/absent when not applicable) or has a
+type-appropriate default (`0.0` for numeric percentiles) when deserializing older artifacts that
+predate it.
+
+- **`PerformancePercentiles.pages_per_sec`** (optional `Percentiles`): pages-per-second
+  percentiles, derived from the harness-side (framework-agnostic) `PdfMetadata.page_count`
+  divided by wall-clock duration — never a framework's self-reported page count, so every
+  framework is compared against the same ground truth. `null` when no result in the group
+  carries a known PDF page count (non-PDF file types, or a PDF the harness could not size). For
+  a native batch, the page counts of every document sharing one batch invocation are summed
+  before dividing by the batch's shared makespan, mirroring how `throughput` is computed for
+  batches from summed bytes rather than a single member row.
+- **`PerformancePercentiles.cpu_seconds`** (`Percentiles`, always present): total process-tree
+  CPU-time percentiles, in core-seconds. Computed by trapezoidal integration of the resource
+  sampler's per-sample CPU percentage over its timeline (see
+  `PerformanceMetrics.cpu_seconds` doc comment). **Precision is bounded by the sampling
+  interval** (1-10ms, adaptive on file size): CPU bursts shorter than the gap between two
+  samples are smoothed by the trapezoidal average rather than measured exactly, so treat
+  `cpu_seconds` as an approximation, not an exact accounting figure.
+- **`PerformancePercentiles.batch_size`** (optional `usize`): the approximate number of
+  documents processed per one measured process invocation in this group — `1` for single-file
+  mode, or the modal per-batch document count for a native batch (`total_sample_count /
+  performance_sample_count`, rounded). This lets peak-RSS (and any other performance metric
+  already in this struct) be read "keyed by batch size" using the single-file-vs-batch mode
+  entries the benchmark matrix already runs, without adding a new axis to the
+  `by_framework_mode` aggregate key.
+- **`PerformancePercentiles.system_load`** (optional `SystemLoadPercentiles`): surfaces the
+  previously-captured-but-discarded `BenchmarkResult.system_load` as a contention qualifier —
+  `null` when no result in the group carries a snapshot. Read `load_per_core` *relatively* (was
+  this bucket measured under comparable contention to another) rather than as an absolute
+  number; `contended_sample_count` counts samples whose 1-minute load average per logical core
+  exceeded the harness's contention threshold.
+- **`ComparisonData.pages_per_sec_ranking`** / **`cpu_seconds_ranking`** (`RankedFramework[]`):
+  new rankings mirroring `throughput_ranking` and `memory_ranking` respectively — pages/sec
+  ranked descending (higher is better), CPU-seconds ranked ascending (lower is better). Only
+  frameworks with at least one pages/sec observation appear in `pages_per_sec_ranking`.
+- **`ComparisonData.pareto_frontier`** (`ParetoPoint[]`): the non-dominated frontier over
+  (pages/sec ↑, SF1 ↑, peak-RSS ↓) for markdown frameworks that carry both an SF1 term and a
+  pages/sec observation (plaintext-only frameworks never carry SF1, so they are never eligible;
+  see `ParetoPoint`'s doc comment for the dominance rule). Pure computation over already-reported
+  percentiles — no new capture-time data required.
+
 ## Migration from v2.5.0 to v2.6.0
 
 - `PerFixtureRow.ocr` changed from a required boolean to a nullable boolean so unknown OCR usage is not mislabeled as `false`.
@@ -170,16 +236,10 @@ Contains all cross-framework rankings split by output format for quality metrics
 
 ```json
 {
-  "performance_ranking": [
-    /* RankedFramework[] */
-  ],
   "throughput_ranking": [
     /* RankedFramework[] */
   ],
   "memory_ranking": [
-    /* RankedFramework[] */
-  ],
-  "cpu_ranking": [
     /* RankedFramework[] */
   ],
   "quality_ranking_markdown": [
@@ -203,11 +263,20 @@ Contains all cross-framework rankings split by output format for quality metrics
   "pdf_sf1_ranking_markdown": [
     /* RankedFramework[] — markdown-only, never plaintext */
   ],
+  "pages_per_sec_ranking": [
+    /* RankedFramework[] — descending, higher pages/sec first (v2.7.0+) */
+  ],
+  "cpu_seconds_ranking": [
+    /* RankedFramework[] — ascending, lower CPU-seconds first (v2.7.0+) */
+  ],
   "deltas_vs_baseline": {
     "<aggregate_key>": {
       /* DeltaMetrics */
     }
-  }
+  },
+  "pareto_frontier": [
+    /* ParetoPoint[] — non-dominated (pages/sec, SF1, peak-RSS) points, markdown only (v2.7.0+) */
+  ]
 }
 ```
 
@@ -219,6 +288,22 @@ Contains all cross-framework rankings split by output format for quality metrics
   "rank": 1,
   "value": 95.5, // The metric value (duration, throughput, etc.)
   "relative": 1.0 // Ratio relative to best (1.0 = best)
+}
+```
+
+### ParetoPoint (v2.7.0+)
+
+One non-dominated point in the (pages/sec, SF1, peak-RSS) multi-objective comparison. A
+candidate is on the frontier when no other candidate dominates it: dominance requires being at
+least as good on every objective and strictly better on at least one. `pages_per_sec` and `sf1`
+are maximized; `peak_memory_mb` is minimized.
+
+```json
+{
+  "framework_mode": "xberg-markdown-layout:single",
+  "pages_per_sec": 12.5,
+  "sf1": 0.82,
+  "peak_memory_mb": 320.0
 }
 ```
 

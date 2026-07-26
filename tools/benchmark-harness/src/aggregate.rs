@@ -121,8 +121,40 @@ pub struct ComparisonData {
     /// PDF-only: frameworks ranked by structural F1 / SF1 (highest first) — markdown only
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pdf_sf1_ranking_markdown: Vec<RankedFramework>,
+    /// Frameworks ranked by median pages/sec (highest first). Only frameworks with at least one
+    /// PDF pages/sec observation are included (see `PerformancePercentiles.pages_per_sec`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pages_per_sec_ranking: Vec<RankedFramework>,
+    /// Frameworks ranked by median CPU-seconds consumed (lowest first).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cpu_seconds_ranking: Vec<RankedFramework>,
     /// Performance deltas relative to the fastest framework (throughput-based)
     pub deltas_vs_baseline: HashMap<String, DeltaMetrics>,
+    /// Non-dominated frontier over (pages/sec ↑, SF1 ↑, peak-RSS ↓), markdown frameworks only.
+    /// See [`ParetoPoint`] for the dominance rule and eligibility criteria.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pareto_frontier: Vec<ParetoPoint>,
+}
+
+/// One non-dominated point in the (pages/sec, SF1, peak-RSS) multi-objective comparison.
+///
+/// A candidate is on the frontier when no other candidate **dominates** it: dominance requires
+/// being at least as good on every objective and strictly better on at least one.
+/// `pages_per_sec` and `sf1` are maximized; `peak_memory_mb` is minimized.
+///
+/// Restricted to markdown frameworks that have both an SF1 term and at least one pages/sec
+/// observation: plaintext-only frameworks never carry SF1 (see module-level docs), and a
+/// framework with no PDF page-count data has no pages/sec axis to compare on.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParetoPoint {
+    /// Framework:mode key, matching `RankedFramework.framework_mode`.
+    pub framework_mode: String,
+    /// Median pages/sec (higher is better).
+    pub pages_per_sec: f64,
+    /// Median structural F1 / SF1 (higher is better).
+    pub sf1: f64,
+    /// Median peak RSS in MB (lower is better).
+    pub peak_memory_mb: f64,
 }
 
 /// A framework entry in a ranking
@@ -243,6 +275,48 @@ pub struct PerformancePercentiles {
     /// Quality score percentiles (p50, p95, p99) — 0.0 to 1.0
     #[serde(skip_serializing_if = "Option::is_none")]
     pub quality: Option<QualityPercentiles>,
+    /// Pages-per-second percentiles, derived from `PdfMetadata.page_count` divided by wall-clock
+    /// duration. `None` when no result in this group carries a known PDF page count (e.g.
+    /// non-PDF file types, or a page count the harness could not detect). For a native batch,
+    /// the page counts of every document sharing one `batch_sample_id` are summed and divided by
+    /// the shared batch makespan, mirroring how `throughput` is computed for batches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pages_per_sec: Option<Percentiles>,
+    /// Total process-tree CPU-time percentiles, in core-seconds
+    /// (see `PerformanceMetrics::cpu_seconds` for the integration methodology and its
+    /// sample-interval-bounded precision).
+    #[serde(default)]
+    pub cpu_seconds: Percentiles,
+    /// Approximate number of documents processed per one measured process invocation in this
+    /// group: `Some(1)` for single-file mode; for batch mode, the modal document count per
+    /// deduped performance sample (`total_sample_count / performance_sample_count`, rounded).
+    /// `None` when the group has no successful performance samples to derive a ratio from.
+    /// Surfaced so peak-RSS (and other performance metrics) can be read "keyed by batch size"
+    /// without adding a new axis to the `by_framework_mode` aggregate key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub batch_size: Option<usize>,
+    /// System-load contention qualifier aggregated from `BenchmarkResult.system_load` samples in
+    /// this group. `None` when no result in the group carries a load snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_load: Option<SystemLoadPercentiles>,
+}
+
+/// Aggregated system-load contention qualifier for a group of results.
+///
+/// Lets a consumer judge whether a bucket's timing data is comparable to an idle-machine
+/// baseline: see `crate::system_load::SystemLoad` for why load figures are read *relatively*
+/// (was this bucket measured under similar or worse contention than another) rather than as an
+/// absolute number.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemLoadPercentiles {
+    /// 50th percentile of `SystemLoad::load_per_core()` across the group's samples.
+    pub load_per_core_p50: f64,
+    /// 95th percentile of `SystemLoad::load_per_core()` across the group's samples.
+    pub load_per_core_p95: f64,
+    /// Number of samples for which `SystemLoad::is_contended()` was true.
+    pub contended_sample_count: usize,
+    /// Total number of results in the group carrying a system-load snapshot.
+    pub total_sample_count: usize,
 }
 
 /// Quality percentile values (p50, p95, p99) for all F1 metrics
@@ -275,7 +349,7 @@ pub struct QualityPercentiles {
 }
 
 /// Percentile values for a metric
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Percentiles {
     /// 50th percentile (median)
     pub p50: f64,
@@ -322,7 +396,10 @@ pub fn aggregate_new_format(results: &[BenchmarkResult]) -> NewConsolidatedResul
                 pdf_tf1_ranking_markdown: Vec::new(),
                 pdf_tf1_ranking_plaintext: Vec::new(),
                 pdf_sf1_ranking_markdown: Vec::new(),
+                pages_per_sec_ranking: Vec::new(),
+                cpu_seconds_ranking: Vec::new(),
                 deltas_vs_baseline: HashMap::new(),
+                pareto_frontier: Vec::new(),
             },
             per_fixture_results: Vec::new(),
             metadata: ConsolidationMetadata {
@@ -569,10 +646,20 @@ fn calculate_percentiles(results: &[&BenchmarkResult]) -> PerformancePercentiles
         .filter(|&v| !v.is_nan() && v.is_finite())
         .collect();
 
+    let mut cpu_seconds_values: Vec<f64> = performance_samples
+        .iter()
+        .map(|r| r.metrics.cpu_seconds)
+        .filter(|&v| !v.is_nan() && v.is_finite() && v >= 0.0)
+        .collect();
+
+    let mut pages_per_sec_values = collect_pages_per_second(&successful);
+
     durations.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     throughputs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     memories.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     extraction_durations.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    cpu_seconds_values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    pages_per_sec_values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
     let duration = Percentiles {
         p50: sanitize_f64(percentile_r7(&durations, 0.50)),
@@ -601,6 +688,38 @@ fn calculate_percentiles(results: &[&BenchmarkResult]) -> PerformancePercentiles
     } else {
         None
     };
+
+    let cpu_seconds = Percentiles {
+        p50: sanitize_f64(percentile_r7(&cpu_seconds_values, 0.50)),
+        p95: sanitize_f64(percentile_r7(&cpu_seconds_values, 0.95)),
+        p99: sanitize_f64(percentile_r7(&cpu_seconds_values, 0.99)),
+    };
+
+    let pages_per_sec = if !pages_per_sec_values.is_empty() {
+        Some(Percentiles {
+            p50: sanitize_f64(percentile_r7(&pages_per_sec_values, 0.50)),
+            p95: sanitize_f64(percentile_r7(&pages_per_sec_values, 0.95)),
+            p99: sanitize_f64(percentile_r7(&pages_per_sec_values, 0.99)),
+        })
+    } else {
+        None
+    };
+
+    // Approximate documents-per-process-invocation: 1:1 for single-file mode (each successful
+    // row is its own performance sample), or the modal batch size for native batches (deduped
+    // performance samples each represent one whole-batch process). See `PerformancePercentiles`
+    // doc comment. ~keep
+    let batch_size = if performance_samples.is_empty() {
+        None
+    } else {
+        Some(
+            (results.len() as f64 / performance_samples.len() as f64)
+                .round()
+                .max(1.0) as usize,
+        )
+    };
+
+    let system_load = aggregate_system_load(results);
 
     let success_rate_percent = if !results.is_empty() {
         (successful.len() as f64 / results.len() as f64) * 100.0
@@ -712,7 +831,81 @@ fn calculate_percentiles(results: &[&BenchmarkResult]) -> PerformancePercentiles
         success_rate_percent,
         extraction_duration,
         quality,
+        pages_per_sec,
+        cpu_seconds,
+        batch_size,
+        system_load,
     }
+}
+
+/// Compute one pages/sec observation per performance sample (see [`successful_performance_samples`]).
+///
+/// For a single-file result, this is simply `page_count / duration`. For a native batch, every
+/// document sharing one `batch_sample_id` has its own `PdfMetadata.page_count`, so the *total*
+/// pages processed by that one batch invocation is summed across all its member rows before
+/// dividing by the (shared) batch makespan — mirroring how batch-wide `throughput_bytes_per_sec`
+/// is computed from summed bytes, not a single member row's byte count.
+///
+/// Rows without a detected PDF page count (non-PDF files, or a PDF the harness could not size)
+/// are excluded rather than treated as zero.
+fn collect_pages_per_second(successful: &[&BenchmarkResult]) -> Vec<f64> {
+    let mut batch_pages: HashMap<&str, u64> = HashMap::new();
+    for result in successful {
+        if let (Some(batch_id), Some(page_count)) = (
+            result.framework_capabilities.batch_sample_id.as_deref(),
+            result.pdf_metadata.as_ref().and_then(|metadata| metadata.page_count),
+        ) {
+            *batch_pages.entry(batch_id).or_insert(0) += page_count as u64;
+        }
+    }
+
+    successful_performance_samples(successful.iter().copied())
+        .into_iter()
+        .filter_map(|sample| {
+            let duration_secs = sample.duration.as_secs_f64();
+            if duration_secs <= 0.0 {
+                return None;
+            }
+            let pages = match sample.framework_capabilities.batch_sample_id.as_deref() {
+                Some(batch_id) => *batch_pages.get(batch_id)?,
+                None => sample.pdf_metadata.as_ref().and_then(|metadata| metadata.page_count)? as u64,
+            };
+            if pages == 0 {
+                return None;
+            }
+            Some(pages as f64 / duration_secs)
+        })
+        .collect()
+}
+
+/// Aggregate the `SystemLoad` snapshots carried by a group of results into a contention
+/// qualifier. Returns `None` when no result in the group recorded a snapshot.
+fn aggregate_system_load(results: &[&BenchmarkResult]) -> Option<SystemLoadPercentiles> {
+    let mut load_per_core: Vec<f64> = results
+        .iter()
+        .filter_map(|r| r.system_load.as_ref())
+        .map(|load| load.load_per_core())
+        .filter(|v| !v.is_nan() && v.is_finite())
+        .collect();
+
+    if load_per_core.is_empty() {
+        return None;
+    }
+
+    let contended_sample_count = results
+        .iter()
+        .filter_map(|r| r.system_load.as_ref())
+        .filter(|load| load.is_contended())
+        .count();
+
+    load_per_core.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+    Some(SystemLoadPercentiles {
+        load_per_core_p50: sanitize_f64(percentile_r7(&load_per_core, 0.50)),
+        load_per_core_p95: sanitize_f64(percentile_r7(&load_per_core, 0.95)),
+        contended_sample_count,
+        total_sample_count: load_per_core.len(),
+    })
 }
 
 /// Aggregate cold start durations
@@ -933,6 +1126,8 @@ fn build_shared_corpus_quality_ranking(
 /// once even when its document rows span several file-type or OCR buckets.
 fn build_comparison(by_framework_mode: &HashMap<String, FrameworkModeAggregation>) -> ComparisonData {
     let mut metrics: Vec<(String, f64, f64, OutputFormat)> = Vec::new();
+    let mut cpu_seconds_metrics: Vec<(String, f64)> = Vec::new();
+    let mut pages_per_sec_metrics: Vec<(String, f64)> = Vec::new();
 
     for (key, agg) in by_framework_mode {
         let Some(performance) = agg
@@ -949,6 +1144,10 @@ fn build_comparison(by_framework_mode: &HashMap<String, FrameworkModeAggregation
             performance.memory.p50,
             agg.output_format,
         ));
+        cpu_seconds_metrics.push((key.clone(), performance.cpu_seconds.p50));
+        if let Some(pages_per_sec) = &performance.pages_per_sec {
+            pages_per_sec_metrics.push((key.clone(), pages_per_sec.p50));
+        }
     }
 
     let mut thr = metrics.clone();
@@ -1105,6 +1304,31 @@ fn build_comparison(by_framework_mode: &HashMap<String, FrameworkModeAggregation
     let pdf_tf1_ranking_plaintext = build_ranking(&mut pdf_tf1_plaintext);
     let pdf_sf1_ranking_markdown = build_ranking(&mut pdf_sf1_markdown);
 
+    // Higher pages/sec is better, so the shared descending `build_ranking` closure applies as-is.
+    let pages_per_sec_ranking = build_ranking(&mut pages_per_sec_metrics);
+
+    // Lower CPU-seconds is better: sort ascending, with the best (lowest) value as the `1.0`
+    // relative baseline — mirrors `memory_ranking`'s ascending treatment above.
+    cpu_seconds_metrics.retain(|(_, v)| v.is_finite());
+    cpu_seconds_metrics.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+    let baseline_cpu_seconds = cpu_seconds_metrics.first().map(|(_, v)| *v).unwrap_or(1.0);
+    let cpu_seconds_ranking: Vec<RankedFramework> = cpu_seconds_metrics
+        .iter()
+        .enumerate()
+        .map(|(i, (k, v))| RankedFramework {
+            framework_mode: k.clone(),
+            rank: i + 1,
+            value: *v,
+            relative: if baseline_cpu_seconds > 0.0 {
+                *v / baseline_cpu_seconds
+            } else {
+                1.0
+            },
+        })
+        .collect();
+
+    let pareto_frontier = build_pareto_frontier(by_framework_mode);
+
     ComparisonData {
         throughput_ranking,
         memory_ranking,
@@ -1115,14 +1339,63 @@ fn build_comparison(by_framework_mode: &HashMap<String, FrameworkModeAggregation
         pdf_tf1_ranking_markdown,
         pdf_tf1_ranking_plaintext,
         pdf_sf1_ranking_markdown,
+        pages_per_sec_ranking,
+        cpu_seconds_ranking,
         deltas_vs_baseline,
+        pareto_frontier,
     }
+}
+
+/// Build the non-dominated (pages/sec ↑, SF1 ↑, peak-RSS ↓) frontier across markdown frameworks.
+///
+/// See [`ParetoPoint`] for the dominance rule and eligibility criteria (markdown output format,
+/// a defined SF1 term, and at least one pages/sec observation).
+fn build_pareto_frontier(by_framework_mode: &HashMap<String, FrameworkModeAggregation>) -> Vec<ParetoPoint> {
+    let candidates: Vec<ParetoPoint> = by_framework_mode
+        .iter()
+        .filter(|(_, agg)| agg.output_format == OutputFormat::Markdown)
+        .filter_map(|(key, agg)| {
+            let performance = agg
+                .overall_performance
+                .as_ref()
+                .filter(|performance| performance.performance_sample_count > 0)?;
+            let pages_per_sec = performance.pages_per_sec.as_ref()?.p50;
+            let sf1 = performance.quality.as_ref()?.f1_layout_p50?;
+            let peak_memory_mb = performance.memory.p50;
+            if !pages_per_sec.is_finite() || !sf1.is_finite() || !peak_memory_mb.is_finite() {
+                return None;
+            }
+            Some(ParetoPoint {
+                framework_mode: key.clone(),
+                pages_per_sec,
+                sf1,
+                peak_memory_mb,
+            })
+        })
+        .collect();
+
+    candidates
+        .iter()
+        .filter(|candidate| {
+            !candidates.iter().any(|other| {
+                other.framework_mode != candidate.framework_mode
+                    && other.pages_per_sec >= candidate.pages_per_sec
+                    && other.sf1 >= candidate.sf1
+                    && other.peak_memory_mb <= candidate.peak_memory_mb
+                    && (other.pages_per_sec > candidate.pages_per_sec
+                        || other.sf1 > candidate.sf1
+                        || other.peak_memory_mb < candidate.peak_memory_mb)
+            })
+        })
+        .cloned()
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{ErrorKind, FrameworkCapabilities, OcrStatus, PerformanceMetrics};
+    use crate::system_load::SystemLoad;
+    use crate::types::{ErrorKind, FrameworkCapabilities, OcrStatus, PdfMetadata, PerformanceMetrics, QualityMetrics};
     use std::path::PathBuf;
     use std::time::Duration;
 
@@ -1149,6 +1422,7 @@ mod tests {
                 peak_memory_bytes: memory_bytes,
                 peak_memory_delta_bytes: memory_bytes,
                 avg_cpu_percent: 50.0,
+                cpu_seconds: 50.0,
                 throughput_bytes_per_sec: throughput_bps,
                 p50_memory_bytes: memory_bytes,
                 p95_memory_bytes: memory_bytes,
@@ -1498,6 +1772,7 @@ mod tests {
                 peak_memory_bytes: 10_000_000,
                 peak_memory_delta_bytes: 10_000_000,
                 avg_cpu_percent: 50.0,
+                cpu_seconds: 50.0,
                 throughput_bytes_per_sec: 10_240.0,
                 p50_memory_bytes: 8_000_000,
                 p95_memory_bytes: 9_500_000,
@@ -1545,6 +1820,7 @@ mod tests {
                     peak_memory_bytes: 10_000_000,
                     peak_memory_delta_bytes: 10_000_000,
                     avg_cpu_percent: 50.0,
+                    cpu_seconds: 50.0,
                     throughput_bytes_per_sec: 10_240.0,
                     p50_memory_bytes: 8_000_000,
                     p95_memory_bytes: 9_500_000,
@@ -1577,6 +1853,7 @@ mod tests {
                     peak_memory_bytes: 0,
                     peak_memory_delta_bytes: 0,
                     avg_cpu_percent: 0.0,
+                    cpu_seconds: 0.0,
                     throughput_bytes_per_sec: 0.0,
                     p50_memory_bytes: 0,
                     p95_memory_bytes: 0,
@@ -1922,6 +2199,7 @@ mod tests {
                 peak_memory_bytes: 0,
                 peak_memory_delta_bytes: 0,
                 avg_cpu_percent: 0.0,
+                cpu_seconds: 0.0,
                 throughput_bytes_per_sec: 0.0,
                 p50_memory_bytes: 0,
                 p95_memory_bytes: 0,
@@ -2076,5 +2354,418 @@ mod tests {
             .find(|r| r.framework_mode.contains("framework-ok"))
             .expect("framework-ok must appear in pdf_quality_ranking_markdown");
         assert!(pdf_ok.rank < pdf_crashed.rank);
+    }
+
+    fn pdf_metadata_with_page_count(page_count: u32) -> PdfMetadata {
+        PdfMetadata {
+            has_text_layer: true,
+            detection_method: "pdftotext".to_string(),
+            page_count: Some(page_count),
+            ocr_enabled: false,
+            text_quality_score: None,
+        }
+    }
+
+    #[test]
+    fn pages_per_sec_percentile_from_single_file_pdf_metadata() {
+        let mut result = create_test_result(
+            "xberg-markdown-baseline",
+            "pdf",
+            OcrStatus::NotUsed,
+            2_000,
+            1_000_000.0,
+            10_000_000,
+        );
+        result.pdf_metadata = Some(pdf_metadata_with_page_count(20));
+
+        let percentiles = calculate_percentiles(&[&result]);
+
+        // 20 pages / 2.0 seconds = 10.0 pages/sec.
+        let pages_per_sec = percentiles.pages_per_sec.expect("pages_per_sec must be populated");
+        assert_eq!(pages_per_sec.p50, 10.0);
+        assert_eq!(pages_per_sec.p95, 10.0);
+        assert_eq!(pages_per_sec.p99, 10.0);
+    }
+
+    #[test]
+    fn pages_per_sec_is_none_without_any_page_count_data() {
+        let result = create_test_result(
+            "xberg-markdown-baseline",
+            "docx",
+            OcrStatus::NotUsed,
+            1_000,
+            1_000_000.0,
+            10_000_000,
+        );
+
+        let percentiles = calculate_percentiles(&[&result]);
+
+        assert!(percentiles.pages_per_sec.is_none());
+    }
+
+    #[test]
+    fn pages_per_sec_sums_page_counts_across_one_batch_invocation() {
+        let capability = crate::types::BatchCapability {
+            entry_point: crate::types::BatchEntryPoint::XbergCliExtractBatch,
+            timing_scope: crate::types::BatchTimingScope::ColdEndToEndSubprocess,
+            per_item_timing: true,
+        };
+
+        let mut doc_a = create_test_result(
+            "xberg-markdown-baseline-batch",
+            "pdf",
+            OcrStatus::NotUsed,
+            4_000,
+            1_000_000.0,
+            10_000_000,
+        );
+        doc_a.framework_capabilities.batch_support = true;
+        doc_a.framework_capabilities.batch_capability = Some(capability);
+        doc_a.framework_capabilities.batch_performance_sample = Some(true);
+        doc_a.framework_capabilities.batch_sample_id = Some("batch-1".to_string());
+        doc_a.pdf_metadata = Some(pdf_metadata_with_page_count(12));
+
+        let mut doc_b = create_test_result(
+            "xberg-markdown-baseline-batch",
+            "pdf",
+            OcrStatus::NotUsed,
+            4_000,
+            1_000_000.0,
+            10_000_000,
+        );
+        doc_b.framework_capabilities.batch_support = true;
+        doc_b.framework_capabilities.batch_capability = Some(capability);
+        doc_b.framework_capabilities.batch_performance_sample = Some(false);
+        doc_b.framework_capabilities.batch_sample_id = Some("batch-1".to_string());
+        doc_b.pdf_metadata = Some(pdf_metadata_with_page_count(8));
+
+        let percentiles = calculate_percentiles(&[&doc_a, &doc_b]);
+
+        // Total 20 pages across the one batch invocation, over its shared 4-second makespan.
+        let pages_per_sec = percentiles
+            .pages_per_sec
+            .expect("pages_per_sec must be populated for the batch");
+        assert_eq!(pages_per_sec.p50, 5.0);
+        assert_eq!(percentiles.performance_sample_count, 1);
+    }
+
+    #[test]
+    fn cpu_seconds_percentile_aggregates_from_performance_samples() {
+        let mut r1 = create_test_result(
+            "xberg-markdown-baseline",
+            "pdf",
+            OcrStatus::NotUsed,
+            100,
+            1_000_000.0,
+            10_000_000,
+        );
+        r1.metrics.cpu_seconds = 1.0;
+        let mut r2 = create_test_result(
+            "xberg-markdown-baseline",
+            "pdf",
+            OcrStatus::NotUsed,
+            100,
+            1_000_000.0,
+            10_000_000,
+        );
+        r2.metrics.cpu_seconds = 2.0;
+        let mut r3 = create_test_result(
+            "xberg-markdown-baseline",
+            "pdf",
+            OcrStatus::NotUsed,
+            100,
+            1_000_000.0,
+            10_000_000,
+        );
+        r3.metrics.cpu_seconds = 3.0;
+
+        let percentiles = calculate_percentiles(&[&r1, &r2, &r3]);
+
+        assert_eq!(percentiles.cpu_seconds.p50, 2.0);
+    }
+
+    #[test]
+    fn batch_size_is_one_for_single_file_mode() {
+        let result = create_test_result(
+            "xberg-markdown-baseline",
+            "pdf",
+            OcrStatus::NotUsed,
+            100,
+            1_000_000.0,
+            10_000_000,
+        );
+
+        let percentiles = calculate_percentiles(&[&result]);
+
+        assert_eq!(percentiles.batch_size, Some(1));
+    }
+
+    #[test]
+    fn batch_size_reflects_documents_per_batch_invocation() {
+        let capability = crate::types::BatchCapability {
+            entry_point: crate::types::BatchEntryPoint::XbergCliExtractBatch,
+            timing_scope: crate::types::BatchTimingScope::ColdEndToEndSubprocess,
+            per_item_timing: true,
+        };
+        let mut results = [
+            create_test_result(
+                "xberg-markdown-baseline-batch",
+                "pdf",
+                OcrStatus::NotUsed,
+                100,
+                1_000_000.0,
+                10_000_000,
+            ),
+            create_test_result(
+                "xberg-markdown-baseline-batch",
+                "pdf",
+                OcrStatus::NotUsed,
+                100,
+                1_000_000.0,
+                10_000_000,
+            ),
+            create_test_result(
+                "xberg-markdown-baseline-batch",
+                "pdf",
+                OcrStatus::NotUsed,
+                100,
+                1_000_000.0,
+                10_000_000,
+            ),
+            create_test_result(
+                "xberg-markdown-baseline-batch",
+                "pdf",
+                OcrStatus::NotUsed,
+                100,
+                1_000_000.0,
+                10_000_000,
+            ),
+        ];
+        for (index, result) in results.iter_mut().enumerate() {
+            result.framework_capabilities.batch_support = true;
+            result.framework_capabilities.batch_capability = Some(capability);
+            result.framework_capabilities.batch_performance_sample = Some(index == 0);
+            result.framework_capabilities.batch_sample_id = Some("batch-of-4".to_string());
+        }
+
+        let refs: Vec<&BenchmarkResult> = results.iter().collect();
+        let percentiles = calculate_percentiles(&refs);
+
+        assert_eq!(percentiles.performance_sample_count, 1);
+        assert_eq!(percentiles.batch_size, Some(4));
+    }
+
+    #[test]
+    fn system_load_aggregates_contention_across_results() {
+        let mut idle = create_test_result(
+            "xberg-markdown-baseline",
+            "pdf",
+            OcrStatus::NotUsed,
+            100,
+            1_000_000.0,
+            10_000_000,
+        );
+        idle.system_load = Some(SystemLoad {
+            load_avg_1m: 1.0,
+            load_avg_5m: 1.0,
+            load_avg_15m: 1.0,
+            logical_cores: 10,
+            physical_cores: 10,
+        });
+
+        let mut busy = create_test_result(
+            "xberg-markdown-baseline",
+            "pdf",
+            OcrStatus::NotUsed,
+            100,
+            1_000_000.0,
+            10_000_000,
+        );
+        busy.system_load = Some(SystemLoad {
+            load_avg_1m: 12.0,
+            load_avg_5m: 12.0,
+            load_avg_15m: 12.0,
+            logical_cores: 10,
+            physical_cores: 10,
+        });
+
+        let percentiles = calculate_percentiles(&[&idle, &busy]);
+
+        let system_load = percentiles.system_load.expect("system_load must be populated");
+        assert_eq!(system_load.total_sample_count, 2);
+        assert_eq!(
+            system_load.contended_sample_count, 1,
+            "only the busy sample (load_per_core 1.2 > 0.7 threshold) should count as contended"
+        );
+        // R7 median of [0.1, 1.2] (load_avg_1m / logical_cores, sorted).
+        assert!((system_load.load_per_core_p50 - 0.65).abs() < 1e-9);
+    }
+
+    #[test]
+    fn system_load_is_none_without_any_captured_snapshot() {
+        let result = create_test_result(
+            "xberg-markdown-baseline",
+            "pdf",
+            OcrStatus::NotUsed,
+            100,
+            1_000_000.0,
+            10_000_000,
+        );
+
+        let percentiles = calculate_percentiles(&[&result]);
+
+        assert!(percentiles.system_load.is_none());
+    }
+
+    fn markdown_pdf_result(
+        framework: &str,
+        duration_ms: u64,
+        memory_bytes: u64,
+        page_count: u32,
+        f1_layout: f64,
+    ) -> BenchmarkResult {
+        let mut result = create_test_result(
+            framework,
+            "pdf",
+            OcrStatus::NotUsed,
+            duration_ms,
+            1_000_000.0,
+            memory_bytes,
+        );
+        result.pdf_metadata = Some(pdf_metadata_with_page_count(page_count));
+        result.quality = Some(QualityMetrics {
+            f1_score_text: 0.9,
+            f1_score_numeric: 0.9,
+            f1_score_layout: Some(f1_layout),
+            quality_score: 0.9,
+            missing_tokens: vec![],
+            extra_tokens: vec![],
+            correct: false,
+        });
+        result
+    }
+
+    /// `framework-fast` dominates `framework-dominated` on all three Pareto axes (higher
+    /// pages/sec, higher SF1, lower peak-RSS), so `framework-dominated` must be excluded from
+    /// the frontier. `framework-balanced` trades pages/sec for SF1 and memory against
+    /// `framework-fast` (neither dominates the other), so both survive.
+    #[test]
+    fn pareto_frontier_excludes_the_dominated_candidate() {
+        let results = vec![
+            markdown_pdf_result("framework-fast", 1_000, 500_000_000, 100, 0.70),
+            markdown_pdf_result("framework-balanced", 2_000, 200_000_000, 100, 0.90),
+            markdown_pdf_result("framework-dominated", 4_000, 900_000_000, 100, 0.60),
+        ];
+
+        let aggregated = aggregate_new_format(&results);
+        let frontier = &aggregated.comparison.pareto_frontier;
+        let frontier_keys: std::collections::HashSet<&str> =
+            frontier.iter().map(|point| point.framework_mode.as_str()).collect();
+
+        assert_eq!(
+            frontier.len(),
+            2,
+            "expected exactly fast + balanced on the frontier: {frontier:?}"
+        );
+        assert!(frontier_keys.iter().any(|k| k.contains("framework-fast")));
+        assert!(frontier_keys.iter().any(|k| k.contains("framework-balanced")));
+        assert!(
+            !frontier_keys.iter().any(|k| k.contains("framework-dominated")),
+            "framework-dominated must be excluded: framework-fast strictly dominates it on all three axes, got {frontier:?}"
+        );
+
+        let fast_point = frontier
+            .iter()
+            .find(|point| point.framework_mode.contains("framework-fast"))
+            .expect("fast point present");
+        assert_eq!(fast_point.pages_per_sec, 100.0);
+        assert_eq!(fast_point.sf1, 0.70);
+        assert_eq!(fast_point.peak_memory_mb, 500.0);
+    }
+
+    #[test]
+    fn pareto_frontier_excludes_plaintext_frameworks() {
+        let mut plaintext = markdown_pdf_result("framework-plaintext", 1_000, 100_000_000, 100, 0.95);
+        plaintext.output_format = OutputFormat::Plaintext;
+        plaintext.quality.as_mut().unwrap().f1_score_layout = None;
+
+        let aggregated = aggregate_new_format(&[plaintext]);
+
+        assert!(
+            aggregated.comparison.pareto_frontier.is_empty(),
+            "a plaintext-only framework has no SF1 term and must never appear on the frontier"
+        );
+    }
+
+    #[test]
+    fn pages_per_sec_ranking_orders_by_median_descending() {
+        let mut fast = create_test_result(
+            "framework-fast",
+            "pdf",
+            OcrStatus::NotUsed,
+            1_000,
+            1_000_000.0,
+            10_000_000,
+        );
+        fast.pdf_metadata = Some(pdf_metadata_with_page_count(100));
+
+        let mut slow = create_test_result(
+            "framework-slow",
+            "pdf",
+            OcrStatus::NotUsed,
+            4_000,
+            1_000_000.0,
+            10_000_000,
+        );
+        slow.pdf_metadata = Some(pdf_metadata_with_page_count(100));
+
+        let aggregated = aggregate_new_format(&[fast, slow]);
+        let ranking = &aggregated.comparison.pages_per_sec_ranking;
+
+        assert_eq!(ranking.len(), 2);
+        assert!(ranking[0].framework_mode.contains("framework-fast"));
+        assert_eq!(ranking[0].rank, 1);
+        assert_eq!(ranking[0].value, 100.0);
+        assert!(ranking[1].framework_mode.contains("framework-slow"));
+        assert_eq!(ranking[1].rank, 2);
+        assert_eq!(ranking[1].value, 25.0);
+    }
+
+    #[test]
+    fn cpu_seconds_ranking_orders_ascending_lowest_first() {
+        let mut lean = create_test_result(
+            "framework-lean",
+            "pdf",
+            OcrStatus::NotUsed,
+            1_000,
+            1_000_000.0,
+            10_000_000,
+        );
+        lean.metrics.cpu_seconds = 0.5;
+
+        let mut heavy = create_test_result(
+            "framework-heavy",
+            "pdf",
+            OcrStatus::NotUsed,
+            1_000,
+            1_000_000.0,
+            10_000_000,
+        );
+        heavy.metrics.cpu_seconds = 4.0;
+
+        let aggregated = aggregate_new_format(&[lean, heavy]);
+        let ranking = &aggregated.comparison.cpu_seconds_ranking;
+
+        assert_eq!(ranking.len(), 2);
+        assert!(ranking[0].framework_mode.contains("framework-lean"));
+        assert_eq!(ranking[0].rank, 1);
+        assert_eq!(ranking[0].value, 0.5);
+        assert!(ranking[1].framework_mode.contains("framework-heavy"));
+        assert_eq!(ranking[1].rank, 2);
+        assert_eq!(ranking[1].value, 4.0);
+        assert!(
+            ranking[1].relative > 1.0,
+            "the higher-CPU framework's relative value should exceed the lowest-CPU baseline"
+        );
     }
 }

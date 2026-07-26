@@ -441,6 +441,7 @@ mod tests {
                 peak_memory_bytes: 0,
                 peak_memory_delta_bytes: 0,
                 avg_cpu_percent: 0.0,
+                cpu_seconds: 0.0,
                 throughput_bytes_per_sec: 0.0,
                 p50_memory_bytes: 0,
                 p95_memory_bytes: 0,

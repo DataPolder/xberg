@@ -178,6 +178,38 @@ fn collect_process_tree_vm(pid: Pid, system: &System) -> u64 {
     total
 }
 
+/// Approximate total CPU-time consumed by the process tree in core-seconds, via trapezoidal
+/// integration of the per-sample CPU percentage over the sampled timeline.
+///
+/// `ResourceSample::cpu_percent` is normalized to a fraction of total system capacity (divided
+/// by `logical_cores` in [`ResourceMonitor::collect_sample`]); this recovers the un-normalized
+/// (raw, `0..=100*logical_cores`) percentage before integrating, since core-seconds measures
+/// actual CPU-time consumed rather than a per-core-normalized rate.
+///
+/// `logical_cores` is taken as a parameter (rather than calling `num_cpus::get()` internally)
+/// so the integration math is independently unit-testable regardless of the host's actual core
+/// count. Precision is bounded by the sampling interval (1-10ms, adaptive on file size, see
+/// [`adaptive_sampling_interval_ms`]): CPU bursts shorter than the gap between two samples are
+/// smoothed by the trapezoidal average rather than captured exactly. Returns `0.0` when fewer
+/// than two samples are available, since there is no timeline to integrate over.
+fn integrate_cpu_core_seconds(samples: &[ResourceSample], logical_cores: f64) -> f64 {
+    if samples.len() < 2 {
+        return 0.0;
+    }
+
+    samples
+        .windows(2)
+        .map(|pair| {
+            let (prev, curr) = (pair[0], pair[1]);
+            let delta_secs = curr.timestamp_ms.saturating_sub(prev.timestamp_ms) as f64 / 1000.0;
+            let prev_raw_percent = prev.cpu_percent * logical_cores;
+            let curr_raw_percent = curr.cpu_percent * logical_cores;
+            let avg_raw_percent = (prev_raw_percent + curr_raw_percent) / 2.0;
+            (avg_raw_percent / 100.0) * delta_secs
+        })
+        .sum()
+}
+
 /// Collect total CPU usage from a process and all its descendants
 ///
 /// Recursively traverses the process tree, summing CPU usage from the parent
@@ -618,6 +650,7 @@ impl ResourceMonitor {
             total_page_faults,
             memory_growth_rate_mb_s,
             avg_cpu_percent: avg_cpu,
+            cpu_seconds: integrate_cpu_core_seconds(samples, num_cpus::get() as f64),
             p50_memory_bytes: Self::calculate_percentile(memory_values.clone(), 0.50),
             p95_memory_bytes: Self::calculate_percentile(memory_values.clone(), 0.95),
             p99_memory_bytes: Self::calculate_percentile(memory_values, 0.99),
@@ -654,6 +687,9 @@ pub struct ResourceStats {
     pub memory_growth_rate_mb_s: f64,
     /// Average CPU usage percentage
     pub avg_cpu_percent: f64,
+    /// Total process-tree CPU time consumed, in core-seconds (trapezoidal integration of the
+    /// sampled timeline; see [`integrate_cpu_core_seconds`]).
+    pub cpu_seconds: f64,
     /// 50th percentile (median) memory usage
     pub p50_memory_bytes: u64,
     /// 95th percentile memory usage
@@ -734,6 +770,86 @@ mod tests {
     fn test_calculate_percentile_empty() {
         let values = vec![];
         assert_eq!(ResourceMonitor::calculate_percentile(values, 0.5), 0);
+    }
+
+    #[test]
+    fn integrate_cpu_core_seconds_returns_zero_for_fewer_than_two_samples() {
+        assert_eq!(integrate_cpu_core_seconds(&[], 4.0), 0.0);
+
+        let single = [ResourceSample {
+            memory_bytes: 0,
+            vm_size_bytes: 0,
+            page_faults: 0,
+            cpu_percent: 50.0,
+            timestamp_ms: 0,
+        }];
+        assert_eq!(integrate_cpu_core_seconds(&single, 4.0), 0.0);
+    }
+
+    #[test]
+    fn integrate_cpu_core_seconds_trapezoidal_two_samples() {
+        // Normalized cpu_percent of 25% and 50% on a 2-core machine recovers raw (un-normalized)
+        // percentages of 50% and 100%. Trapezoidal average = 75% = 0.75 cores, held for 1 second
+        // => 0.75 core-seconds.
+        let samples = [
+            ResourceSample {
+                memory_bytes: 0,
+                vm_size_bytes: 0,
+                page_faults: 0,
+                cpu_percent: 25.0,
+                timestamp_ms: 0,
+            },
+            ResourceSample {
+                memory_bytes: 0,
+                vm_size_bytes: 0,
+                page_faults: 0,
+                cpu_percent: 50.0,
+                timestamp_ms: 1_000,
+            },
+        ];
+
+        let core_seconds = integrate_cpu_core_seconds(&samples, 2.0);
+
+        assert!(
+            (core_seconds - 0.75).abs() < 1e-9,
+            "expected 0.75 core-seconds, got {core_seconds}"
+        );
+    }
+
+    #[test]
+    fn integrate_cpu_core_seconds_sums_across_multiple_windows() {
+        // Three samples of constant raw 100% (normalized 25% on a 4-core machine) held for 500ms
+        // each => 1.0 core * 1.0 total second = 1.0 core-second.
+        let samples = [
+            ResourceSample {
+                memory_bytes: 0,
+                vm_size_bytes: 0,
+                page_faults: 0,
+                cpu_percent: 25.0,
+                timestamp_ms: 0,
+            },
+            ResourceSample {
+                memory_bytes: 0,
+                vm_size_bytes: 0,
+                page_faults: 0,
+                cpu_percent: 25.0,
+                timestamp_ms: 500,
+            },
+            ResourceSample {
+                memory_bytes: 0,
+                vm_size_bytes: 0,
+                page_faults: 0,
+                cpu_percent: 25.0,
+                timestamp_ms: 1_000,
+            },
+        ];
+
+        let core_seconds = integrate_cpu_core_seconds(&samples, 4.0);
+
+        assert!(
+            (core_seconds - 1.0).abs() < 1e-9,
+            "expected 1.0 core-second, got {core_seconds}"
+        );
     }
 
     #[tokio::test]
@@ -886,6 +1002,15 @@ mod tests {
         assert_eq!(stats.sample_count, 3);
         assert!(stats.memory_growth_rate_mb_s >= 0.0);
         assert_eq!(stats.snapshots.len(), 3);
+        // `calculate_stats` must wire `cpu_seconds` through the same integration function,
+        // called with the host's actual logical core count (not asserted as a machine-dependent
+        // literal, since `num_cpus::get()` varies across CI runners). ~keep
+        let expected_core_seconds = integrate_cpu_core_seconds(&samples, num_cpus::get() as f64);
+        assert!(
+            (stats.cpu_seconds - expected_core_seconds).abs() < 1e-9,
+            "expected cpu_seconds {expected_core_seconds}, got {}",
+            stats.cpu_seconds
+        );
     }
 
     #[tokio::test]
@@ -894,6 +1019,7 @@ mod tests {
         assert_eq!(stats.baseline_memory_bytes, 42);
         assert_eq!(stats.peak_memory_bytes, 0);
         assert_eq!(stats.sample_count, 0);
+        assert_eq!(stats.cpu_seconds, 0.0);
     }
 
     #[tokio::test]

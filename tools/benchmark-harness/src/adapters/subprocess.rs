@@ -124,6 +124,16 @@ fn bytes_per_second(bytes: u64, duration: Duration) -> f64 {
     }
 }
 
+/// Detect a PDF's page count using the harness-side (framework-agnostic) `xberg` page counter.
+///
+/// This is intentionally independent of whatever a competing framework self-reports, so the
+/// resulting `pages_per_sec` aggregate metric compares every framework against the same
+/// ground truth. Returns `None` when the file cannot be read or does not parse as a PDF.
+fn detect_pdf_page_count(path: &Path) -> Option<u32> {
+    let bytes = std::fs::read(path).ok()?;
+    xberg::pdf_page_count(&bytes, None).ok().map(|count| count as u32)
+}
+
 #[derive(Debug)]
 struct ParsedBatchOutput {
     items: Vec<serde_json::Value>,
@@ -1151,6 +1161,7 @@ impl SubprocessAdapter {
                 peak_memory_bytes: resource_stats.peak_memory_bytes,
                 peak_memory_delta_bytes: resource_stats.peak_memory_delta_bytes,
                 avg_cpu_percent: resource_stats.avg_cpu_percent,
+                cpu_seconds: resource_stats.cpu_seconds,
                 throughput_bytes_per_sec: 0.0,
                 p50_memory_bytes: resource_stats.p50_memory_bytes,
                 p95_memory_bytes: resource_stats.p95_memory_bytes,
@@ -1418,6 +1429,7 @@ impl FrameworkAdapter for SubprocessAdapter {
                 peak_memory_bytes: reported_mem,
                 peak_memory_delta_bytes: reported_mem.saturating_sub(resource_stats.baseline_memory_bytes),
                 avg_cpu_percent: resource_stats.avg_cpu_percent,
+                cpu_seconds: resource_stats.cpu_seconds,
                 throughput_bytes_per_sec: throughput,
                 p50_memory_bytes: reported_mem,
                 p95_memory_bytes: reported_mem,
@@ -1428,6 +1440,7 @@ impl FrameworkAdapter for SubprocessAdapter {
                 peak_memory_bytes: resource_stats.peak_memory_bytes,
                 peak_memory_delta_bytes: resource_stats.peak_memory_delta_bytes,
                 avg_cpu_percent: resource_stats.avg_cpu_percent,
+                cpu_seconds: resource_stats.cpu_seconds,
                 throughput_bytes_per_sec: throughput,
                 p50_memory_bytes: resource_stats.p50_memory_bytes,
                 p95_memory_bytes: resource_stats.p95_memory_bytes,
@@ -1449,7 +1462,7 @@ impl FrameworkAdapter for SubprocessAdapter {
             Some(crate::types::PdfMetadata {
                 has_text_layer: false,
                 detection_method: "unknown".to_string(),
-                page_count: None,
+                page_count: detect_pdf_page_count(file_path),
                 ocr_enabled: ocr_status == OcrStatus::Used,
                 text_quality_score: None,
             })
@@ -1721,6 +1734,18 @@ impl FrameworkAdapter for SubprocessAdapter {
                 let mut item_capabilities = framework_capabilities.clone();
                 item_capabilities.batch_performance_sample = Some(throughput_anchor == Some(idx));
 
+                let pdf_metadata = if file_extension.eq_ignore_ascii_case("pdf") {
+                    Some(crate::types::PdfMetadata {
+                        has_text_layer: false,
+                        detection_method: "unknown".to_string(),
+                        page_count: detect_pdf_page_count(file_path),
+                        ocr_enabled: ocr_status == OcrStatus::Used,
+                        text_quality_score: None,
+                    })
+                } else {
+                    None
+                };
+
                 BenchmarkResult {
                     framework: self.name.clone(),
                     output_format,
@@ -1737,6 +1762,7 @@ impl FrameworkAdapter for SubprocessAdapter {
                         peak_memory_bytes: resource_stats.peak_memory_bytes,
                         peak_memory_delta_bytes: resource_stats.peak_memory_delta_bytes,
                         avg_cpu_percent: resource_stats.avg_cpu_percent,
+                        cpu_seconds: resource_stats.cpu_seconds,
                         // Every sibling carries the same process sample so each
                         // reporting bucket can recover it; aggregation deduplicates
                         // by `batch_sample_id`. ~keep
@@ -1751,7 +1777,7 @@ impl FrameworkAdapter for SubprocessAdapter {
                     cold_start_duration: None,
                     file_extension,
                     framework_capabilities: item_capabilities,
-                    pdf_metadata: None,
+                    pdf_metadata,
                     ocr_status,
                     extracted_text: batch_contents.get(idx).cloned().flatten(),
                     system_load: None,
@@ -1780,6 +1806,7 @@ impl Default for PerformanceMetrics {
             peak_memory_bytes: 0,
             peak_memory_delta_bytes: 0,
             avg_cpu_percent: 0.0,
+            cpu_seconds: 0.0,
             throughput_bytes_per_sec: 0.0,
             p50_memory_bytes: 0,
             p95_memory_bytes: 0,

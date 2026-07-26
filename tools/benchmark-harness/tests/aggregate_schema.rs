@@ -1,6 +1,8 @@
 use benchmark_harness::aggregate::aggregate_new_format;
+use benchmark_harness::system_load::SystemLoad;
 use benchmark_harness::types::{
-    BenchmarkResult, ErrorKind, FrameworkCapabilities, OcrStatus, OutputFormat, PerformanceMetrics, QualityMetrics,
+    BenchmarkResult, ErrorKind, FrameworkCapabilities, OcrStatus, OutputFormat, PdfMetadata, PerformanceMetrics,
+    QualityMetrics,
 };
 use std::path::PathBuf;
 use std::time::Duration;
@@ -33,6 +35,7 @@ fn make_benchmark_result(
             peak_memory_bytes: 100_000_000,
             peak_memory_delta_bytes: 100_000_000,
             avg_cpu_percent: 50.0,
+            cpu_seconds: 50.0,
             throughput_bytes_per_sec: 102_400.0,
             p50_memory_bytes: 90_000_000,
             p95_memory_bytes: 95_000_000,
@@ -428,4 +431,135 @@ fn test_empty_results() {
     assert!(aggregated.by_framework_mode.is_empty());
     assert!(aggregated.per_fixture_results.is_empty());
     assert_eq!(aggregated.metadata.total_results, 0);
+    assert!(aggregated.comparison.pages_per_sec_ranking.is_empty());
+    assert!(aggregated.comparison.cpu_seconds_ranking.is_empty());
+    assert!(aggregated.comparison.pareto_frontier.is_empty());
+}
+
+/// Tier A comparative performance metrics (v2.7.0 additive fields): `pages_per_sec` and
+/// `cpu_seconds` percentiles, and the `batch_size` dimension, must reach the public
+/// `NewConsolidatedResults` schema produced by `aggregate_new_format`.
+#[test]
+fn test_pages_per_sec_and_cpu_seconds_populate_in_public_schema() {
+    let mut result = make_benchmark_result(
+        "xberg-markdown-baseline",
+        OutputFormat::Markdown,
+        "fixture_1.pdf",
+        false,
+        true,
+        Some(QualityMetrics {
+            f1_score_text: 0.95,
+            f1_score_numeric: 0.90,
+            f1_score_layout: Some(0.88),
+            quality_score: 0.91,
+            missing_tokens: vec![],
+            extra_tokens: vec![],
+            correct: true,
+        }),
+    );
+    // duration is fixed at 100ms in `make_benchmark_result`; 5 pages / 0.1s = 50.0 pages/sec.
+    result.pdf_metadata = Some(PdfMetadata {
+        has_text_layer: true,
+        detection_method: "pdftotext".to_string(),
+        page_count: Some(5),
+        ocr_enabled: false,
+        text_quality_score: None,
+    });
+    result.metrics.cpu_seconds = 0.08;
+
+    let aggregated = aggregate_new_format(&[result]);
+
+    let performance = aggregated.by_framework_mode["xberg-markdown-baseline:single"]
+        .overall_performance
+        .as_ref()
+        .expect("overall_performance must be populated");
+
+    let pages_per_sec = performance
+        .pages_per_sec
+        .as_ref()
+        .expect("pages_per_sec must be populated from PdfMetadata.page_count");
+    assert_eq!(pages_per_sec.p50, 50.0);
+
+    assert_eq!(performance.cpu_seconds.p50, 0.08);
+    assert_eq!(performance.batch_size, Some(1));
+
+    let serialized = serde_json::to_value(&aggregated).unwrap();
+    let performance_json = &serialized["by_framework_mode"]["xberg-markdown-baseline:single"]["overall_performance"];
+    assert_eq!(performance_json["pages_per_sec"]["p50"], 50.0);
+    assert_eq!(performance_json["cpu_seconds"]["p50"], 0.08);
+    assert_eq!(performance_json["batch_size"], 1);
+}
+
+#[test]
+fn test_system_load_surfaces_as_contention_qualifier() {
+    let mut result = make_benchmark_result(
+        "xberg-markdown-baseline",
+        OutputFormat::Markdown,
+        "fixture_1.pdf",
+        false,
+        true,
+        None,
+    );
+    result.system_load = Some(SystemLoad {
+        load_avg_1m: 8.0,
+        load_avg_5m: 8.0,
+        load_avg_15m: 8.0,
+        logical_cores: 4,
+        physical_cores: 4,
+    });
+
+    let aggregated = aggregate_new_format(&[result]);
+
+    let performance = aggregated.by_framework_mode["xberg-markdown-baseline:single"]
+        .overall_performance
+        .as_ref()
+        .expect("overall_performance must be populated");
+    let system_load = performance
+        .system_load
+        .as_ref()
+        .expect("system_load must surface the captured contention snapshot");
+
+    assert_eq!(system_load.total_sample_count, 1);
+    assert_eq!(
+        system_load.contended_sample_count, 1,
+        "load_per_core of 2.0 (8.0 / 4 cores) exceeds the contention threshold"
+    );
+}
+
+#[test]
+fn test_pareto_frontier_reaches_public_schema() {
+    let mut result = make_benchmark_result(
+        "xberg-markdown-baseline",
+        OutputFormat::Markdown,
+        "fixture_1.pdf",
+        false,
+        true,
+        Some(QualityMetrics {
+            f1_score_text: 0.95,
+            f1_score_numeric: 0.90,
+            f1_score_layout: Some(0.88),
+            quality_score: 0.91,
+            missing_tokens: vec![],
+            extra_tokens: vec![],
+            correct: true,
+        }),
+    );
+    result.pdf_metadata = Some(PdfMetadata {
+        has_text_layer: true,
+        detection_method: "pdftotext".to_string(),
+        page_count: Some(10),
+        ocr_enabled: false,
+        text_quality_score: None,
+    });
+
+    let aggregated = aggregate_new_format(&[result]);
+
+    // A single markdown candidate with a defined SF1 term and pages/sec observation is
+    // trivially non-dominated, so it must appear on the frontier by construction.
+    assert_eq!(aggregated.comparison.pareto_frontier.len(), 1);
+    let point = &aggregated.comparison.pareto_frontier[0];
+    assert_eq!(point.framework_mode, "xberg-markdown-baseline:single");
+    assert_eq!(point.pages_per_sec, 100.0);
+    assert_eq!(point.sf1, 0.88);
+    assert_eq!(point.peak_memory_mb, 100.0);
 }

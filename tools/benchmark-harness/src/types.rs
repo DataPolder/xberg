@@ -327,6 +327,18 @@ pub struct PerformanceMetrics {
     /// Average CPU usage percentage (0-100)
     pub avg_cpu_percent: f64,
 
+    /// Total process-tree CPU time consumed, in core-seconds.
+    ///
+    /// Computed by trapezoidal integration of the un-normalized process-tree CPU percentage
+    /// over the resource sampler's timeline (see
+    /// `crate::monitoring::ResourceMonitor::calculate_stats`). Precision is bounded by the
+    /// sampling interval (1-10ms, adaptive on file size): CPU bursts shorter than the gap
+    /// between two samples are smoothed by the trapezoidal average rather than measured
+    /// exactly. `#[serde(default)]` so historical capture files without this field deserialize
+    /// as `0.0` rather than failing.
+    #[serde(default)]
+    pub cpu_seconds: f64,
+
     /// Throughput in bytes per second
     pub throughput_bytes_per_sec: f64,
 
