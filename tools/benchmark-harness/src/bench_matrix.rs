@@ -166,7 +166,7 @@ const NATIVE_DOCUMENT_STEMS: &[&str] = &[
 ];
 
 const OCR_MANIFEST_NAME: &str = "ocr-pdf-fast-b4-v1";
-const OCR_MANIFEST_BLAKE3: &str = "c740a9480fd0ad4311a4905206345c58d7ef7a987682cc96644e2f0ffe616a13";
+const OCR_MANIFEST_BLAKE3: &str = "f9e4e881b70111df10516a5f2cf2ed648f67b299f9116bafb34746e98436b66b";
 const OCR_BATCH_SIZE: usize = 4;
 const OCR_FIXTURES: &[&str] = &[
     "pdf_non_searchable.json",
