@@ -1613,7 +1613,6 @@ mod tests {
             "SF1 should be positive when structural GT is provided, got {}",
             structural.sf1
         );
-        // Structural GT present ⇒ per-dimension precision/recall are populated too.
         assert_eq!(structural.per_type_sf1.len(), structural.per_type_precision.len());
         assert_eq!(structural.per_type_sf1.len(), structural.per_type_recall.len());
     }

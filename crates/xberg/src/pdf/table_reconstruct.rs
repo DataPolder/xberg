@@ -5,7 +5,7 @@
 //! It re-exports core types from `table_core` and adds PDF-specific
 //! conversion helpers.
 
-pub(crate) use crate::table_core::{reconstruct_table, table_to_markdown, HocrWord};
+pub(crate) use crate::table_core::{HocrWord, reconstruct_table, table_to_markdown};
 
 const DENSE_NUMERIC_MIN_DATA_ROWS: usize = 6;
 const DENSE_NUMERIC_MIN_COLUMNS: usize = 6;
@@ -833,7 +833,6 @@ fn looks_like_short_columned_prose(data_rows: &[Vec<String>], num_cols: usize) -
     if filled_cells == 0 {
         return false;
     }
-    // Numeric-fraction exemption: mostly-value grids are real tables.
     if numeric_value_cells * 100 >= filled_cells * SHORT_PROSE_NUMERIC_EXEMPT_PERCENT {
         return false;
     }
@@ -872,9 +871,6 @@ fn looks_like_short_columned_prose(data_rows: &[Vec<String>], num_cols: usize) -
         }
     }
 
-    // Majority of eligible rows must read as prose. For 1–2 rows this reduces to
-    // "every row" (no cross-row evidence to average over); for 3+ rows it mirrors
-    // the majority rule the other prose guards use.
     eligible_rows >= 1 && prose_rows * 2 > eligible_rows
 }
 
@@ -925,17 +921,6 @@ pub(crate) fn is_well_formed_table(grid: &[Vec<String>]) -> bool {
         }
     }
 
-    // Columned-prose guard (xberg-io/xberg#36). The alpha-ratio guard below only
-    // fires on ≥3 rows AND only catches phrase-per-cell prose whose rows are
-    // ≥80% alphabetic; the shredded-prose branch above only rejects a 1–2 row
-    // grid when EVERY row reads as a shredded-prose row at ≥6 columns. A
-    // wrapped-prose passage split across columns (a common misparse of
-    // multi-column academic text, incl. equation fragments that drop the alpha
-    // ratio below 0.8) therefore reaches `return true` and is fabricated as a
-    // table — and the corpus fabrications are wide (8–15 columns), not narrow.
-    // Recovering them as prose both removes the fabrication and restores readable
-    // text. The helper handles both the phrase-per-cell and wide-shredded prose
-    // shapes and exempts genuine short tables via a numeric-value fraction.
     if !data_rows.is_empty()
         && num_cols >= 2
         && !dense_numeric_grid
@@ -984,11 +969,7 @@ pub(crate) fn is_well_formed_table(grid: &[Vec<String>]) -> bool {
                     .iter()
                     .filter_map(|row| {
                         let cell = row.get(c).map(|s| s.trim()).unwrap_or("");
-                        if cell.is_empty() {
-                            None
-                        } else {
-                            Some(cell.len() as f64)
-                        }
+                        if cell.is_empty() { None } else { Some(cell.len() as f64) }
                     })
                     .collect();
                 if lengths.is_empty() {
@@ -1483,9 +1464,11 @@ mod tests {
 
     #[test]
     fn dense_numeric_matrix_survives_anti_prose_guards() {
-        let mut table = vec![(0..DENSE_NUMERIC_MIN_COLUMNS)
-            .map(|col| format!("Column {col}"))
-            .collect()];
+        let mut table = vec![
+            (0..DENSE_NUMERIC_MIN_COLUMNS)
+                .map(|col| format!("Column {col}"))
+                .collect(),
+        ];
         for row in 0..DENSE_NUMERIC_MIN_DATA_ROWS {
             table.push(
                 (0..DENSE_NUMERIC_MIN_COLUMNS)
@@ -1541,11 +1524,13 @@ mod tests {
 
         assert!(prune_spurious_interior_column(&mut table, true));
         assert_eq!(table[0].len(), 6);
-        assert!(table
-            .last()
-            .expect("data row")
-            .iter()
-            .any(|cell| cell.contains("sustained")));
+        assert!(
+            table
+                .last()
+                .expect("data row")
+                .iter()
+                .any(|cell| cell.contains("sustained"))
+        );
     }
 
     #[test]
@@ -2295,8 +2280,6 @@ mod tests {
 
     #[test]
     fn test_well_formed_rejects_two_row_columned_prose() {
-        // The #36 shape: the four-row prose grid at test_well_formed_rejects_prose_rows
-        // truncated to two data rows, which the ≥3-row alpha guard never inspects.
         let grid = vec![
             vec!["Column A".into(), "Column B".into(), "Column C".into()],
             vec![
@@ -2353,7 +2336,6 @@ mod tests {
 
     #[test]
     fn test_well_formed_rejects_five_col_short_prose() {
-        // Upper column boundary of the guard (num_cols == 5).
         let grid = vec![
             vec!["A".into(), "B".into(), "C".into(), "D".into(), "E".into()],
             vec![
@@ -2430,11 +2412,6 @@ mod tests {
 
     #[test]
     fn test_well_formed_rejects_wide_two_row_shredded_prose() {
-        // The observed #36 shape: a wrapped-prose passage split across many
-        // columns in a 2-data-row grid (arxiv 0903.1810 line 65). The ≥3-row
-        // alpha guard never sees it and the ≥6-col shredded branch only rejects
-        // when every row ends on clause-terminal punctuation, so without the
-        // widened short-grid guard it survives as a fabricated table.
         let grid = vec![
             vec!["A".into(), "B".into(), "C".into(), "D".into(), "E".into(), "F".into()],
             vec![
@@ -2462,11 +2439,6 @@ mod tests {
 
     #[test]
     fn test_well_formed_rejects_wide_shredded_prose_with_incidental_numbers() {
-        // The exact arxiv 0903.1810 line-65 shape: a wrapped prose passage
-        // shredded into ~15 thin one-or-two-word columns over 2 data rows, with
-        // incidental equation fragments ("10 17", "1 . 0"). The numeric-value
-        // fraction stays low, so the numeric exemption does not fire and the
-        // wide-shredded signal demotes it.
         let grid = vec![
             vec![
                 "oblate range".into(),
@@ -2511,8 +2483,6 @@ mod tests {
 
     #[test]
     fn test_well_formed_keeps_wide_short_value_grid() {
-        // A genuine wide short table (6 columns of short values) must survive the
-        // widened guard: cells average < 4 words, so they do not read as prose.
         let grid = vec![
             vec![
                 "Q1".into(),

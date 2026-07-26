@@ -740,11 +740,6 @@ jobs:
           echo "MinerU model cache populated at $HF_HUB_CACHE"
           du -sh "$HF_HUB_CACHE" || true
 
-      # actions/cache is best-effort cross-run only: a ~1.1 GB blob gets evicted
-      # from the shared 10 GB repo budget by concurrent CI before bench-mineru
-      # runs. Deliver the weights to the bench jobs via a run-scoped artifact,
-      # which is immune to cache eviction. tar preserves the Hugging Face hub
-      # blob/snapshot symlink layout that a plain artifact upload would flatten.
       - name: Package MinerU model cache
         run: |
           set -euo pipefail
@@ -836,9 +831,6 @@ jobs:
             echo "MINERU_MODEL_SOURCE=huggingface"
           } >> "$GITHUB_ENV"
 
-      # Model weights arrive as a run-scoped artifact from prefetch-mineru-models
-      # (actions/cache is unreliable here: the ~1.1 GB blob is evicted from the
-      # shared repo cache budget by concurrent CI before this job runs).
       - name: Download MinerU model cache
         uses: actions/download-artifact@v8
         with:

@@ -508,8 +508,6 @@ pub fn print_triage_blocks(results: &[PipelineDocResult], sort_by: SortMetric, b
                 .iter()
                 .filter_map(|bt| {
                     pr.per_type_sf1.get(*bt).map(|f1| {
-                        // Show the precision/recall split when present so a low F1
-                        // reads as fabrication (low p) vs omission (low r).
                         match (pr.per_type_precision.get(*bt), pr.per_type_recall.get(*bt)) {
                             (Some(p), Some(r)) => {
                                 format!("{}:{:.0}%(p{:.0}/r{:.0})", bt, f1 * 100.0, p * 100.0, r * 100.0)

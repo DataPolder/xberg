@@ -251,7 +251,6 @@ const CER_MAX_CHARS: usize = 16_384;
 /// Levenshtein edit distance between two char slices. Two-row DP: O(n·m) time,
 /// O(min(n, m)) space.
 fn edit_distance(a: &[char], b: &[char]) -> usize {
-    // Keep the shorter sequence on the inner (column) axis to minimize memory.
     let (a, b) = if a.len() < b.len() { (b, a) } else { (a, b) };
     if b.is_empty() {
         return a.len();
@@ -510,16 +509,12 @@ mod tests {
 
     #[test]
     fn normalized_edit_similarity_is_order_sensitive() {
-        // Identical strings ⇒ 1.0.
         assert!((normalized_edit_similarity("hello world", "hello world") - 1.0).abs() < 1e-9);
-        // A transposition costs TF1 nothing (same bag of words) but the char
-        // metric registers it, so similarity drops below 1.0.
         let sim = normalized_edit_similarity("ab", "ba");
         assert!(
             (0.0..1.0).contains(&sim),
             "transposition should lower similarity, got {sim}"
         );
-        // One substitution in ten chars ⇒ 0.9.
         assert!((normalized_edit_similarity("abcdefghij", "abcdefghiX") - 0.9).abs() < 1e-9);
     }
 

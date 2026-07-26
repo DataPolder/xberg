@@ -692,9 +692,6 @@ pub fn score_structural(pred: &StructuralSidecar, gt: &StructuralSidecar) -> Str
     let base = if weight_sum > 0.0 { score_sum / weight_sum } else { 1.0 };
     let sf1 = fold_order_into_sf1(base, d5, matched);
 
-    // Report-only P/R split, parallel to `dimensions()`. Reading order (D5) is a
-    // sequence agreement, not a set match, so its "precision"/"recall" mirror the
-    // score rather than being computed independently.
     let breakdown = vec![
         d0.breakdown(),
         d1.breakdown(),
@@ -1119,11 +1116,8 @@ Figure 1: The overall system architecture and its components.
 
     #[test]
     fn f1_parts_from_splits_precision_and_recall() {
-        // Empty on both sides is a perfect (vacuous) match.
         assert_eq!(f1_parts_from(0.0, 0, 0), (1.0, 1.0, 1.0));
-        // Present on one side only scores zero across the board.
         assert_eq!(f1_parts_from(0.0, 3, 0), (0.0, 0.0, 0.0));
-        // Over-emission: 1 unit of credit against 4 predicted / 1 truth ⇒ p<r.
         let (f1, precision, recall) = f1_parts_from(1.0, 4, 1);
         assert!((precision - 0.25).abs() < 1e-9, "precision {precision}");
         assert!((recall - 1.0).abs() < 1e-9, "recall {recall}");
@@ -1133,13 +1127,11 @@ Figure 1: The overall system architecture and its components.
 
     #[test]
     fn breakdown_reads_fabrication_as_low_precision() {
-        // GT has one heading; prediction fabricates three extra unmatched ones.
         let gt = StructuralSidecar::from_markdown("# Real\n\nBody paragraph text here.\n");
         let pred = StructuralSidecar::from_markdown(
             "# Real\n\n## Fabricated one\n\n## Fabricated two\n\n## Fabricated three\n\nBody paragraph text here.\n",
         );
         let score = score_structural(&pred, &gt);
-        // dimensions()/breakdown are parallel; heading is index 1.
         let (name, heading) = score.dimensions_pr()[1];
         assert_eq!(name, "heading");
         assert!(
@@ -1152,7 +1144,6 @@ Figure 1: The overall system architecture and its components.
 
     #[test]
     fn breakdown_reads_omission_as_low_recall() {
-        // Mirror image: GT has four headings, prediction recovers only one.
         let gt = StructuralSidecar::from_markdown(
             "# Real\n\n## Second\n\n## Third\n\n## Fourth\n\nBody paragraph text here.\n",
         );
@@ -1183,7 +1174,6 @@ Figure 1: The overall system architecture and its components.
             cells: vec![cell(0, 0, "alpha"), cell(0, 1, "beta")],
             spans_recoverable: false,
         };
-        // Same content, cells transposed to different (row, col) origins.
         let pred = TableNode {
             n_rows: 2,
             n_cols: 1,
@@ -1206,7 +1196,6 @@ Figure 1: The overall system architecture and its components.
     #[test]
     fn table_content_dimension_is_reported_but_unfolded() {
         let score = score_markdown(SAMPLE, SAMPLE);
-        // A 7th named dimension carrying the GriTS-Con content F1.
         let dims = score.dimensions();
         assert_eq!(dims.len(), 7);
         assert_eq!(dims[6].0, "table_content");
@@ -1214,8 +1203,6 @@ Figure 1: The overall system architecture and its components.
             (score.d6_table_content - 1.0).abs() < 1e-9,
             "identical doc ⇒ content F1 1.0"
         );
-        // Report-only: an identical doc still scores a perfect SF1, and d6 lives
-        // outside the weighted rollup entirely.
         assert!((score.sf1 - 1.0).abs() < 1e-9);
     }
 
