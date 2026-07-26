@@ -407,12 +407,37 @@ impl SubprocessAdapter {
             .unwrap_or(OcrStatus::Unknown)
     }
 
-    fn timeout_error(operation: &str, timeout: Duration) -> Error {
+    fn timeout_error(operation: &str, timeout: Duration, reaped: Option<&std::process::Output>) -> Error {
         #[cfg(windows)]
         let cleanup = "; Windows timeout cleanup terminates the direct child only; descendant cleanup is unsupported";
         #[cfg(not(windows))]
         let cleanup = "";
-        Error::Timeout(format!("{operation} exceeded {timeout:?}{cleanup}"))
+        let mut message = format!("{operation} exceeded {timeout:?}{cleanup}");
+        if let Some(output) = reaped {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stderr_tail = Self::tail_chars(stderr.trim_end(), 2000);
+            if !stderr_tail.is_empty() {
+                message.push_str(&format!("\nlast subprocess stderr (tail):\n{stderr_tail}"));
+            }
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stdout_tail = Self::tail_chars(stdout.trim_end(), 500);
+            if !stdout_tail.is_empty() {
+                message.push_str(&format!("\nlast subprocess stdout (tail):\n{stdout_tail}"));
+            }
+        }
+        Error::Timeout(message)
+    }
+
+    /// Return the last `max` bytes of `s`, prefixed with `…` when truncated, snapped to a char boundary.
+    fn tail_chars(s: &str, max: usize) -> String {
+        if s.len() <= max {
+            return s.to_string();
+        }
+        let mut cut = s.len() - max;
+        while cut < s.len() && !s.is_char_boundary(cut) {
+            cut += 1;
+        }
+        format!("…{}", &s[cut..])
     }
 
     fn measured_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
@@ -505,12 +530,20 @@ impl SubprocessAdapter {
                 ),
                 Err(_) => {
                     let duration = start.elapsed();
+                    // Capture the reaped child output so the hung subprocess's last
+                    // stderr/stdout is surfaced in the timeout error (CI self-diagnosis).
                     #[cfg(unix)]
-                    {
+                    let reaped = {
                         Self::kill_process_group(child_pid);
-                        let _ = wait.await;
-                    }
-                    (None, Some(Self::timeout_error(operation, timeout)), duration)
+                        wait.await.ok()
+                    };
+                    #[cfg(not(unix))]
+                    let reaped: Option<std::process::Output> = None;
+                    (
+                        None,
+                        Some(Self::timeout_error(operation, timeout, reaped.as_ref())),
+                        duration,
+                    )
                 }
             }
         };
@@ -3224,6 +3257,35 @@ mod tests {
         assert!(outcome.resource_stats.baseline_memory_bytes > 0);
         assert_eq!(outcome.resource_stats.peak_memory_bytes, 0);
         assert_eq!(outcome.resource_stats.sample_count, 0);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn timeout_error_surfaces_child_stderr_tail() {
+        let mut cmd = SubprocessAdapter::measured_command("sh");
+        cmd.args(["-c", "echo XBERG_HANG_SENTINEL 1>&2; sleep 5"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        SubprocessAdapter::configure_measured_stdin(&mut cmd);
+        SubprocessAdapter::configure_child_process(&mut cmd);
+
+        let outcome = SubprocessAdapter::execute_measured_command(
+            &mut cmd,
+            Duration::from_millis(300),
+            "hang probe",
+            Duration::from_millis(20),
+        )
+        .await
+        .unwrap();
+
+        let error = outcome.error.expect("a timed-out subprocess must produce an error");
+        let Error::Timeout(message) = &error else {
+            panic!("expected Error::Timeout, got: {error:?}");
+        };
+        assert!(
+            message.contains("XBERG_HANG_SENTINEL"),
+            "timeout error must surface the hung child's stderr tail: {message}"
+        );
     }
 
     #[cfg(unix)]
