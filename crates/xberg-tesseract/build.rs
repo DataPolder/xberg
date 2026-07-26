@@ -1143,7 +1143,20 @@ mod build_tesseract {
             if let Some(start) = patched.find("set(TESSERACT_SRC_API\n")
                 && let Some(end) = patched[start..].find(")\n")
             {
-                let replacement = "set(TESSERACT_SRC_API\n    src/api/baseapi.cpp\n    src/api/hocrrenderer.cpp\n)\n";
+                // `capi.cpp` is the actual C-style API surface (`TessBaseAPICreate`,
+                // `TessBaseAPIInit5`, `TessBaseAPISetImage`, `TessMonitorCreate`, etc.)
+                // that `xberg-tesseract`'s Rust FFI binds to directly. Dropping it here
+                // previously left every one of those symbols unresolved in the linked
+                // wasm module; wasm-bindgen's import handling silently resolved them to
+                // no-op stubs returning 0/null instead of failing the link, so
+                // `TessBaseAPICreate()` (and everything downstream) always returned a
+                // null pointer at runtime. `renderer.cpp`/`altorenderer.cpp`/
+                // `lstmboxrenderer.cpp`/`pdfrenderer.cpp`/`wordstrboxrenderer.cpp` are
+                // pulled in too because `capi.cpp`'s renderer-constructor functions
+                // (`TessPDFRendererCreate`, etc.) reference those concrete renderer
+                // classes even though the Rust binding never calls them — the linker
+                // still needs them defined once `capi.cpp` is part of the build.
+                let replacement = "set(TESSERACT_SRC_API\n    src/api/baseapi.cpp\n    src/api/capi.cpp\n    src/api/renderer.cpp\n    src/api/altorenderer.cpp\n    src/api/hocrrenderer.cpp\n    src/api/lstmboxrenderer.cpp\n    src/api/pdfrenderer.cpp\n    src/api/wordstrboxrenderer.cpp\n)\n";
                 patched = format!("{}{}{}", &patched[..start], replacement, &patched[start + end + 2..]);
             }
 
@@ -1272,12 +1285,15 @@ mod build_tesseract {
             let mut patched = content;
             patched = patched.replace("  src/opencl/*.cpp\n", "");
             patched = patched.replace("  src/viewer/*.cpp\n", "");
-            patched = patched.replace("    src/api/capi.cpp\n", "");
-            patched = patched.replace("    src/api/renderer.cpp\n", "");
-            patched = patched.replace("    src/api/altorenderer.cpp\n", "");
-            patched = patched.replace("    src/api/lstmboxrenderer.cpp\n", "");
-            patched = patched.replace("    src/api/pdfrenderer.cpp\n", "");
-            patched = patched.replace("    src/api/wordstrboxrenderer.cpp\n", "");
+            // NOTE: src/api/{capi,renderer,altorenderer,hocrrenderer,lstmboxrenderer,
+            // pdfrenderer,wordstrboxrenderer}.cpp are intentionally NOT stripped here.
+            // `capi.cpp` is the C-style API surface (`TessBaseAPICreate`, `TessBaseAPIInit5`,
+            // `TessMonitorCreate`, etc.) that `xberg-tesseract`'s Rust FFI binds to directly;
+            // dropping it left those symbols unresolved, silently stubbed to 0/null by
+            // wasm-bindgen's import handling instead of failing the link, so every
+            // WASM Tesseract call returned a null pointer at runtime. The renderer files
+            // are kept because capi.cpp's renderer-constructor functions reference those
+            // concrete classes even though the Rust binding never calls them.
             fs::write(&cmakelists, &patched).expect("Failed to write CMakeLists.txt");
             eprintln!("Patched CMakeLists.txt: removed unnecessary sources for WASM");
         }
