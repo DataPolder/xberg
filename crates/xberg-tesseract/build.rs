@@ -8,7 +8,7 @@ mod build_tesseract {
     use std::path::{Path, PathBuf};
 
     const LEPTONICA_VERSION: &str = "1.87.0";
-    const TESSERACT_VERSION: &str = "5.5.2";
+    const TESSERACT_VERSION: &str = "5.5.3";
 
     fn leptonica_url() -> String {
         format!(
