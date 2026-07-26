@@ -1159,6 +1159,10 @@ jobs:
           SOURCE_SHA="${{ needs.setup.outputs.source-sha }}"
           UPDATED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
           RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          # expected_matrix_keys counts the REQUIRED (non-optional) cells the aggregate must
+          # contain; optional_matrix_keys is MinerU's best-effort cell (decoupled from the
+          # release gate). Keep both in sync with bench_matrix.rs {native,ocr}_matrix() and
+          # cohort_manifest_blake3 with {NATIVE,OCR}_MANIFEST_BLAKE3.
           jq -n \
             --arg cohort "native-pdf-fast-b8-v1" \
             --arg cohort_hash "c10d1f78d3f9d61070c0d91e7bfe90a904b69c9d3261536eb1dcff2081c73f6b" \
@@ -1166,16 +1170,16 @@ jobs:
             --arg run_id "${{ github.run_id }}" \
             --arg run_url "$RUN_URL" \
             --arg updated_at "$UPDATED_AT" \
-            '{cohort: $cohort, cohort_manifest_blake3: $cohort_hash, expected_matrix_keys: 21, commit: $commit, run_id: $run_id, run_url: $run_url, updated_at: $updated_at}' \
+            '{cohort: $cohort, cohort_manifest_blake3: $cohort_hash, expected_matrix_keys: 20, optional_matrix_keys: 1, commit: $commit, run_id: $run_id, run_url: $run_url, updated_at: $updated_at}' \
             > release-assets/benchmarks-native-metadata.json
           jq -n \
             --arg cohort "ocr-pdf-fast-b4-v1" \
-            --arg cohort_hash "c740a9480fd0ad4311a4905206345c58d7ef7a987682cc96644e2f0ffe616a13" \
+            --arg cohort_hash "f9e4e881b70111df10516a5f2cf2ed648f67b299f9116bafb34746e98436b66b" \
             --arg commit "$SOURCE_SHA" \
             --arg run_id "${{ github.run_id }}" \
             --arg run_url "$RUN_URL" \
             --arg updated_at "$UPDATED_AT" \
-            '{cohort: $cohort, cohort_manifest_blake3: $cohort_hash, expected_matrix_keys: 17, commit: $commit, run_id: $run_id, run_url: $run_url, updated_at: $updated_at}' \
+            '{cohort: $cohort, cohort_manifest_blake3: $cohort_hash, expected_matrix_keys: 16, optional_matrix_keys: 1, commit: $commit, run_id: $run_id, run_url: $run_url, updated_at: $updated_at}' \
             > release-assets/benchmarks-ocr-metadata.json
           jq -n \
             --arg commit "$SOURCE_SHA" \
