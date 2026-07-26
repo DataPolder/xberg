@@ -26,6 +26,24 @@ enum OutputFileFormat {
     Json,
 }
 
+/// CLI enum for the pinned benchmark artifact release cohort
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum CliCohort {
+    /// Native (non-OCR) fast PDF cohort
+    Native,
+    /// OCR fast PDF cohort
+    Ocr,
+}
+
+impl From<CliCohort> for benchmark_harness::bench_matrix::Cohort {
+    fn from(cohort: CliCohort) -> Self {
+        match cohort {
+            CliCohort::Native => benchmark_harness::bench_matrix::Cohort::Native,
+            CliCohort::Ocr => benchmark_harness::bench_matrix::Cohort::Ocr,
+        }
+    }
+}
+
 impl From<CliMode> for BenchmarkMode {
     fn from(mode: CliMode) -> Self {
         match mode {
@@ -389,6 +407,47 @@ enum Commands {
         /// reference-corpus cache was not restored. Used as a fast CI pre-check.
         #[arg(long)]
         strict: bool,
+    },
+
+    /// Validate the exact benchmark artifact/aggregate contract for one fixed cohort
+    ///
+    /// Two modes: with `--aggregated-file`, validates one consolidated `aggregated.json`;
+    /// otherwise validates a directory of raw per-framework `run/{provenance,results}.json`
+    /// artifacts, which requires `--artifacts-dir`, `--cohort-manifest`, `--fixtures-root`,
+    /// `--source-sha`, and `--run-id`.
+    ValidateArtifacts {
+        /// Which cohort's release contract to validate (native or ocr)
+        #[arg(long)]
+        cohort: CliCohort,
+
+        /// Path to a consolidated aggregated.json; when set, validates the aggregate instead
+        /// of raw per-framework artifacts
+        #[arg(long)]
+        aggregated_file: Option<PathBuf>,
+
+        /// Directory containing one subdirectory per expected artifact
+        #[arg(long)]
+        artifacts_dir: Option<PathBuf>,
+
+        /// Path to the pinned cohort manifest JSON
+        #[arg(long)]
+        cohort_manifest: Option<PathBuf>,
+
+        /// Root directory fixture paths in the manifest are resolved against
+        #[arg(long)]
+        fixtures_root: Option<PathBuf>,
+
+        /// Benchmark source revision every provenance.json must record
+        #[arg(long)]
+        source_sha: Option<String>,
+
+        /// Run identifier suffix shared by every expected artifact directory
+        #[arg(long)]
+        run_id: Option<String>,
+
+        /// Benchmark iterations every provenance.json/results.json must record
+        #[arg(long, default_value = "3")]
+        iterations: usize,
     },
 }
 
@@ -1180,6 +1239,34 @@ async fn main() -> Result<()> {
                 )));
             }
 
+            Ok(())
+        }
+
+        Commands::ValidateArtifacts {
+            cohort,
+            aggregated_file,
+            artifacts_dir,
+            cohort_manifest,
+            fixtures_root,
+            source_sha,
+            run_id,
+            iterations,
+        } => {
+            use benchmark_harness::validate_artifacts::{ValidateArtifactsArgs, validate};
+
+            let args = ValidateArtifactsArgs {
+                cohort: cohort.into(),
+                aggregated_file,
+                artifacts_dir,
+                cohort_manifest,
+                fixtures_root,
+                source_sha,
+                run_id,
+                iterations,
+            };
+
+            let message = validate(&args)?;
+            println!("{message}");
             Ok(())
         }
 

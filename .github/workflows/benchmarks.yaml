@@ -90,11 +90,6 @@ jobs:
       - name: Install Task
         uses: xberg-io/actions/install-task@v1
 
-      - name: Install BLAKE3 verifier
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y b3sum
-
       - name: Validate benchmark scripts
         run: task benchmark:validate:scripts
 
@@ -1006,12 +1001,6 @@ jobs:
         if: needs.setup.result == 'success'
         uses: ./.github/actions/install-system-deps
 
-      - name: Install BLAKE3 verifier
-        if: needs.setup.result == 'success'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y b3sum
-
       - name: Setup ONNX Runtime
         if: needs.setup.result == 'success'
         uses: ./.github/actions/setup-onnx-runtime
@@ -1042,7 +1031,7 @@ jobs:
         id: validate-native
         if: always()
         run: >-
-          python3 scripts/ci/benchmarks/validate-benchmark-artifacts.py
+          cargo run --locked --release --package benchmark-harness --bin benchmark-harness -- validate-artifacts
           --cohort native
           --artifacts-dir benchmark-artifacts/native
           --cohort-manifest tools/benchmark-harness/cohorts/native-pdf-fast-b8.json
@@ -1055,7 +1044,7 @@ jobs:
         id: validate-ocr
         if: always()
         run: >-
-          python3 scripts/ci/benchmarks/validate-benchmark-artifacts.py
+          cargo run --locked --release --package benchmark-harness --bin benchmark-harness -- validate-artifacts
           --cohort ocr
           --artifacts-dir benchmark-artifacts/ocr
           --cohort-manifest tools/benchmark-harness/cohorts/ocr-pdf-fast-b4.json
@@ -1082,10 +1071,10 @@ jobs:
         if: ${{ always() && steps.validate-native.outcome == 'success' && steps.validate-ocr.outcome == 'success' }}
         run: |
           set -euo pipefail
-          python3 scripts/ci/benchmarks/validate-benchmark-artifacts.py \
+          cargo run --locked --release --package benchmark-harness --bin benchmark-harness -- validate-artifacts \
             --cohort native \
             --aggregated-file consolidated-output/native/aggregated.json
-          python3 scripts/ci/benchmarks/validate-benchmark-artifacts.py \
+          cargo run --locked --release --package benchmark-harness --bin benchmark-harness -- validate-artifacts \
             --cohort ocr \
             --aggregated-file consolidated-output/ocr/aggregated.json
 

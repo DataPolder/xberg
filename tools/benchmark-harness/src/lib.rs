@@ -41,6 +41,7 @@ pub mod adapter;
 pub mod adapters;
 pub mod aggregate;
 pub mod batch_diagnostic;
+pub mod bench_matrix;
 pub mod cohort;
 pub mod comparison;
 pub mod config;
@@ -72,6 +73,7 @@ pub mod stats;
 pub mod survey;
 pub mod system_load;
 pub mod types;
+pub mod validate_artifacts;
 pub mod validate_gt;
 
 use std::path::Path;
