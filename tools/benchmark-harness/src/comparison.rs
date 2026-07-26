@@ -1180,48 +1180,6 @@ pub fn load_guardrails(path: &Path) -> Result<GuardrailsConfig> {
     Ok(config)
 }
 
-/// Generate a guardrails configuration from benchmark results.
-///
-/// Each document+pipeline pair with meaningful scores produces a contract
-/// whose minimum thresholds are the observed score multiplied by
-/// `threshold_factor` (e.g. 0.9 means 90% of observed score).
-pub fn generate_guardrails(results: &[DocResult], threshold_factor: f64) -> GuardrailsConfig {
-    let mut contracts = Vec::new();
-    for doc in results {
-        for result in &doc.results {
-            if result.sf1.is_nan() || result.tf1.is_nan() {
-                continue;
-            }
-            if result.sf1 < 0.01 && result.tf1 < 0.01 {
-                continue;
-            }
-            contracts.push(GuardrailContract {
-                doc: doc.name.clone(),
-                pipeline: result.pipeline.name().to_string(),
-                min_sf1: if result.sf1 > 0.01 {
-                    Some((result.sf1 * threshold_factor * 100.0).round() / 100.0)
-                } else {
-                    None
-                },
-                min_tf1: if result.tf1 > 0.01 {
-                    Some((result.tf1 * threshold_factor * 100.0).round() / 100.0)
-                } else {
-                    None
-                },
-                relative_order: reading_order_anchors(&doc.name, result.pipeline.name()),
-            });
-        }
-    }
-    let mut config = GuardrailsConfig {
-        version: "1.0".to_string(),
-        generated_at: chrono::Utc::now().to_rfc3339(),
-        threshold_factor,
-        contracts,
-    };
-    install_reading_order_guardrail(&mut config);
-    config
-}
-
 fn reading_order_anchors(doc: &str, pipeline: &str) -> Vec<String> {
     if doc != READING_ORDER_GUARDRAIL_DOC || pipeline != READING_ORDER_GUARDRAIL_PIPELINE {
         return Vec::new();

@@ -283,25 +283,6 @@ enum Commands {
         diagnose_threshold: f64,
     },
 
-    /// Generate quality guardrails JSON from benchmark results
-    GenerateGuardrails {
-        /// Directory containing fixture JSON files
-        #[arg(short, long)]
-        fixtures: PathBuf,
-
-        /// Pipelines to run (comma-separated)
-        #[arg(long, value_delimiter = ',')]
-        pipelines: Option<Vec<String>>,
-
-        /// Threshold factor applied to observed scores (e.g. 0.9 = 90% of observed)
-        #[arg(long, default_value = "0.9")]
-        threshold_factor: f64,
-
-        /// Output path for the guardrails JSON file
-        #[arg(short, long, default_value = "guardrails.json")]
-        output: PathBuf,
-    },
-
     /// Run 6-path pipeline benchmark across the document corpus
     PipelineBenchmark {
         /// Directory containing fixture JSON files
@@ -408,40 +389,6 @@ enum Commands {
         /// reference-corpus cache was not restored. Used as a fast CI pre-check.
         #[arg(long)]
         strict: bool,
-    },
-
-    /// Compute field-level extraction quality (form-fields, formula, structured)
-    FieldQuality {
-        /// Directory containing fixture JSON files
-        #[arg(short, long)]
-        fixtures: PathBuf,
-
-        /// Extraction mode: form-fields, formula, or structured
-        #[arg(long, default_value = "form-fields")]
-        mode: String,
-
-        /// Dataset name for structured mode (cord, sroie, funsd, docile, vrdu)
-        #[arg(long)]
-        dataset: Option<String>,
-
-        /// Only run fixtures whose file stem contains this string
-        #[arg(long)]
-        filter: Option<String>,
-    },
-
-    /// Score precomputed Markdown outputs without running extraction
-    ScoreOutputs {
-        /// Directory containing fixture JSON files, or one fixture JSON file
-        #[arg(short, long)]
-        fixtures: PathBuf,
-
-        /// Markdown output directory, Markdown file, JSON map/records, or JSONL records
-        #[arg(short, long)]
-        outputs: PathBuf,
-
-        /// Write the score report to this JSON file instead of standard output
-        #[arg(long)]
-        output: Option<PathBuf>,
     },
 }
 
@@ -953,46 +900,6 @@ async fn main() -> Result<()> {
             Ok(())
         }
 
-        Commands::GenerateGuardrails {
-            fixtures,
-            pipelines,
-            threshold_factor,
-            output,
-        } => {
-            use benchmark_harness::comparison::{ComparisonConfig, Pipeline, generate_guardrails, run_comparison};
-
-            let selected_pipelines = match pipelines {
-                Some(names) => names.iter().filter_map(|n| Pipeline::parse(n)).collect(),
-                None => vec![Pipeline::Baseline, Pipeline::Layout],
-            };
-
-            let config = ComparisonConfig {
-                fixtures_dir: fixtures,
-                pipelines: selected_pipelines,
-                dump_outputs: false,
-                guardrails: false,
-                guardrails_file: None,
-                name_filter: None,
-                json_output: None,
-                noise: false,
-                diagnose: false,
-                diagnose_threshold: 0.8,
-            };
-
-            let results = run_comparison(&config).await?;
-            let guardrails = generate_guardrails(&results, threshold_factor);
-            let json = serde_json::to_string_pretty(&guardrails)
-                .map_err(|e| benchmark_harness::Error::Benchmark(format!("Failed to serialize guardrails: {}", e)))?;
-            std::fs::write(&output, json).map_err(benchmark_harness::Error::Io)?;
-            tracing::info!(
-                guardrail_count = guardrails.contracts.len(),
-                document_count = results.len(),
-                output = %output.display(),
-                "guardrails generated"
-            );
-            Ok(())
-        }
-
         Commands::PipelineBenchmark {
             fixtures,
             paths,
@@ -1276,60 +1183,6 @@ async fn main() -> Result<()> {
             Ok(())
         }
 
-        Commands::FieldQuality {
-            fixtures,
-            mode,
-            dataset,
-            filter,
-        } => {
-            use benchmark_harness::field_quality::{Args, Mode, run};
-
-            let parsed_mode = Mode::parse(&mode).ok_or_else(|| {
-                benchmark_harness::Error::Config(format!(
-                    "Invalid mode '{}': expected form-fields, formula, or structured",
-                    mode
-                ))
-            })?;
-
-            let args = Args {
-                fixtures,
-                mode: parsed_mode,
-                dataset,
-                filter,
-            };
-
-            run(args)
-                .await
-                .map_err(|e| benchmark_harness::Error::Benchmark(format!("{e:#}")))
-        }
-
-        Commands::ScoreOutputs {
-            fixtures,
-            outputs,
-            output,
-        } => {
-            let report = benchmark_harness::score_outputs::score_outputs(&fixtures, &outputs)?;
-            let json = serde_json::to_string_pretty(&report).map_err(benchmark_harness::Error::Json)?;
-            if let Some(path) = output {
-                if let Some(parent) = path.parent()
-                    && !parent.as_os_str().is_empty()
-                {
-                    std::fs::create_dir_all(parent).map_err(benchmark_harness::Error::Io)?;
-                }
-                std::fs::write(&path, json).map_err(benchmark_harness::Error::Io)?;
-                tracing::info!(
-                    document_count = report.document_count,
-                    mean_sf1 = report.mean_sf1,
-                    mean_tf1 = report.mean_tf1,
-                    output = %path.display(),
-                    "outputs scored"
-                );
-            } else {
-                println!("{json}");
-            }
-            Ok(())
-        }
-
         Commands::MeasureFrameworkSizes { output } => {
             use benchmark_harness::{measure_framework_sizes, save_framework_sizes};
 
@@ -1475,21 +1328,6 @@ mod tests {
     fn single_mode_preserves_xberg_names() {
         let names = normalize_run_frameworks(&["xberg-markdown-baseline".to_string()], false);
         assert_eq!(names, ["xberg-markdown-baseline"]);
-    }
-
-    #[test]
-    fn score_outputs_cli_accepts_required_paths() {
-        let cli = Cli::try_parse_from([
-            "benchmark-harness",
-            "score-outputs",
-            "--fixtures",
-            "fixtures",
-            "--outputs",
-            "outputs",
-        ])
-        .unwrap();
-
-        assert!(matches!(cli.command, Commands::ScoreOutputs { .. }));
     }
 
     #[test]

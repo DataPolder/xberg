@@ -33,7 +33,6 @@ candle-paddleocr-vl-15-bench = ["xberg/candle-paddleocr-vl"]
 [dependencies]
 
 ahash = { workspace = true }
-anyhow = { workspace = true }
 
 async-trait = { workspace = true }
 blake3 = { workspace = true }
