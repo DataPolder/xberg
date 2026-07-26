@@ -1,21 +1,9 @@
 name: CI E2E
 
 on:
+  # E2E runs only on main (post-merge) and manual dispatch — it is heavy and no
+  # longer gates PRs/branches. CI Rust + CI Integrations still cover PRs.
   push:
-    branches: [main]
-    paths:
-      - "crates/**"
-      - "packages/**"
-      - "e2e/**"
-      - "fixtures/**"
-      - "alef.toml"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "Taskfile.yml"
-      - "pnpm-workspace.yaml"
-      - "scripts/ci/wasm/**"
-      - ".github/workflows/ci-e2e.yaml"
-  pull_request:
     branches: [main]
     paths:
       - "crates/**"
