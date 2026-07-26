@@ -129,7 +129,13 @@ pub(crate) async fn extract_file(
         Box::pin(extract_file_with_extractor(path, &detected_mime, config)).await
     });
 
-    #[cfg(feature = "tokio-runtime")]
+    // `std::time::Instant::now()` panics on `wasm32-unknown-unknown` (no clock source
+    // without a JS/WASI shim), which aborts the whole module with an uncatchable
+    // `unreachable` trap. `tokio-runtime` can be enabled transitively on that target
+    // (e.g. by `layout-tract` inside `wasm-target`), so gating on the feature alone is
+    // not enough — explicitly exclude wasm32 here, matching `run_timed_extraction` in
+    // `batch.rs`, which already carries the `not(target_arch = "wasm32")` guard.
+    #[cfg(all(feature = "tokio-runtime", not(target_arch = "wasm32")))]
     let result = if let Some(secs) = config.extraction_timeout_secs {
         let start = std::time::Instant::now();
         match tokio::time::timeout(std::time::Duration::from_secs(secs), extraction_future).await {
@@ -148,15 +154,16 @@ pub(crate) async fn extract_file(
         extraction_future.await
     };
 
-    #[cfg(not(feature = "tokio-runtime"))]
+    #[cfg(any(not(feature = "tokio-runtime"), target_arch = "wasm32"))]
     let result = {
-        // Without a tokio runtime (e.g. the WASM build) there is no timer to
-        // enforce a timeout, but the default ExtractionConfig sets
-        // extraction_timeout_secs, so erroring here would reject every default
-        // call. Ignore the unenforceable limit and run the extraction instead. ~keep
+        // Without a usable tokio timer (no 'tokio-runtime' feature, or the WASM build,
+        // where `std::time::Instant::now()` panics) there is no timer to enforce a
+        // timeout, but the default ExtractionConfig sets extraction_timeout_secs, so
+        // erroring here would reject every default call. Ignore the unenforceable
+        // limit and run the extraction instead. ~keep
         if config.extraction_timeout_secs.is_some() {
             tracing::debug!(
-                "extraction_timeout_secs is ignored without the 'tokio-runtime' feature; running without a timeout"
+                "extraction_timeout_secs is ignored on this target (no usable tokio timer); running without a timeout"
             );
         }
         extraction_future.await
