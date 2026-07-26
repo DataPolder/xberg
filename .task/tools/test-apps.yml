@@ -54,8 +54,14 @@ tasks:
     env:
       GOWORK: "off"
     cmds:
-      - go mod tidy
-      - go test -v -run '^Test_Smoke' ./...
+      # The cgo binding needs the native lib resolved via `cmd/setup -print-env`
+      # (the module's baked -L points at the read-only, empty module-cache .lib);
+      # export CGO_LDFLAGS in the same shell as the build so it is inherited.
+      - rm -rf .lib
+      - |
+        export CGO_LDFLAGS="$(go run github.com/xberg-io/xberg/packages/go/cmd/setup -print-env | sed -n 's/^export CGO_LDFLAGS="\(.*\)"$/\1/p')"
+        go mod tidy
+        go test -v -run '^Test_Smoke' ./...
 
   smoke:java:
     desc: Run Java test_app smoke test
@@ -121,13 +127,18 @@ tasks:
     desc: Run Zig test_app smoke test
     dir: "{{.ROOT_DIR}}/test_apps/zig"
     cmds:
-      - zig build test --test-filter "smoke"
+      # zig 0.16's `zig build` has no --test-filter; build.zig exposes a dedicated
+      # `smoke` step that runs only smoke_test.zig (unchained from the full suite).
+      - zig build smoke
 
   smoke:swift:
     desc: Run Swift test_app smoke test
     dir: "{{.ROOT_DIR}}/test_apps/swift_e2e"
     cmds:
-      - swift test --filter SmokeTests
+      # Swift/XCTest has no self-spawning mock-server fixture (unlike Python's
+      # conftest), so the URI smoke tests need MOCK_SERVER_URL exported by the
+      # wrapper, which builds+starts the mock server around the command.
+      - "{{.ROOT_DIR}}/scripts/e2e/run-with-mock-server.sh swift test --filter SmokeTests"
 
   smoke:kotlin_android:
     desc: Run Kotlin Android test_app smoke test
