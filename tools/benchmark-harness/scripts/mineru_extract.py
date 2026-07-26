@@ -18,6 +18,7 @@ import multiprocessing as _mp
 import os
 import platform
 import resource
+import socket
 import sys
 import tempfile
 import time
@@ -29,14 +30,22 @@ os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
 os.environ.setdefault("ONNXRUNTIME_PROVIDERS", "CPUExecutionProvider")
 os.environ.setdefault("MINERU_DEVICE_MODE", "cpu")
 
-# MinerU's content-assembly tags each block's language via fast-langdetect
-# (mineru/utils/language.py -> detect_lang), which runs for every document
-# regardless of the OCR lang and, on first use, downloads lid.176.bin from a
-# hardcoded GitHub-release URL with no request timeout. On an egress-restricted
-# runner that fetch blocks until the harness timeout. Point FTLANG_CACHE inside
-# the Hugging Face hub cache dir the benchmark workflow already prefetches,
-# packages, and restores, so the model travels with the HF cache and no network
-# fetch happens at bench time. Set before mineru is imported (done lazily below). ~keep
+# Cap stray unbounded network calls when requested. MinerU's
+# persist_downloaded_model_config does a bare requests.get() with NO timeout to a
+# config template on gcore.jsdelivr.net on the first model resolution whenever
+# ~/mineru.json is absent; HF_HUB_OFFLINE does not govern it, so on an egress-
+# restricted runner it hangs the full harness timeout. The bench workflow avoids the
+# call entirely by packaging ~/mineru.json, and sets MINERU_NET_TIMEOUT so any
+# residual/future stray call fails fast and loud instead of hanging. Must be set
+# before mineru is imported (done lazily below). ~keep
+_net_timeout = float(os.environ.get("MINERU_NET_TIMEOUT", "0") or "0")
+if _net_timeout > 0:
+    socket.setdefaulttimeout(_net_timeout)
+
+# FTLANG_CACHE points fast-langdetect's cache inside the packaged HF hub dir. In
+# practice MinerU calls detect_language with the default low_memory=True, loading the
+# bundled lid.176.ftz from package resources with no network fetch, so this is a
+# harmless safeguard rather than a fix. Set before mineru is imported (done lazily). ~keep
 _hf_hub_cache = os.environ.get("HF_HUB_CACHE") or str(
     Path(os.environ.get("HF_HOME") or Path.home() / ".cache" / "huggingface") / "hub"
 )

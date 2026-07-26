@@ -715,8 +715,10 @@ jobs:
         id: mineru-model-cache
         uses: actions/cache@v5
         with:
-          path: ~/.cache/huggingface/hub
-          key: mineru-models-3.4.4-offline-v3-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            ~/.cache/huggingface/hub
+            ~/mineru.json
+          key: mineru-models-3.4.4-cfg-v4-${{ runner.os }}-${{ runner.arch }}
 
       - name: Warm MinerU model weights (native + OCR pipelines)
         if: steps.mineru-model-cache.outputs.cache-hit != 'true'
@@ -735,11 +737,38 @@ jobs:
           echo "MinerU model cache populated at $HF_HUB_CACHE"
           du -sh "$HF_HUB_CACHE" || true
 
+      - name: Ensure MinerU config (mineru.json) present
+        env:
+          UV_NO_SYNC: "1"
+        run: |
+          set -euo pipefail
+          # MinerU's persist_downloaded_model_config fetches a config template from
+          # gcore.jsdelivr.net (bare requests.get, no timeout) on the first model
+          # resolution whenever ~/mineru.json is absent -- ungoverned by HF_HUB_OFFLINE,
+          # so on the egress-restricted bench runner it hangs the full timeout. Packaging
+          # a valid ~/mineru.json makes get_existing_configured_model_root short-circuit
+          # the download entirely. The warm step above writes it as a side effect; on a
+          # cache hit it is restored by actions/cache. Regenerate online if still missing.
+          if [ ! -f "$HOME/mineru.json" ]; then
+            echo "mineru.json missing after warm/cache-restore; generating online..."
+            uv run --no-sync python tools/benchmark-harness/scripts/mineru_extract.py \
+              --no-ocr --format=markdown sync test_documents/pdf/fake_memo.pdf > /dev/null
+          fi
+          uv run --no-sync python - <<'PY'
+          import json, os
+          cfg = os.path.expanduser("~/mineru.json")
+          data = json.load(open(cfg))
+          models_dir = data.get("models-dir") or {}
+          assert models_dir.get("pipeline"), f"mineru.json missing models-dir.pipeline: {data}"
+          print(f"mineru.json OK: config_version={data.get('config_version')} models-dir={models_dir}")
+          PY
+
       - name: Package MinerU model cache
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/mineru-model-cache"
-          tar -C "$HOME/.cache/huggingface" -cf "$RUNNER_TEMP/mineru-model-cache/mineru-models.tar" hub
+          tar -C "$HOME" -cf "$RUNNER_TEMP/mineru-model-cache/mineru-models.tar" \
+            .cache/huggingface/hub mineru.json
           ls -lh "$RUNNER_TEMP/mineru-model-cache/mineru-models.tar"
 
       - name: Upload MinerU model cache
@@ -838,7 +867,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$HOME/.cache/huggingface"
-          tar -C "$HOME/.cache/huggingface" -xf "$RUNNER_TEMP/mineru-model-cache/mineru-models.tar"
+          tar -C "$HOME" -xf "$RUNNER_TEMP/mineru-model-cache/mineru-models.tar"
+          test -f "$HOME/mineru.json" || { echo "mineru.json not restored from cache artifact"; exit 1; }
           du -sh "$HOME/.cache/huggingface/hub" || true
 
       - name: Run benchmark
@@ -851,6 +881,10 @@ jobs:
           COHORT: tools/benchmark-harness/cohorts/${{ matrix.cohort }}.json
           OCR_ENABLED: ${{ matrix.cohort == 'ocr-pdf-fast-b4' }}
           UV_NO_SYNC: "1"
+          # Belt-and-suspenders: cap any stray unbounded network call (offline) so it
+          # fails fast and loud instead of hanging the full timeout. Bench-only, so the
+          # prefetch job's large online model downloads are unaffected.
+          MINERU_NET_TIMEOUT: "60"
         run: scripts/benchmarks/run-benchmark.sh
 
       - name: Upload artifacts
