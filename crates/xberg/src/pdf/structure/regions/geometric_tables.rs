@@ -1,4 +1,4 @@
-//! Geometric table-region fallback (xberg-io/xberg#1316).
+//! Geometric table-region fallback (xberg-io/xberg#1316, #1319).
 //!
 //! Under the corrected square-resize RT-DETR preprocessing (commit `8299d3ea`,
 //! faithful to the Docling Heron ONNX export), the layout detector no longer
@@ -10,13 +10,17 @@
 //!
 //! It synthesizes a `Table` region **only** for pages where the ML detector
 //! produced no `Table` region at all — it never overrides the detector where it
-//! already fired. The synthesized region is reconstructed through the exact same
+//! already fired. The synthesized region is reconstructed through the same
 //! guarded path as an ML `Table` hint
-//! ([`super::tables::extract_tables_from_layout_hints`]), so every #36
-//! false-positive guard (`post_process_table`, `is_well_formed_table`, the
-//! numeric-exemption prose gate, the code-listing and single-cell-row guards)
-//! still decides acceptance. This widens *candidate proposal* only; it never
-//! bypasses validation.
+//! ([`super::tables::extract_tables_from_layout_hints`]), so the #36
+//! false-positive guards (`post_process_table`, `is_well_formed_table`'s
+//! empty-cell / shredded-row / alpha-ratio / unique-word checks, the
+//! code-listing and single-cell-row guards) still decide acceptance. The one
+//! exception is text-heavy grids (#1319): because a regular key-value grid trips
+//! `is_well_formed_table`'s uniform-column *prose* heuristic, and this fallback
+//! has already vetted the columnar structure geometrically ([`run_is_text_heavy_grid`]),
+//! that single heuristic is skipped for these pre-vetted hints
+//! (`prevalidated_columns`). All other guards still apply.
 
 use crate::pdf::structure::types::{LayoutHint, LayoutHintClass};
 use crate::pdf::table_reconstruct::HocrWord;
@@ -41,12 +45,32 @@ const MAX_ROW_PITCH_FACTOR: f32 = 3.5;
 /// the same visual row.
 const ROW_GROUPING_FACTOR: f32 = 0.6;
 /// Minimum fraction of a run's words that must be numeric-value tokens for the
-/// run to be proposed. The #1316 target class — borderless invoice / line-item /
-/// metric tables — is numeric, whereas the dominant geometric false positive is
-/// alphabetic multi-column prose (two-column academic body text), which cannot
-/// clear this bar. The ML detector remains responsible for textual tables; this
-/// fallback deliberately covers only the numeric borderless case it regressed.
+/// run to be proposed via the numeric path. The #1316 target class — borderless
+/// invoice / line-item / metric tables — is numeric, whereas the dominant
+/// geometric false positive is alphabetic multi-column prose (two-column
+/// academic body text), which cannot clear this bar. Text-heavy borderless
+/// tables (invoice header key-value grids, #1319) are handled by the separate,
+/// strictly-gated [`run_is_text_heavy_grid`] path.
 const MIN_NUMERIC_WORD_FRACTION: f32 = 0.35;
+/// Text-heavy key-value grids (#1319 — invoice header association tables) are
+/// numeric-sparse, so they fail [`MIN_NUMERIC_WORD_FRACTION`], but they carry a
+/// columnar signature that the numeric gate's dominant false positive (packed
+/// multi-column academic prose) does not: short cells separated by whitespace
+/// gutters that are both far wider than the inter-word spacing and absolutely
+/// wide. All three conditions below must hold. They were calibrated against a
+/// corpus sweep of numeric-sparse runs: alphabetic prose peaks at ~77 pt gutters
+/// only when dense (≥14 words/row), while sparse prose (≤10 words/row) never
+/// exceeds ~12 pt gutters — versus the reproducer's 229 pt gutter at 7 words/row.
+/// Each threshold independently rejects every observed prose run; requiring all
+/// three is defence-in-depth against layouts outside the sample.
+const TEXT_HEAVY_MAX_WORDS_PER_ROW: usize = 10;
+/// A run's median inter-column gutter must be at least this multiple of its
+/// median intra-cell word spacing — the gutter is a deliberate column break, not
+/// wide word spacing.
+const TEXT_HEAVY_MIN_GUTTER_RATIO: u32 = 8;
+/// A run's median inter-column gutter must be at least this many points — an
+/// absolute column gap (~1.4 in), well above the widest sparse-prose gutter.
+const TEXT_HEAVY_MIN_GUTTER_PTS: u32 = 100;
 /// Confidence stamped on a synthesized hint. `extract_tables_from_layout_hints`
 /// filters hints by `confidence >= min_confidence` (0.5 at every call site), so
 /// a synthesized region must clear that bar; the geometric evidence has already
@@ -146,8 +170,19 @@ fn finalize_run(words: &[HocrWord], rows: &[Row], run: &[usize], page_height: f3
         return None;
     }
 
-    if !run_is_numeric_dominant(words, rows, run) {
+    // Accept the run if it is either numeric-dominant (the #1316 class) or a
+    // text-heavy key-value grid (the #1319 class). Both are gated hard; a run
+    // that is neither is left to the ML detector to avoid #36 over-fabrication.
+    let numeric = run_is_numeric_dominant(words, rows, run);
+    if !numeric && !run_is_text_heavy_grid(words, rows, run) {
         return None;
+    }
+    if !numeric {
+        tracing::debug!(
+            rows = run.len(),
+            columns = consistent_columns,
+            "geometric table fallback: accepted text-heavy key-value grid (#1319)"
+        );
     }
 
     Some(run_bounding_hint(words, rows, run, page_height))
@@ -276,6 +311,59 @@ fn group_rows(words: &[HocrWord], indexed: &[usize], median_height: u32) -> Vec<
     rows
 }
 
+/// Whether a run is a text-heavy key-value grid (#1319): sparse rows whose cells
+/// are separated by whitespace gutters both far wider than the intra-cell word
+/// spacing and absolutely wide. See [`TEXT_HEAVY_MAX_WORDS_PER_ROW`] for the
+/// calibration. This is the non-numeric counterpart to [`run_is_numeric_dominant`].
+fn run_is_text_heavy_grid(words: &[HocrWord], rows: &[Row], run: &[usize]) -> bool {
+    let (median_gutter, median_word_gap, median_words_per_row) = run_row_spacing(words, rows, run);
+    median_word_gap > 0
+        && median_words_per_row <= TEXT_HEAVY_MAX_WORDS_PER_ROW
+        && median_gutter >= TEXT_HEAVY_MIN_GUTTER_PTS
+        && median_gutter >= median_word_gap.saturating_mul(TEXT_HEAVY_MIN_GUTTER_RATIO)
+}
+
+/// Per-run spacing summary used by [`run_is_text_heavy_grid`]:
+/// `(median inter-column gutter, median intra-cell word gap, median words/row)`.
+/// For each row the widest inter-word gap approximates the column gutter and the
+/// narrowest positive gap approximates the word spacing inside a cell; medians
+/// over the run resist a single irregular row.
+fn run_row_spacing(words: &[HocrWord], rows: &[Row], run: &[usize]) -> (u32, u32, usize) {
+    let mut per_row_max_gap: Vec<u32> = Vec::new();
+    let mut per_row_min_gap: Vec<u32> = Vec::new();
+    let mut per_row_count: Vec<usize> = Vec::new();
+    for &row_idx in run {
+        let mut row_words: Vec<&HocrWord> = rows[row_idx].word_indices.iter().map(|&i| &words[i]).collect();
+        row_words.sort_by_key(|w| w.left);
+        per_row_count.push(row_words.len());
+        let gaps: Vec<u32> = row_words
+            .windows(2)
+            .map(|pair| pair[1].left.saturating_sub(pair[0].left + pair[0].width))
+            .collect();
+        if let Some(&max_gap) = gaps.iter().max() {
+            per_row_max_gap.push(max_gap);
+        }
+        if let Some(&min_gap) = gaps.iter().filter(|&&g| g > 0).min() {
+            per_row_min_gap.push(min_gap);
+        }
+    }
+    (
+        median_u32(per_row_max_gap),
+        median_u32(per_row_min_gap),
+        median_usize(per_row_count),
+    )
+}
+
+fn median_u32(mut values: Vec<u32>) -> u32 {
+    values.sort_unstable();
+    values.get(values.len() / 2).copied().unwrap_or(0)
+}
+
+fn median_usize(mut values: Vec<usize>) -> usize {
+    values.sort_unstable();
+    values.get(values.len() / 2).copied().unwrap_or(0)
+}
+
 fn median_word_height(words: &[HocrWord], indexed: &[usize]) -> u32 {
     let mut heights: Vec<u32> = indexed.iter().map(|&i| words[i].height).collect();
     heights.sort_unstable();
@@ -359,6 +447,80 @@ mod tests {
         }
         let hints = detect_geometric_table_hints(&words, 842.0);
         assert!(hints.is_empty(), "alphabetic grid must not be proposed (numeric gate)");
+    }
+
+    /// The #1319 reproducer shape: a sparse 3-column key-value header grid with
+    /// short multi-word cells separated by wide gutters. It is numeric-sparse, so
+    /// it clears detection only through the text-heavy path.
+    #[test]
+    fn detects_text_heavy_key_value_grid() {
+        let col_a = 33u32; // recipient / address
+        let col_b = 330u32; // field label
+        let col_c = 460u32; // value
+        let rows_text = [
+            ("SAMPLE", "ROAD", "Invoice", "number", "INV", "alpha"),
+            ("DEMO", "CITY", "Order", "number", "ORD", "beta"),
+            ("SYNTH", "COUNTRY", "Invoice", "date", "Jan", "gamma"),
+            ("EXAMPLE", "CORP", "Order", "date", "Feb", "delta"),
+        ];
+        let mut words = Vec::new();
+        for (r, (a1, a2, b1, b2, c1, c2)) in rows_text.iter().enumerate() {
+            let y = 100 + r as u32 * 15;
+            words.push(word(a1, col_a, y, 40)); // ends 73
+            words.push(word(a2, col_a + 45, y, 30)); // 78 → gutter 222 to col_b
+            words.push(word(b1, col_b, y, 48)); // ends 378
+            words.push(word(b2, col_b + 53, y, 42)); // 383
+            words.push(word(c1, col_c, y, 28)); // ends 488
+            words.push(word(c2, col_c + 33, y, 28)); // 493
+        }
+        let hints = detect_geometric_table_hints(&words, 842.0);
+        assert_eq!(hints.len(), 1, "text-heavy key-value grid must be proposed");
+        assert_eq!(hints[0].class_name, LayoutHintClass::Table);
+    }
+
+    /// Packed multi-column academic prose: many words per row, gutters comparable
+    /// to the inter-word spacing. Numeric-sparse and not a sparse key-value grid,
+    /// so neither acceptance path fires.
+    #[test]
+    fn rejects_dense_multicolumn_prose() {
+        let col_x = [33u32, 220, 410];
+        let mut words = Vec::new();
+        for r in 0..5u32 {
+            let y = 100 + r * 14;
+            for &cx in &col_x {
+                let mut x = cx;
+                for w in 0..5u32 {
+                    words.push(word(&format!("word{r}{w}"), x, y, 30));
+                    x += 34; // 30 width + 4 gap → packed cell
+                }
+            }
+        }
+        let hints = detect_geometric_table_hints(&words, 842.0);
+        assert!(hints.is_empty(), "dense multi-column prose must not be proposed");
+    }
+
+    /// The dangerous corpus false positive: a dense prose row (many words) that
+    /// happens to carry one wide gap, giving a high gutter ratio. The words-per-row
+    /// sparsity cap rejects it even though the gutter and ratio guards pass.
+    #[test]
+    fn rejects_wide_gutter_dense_prose() {
+        let col_x = [33u32, 250, 470];
+        let mut words = Vec::new();
+        for r in 0..4u32 {
+            let y = 100 + r * 14;
+            for &cx in &col_x {
+                let mut x = cx;
+                for w in 0..6u32 {
+                    words.push(word(&format!("w{r}{w}"), x, y, 8));
+                    x += 12; // packed: 12 words visible per row across 3 dense cells
+                }
+            }
+        }
+        let hints = detect_geometric_table_hints(&words, 842.0);
+        assert!(
+            hints.is_empty(),
+            "wide-gutter but dense prose must be rejected by the sparsity cap"
+        );
     }
 
     /// An equation-dense grid whose "numbers" are math variables and subscripts

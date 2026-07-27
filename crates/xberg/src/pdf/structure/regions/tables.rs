@@ -11,7 +11,7 @@ const TABLE_BBOX_TOP_TIGHTEN_MARGIN_PTS: u32 = 4;
 use crate::pdf::structure::text_repair::repair_broken_word_spacing;
 use crate::pdf::structure::types::{LayoutHint, LayoutHintClass};
 use crate::pdf::table_reconstruct::{
-    is_well_formed_table, looks_like_code_listing, post_process_table, reconstruct_table, table_to_markdown,
+    is_well_formed_table_core, looks_like_code_listing, post_process_table, reconstruct_table, table_to_markdown,
 };
 use crate::types::Table;
 
@@ -30,6 +30,7 @@ pub(in crate::pdf::structure) fn extract_tables_from_layout_hints(
     page_height: f32,
     min_confidence: f32,
     allow_single_column: bool,
+    prevalidated_columns: bool,
 ) -> Vec<Table> {
     use crate::pdf::table_reconstruct::HocrWord;
 
@@ -239,7 +240,7 @@ pub(in crate::pdf::structure) fn extract_tables_from_layout_hints(
             continue;
         }
 
-        if !is_well_formed_table(&table_cells) {
+        if !is_well_formed_table_core(&table_cells, prevalidated_columns) {
             tracing::trace!(
                 page = page_index,
                 rows = table_cells.len(),
@@ -393,7 +394,7 @@ mod tests {
             right: 600.0,
             top: 800.0,
         }];
-        let tables = extract_tables_from_layout_hints(&words, &hints, 0, 800.0, 0.5, false);
+        let tables = extract_tables_from_layout_hints(&words, &hints, 0, 800.0, 0.5, false, false);
         assert!(tables.is_empty());
     }
 
@@ -406,7 +407,7 @@ mod tests {
             make_word("D", 100, 30, 50, 12),
         ];
         let hints = vec![make_table_hint(0.3, 0.0, 0.0, 200.0, 800.0)];
-        let tables = extract_tables_from_layout_hints(&words, &hints, 0, 800.0, 0.5, false);
+        let tables = extract_tables_from_layout_hints(&words, &hints, 0, 800.0, 0.5, false, false);
         assert!(tables.is_empty());
     }
 
@@ -414,14 +415,14 @@ mod tests {
     fn test_empty_region_too_few_words() {
         let words = vec![make_word("A", 10, 10, 50, 12), make_word("B", 100, 10, 50, 12)];
         let hints = vec![make_table_hint(0.9, 0.0, 0.0, 200.0, 800.0)];
-        let tables = extract_tables_from_layout_hints(&words, &hints, 0, 800.0, 0.5, false);
+        let tables = extract_tables_from_layout_hints(&words, &hints, 0, 800.0, 0.5, false, false);
         assert!(tables.is_empty());
     }
 
     #[test]
     fn test_empty_words_returns_empty() {
         let hints = vec![make_table_hint(0.9, 0.0, 0.0, 200.0, 800.0)];
-        let tables = extract_tables_from_layout_hints(&[], &hints, 0, 800.0, 0.5, false);
+        let tables = extract_tables_from_layout_hints(&[], &hints, 0, 800.0, 0.5, false, false);
         assert!(tables.is_empty());
     }
 
@@ -433,7 +434,7 @@ mod tests {
             make_word("C", 10, 30, 50, 12),
             make_word("D", 100, 30, 50, 12),
         ];
-        let tables = extract_tables_from_layout_hints(&words, &[], 0, 800.0, 0.5, false);
+        let tables = extract_tables_from_layout_hints(&words, &[], 0, 800.0, 0.5, false, false);
         assert!(tables.is_empty());
     }
 
@@ -446,7 +447,7 @@ mod tests {
             make_word("D", 560, 520, 50, 12),
         ];
         let hints = vec![make_table_hint(0.9, 0.0, 700.0, 100.0, 800.0)];
-        let tables = extract_tables_from_layout_hints(&words, &hints, 0, 800.0, 0.5, false);
+        let tables = extract_tables_from_layout_hints(&words, &hints, 0, 800.0, 0.5, false, false);
         assert!(tables.is_empty());
     }
 
@@ -459,7 +460,7 @@ mod tests {
             make_word("C", 100, 30, 50, 12),
         ];
         let hints = vec![make_table_hint(0.9, 0.0, 0.0, 200.0, 800.0)];
-        let tables = extract_tables_from_layout_hints(&words, &hints, 0, 800.0, 0.5, false);
+        let tables = extract_tables_from_layout_hints(&words, &hints, 0, 800.0, 0.5, false, false);
         assert!(tables.is_empty());
     }
 
@@ -474,7 +475,7 @@ mod tests {
             make_word("Cell4", 200, 70, 80, 15),
         ];
         let hints = vec![make_table_hint(0.9, 0.0, 700.0, 400.0, 800.0)];
-        let tables = extract_tables_from_layout_hints(&words, &hints, 2, 800.0, 0.5, false);
+        let tables = extract_tables_from_layout_hints(&words, &hints, 2, 800.0, 0.5, false, false);
         for table in &tables {
             assert_eq!(table.page_number, 3);
         }
@@ -514,7 +515,7 @@ mod tests {
 
         let hints = vec![make_table_hint(0.9, 40.0, 690.0, 510.0, 800.0)];
 
-        let tables = extract_tables_from_layout_hints(&all_words, &hints, 0, page_height, 0.5, true);
+        let tables = extract_tables_from_layout_hints(&all_words, &hints, 0, page_height, 0.5, true, false);
 
         assert!(!tables.is_empty(), "expected a table to be reconstructed");
 

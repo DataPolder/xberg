@@ -1535,6 +1535,7 @@ pub(crate) fn extract_document_structure_from_segments(
                                     tp.page_height,
                                     0.5,
                                     allow_single_column,
+                                    false,
                                 )
                             } else {
                                 let Some(mut tatr) =
@@ -1573,6 +1574,7 @@ pub(crate) fn extract_document_structure_from_segments(
                                     tp.page_height,
                                     0.5,
                                     allow_single_column,
+                                    false,
                                 )
                             }
                         })
@@ -1612,6 +1614,7 @@ pub(crate) fn extract_document_structure_from_segments(
                                     tp.page_height,
                                     0.5,
                                     allow_single_column,
+                                    false,
                                 )
                             } else {
                                 Vec::new()
@@ -1633,6 +1636,7 @@ pub(crate) fn extract_document_structure_from_segments(
                             tp.page_height,
                             0.5,
                             allow_single_column,
+                            false,
                         ));
                     }
                 }
@@ -1650,6 +1654,7 @@ pub(crate) fn extract_document_structure_from_segments(
                         tp.page_height,
                         0.5,
                         allow_single_column,
+                        false,
                     ));
                 }
             }
@@ -1669,6 +1674,7 @@ pub(crate) fn extract_document_structure_from_segments(
                 tp.page_height,
                 0.5,
                 allow_single_column,
+                false,
             ));
         }
 
@@ -1690,6 +1696,10 @@ pub(crate) fn extract_document_structure_from_segments(
                 *page_height,
                 0.5,
                 allow_single_column,
+                // Geometrically pre-vetted (row/column/gutter guards): skip the
+                // downstream columnar-prose heuristic that mistakes a regular
+                // key-value grid for wrapped prose (#1319).
+                true,
             ));
             let recovered = layout_tables.len() - before;
             if recovered > 0 {

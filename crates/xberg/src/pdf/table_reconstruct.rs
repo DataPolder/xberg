@@ -896,6 +896,17 @@ fn looks_like_short_columned_prose(data_rows: &[Vec<String>], num_cols: usize) -
 /// - Repeated page elements (headers/footers detected as tables on every page)
 /// - Low-vocabulary repetitive content (same few words in every row)
 pub(crate) fn is_well_formed_table(grid: &[Vec<String>]) -> bool {
+    is_well_formed_table_core(grid, false)
+}
+
+/// Core well-formedness check. `skip_columnar_prose_guard` drops only the
+/// uniform-column-length prose heuristic, for callers that have already vetted
+/// the region's columnar structure geometrically (the #1319 text-heavy geometric
+/// fallback). A genuine key-value grid has regular, short column lengths that
+/// this heuristic mistakes for wrapped columnar prose; every other structural
+/// guard (empty-cell fraction, shredded-row, alpha-ratio, unique-word, and
+/// header-duplication checks) still applies.
+pub(crate) fn is_well_formed_table_core(grid: &[Vec<String>], skip_columnar_prose_guard: bool) -> bool {
     if grid.len() < 2 {
         return false;
     }
@@ -1006,7 +1017,7 @@ pub(crate) fn is_well_formed_table(grid: &[Vec<String>]) -> bool {
                 .iter()
                 .all(|(mean, stddev)| *mean > 0.0 && *stddev / *mean < 0.3);
 
-            if !dense_numeric_grid && columns_uniform && low_variance {
+            if !skip_columnar_prose_guard && !dense_numeric_grid && columns_uniform && low_variance {
                 return false;
             }
         }
@@ -2179,6 +2190,43 @@ mod tests {
         assert!(
             is_well_formed_table(&grid),
             "Real table with varied columns should be accepted"
+        );
+    }
+
+    /// A genuine text-heavy key-value grid (#1319 invoice header) has regular,
+    /// short column lengths, so the global uniform-column prose heuristic rejects
+    /// it — but a geometrically pre-vetted caller passing
+    /// `skip_columnar_prose_guard = true` must accept it while every other
+    /// structural guard still applies.
+    #[test]
+    fn test_key_value_grid_gated_by_columnar_prose_guard_only() {
+        let grid: Vec<Vec<String>> = vec![
+            vec![
+                "EXAMPLE COMPANY".into(),
+                "Customer number".into(),
+                "CUST-86241057".into(),
+            ],
+            vec![
+                "Attn. SYNTH RECIPIENT".into(),
+                "Invoice number".into(),
+                "INV-709381624".into(),
+            ],
+            vec!["SAMPLE ROAD 14".into(), "Invoice date".into(), "15 January 2030".into()],
+            vec!["45123 DEMO CITY".into(), "Order number".into(), "ORDER-58260419".into()],
+            vec!["SYNTH COUNTRY".into(), "Order date".into(), "15 January 2030".into()],
+            vec![
+                "Tax ID SYNTH-TAX-918274635".into(),
+                "Delivery date".into(),
+                "15 January 2030".into(),
+            ],
+        ];
+        assert!(
+            !is_well_formed_table_core(&grid, false),
+            "uniform-column prose heuristic rejects the key-value grid without the skip"
+        );
+        assert!(
+            is_well_formed_table_core(&grid, true),
+            "pre-vetted key-value grid must pass every other structural guard"
         );
     }
 
