@@ -10,6 +10,7 @@
 //! | `XBERG_LAYOUT_NO_DEMOTE`       | Never demote a heading to body text on Text/Caption/Footnote |
 //! | `XBERG_LAYOUT_NO_PROMOTE`      | Never promote a paragraph to a heading on Title/SectionHeader |
 //! | `XBERG_LAYOUT_NO_LAYOUT_TABLES`| Never fabricate a table from a layout Table region           |
+//! | `XBERG_LAYOUT_NO_GEOMETRIC_TABLES`| Never synthesize a Table region from column-aligned text   |
 //! | `XBERG_LAYOUT_NO_REORDER`      | Never reorder reading order by layout regions                |
 //! | `XBERG_LAYOUT_LOG_OVERRIDES`   | Emit a per-override `info` line for attribution              |
 //!
@@ -26,6 +27,10 @@ pub(crate) struct LayoutDebugFlags {
     pub(crate) no_promote: bool,
     /// `XBERG_LAYOUT_NO_LAYOUT_TABLES`: suppress table fabrication from layout regions.
     pub(crate) no_layout_tables: bool,
+    /// `XBERG_LAYOUT_NO_GEOMETRIC_TABLES`: suppress synthesizing Table regions from
+    /// column-aligned text on pages where the ML detector emitted no Table region.
+    /// Exists to A/B the geometric fallback (xberg-io/xberg#1316) against the corpus.
+    pub(crate) no_geometric_tables: bool,
     /// `XBERG_LAYOUT_NO_REORDER`: suppress reading-order reordering by layout.
     /// Its only reader lives in `reorder_segments_by_layout`, which is gated on
     /// `feature = "layout-detection"`; without that feature (wasm-target, android-target,
@@ -51,6 +56,7 @@ pub(crate) fn layout_debug_flags() -> LayoutDebugFlags {
         no_demote: env_is_set("XBERG_LAYOUT_NO_DEMOTE"),
         no_promote: env_is_set("XBERG_LAYOUT_NO_PROMOTE"),
         no_layout_tables: env_is_set("XBERG_LAYOUT_NO_LAYOUT_TABLES"),
+        no_geometric_tables: env_is_set("XBERG_LAYOUT_NO_GEOMETRIC_TABLES"),
         no_reorder: env_is_set("XBERG_LAYOUT_NO_REORDER"),
         log_overrides: env_is_set("XBERG_LAYOUT_LOG_OVERRIDES"),
     })

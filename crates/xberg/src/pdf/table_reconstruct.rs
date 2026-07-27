@@ -10,6 +10,16 @@ pub(crate) use crate::table_core::{HocrWord, reconstruct_table, table_to_markdow
 const DENSE_NUMERIC_MIN_DATA_ROWS: usize = 6;
 const DENSE_NUMERIC_MIN_COLUMNS: usize = 6;
 const DENSE_NUMERIC_MIN_CELL_PERCENT: usize = 75;
+/// Minimum non-empty data cells for the short-numeric-table exemption. Below
+/// this there is too little evidence to call a grid a genuine table.
+const SHORT_NUMERIC_MIN_DATA_CELLS: usize = 4;
+/// Data-cell numeric fraction at or above which a short, wide single-word grid
+/// is a genuine numeric table (invoice line items, small metric tables) rather
+/// than shredded multi-column prose. Prose columns are alphabetic, so this bar
+/// is unreachable for the misparses the ≥5-column guard targets — it recovers
+/// the short borderless tables the corrected preprocessing loses (#1316)
+/// without reopening the #36 fabrication hole.
+const SHORT_NUMERIC_MIN_CELL_PERCENT: usize = 60;
 const LARGE_TABLE_MIN_COLUMNS: usize = 6;
 const DEFAULT_MIN_DATA_ROW_DIGIT_CELLS: usize = 3;
 const REPEATED_DATA_ROW_COUNT: usize = 3;
@@ -349,6 +359,7 @@ fn post_process_table_inner(
         let dense_scalar_grid = layout_guided && is_dense_scalar_grid(&processed);
         if !dense_numeric_grid
             && !dense_scalar_grid
+            && !is_predominantly_numeric_short_grid(&processed)
             && non_empty_cells >= 6
             && single_word_cells * 100 > non_empty_cells * threshold
         {
@@ -1053,6 +1064,29 @@ fn is_dense_numeric_grid(grid: &[Vec<String>]) -> bool {
 
     non_empty_cells > 0
         && numeric_cells.saturating_mul(100) >= non_empty_cells.saturating_mul(DENSE_NUMERIC_MIN_CELL_PERCENT)
+}
+
+/// Whether the grid's data cells are overwhelmingly numeric values, with no
+/// row/column-count floor (unlike [`is_dense_numeric_grid`], which is calibrated
+/// for large 6×6+ tables). A short, wide grid of one-or-two-word cells that is
+/// this numeric is genuine tabular data — a borderless invoice/line-item table —
+/// not shredded prose, which is alphabetic. Used only to exempt such grids from
+/// the ≥5-column single-word prose guard (xberg-io/xberg#1316).
+fn is_predominantly_numeric_short_grid(grid: &[Vec<String>]) -> bool {
+    let mut non_empty_cells = 0usize;
+    let mut numeric_cells = 0usize;
+    for cell in grid.iter().skip(1).flat_map(|row| row.iter()) {
+        let trimmed = cell.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        non_empty_cells += 1;
+        if is_numeric_value_cell(trimmed) {
+            numeric_cells += 1;
+        }
+    }
+    non_empty_cells >= SHORT_NUMERIC_MIN_DATA_CELLS
+        && numeric_cells.saturating_mul(100) >= non_empty_cells.saturating_mul(SHORT_NUMERIC_MIN_CELL_PERCENT)
 }
 
 fn is_dense_scalar_grid(grid: &[Vec<String>]) -> bool {

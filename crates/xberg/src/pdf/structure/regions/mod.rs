@@ -3,11 +3,13 @@
 //! Provides table recognition, layout validation, and heading classification
 //! helpers used by the PDF structure pipeline.
 
+mod geometric_tables;
 mod heading;
 pub(super) mod layout_validation;
 pub(super) mod table_recognition;
 pub(crate) mod tables;
 
+pub(super) use geometric_tables::detect_geometric_table_hints;
 pub(super) use heading::{looks_like_bare_url, looks_like_figure_label};
 #[cfg(feature = "layout-detection")]
 pub(super) use table_recognition::recognize_tables_slanet;

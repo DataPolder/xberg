@@ -1372,6 +1372,15 @@ pub(crate) fn extract_document_structure_from_segments(
             page_height: f32,
         }
         let mut table_pages: Vec<TablePageData> = Vec::new();
+        // Geometric fallback (#1316): pages the ML detector left without any
+        // Table region, but whose text geometry forms a column-aligned grid.
+        // Reconstructed through the same guarded path as ML hints, below.
+        let mut geometric_table_pages: Vec<(
+            usize,
+            Vec<crate::pdf::table_reconstruct::HocrWord>,
+            f32,
+            Vec<LayoutHint>,
+        )> = Vec::new();
 
         #[allow(clippy::needless_range_loop)]
         for page_idx in 0..page_count {
@@ -1382,12 +1391,9 @@ pub(crate) fn extract_document_structure_from_segments(
             let Some(hints) = hints_pages.get(page_idx) else {
                 continue;
             };
-            if !hints
+            let has_table_hint = hints
                 .iter()
-                .any(|h| h.class_name == super::types::LayoutHintClass::Table)
-            {
-                continue;
-            }
+                .any(|h| h.class_name == super::types::LayoutHintClass::Table);
             #[cfg(feature = "layout-detection")]
             let page_height = layout_results
                 .and_then(|results| results.get(page_idx))
@@ -1403,17 +1409,29 @@ pub(crate) fn extract_document_structure_from_segments(
                 );
                 continue;
             }
-            tracing::trace!(
-                page = page_idx,
-                word_count = words.len(),
-                page_height,
-                "oxide layout table extraction: page prepared"
-            );
-            table_pages.push(TablePageData {
-                page_idx,
-                words,
-                page_height,
-            });
+            if has_table_hint {
+                tracing::trace!(
+                    page = page_idx,
+                    word_count = words.len(),
+                    page_height,
+                    "oxide layout table extraction: page prepared"
+                );
+                table_pages.push(TablePageData {
+                    page_idx,
+                    words,
+                    page_height,
+                });
+            } else {
+                let synthetic = super::regions::detect_geometric_table_hints(&words, page_height);
+                if !synthetic.is_empty() {
+                    tracing::debug!(
+                        page = page_idx,
+                        regions = synthetic.len(),
+                        "geometric table fallback: synthesized Table region(s) on ML-silent page"
+                    );
+                    geometric_table_pages.push((page_idx, words, page_height, synthetic));
+                }
+            }
         }
 
         #[cfg(feature = "layout-detection")]
@@ -1652,6 +1670,35 @@ pub(crate) fn extract_document_structure_from_segments(
                 0.5,
                 allow_single_column,
             ));
+        }
+
+        // Geometric table fallback (#1316): reconstruct the synthesized regions
+        // through the SAME guarded path (post_process_table, is_well_formed_table,
+        // numeric-exemption prose gate, code-listing/single-cell-row guards). This
+        // never runs the ML table models — it only recovers tables the detector
+        // missed on otherwise Table-region-free pages.
+        for (page_idx, words, page_height, synthetic_hints) in &geometric_table_pages {
+            if cancel_token.is_some_and(|t| t.is_cancelled()) {
+                tracing::debug!("oxide structure pipeline: cancelled during geometric table fallback");
+                break;
+            }
+            let before = layout_tables.len();
+            layout_tables.extend(super::regions::extract_tables_from_layout_hints(
+                words,
+                synthetic_hints,
+                *page_idx,
+                *page_height,
+                0.5,
+                allow_single_column,
+            ));
+            let recovered = layout_tables.len() - before;
+            if recovered > 0 {
+                tracing::debug!(
+                    page = page_idx,
+                    recovered,
+                    "geometric table fallback: recovered table(s) the ML detector missed"
+                );
+            }
         }
     }
 
