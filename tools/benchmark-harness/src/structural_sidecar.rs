@@ -696,7 +696,21 @@ pub fn score_structural(pred: &StructuralSidecar, gt: &StructuralSidecar) -> Str
             score_sum += weight * value;
         }
     }
-    let base = if weight_sum > 0.0 { score_sum / weight_sum } else { 1.0 };
+    // paragraph/heading/list/table/edge dimension is "present" per the `present_*`
+    // gates above. That happens either because both documents are genuinely empty
+    // of structural content (a true vacuous match, scored 1.0 — mirrors
+    // `compute_f1`'s both-empty convention in quality.rs) OR because content exists
+    // (e.g. unbound captions/footnotes, which aren't gradeable by any `present_*`
+    // gate) on at least one side without a matching gate. The latter must NOT score
+    // 1.0: that would let a framework mangle un-gated content for free. Only the
+    // former — both node lists literally empty — is a genuine vacuous match.
+    let base = if weight_sum > 0.0 {
+        score_sum / weight_sum
+    } else if pred.nodes.is_empty() && gt.nodes.is_empty() {
+        1.0
+    } else {
+        0.0
+    };
     let sf1 = fold_order_into_sf1(base, d5, matched);
 
     let breakdown = vec![
@@ -1008,22 +1022,26 @@ struct Edge {
     target: String,
 }
 
-/// Collect caption/footnote binding edges (only bound ones — an unbound caption
-/// contributes no edge).
+/// Collect caption/footnote binding edges. Every Caption/Footnote node is
+/// gradeable — bound ones carry the resolved target text, unbound ones carry an
+/// empty target — so a genuine binding failure is a target mismatch rather than
+/// an entry silently missing from both `n_pred` and `n_gt`. Previously only
+/// bound nodes (`binds_to: Some(_)`) were collected: a caption unbound on the GT
+/// side (a real, if imperfect, occurrence of the deterministic nearest-preceding
+/// binder) then had no representation in `edges()`/`present_edges()` at all —
+/// content that isn't a Paragraph/Formula/Image/Figure (see `paragraph_texts`)
+/// either, so it was invisible to every dimension and any pred output for it was
+/// free. Counting it here restores it as a recall opportunity.
 fn edges(s: &StructuralSidecar) -> Vec<Edge> {
     s.nodes
         .iter()
         .filter_map(|n| match n {
-            StructuralNode::Caption {
-                binds_to: Some(t),
-                text,
-            }
-            | StructuralNode::Footnote {
-                binds_to: Some(t),
-                text,
-            } => Some(Edge {
+            StructuralNode::Caption { binds_to, text } | StructuralNode::Footnote { binds_to, text } => Some(Edge {
                 caption: text.clone(),
-                target: s.nodes.get(*t).map(|n| n.repr_text()).unwrap_or_default(),
+                target: binds_to
+                    .and_then(|t| s.nodes.get(t))
+                    .map(|n| n.repr_text())
+                    .unwrap_or_default(),
             }),
             _ => None,
         })
@@ -1050,17 +1068,39 @@ fn score_edges(pred: &StructuralSidecar, gt: &StructuralSidecar) -> Dim {
     Dim::from_credit(credit, pe.len(), ge.len())
 }
 
-/// D5: match every node by content, then score reading order via LIS.
-/// Returns `(order_score, matched_pair_count)`.
+/// D5: match nodes by content — restricted to pairs of the *same kind*, mirroring
+/// every other dimension's same-kind greedy matching (score_paragraphs/headings/
+/// lists/tables/edges) — then score reading order via LIS over those matches.
+/// Without the kind restriction, a Table's flattened cell text can beat a genuine
+/// Paragraph/ListItem match on raw text similarity, corrupting the order pairs
+/// with cross-kind matches that no other dimension would ever form. Returns
+/// `(order_score, matched_pair_count)`.
 fn score_order(pred: &StructuralSidecar, gt: &StructuralSidecar) -> (f64, usize) {
-    let ptext: Vec<String> = pred.nodes.iter().map(|n| n.repr_text()).collect();
-    let gtext: Vec<String> = gt.nodes.iter().map(|n| n.repr_text()).collect();
-    let matches = greedy_match(&ptext, &gtext);
-
     let pred_pos = order_positions(&pred.reading_order, pred.nodes.len());
     let gt_pos = order_positions(&gt.reading_order, gt.nodes.len());
 
-    let order_pairs: Vec<(usize, usize)> = matches.iter().map(|(i, j, _)| (gt_pos[*j], pred_pos[*i])).collect();
+    let mut pred_by_kind: HashMap<&'static str, Vec<usize>> = HashMap::new();
+    for (idx, node) in pred.nodes.iter().enumerate() {
+        pred_by_kind.entry(node.kind_name()).or_default().push(idx);
+    }
+    let mut gt_by_kind: HashMap<&'static str, Vec<usize>> = HashMap::new();
+    for (idx, node) in gt.nodes.iter().enumerate() {
+        gt_by_kind.entry(node.kind_name()).or_default().push(idx);
+    }
+
+    let mut order_pairs: Vec<(usize, usize)> = Vec::new();
+    for (kind, pred_indices) in &pred_by_kind {
+        let Some(gt_indices) = gt_by_kind.get(kind) else {
+            continue;
+        };
+        let ptext: Vec<String> = pred_indices.iter().map(|&i| pred.nodes[i].repr_text()).collect();
+        let gtext: Vec<String> = gt_indices.iter().map(|&j| gt.nodes[j].repr_text()).collect();
+        for (local_i, local_j, _) in greedy_match(&ptext, &gtext) {
+            let pred_idx = pred_indices[local_i];
+            let gt_idx = gt_indices[local_j];
+            order_pairs.push((gt_pos[gt_idx], pred_pos[pred_idx]));
+        }
+    }
     (compute_order_score(&order_pairs), order_pairs.len())
 }
 
@@ -1554,5 +1594,119 @@ Figure 1: The overall system architecture and its components.
     fn test_empty_docs_score_one() {
         let empty = StructuralSidecar::default();
         assert!((sf1(&empty, &empty) - 1.0).abs() < 1e-9);
+    }
+
+    // --- BUG 1: score_order must not match across node kinds. ---
+
+    #[test]
+    fn score_order_does_not_match_across_kinds() {
+        // The table's flattened cell text ("Revenue Growth Q1 Q2") is textually
+        // similar to the standalone paragraph ("Revenue growth was strong in Q1
+        // and Q2"), and cross-kind matching would previously let `greedy_match`
+        // a pairing no other dimension would ever form.
+        const GT: &str = "\
+Revenue growth was strong in Q1 and Q2.
+
+Unrelated closing remarks about the fiscal year follow here.
+
+| Revenue | Growth | Q1 | Q2 |
+|---------|--------|----|----|
+| Total | High | 10 | 20 |
+";
+        // Predicted document reproduces the same nodes but in a different order:
+        // the table now comes first (before both paragraphs). If the order
+        // dimension matched across kinds, the table's cell text could steal the
+        // paragraph's slot in the greedy match and distort the LIS pairs.
+        const PRED: &str = "\
+| Revenue | Growth | Q1 | Q2 |
+|---------|--------|----|----|
+| Total | High | 10 | 20 |
+
+Revenue growth was strong in Q1 and Q2.
+
+Unrelated closing remarks about the fiscal year follow here.
+";
+        let gt = StructuralSidecar::from_markdown(GT);
+        let pred = StructuralSidecar::from_markdown(PRED);
+
+        let (_order_score, matched) = score_order(&pred, &gt);
+        // Same-kind matching must produce exactly one pair per kind: one table
+        // pair and two paragraph pairs (3 total) — never a cross-kind pairing
+        // that would inflate or collapse the matched-pair count.
+        assert_eq!(matched, 3, "expected 3 same-kind matches (1 table + 2 paragraphs)");
+
+        // With the table reordered to the front, the paragraph order relative to
+        // the table is now inverted vs GT; the kind-restricted LIS must detect
+        // this instead of being masked or corrupted by a cross-kind table/paragraph
+        let (order_score, _) = score_order(&pred, &gt);
+        assert!(
+            order_score < 1.0,
+            "reordering the table ahead of the paragraphs must lower the order score, got {order_score}"
+        );
+    }
+
+    // --- BUG 2: vacuous SF1 must not default to 1.0 when GT has ungraded content. ---
+
+    #[test]
+    fn vacuous_sf1_is_not_one_when_gt_has_ungraded_content() {
+        // GT's caption has no preceding Image/Table/Figure, so the deterministic
+        // nearest-preceding binder leaves it unbound (`binds_to: None`). An
+        // unbound Caption/Footnote is not a Paragraph/Formula/Image/Figure (see
+        // `paragraph_texts`), so before the BUG3 fix it was invisible to every
+        // real, gradeable content. Pred captures none of it.
+        const GT: &str = "Figure 1: The overall system architecture and its components.\n";
+        let gt = StructuralSidecar::from_markdown(GT);
+        let pred = StructuralSidecar::from_markdown("Something totally unrelated and wrong.\n");
+
+        let score = score_structural(&pred, &gt);
+        assert!(
+            score.sf1 < 0.5,
+            "GT has gradeable content pred entirely missed; sf1 must not be inflated, got {}",
+            score.sf1
+        );
+    }
+
+    #[test]
+    fn genuinely_empty_docs_still_score_one() {
+        // Both pred and GT have zero nodes: a true vacuous match, distinct from
+        // the "content exists but wasn't gated" case above.
+        let empty = StructuralSidecar::default();
+        assert!((sf1(&empty, &empty) - 1.0).abs() < 1e-9);
+    }
+
+    // --- BUG 3: an unbound GT caption/footnote must be a gradeable recall opportunity. ---
+
+    #[test]
+    fn unbound_gt_caption_lowers_edge_recall_instead_of_vanishing() {
+        const GT: &str = "Figure 1: The overall system architecture and its components.\n";
+        let gt = StructuralSidecar::from_markdown(GT);
+        // GT's only caption is unbound (no preceding Image/Table/Figure), so
+        // `edges(gt)` now includes it (empty target). Pred has no trace of it.
+        assert!(
+            matches!(&gt.nodes[0], StructuralNode::Caption { binds_to: None, .. }),
+            "test setup expects an unbound GT caption"
+        );
+
+        let pred = StructuralSidecar::from_markdown("Something totally unrelated and wrong.\n");
+        let score = score_structural(&pred, &gt);
+        let edges_bd = score.dimensions_pr()[4];
+        assert_eq!(edges_bd.0, "edges");
+        assert!(
+            edges_bd.1.recall < 1.0,
+            "an unbound GT caption pred never produced must lower edge recall, got {}",
+            edges_bd.1.recall
+        );
+        assert_eq!(
+            score.d4_edges, 0.0,
+            "unmatched unbound GT caption must score D4=0, not vacuous 1.0"
+        );
+    }
+
+    #[test]
+    fn test_unbind_caption_drops_still_holds_with_edges_including_unbound() {
+        // Regression: the existing `unbind_caption` perturbation (pred's caption
+        // binding stripped, GT keeps its bound edge) must still drop the score
+        // after BUG3 widens `edges()` to include unbound nodes.
+        assert_drops(&unbind_caption(baseline()), "unbind-caption");
     }
 }
