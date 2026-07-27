@@ -2176,6 +2176,13 @@ jobs:
 
       - uses: actions/checkout@v6
         with:
+          # Pin to the tag by name so checkout takes its CURRENT commit rather
+          # than asserting the triggering `github.sha`. update-swift-package-manifest
+          # force-moves this tag onto the Package.swift-checksum commit before this
+          # job runs; without an explicit ref, checkout fails "ref does not point to
+          # the expected commit". Tagging the Go module at the moved (released) tip
+          # is correct for pkg.go.dev. ~keep
+          ref: refs/tags/${{ needs.prepare.outputs.tag }}
           fetch-depth: 0
           fetch-tags: true
           token: ${{ steps.app-token.outputs.token }}
