@@ -137,8 +137,10 @@ mod build_libwpd {
 
     fn link_zlib() {
         if !targeting_windows() {
-            // Linux/macOS link the system zlib (`libz`) — unchanged.
-            println!("cargo:rustc-link-lib=z");
+            // On unix, zlib is provided by the `libz-sys` dependency, which
+            // builds a static zlib from source for the target and links it (and
+            // exports its headers via `DEP_Z_INCLUDE`, consumed in `build`).
+            // Nothing to emit here.
             return;
         }
 
@@ -232,12 +234,28 @@ mod build_libwpd {
             // vendored sources never provide (LNK2019). GCC/clang enable
             // exceptions by default, which is why only the MSVC link failed.
             build.flag("/EHsc");
+        } else {
+            // On unix, `libz-sys` (a unix-only dependency) built a static zlib
+            // and exported its header directory as `DEP_Z_INCLUDE`. Add it so
+            // librevenge's RVNGZipStream.cpp can find `<zlib.h>` even under zig
+            // cross-compilation, where the host `/usr/include` is invisible to
+            // the target sysroot (the failure was `zlib.h file not found`).
+            if let Ok(zlib_include) = env::var("DEP_Z_INCLUDE") {
+                build.include(zlib_include);
+            }
         }
 
         for f in cpp_files(&rev.join("src/lib")) {
             build.file(f);
         }
         for f in cpp_files(&wpd.join("src/lib")) {
+            // libwpd_math.cpp defines a fallback `rint` guarded to `_WIN32`, but
+            // modern MSVC UCRT already provides `rint`, so compiling it triggers
+            // `LNK: duplicate symbol: rint` at the final link. Skip it on Windows
+            // (the UCRT symbol is used); on other targets it is an empty TU.
+            if targeting_windows() && f.file_name().is_some_and(|n| n == "libwpd_math.cpp") {
+                continue;
+            }
             build.file(f);
         }
         build.file("src/shim.cpp");
