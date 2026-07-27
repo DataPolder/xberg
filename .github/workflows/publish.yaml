@@ -1789,14 +1789,50 @@ jobs:
             echo "[publish] glibc floor: ${GLIBC_FLOOR} (target: ${TARGET_ARG})"
           fi
           ${BUILD_CMD} --locked -p xberg-dart --release --target "${TARGET_ARG}"
-      - name: Stage native library
+      - name: Stage native library and vendor its ONNX Runtime closure
         shell: bash
         env:
           TARGET: ${{ matrix.target }}
           LIB: ${{ matrix.lib }}
         run: |
-          mkdir -p dist/server-natives
-          cp "target/${TARGET}/release/${LIB}" "dist/server-natives/${LIB}"
+          set -euxo pipefail
+          STAGE=dist/server-natives
+          mkdir -p "$STAGE"
+          cp "target/${TARGET}/release/${LIB}" "$STAGE/${LIB}"
+          # The Dart native dynamically links ONNX Runtime; the download-based
+          # pub package ships only these staged files, so the ORT runtime must be
+          # bundled beside the native or `RustLib.init()` fails to dlopen it.
+          case "$TARGET" in
+            *-apple-darwin)
+              # Native loads `@rpath/libonnxruntime.<ver>.dylib` with rpath
+              # `@loader_path`, so ship that exact basename next to it.
+              base="$(otool -L "$STAGE/${LIB}" | awk '/onnxruntime/{print $1; exit}' | xargs -r basename)"
+              [ -n "$base" ] || { echo "::error::dart native does not link onnxruntime"; exit 1; }
+              src="${ORT_LIB_LOCATION:?}/$base"
+              [ -f "$src" ] || src="${ORT_DYLIB_PATH:?}"
+              cp "$src" "$STAGE/$base"
+              chmod u+w "$STAGE/$base"
+              install_name_tool -id "@loader_path/$base" "$STAGE/$base"
+              codesign --force -s - "$STAGE/$base" || true
+              # The native and the ORT dylib must not resolve non-system libs.
+              bad="$(otool -L "$STAGE/${LIB}" "$STAGE/$base" | tail -n +2 \
+                | awk '{print $1}' | grep -E '^(/opt/homebrew|/usr/local)/' || true)"
+              [ -z "$bad" ] || { echo "::error::dart native links non-system libs:"; echo "$bad"; exit 1; }
+              ;;
+            *-unknown-linux-gnu)
+              # patchelf the $ORIGIN rpath and copy the .so closure (libonnxruntime + codecs).
+              bash scripts/ci/vendor-native-closure.sh "$STAGE/${LIB}"
+              compgen -G "$STAGE/libonnxruntime.so*" >/dev/null \
+                || { echo "::error::libonnxruntime not vendored beside dart native"; exit 1; }
+              ;;
+            *-pc-windows-msvc)
+              # Windows resolves imports from the loader's own directory, so ship
+              # every ORT DLL beside the native.
+              cp "${ORT_LIB_LOCATION:?}"/*.dll "$STAGE/"
+              [ -f "$STAGE/onnxruntime.dll" ] || { echo "::error::onnxruntime.dll not staged"; exit 1; }
+              ;;
+          esac
+          ls -l "$STAGE"
       - uses: actions/upload-artifact@v7
         with:
           name: dart-server-${{ matrix.blob }}
@@ -1832,14 +1868,15 @@ jobs:
           for dir in dart-server-artifacts/dart-server-*; do
             [[ -d "$dir" ]] || continue
             blob="$(basename "$dir" | sed 's/^dart-server-//')"
-            lib="$(find "$dir" -type f | head -n1)"
-            [[ -f "$lib" ]] || continue
-            staging="$(mktemp -d)"
-            cp "$lib" "$staging/"
+            [[ -n "$(ls -A "$dir")" ]] || continue
+            # Ship the whole vendored native closure (native + libonnxruntime +
+            # codecs), flattened to the tarball root so native_loader.dart extracts
+            # them side by side in the versioned cache dir — the native then
+            # resolves ORT via @loader_path (macOS) / $ORIGIN (Linux) / the load
+            # directory (Windows).
             tarball="xberg-dart-v${VERSION}-${blob}.tar.gz"
-            tar -czf "dist/dart-release/${tarball}" -C "$staging" "$(basename "$lib")"
+            tar -czf "dist/dart-release/${tarball}" -C "$dir" .
             ( cd dist/dart-release && sha256sum "${tarball}" >"${tarball}.sha256" )
-            rm -rf "$staging"
           done
 
       - uses: xberg-io/actions/upload-release-assets@v1

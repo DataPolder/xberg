@@ -809,9 +809,9 @@ dependencies = [
 
 [[package]]
 name = "calamine"
-version = "0.36.0"
+version = "0.36.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6975084f43060e56343ffba7f9731fa52a7dcf2e1cd8e2459fd4c6bf4a1bff59"
+checksum = "5fa68281b1a76b54a62156474adb06bb380a67e07dd60656e3217152b42183f3"
 dependencies = [
  "atoi_simd",
  "byteorder",
@@ -1308,9 +1308,9 @@ dependencies = [
 
 [[package]]
 name = "crawlberg"
-version = "1.0.8"
+version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc6e5f06202d56f7b1b16399841241b810db3e305401bb401599565b07c92e10"
+checksum = "cab5814c0d5db694be37a31c5a322dc85027650cb0b09f88ad0b6188ebdfe181"
 dependencies = [
  "ahash 0.8.12",
  "aho-corasick",
@@ -3702,14 +3702,14 @@ checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 
 [[package]]
 name = "liter-llm"
-version = "1.11.1"
+version = "1.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ab4c485c50d51312eaa119a9f837a5de21fc85f20f17dd0bd193f1d1f081e65"
+checksum = "e9c2f37e8337fa18108051c50b49360effb2d22d797b94d792f99861da092eee"
 dependencies = [
  "ahash 0.8.12",
  "arc-swap",
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.0",
  "bytes",
  "dashmap",
  "futures-core",
@@ -4746,9 +4746,9 @@ dependencies = [
 
 [[package]]
 name = "pdf_oxide"
-version = "0.3.75"
+version = "0.3.76"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e00ca5f52780bb764da7fc1783c0c6f549fcf960d69734c8d7cf7996bdbb49d"
+checksum = "a5ec03a138df06a1b063e5053bd957aab153ccfb5a59a326e285b57b3e1bd600"
 dependencies = [
  "aes 0.9.1",
  "base64 0.22.1",
@@ -7702,9 +7702,9 @@ checksum = "009994f150cc0cd50ff54917d5bc8bffe8cad10ca10d81c34da2ec421ae61782"
 
 [[package]]
 name = "tree-sitter-language-pack"
-version = "1.13.3"
+version = "1.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "345ee6dd864ca9f9e846120d5546082a27e946e1b129a55e7c6d4b1fc5cddec3"
+checksum = "445e69b4cdfd2758eeed0badaacd9eb037459aeb4d8bda5f21fb45d8e6958cac"
 dependencies = [
  "ahash 0.8.12",
  "cc",
@@ -8740,7 +8740,7 @@ dependencies = [
 
 [[package]]
 name = "xberg"
-version = "1.0.0-rc.40"
+version = "1.0.0"
 dependencies = [
  "aes-gcm",
  "ahash 0.8.12",
@@ -8854,6 +8854,7 @@ dependencies = [
  "whatlang",
  "xberg-gliner",
  "xberg-libheif",
+ "xberg-libwpd",
  "xberg-paddle-ocr",
  "xberg-tesseract",
  "zeroize",
@@ -8862,7 +8863,7 @@ dependencies = [
 
 [[package]]
 name = "xberg-e2e-rust"
-version = "1.0.0-rc.40"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -8877,7 +8878,7 @@ dependencies = [
 
 [[package]]
 name = "xberg-gliner"
-version = "1.0.0-rc.40"
+version = "1.0.0"
 dependencies = [
  "getrandom 0.2.17",
  "getrandom 0.3.4",
@@ -8891,7 +8892,7 @@ dependencies = [
 
 [[package]]
 name = "xberg-libheif"
-version = "1.0.0-rc.40"
+version = "1.0.0"
 dependencies = [
  "cfg-if 1.0.4",
  "enumn",
@@ -8901,8 +8902,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "xberg-libwpd"
+version = "1.0.0"
+dependencies = [
+ "cc",
+ "flate2",
+ "sha2 0.11.0",
+ "tar",
+ "thiserror 2.0.19",
+ "tracing",
+]
+
+[[package]]
 name = "xberg-paddle-ocr"
-version = "1.0.0-rc.40"
+version = "1.0.0"
 dependencies = [
  "geo-clipper",
  "geo-types",
@@ -8917,7 +8930,7 @@ dependencies = [
 
 [[package]]
 name = "xberg-tesseract"
-version = "1.0.0-rc.40"
+version = "1.0.0"
 dependencies = [
  "cc",
  "cmake",

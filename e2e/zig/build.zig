@@ -5,6 +5,7 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const test_step = b.step("test", "Run tests");
+    const smoke_step = b.step("smoke", "Run smoke tests only");
     const ffi_path = b.option([]const u8, "ffi_path", "Path to directory containing libxberg_ffi") orelse "../../target/release";
     const ffi_include = b.option([]const u8, "ffi_include_path", "Path to directory containing FFI header") orelse "../../crates/xberg-ffi/include";
     const ffi_path_abs = b.pathFromRoot(ffi_path);
@@ -481,6 +482,22 @@ pub fn build(b: *std.Build) void {
     }
     smoke_run.step.dependOn(&reranker_backend_management_run.step);
     test_step.dependOn(&smoke_run.step);
+
+    const smoke_smoke_run = b.addRunArtifact(smoke_tests);
+    smoke_smoke_run.setEnvironmentVariable("CRAWLBERG_ALLOW_PRIVATE_NETWORK", "true");
+    if (mock_server_url) |_url| {
+        smoke_smoke_run.setEnvironmentVariable("MOCK_SERVER_URL", _url);
+    }
+    if (mock_servers_json) |_json| {
+        smoke_smoke_run.setEnvironmentVariable("MOCK_SERVERS", _json);
+    }
+    {
+        var _it = mock_servers_map.iterator();
+        while (_it.next()) |_entry| {
+            smoke_smoke_run.setEnvironmentVariable(_entry.key_ptr.*, _entry.value_ptr.*);
+        }
+    }
+    smoke_step.dependOn(&smoke_smoke_run.step);
 
     const summarization_module = b.createModule(.{
         .root_source_file = b.path("src/summarization_test.zig"),
