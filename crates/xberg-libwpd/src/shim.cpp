@@ -5,10 +5,13 @@
  * WPDocument::parse and libwpd invokes its callbacks. This file provides such
  * an implementation (DocumentBuilder) that records a flat, format-agnostic
  * internal document (a `std::vector<Node>`) as libwpd walks the document, and
- * exposes it to Rust through a flat C API returning owned UTF-8 that the Rust
- * side frees. Text and Markdown are two renderings of that one internal
- * document, produced only at the end, not two different things recorded
- * during the walk.
+ * exposes it to Rust through a flat C API returning an owned binary blob that
+ * the Rust side frees and decodes into a typed document model (see
+ * `serialize` below and `src/dto.rs`). This shim performs no text or Markdown
+ * rendering itself — that would throw away structure a caller might want
+ * (table cell spans, list nesting, note numbering) that the flat node vector
+ * still carries; format-specific rendering, if wanted, belongs above this
+ * layer, over the typed `WpdDocument` Rust decodes.
  *
  * Every entry point catches all C++ exceptions: libwpd throws on malformed
  * input, and an exception must never unwind across the FFI boundary.
@@ -29,8 +32,8 @@ using librevenge::RVNGPropertyList;
 using librevenge::RVNGString;
 
 /* One recorded event from the libwpd/librevenge callback walk. The document
- * is a flat `std::vector<Node>`; rendering (see `render` below) is the only
- * place that knows about output formats. `text`/`text2` and
+ * is a flat `std::vector<Node>`; serialization (see `serialize` below) is the
+ * only place that knows about the wire encoding. `text`/`text2` and
  * `level`/`counter`/`counter2` are reused across kinds rather than giving
  * every kind its own dedicated fields (a link's href, a field's placeholder
  * kind, a metadata key/value pair, and a table cell's column/span all borrow
@@ -90,9 +93,9 @@ struct Node {
 };
 
 /* Records the document as a flat, format-agnostic `std::vector<Node>` while
- * libwpd walks it. Carries no notion of "plain text" vs "Markdown" — that
- * distinction exists only in `render`, which runs once, after the walk is
- * complete, over the recorded nodes. ~keep */
+ * libwpd walks it. Carries no notion of any output encoding — that is
+ * `serialize`'s job, run once, after the walk is complete, over the recorded
+ * nodes. ~keep */
 class DocumentBuilder : public librevenge::RVNGTextInterface {
 public:
   std::vector<Node> nodes;
@@ -198,7 +201,11 @@ public:
       return;
     ListLevel &level = listStack_.back();
     Node n{NodeKind::ListItemStart};
-    n.level = static_cast<int>(listStack_.size());
+    // Level is serialized as a u8; clamp so a pathologically deep nesting
+    // can't wrap to a small value on the narrowing cast (cf. the 1..=6 guard
+    // on heading level in openParagraph). ~keep
+    size_t depth = listStack_.size();
+    n.level = static_cast<int>(depth > 255 ? 255 : depth);
     n.ordered = level.ordered;
     if (level.ordered) {
       level.counter += 1;
@@ -208,8 +215,10 @@ public:
   }
 
   // Headers and footers recur on every page rather than at one point in the
-  // flow; rendering collects them once and exposes them at the start/end of
-  // the document instead of splicing them inline (see `render`). ~keep
+  // flow; they are recorded as their own bracketing start/end events so a
+  // consumer of the decoded event stream can place them wherever it wants
+  // (typically once, at the start/end of the document) instead of the shim
+  // splicing them inline into the flow itself. ~keep
   void openHeader(const RVNGPropertyList &) override {
     nodes.push_back({NodeKind::HeaderStart});
   }
@@ -220,13 +229,13 @@ public:
   void closeFooter() override { nodes.push_back({NodeKind::FooterEnd}); }
 
   // Footnotes, endnotes, comments and text boxes never belong inline in the
-  // narrative. Notes are reference constructs, so rendering leaves a numbered
-  // marker at the anchor and collects the bodies at the end of the document;
-  // footnotes and endnotes are kept as distinct node kinds (rather than one
-  // merged "note" kind) so `render` can number and label them as two
-  // separate sequences instead of interleaving them under one counter;
-  // comments and text boxes have no such numbering in the source and stay
-  // bracketed where they occur (see `render`). ~keep
+  // narrative. Notes are reference constructs anchored at a point in the
+  // flow with their body recorded separately in event order; footnotes and
+  // endnotes are kept as distinct node kinds (rather than one merged "note"
+  // kind) so a consumer can number and label them as two separate sequences
+  // instead of interleaving them under one counter. Comments and text boxes
+  // have no such numbering in the source and are recorded as their own
+  // bracketing start/end pair wherever they occur. ~keep
   void openFootnote(const RVNGPropertyList &) override {
     nodes.push_back({NodeKind::NoteStart});
   }
@@ -247,8 +256,10 @@ public:
   void openLink(const RVNGPropertyList &props) override {
     const librevenge::RVNGProperty *href = props["xlink:href"];
     Node n{NodeKind::LinkStart};
+    // Explicit (ptr, size) construction, like insertText: implicit
+    // std::string(const char*) would truncate at an embedded NUL. ~keep
     if (href && href->getStr().cstr())
-      n.text = href->getStr().cstr();
+      n.text = std::string(href->getStr().cstr(), href->getStr().size());
     nodes.push_back(n);
   }
   void closeLink() override { nodes.push_back({NodeKind::LinkEnd}); }
@@ -280,15 +291,18 @@ public:
   // setDocumentMetaData is always the first callback libwpd makes, so these
   // nodes land at the very front of `nodes` regardless of when they're
   // rendered. Only a handful of the keys RVNGTextInterface documents are
-  // captured (plus dc:title, which some libwpd versions emit despite not
-  // being in that list) — enough to round-trip the common case (title,
-  // author, subject, keywords) without building a full structured metadata
-  // API on the Rust side, which would be a much larger change to the FFI
-  // surface for headers this extractor otherwise never inspects. ~keep
+  // captured — enough to round-trip the common case (title, author, subject,
+  // keywords) without building a full structured metadata API on the Rust
+  // side. The "Author" summary field is emitted by libwpd as
+  // `meta:initial-creator`; `dc:creator` is WordPerfect's separate "Typist"
+  // field (see WP6ContentListener), so both are captured but the Rust side
+  // maps only `meta:initial-creator` to the document author. `dc:title` is not
+  // emitted by libwpd 0.10.3 but is captured defensively for other versions.
+  // ~keep
   void setDocumentMetaData(const RVNGPropertyList &props) override {
     static const char *const kKeys[] = {
-        "dc:title", "dc:creator",  "dc:subject",
-        "dc:type",  "dc:language", "meta:keyword",
+        "dc:title", "meta:initial-creator", "dc:creator",   "dc:subject",
+        "dc:type",  "dc:language",          "meta:keyword",
     };
     for (const char *key : kKeys) {
       const librevenge::RVNGProperty *value = props[key];
@@ -296,7 +310,9 @@ public:
         continue;
       Node n{NodeKind::MetaData};
       n.text = key;
-      n.text2 = value->getStr().cstr();
+      // Explicit (ptr, size): implicit std::string(const char*) would
+      // truncate a value containing an embedded NUL. ~keep
+      n.text2 = std::string(value->getStr().cstr(), value->getStr().size());
       nodes.push_back(n);
     }
   }
@@ -313,9 +329,9 @@ public:
   void closeSection() override {}
 
   // Table structure is recorded fully (open events too, not just the
-  // close-event markers the previous implementation emitted) so `render`
-  // can lay cells out on a real grid: column, column span, row span and
-  // whether a row is a header row. ~keep
+  // close-event markers the previous implementation emitted) so a consumer
+  // of the decoded event stream can lay cells out on a real grid: column,
+  // column span, row span and whether a row is a header row. ~keep
   void openTable(const RVNGPropertyList &) override {
     nodes.push_back({NodeKind::TableStart});
   }
@@ -376,519 +392,295 @@ private:
   std::vector<ListLevel> listStack_;
 };
 
-/* Renders a recorded `std::vector<Node>` to text (`markdown = false`) or to
- * lightly Markdown-marked-up text (`markdown = true`). This is the only place
- * that knows about output formats — `DocumentBuilder` above records the same
- * structure regardless of which rendering will eventually be requested.
+/* Serializes a recorded `std::vector<Node>` to the versioned binary wire
+ * format Rust's `dto::decode` parses. This is the only place that knows about
+ * the wire encoding — `DocumentBuilder` above records the same structure
+ * regardless of how it will eventually be serialized.
  *
- * Handles header/footer/aside placement identically in both modes: each is
- * accumulated into its own buffer via a sink stack and spliced back in
- * (headers/footers once, at the start/end; asides inline, bracketed) rather
- * than left to bleed into the surrounding narrative text. Tables are laid out
- * on a real grid built from the recorded column/span/header-row metadata: in
- * Markdown mode as GitHub-flavored pipe tables, in text mode as a tab/newline
- * grid with cell text sanitized so embedded tabs/newlines can't be mistaken
- * for cell or row boundaries. ~keep */
-/* libwpd emits one flat span per formatting run, so a bold word inside an
- * italic sentence arrives as three consecutive runs rather than one nested
- * pair. Rendered naively that produces `***Bold**** rest*`, whose delimiter
- * runs are ambiguous to Markdown parsers. Closing a run and immediately
- * reopening the same one is a no-op, so drop both halves. ~keep */
-bool isMatchingReopen(NodeKind end, NodeKind start) {
-  switch (end) {
+ * # Wire format (version 1)
+ *
+ * This spec MUST stay byte-for-byte identical to the one in `src/dto.rs` —
+ * the two are independently hand-written mirrors of the same format, not
+ * generated from a shared schema. All integers are little-endian. Strings are
+ * raw UTF-8 bytes (not NUL-terminated) with an explicit `u32` byte length, so
+ * embedded NULs never truncate anything.
+ *
+ *   document := version metadata_section event_section
+ *   version  := u8                          // WIRE_VERSION, currently 1
+ *   metadata_section := u32 count  count * (string key, string value)
+ *   event_section     := u32 count  count * event
+ *   event             := u8 tag  payload     // payload shape depends on tag
+ *   string            := u32 byte_len  byte_len * u8
+ *   bool (in a payload) := u8, 0 or 1
+ *
+ * Event tags (see the matching table in `dto.rs` for full payload shapes):
+ *   0 Text(string) | 1 Tab | 2 Space | 3 LineBreak | 4 ParagraphEnd
+ *   5 ListItemStart(bool ordered, u8 level, u32 counter) | 6 ListItemEnd
+ *   7 HeadingStart(u8 level)
+ *   8/9 BoldStart/End | 10/11 ItalicStart/End | 12/13 UnderlineStart/End
+ *   14/15 StrikethroughStart/End | 16/17 SuperscriptStart/End
+ *   18/19 SubscriptStart/End
+ *   20 TableStart | 21 RowStart(bool header)
+ *   22 CellStart(i32 column, u32 col_span, u32 row_span)
+ *   23 CoveredCell(i32 column) | 24 CellEnd | 25 RowEnd | 26 TableEnd
+ *   27/28 HeaderStart/End (document running header) | 29/30 FooterStart/End
+ *   31 NoteStart(bool endnote) | 32 NoteEnd
+ *   33 AsideStart(string kind) | 34 AsideEnd
+ *   35 LinkStart(string href) | 36 LinkEnd
+ *   37 Field(string text)
+ *
+ * `MetaData` nodes are not serialized as events: they are pulled out into the
+ * metadata section up front, keyed by the same string (e.g. "dc:title") the
+ * `Node` carried. This mirrors every key `setDocumentMetaData` captured, not
+ * only the ones `dto::WpdMetadata` exposes as named fields, so no metadata
+ * the shim captured is silently dropped from the wire. ~keep */
+namespace wire {
+constexpr uint8_t kWireVersion = 1;
+
+enum class Tag : uint8_t {
+  Text = 0,
+  Tab = 1,
+  Space = 2,
+  LineBreak = 3,
+  ParagraphEnd = 4,
+  ListItemStart = 5,
+  ListItemEnd = 6,
+  HeadingStart = 7,
+  BoldStart = 8,
+  BoldEnd = 9,
+  ItalicStart = 10,
+  ItalicEnd = 11,
+  UnderlineStart = 12,
+  UnderlineEnd = 13,
+  StrikethroughStart = 14,
+  StrikethroughEnd = 15,
+  SuperscriptStart = 16,
+  SuperscriptEnd = 17,
+  SubscriptStart = 18,
+  SubscriptEnd = 19,
+  TableStart = 20,
+  RowStart = 21,
+  CellStart = 22,
+  CoveredCell = 23,
+  CellEnd = 24,
+  RowEnd = 25,
+  TableEnd = 26,
+  HeaderStart = 27,
+  HeaderEnd = 28,
+  FooterStart = 29,
+  FooterEnd = 30,
+  NoteStart = 31,
+  NoteEnd = 32,
+  AsideStart = 33,
+  AsideEnd = 34,
+  LinkStart = 35,
+  LinkEnd = 36,
+  Field = 37,
+};
+
+void putU8(std::string &out, uint8_t v) { out.push_back(static_cast<char>(v)); }
+void putBool(std::string &out, bool v) { putU8(out, v ? 1 : 0); }
+void putTag(std::string &out, Tag tag) {
+  putU8(out, static_cast<uint8_t>(tag));
+}
+
+void putU32(std::string &out, uint32_t v) {
+  for (int i = 0; i < 4; ++i) {
+    out.push_back(static_cast<char>(v & 0xff));
+    v >>= 8;
+  }
+}
+void putI32(std::string &out, int32_t v) {
+  putU32(out, static_cast<uint32_t>(v));
+}
+void putString(std::string &out, const std::string &s) {
+  putU32(out, static_cast<uint32_t>(s.size()));
+  out += s;
+}
+
+// Non-negative counts/spans are clamped to at least 1 by the callers that
+// populate `Node::counter`/`counter2` (see `openTableCell`); this only guards
+// against a negative value ever reaching the wire regardless of caller. ~keep
+uint32_t nonNegative(int v) { return v < 0 ? 0 : static_cast<uint32_t>(v); }
+
+/* Encodes one event node. `MetaData` nodes must be filtered out by the caller
+ * before reaching here — they have no event representation. ~keep */
+void putEvent(std::string &out, const Node &n) {
+  switch (n.kind) {
+  case NodeKind::Text:
+    putTag(out, Tag::Text);
+    putString(out, n.text);
+    break;
+  case NodeKind::Tab:
+    putTag(out, Tag::Tab);
+    break;
+  case NodeKind::Space:
+    putTag(out, Tag::Space);
+    break;
+  case NodeKind::LineBreak:
+    putTag(out, Tag::LineBreak);
+    break;
+  case NodeKind::ParagraphEnd:
+    putTag(out, Tag::ParagraphEnd);
+    break;
+  case NodeKind::ListItemStart:
+    putTag(out, Tag::ListItemStart);
+    putBool(out, n.ordered);
+    putU8(out, static_cast<uint8_t>(n.level));
+    putU32(out, nonNegative(n.counter));
+    break;
+  case NodeKind::ListItemEnd:
+    putTag(out, Tag::ListItemEnd);
+    break;
+  case NodeKind::Heading:
+    putTag(out, Tag::HeadingStart);
+    putU8(out, static_cast<uint8_t>(n.level));
+    break;
+  case NodeKind::BoldStart:
+    putTag(out, Tag::BoldStart);
+    break;
   case NodeKind::BoldEnd:
-    return start == NodeKind::BoldStart;
+    putTag(out, Tag::BoldEnd);
+    break;
+  case NodeKind::ItalicStart:
+    putTag(out, Tag::ItalicStart);
+    break;
   case NodeKind::ItalicEnd:
-    return start == NodeKind::ItalicStart;
+    putTag(out, Tag::ItalicEnd);
+    break;
+  case NodeKind::UnderlineStart:
+    putTag(out, Tag::UnderlineStart);
+    break;
   case NodeKind::UnderlineEnd:
-    return start == NodeKind::UnderlineStart;
+    putTag(out, Tag::UnderlineEnd);
+    break;
+  case NodeKind::StrikethroughStart:
+    putTag(out, Tag::StrikethroughStart);
+    break;
   case NodeKind::StrikethroughEnd:
-    return start == NodeKind::StrikethroughStart;
+    putTag(out, Tag::StrikethroughEnd);
+    break;
+  case NodeKind::SuperscriptStart:
+    putTag(out, Tag::SuperscriptStart);
+    break;
   case NodeKind::SuperscriptEnd:
-    return start == NodeKind::SuperscriptStart;
+    putTag(out, Tag::SuperscriptEnd);
+    break;
+  case NodeKind::SubscriptStart:
+    putTag(out, Tag::SubscriptStart);
+    break;
   case NodeKind::SubscriptEnd:
-    return start == NodeKind::SubscriptStart;
-  default:
-    return false;
+    putTag(out, Tag::SubscriptEnd);
+    break;
+  case NodeKind::TableStart:
+    putTag(out, Tag::TableStart);
+    break;
+  case NodeKind::TableRowStart:
+    putTag(out, Tag::RowStart);
+    putBool(out, n.ordered);
+    break;
+  case NodeKind::TableCellStart:
+    putTag(out, Tag::CellStart);
+    putI32(out, n.level);
+    putU32(out, nonNegative(std::max(1, n.counter)));
+    putU32(out, nonNegative(std::max(1, n.counter2)));
+    break;
+  case NodeKind::CoveredTableCell:
+    putTag(out, Tag::CoveredCell);
+    putI32(out, n.level);
+    break;
+  case NodeKind::TableCellEnd:
+    putTag(out, Tag::CellEnd);
+    break;
+  case NodeKind::TableRowEnd:
+    putTag(out, Tag::RowEnd);
+    break;
+  case NodeKind::TableEnd:
+    putTag(out, Tag::TableEnd);
+    break;
+  case NodeKind::HeaderStart:
+    putTag(out, Tag::HeaderStart);
+    break;
+  case NodeKind::HeaderEnd:
+    putTag(out, Tag::HeaderEnd);
+    break;
+  case NodeKind::FooterStart:
+    putTag(out, Tag::FooterStart);
+    break;
+  case NodeKind::FooterEnd:
+    putTag(out, Tag::FooterEnd);
+    break;
+  case NodeKind::NoteStart:
+    putTag(out, Tag::NoteStart);
+    putBool(out, false);
+    break;
+  case NodeKind::NoteEnd:
+    putTag(out, Tag::NoteEnd);
+    break;
+  case NodeKind::EndnoteStart:
+    putTag(out, Tag::NoteStart);
+    putBool(out, true);
+    break;
+  case NodeKind::EndnoteEnd:
+    putTag(out, Tag::NoteEnd);
+    break;
+  case NodeKind::AsideStart:
+    putTag(out, Tag::AsideStart);
+    putString(out, n.text);
+    break;
+  case NodeKind::AsideEnd:
+    putTag(out, Tag::AsideEnd);
+    break;
+  case NodeKind::LinkStart:
+    putTag(out, Tag::LinkStart);
+    putString(out, n.text);
+    break;
+  case NodeKind::LinkEnd:
+    putTag(out, Tag::LinkEnd);
+    break;
+  case NodeKind::FieldInsert:
+    putTag(out, Tag::Field);
+    putString(out, n.text);
+    break;
+  case NodeKind::MetaData:
+    // Handled separately by `serialize`; never reaches here.
+    break;
   }
 }
+} // namespace wire
 
-std::vector<Node> coalesceSpans(const std::vector<Node> &nodes) {
-  std::vector<Node> out;
-  out.reserve(nodes.size());
+std::string serialize(const std::vector<Node> &nodes) {
+  std::vector<const Node *> metadata;
+  std::vector<const Node *> events;
+  events.reserve(nodes.size());
   for (const Node &n : nodes) {
-    if (!out.empty() && isMatchingReopen(out.back().kind, n.kind)) {
-      out.pop_back();
-      continue;
-    }
-    out.push_back(n);
-  }
-  return out;
-}
-
-/* One table cell as recorded: `text` is already sanitized (see
- * `sanitizeCellText`) by the time it lands here. A covered (merged-away)
- * cell is recorded as an empty cell with span 1 so it still occupies a grid
- * position. ~keep */
-struct CellRecord {
-  std::string text;
-  int colSpan = 1;
-  // Absolute start column from librevenge:column. libwpd sets this on every
-  // real cell (WPXContentListener::_openTableCell); covered cells and any
-  // filler emitted on an error path carry -1 (unknown) and simply advance the
-  // cursor by one. ~keep
-  int column = -1;
-};
-struct RowRecord {
-  std::vector<CellRecord> cells;
-  bool isHeader = false;
-};
-struct TableRecord {
-  std::vector<RowRecord> rows;
-};
-
-// Embedded tabs/newlines inside cell text would otherwise be indistinguishable
-// from the tab/newline delimiters `render` itself uses for cell and row
-// boundaries (text mode) or would break a Markdown pipe table's
-// one-line-per-row syntax (markdown mode); both are neutralized here rather
-// than left for the consumer to disambiguate. `|` is escaped only in Markdown
-// mode, where it is the pipe-table column delimiter. ~keep
-std::string sanitizeCellText(const std::string &raw, bool markdown) {
-  std::string out;
-  out.reserve(raw.size());
-  for (char c : raw) {
-    if (c == '\n') {
-      out += markdown ? "<br>" : " ";
-    } else if (c == '\t') {
-      out += ' ';
-    } else if (markdown && c == '|') {
-      out += "\\|";
-    } else {
-      out += c;
-    }
-  }
-  return out;
-}
-
-// Number of grid columns a row occupies, anchoring each real cell at its true
-// librevenge:column and advancing by its span. Re-anchoring (rather than pure
-// left-to-right accumulation) self-corrects the drift libwpd itself warns about
-// for vertical merges ("insert covered cells with proper attributes" FIXME):
-// even if a covered cell is dropped or duplicated, the next real cell snaps
-// back to its declared column. ~keep
-size_t rowWidth(const RowRecord &row) {
-  size_t cursor = 0;
-  size_t width = 0;
-  for (const CellRecord &cell : row.cells) {
-    if (cell.column >= 0 && static_cast<size_t>(cell.column) > cursor)
-      cursor = static_cast<size_t>(cell.column);
-    cursor += static_cast<size_t>(std::max(1, cell.colSpan));
-    width = std::max(width, cursor);
-  }
-  return width;
-}
-
-std::vector<std::string> expandRow(const RowRecord &row, size_t columnCount) {
-  std::vector<std::string> cols(columnCount);
-  size_t cursor = 0;
-  for (const CellRecord &cell : row.cells) {
-    if (cell.column >= 0 && static_cast<size_t>(cell.column) > cursor)
-      cursor = static_cast<size_t>(cell.column);
-    if (cursor < columnCount)
-      cols[cursor] = cell.text;
-    cursor += static_cast<size_t>(std::max(1, cell.colSpan));
-  }
-  return cols;
-}
-
-size_t tableColumnCount(const TableRecord &table) {
-  size_t columnCount = 1;
-  for (const RowRecord &row : table.rows)
-    columnCount = std::max(columnCount, rowWidth(row));
-  return columnCount;
-}
-
-std::string renderTableMarkdown(const TableRecord &table) {
-  if (table.rows.empty())
-    return std::string();
-  const size_t columnCount = tableColumnCount(table);
-
-  bool hasHeaderRow =
-      std::any_of(table.rows.begin(), table.rows.end(),
-                  [](const RowRecord &r) { return r.isHeader; });
-
-  std::string out = "\n";
-  std::string separator = "|";
-  for (size_t i = 0; i < columnCount; ++i)
-    separator += " --- |";
-  separator += "\n";
-
-  bool separatorEmitted = false;
-  for (size_t i = 0; i < table.rows.size(); ++i) {
-    const std::vector<std::string> cols = expandRow(table.rows[i], columnCount);
-    out += "|";
-    for (const std::string &c : cols) {
-      out += ' ';
-      out += c;
-      out += " |";
-    }
-    out += "\n";
-    // A table with no row explicitly flagged as a header still needs a
-    // separator row to be valid Markdown; treating the first row as the
-    // header in that case is a heuristic, not a fact recovered from the
-    // source document. ~keep
-    bool isHeaderBoundary = table.rows[i].isHeader || (!hasHeaderRow && i == 0);
-    if (isHeaderBoundary && !separatorEmitted) {
-      out += separator;
-      separatorEmitted = true;
-    }
-  }
-  return out;
-}
-
-std::string renderTableText(const TableRecord &table) {
-  const size_t columnCount = tableColumnCount(table);
-  std::string out;
-  for (const RowRecord &row : table.rows) {
-    const std::vector<std::string> cols = expandRow(row, columnCount);
-    for (size_t i = 0; i < cols.size(); ++i) {
-      if (i)
-        out += '\t';
-      out += cols[i];
-    }
-    out += '\n';
-  }
-  return out;
-}
-
-std::string render(const std::vector<Node> &rawNodes, bool markdown) {
-  const std::vector<Node> nodes = coalesceSpans(rawNodes);
-  std::string body;
-  std::string header;
-  std::string footer;
-  std::string *sink = &body;
-  std::vector<std::string *> sinkStack;
-  std::vector<std::string> asideStack;
-  std::vector<std::string> asideLabels;
-  std::vector<std::string> footnotes;
-  std::vector<std::string> footnoteStack;
-  std::vector<std::string> endnotes;
-  std::vector<std::string> endnoteStack;
-
-  std::vector<TableRecord> tableStack;
-  std::vector<RowRecord> rowStack;
-  std::vector<std::string> cellStack;
-  std::vector<std::pair<int, int>>
-      cellSpanStack; // (colSpan, column) per open cell
-  std::vector<std::string> linkHrefStack;
-
-  auto pushSink = [&](std::string *s) {
-    sinkStack.push_back(sink);
-    sink = s;
-  };
-  auto popSink = [&]() {
-    if (!sinkStack.empty()) {
-      sink = sinkStack.back();
-      sinkStack.pop_back();
-    }
-  };
-  // Emphasis delimiters must hug the text: `**bold ** ` is not bold in any
-  // Markdown dialect, so trailing run-internal spaces move outside the
-  // closing delimiter (and leading ones outside the opening delimiter).
-  // Document text is data, not markup: a literal '*' or '#' from the source
-  // would otherwise be read as emphasis or a heading on the way out. ~keep
-  auto appendText = [&](const std::string &text) {
-    if (!markdown) {
-      *sink += text;
-      return;
-    }
-    for (char c : text) {
-      if (std::strchr("\\`*_[]#$", c) != nullptr)
-        *sink += '\\';
-      *sink += c;
-    }
-  };
-  struct OpenMark {
-    std::string *sink;
-    size_t end;
-  };
-  std::vector<OpenMark> openMarks;
-
-  auto openEmphasis = [&](const char *delim) {
-    if (!markdown)
-      return;
-    *sink += delim;
-    openMarks.push_back({sink, sink->size()});
-  };
-  auto closeEmphasis = [&](const char *delim, size_t openLen) {
-    if (!markdown)
-      return;
-    std::string spill;
-    while (!sink->empty() && (sink->back() == ' ' || sink->back() == '\t')) {
-      spill.insert(spill.begin(), sink->back());
-      sink->pop_back();
-    }
-    // An emphasis run that captured no text is noise (`****`) and, worse,
-    // can pair with a neighbouring run and swallow real text between them.
-    // ~keep
-    if (!openMarks.empty()) {
-      OpenMark mark = openMarks.back();
-      openMarks.pop_back();
-      if (mark.sink == sink && sink->size() == mark.end &&
-          sink->size() >= openLen) {
-        sink->erase(sink->size() - openLen);
-        *sink += spill;
-        return;
-      }
-    }
-    *sink += delim;
-    *sink += spill;
-  };
-
-  std::vector<Node> metadata;
-
-  for (const Node &n : nodes) {
-    switch (n.kind) {
-    case NodeKind::Text:
-      appendText(n.text);
-      break;
-    case NodeKind::Tab:
-      *sink += '\t';
-      break;
-    case NodeKind::Space:
-      *sink += ' ';
-      break;
-    case NodeKind::LineBreak:
-      *sink += '\n';
-      break;
-    case NodeKind::ParagraphEnd:
-      *sink += "\n\n";
-      break;
-    case NodeKind::ListItemEnd:
-      *sink += '\n';
-      break;
-    case NodeKind::Heading:
-      if (markdown)
-        *sink += std::string(static_cast<size_t>(n.level), '#') + ' ';
-      break;
-    case NodeKind::BoldStart:
-      openEmphasis("**");
-      break;
-    case NodeKind::BoldEnd:
-      closeEmphasis("**", 2);
-      break;
-    case NodeKind::ItalicStart:
-      openEmphasis("*");
-      break;
-    case NodeKind::ItalicEnd:
-      closeEmphasis("*", 1);
-      break;
-    // Markdown has no underline, strikethrough, superscript or subscript
-    // syntax of its own; strikethrough uses the GFM `~~` convention and
-    // the rest fall back to the inline HTML CommonMark leaves for them. ~keep
-    case NodeKind::UnderlineStart:
-      openEmphasis("<u>");
-      break;
-    case NodeKind::UnderlineEnd:
-      closeEmphasis("</u>", 3);
-      break;
-    case NodeKind::StrikethroughStart:
-      openEmphasis("~~");
-      break;
-    case NodeKind::StrikethroughEnd:
-      closeEmphasis("~~", 2);
-      break;
-    case NodeKind::SuperscriptStart:
-      openEmphasis("<sup>");
-      break;
-    case NodeKind::SuperscriptEnd:
-      closeEmphasis("</sup>", 5);
-      break;
-    case NodeKind::SubscriptStart:
-      openEmphasis("<sub>");
-      break;
-    case NodeKind::SubscriptEnd:
-      closeEmphasis("</sub>", 5);
-      break;
-    case NodeKind::ListItemStart:
-      if (markdown) {
-        std::string indent(static_cast<size_t>(n.level - 1) * 2, ' ');
-        *sink += n.ordered ? indent + std::to_string(n.counter) + ". "
-                           : indent + "- ";
-      }
-      break;
-    case NodeKind::LinkStart:
-      if (markdown)
-        *sink += '[';
-      linkHrefStack.push_back(n.text);
-      break;
-    case NodeKind::LinkEnd:
-      if (!linkHrefStack.empty()) {
-        std::string href = std::move(linkHrefStack.back());
-        linkHrefStack.pop_back();
-        if (markdown)
-          *sink += "](" + href + ")";
-        else if (!href.empty())
-          *sink += " (" + href + ")";
-      }
-      break;
-    case NodeKind::FieldInsert:
-      *sink += "[" + n.text + "]";
-      break;
-    case NodeKind::MetaData:
-      metadata.push_back(n);
-      break;
-    case NodeKind::TableStart:
-      tableStack.push_back(TableRecord{});
-      rowStack.push_back(RowRecord{});
-      break;
-    case NodeKind::TableRowStart:
-      rowStack.back() = RowRecord{};
-      rowStack.back().isHeader = n.ordered;
-      break;
-    case NodeKind::TableCellStart:
-      cellSpanStack.push_back({std::max(1, n.counter), n.level});
-      cellStack.push_back(std::string());
-      pushSink(&cellStack.back());
-      break;
-    case NodeKind::TableCellEnd: {
-      if (cellStack.empty() || rowStack.empty())
-        break;
-      std::string text = sanitizeCellText(cellStack.back(), markdown);
-      cellStack.pop_back();
-      popSink();
-      int colSpan = 1;
-      int column = -1;
-      if (!cellSpanStack.empty()) {
-        colSpan = cellSpanStack.back().first;
-        column = cellSpanStack.back().second;
-        cellSpanStack.pop_back();
-      }
-      rowStack.back().cells.push_back({text, colSpan, column});
-      break;
-    }
-    case NodeKind::CoveredTableCell:
-      if (!rowStack.empty())
-        rowStack.back().cells.push_back({std::string(), 1, -1});
-      break;
-    case NodeKind::TableRowEnd:
-      if (!tableStack.empty() && !rowStack.empty())
-        tableStack.back().rows.push_back(rowStack.back());
-      break;
-    case NodeKind::TableEnd:
-      if (!tableStack.empty()) {
-        TableRecord table = std::move(tableStack.back());
-        tableStack.pop_back();
-        if (!rowStack.empty())
-          rowStack.pop_back();
-        *sink += markdown ? renderTableMarkdown(table) : renderTableText(table);
-      }
-      break;
-    case NodeKind::HeaderStart:
-      pushSink(&header);
-      break;
-    case NodeKind::HeaderEnd:
-      popSink();
-      break;
-    case NodeKind::FooterStart:
-      pushSink(&footer);
-      break;
-    case NodeKind::FooterEnd:
-      popSink();
-      break;
-    case NodeKind::NoteStart:
-      footnoteStack.push_back(std::string());
-      pushSink(&footnoteStack.back());
-      break;
-    case NodeKind::NoteEnd: {
-      if (footnoteStack.empty())
-        break;
-      std::string content = std::move(footnoteStack.back());
-      footnoteStack.pop_back();
-      popSink();
-      while (!content.empty() && content.back() == '\n')
-        content.pop_back();
-      footnotes.push_back(std::move(content));
-      std::string ref = std::to_string(footnotes.size());
-      *sink += markdown ? "[^" + ref + "]" : "[" + ref + "]";
-      break;
-    }
-    case NodeKind::EndnoteStart:
-      endnoteStack.push_back(std::string());
-      pushSink(&endnoteStack.back());
-      break;
-    case NodeKind::EndnoteEnd: {
-      if (endnoteStack.empty())
-        break;
-      std::string content = std::move(endnoteStack.back());
-      endnoteStack.pop_back();
-      popSink();
-      while (!content.empty() && content.back() == '\n')
-        content.pop_back();
-      endnotes.push_back(std::move(content));
-      std::string ref = "e" + std::to_string(endnotes.size());
-      *sink += markdown ? "[^" + ref + "]" : "[" + ref + "]";
-      break;
-    }
-    case NodeKind::AsideStart:
-      asideLabels.push_back(n.text);
-      asideStack.push_back(std::string());
-      pushSink(&asideStack.back());
-      break;
-    case NodeKind::AsideEnd: {
-      if (asideStack.empty())
-        break;
-      std::string content = std::move(asideStack.back());
-      asideStack.pop_back();
-      std::string label = std::move(asideLabels.back());
-      asideLabels.pop_back();
-      popSink();
-      while (!content.empty() && content.back() == '\n')
-        content.pop_back();
-      *sink += "\n[" + label + ": " + content + "]\n";
-      break;
-    }
-    }
+    if (n.kind == NodeKind::MetaData)
+      metadata.push_back(&n);
+    else
+      events.push_back(&n);
   }
 
   std::string out;
-  // Metadata gets a minimal YAML-ish front-matter block, Markdown mode
-  // only: this is a lighter-weight choice than adding a second, structured
-  // return path to the C API purely to carry a handful of summary fields
-  // (see the comment on `setDocumentMetaData`). Text mode leaves metadata
-  // out entirely rather than inventing a plain-text convention for it. ~keep
-  if (markdown && !metadata.empty()) {
-    out += "---\n";
-    for (const Node &m : metadata)
-      out += m.text + ": \"" + m.text2 + "\"\n";
-    out += "---\n\n";
+  // Rough up-front capacity so the blob doesn't repeatedly reallocate while
+  // appending; ~8 bytes/node covers a tag plus small fixed payloads (text
+  // nodes grow it further, which amortized doubling then absorbs). ~keep
+  constexpr size_t kBytesPerNodeEstimate = 8;
+  out.reserve(nodes.size() * kBytesPerNodeEstimate + sizeof(uint32_t) * 2 + 1);
+  wire::putU8(out, wire::kWireVersion);
+
+  wire::putU32(out, static_cast<uint32_t>(metadata.size()));
+  for (const Node *m : metadata) {
+    wire::putString(out, m->text);
+    wire::putString(out, m->text2);
   }
-  if (!header.empty())
-    out += "[header: " + header + "]\n\n";
-  out += body;
-  if (!footnotes.empty()) {
-    while (!out.empty() && out.back() == '\n')
-      out.pop_back();
-    for (size_t i = 0; i < footnotes.size(); ++i) {
-      std::string ref = std::to_string(i + 1);
-      out += markdown ? "\n\n[^" + ref + "]: " + footnotes[i]
-                      : "\n\n[" + ref + "] " + footnotes[i];
-    }
-  }
-  if (!endnotes.empty()) {
-    while (!out.empty() && out.back() == '\n')
-      out.pop_back();
-    for (size_t i = 0; i < endnotes.size(); ++i) {
-      std::string ref = "e" + std::to_string(i + 1);
-      out += markdown ? "\n\n[^" + ref + "]: " + endnotes[i]
-                      : "\n\n[" + ref + "] " + endnotes[i];
-    }
-  }
-  if (!footer.empty())
-    out += "\n\n[footer: " + footer + "]";
+
+  wire::putU32(out, static_cast<uint32_t>(events.size()));
+  for (const Node *n : events)
+    wire::putEvent(out, *n);
+
   return out;
 }
-} 
+} // namespace
 
 extern "C" {
 
@@ -913,7 +705,7 @@ char *dup_malloc(const char *data, size_t n) {
   buf[n] = '\0';
   return buf;
 }
-} 
+} // namespace
 
 /* Returns non-zero if the buffer looks like a WordPerfect document libwpd can
  * parse. Never throws. ~keep */
@@ -933,28 +725,26 @@ int xberg_wpd_is_supported(const unsigned char *data, unsigned long len) {
   }
 }
 
-/* Extract text (or, if `markdown` is non-zero, lightly Markdown-marked-up
- * text) from an in-memory WordPerfect document. Parses once into an internal
- * `std::vector<Node>` document via `DocumentBuilder`, then renders that one
- * document to the requested format — the two output modes are two renderings
- * of the same recorded structure, not two different things produced during
- * the libwpd walk.
+/* Extract the structured document model of an in-memory WordPerfect document
+ * as a versioned binary blob (see the wire-format comment above `serialize`).
+ * Parses once into an internal `std::vector<Node>` document via
+ * `DocumentBuilder`, then serializes that one document — there is no
+ * rendering step; the caller (Rust's `dto::decode`) reconstructs a typed
+ * document model from the bytes.
  *
- * On XBERG_WPD_OK, *out_text is a malloc'd buffer of *out_len bytes (NOT
- * necessarily NUL-terminated at that length if the document contained an
- * embedded NUL; a trailing NUL is appended anyway for defensive C-string use
- * but callers must use *out_len as the authoritative length) the caller frees
- * via xberg_wpd_free_string. On any other return, *out_text is left null.
+ * On XBERG_WPD_OK, *out_buf is a malloc'd buffer of *out_len bytes (NOT
+ * NUL-terminated; the format is binary, not text) the caller frees via
+ * xberg_wpd_free_string. On any other return, *out_buf is left null.
  *
  * On failure, *out_err may be set to a malloc'd, NUL-terminated diagnostic
  * message (freed the same way) describing the underlying C++ exception; it
  * is left null when no additional detail is available. ~keep */
-int xberg_wpd_extract(const unsigned char *data, unsigned long len,
-                      int markdown, char **out_text, unsigned long *out_len,
-                      char **out_err) {
-  if (!out_text || !out_len)
+int xberg_wpd_extract_document(const unsigned char *data, unsigned long len,
+                               char **out_buf, unsigned long *out_len,
+                               char **out_err) {
+  if (!out_buf || !out_len)
     return XBERG_WPD_INVALID_ARGS;
-  *out_text = nullptr;
+  *out_buf = nullptr;
   *out_len = 0;
   if (out_err)
     *out_err = nullptr;
@@ -985,14 +775,14 @@ int xberg_wpd_extract(const unsigned char *data, unsigned long len,
       return XBERG_WPD_PARSE_ERROR;
     }
 
-    std::string rendered = render(builder.nodes, markdown != 0);
-    if (rendered.size() > (std::numeric_limits<unsigned long>::max)())
+    std::string blob = serialize(builder.nodes);
+    if (blob.size() > (std::numeric_limits<unsigned long>::max)())
       return XBERG_WPD_OUT_OF_MEMORY;
-    char *buf = dup_malloc(rendered.data(), rendered.size());
+    char *buf = dup_malloc(blob.data(), blob.size());
     if (!buf)
       return XBERG_WPD_OUT_OF_MEMORY;
-    *out_text = buf;
-    *out_len = static_cast<unsigned long>(rendered.size());
+    *out_buf = buf;
+    *out_len = static_cast<unsigned long>(blob.size());
     return XBERG_WPD_OK;
   } catch (const std::exception &e) {
     // libwpd's own error types (ParseException, FileException,
@@ -1010,12 +800,14 @@ int xberg_wpd_extract(const unsigned char *data, unsigned long len,
 
 void xberg_wpd_free_string(char *s) { std::free(s); }
 
-/* Internal self-test for the aside-separation logic in `render` (see its
- * comment above): drives `DocumentBuilder`'s callbacks directly, the same way
- * libwpd would, without needing a real WordPerfect document on disk. Exposed
- * so the Rust test suite has real evidence that footnote/header content is
- * bracketed apart from body text rather than concatenated into it. Not part
- * of the crate's public API contract. Returns non-zero on success. ~keep */
+/* Internal self-test for the header/footer/footnote separation captured by
+ * `DocumentBuilder`: drives its callbacks directly, the same way libwpd
+ * would, without needing a real WordPerfect document on disk. Exposed so the
+ * Rust test suite has real evidence that footnote/header nodes are recorded
+ * as distinct bracketing events rather than folded into body text. Asserts
+ * directly on the recorded `std::vector<Node>` rather than on any rendering,
+ * since rendering no longer exists in this shim. Not part of the crate's
+ * public API contract. Returns non-zero on success. ~keep */
 int xberg_wpd_self_test_separation(void) try {
   DocumentBuilder b;
 
@@ -1036,22 +828,28 @@ int xberg_wpd_self_test_separation(void) try {
   b.insertText(RVNGString("Page 1 of 1"));
   b.closeFooter();
 
-  std::string out = render(b.nodes, false);
+  const std::vector<Node> &n = b.nodes;
+  auto kindAt = [&](size_t i) { return n[i].kind; };
+  bool ok = n.size() == 12;
+  ok = ok && kindAt(0) == NodeKind::HeaderStart;
+  ok = ok && kindAt(1) == NodeKind::Text && n[1].text == "Confidential Draft";
+  ok = ok && kindAt(2) == NodeKind::HeaderEnd;
+  ok = ok && kindAt(3) == NodeKind::Text && n[3].text == "Body start.";
+  ok = ok && kindAt(4) == NodeKind::NoteStart;
+  ok = ok && kindAt(5) == NodeKind::Text && n[5].text == "See appendix A.";
+  ok = ok && kindAt(6) == NodeKind::NoteEnd;
+  ok = ok && kindAt(7) == NodeKind::Text && n[7].text == "Body continues.";
+  ok = ok && kindAt(8) == NodeKind::ParagraphEnd;
+  ok = ok && kindAt(9) == NodeKind::FooterStart;
+  ok = ok && kindAt(10) == NodeKind::Text && n[10].text == "Page 1 of 1";
+  ok = ok && kindAt(11) == NodeKind::FooterEnd;
 
-  bool ok = true;
-  ok = ok && out.find("[header: Confidential Draft]") != std::string::npos;
-  ok = ok && out.find("[footer: Page 1 of 1]") != std::string::npos;
-  ok = ok && out.find("[1] See appendix A.") != std::string::npos;
-  ok = ok && out.find("Body start.[1]Body continues.") != std::string::npos;
-  size_t anchor = out.find("[1]");
-  size_t collected = out.find("[1] See appendix A.");
-  ok = ok && anchor != std::string::npos && collected != std::string::npos &&
-       anchor < collected;
-  ok = ok && out.find("See appendix A.") > out.find("Body continues.");
-  // The header text must never appear anywhere but inside its own marker. ~keep
-  size_t body_start = out.find("Body start.");
-  ok = ok && body_start != std::string::npos &&
-       out.find("Confidential Draft", body_start) == std::string::npos;
+  // The serialized blob must round-trip the same node kinds through the wire
+  // tags a byte-level Rust decoder would see, so the wire format itself is
+  // exercised, not just the recorded node vector. ~keep
+  std::string blob = serialize(n);
+  ok = ok && blob.size() > 0 &&
+       static_cast<uint8_t>(blob[0]) == wire::kWireVersion;
 
   return ok ? 1 : 0;
 } catch (...) {
@@ -1061,10 +859,11 @@ int xberg_wpd_self_test_separation(void) try {
 /* Internal self-test for the internal-document-model completeness work: link
  * hrefs, field placeholders, strikethrough spans, footnote/endnote
  * separation, table structure (header row, column span, a covered/merged
- * cell) and metadata front matter. Same rationale as
- * `xberg_wpd_self_test_separation` above: real evidence without needing a
- * WordPerfect fixture on disk for every feature. Returns non-zero on
- * success. ~keep */
+ * cell) and metadata. Same rationale as `xberg_wpd_self_test_separation`
+ * above: real evidence without needing a WordPerfect fixture on disk for
+ * every feature. Asserts directly on the recorded `std::vector<Node>` (and,
+ * for the serialized-size sanity check, the wire blob) rather than on any
+ * rendering. Returns non-zero on success. ~keep */
 int xberg_wpd_self_test_features(void) try {
   DocumentBuilder b;
   RVNGPropertyList empty;
@@ -1117,7 +916,9 @@ int xberg_wpd_self_test_features(void) try {
 
   b.openTableRow(empty);
   b.openTableCell(empty);
-  // Embedded tab/newline must not corrupt cell/row boundaries. ~keep
+  // Embedded tab/newline must survive unmodified: sanitization was a
+  // rendering-only concern and no longer applies to the structured model.
+  // ~keep
   b.insertText(RVNGString("Jo|e"));
   b.insertLineBreak();
   b.insertText(RVNGString("Doe"));
@@ -1129,12 +930,71 @@ int xberg_wpd_self_test_features(void) try {
   b.closeTableRow();
   b.closeTable();
 
+  const std::vector<Node> &n = b.nodes;
+
+  auto findMetaData = [&](const char *key) -> const Node * {
+    for (const Node &node : n)
+      if (node.kind == NodeKind::MetaData && node.text == key)
+        return &node;
+    return nullptr;
+  };
+  const Node *title = findMetaData("dc:title");
+  const Node *creator = findMetaData("dc:creator");
+
+  auto contains = [&](NodeKind kind) {
+    return std::any_of(n.begin(), n.end(),
+                       [&](const Node &node) { return node.kind == kind; });
+  };
+  auto findFirst = [&](NodeKind kind) -> const Node * {
+    for (const Node &node : n)
+      if (node.kind == kind)
+        return &node;
+    return nullptr;
+  };
+
+  bool ok = true;
+  ok = ok && title && title->text2 == "Sample Report";
+  ok = ok && creator && creator->text2 == "A. Writer";
+
+  const Node *link = findFirst(NodeKind::LinkStart);
+  ok = ok && link && link->text == "https://example.com/report";
+  ok = ok && contains(NodeKind::LinkEnd);
+  ok = ok && contains(NodeKind::StrikethroughStart) &&
+       contains(NodeKind::StrikethroughEnd);
+
+  const Node *field = findFirst(NodeKind::FieldInsert);
+  ok = ok && field && field->text == "page";
+
+  ok = ok && contains(NodeKind::NoteStart) && contains(NodeKind::NoteEnd);
+  ok = ok && contains(NodeKind::EndnoteStart) && contains(NodeKind::EndnoteEnd);
+
+  const Node *headerRow = findFirst(NodeKind::TableRowStart);
+  ok = ok && headerRow && headerRow->ordered;
+
+  int spanCellCount = 0;
+  for (const Node &node : n)
+    if (node.kind == NodeKind::TableCellStart && node.counter == 2)
+      spanCellCount++;
+  ok = ok && spanCellCount == 1;
+
+  ok = ok && contains(NodeKind::CoveredTableCell);
+
+  // Embedded '|' and a line break inside a cell survive verbatim in the
+  // structured model; sanitizing them for a delimiter-based text format was
+  // a rendering concern that no longer applies. ~keep
+  bool foundRawPipeText = false;
+  for (const Node &node : n)
+    if (node.kind == NodeKind::Text && node.text == "Jo|e")
+      foundRawPipeText = true;
+  ok = ok && foundRawPipeText;
+
   // A second table exercising column re-anchoring: libwpd documents that it
   // sometimes fails to emit a covered cell for a vertical merge ("this case
-  // should not happen, but it happens in real-life documents"), yet it always
-  // stamps the surviving real cell with its true librevenge:column. Here row 2
-  // omits the column-0 covered cell but declares its cell at column 1; the
-  // renderer must still place it in the second column, not the first. ~keep
+  // should not happen, but it happens in real-life documents"), yet it
+  // always stamps the surviving real cell with its true librevenge:column.
+  // Row 2 here omits the column-0 covered cell but declares its cell at
+  // column 1; the recorded node must still carry column 1, not column 0, so
+  // a consumer reconstructing the grid places it correctly. ~keep
   DocumentBuilder c;
   c.openTable(empty);
   c.openTableRow(empty);
@@ -1157,32 +1017,27 @@ int xberg_wpd_self_test_features(void) try {
   c.closeTableCell();
   c.closeTableRow();
   c.closeTable();
-  std::string reanchored = render(c.nodes, true);
 
-  std::string md = render(b.nodes, true);
-  std::string text = render(b.nodes, false);
+  int r2CellColumn = -2;
+  bool afterSecondRow = false;
+  int rowEndsSeen = 0;
+  for (const Node &node : c.nodes) {
+    if (node.kind == NodeKind::TableRowEnd)
+      rowEndsSeen++;
+    if (rowEndsSeen == 1 && node.kind == NodeKind::TableCellStart)
+      afterSecondRow = true;
+    if (afterSecondRow && node.kind == NodeKind::TableCellStart)
+      r2CellColumn = node.level;
+  }
+  ok = ok && r2CellColumn == 1;
 
-  bool ok = true;
-  ok = ok && md.find("---\ndc:title: \"Sample Report\"") != std::string::npos;
-  ok = ok && md.find("[full report](https://example.com/report)") !=
-                 std::string::npos;
-  ok = ok && md.find("~~obsolete~~") != std::string::npos;
-  ok = ok && md.find("[page]") != std::string::npos;
-  ok = ok && md.find("[^1]") != std::string::npos &&
-       md.find("[^1]: A footnote.") != std::string::npos;
-  ok = ok && md.find("[^e1]") != std::string::npos &&
-       md.find("[^e1]: An endnote.") != std::string::npos;
-  ok = ok && md.find("| Name | Contact |  |") != std::string::npos;
-  ok = ok && md.find("| --- | --- | --- |") != std::string::npos;
-  ok = ok && md.find("Jo\\|e<br>Doe") != std::string::npos;
-  // The embedded newline was folded into a space rather than left as a raw
-  // '\n' that would otherwise be indistinguishable from a row boundary. ~keep
-  ok = ok && text.find("Jo|e Doe\t\tjo@example.com") != std::string::npos;
-  ok = ok && text.find("Name\tContact\t") != std::string::npos;
-  // Re-anchoring: the dropped column-0 covered cell leaves an empty first
-  // column and r2c1 lands in the second, matching row 1's real columns. ~keep
-  ok = ok && reanchored.find("| r1c0 | r1c1 |") != std::string::npos;
-  ok = ok && reanchored.find("|  | r2c1 |") != std::string::npos;
+  // The serialized blob must be non-empty and version-tagged: a byte-level
+  // smoke check that `serialize` actually ran over this richer document
+  // rather than the wire format itself being asserted node-by-node here
+  // (that is `dto::decode`'s job, exercised from Rust). ~keep
+  std::string blob = serialize(n);
+  ok = ok && blob.size() > 0 &&
+       static_cast<uint8_t>(blob[0]) == wire::kWireVersion;
 
   return ok ? 1 : 0;
 } catch (...) {

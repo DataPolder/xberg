@@ -1,4 +1,4 @@
-//! WordPerfect text extraction for Xberg.
+//! WordPerfect structured document extraction for Xberg.
 //!
 //! Thin, safe wrapper over [libwpd](https://libwpd.sourceforge.net/) and its
 //! document-model dependency librevenge, both built from source against their
@@ -8,36 +8,38 @@
 //! libwpd has no `extract()` entry point; it drives a librevenge callback
 //! interface. A hand-written C++ shim (`src/shim.cpp`) implements that
 //! interface, records a flat, format-agnostic internal document as libwpd
-//! walks the input, and renders that one document to text or (via
-//! [`extract_markdown`]) lightly Markdown-marked-up text, exposing the result
-//! through a flat C API this crate wraps. Footnotes and endnotes are tracked
-//! as distinct, separately-numbered sequences; comments, text boxes, headers
-//! and footers are always bracketed apart from body text rather than
-//! concatenated into it. Tables render as GitHub-flavored Markdown pipe
-//! tables in [`extract_markdown`] and as a tab/newline grid in
-//! [`extract_text`]. Hyperlinks, page/date fields and a handful of common
-//! document metadata fields (title, author, subject, keywords) are also
-//! captured. WordPerfect support targets Linux, macOS and Windows; on other
-//! platforms the functions return [`WpdError::UnsupportedPlatform`].
+//! walks the input, and serializes that one document into a versioned binary
+//! blob exposed through a flat C API this crate wraps. [`extract_document`]
+//! decodes that blob into a typed [`WpdDocument`]: an ordered [`WpdEvent`]
+//! stream (text runs, formatting spans, list items, table structure with
+//! column/row spans and header-row flags, hyperlinks, fields, footnotes and
+//! endnotes kept as distinct sequences, headers/footers, and comment/text-box
+//! asides) plus [`WpdMetadata`] (title, author, subject, keywords, and every
+//! raw key/value pair libwpd reported). This crate performs no text or
+//! Markdown rendering; producing a flattened string from the structured model
+//! is left to the caller. WordPerfect support targets Linux, macOS and
+//! Windows; on other platforms [`extract_document`] returns
+//! [`WpdError::UnsupportedPlatform`].
 
+mod dto;
 mod error;
 
+pub use dto::{WpdDocument, WpdEvent, WpdMetadata};
 pub use error::WpdError;
 
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 mod imp {
-    use crate::WpdError;
+    use crate::{WpdDocument, WpdError, dto};
     use std::ffi::CStr;
     use std::os::raw::{c_char, c_int, c_uchar, c_ulong};
     use std::{ptr, slice};
 
     unsafe extern "C" {
         fn xberg_wpd_is_supported(data: *const c_uchar, len: c_ulong) -> c_int;
-        fn xberg_wpd_extract(
+        fn xberg_wpd_extract_document(
             data: *const c_uchar,
             len: c_ulong,
-            markdown: c_int,
-            out_text: *mut *mut c_char,
+            out_buf: *mut *mut c_char,
             out_len: *mut c_ulong,
             out_err: *mut *mut c_char,
         ) -> c_int;
@@ -58,22 +60,9 @@ mod imp {
         unsafe { xberg_wpd_is_supported(data.as_ptr(), data.len() as c_ulong) != 0 }
     }
 
-    /// Extract the plain text of a WordPerfect document held entirely in memory.
-    pub fn extract_text(data: &[u8]) -> Result<String, WpdError> {
-        extract(data, false)
-    }
-
-    /// Extract a Markdown-marked-up rendering of a WordPerfect document:
-    /// heading paragraphs, bold/italic/strikethrough spans, list items,
-    /// hyperlinks and tables are rendered as Markdown syntax (tables as
-    /// GitHub-flavored pipe tables). Footnotes, endnotes, comments, text
-    /// boxes, headers and footers are always bracketed apart from body text,
-    /// in this mode as in [`extract_text`].
-    pub fn extract_markdown(data: &[u8]) -> Result<String, WpdError> {
-        extract(data, true)
-    }
-
-    fn extract(data: &[u8], markdown: bool) -> Result<String, WpdError> {
+    /// Extract the structured document model of a WordPerfect document held
+    /// entirely in memory.
+    pub fn extract_document(data: &[u8]) -> Result<WpdDocument, WpdError> {
         if data.is_empty() || data.len() > u32::MAX as usize {
             return Err(WpdError::InvalidArgs);
         }
@@ -87,10 +76,9 @@ mod imp {
         // return it hands back a malloc'd buffer of exactly `out_len` bytes whose
         // ownership transfers to us. ~keep
         let code = unsafe {
-            xberg_wpd_extract(
+            xberg_wpd_extract_document(
                 data.as_ptr(),
                 data.len() as c_ulong,
-                markdown as c_int,
                 &mut out,
                 &mut out_len,
                 &mut out_err,
@@ -126,14 +114,15 @@ mod imp {
         // SAFETY: `out` is the non-null buffer the shim allocated, exactly
         // `out_len` bytes long; we copy it out and free it through the matching
         // deallocator before returning. Using the explicit length (rather than
-        // scanning for a NUL terminator) means an embedded NUL in the extracted
-        // text can't silently truncate the result. ~keep
-        let text = unsafe {
+        // scanning for a NUL terminator) means the binary blob's embedded
+        // length-prefixed strings can't be silently truncated at an embedded
+        // NUL. ~keep
+        let bytes = unsafe {
             let bytes = slice::from_raw_parts(out as *const u8, out_len as usize).to_vec();
             xberg_wpd_free_string(out);
-            String::from_utf8(bytes)
+            bytes
         };
-        text.map_err(|_| WpdError::InvalidUtf8)
+        dto::decode(&bytes)
     }
 
     #[cfg(test)]
@@ -156,22 +145,15 @@ mod imp {
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 mod imp {
-    use crate::WpdError;
-
     /// WordPerfect extraction is desktop-only; unavailable on this target.
     pub fn is_supported(_data: &[u8]) -> bool {
         false
     }
 
     /// WordPerfect extraction is desktop-only; unavailable on this target.
-    pub fn extract_text(_data: &[u8]) -> Result<String, WpdError> {
-        Err(WpdError::UnsupportedPlatform)
-    }
-
-    /// WordPerfect extraction is desktop-only; unavailable on this target.
-    pub fn extract_markdown(_data: &[u8]) -> Result<String, WpdError> {
-        Err(WpdError::UnsupportedPlatform)
+    pub fn extract_document(_data: &[u8]) -> Result<super::WpdDocument, super::WpdError> {
+        Err(super::WpdError::UnsupportedPlatform)
     }
 }
 
-pub use imp::{extract_markdown, extract_text, is_supported};
+pub use imp::{extract_document, is_supported};

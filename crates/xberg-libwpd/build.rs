@@ -1,5 +1,5 @@
-//! Builds libwpd + librevenge from source and compiles the C++ shim into a
-//! single static library.
+//! Decompresses the vendored libwpd + librevenge + boost archives and
+//! compiles the sources plus the C++ shim into a single static library.
 //!
 //! WordPerfect support targets Linux, macOS and Windows. On any other target
 //! this build script is a no-op and the crate exposes stub functions (see
@@ -9,20 +9,19 @@
 //! desktop host, `cfg!` would still say "linux"/"macos" and we would try to
 //! compile libwpd for wasm.
 //!
-//! Both libraries are built against their MPL-2.0 arm. They are downloaded from
-//! their upstream release tarballs at build time (checksum-verified) and cached
-//! in a workspace-relative directory (override via `XBERG_LIBWPD_CACHE_DIR`),
-//! mirroring how `xberg-tesseract` provisions its native dependencies, so the
-//! extraction survives `cargo clean` instead of being re-downloaded from
-//! `OUT_DIR` on every build. librevenge and libwpd both require boost headers
-//! at build time — header-only `boost::spirit` (parsing) and
+//! Both libraries are built against their MPL-2.0 arm, from `.tar.gz` archives
+//! committed under `vendor/` (see `vendor/PROVENANCE.md` for exact upstream
+//! URLs, checksums, and how the vendored boost header subset was produced).
+//! Nothing here downloads from the network or probes the system for boost:
+//! librevenge and libwpd both need header-only `boost::spirit` (parsing) and
 //! `boost::archive`/`boost::serialization` (the `base64_from_binary` iterator
-//! librevenge uses) — which must be present on the system.
+//! librevenge uses), and `vendor/boost-subset.tar.gz` supplies exactly that
+//! subset. All three archives are decompressed into `OUT_DIR` on every build.
 
-// Host-side gate: these `cfg`s mirror the `[target.'cfg(...)'.build-dependencies]`
+// Host-side gate: this `cfg` mirrors the `[target.'cfg(...)'.build-dependencies]`
 // block in Cargo.toml, which Cargo resolves against the host, so the module only
-// exists where `cc`/`reqwest`/`flate2`/`tar`/`sha2` are available. Whether we
-// *do* anything is a separate, target-driven decision in `main`. ~keep
+// exists where `cc`/`flate2`/`tar`/`sha2` are available. Whether we *do*
+// anything is a separate, target-driven decision in `main`. ~keep
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 mod build_libwpd {
     use flate2::read::GzDecoder;
@@ -35,28 +34,15 @@ mod build_libwpd {
     const LIBWPD_VERSION: &str = "0.10.3";
     const LIBREVENGE_SHA256: &str = "686cc36be3196a0a808761cfd3951a46ff809cb0e028b0902c787261a1389d0f";
     const LIBWPD_SHA256: &str = "ca3575282acff8c952c12160433ad7e73e803ff3f070b8442c7ffa1f3a19f9ae";
-
-    fn librevenge_urls() -> Vec<String> {
-        let v = LIBREVENGE_VERSION;
-        vec![
-            format!("https://downloads.sourceforge.net/project/libwpd/librevenge/librevenge-{v}/librevenge-{v}.tar.gz"),
-            format!(
-                "https://netcologne.dl.sourceforge.net/project/libwpd/librevenge/librevenge-{v}/librevenge-{v}.tar.gz"
-            ),
-        ]
-    }
-
-    fn libwpd_urls() -> Vec<String> {
-        let v = LIBWPD_VERSION;
-        vec![
-            format!("https://downloads.sourceforge.net/project/libwpd/libwpd/libwpd-{v}/libwpd-{v}.tar.gz"),
-            format!("https://netcologne.dl.sourceforge.net/project/libwpd/libwpd/libwpd-{v}/libwpd-{v}.tar.gz"),
-        ]
-    }
+    // Our own `bcp` output, not a third-party download, but pinned anyway so an
+    // accidental corruption of the committed archive fails the build loudly
+    // (see vendor/PROVENANCE.md). ~keep
+    const BOOST_SUBSET_SHA256: &str = "802ee17c5e380efbcbb696468ee3c7090aa409db89c2063b4c9b8d3e3aff1e08";
 
     /// vcpkg triplet used for Windows native deps across this workspace's CI
     /// (see `scripts/ci/install-system-deps/install-windows.ps1`, which
-    /// installs `libheif` the same way).
+    /// installs `libheif` the same way). Only used for zlib on Windows now
+    /// that boost is vendored.
     const VCPKG_TRIPLET: &str = "x64-windows-static-md";
 
     /// The OS we are building *for*, per Cargo. See the module docs for why this
@@ -83,79 +69,6 @@ mod build_libwpd {
         vcpkg_root().join("installed").join(VCPKG_TRIPLET)
     }
 
-    /// Headers that must all be present under a candidate include directory
-    /// for it to be usable: `boost/version.hpp` alone is not sufficient,
-    /// since minimal boost installs (e.g. just `libboost-dev`'s metapackage
-    /// stub on some distros) can provide the version header without the
-    /// header-only `spirit` and `archive`/`serialization` pieces librevenge
-    /// and libwpd actually compile against. ~keep
-    const REQUIRED_BOOST_HEADERS: [&str; 3] = [
-        "boost/version.hpp",
-        "boost/spirit/include/qi.hpp",
-        "boost/archive/iterators/base64_from_binary.hpp",
-    ];
-
-    fn has_all_boost_headers(dir: &Path) -> bool {
-        REQUIRED_BOOST_HEADERS.iter().all(|h| dir.join(h).is_file())
-    }
-
-    /// Locate a directory containing all of `REQUIRED_BOOST_HEADERS`. Honors
-    /// `BOOST_INCLUDE_DIR`, otherwise probes the usual system locations
-    /// (a vcpkg install on Windows, Homebrew/system paths elsewhere).
-    fn find_boost_include() -> PathBuf {
-        if let Ok(dir) = env::var("BOOST_INCLUDE_DIR") {
-            let p = PathBuf::from(dir);
-            if has_all_boost_headers(&p) {
-                return p;
-            }
-            panic!("BOOST_INCLUDE_DIR={p:?} is missing one or more of {REQUIRED_BOOST_HEADERS:?}");
-        }
-
-        if targeting_windows() {
-            let vcpkg_include = vcpkg_triplet_dir().join("include");
-            if has_all_boost_headers(&vcpkg_include) {
-                return vcpkg_include;
-            }
-            panic!(
-                "boost headers not found under {vcpkg_include:?}. Install via \
-                 `vcpkg install boost-spirit:{VCPKG_TRIPLET} boost-serialization:{VCPKG_TRIPLET}` \
-                 or set BOOST_INCLUDE_DIR."
-            );
-        }
-
-        let candidates = ["/opt/homebrew/include", "/usr/local/include", "/usr/include"];
-        for c in candidates {
-            let p = Path::new(c);
-            if has_all_boost_headers(p) {
-                return p.to_path_buf();
-            }
-        }
-        panic!(
-            "boost headers not found. librevenge and libwpd need boost::spirit (parsing) and \
-             boost::archive/boost::serialization (base64_from_binary) at build time. Install \
-             boost (e.g. `brew install boost` or `apt-get install libboost-dev`) or set \
-             BOOST_INCLUDE_DIR."
-        );
-    }
-
-    fn download(urls: &[String]) -> Vec<u8> {
-        let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(120))
-            .build()
-            .expect("failed to build HTTP client");
-        let mut last_err = String::new();
-        for url in urls {
-            match client.get(url).send().and_then(|r| r.error_for_status()) {
-                Ok(resp) => match resp.bytes() {
-                    Ok(b) => return b.to_vec(),
-                    Err(e) => last_err = format!("{url}: reading body: {e}"),
-                },
-                Err(e) => last_err = format!("{url}: {e}"),
-            }
-        }
-        panic!("failed to download from any mirror. last error: {last_err}");
-    }
-
     fn verify_sha256(bytes: &[u8], expected: &str) {
         let digest = Sha256::digest(bytes);
         let actual = hex(&digest);
@@ -170,111 +83,35 @@ mod build_libwpd {
         s
     }
 
-    /// Download, verify and extract `name-version.tar.gz` into `cache`, reusing
-    /// a prior extraction only when the archive it came from is still on disk
-    /// and still hashes to `sha256`. Returns the extracted source root (e.g.
-    /// `<cache>/libwpd-0.10.3`).
-    ///
-    /// The archive is re-verified on every build rather than only on first
-    /// download: the cache lives under `target/`, which CI restores from a
-    /// remote cache, so "we fetched this correctly once" is not evidence that
-    /// what is on disk now is what we fetched. Re-extraction is still skipped
-    /// on a hit, otherwise every build would re-touch the sources and force a
-    /// full C++ rebuild. ~keep
-    fn provision(cache: &Path, name: &str, version: &str, urls: &[String], sha256: &str) -> PathBuf {
-        let root = cache.join(format!("{name}-{version}"));
-        let archive_path = cache.join(format!("{name}-{version}.tar.gz"));
-        let marker = cache.join(format!(".{name}-{version}.ok"));
+    /// Root of the vendored `.tar.gz` archives, relative to the crate
+    /// manifest dir (see `vendor/PROVENANCE.md` for what's in each one and
+    /// where it came from).
+    fn vendor_dir() -> PathBuf {
+        PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set by cargo")).join("vendor")
+    }
 
-        let cached_ok = root.is_dir()
-            && fs::read_to_string(&marker).is_ok_and(|m| m.trim() == sha256)
-            && fs::read(&archive_path).is_ok_and(|b| hex(&Sha256::digest(&b)) == sha256);
-        if cached_ok {
-            return root;
+    /// Extract `<vendor>/<archive_name>` into `out_dir`, optionally
+    /// sha256-verifying the archive bytes first. Re-extracted on every build:
+    /// `OUT_DIR` is not stable across builds the way a persistent cache would
+    /// be, so there is nothing to skip. Returns the extracted root, i.e.
+    /// `out_dir.join(expected_root)`.
+    fn extract(out_dir: &Path, archive_name: &str, expected_sha256: Option<&str>, expected_root: &str) -> PathBuf {
+        let archive_path = vendor_dir().join(archive_name);
+        let bytes = fs::read(&archive_path).unwrap_or_else(|e| panic!("reading {archive_path:?}: {e}"));
+        if let Some(sha256) = expected_sha256 {
+            verify_sha256(&bytes, sha256);
         }
 
-        let bytes = match fs::read(&archive_path) {
-            Ok(b) if hex(&Sha256::digest(&b)) == sha256 => b,
-            _ => {
-                let fetched = download(urls);
-                verify_sha256(&fetched, sha256);
-                fs::write(&archive_path, &fetched).ok();
-                fetched
-            }
-        };
+        let root = out_dir.join(expected_root);
         if root.exists() {
             fs::remove_dir_all(&root).ok();
         }
         let mut archive = tar::Archive::new(GzDecoder::new(&bytes[..]));
         archive
-            .unpack(cache)
-            .unwrap_or_else(|e| panic!("failed to extract {name}: {e}"));
-        assert!(root.is_dir(), "expected {root:?} after extracting {name}");
-        fs::write(&marker, sha256).ok();
+            .unpack(out_dir)
+            .unwrap_or_else(|e| panic!("failed to extract {archive_name}: {e}"));
+        assert!(root.is_dir(), "expected {root:?} after extracting {archive_name}");
         root
-    }
-
-    /// Mirrors `xberg-tesseract`'s cache placement: walk up from `OUT_DIR` to
-    /// the workspace's `target/` directory (4 levels: `target/<profile>/build/
-    /// <crate>-<hash>/out` -> `target/`), landing the cache alongside other
-    /// crates' native build artifacts instead of buried in a per-build `OUT_DIR`
-    /// that gets wiped on every `cargo clean`.
-    fn workspace_cache_dir_from_out_dir() -> Option<PathBuf> {
-        let out_dir = env::var_os("OUT_DIR")?;
-        let mut path = PathBuf::from(out_dir);
-        for _ in 0..4 {
-            if !path.pop() {
-                return None;
-            }
-        }
-        Some(path.join("xberg-libwpd-cache"))
-    }
-
-    /// Cache directory for the downloaded librevenge/libwpd sources: honors
-    /// `XBERG_LIBWPD_CACHE_DIR`, else a platform/`$HOME`-based directory, else
-    /// a workspace-relative path derived from `OUT_DIR` as a last resort. The
-    /// `$HOME`-based directory is the *default*, not the fallback: it lives
-    /// outside `target/`, so the multi-hundred-MB source extraction survives
-    /// `cargo clean` instead of being silently wiped and re-downloaded on the
-    /// next build, which is the entire point of caching it. The `OUT_DIR`
-    /// derived path is kept only for the case where `$HOME`/`USER` are both
-    /// unset. The `cfg!`s below are deliberately host-based: this is a
-    /// directory on the build machine. ~keep
-    fn cache_dir() -> PathBuf {
-        if let Ok(custom) = env::var("XBERG_LIBWPD_CACHE_DIR") {
-            return PathBuf::from(custom);
-        }
-
-        if let Some(home_based) = home_cache_dir() {
-            return home_based;
-        }
-
-        workspace_cache_dir_from_out_dir()
-            .expect("neither a home-based cache dir nor OUT_DIR-derived cache dir is available")
-    }
-
-    /// The platform-appropriate `$HOME`-rooted cache directory, or `None` if
-    /// neither `HOME`/`LOCALAPPDATA` nor `USER` is set.
-    fn home_cache_dir() -> Option<PathBuf> {
-        if cfg!(target_os = "windows") {
-            let local_app_data = env::var("LOCALAPPDATA").ok()?;
-            Some(PathBuf::from(local_app_data).join("xberg-libwpd"))
-        } else if cfg!(target_os = "macos") {
-            let home_dir = env::var("HOME")
-                .ok()
-                .or_else(|| env::var("USER").ok().map(|user| format!("/Users/{user}")))?;
-            Some(
-                PathBuf::from(home_dir)
-                    .join("Library")
-                    .join("Caches")
-                    .join("xberg-libwpd"),
-            )
-        } else {
-            let home_dir = env::var("HOME")
-                .ok()
-                .or_else(|| env::var("USER").ok().map(|user| format!("/home/{user}")))?;
-            Some(PathBuf::from(home_dir).join(".cache").join("xberg-libwpd"))
-        }
     }
 
     fn link_zlib() {
@@ -300,18 +137,25 @@ mod build_libwpd {
     }
 
     pub fn build() {
-        let cache = cache_dir();
-        fs::create_dir_all(&cache).expect("failed to create native cache dir");
+        let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR is set by cargo"));
 
-        let boost = find_boost_include();
-        let rev = provision(
-            &cache,
-            "librevenge",
-            LIBREVENGE_VERSION,
-            &librevenge_urls(),
-            LIBREVENGE_SHA256,
+        let rev = extract(
+            &out_dir,
+            "librevenge-0.0.6.tar.gz",
+            Some(LIBREVENGE_SHA256),
+            &format!("librevenge-{LIBREVENGE_VERSION}"),
         );
-        let wpd = provision(&cache, "libwpd", LIBWPD_VERSION, &libwpd_urls(), LIBWPD_SHA256);
+        let wpd = extract(
+            &out_dir,
+            "libwpd-0.10.3.tar.gz",
+            Some(LIBWPD_SHA256),
+            &format!("libwpd-{LIBWPD_VERSION}"),
+        );
+        // Extracting `boost-subset.tar.gz` reproduces the `boost/boost/...`
+        // layout `bcp` produces, so the include root is the extracted `boost`
+        // dir itself (headers live one level below it, at
+        // `boost/boost/version.hpp`).
+        let boost = extract(&out_dir, "boost-subset.tar.gz", Some(BOOST_SUBSET_SHA256), "boost");
 
         let mut build = cc::Build::new();
         build
@@ -346,8 +190,9 @@ mod build_libwpd {
 
         println!("cargo:rerun-if-changed=src/shim.cpp");
         println!("cargo:rerun-if-changed=src/msvc_compat.h");
-        println!("cargo:rerun-if-env-changed=BOOST_INCLUDE_DIR");
-        println!("cargo:rerun-if-env-changed=XBERG_LIBWPD_CACHE_DIR");
+        println!("cargo:rerun-if-changed=vendor/librevenge-0.0.6.tar.gz");
+        println!("cargo:rerun-if-changed=vendor/libwpd-0.10.3.tar.gz");
+        println!("cargo:rerun-if-changed=vendor/boost-subset.tar.gz");
         if targeting_windows() {
             println!("cargo:rerun-if-env-changed=VCPKG_ROOT");
             println!("cargo:rerun-if-env-changed=VCPKG_INSTALLATION_ROOT");

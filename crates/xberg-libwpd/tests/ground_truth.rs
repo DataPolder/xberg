@@ -1,22 +1,22 @@
 //! Full-decode tests against the WordPerfect corpus in the `test_documents`
 //! submodule, covering WP 4.2 through Corel WP6 and the Macintosh variants.
 //!
-//! Each document is checked against the committed `ground_truth/wordperfect`
-//! renderings: `.txt` against [`extract_text`] and `.md` against
-//! [`extract_markdown`]. Comparison normalizes runs of whitespace, since line
-//! wrapping is a presentation detail of the source document rather than part
-//! of the extracted content.
+//! These assert on the *structure* of the decoded [`xberg_libwpd::WpdDocument`]
+//! — event kinds, table cell spans, note/aside bracketing, metadata — rather
+//! than on any rendered string. Comparing rendered text/Markdown against
+//! ground-truth fixtures is a concern of a layer above this crate (this
+//! crate only decodes libwpd's structured model; it renders nothing).
 //!
 //! Every test skips when the submodule is not checked out (or its LFS objects
 //! are not pulled), matching the other corpus-backed tests in this workspace.
 
-use std::collections::BTreeMap;
 use std::path::PathBuf;
+use xberg_libwpd::{WpdDocument, WpdEvent};
 
-/// Documents whose extraction matches the ground truth exactly, in both modes.
-const EXACT: &[&str] = &["wp42", "wp50", "wp51", "wp6", "wp_mac1", "wp_mac3"];
+/// Every document stem this crate can decode from the corpus, with its
+/// source extension; WP 4.2/5.x samples use `.wp`.
+const STEMS: &[&str] = &["wp42", "wp50", "wp51", "wp6", "wp_mac1", "wp_mac3"];
 
-/// Source extension per document stem; WP 4.2/5.x samples use `.wp`.
 fn source_name(stem: &str) -> String {
     match stem {
         "wp42" | "wp50" | "wp51" => format!("{stem}.wp"),
@@ -38,110 +38,106 @@ fn corpus(rel: &str) -> Option<Vec<u8>> {
     Some(bytes)
 }
 
-fn corpus_str(rel: &str) -> Option<String> {
-    corpus(rel).and_then(|b| String::from_utf8(b).ok())
+fn text_events(doc: &WpdDocument) -> Vec<&str> {
+    doc.events
+        .iter()
+        .filter_map(|e| match e {
+            WpdEvent::Text(s) => Some(s.as_str()),
+            _ => None,
+        })
+        .collect()
 }
 
-/// Collapses all whitespace runs to single spaces so that comparisons ignore
-/// source line wrapping.
-fn normalize(s: &str) -> String {
-    s.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-fn word_counts(s: &str) -> BTreeMap<&str, usize> {
-    let mut counts = BTreeMap::new();
-    for w in s.split_whitespace() {
-        *counts.entry(w).or_insert(0) += 1;
-    }
-    counts
+fn word_count(doc: &WpdDocument) -> usize {
+    text_events(doc).iter().flat_map(|s| s.split_whitespace()).count()
 }
 
 #[test]
-fn text_matches_ground_truth() {
+fn small_documents_decode_without_error() {
     let mut checked = 0;
-    for stem in EXACT {
-        let (Some(bytes), Some(expected)) = (
-            corpus(&format!("wordperfect/{}", source_name(stem))),
-            corpus_str(&format!("ground_truth/wordperfect/{stem}.txt")),
-        ) else {
+    for stem in STEMS {
+        let Some(bytes) = corpus(&format!("wordperfect/{}", source_name(stem))) else {
             continue;
         };
         assert!(xberg_libwpd::is_supported(&bytes), "{stem} should be recognized");
-        let got = xberg_libwpd::extract_text(&bytes).unwrap_or_else(|e| panic!("{stem}: {e}"));
-        assert_eq!(
-            normalize(&got),
-            normalize(&expected),
-            "{stem}: text differs from ground truth"
-        );
+        let doc = xberg_libwpd::extract_document(&bytes).unwrap_or_else(|e| panic!("{stem}: {e}"));
+        assert!(!doc.events.is_empty(), "{stem}: expected at least one event");
+        assert!(word_count(&doc) > 0, "{stem}: expected extracted text");
         checked += 1;
     }
-    eprintln!("compared {checked}/{} documents", EXACT.len());
-}
-
-#[test]
-fn markdown_matches_ground_truth() {
-    let mut checked = 0;
-    for stem in EXACT {
-        let (Some(bytes), Some(expected)) = (
-            corpus(&format!("wordperfect/{}", source_name(stem))),
-            corpus_str(&format!("ground_truth/wordperfect/{stem}.md")),
-        ) else {
-            continue;
-        };
-        let got = xberg_libwpd::extract_markdown(&bytes).unwrap_or_else(|e| panic!("{stem}: {e}"));
-        assert_eq!(
-            normalize(&got),
-            normalize(&expected),
-            "{stem}: markdown differs from ground truth"
-        );
-        checked += 1;
-    }
-    eprintln!("compared {checked}/{} documents", EXACT.len());
+    eprintln!("compared {checked}/{} documents", STEMS.len());
 }
 
 /// `corel_wp6.wpd` is a 1.1 MB real-world WP6 report: nested emphasis,
-/// superscripts, a footnote, tables and embedded images.
-///
-/// It is asserted by content rather than byte-for-byte because two rendering
-/// choices differ deliberately from the ground truth: tables stay
-/// tab/newline-separated instead of becoming HTML `<table>` markup (see
-/// `shim.cpp`'s `render`), and the note body is collected at the end of the
-/// document rather than at the end of its page. Every ground-truth word must
-/// still be reproduced.
+/// superscripts, a footnote, tables and embedded images. This asserts the
+/// decoded event stream actually carries that structure — not merely that
+/// decoding succeeded — so the shim's serializer and Rust's decoder are
+/// proven against a real, non-synthetic libwpd walk.
 #[test]
-fn corel_wp6_reproduces_all_ground_truth_text() {
-    let (Some(bytes), Some(expected)) = (
-        corpus("wordperfect/corel_wp6.wpd"),
-        corpus_str("ground_truth/wordperfect/corel_wp6.txt"),
-    ) else {
+fn corel_wp6_decodes_to_expected_structure() {
+    let Some(bytes) = corpus("wordperfect/corel_wp6.wpd") else {
         return;
     };
 
-    let got = xberg_libwpd::extract_text(&bytes).expect("extract_text");
-    let got_counts = word_counts(&got);
-    let missing: Vec<_> = word_counts(&expected)
-        .into_iter()
-        .filter(|(w, n)| got_counts.get(w).copied().unwrap_or(0) < *n)
-        .map(|(w, _)| w)
-        .collect();
-    assert!(missing.is_empty(), "words missing from extraction: {missing:?}");
+    let doc = xberg_libwpd::extract_document(&bytes).expect("extract_document");
 
-    assert!(got.contains("[1]"), "expected a numbered note anchor");
+    let table_starts = doc.events.iter().filter(|e| matches!(e, WpdEvent::TableStart)).count();
+    let table_ends = doc.events.iter().filter(|e| matches!(e, WpdEvent::TableEnd)).count();
+    let cell_starts = doc
+        .events
+        .iter()
+        .filter(|e| matches!(e, WpdEvent::CellStart { .. }))
+        .count();
+    let note_starts = doc
+        .events
+        .iter()
+        .filter(|e| matches!(e, WpdEvent::NoteStart { .. }))
+        .count();
+    let superscript_starts = doc
+        .events
+        .iter()
+        .filter(|e| matches!(e, WpdEvent::SuperscriptStart))
+        .count();
+
+    assert!(table_starts >= 1, "expected at least one table");
+    assert_eq!(
+        table_starts, table_ends,
+        "every TableStart must have a matching TableEnd"
+    );
+    assert!(cell_starts >= 1, "expected at least one table cell");
+    assert!(note_starts >= 1, "expected at least one footnote or endnote");
+    assert!(superscript_starts >= 1, "expected at least one superscript span");
+
+    // Every CellStart must carry a plausible column/span triple: spans are
+    // at least 1 (libwpd's own invariant, mirrored by the shim's
+    // `std::max(1, ...)` clamp) and column is either -1 (unknown) or
+    // non-negative.
+    for event in &doc.events {
+        if let WpdEvent::CellStart {
+            column,
+            col_span,
+            row_span,
+        } = event
+        {
+            assert!(*column >= -1, "column must be -1 or non-negative, got {column}");
+            assert!(*col_span >= 1, "col_span must be at least 1, got {col_span}");
+            assert!(*row_span >= 1, "row_span must be at least 1, got {row_span}");
+        }
+    }
+
+    // The known note anchor text from the ground-truth fixture must appear
+    // somewhere in the decoded text runs.
+    let all_text = text_events(&doc).join(" ");
     assert!(
-        got.contains("[1] E wordt op vrijwel"),
-        "expected the collected note body"
+        all_text.contains("wordt op vrijwel"),
+        "expected the known note body text to appear in the decoded events"
     );
 
-    let markdown = xberg_libwpd::extract_markdown(&bytes).expect("extract_markdown");
-    assert!(
-        markdown.contains("[^1]"),
-        "markdown should use footnote reference syntax"
+    eprintln!(
+        "corel_wp6: {} events, {table_starts} tables, {cell_starts} cells, \
+         {note_starts} notes, {superscript_starts} superscript spans",
+        doc.events.len()
     );
-    assert!(
-        markdown.contains("[^1]: "),
-        "markdown should define the collected footnote"
-    );
-    assert!(markdown.contains("<sup>"), "superscripts should survive into markdown");
 }
 
 /// The CVE samples are malformed by construction and the `.wpg` files are
@@ -163,9 +159,8 @@ fn malformed_and_unrelated_documents_are_rejected() {
             !xberg_libwpd::is_supported(&bytes),
             "{name} should not be reported as supported"
         );
-        assert!(xberg_libwpd::extract_text(&bytes).is_err(), "{name} should not decode");
         assert!(
-            xberg_libwpd::extract_markdown(&bytes).is_err(),
+            xberg_libwpd::extract_document(&bytes).is_err(),
             "{name} should not decode"
         );
     }
@@ -181,7 +176,6 @@ fn truncated_documents_never_crash() {
     for cut in (1..bytes.len()).step_by(613) {
         let head = &bytes[..cut];
         let _ = xberg_libwpd::is_supported(head);
-        let _ = xberg_libwpd::extract_text(head);
-        let _ = xberg_libwpd::extract_markdown(head);
+        let _ = xberg_libwpd::extract_document(head);
     }
 }

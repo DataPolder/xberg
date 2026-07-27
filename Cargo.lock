@@ -11744,6 +11744,7 @@ dependencies = [
  "xberg-candle-ocr",
  "xberg-gliner",
  "xberg-libheif",
+ "xberg-libwpd",
  "xberg-paddle-ocr",
  "xberg-tesseract",
  "zeroize",
@@ -11874,7 +11875,6 @@ version = "1.0.0-rc.42"
 dependencies = [
  "cc",
  "flate2",
- "reqwest",
  "sha2 0.11.0",
  "tar",
  "thiserror 2.0.19",
