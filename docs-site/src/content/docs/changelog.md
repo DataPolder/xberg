@@ -100,11 +100,41 @@ The full identifier mapping is in the [migration guide](/migration/from-kreuzber
 
 ### Fixed
 
-- XML entity references (`&amp;`, `&lt;`, `&gt;`) are no longer dropped during extraction.
-- PDF `/Rotate` page orientation is handled correctly on the OCR render path, and auto-rotation no
-  longer aborts the process on failure.
-- pdf_oxide table / positioned-text handling and sort guards prevent panics on malformed layouts, and
-  prose previously misclassified as picture text is recovered.
+More than 150 bugs were resolved during the 1.0 cycle. Highlights by area:
+
+- **PDF text fidelity:** text inside Marked-Content (MCID) blocks is no longer dropped from
+  markdown/HTML output (#917); ligature glyphs no longer map to control characters (#1135);
+  glyph-spaced text no longer extracts one character per line (#962); spurious intra-word spaces in
+  native extraction are fixed (#1291, #1222); JPEG 2000 images no longer render blank and silently
+  break OCR (#1158); XML entity references (`&amp;`/`&lt;`/`&gt;`) are preserved (#1242).
+- **Tables:** bordered / graphical-line tables are detected reliably instead of silently skipped (#964,
+  #1097, #1213); rotated full-page tables no longer extract as word salad (#1220, #1221); duplicate
+  table emission and double-counting are fixed (#1288); physically fragmented per-row tables are merged
+  back with their header row (#1290, #1100); borderless and text-heavy grids keep their row
+  associations (#1316, #1319).
+- **Reading order & structure:** two-column reading order no longer scrambles headings (#1170); stale
+  page boundaries after reordering no longer panic on multibyte text or drop documents (#1270, #1272);
+  numbered and cover-page headings are classified correctly (#961, #966, #1096, #1098); filled form
+  field values are placed correctly (#1120).
+- **OCR:** an explicit PaddleOCR backend no longer silently falls back to Tesseract (#801, #1071, #1088,
+  #1102); scanned-page OCR text and page provenance surface consistently across content, pages, and
+  chunks (#1095, #1110, #1281); spurious auto-OCR on born-digital PDFs is suppressed (#1176); a SIGBUS
+  crash and a NaN-sort panic in the OCR pipeline are fixed (#1057, #1179); the Candle VLM OCR backends
+  are stabilized (#1174, #1175, #1208–#1214); model downloads handle TLS-MITM CAs, IPv6 blackholes, and
+  connect timeouts (#1146, #1249).
+- **Chunking & provenance:** chunk `firstPage`/`lastPage` and byte ranges are correct across output
+  formats and long PDFs (#1013, #1074, #1105, #1294); markdown chunks retain markdown (#1073, #1094);
+  split-table chunks keep their header and context (#1100).
+- **Bindings & packaging:** fixed Go embed symbols, Java `UnsatisfiedLinkError`, missing C# config
+  types, wrong Node/PHP embedding shapes, Android `.so` loading, macOS wheel floors, and musl/ONNX
+  Runtime runtime deps (#871, #965, #991, #998, #1008, #1055, #1131, #1257, #1304, #1307); plus Homebrew
+  404s, Docker stop-signal handling, and multi-arch `-core` images (#1081, #1147, #1247, #1315).
+- **Formats:** EML HTML `<table>` bodies, DOCX hyperlink/bold overlap and markdown conversion, archived
+  markdown/CSV escaping, and Korean-charset EML detection are fixed (#942, #1086, #1212, #1237, #1278).
+- **Config & robustness:** `extraction_timeout_secs` is honoured on every path (#830, #911, #1273);
+  `cancel_token`, custom LLM base URLs, and page-classification config all validate correctly (#937,
+
+  #944, #1076).
 
 ### Removed
 
@@ -128,9 +158,15 @@ The full identifier mapping is in the [migration guide](/migration/from-kreuzber
 
 ### Security
 
-- PDF embedded streams are guarded by a decompression-ratio limit and per-embedded-file size caps.
+- An untrusted RTF size field in the email extractor could allocate up to 4 GB — now bounded (#1058).
+- A redaction path could leak PII across roughly a dozen output fields — fixed (#1223).
+- PDF embedded streams are guarded by a decompression-ratio limit and per-embedded-file size caps, and
+  a `SecurityBudget` is wired through the PDF and email extractors.
 - Excel DDE / external-call formulas raise warnings during extraction.
-- A `SecurityBudget` is wired through the PDF and email extractors.
+- FFI image and attachment buffers now carry explicit lengths so callees never read past the buffer
+  (#1056, #1059), and panics on malformed input are replaced with recoverable errors (#907, #1057,
+
+  #1198).
 
 ### Packaging
 
