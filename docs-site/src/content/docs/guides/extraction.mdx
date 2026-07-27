@@ -13,7 +13,7 @@ import { Content as Snip_ruby_api_error_handling } from "../../../snippets/ruby/
 import { Content as Snip_c_api_error_handling } from "../../../snippets/c/api/error_handling.md";
 import { Content as Snip_wasm_api_error_handling_wasm } from "../../../snippets/wasm/api/error_handling_wasm.md";
 
-Extract text, metadata, and structure from 97 file formats — PDFs, Office documents, images, email, HTML, archives, and more. Single files or batches, from local paths or in-memory bytes, with per-document configuration overrides and built-in content filtering.
+Extract text, metadata, and structure from 98 file formats — PDFs, Office documents, images, email, HTML, archives, and more. Single files or batches, from local paths or in-memory bytes, with per-document configuration overrides and built-in content filtering.
 
 See the [Configuration Reference](/reference/configuration/) for all extraction settings and the [Supported Formats](/reference/formats/) reference for format-specific options.
 
@@ -382,14 +382,14 @@ field semantics and per-format behavior.
 
 ## Supported Formats
 
-Xberg supports 97 file formats across 8 categories:
+Xberg supports 98 file formats across 8 categories:
 
 | Category          | Extensions                                               | Notes                               |
 | ----------------- | -------------------------------------------------------- | ----------------------------------- |
 | **PDF**           | `.pdf`                                                   | Native text + OCR for scanned pages |
 | **Images**        | `.png`, `.jpg`, `.jpeg`, `.tiff`, `.bmp`, `.webp`, `.heic`, `.heif`, `.avif` | OCR backend; HEIC/HEIF/AVIF need `heic` feature + libheif |
 | **Office**        | `.docx`, `.pptx`, `.xlsx`, `.odt`, `.ods`, `.odp`        | Modern + OpenDocument via native parsers |
-| **Legacy Office** | `.doc`, `.ppt`                                           | Native OLE/CFB parsing              |
+| **Legacy Office** | `.doc`, `.ppt`, `.wpd`, `.wp`, `.wp5`, `.wp6`            | Native OLE/CFB parsing; WordPerfect via libwpd |
 | **Email**         | `.eml`, `.msg`                                           | Full support including attachments  |
 | **Web**           | `.html`, `.htm`                                          | Converted to Markdown with metadata |
 | **Text**          | `.md`, `.txt`, `.xml`, `.json`, `.yaml`, `.toml`, `.csv` | Direct extraction                   |

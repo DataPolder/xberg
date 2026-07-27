@@ -5,7 +5,7 @@ requires = ["hatchling"]
 [project]
 name = "crewai-xberg"
 version = "1.0.0rc41"
-description = "Xberg document extraction tools for CrewAI agents — text, metadata, and batch extraction across 97 file formats"
+description = "Xberg document extraction tools for CrewAI agents — text, metadata, and batch extraction across 98 file formats"
 readme = "README.md"
 keywords = ["agents", "ai", "crewai", "document-extraction", "llm", "ocr", "pdf", "rag", "text-extraction", "xberg"]
 license = "MIT"

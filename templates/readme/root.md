@@ -33,7 +33,7 @@ Point Xberg at anything — a PDF, a spreadsheet, a scanned image, an audio file
 
 | What it does | How |
 |---|---|
-| **Extract from 97 formats** | PDFs, Office, images, HTML, email, archives, scientific publications, and code — intelligent MIME detection, streaming for large files. |
+| **Extract from 98 formats** | PDFs, Office, images, HTML, email, archives, scientific publications, and code — intelligent MIME detection, streaming for large files. |
 | **6 output formats** | Plain text, Markdown, Djot, HTML, JSON tree structure, or Structured (JSON with OCR metadata and bounding boxes). |
 | **Code intelligence** | Functions, classes, imports, symbols, docstrings from 306 programming languages. Syntax-aware chunking for RAG pipelines. |
 | **Crawl & recurse** | Follow URLs, extract documents from within documents (nested archives, embedded PDFs). Auto/Document/Crawl modes. |
@@ -362,15 +362,15 @@ Common use cases — see [Quick start guide](https://docs.xberg.io/getting-start
 <details>
 <summary><strong>Full feature list</strong></summary>
 
-### Supported File Formats (96)
+### Supported File Formats (98)
 
-97 file formats across 8 major categories with intelligent format detection and comprehensive metadata extraction.
+98 file formats across 8 major categories with intelligent format detection and comprehensive metadata extraction.
 
 #### Office Documents
 
 | Category | Formats | Capabilities |
 |----------|---------|--------------|
-| **Word Processing** | `.docx`, `.docm`, `.doc`, `.dotx`, `.dotm`, `.dot`, `.odt`, `.pages` | Full text, tables, images, metadata, styles |
+| **Word Processing** | `.docx`, `.docm`, `.doc`, `.dotx`, `.dotm`, `.dot`, `.odt`, `.pages`, `.wpd`, `.wp`, `.wp5`, `.wp6` | Full text, tables, images, metadata, styles |
 | **Spreadsheets** | `.xlsx`, `.xlsm`, `.xlsb`, `.xls`, `.xla`, `.xlam`, `.xltm`, `.xltx`, `.xlt`, `.ods`, `.numbers` | Sheet data, formulas, cell metadata, charts |
 | **Presentations** | `.pptx`, `.pptm`, `.ppt`, `.ppsx`, `.potx`, `.potm`, `.pot`, `.odp`, `.key` | Slides, speaker notes, images, metadata |
 | **PDF** | `.pdf` | Text, tables, images, metadata, OCR support |
@@ -515,7 +515,7 @@ Schema validation. Temperature, top-p, frequency penalty tuning.
 | `extract` | — | Extract text from a single document (path, URL, or stdin) |
 | `batch` | — | Extract from multiple documents in parallel |
 | `detect` | — | Identify MIME type of a file |
-| `formats` | — | List all 97 supported formats and MIME types |
+| `formats` | — | List all 98 supported formats and MIME types |
 | `version` | — | Show Xberg version |
 | `cache` | `stats`, `clear`, `manifest`, `warm` | Manage extraction cache and models |
 | `serve` | — | Start REST API server (default: <http://127.0.0.1:8000>) |
@@ -556,7 +556,7 @@ Join our [Discord community](https://discord.gg/xt9WY3GnKR) for questions and di
 
 Xberg is one of six open-source projects from Kreuzberg, Inc.:
 
-- [Xberg](https://github.com/xberg-io/xberg) — document intelligence: text, tables, metadata from 91+ formats with optional OCR.
+- [Xberg](https://github.com/xberg-io/xberg) — document intelligence: text, tables, metadata from 98+ formats with optional OCR.
 - [Xberg Enterprise](https://github.com/xberg-io/xberg-enterprise) — managed extraction API with SDKs, dashboards, and observability.
 - [crawlberg](https://github.com/xberg-io/crawlberg) — web crawling and scraping with HTML→Markdown and headless-Chrome fallback.
 - [html-to-markdown](https://github.com/xberg-io/html-to-markdown) — fast, lossless HTML→Markdown engine.

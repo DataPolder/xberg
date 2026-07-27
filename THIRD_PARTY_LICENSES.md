@@ -51,24 +51,33 @@ platform's `libheif` build links it.
 
 ## libwpd + librevenge (WordPerfect) — MPL-2.0
 
-- **Feature:** the `xberg-libwpd` crate, a standalone workspace member not yet
-  consumed by `xberg`'s `wordperfect`/`full`/`formats` features (tracked as
-  follow-up wiring work). Desktop only (Linux, macOS and Windows).
+- **Feature:** the `xberg-libwpd` crate, consumed by `xberg`'s `wordperfect`
+  feature (included in `formats`, `full` and `windows-target`). Desktop only
+  (Linux, macOS and Windows).
 - **License:** libwpd and librevenge are dual-licensed **MPL-2.0 OR
   LGPL-2.1+**. Xberg builds and links them under the **MPL-2.0** arm.
-- **Linking:** **Static, from source.** `xberg-libwpd`'s build script fetches
-  the upstream librevenge and libwpd release tarballs (checksum-verified),
-  compiles them from source, and statically links them together with a small
-  C++ shim. MPL-2.0 is file-level (weak) copyleft and explicitly permits static
-  linking into a larger, differently-licensed work; obligations are limited to
-  keeping the libwpd/librevenge source and any modifications to their files
-  available under MPL-2.0 and preserving license notices. No copyleft reaches
-  Xberg's MIT core or the language bindings. The LGPL arm is intentionally not
-  used, as LGPL static linking would impose relink/object-file obligations on
-  redistributed binaries.
+- **Linking:** **Static, from source.** `xberg-libwpd` vendors the upstream
+  librevenge and libwpd release tarballs as committed `.tar.gz` archives under
+  `crates/xberg-libwpd/vendor/`; its build script decompresses them
+  (checksum-verified at extract time), compiles them from source, and
+  statically links them together with a small C++ shim. MPL-2.0 is file-level
+  (weak) copyleft and explicitly permits static linking into a larger,
+  differently-licensed work; obligations are limited to keeping the
+  libwpd/librevenge source and any modifications to their files available under
+  MPL-2.0 and preserving license notices. No copyleft reaches Xberg's MIT core
+  or the language bindings. The LGPL arm is intentionally not used, as LGPL
+  static linking would impose relink/object-file obligations on redistributed
+  binaries.
 - **Modifications:** none; both libraries are built from unmodified upstream
   source (librevenge 0.0.6, libwpd 0.10.3). Upstream source:
   <https://libwpd.sourceforge.net/>.
+- **Boost (build-time headers) — BSL-1.0:** the C++ shim compiles against a
+  `bcp`-extracted header-only subset of the Boost C++ Libraries, vendored as
+  `crates/xberg-libwpd/vendor/boost-subset.tar.gz` and decompressed at build
+  time. Boost is licensed under the **Boost Software License 1.0** (BSL-1.0), a
+  permissive license whose only obligation is preserving the license text; no
+  copyleft or attribution-in-binary obligation reaches Xberg. Boost headers are
+  a build-time dependency only — no Boost code is redistributed in Xberg binaries.
 
 ## ONNX Runtime (OCR / ML features)
 

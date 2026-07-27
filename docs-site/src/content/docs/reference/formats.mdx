@@ -4,7 +4,7 @@ title: "Format Support"
 
 import { Tabs, TabItem } from "@astrojs/starlight/components";
 
-Xberg supports 97 file formats across major categories through native Rust extractors.
+Xberg supports 98 file formats across major categories through native Rust extractors.
 
 ## Overview
 
@@ -40,6 +40,7 @@ All formats support async/await and batch processing. Image formats and PDFs sup
 | Apple Pages              | `.pages`                                                                    | `application/x-iwork-pages-sffpages`                                        | Native Rust             | No                        | Modern iWork format support                                 |
 | Apple Numbers            | `.numbers`                                                                  | `application/x-iwork-numbers-sffnumbers`                                    | Native Rust             | No                        | Spreadsheet extraction                                      |
 | Apple Keynote            | `.key`                                                                      | `application/x-iwork-keynote-sffkey`                                        | Native Rust             | No                        | Slide and speaker notes extraction                          |
+| WordPerfect              | `.wpd`, `.wp`, `.wp5`, `.wp6`                                               | `application/vnd.wordperfect`                                               | Native libwpd binding   | No                        | WP 4.2–X-series document extraction                          |
 
 ### Text & Markup
 
@@ -235,6 +236,7 @@ Xberg uses Cargo feature flags to enable optional format and processing support.
 | `mdx`        | MDX documents |
 | `svg`        | SVG parse/sanitize/rasterize and normalized image output |
 | `heic`       | HEIC/HEIF/AVIF/AVCS pixel decoding through libheif |
+| `wordperfect` | WordPerfect (`.wpd`) extraction via vendored libwpd/librevenge (desktop only: Linux, macOS, Windows) |
 | `transcription-types` | Audio/video transcription config and DTOs without ONNX Runtime |
 | `transcription` | Whisper ONNX audio/video transcription extractor |
 | `formats`    | Aggregate for document/image/archive format extractors |

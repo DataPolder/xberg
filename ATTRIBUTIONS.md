@@ -360,6 +360,38 @@ extraction via `nom-exif` is pure Rust and works on every target.
 
 ---
 
+## libwpd + librevenge
+
+Native WordPerfect document libraries built from source and statically linked
+into the `xberg-libwpd` crate:
+
+- **Source**: <https://libwpd.sourceforge.net/>
+- **License**: MPL-2.0 OR LGPL-2.1+ (xberg builds under the MPL-2.0 arm)
+- **Authors**: Document Liberation Project (LibreOffice/AbiWord ecosystem) contributors
+- **Versions**: librevenge 0.0.6, libwpd 0.10.3
+- **Location**: vendored as committed `.tar.gz` archives under `crates/xberg-libwpd/vendor/`, decompressed and compiled by `crates/xberg-libwpd/build.rs` (checksum-verified at extract time); consumed via `crates/xberg-libwpd/src/shim.cpp`
+- **Purpose**: WordPerfect (.wpd) document extraction
+- **Modifications**: none; both libraries are built from unmodified upstream source
+
+### License Compatibility
+
+See `THIRD_PARTY_LICENSES.md` for the full MPL-2.0 vs LGPL-2.1+ linking analysis. In short: xberg statically links under the MPL-2.0 arm (file-level copyleft, static linking explicitly permitted), so no copyleft obligation reaches xberg's MIT-licensed core or language bindings.
+
+---
+
+## Boost C++ Libraries (build-time, xberg-libwpd)
+
+A header-only subset of Boost, used at build time by the `xberg-libwpd` C++ shim:
+
+- **Source**: <https://www.boost.org/>
+- **License**: BSL-1.0 (Boost Software License 1.0)
+- **Author**: Boost contributors
+- **Location**: `bcp`-extracted subset vendored as `crates/xberg-libwpd/vendor/boost-subset.tar.gz`, decompressed by `crates/xberg-libwpd/build.rs`
+- **Purpose**: header-only dependency of libwpd/librevenge (build-time only; no Boost code is redistributed in xberg binaries)
+- **Modifications**: none; subset extracted verbatim with `bcp`
+
+---
+
 ## jhqxxx/aha
 
 Rust-native VLM-OCR backends vendored into `crates/xberg-candle-ocr/`:
