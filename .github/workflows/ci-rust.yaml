@@ -158,7 +158,7 @@ jobs:
   # `cfg(target_os = "windows")` dependency blocks (ureq/tokenizers/liter-llm).
   # Also the only job that builds/tests xberg-libwpd on Windows.
   clippy-windows:
-    name: Clippy Windows ORT surface
+    name: Rust (windows-latest)
     if: github.repository == 'xberg-io/xberg' && github.actor != 'dependabot[bot]'
     runs-on: windows-latest
     timeout-minutes: 60
