@@ -21,6 +21,7 @@
 #include <libwpd/libwpd.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
