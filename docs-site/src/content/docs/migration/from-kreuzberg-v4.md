@@ -28,19 +28,61 @@ or you are not ready to migrate.
 
 ## What changed in v5 (Xberg)
 
+### Package names
+
 Package identifiers moved from `kreuzberg` to `xberg`:
 
 | Ecosystem | v4 (Kreuzberg) | v5 (Xberg) |
 |-----------|----------------|------------|
 | Rust (crates.io) | `kreuzberg` | `xberg` |
 | Python (PyPI) | `kreuzberg` | `xberg` |
-| npm | `@kreuzberg/*` | `@xberg-io/xberg` |
+| npm | `@kreuzberg/node`, `@kreuzberg/wasm` | `@xberg-io/xberg`, `@xberg-io/xberg-wasm` |
 | Maven | `dev.kreuzberg:kreuzberg` | `io.xberg:xberg` |
-| NuGet | `Kreuzberg` | `Xberg` |
+| NuGet | `Kreuzberg` | `XbergIo.Xberg` |
 | Packagist | `kreuzberg/kreuzberg` | `xberg-io/xberg` |
+| RubyGems | `kreuzberg` | `xberg` |
+| Hex (Elixir) | `kreuzberg` | `xberg` |
+| pub.dev (Dart) | — | `xberg` |
 | Go module | `github.com/kreuzberg-dev/kreuzberg` | `github.com/xberg-io/xberg/packages/go` |
 | R binding | supported | **removed** (use v4 LTS) |
 
-The extraction API is otherwise compatible in shape; update the import/package name and consult the
-[API reference](/reference/api-python/) for your language. See the
-[installation guide](/getting-started/installation/) for the current package names.
+The standalone `@kreuzberg/core` npm package is gone — the Node package (`@xberg-io/xberg`) is
+self-contained.
+
+### API identifiers
+
+The extraction API is compatible in shape — the entry points (`extract_file`/`extract_bytes` and
+their batch and sync variants), config, and result types keep the same structure. The identifiers
+that changed:
+
+- **Rust error type:** `KreuzbergError` → `XbergError` (and `Result<T>` now aliases
+  `Result<T, XbergError>`).
+- **Config file discovery:** `kreuzberg.{toml,yaml,json}` → `xberg.{toml,yaml,yml,json}` (the `.yml`
+  extension is now also recognized).
+
+Update the import/package name and consult the [API reference](/reference/api-python/) for your
+language.
+
+### Environment variables
+
+All environment variables are re-prefixed `KREUZBERG_*` → `XBERG_*` — for example
+`KREUZBERG_CACHE_DIR` → `XBERG_CACHE_DIR`, `KREUZBERG_OCR_BACKEND` → `XBERG_OCR_BACKEND`,
+`KREUZBERG_OUTPUT_FORMAT` → `XBERG_OUTPUT_FORMAT`. Rename any `KREUZBERG_`-prefixed variables in your
+environment or deployment config.
+
+- **Removed:** `KREUZBERG_PDFIUM_BUNDLED_PATH` — the bundled PDFium fork was dropped.
+- **New:** xberg adds `XBERG_`-prefixed variables for layout tuning, OCR model tier/version, CoreML,
+  and the ONNX Runtime execution provider. See the configuration reference for the full list.
+
+### Models and cache
+
+Downloaded models and the extraction cache move from the `kreuzberg` path segment to `xberg`
+(e.g. `~/.cache/kreuzberg` → `~/.cache/xberg`), and model repositories are pulled from the
+**`xberg-io`** Hugging Face org (was `kreuzberg-dev`). Existing caches are re-downloaded on first run.
+
+### Removed OCR backend
+
+The **EasyOCR** backend (a Python/torch-only extra in Kreuzberg) is removed. Use **Tesseract**,
+**PaddleOCR**, the pure-Rust **Candle** backend, or a **VLM** backend instead.
+
+See the [installation guide](/getting-started/installation/) for the current package names.

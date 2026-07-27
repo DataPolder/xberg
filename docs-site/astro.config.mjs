@@ -295,6 +295,10 @@ export default defineConfig({
                   label : "Migration",
                   items : [
                     {
+                      label : "From Kreuzberg v4",
+                      slug : "migration/from-kreuzberg-v4",
+                    },
+                    {
                       label : "From Unstructured",
                       slug : "migration/from-unstructured",
                     },
