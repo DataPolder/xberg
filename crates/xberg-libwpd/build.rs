@@ -114,15 +114,62 @@ mod build_libwpd {
         root
     }
 
+    /// zlib on the `x64-windows-static-md` triplet is a static library, but its
+    /// file name is not stable across vcpkg/zlib versions: classic zlib CMake
+    /// emits `zlibstatic.lib` (debug `zlibstaticd.lib`), newer ports emit
+    /// `zs.lib`/`zsd.lib` (see the `-lzs`/`-lzsd`/`-lzd` pkgconfig rewrites in
+    /// vcpkg's zlib portfile), and some renamed variants ship
+    /// `zlib.lib`/`zlibd.lib`. We probe the disk for whichever the installed
+    /// cache actually produced instead of hard-coding one name. Release libs
+    /// live in `<triplet>/lib`; debug libs (trailing `d`) in
+    /// `<triplet>/debug/lib`.
+    const ZLIB_RELEASE_STEMS: &[&str] = &["zlibstatic", "zlib", "zs", "z"];
+    const ZLIB_DEBUG_STEMS: &[&str] = &["zlibstaticd", "zlibd", "zsd", "zd"];
+
+    /// First `<stem>.lib` present in `dir`, returned as a `rustc-link-lib` stem
+    /// (no `.lib` extension), trying `stems` in order.
+    fn find_zlib_lib(dir: &Path, stems: &[&str]) -> Option<String> {
+        stems
+            .iter()
+            .find(|stem| dir.join(format!("{stem}.lib")).is_file())
+            .map(|stem| (*stem).to_string())
+    }
+
     fn link_zlib() {
-        if targeting_windows() {
-            println!(
-                "cargo:rustc-link-search=native={}",
-                vcpkg_triplet_dir().join("lib").display()
-            );
-            println!("cargo:rustc-link-lib=zlib");
-        } else {
+        if !targeting_windows() {
+            // Linux/macOS link the system zlib (`libz`) — unchanged.
             println!("cargo:rustc-link-lib=z");
+            return;
+        }
+
+        // The librevenge/libwpd C++ sources are compiled by `cc` with `-MD`
+        // (the release dynamic CRT — `cc` uses `-MD` regardless of the Cargo
+        // profile unless `crt-static` is set), and rustc's MSVC target links
+        // the release CRT even for dev builds. So we link the RELEASE vcpkg
+        // zlib (`<triplet>/lib`) in *both* profiles; linking the debug zlib
+        // (`<triplet>/debug/lib`, built with `-MDd`) would trip LNK2038
+        // RuntimeLibrary mismatches. The debug dir is only a last-resort
+        // fallback for a release-stripped cache.
+        let triplet = vcpkg_triplet_dir();
+        let release_lib = triplet.join("lib");
+        let debug_lib = triplet.join("debug").join("lib");
+
+        let resolved = find_zlib_lib(&release_lib, ZLIB_RELEASE_STEMS)
+            .map(|stem| (release_lib.clone(), stem))
+            .or_else(|| find_zlib_lib(&debug_lib, ZLIB_DEBUG_STEMS).map(|stem| (debug_lib.clone(), stem)));
+
+        match resolved {
+            Some((dir, stem)) => {
+                println!("cargo:rustc-link-search=native={}", dir.display());
+                println!("cargo:rustc-link-lib={stem}");
+            }
+            None => {
+                // Nothing on disk (missing/broken vcpkg cache). Emit the
+                // most-likely release name so the linker fails loudly with a
+                // clear "could not open" error against the release lib dir.
+                println!("cargo:rustc-link-search=native={}", release_lib.display());
+                println!("cargo:rustc-link-lib=zlibstatic");
+            }
         }
     }
 
