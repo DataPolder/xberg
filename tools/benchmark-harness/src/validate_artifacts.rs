@@ -474,7 +474,7 @@ fn validate_results(
             .iterations
             .iter()
             .enumerate()
-            .all(|(expected_index, iteration)| iteration.iteration == expected_index);
+            .all(|(expected_index, iteration)| iteration.iteration == expected_index + 1);
         require(
             sequential,
             format!("{}: result {index} iteration order/duplicates mismatch", path.display()),

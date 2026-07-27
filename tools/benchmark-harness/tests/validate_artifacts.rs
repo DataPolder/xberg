@@ -187,7 +187,8 @@ fn build_results(
             quality: None,
             iterations: (0..ITERATIONS)
                 .map(|index| IterationResult {
-                    iteration: index,
+                    // mirror that here so the fixture matches real artifacts.
+                    iteration: index + 1,
                     duration: Duration::from_millis(1),
                     extraction_duration: None,
                     metrics: zero_metrics(),
@@ -459,6 +460,47 @@ fn rejects_result_row_when_not_an_object() {
         value[0] = serde_json::Value::Null;
     });
     assert!(validate(&scenario.args).is_err());
+}
+
+#[test]
+fn accepts_sequential_one_based_iterations() {
+    // The runner numbers iterations 1-based ([1, 2, 3] for ITERATIONS = 3); the untampered
+    // scenario fixture already reflects that, so this simply pins the happy path against
+    // regressing back to a 0-based expectation.
+    let scenario = artifact_scenario(Cohort::Native);
+    validate(&scenario.args).expect("sequential 1-based iterations should validate");
+}
+
+#[test]
+fn rejects_misordered_iterations() {
+    let scenario = artifact_scenario(Cohort::Native);
+    tamper_json(&results_path(&scenario, 0), |value| {
+        let second = value[0]["iterations"][1]["iteration"].clone();
+        let third = value[0]["iterations"][2]["iteration"].clone();
+        value[0]["iterations"][1]["iteration"] = third;
+        value[0]["iterations"][2]["iteration"] = second;
+    });
+    assert_err_contains(validate(&scenario.args), "iteration order/duplicates mismatch");
+}
+
+#[test]
+fn rejects_duplicate_iterations() {
+    let scenario = artifact_scenario(Cohort::Native);
+    tamper_json(&results_path(&scenario, 0), |value| {
+        let first = value[0]["iterations"][0]["iteration"].clone();
+        value[0]["iterations"][1]["iteration"] = first;
+    });
+    assert_err_contains(validate(&scenario.args), "iteration order/duplicates mismatch");
+}
+
+#[test]
+fn rejects_iteration_count_mismatch() {
+    let scenario = artifact_scenario(Cohort::Native);
+    tamper_json(&results_path(&scenario, 0), |value| {
+        // the configured ITERATIONS.
+        value[0]["iterations"].as_array_mut().unwrap().pop();
+    });
+    assert_err_contains(validate(&scenario.args), "iteration count mismatch");
 }
 
 fn zero_percentiles() -> Percentiles {
