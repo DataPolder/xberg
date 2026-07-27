@@ -250,6 +250,15 @@ pub struct RankedFramework {
     pub value: f64,
     /// Ratio relative to the best in this ranking (1.0 = best)
     pub relative: f64,
+    /// True when this framework:mode is sourced from a cell the release contract marks
+    /// `optional` (best-effort, e.g. MinerU — see [`crate::bench_matrix::MatrixEntry::optional`]).
+    /// Optional cells can be partially failed or under-sampled relative to the pinned corpus and
+    /// still land in a ranking with no distinguishing flag; consumers should not treat an
+    /// optional entry's rank as directly comparable to a contract-verified one. `#[serde(default)]`
+    /// so aggregates produced before this field existed still deserialize (defaults to `false`,
+    /// i.e. contract-verified, which is correct for every pre-existing ranking entry).
+    #[serde(default)]
+    pub optional: bool,
 }
 
 /// Performance deltas relative to baseline (highest throughput framework)
@@ -1212,6 +1221,7 @@ fn resolve_shared_corpus_file_types(
 fn build_shared_corpus_quality_ranking(
     by_framework_mode: &HashMap<String, FrameworkModeAggregation>,
     format: OutputFormat,
+    optional_keys: &std::collections::HashSet<String>,
 ) -> Vec<RankedFramework> {
     let candidates: Vec<(&String, &FrameworkModeAggregation)> = by_framework_mode
         .iter()
@@ -1259,7 +1269,21 @@ fn build_shared_corpus_quality_ranking(
             rank: i + 1,
             value: *v,
             relative: if baseline_qual > 0.0 { *v / baseline_qual } else { 1.0 },
+            optional: optional_keys.contains(k),
         })
+        .collect()
+}
+
+/// Aggregate keys (see [`make_aggregate_key`]) for every matrix cell either pinned cohort
+/// contract marks `optional` (best-effort, e.g. MinerU). Used to flag [`RankedFramework::optional`]
+/// so a ranking consumer can tell a contract-verified entry apart from a best-effort one that may
+/// be partially failed or under-sampled relative to the pinned corpus.
+fn optional_aggregate_keys() -> std::collections::HashSet<String> {
+    [crate::bench_matrix::Cohort::Native, crate::bench_matrix::Cohort::Ocr]
+        .into_iter()
+        .flat_map(|cohort| cohort.contract().matrix)
+        .filter(|entry| entry.optional)
+        .map(|entry| entry.aggregate_key())
         .collect()
 }
 
@@ -1268,6 +1292,7 @@ fn build_shared_corpus_quality_ranking(
 /// Uses the framework-mode-wide process aggregation so a native batch contributes
 /// once even when its document rows span several file-type or OCR buckets.
 fn build_comparison(by_framework_mode: &HashMap<String, FrameworkModeAggregation>) -> ComparisonData {
+    let optional_keys = optional_aggregate_keys();
     let mut metrics: Vec<(String, f64, f64, OutputFormat)> = Vec::new();
     let mut cpu_seconds_metrics: Vec<(String, f64)> = Vec::new();
     let mut pages_per_sec_metrics: Vec<(String, f64)> = Vec::new();
@@ -1305,6 +1330,7 @@ fn build_comparison(by_framework_mode: &HashMap<String, FrameworkModeAggregation
             rank: i + 1,
             value: *v,
             relative: if baseline_thr > 0.0 { *v / baseline_thr } else { 1.0 },
+            optional: optional_keys.contains(k),
         })
         .collect();
 
@@ -1320,11 +1346,14 @@ fn build_comparison(by_framework_mode: &HashMap<String, FrameworkModeAggregation
             rank: i + 1,
             value: *v,
             relative: if baseline_mem > 0.0 { *v / baseline_mem } else { 1.0 },
+            optional: optional_keys.contains(k),
         })
         .collect();
 
-    let quality_ranking_markdown = build_shared_corpus_quality_ranking(by_framework_mode, OutputFormat::Markdown);
-    let quality_ranking_plaintext = build_shared_corpus_quality_ranking(by_framework_mode, OutputFormat::Plaintext);
+    let quality_ranking_markdown =
+        build_shared_corpus_quality_ranking(by_framework_mode, OutputFormat::Markdown, &optional_keys);
+    let quality_ranking_plaintext =
+        build_shared_corpus_quality_ranking(by_framework_mode, OutputFormat::Plaintext, &optional_keys);
 
     let mut deltas_vs_baseline = HashMap::new();
     if let Some(baseline) = metrics
@@ -1408,6 +1437,7 @@ fn build_comparison(by_framework_mode: &HashMap<String, FrameworkModeAggregation
                 rank: i + 1,
                 value: *v,
                 relative: if best > 0.0 { *v / best } else { 1.0 },
+                optional: optional_keys.contains(k),
             })
             .collect()
     };
@@ -1451,7 +1481,23 @@ fn build_comparison(by_framework_mode: &HashMap<String, FrameworkModeAggregation
 
     cpu_seconds_metrics.retain(|(_, v)| v.is_finite());
     cpu_seconds_metrics.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-    let baseline_cpu_seconds = cpu_seconds_metrics.first().map(|(_, v)| *v).unwrap_or(1.0);
+    // cpu_seconds is lower-is-better, so the natural baseline is the smallest value. But native
+    // single-file frameworks (e.g. liteparse/xberg) routinely report exactly 0.0 core-seconds, and
+    // a 0.0 baseline is undefined, and the old `if baseline > 0.0 { .. } else { 1.0 }` guard used to
+    // fall through to `1.0` for *every* row once that happened — including rows with real,
+    // materially different positive cpu_seconds — making `relative` meaningless whenever any
+    // framework hit the 0.0 floor.
+    //
+    // Fix: use the smallest *positive* cpu_seconds value in the ranking as the reference point
+    // instead of the true (possibly-zero) minimum. This subsumes the old behavior when the true
+    // positive row still gets a finite ratio against the smallest positive cost observed. Only when
+    // literally every row is 0.0 does `reference` stay 0.0, in which case every row's `relative`
+    // degenerates to 0.0 (all tied for best) rather than the old, misleading all-`1.0`.
+    let reference_cpu_seconds = cpu_seconds_metrics
+        .iter()
+        .map(|(_, v)| *v)
+        .find(|v| *v > 0.0)
+        .unwrap_or_else(|| cpu_seconds_metrics.first().map(|(_, v)| *v).unwrap_or(0.0));
     let cpu_seconds_ranking: Vec<RankedFramework> = cpu_seconds_metrics
         .iter()
         .enumerate()
@@ -1459,11 +1505,12 @@ fn build_comparison(by_framework_mode: &HashMap<String, FrameworkModeAggregation
             framework_mode: k.clone(),
             rank: i + 1,
             value: *v,
-            relative: if baseline_cpu_seconds > 0.0 {
-                *v / baseline_cpu_seconds
+            relative: if reference_cpu_seconds > 0.0 {
+                *v / reference_cpu_seconds
             } else {
-                1.0
+                0.0
             },
+            optional: optional_keys.contains(k),
         })
         .collect();
 
@@ -3000,6 +3047,133 @@ mod tests {
             ranking[1].relative > 1.0,
             "the higher-CPU framework's relative value should exceed the lowest-CPU baseline"
         );
+    }
+
+    /// Defect #6 regression: when several frameworks report `cpu_seconds == 0.0` (real for native
+    /// single-file liteparse/xberg), the old `relative` computation divided by that 0.0 baseline,
+    /// tripped the `else` branch, and gave *every* row (including materially slower positive-CPU
+    /// frameworks) `relative == 1.0`. `relative` must stay well-defined and distinguish the
+    /// positive-CPU rows from each other and from the 0.0-cost rows.
+    #[test]
+    fn cpu_seconds_ranking_relative_is_well_defined_when_best_is_zero() {
+        let mut zero_cost = create_test_result(
+            "framework-zero-cost",
+            "pdf",
+            OcrStatus::NotUsed,
+            1_000,
+            1_000_000.0,
+            10_000_000,
+        );
+        zero_cost.metrics.cpu_seconds = 0.0;
+
+        let mut light = create_test_result(
+            "framework-light",
+            "pdf",
+            OcrStatus::NotUsed,
+            1_000,
+            1_000_000.0,
+            10_000_000,
+        );
+        light.metrics.cpu_seconds = 2.0;
+
+        let mut heavy = create_test_result(
+            "framework-heavy",
+            "pdf",
+            OcrStatus::NotUsed,
+            1_000,
+            1_000_000.0,
+            10_000_000,
+        );
+        heavy.metrics.cpu_seconds = 8.0;
+
+        let aggregated = aggregate_new_format(&[zero_cost, light, heavy]);
+        let ranking = &aggregated.comparison.cpu_seconds_ranking;
+        assert_eq!(ranking.len(), 3);
+
+        let relatives: HashMap<&str, f64> = ranking
+            .iter()
+            .map(|r| (r.framework_mode.as_str(), r.relative))
+            .collect();
+
+        // Not every row collapsed to 1.0 (the bug being fixed).
+        assert!(
+            relatives.values().any(|v| *v != 1.0),
+            "relative values must not all degenerate to 1.0 when the best cpu_seconds is 0.0: {relatives:?}"
+        );
+
+        let zero_relative = relatives
+            .iter()
+            .find(|(k, _)| k.contains("framework-zero-cost"))
+            .map(|(_, v)| *v)
+            .expect("zero-cost framework present");
+        let light_relative = relatives
+            .iter()
+            .find(|(k, _)| k.contains("framework-light"))
+            .map(|(_, v)| *v)
+            .expect("light framework present");
+        let heavy_relative = relatives
+            .iter()
+            .find(|(k, _)| k.contains("framework-heavy"))
+            .map(|(_, v)| *v)
+            .expect("heavy framework present");
+
+        // The true best (0.0 cost) is at or below the reference point (smallest positive value).
+        assert_eq!(zero_relative, 0.0);
+        // heavy == 4.0x -- distinct, finite, and ordered the same as their raw cpu_seconds.
+        assert_eq!(light_relative, 1.0);
+        assert_eq!(heavy_relative, 4.0);
+        assert!(heavy_relative > light_relative);
+    }
+
+    /// Defect #6 regression, all-zero edge case: if literally every framework reports 0.0
+    /// cpu_seconds, there is no positive reference to scale against. Every row should land on a
+    /// single well-defined tied value (0.0), not the old blanket 1.0.
+    #[test]
+    fn cpu_seconds_ranking_relative_all_zero_stays_well_defined() {
+        let mut a = create_test_result("framework-a", "pdf", OcrStatus::NotUsed, 1_000, 1_000_000.0, 10_000_000);
+        a.metrics.cpu_seconds = 0.0;
+        let mut b = create_test_result("framework-b", "pdf", OcrStatus::NotUsed, 1_000, 1_000_000.0, 10_000_000);
+        b.metrics.cpu_seconds = 0.0;
+
+        let aggregated = aggregate_new_format(&[a, b]);
+        let ranking = &aggregated.comparison.cpu_seconds_ranking;
+        assert_eq!(ranking.len(), 2);
+        assert!(ranking.iter().all(|r| r.relative == 0.0));
+    }
+
+    /// Defect #8 regression: MinerU is marked `optional` (best-effort) in the release contract
+    /// (`bench_matrix::native_matrix`/`ocr_matrix`), but ranking output carried no flag
+    /// distinguishing it from a contract-verified framework. `RankedFramework::optional` must be
+    /// `true` for MinerU's `mineru:markdown:single` cell and `false` for a required framework in
+    /// the same ranking.
+    #[test]
+    fn ranked_framework_flags_optional_cohort_entries() {
+        let mineru = create_test_result("mineru", "pdf", OcrStatus::NotUsed, 1_000, 1_000_000.0, 10_000_000);
+        let docling = create_test_result("docling", "pdf", OcrStatus::NotUsed, 2_000, 500_000.0, 20_000_000);
+
+        let aggregated = aggregate_new_format(&[mineru, docling]);
+
+        let find = |ranking: &[RankedFramework], needle: &str| -> RankedFramework {
+            ranking
+                .iter()
+                .find(|r| r.framework_mode.contains(needle))
+                .unwrap_or_else(|| panic!("expected a ranking entry containing {needle:?}, got {ranking:?}"))
+                .clone()
+        };
+
+        let throughput_mineru = find(&aggregated.comparison.throughput_ranking, "mineru");
+        let throughput_docling = find(&aggregated.comparison.throughput_ranking, "docling");
+        assert!(throughput_mineru.optional, "mineru is optional in the release contract");
+        assert!(
+            !throughput_docling.optional,
+            "docling is a required, contract-verified framework"
+        );
+
+        let memory_mineru = find(&aggregated.comparison.memory_ranking, "mineru");
+        assert!(memory_mineru.optional);
+
+        let cpu_mineru = find(&aggregated.comparison.cpu_seconds_ranking, "mineru");
+        assert!(cpu_mineru.optional);
     }
 
     /// A successful sample with zero throughput is dropped from the `throughput` percentile

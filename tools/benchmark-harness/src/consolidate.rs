@@ -45,10 +45,7 @@ pub struct RunProvenanceRecord {
 /// if a `results.json` file contains invalid JSON or fails validation.
 pub fn load_run_results(dir: &Path) -> Result<Vec<BenchmarkResult>> {
     let mut results = Vec::new();
-    for entry in fs::read_dir(dir).map_err(Error::Io)? {
-        let entry = entry.map_err(Error::Io)?;
-        let path = entry.path();
-
+    for path in sorted_dir_entries(dir)? {
         if path.is_file() && path.file_name().is_some_and(|n| n == "results.json") {
             eprintln!("Loading results from {}", path.display());
             let json_content = fs::read_to_string(&path).map_err(Error::Io)?;
@@ -77,6 +74,29 @@ pub fn load_run_results(dir: &Path) -> Result<Vec<BenchmarkResult>> {
         }
     }
     Ok(results)
+}
+
+/// List `dir`'s immediate entries, sorted by path.
+///
+/// `std::fs::read_dir` yields entries in whatever order the underlying filesystem happens to
+/// return them, which varies by OS and is not guaranteed stable even across two reads of the same
+/// directory. `load_run_results` and `collect_run_provenance` both recurse via `read_dir`, and
+/// their traversal order feeds directly into last-writer-wins state (e.g. `disk_sizes` in
+/// `aggregate_new_format`, which overwrites on every result seen for a framework) — an unsorted
+/// walk means consolidating byte-identical inputs twice can pick a different "last" result each
+/// time. Sorting here makes both traversals, and everything downstream that depends on their
+/// order, deterministic.
+///
+/// # Errors
+///
+/// Returns [`Error::Io`] if the directory cannot be read.
+fn sorted_dir_entries(dir: &Path) -> Result<Vec<std::path::PathBuf>> {
+    let mut paths: Vec<std::path::PathBuf> = fs::read_dir(dir)
+        .map_err(Error::Io)?
+        .map(|entry| entry.map(|e| e.path()).map_err(Error::Io))
+        .collect::<Result<Vec<_>>>()?;
+    paths.sort();
+    Ok(paths)
 }
 
 fn is_batch_results_dir(dir: &Path) -> bool {
@@ -109,9 +129,7 @@ fn collect_run_provenance(root: &Path, dir: &Path, records: &mut Vec<RunProvenan
         records.push(load_provenance_record(root, dir)?);
     }
 
-    for entry in fs::read_dir(dir).map_err(Error::Io)? {
-        let entry = entry.map_err(Error::Io)?;
-        let path = entry.path();
+    for path in sorted_dir_entries(dir)? {
         if path.is_dir() {
             collect_run_provenance(root, &path, records)?;
         }
@@ -460,6 +478,92 @@ mod tests {
             records[1].provenance.as_ref().unwrap().repository.commit.as_deref(),
             Some("bbb")
         );
+    }
+
+    /// Defect #6 regression: `load_run_results`'s recursive walk must not depend on the
+    /// underlying filesystem's `read_dir` return order. Two sibling directories are named so that
+    /// filesystem order (whatever it happens to be) and sort order can disagree; the loaded
+    /// results must always come back in path-sorted order, deterministically, regardless of which
+    /// order the OS reports them in.
+    #[test]
+    fn load_run_results_recurses_in_sorted_directory_order() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        for (sub, framework) in [("zzz-last", "framework-z"), ("aaa-first", "framework-a")] {
+            let subdir = dir.path().join(sub);
+            fs::create_dir_all(&subdir).expect("create subdir");
+            fs::write(
+                subdir.join("results.json"),
+                serde_json::to_string(&vec![make_result(framework)]).expect("serialize"),
+            )
+            .expect("write results");
+        }
+
+        let loaded = load_run_results(dir.path()).expect("load");
+        assert_eq!(loaded.len(), 2);
+        let names: Vec<&str> = loaded.iter().map(|r| r.framework.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["framework-a", "framework-z"],
+            "results must be loaded in path-sorted order (aaa-first before zzz-last), not \
+             filesystem-enumeration order"
+        );
+    }
+
+    /// Defect #6 regression: `disk_sizes` in `aggregate_new_format` keeps the *last-seen*
+    /// `installation_size` per framework (last-writer-wins), so its winner is only deterministic
+    /// if the input order is deterministic. With two directories reporting conflicting sizes for
+    /// the same framework, repeated `load_run_results` + aggregate passes over the same
+    /// byte-identical input must always resolve to the same winner (and log the same conflict).
+    #[test]
+    fn disk_sizes_conflict_resolution_is_deterministic_across_repeated_loads() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let sizes = [("run-a-early", 1_000_u64), ("run-b-late", 2_000_u64)];
+        for (sub, size_bytes) in sizes {
+            let subdir = dir.path().join(sub);
+            fs::create_dir_all(&subdir).expect("create subdir");
+            let mut result = make_result("conflicted-framework");
+            result.framework_capabilities.installation_size = Some(crate::types::DiskSizeInfo {
+                size_bytes,
+                package_bytes: 0,
+                system_deps_bytes: 0,
+                model_bytes: 0,
+                method: "binary_size".to_string(),
+                description: format!("from {sub}"),
+                system_deps_detail: std::collections::HashMap::new(),
+            });
+            fs::write(
+                subdir.join("results.json"),
+                serde_json::to_string(&vec![result]).expect("serialize"),
+            )
+            .expect("write results");
+        }
+
+        // Load and aggregate the same on-disk fixture twice. `load_run_results`'s traversal order
+        // now depends only on path sort, not filesystem enumeration order, so both passes must
+        // agree on which `installation_size` wins.
+        let mut winners = Vec::new();
+        let mut conflict_counts = Vec::new();
+        for _ in 0..2 {
+            let loaded = load_run_results(dir.path()).expect("load");
+            let aggregated = aggregate_new_format(&loaded);
+            let winner = aggregated
+                .disk_sizes
+                .get("conflicted-framework")
+                .expect("conflicted-framework has a disk size")
+                .size_bytes;
+            winners.push(winner);
+            conflict_counts.push(aggregated.metadata.disk_size_conflicts.len());
+        }
+
+        assert_eq!(
+            winners[0], winners[1],
+            "disk_sizes winner must be deterministic across passes"
+        );
+        // "run-b-late" sorts after "run-a-early", so its 2_000-byte size is the last-seen (and
+        // thus winning) value under the now-deterministic sorted traversal.
+        assert_eq!(winners[0], 2_000);
+        assert_eq!(conflict_counts[0], conflict_counts[1]);
+        assert_eq!(conflict_counts[0], 1);
     }
 
     #[test]
