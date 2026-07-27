@@ -329,7 +329,18 @@ fn capture_repository(start_directory: &Path) -> RepositoryProvenance {
         };
     };
     let commit = git_output(&repository_root, &["rev-parse", "HEAD"]);
-    let dirty = git_output_bytes(&repository_root, &["status", "--porcelain"]).map(|output| !output.is_empty());
+    // `dirty` answers "was the source under test modified relative to HEAD", so it deliberately ignores
+    // submodule work-tree state. The reference corpus lives in the `test_documents` submodule, where CI
+    // stages derived cache files and runs `git lfs pull`; without the submodule's LFS clean filter wired up
+    // (actions/checkout does not smudge submodule LFS) every pulled fixture reads back as "modified" and
+    // would falsely flag the run. Corpus integrity is verified independently via the cohort manifest and
+    // per-fixture blake3 hashes, so a moved submodule pointer is still surfaced but incidental work-tree
+    // churn is not.
+    let dirty = git_output_bytes(
+        &repository_root,
+        &["status", "--porcelain", "--ignore-submodules=dirty"],
+    )
+    .map(|output| !output.is_empty());
     RepositoryProvenance { commit, dirty }
 }
 
@@ -452,6 +463,74 @@ mod tests {
 
         std::fs::write(repository.join("tracked.txt"), b"dirty").unwrap();
         assert_eq!(capture_repository(&nested).dirty, Some(true));
+    }
+
+    #[test]
+    fn submodule_work_tree_churn_does_not_flag_dirty() {
+        fn git(dir: &Path, args: &[&str]) {
+            assert!(
+                Command::new("git")
+                    .arg("-C")
+                    .arg(dir)
+                    .args(args)
+                    .status()
+                    .unwrap()
+                    .success(),
+                "git {args:?} failed in {}",
+                dir.display()
+            );
+        }
+
+        let temp = tempfile::tempdir().unwrap();
+
+        // A standalone repo that will be embedded as the corpus submodule.
+        let corpus = temp.path().join("corpus");
+        std::fs::create_dir_all(&corpus).unwrap();
+        git(&corpus, &["init"]);
+        git(&corpus, &["config", "user.email", "corpus@example.com"]);
+        git(&corpus, &["config", "user.name", "Corpus"]);
+        std::fs::write(corpus.join("fixture.txt"), b"pointer").unwrap();
+        git(&corpus, &["add", "fixture.txt"]);
+        git(&corpus, &["commit", "-m", "corpus initial"]);
+
+        // The superproject that embeds it, mirroring `test_documents` in the benchmark repo.
+        let superproject = temp.path().join("superproject");
+        std::fs::create_dir_all(&superproject).unwrap();
+        git(&superproject, &["init"]);
+        git(&superproject, &["config", "user.email", "super@example.com"]);
+        git(&superproject, &["config", "user.name", "Super"]);
+        std::fs::write(superproject.join("source.rs"), b"fn main() {}").unwrap();
+        git(&superproject, &["add", "source.rs"]);
+        // `-c protocol.file.allow=always` is required for local `file://` submodule clones (CVE-2022-39253);
+        // it must be passed on the add invocation itself, as the clone subprocess ignores repo-local config.
+        git(
+            &superproject,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                corpus.to_str().unwrap(),
+                "test_documents",
+            ],
+        );
+        git(&superproject, &["commit", "-m", "embed corpus submodule"]);
+
+        assert_eq!(capture_repository(&superproject).dirty, Some(false));
+
+        // Simulate CI staging + `git lfs pull`: the submodule work tree gets modified and gains untracked
+        // files. This must NOT flag the source checkout as dirty.
+        std::fs::write(
+            superproject.join("test_documents").join("fixture.txt"),
+            b"real lfs content",
+        )
+        .unwrap();
+        std::fs::write(superproject.join("test_documents").join("staged.bin"), b"derived cache").unwrap();
+        assert_eq!(capture_repository(&superproject).dirty, Some(false));
+
+        // A real modification to the source tree still flags dirty.
+        std::fs::write(superproject.join("source.rs"), b"fn main() { panic!() }").unwrap();
+        assert_eq!(capture_repository(&superproject).dirty, Some(true));
     }
 
     #[test]
