@@ -175,6 +175,10 @@ mod build_libwpd {
         // Force-include the shim rather than patch the upstream sources. ~keep
         if targeting_windows() {
             build.flag("/FImsvc_compat.h");
+            // librevenge's RVNGZipStream.cpp does `#include <zlib.h>`. On Unix
+            // zlib is a system header; on Windows it lives in the vcpkg triplet
+            // include dir (installed alongside the zlib we link in link_zlib).
+            build.include(vcpkg_triplet_dir().join("include"));
         }
 
         for f in cpp_files(&rev.join("src/lib")) {
