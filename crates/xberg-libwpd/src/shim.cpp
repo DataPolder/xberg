@@ -647,7 +647,7 @@ void putEvent(std::string &out, const Node &n) {
     break;
   }
 }
-} // namespace wire
+} 
 
 std::string serialize(const std::vector<Node> &nodes) {
   std::vector<const Node *> metadata;
@@ -680,7 +680,7 @@ std::string serialize(const std::vector<Node> &nodes) {
 
   return out;
 }
-} // namespace
+} 
 
 extern "C" {
 
@@ -705,7 +705,7 @@ char *dup_malloc(const char *data, size_t n) {
   buf[n] = '\0';
   return buf;
 }
-} // namespace
+} 
 
 /* Returns non-zero if the buffer looks like a WordPerfect document libwpd can
  * parse. Never throws. ~keep */

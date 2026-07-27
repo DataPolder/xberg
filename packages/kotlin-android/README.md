@@ -80,7 +80,7 @@
   </a>
 </div>
 
-Extract text, tables, images, metadata, and code intelligence from 97 file formats and 306 programming languages including PDF, Office documents, images, and audio/video transcripts where native transcription is available. Android library (AAR) with bundled jniLibs/arm64-v8a and jniLibs/x86_64 — Gradle automatically picks up the native cdylib for emulator and device builds. Server-side Kotlin/JVM consumers can use the Java binding directly via standard Kotlin/Java interop.
+Extract text, tables, images, metadata, and code intelligence from 98 file formats and 306 programming languages including PDF, Office documents, images, and audio/video transcripts where native transcription is available. Android library (AAR) with bundled jniLibs/arm64-v8a and jniLibs/x86_64 — Gradle automatically picks up the native cdylib for emulator and device builds. Server-side Kotlin/JVM consumers can use the Java binding directly via standard Kotlin/Java interop.
 
 ## What This Package Provides
 
@@ -97,13 +97,13 @@ Extract text, tables, images, metadata, and code intelligence from 97 file forma
 Kotlin DSL (`build.gradle.kts`):
 
 ```kotlin
-implementation("io.xberg:xberg-android:1.0.0-rc.42")
+implementation("io.xberg:xberg-android:1.0.0")
 ```
 
 Groovy DSL (`build.gradle`):
 
 ```groovy
-implementation 'io.xberg:xberg-android:1.0.0-rc.42'
+implementation 'io.xberg:xberg-android:1.0.0'
 ```
 
 Add to your `pom.xml`:
@@ -112,7 +112,7 @@ Add to your `pom.xml`:
 <dependency>
     <groupId>io.xberg</groupId>
     <artifactId>xberg-android</artifactId>
-    <version>1.0.0-rc.42</version>
+    <version>1.0.0</version>
 </dependency>
 ```
 
@@ -161,15 +161,15 @@ For non-blocking document processing:
 
 ## Features
 
-### Supported File Formats (96)
+### Supported File Formats (98)
 
-97 file formats across 8 major categories with intelligent format detection and comprehensive metadata extraction.
+98 file formats across 8 major categories with intelligent format detection and comprehensive metadata extraction.
 
 #### Office Documents
 
 | Category | Formats | Capabilities |
 |----------|---------|--------------|
-| **Word Processing** | `.docx`, `.docm`, `.doc`, `.dotx`, `.dotm`, `.dot`, `.odt`, `.pages` | Full text, tables, images, metadata, styles |
+| **Word Processing** | `.docx`, `.docm`, `.doc`, `.dotx`, `.dotm`, `.dot`, `.odt`, `.pages`, `.wpd`, `.wp`, `.wp5`, `.wp6` | Full text, tables, images, metadata, styles |
 | **Spreadsheets** | `.xlsx`, `.xlsm`, `.xlsb`, `.xls`, `.xla`, `.xlam`, `.xltm`, `.xltx`, `.xlt`, `.ods`, `.numbers` | Sheet data, formulas, cell metadata, charts |
 | **Presentations** | `.pptx`, `.pptm`, `.ppt`, `.ppsx`, `.potx`, `.potm`, `.pot`, `.odp`, `.key` | Slides, speaker notes, images, metadata |
 | **PDF** | `.pdf` | Text, tables, images, metadata, OCR support |

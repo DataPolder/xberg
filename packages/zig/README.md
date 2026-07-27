@@ -80,7 +80,7 @@
   </a>
 </div>
 
-Extract text, tables, images, metadata, and code intelligence from 97 file formats and 306 programming languages including PDF, Office documents, images, and audio/video transcripts where native transcription is available. Zig bindings consuming the C FFI surface via @cImport, idiomatic error sets, optional types, and slice-based memory management.
+Extract text, tables, images, metadata, and code intelligence from 98 file formats and 306 programming languages including PDF, Office documents, images, and audio/video transcripts where native transcription is available. Zig bindings consuming the C FFI surface via @cImport, idiomatic error sets, optional types, and slice-based memory management.
 
 ## What This Package Provides
 
@@ -97,7 +97,7 @@ Extract text, tables, images, metadata, and code intelligence from 97 file forma
 Fetch the package and pin it in `build.zig.zon`:
 
 ```bash
-zig fetch --save https://github.com/xberg-io/xberg/archive/refs/tags/v1.0.0-rc.42.tar.gz
+zig fetch --save https://github.com/xberg-io/xberg/archive/refs/tags/v1.0.0.tar.gz
 ```
 
 Then wire it into `build.zig`:
@@ -229,15 +229,15 @@ pub fn main() !void {
 
 ## Features
 
-### Supported File Formats (96)
+### Supported File Formats (98)
 
-97 file formats across 8 major categories with intelligent format detection and comprehensive metadata extraction.
+98 file formats across 8 major categories with intelligent format detection and comprehensive metadata extraction.
 
 #### Office Documents
 
 | Category | Formats | Capabilities |
 |----------|---------|--------------|
-| **Word Processing** | `.docx`, `.docm`, `.doc`, `.dotx`, `.dotm`, `.dot`, `.odt`, `.pages` | Full text, tables, images, metadata, styles |
+| **Word Processing** | `.docx`, `.docm`, `.doc`, `.dotx`, `.dotm`, `.dot`, `.odt`, `.pages`, `.wpd`, `.wp`, `.wp5`, `.wp6` | Full text, tables, images, metadata, styles |
 | **Spreadsheets** | `.xlsx`, `.xlsm`, `.xlsb`, `.xls`, `.xla`, `.xlam`, `.xltm`, `.xltx`, `.xlt`, `.ods`, `.numbers` | Sheet data, formulas, cell metadata, charts |
 | **Presentations** | `.pptx`, `.pptm`, `.ppt`, `.ppsx`, `.potx`, `.potm`, `.pot`, `.odp`, `.key` | Slides, speaker notes, images, metadata |
 | **PDF** | `.pdf` | Text, tables, images, metadata, OCR support |
