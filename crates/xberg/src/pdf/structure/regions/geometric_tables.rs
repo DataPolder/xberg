@@ -35,15 +35,8 @@ const ANCHOR_TOLERANCE_PTS: u32 = 10;
 const MIN_ANCHOR_ROW_SUPPORT: f32 = 0.6;
 /// A run breaks when the top-to-top pitch to the next tabular row exceeds this
 /// multiple of the median word height — keeps a genuine grid together while
-/// refusing to bridge a table into distant prose. Empirically (pb_synthetic
-/// duplicate-tables corpus doc), the vertical gap between a stacked table and
-/// the next physically-distinct table below it is only ~2.2x the median row
-/// height, while intra-table pitches (including the header-to-first-data-row
-/// gap) stay at ~1.8x or below; 3.5 was wide enough to bridge two stacked
-/// tables into one region and wreck reading order (#1316 follow-up), so this
-/// is tuned to split there while still keeping a single table's own rows
-/// (including multi-line headers) together.
-const MAX_ROW_PITCH_FACTOR: f32 = 2.0;
+/// refusing to bridge a table into distant prose.
+const MAX_ROW_PITCH_FACTOR: f32 = 3.5;
 /// Rows whose tops differ by at most this multiple of the median word height are
 /// the same visual row.
 const ROW_GROUPING_FACTOR: f32 = 0.6;
@@ -109,15 +102,6 @@ pub(in crate::pdf::structure) fn detect_geometric_table_hints(words: &[HocrWord]
             .last()
             .map(|&prev| rows[row_idx].top.saturating_sub(rows[prev].top) <= max_row_pitch)
             .unwrap_or(true);
-        if std::env::var_os("XBERG_GEOM_DEBUG").is_some() {
-            if let Some(&prev) = run.last() {
-                let pitch = rows[row_idx].top.saturating_sub(rows[prev].top);
-                eprintln!(
-                    "[geom-debug] row_idx={} top={} prev_top={} pitch={} max_row_pitch={} contiguous={}",
-                    row_idx, rows[row_idx].top, rows[prev].top, pitch, max_row_pitch, contiguous
-                );
-            }
-        }
         if !contiguous {
             if let Some(hint) = finalize_run(words, &rows, &run, page_height) {
                 hints.push(hint);
@@ -166,37 +150,7 @@ fn finalize_run(words: &[HocrWord], rows: &[Row], run: &[usize], page_height: f3
         return None;
     }
 
-    let hint = run_bounding_hint(words, rows, run, page_height);
-    if std::env::var_os("XBERG_GEOM_DEBUG").is_some() {
-        let numeric_fraction = {
-            let mut total = 0usize;
-            let mut numeric = 0usize;
-            for &row_idx in run {
-                for &i in &rows[row_idx].word_indices {
-                    let text = words[i].text.trim();
-                    if text.is_empty() {
-                        continue;
-                    }
-                    total += 1;
-                    if is_numeric_token(text) {
-                        numeric += 1;
-                    }
-                }
-            }
-            if total > 0 { numeric as f32 / total as f32 } else { 0.0 }
-        };
-        eprintln!(
-            "[geom-debug] run rows={} pdf_top={:.1} pdf_bottom={:.1} left={:.1} right={:.1} numeric_frac={:.2} consistent_cols={}",
-            run.len(),
-            hint.top,
-            hint.bottom,
-            hint.left,
-            hint.right,
-            numeric_fraction,
-            consistent_columns,
-        );
-    }
-    Some(hint)
+    Some(run_bounding_hint(words, rows, run, page_height))
 }
 
 /// Whether a run's words are numeric-dominant — the separator between the
