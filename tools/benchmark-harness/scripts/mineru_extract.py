@@ -296,8 +296,6 @@ def _terminate_lingering_group_processes() -> None:
     except OSError:
         return
     # Only reap by process-group when we OWN the group. The benchmark harness
-    # spawns us as a group leader (subprocess.rs uses process_group(0), so our
-    # pgid == our pid) and the orphaned render workers inherit that group, so
     # killing the group hits only them. When mineru_extract.py is invoked
     # directly instead -- a CI `run:` step's shell, or an interactive terminal --
     # we share the CALLER's process group, and reaping it would SIGKILL that
