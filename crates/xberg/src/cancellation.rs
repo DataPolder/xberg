@@ -50,7 +50,13 @@ impl CancellationToken {
     ///
     /// All clones of this token will observe [`is_cancelled`] returning `true`
     /// on their next check. This operation is idempotent.
-    #[cfg(any(feature = "tokio-runtime", test))]
+    ///
+    /// Gated `not(target_arch = "wasm32")` to match the only call sites
+    /// (`run_timed_extraction` in `batch.rs`, the timeout block in `bytes.rs`):
+    /// `tokio-runtime` is enabled transitively on wasm32 via `layout-tract`
+    /// inside `wasm-target`, so gating on the feature alone leaves this method
+    /// compiled-but-uncalled (dead code) on that target.
+    #[cfg(any(all(feature = "tokio-runtime", not(target_arch = "wasm32")), test))]
     #[inline]
     pub(crate) fn cancel(&self) {
         self.cancelled.store(true, Ordering::Relaxed);
