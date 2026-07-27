@@ -65,6 +65,32 @@ require_exact_cli_build() {
   fi
 }
 
+require_no_cli_build() {
+  local job="$1"
+  local description="$2"
+  local command_count
+
+  command_count="$(
+    grep -Ec '^[[:space:]]+run:[[:space:]]+cargo build --locked --release -p xberg-cli' <<<"$job" || true
+  )"
+
+  if [[ "$command_count" -ne 0 ]]; then
+    echo "benchmark workflow validation failed: $description"
+    exit 1
+  fi
+}
+
+require_step() {
+  local job="$1"
+  local pattern="$2"
+  local description="$3"
+
+  if ! grep -qE "$pattern" <<<"$job"; then
+    echo "benchmark workflow validation failed: $description"
+    exit 1
+  fi
+}
+
 setup_job="$(extract_job setup <<<"$workflow_content")"
 aggregate_job="$(extract_job aggregate-and-publish <<<"$workflow_content")"
 setup_rust_step="$(extract_named_step "Setup Rust" <<<"$setup_job")"
@@ -76,7 +102,15 @@ require_exact_input "$setup_rust_inputs" disable-cache '"false"' \
   "setup Rust must retain the coarse Cargo target cache"
 require_exact_cli_build "$setup_job" \
   "setup must build exactly one all-feature CLI for benchmark size measurement"
-require_exact_cli_build "$aggregate_job" \
-  "aggregate must build exactly one all-feature CLI for installation-size consistency"
+# aggregate reuses the exact xberg-cli binary `setup` built and uploaded
+# (benchmarks-target) rather than cold-rebuilding it. This is what guarantees
+# installation-size consistency -- the measured binary is byte-identical to the
+# benchmarked one -- and avoids a redundant release compile in the release job.
+require_no_cli_build "$aggregate_job" \
+  "aggregate must reuse the setup-built xberg-cli artifact, not cold-rebuild it"
+require_step "$aggregate_job" '^[[:space:]]+- name: Download build artifacts \(harness binary \+ xberg-cli\)' \
+  "aggregate must download the benchmarks-target artifact for size measurement"
+require_step "$aggregate_job" 'restore-binary-permissions\.sh' \
+  "aggregate must restore benchmark binary permissions after downloading the artifact"
 
 echo "benchmark workflow build configuration is valid"
