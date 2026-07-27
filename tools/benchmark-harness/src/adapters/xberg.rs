@@ -179,8 +179,8 @@ pub fn create_xberg_adapter(
     };
     let supported_formats = vec![
         "pdf", "docx", "doc", "xlsx", "xls", "pptx", "ppt", "txt", "md", "html", "xml", "json", "odt", "ods", "odp",
-        "epub", "rtf", "csv", "json", "yaml", "png", "jpg", "jpeg", "gif", "bmp", "tiff", "tif", "webp", "zip", "tar",
-        "gz", "7z",
+        "epub", "rtf", "wpd", "wp", "csv", "json", "yaml", "png", "jpg", "jpeg", "gif", "bmp", "tiff", "tif", "webp",
+        "zip", "tar", "gz", "7z",
     ]
     .into_iter()
     .map(|s| s.to_string())

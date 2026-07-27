@@ -65,7 +65,7 @@ fn get_supported_formats(framework_name: &str) -> Vec<String> {
             "pdf", "docx", "doc", "pptx", "ppt", "ppsx", "pptm", "xlsx", "xls", "xlsm", "xlsb", "odt", "ods", "rtf",
             "epub", "html", "htm", "xml", "svg", "md", "txt", "csv", "tsv", "json", "yaml", "yml", "toml", "eml",
             "msg", "tex", "latex", "bib", "rst", "org", "ipynb", "png", "jpg", "jpeg", "gif", "bmp", "tiff", "tif",
-            "webp", "jp2", "zip", "tar", "gz", "7z",
+            "webp", "jp2", "zip", "tar", "gz", "7z", "wpd", "wp",
         ]
         .into_iter()
         .map(|s| s.to_string())
@@ -90,7 +90,7 @@ fn get_supported_formats(framework_name: &str) -> Vec<String> {
         "mineru" => vec!["pdf", "png", "jpg"].into_iter().map(|s| s.to_string()).collect(),
 
         _ => vec![
-            "pdf", "docx", "doc", "xlsx", "xls", "pptx", "ppt", "txt", "md", "html", "xml", "json",
+            "pdf", "docx", "doc", "xlsx", "xls", "pptx", "ppt", "txt", "md", "html", "xml", "json", "wpd", "wp",
         ]
         .into_iter()
         .map(|s| s.to_string())
