@@ -123,6 +123,9 @@ pub mod hwp;
 #[cfg(feature = "hwpx")]
 pub mod hwpx;
 
+#[cfg(feature = "wordperfect")]
+pub mod wordperfect;
+
 #[cfg(feature = "iwork")]
 pub mod iwork;
 
@@ -228,6 +231,9 @@ pub use hwp::HwpExtractor;
 
 #[cfg(feature = "hwpx")]
 pub use hwpx::HwpxExtractor;
+
+#[cfg(feature = "wordperfect")]
+pub use wordperfect::WordPerfectExtractor;
 
 #[cfg(feature = "iwork")]
 pub use iwork::{keynote::KeynoteExtractor, numbers::NumbersExtractor, pages::PagesExtractor};
@@ -413,6 +419,11 @@ pub(crate) fn register_default_extractors() -> Result<()> {
         registry.register_internal(Arc::new(HwpxExtractor::new()))?;
     }
 
+    #[cfg(feature = "wordperfect")]
+    {
+        registry.register_internal(Arc::new(WordPerfectExtractor::new()))?;
+    }
+
     #[cfg(feature = "iwork")]
     {
         registry.register_internal(Arc::new(PagesExtractor::new()))?;
@@ -538,6 +549,12 @@ mod tests {
         {
             expected_count += 1;
             assert!(extractor_names.contains(&"hwpx-extractor".to_string()));
+        }
+
+        #[cfg(feature = "wordperfect")]
+        {
+            expected_count += 1;
+            assert!(extractor_names.contains(&"wordperfect-extractor".to_string()));
         }
 
         #[cfg(feature = "iwork")]

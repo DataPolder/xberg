@@ -41,6 +41,7 @@ pub(crate) const LEGACY_WORD_MIME_TYPE: &str = "application/msword";
 pub(crate) const LEGACY_POWERPOINT_MIME_TYPE: &str = "application/vnd.ms-powerpoint";
 
 pub(crate) const PST_MIME_TYPE: &str = "application/vnd.ms-outlook-pst";
+pub(crate) const WPD_MIME_TYPE: &str = "application/vnd.wordperfect";
 pub(crate) const JSON_MIME_TYPE: &str = "application/json";
 pub(crate) const XML_MIME_TYPE: &str = "application/xml";
 #[cfg(feature = "tree-sitter")]
@@ -281,6 +282,11 @@ static FORMATS: &[FormatEntry] = &[
         extensions: &["hwpx"],
         mime_type: "application/haansofthwpx",
         aliases: &[],
+    },
+    FormatEntry {
+        extensions: &["wpd", "wp", "wp5", "wp6"],
+        mime_type: WPD_MIME_TYPE,
+        aliases: &["application/wordperfect"],
     },
     FormatEntry {
         extensions: &["bmp"],
@@ -811,6 +817,13 @@ pub fn detect_mime_type_from_bytes(content: &[u8]) -> Result<String> {
 
     if content.len() >= 4 && content[..4] == [0x21, 0x42, 0x44, 0x4E] {
         return Ok(PST_MIME_TYPE.to_string());
+    }
+
+    // WordPerfect (Windows/DOS variants): magic bytes `\xffWPC`. The Mac
+    // WordPerfect variant has no reliable magic bytes and is routed by the
+    // `.wpd` extension via `EXT_TO_MIME` instead.
+    if content.len() >= 4 && content[..4] == [0xFF, 0x57, 0x50, 0x43] {
+        return Ok(WPD_MIME_TYPE.to_string());
     }
 
     if let Ok(text) = std::str::from_utf8(content) {

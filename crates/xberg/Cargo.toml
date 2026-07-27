@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
-description = "High-performance document intelligence library for Rust. Extract text, metadata, and structured data from PDFs, Office documents, images, and 96 formats and 306 programming languages via tree-sitter code intelligence with async/sync APIs."
+description = "High-performance document intelligence library for Rust. Extract text, metadata, and structured data from PDFs, Office documents, images, and 98 formats and 306 programming languages via tree-sitter code intelligence with async/sync APIs."
 license.workspace = true
 repository = "https://github.com/xberg-io/xberg"
 homepage = "https://xberg.io"
@@ -144,6 +144,9 @@ ocr-wasm = [
 # bundled dav1d plugin fails to compile against current libdav1d, and it stripped the libheif version
 # feature on Windows — see CHANGELOG and the `system-libheif-provisioning` note.
 heic = ["dep:xberg-libheif", "dep:image", "dep:nom-exif", "image-encode"]
+# WordPerfect (.wpd) extraction via the vendored libwpd/librevenge shim in
+# xberg-libwpd. Native C++ dependency (vendors boost), same shape as `heic`.
+wordperfect = ["dep:xberg-libwpd"]
 # PaddleOCR type definitions only — pure-Rust config structs, no ORT dependency.
 # Exposes PaddleOcrConfig, PaddleLanguage, ModelPaths. Safe on Android/WASM.
 paddle-ocr-types = []
@@ -687,6 +690,12 @@ windows-target = [
     # late-interaction-presets is implied by "late-interaction" above (the ORT
     # ML feature added for full Windows ONNX Runtime parity).
     "markdown-footnotes",
+    # wordperfect = [dep:xberg-libwpd]: xberg-libwpd vendors its boost header
+    # subset (no vcpkg boost needed, unlike `heic`'s libheif), but its build.rs
+    # still links vcpkg-provided `zlib` on Windows. That zlib install and the
+    # `-v4` dep cache are already wired into
+    # scripts/ci/install-system-deps/install-windows.ps1 — do not remove them.
+    "wordperfect",
 ]
 # macos-intel-target: native Intel macOS (x86_64-apple-darwin). FULL feature
 # parity with every other platform — including all ONNX Runtime ML (paddle-ocr,
@@ -728,6 +737,7 @@ formats = [
     "mdx",
     "svg",
     "heic",
+    "wordperfect",
 ]
 # Text processing and analysis capabilities.
 analysis = [
@@ -776,6 +786,7 @@ full = [
     "captioning",
     "qr-codes",
     "heic",
+    "wordperfect",
 ]
 # Server deployment preset — formats + analysis + services + OCR.
 server = [
@@ -948,6 +959,7 @@ v_htmlescape = { version = "0.17", optional = true }
 whatlang = { version = "0.18.0", optional = true }
 xberg-gliner = { workspace = true, optional = true }
 xberg-libheif = { path = "../xberg-libheif", version = "1.0.0-rc.42", optional = true }
+xberg-libwpd = { path = "../xberg-libwpd", version = "1.0.0-rc.42", optional = true }
 # No `version` on this path-dep: xberg-tesseract carries `links =
 # "xberg_tesseract"`, and a versioned path-dep makes the maturin sdist
 # resolve two copies (path + registry) of a `links` crate, which cargo rejects
