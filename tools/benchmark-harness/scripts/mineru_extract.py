@@ -13,6 +13,7 @@ windows batch model inference across document boundaries.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import multiprocessing as _mp
 import os
@@ -313,10 +314,8 @@ def _terminate_lingering_group_processes() -> None:
             continue
         if pgid != my_pgid or pid in (my_pid, launcher_pid):
             continue
-        try:
+        with contextlib.suppress(OSError):
             os.kill(pid, signal.SIGKILL)
-        except OSError:
-            pass
 
 
 def _parse_path(line: str) -> str:

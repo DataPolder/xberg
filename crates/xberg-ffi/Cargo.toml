@@ -78,7 +78,7 @@ android-target = ["xberg/android-target", "api", "api-types", "archives", "auto-
 [dependencies]
 ahash = "0.8"
 async-trait = "0.1"
-crawlberg = { default-features = false, version = "1.0.9" }
+crawlberg = { default-features = false, version = "1.0.10" }
 html-to-markdown-rs = { default-features = false, version = "3.9" }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }

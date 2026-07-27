@@ -110,7 +110,6 @@ fn corel_wp6_decodes_to_expected_structure() {
 
     // Every CellStart must carry a plausible column/span triple: spans are
     // at least 1 (libwpd's own invariant, mirrored by the shim's
-    // `std::max(1, ...)` clamp) and column is either -1 (unknown) or
     // non-negative.
     for event in &doc.events {
         if let WpdEvent::CellStart {

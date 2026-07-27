@@ -510,7 +510,6 @@ mod tests {
         git(&superproject, &["config", "user.name", "Super"]);
         std::fs::write(superproject.join("source.rs"), b"fn main() {}").unwrap();
         git(&superproject, &["add", "source.rs"]);
-        // `-c protocol.file.allow=always` is required for local `file://` submodule clones (CVE-2022-39253);
         // it must be passed on the add invocation itself, as the clone subprocess ignores repo-local config.
         git(
             &superproject,

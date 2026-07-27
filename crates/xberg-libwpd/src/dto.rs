@@ -322,7 +322,6 @@ pub fn decode(bytes: &[u8]) -> Result<WpdDocument, WpdError> {
         let value = r.string()?;
         match key.as_str() {
             "dc:title" => metadata.title = Some(value.clone()),
-            // libwpd emits the "Author" summary field as `meta:initial-creator`;
             // `dc:creator` is WordPerfect's separate "Typist" field, kept only in
             // `raw` rather than mistaken for the author.
             "meta:initial-creator" => metadata.author = Some(value.clone()),
@@ -440,7 +439,6 @@ mod tests {
 
     #[test]
     fn decode_rejects_abort_sized_count_without_allocating() {
-        // metadata_count = u32::MAX in a 5-byte blob: must fail fast on the
         // first out-of-range read, never pre-allocate a ~200GB Vec (which would
         // abort the process, not return Err). Same for event_count.
         assert!(matches!(
@@ -449,13 +447,12 @@ mod tests {
         ));
         let mut bytes = vec![WIRE_VERSION];
         bytes.extend_from_slice(&0u32.to_le_bytes()); // metadata_count = 0
-        bytes.extend_from_slice(&u32::MAX.to_le_bytes()); // event_count = u32::MAX
+        bytes.extend_from_slice(&u32::MAX.to_le_bytes());
         assert!(matches!(decode(&bytes), Err(WpdError::Internal)));
     }
 
     #[test]
     fn decode_maps_initial_creator_to_author_not_typist() {
-        // libwpd emits the Author summary field as `meta:initial-creator`;
         // `dc:creator` is the separate Typist field and must stay raw-only.
         let mut bytes = vec![WIRE_VERSION];
         bytes.extend_from_slice(&2u32.to_le_bytes());

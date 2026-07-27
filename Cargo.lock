@@ -1010,9 +1010,9 @@ dependencies = [
 
 [[package]]
 name = "calamine"
-version = "0.36.0"
+version = "0.36.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6975084f43060e56343ffba7f9731fa52a7dcf2e1cd8e2459fd4c6bf4a1bff59"
+checksum = "5fa68281b1a76b54a62156474adb06bb380a67e07dd60656e3217152b42183f3"
 dependencies = [
  "atoi_simd",
  "byteorder",
@@ -1565,7 +1565,7 @@ version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -1835,9 +1835,9 @@ dependencies = [
 
 [[package]]
 name = "crawlberg"
-version = "1.0.9"
+version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2841d7bdd19a54e025f61e852c54e0af8f5d492e6ed862dbb0b1363e4f9a29f"
+checksum = "cab5814c0d5db694be37a31c5a322dc85027650cb0b09f88ad0b6188ebdfe181"
 dependencies = [
  "ahash 0.8.12",
  "aho-corasick",
@@ -2783,7 +2783,7 @@ dependencies = [
  "bitflags 2.13.1",
  "cexpr",
  "clang-sys",
- "itertools 0.14.0",
+ "itertools 0.10.5",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -4723,9 +4723,9 @@ checksum = "47f142fe24a9c9944451e8349de0a56af5f3e7226dc46f3ed4d4ecc0b85af75e"
 
 [[package]]
 name = "jiff"
-version = "0.2.34"
+version = "0.2.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e184d09547b80eb7e20d141ba2fb1fbac843ca53f4cf1b31210adc4c1adc6e16"
+checksum = "668b7183bd07af9a4885f5c35b0cc5c83c4607a913c16b7e17291832910d2dcc"
 dependencies = [
  "defmt",
  "jiff-core",
@@ -4747,9 +4747,9 @@ dependencies = [
 
 [[package]]
 name = "jiff-static"
-version = "0.2.34"
+version = "0.2.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "323da076b7a6faf914dc677cb05a4b907742ff7375c8322c9e7f5061e5e0e9de"
+checksum = "3a69dcb3a21cfb32ce1cd056169337ca284af0766dd766e7878819b251a49204"
 dependencies = [
  "jiff-core",
  "proc-macro2",
@@ -5084,9 +5084,9 @@ checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 
 [[package]]
 name = "liter-llm"
-version = "1.11.2"
+version = "1.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b9cadc4e7d91a51d237279b777d58e2ca25223159963f0a66bf17f4157e0274"
+checksum = "e9c2f37e8337fa18108051c50b49360effb2d22d797b94d792f99861da092eee"
 dependencies = [
  "ahash 0.8.12",
  "arc-swap",
@@ -6432,9 +6432,9 @@ dependencies = [
 
 [[package]]
 name = "pdf_oxide"
-version = "0.3.75"
+version = "0.3.76"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e00ca5f52780bb764da7fc1783c0c6f549fcf960d69734c8d7cf7996bdbb49d"
+checksum = "a5ec03a138df06a1b063e5053bd957aab153ccfb5a59a326e285b57b3e1bd600"
 dependencies = [
  "aes 0.9.1",
  "base64 0.22.1",
@@ -6892,7 +6892,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -7838,7 +7838,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ffbe87d9e8db95652c25ded2418150e00b08c2fde09e23ec15896d2c470c6631"
 dependencies = [
  "g2p",
- "image 0.25.10",
+ "image 0.24.9",
  "lru 0.16.4",
 ]
 
@@ -10283,9 +10283,9 @@ checksum = "009994f150cc0cd50ff54917d5bc8bffe8cad10ca10d81c34da2ec421ae61782"
 
 [[package]]
 name = "tree-sitter-language-pack"
-version = "1.13.4"
+version = "1.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57d7a66a4a143bc10fa060c2f28f81758ec20b4a335fdb8bdf95292709af409b"
+checksum = "445e69b4cdfd2758eeed0badaacd9eb037459aeb4d8bda5f21fb45d8e6958cac"
 dependencies = [
  "ahash 0.8.12",
  "cc",
@@ -11095,7 +11095,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -11849,7 +11849,7 @@ name = "xberg-jni"
 version = "1.0.0-rc.42"
 dependencies = [
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.0",
  "futures-util",
  "jni 0.22.4",
  "serde_json",

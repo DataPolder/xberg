@@ -654,7 +654,6 @@ fn accepts_exact_ocr_aggregate_contract() {
 
 #[test]
 fn accepts_native_aggregate_when_optional_mineru_absent() {
-    // The aggregate legitimately lacks the best-effort framework's key/rows when it failed;
     // validation must still pass on the required frameworks.
     let contract = Cohort::Native.contract();
     let optional_entry = contract
