@@ -157,6 +157,14 @@ pub fn field_precision_recall_f1(predicted: &Value, ground_truth: &Value) -> Met
         }
     }
 
+    if tp + fp == 0 && tp + fn_count == 0 {
+        return Metrics {
+            precision: 1.0,
+            recall: 1.0,
+            f1: 1.0,
+        };
+    }
+
     let precision = if tp + fp == 0 {
         0.0
     } else {
@@ -247,6 +255,9 @@ pub fn numeric_match(predicted: &Value, ground_truth: &Value, tolerance: &Numeri
 
     match (pred_num, gt_num) {
         (Some(p), Some(g)) => {
+            if g == 0.0 {
+                return p == 0.0;
+            }
             let percent_diff = ((p - g).abs() / g.abs()).min(1.0);
             let effective = if g.abs() >= 1.0 {
                 tolerance.currency_percent.max(tolerance.decimal_percent)
@@ -354,6 +365,14 @@ pub fn field_precision_recall_f1_normalized(
         if !pred_leaves.contains_key(path) {
             fn_count += 1;
         }
+    }
+
+    if tp + fp == 0 && tp + fn_count == 0 {
+        return Metrics {
+            precision: 1.0,
+            recall: 1.0,
+            f1: 1.0,
+        };
     }
 
     let precision = if tp + fp == 0 {
@@ -848,5 +867,133 @@ mod tests {
         let gt = vec!["x^2".to_string()];
         let m = latex_token_f1(&[], &gt);
         assert_eq!(m.f1, 0.0);
+    }
+
+    #[test]
+    fn test_numeric_match_zero_vs_zero_is_a_match() {
+        let tol = NumericTolerance::default();
+        let pred = json!(0.0);
+        let gt = json!(0.0);
+        let result = numeric_match(&pred, &gt, &tol);
+        assert!(result, "0.0 vs 0.0 must be a match, not a NaN-driven mismatch");
+    }
+
+    #[test]
+    fn test_numeric_match_zero_vs_nonzero_is_a_mismatch() {
+        let tol = NumericTolerance::default();
+        let pred = json!(0.0);
+        let gt = json!(0.5);
+        let result = numeric_match(&pred, &gt, &tol);
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_numeric_match_equal_hundreds() {
+        let tol = NumericTolerance::default();
+        let pred = json!(100.0);
+        let gt = json!(100.0);
+        let result = numeric_match(&pred, &gt, &tol);
+        assert!(result);
+    }
+
+    #[test]
+    fn test_numeric_match_beyond_tolerance_is_a_mismatch() {
+        let tol = NumericTolerance::default();
+        let pred = json!(106.0);
+        let gt = json!(100.0);
+        let result = numeric_match(&pred, &gt, &tol);
+        assert!(!result, "6% diff exceeds default 1% tolerance");
+    }
+
+    #[test]
+    fn test_numeric_match_no_nan_across_boundary_cases() {
+        let tol = NumericTolerance::default();
+        let cases: [(f64, f64, bool); 4] = [
+            (0.0, 0.0, true),
+            (0.0, 0.5, false),
+            (100.0, 100.0, true),
+            (100.0, 106.0, false),
+        ];
+        for (p, g, expected) in cases {
+            let result = numeric_match(&json!(p), &json!(g), &tol);
+            assert_eq!(result, expected, "numeric_match({p}, {g}) mismatch");
+        }
+    }
+
+    #[test]
+    fn test_field_precision_recall_f1_both_empty_is_vacuous_match() {
+        let pred = json!({});
+        let gt = json!({});
+        let m = field_precision_recall_f1(&pred, &gt);
+        assert_eq!(m.precision, 1.0);
+        assert_eq!(m.recall, 1.0);
+        assert_eq!(m.f1, 1.0, "both-empty JSON must be a vacuous match, not F1=0.0");
+    }
+
+    #[test]
+    fn test_field_precision_recall_f1_empty_pred_vs_nonempty_gt_is_zero() {
+        let pred = json!({});
+        let gt = json!({ "name": "Alice" });
+        let m = field_precision_recall_f1(&pred, &gt);
+        assert_eq!(m.f1, 0.0);
+    }
+
+    #[test]
+    fn test_field_precision_recall_f1_nonempty_pred_vs_empty_gt_is_zero() {
+        let pred = json!({ "name": "Alice" });
+        let gt = json!({});
+        let m = field_precision_recall_f1(&pred, &gt);
+        assert_eq!(m.f1, 0.0);
+    }
+
+    #[test]
+    fn test_field_precision_recall_f1_partial_overlap_exact_value() {
+        let pred = json!({ "a": 1, "b": 2, "c": 3 });
+        let gt = json!({ "a": 1, "b": 99, "d": 4 });
+        // tp=1 (a), fp=2 (b mismatched, c extra), fn=1 (d missing)
+        let m = field_precision_recall_f1(&pred, &gt);
+        assert_eq!(m.precision, 1.0 / 3.0);
+        assert_eq!(m.recall, 0.5);
+        assert!((m.f1 - 0.4).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_field_precision_recall_f1_normalized_both_empty_is_vacuous_match() {
+        let pred = json!({});
+        let gt = json!({});
+        let tol = NumericTolerance::default();
+        let m = field_precision_recall_f1_normalized(&pred, &gt, &tol);
+        assert_eq!(m.precision, 1.0);
+        assert_eq!(m.recall, 1.0);
+        assert_eq!(m.f1, 1.0, "both-empty JSON must be a vacuous match, not F1=0.0");
+    }
+
+    #[test]
+    fn test_field_precision_recall_f1_normalized_empty_pred_vs_nonempty_gt_is_zero() {
+        let pred = json!({});
+        let gt = json!({ "name": "Alice" });
+        let tol = NumericTolerance::default();
+        let m = field_precision_recall_f1_normalized(&pred, &gt, &tol);
+        assert_eq!(m.f1, 0.0);
+    }
+
+    #[test]
+    fn test_field_precision_recall_f1_normalized_nonempty_pred_vs_empty_gt_is_zero() {
+        let pred = json!({ "name": "Alice" });
+        let gt = json!({});
+        let tol = NumericTolerance::default();
+        let m = field_precision_recall_f1_normalized(&pred, &gt, &tol);
+        assert_eq!(m.f1, 0.0);
+    }
+
+    #[test]
+    fn test_field_precision_recall_f1_normalized_partial_overlap_exact_value() {
+        let pred = json!({ "a": 1, "b": 2, "c": 3 });
+        let gt = json!({ "a": 1, "b": 99, "d": 4 });
+        let tol = NumericTolerance::default();
+        let m = field_precision_recall_f1_normalized(&pred, &gt, &tol);
+        assert_eq!(m.precision, 1.0 / 3.0);
+        assert_eq!(m.recall, 0.5);
+        assert!((m.f1 - 0.4).abs() < 1e-12);
     }
 }
