@@ -18,7 +18,9 @@ import multiprocessing as _mp
 import os
 import platform
 import resource
+import signal
 import socket
+import subprocess
 import sys
 import tempfile
 import time
@@ -269,6 +271,54 @@ def _run_with_timeout(fn, args, timeout):
             return {"error": str(e), "_extraction_time_ms": 0}
 
 
+def _terminate_lingering_group_processes() -> None:
+    """Kill MinerU's orphaned render workers / multiprocessing resource_tracker before exit.
+
+    MinerU renders pages through a *persistent* spawn ``ProcessPoolExecutor`` and
+    multiprocessing starts a ``resource_tracker``. On the one-shot extraction path the parent
+    kills its extraction worker (``_run_with_timeout``) before MinerU's atexit teardown can
+    run, so those helper processes are orphaned. They keep a dup of the inherited stdout/stderr
+    pipe open (multiprocessing places it on a high fd, so redirecting fds 1/2 alone does not
+    release it), and the parent harness reads stdout+stderr to EOF — so a single live orphan
+    blocks it until its hard timeout even though the result is already produced.
+
+    Extraction is finished by the time this runs, so the render pool is disposable. Orphaned
+    children keep this process's process-group id across reparenting, so kill every other member
+    of our group, sparing this process and its immediate launcher (the harness waits on that
+    launcher). This is the teardown MinerU's own ``_terminate_executor_processes`` intends but
+    cannot perform once its worker has been SIGKILLed.
+    """
+    my_pid = os.getpid()
+    launcher_pid = os.getppid()
+    try:
+        my_pgid = os.getpgrp()
+    except OSError:
+        return
+    try:
+        listing = subprocess.run(
+            ["ps", "-A", "-o", "pid=,pgid="],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return
+    for line in listing.splitlines():
+        fields = line.split()
+        if len(fields) != 2:
+            continue
+        try:
+            pid, pgid = int(fields[0]), int(fields[1])
+        except ValueError:
+            continue
+        if pgid != my_pgid or pid in (my_pid, launcher_pid):
+            continue
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+
+
 def _parse_path(line: str) -> str:
     """Parse a request line: JSON object with path field, or plain file path."""
     stripped = line.strip()
@@ -341,6 +391,8 @@ def main() -> None:
                 payload = _run_with_timeout(extract_sync, (file_paths[0], ocr_enabled, output_format), timeout)
             else:
                 payload = extract_sync(file_paths[0], ocr_enabled, output_format)
+            # Reap MinerU's orphaned render pool before emitting, so the harness sees stdout EOF.
+            _terminate_lingering_group_processes()
             print(json.dumps(payload), end="")
 
         elif mode == "batch":
@@ -349,6 +401,8 @@ def main() -> None:
                 sys.exit(1)
 
             payload = extract_batch(file_paths, ocr_enabled, output_format)
+            # Reap MinerU's orphaned render pool before emitting, so the harness sees stdout EOF.
+            _terminate_lingering_group_processes()
             print(json.dumps(payload), end="")
 
         else:
