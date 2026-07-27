@@ -330,15 +330,24 @@ fn capture_repository(start_directory: &Path) -> RepositoryProvenance {
     };
     let commit = git_output(&repository_root, &["rev-parse", "HEAD"]);
     // `dirty` answers "was the source under test modified relative to HEAD", so it deliberately ignores
-    // submodule work-tree state. The reference corpus lives in the `test_documents` submodule, where CI
-    // stages derived cache files and runs `git lfs pull`; without the submodule's LFS clean filter wired up
-    // (actions/checkout does not smudge submodule LFS) every pulled fixture reads back as "modified" and
-    // would falsely flag the run. Corpus integrity is verified independently via the cohort manifest and
-    // per-fixture blake3 hashes, so a moved submodule pointer is still surfaced but incidental work-tree
-    // churn is not.
+    // both submodule work-tree state and untracked files. Two kinds of benign CI-generated churn would
+    // otherwise falsely flag every run: (1) the reference corpus lives in the `test_documents` submodule,
+    // where CI stages derived cache files and runs `git lfs pull` (actions/checkout does not smudge submodule
+    // LFS, so every pulled fixture reads back as "modified") — handled by `--ignore-submodules=dirty`; and
+    // (2) the ONNX Runtime setup copies `libonnxruntime.so*` into `crates/xberg-node/`, a path deliberately
+    // un-ignored in .gitignore so npm packaging can bundle the dylib, so those staged libs surface as
+    // untracked files — handled by `--untracked-files=no`. The benchmarked binary is built in a separate
+    // job from the exact commit and downloaded, and corpus integrity is verified independently via the
+    // cohort manifest and per-fixture blake3 hashes, so untracked scaffolding cannot affect measurements.
+    // Real tampering — a modification to a tracked source file — still flags dirty.
     let dirty = git_output_bytes(
         &repository_root,
-        &["status", "--porcelain", "--ignore-submodules=dirty"],
+        &[
+            "status",
+            "--porcelain",
+            "--untracked-files=no",
+            "--ignore-submodules=dirty",
+        ],
     )
     .map(|output| !output.is_empty());
     RepositoryProvenance { commit, dirty }
@@ -531,6 +540,48 @@ mod tests {
         // A real modification to the source tree still flags dirty.
         std::fs::write(superproject.join("source.rs"), b"fn main() { panic!() }").unwrap();
         assert_eq!(capture_repository(&superproject).dirty, Some(true));
+    }
+
+    #[test]
+    fn untracked_staged_artifacts_do_not_flag_dirty() {
+        fn git(dir: &Path, args: &[&str]) {
+            assert!(
+                Command::new("git")
+                    .arg("-C")
+                    .arg(dir)
+                    .args(args)
+                    .status()
+                    .unwrap()
+                    .success(),
+                "git {args:?} failed in {}",
+                dir.display()
+            );
+        }
+
+        let temp = tempfile::tempdir().unwrap();
+        let repository = temp.path().join("repo");
+        std::fs::create_dir_all(&repository).unwrap();
+        git(&repository, &["init"]);
+        git(&repository, &["config", "user.email", "repo@example.com"]);
+        git(&repository, &["config", "user.name", "Repo"]);
+        std::fs::write(repository.join("source.rs"), b"fn main() {}").unwrap();
+        git(&repository, &["add", "source.rs"]);
+        git(&repository, &["commit", "-m", "initial"]);
+
+        assert_eq!(capture_repository(&repository).dirty, Some(false));
+
+        // Mirror CI staging the ONNX Runtime dylib into crates/xberg-node/: an untracked file appears in the
+        // work tree. It is not a source modification, so it must not flag the checkout as dirty.
+        std::fs::write(
+            repository.join("libonnxruntime.so.1.20.0"),
+            b"\x7fELF staged runtime lib",
+        )
+        .unwrap();
+        assert_eq!(capture_repository(&repository).dirty, Some(false));
+
+        // A modification to a tracked source file still flags dirty.
+        std::fs::write(repository.join("source.rs"), b"fn main() { panic!() }").unwrap();
+        assert_eq!(capture_repository(&repository).dirty, Some(true));
     }
 
     #[test]
