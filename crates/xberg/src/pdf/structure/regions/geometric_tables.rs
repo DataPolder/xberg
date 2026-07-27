@@ -174,17 +174,22 @@ fn run_is_numeric_dominant(words: &[HocrWord], rows: &[Row], run: &[usize]) -> b
     total > 0 && numeric as f32 >= total as f32 * MIN_NUMERIC_WORD_FRACTION
 }
 
-/// A token reads as a numeric value when it has digits and those digits are at
-/// least half of its alphanumerics (mirrors `is_numeric_value_cell` in
-/// `table_reconstruct`). Catches `10.00`, `19%`, `1,234`, `2024-01`; rejects
-/// prose words and mostly-alphabetic codes.
+/// A token reads as a numeric data value when it carries at least one digit and
+/// no alphabetic character — a real number, optionally decorated with grouping,
+/// decimal, sign, currency, or percent punctuation. Catches `10.00`, `19%`,
+/// `1,234`, `$305,568`, `2024-01`, `(42,253)`; rejects prose words, unit labels
+/// like `000s`, and math variables/subscripts like `a1`, `2j`, `γδ` — the latter
+/// being the dominant false positive on equation-dense academic pages (#1316).
 fn is_numeric_token(text: &str) -> bool {
-    let digits = text.chars().filter(char::is_ascii_digit).count();
-    if digits == 0 {
-        return false;
+    let mut has_digit = false;
+    for c in text.chars() {
+        if c.is_ascii_digit() {
+            has_digit = true;
+        } else if c.is_alphabetic() {
+            return false;
+        }
     }
-    let alphanumerics = text.chars().filter(|c| c.is_alphanumeric()).count();
-    digits.saturating_mul(2) >= alphanumerics
+    has_digit
 }
 
 /// Cluster anchors within [`ANCHOR_TOLERANCE_PTS`] and count clusters that are
@@ -354,6 +359,32 @@ mod tests {
         }
         let hints = detect_geometric_table_hints(&words, 842.0);
         assert!(hints.is_empty(), "alphabetic grid must not be proposed (numeric gate)");
+    }
+
+    /// An equation-dense grid whose "numbers" are math variables and subscripts
+    /// (`a1`, `2j`, `j0`, `γδ`) must NOT be proposed: `is_numeric_token` rejects
+    /// any letter-bearing token, so the run fails the numeric-dominance gate.
+    /// Regression guard for the 1304.6413 academic-paper false positive (#1316).
+    #[test]
+    fn rejects_equation_subscript_grid() {
+        let xs = [40u32, 200, 360, 520];
+        let cells = [
+            ["a1", "2j", "j0", "γδ"],
+            ["b1", "2b", "t1", "wn"],
+            ["x1", "y1", "2a", "nx2"],
+        ];
+        let mut words = Vec::new();
+        for (row, vals) in cells.iter().enumerate() {
+            let y = 100 + row as u32 * 15;
+            for (x, v) in xs.iter().zip(vals) {
+                words.push(word(v, *x, y, 40));
+            }
+        }
+        let hints = detect_geometric_table_hints(&words, 842.0);
+        assert!(
+            hints.is_empty(),
+            "equation-subscript grid must not be proposed (numeric gate)"
+        );
     }
 
     /// A single tabular row (no vertical repetition) is not a table.
