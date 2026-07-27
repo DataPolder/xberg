@@ -671,8 +671,12 @@ jobs:
 
   prefetch-mineru-models:
     name: Prefetch MinerU model weights
-    needs: setup
-    if: ${{ needs.setup.result == 'success' && !cancelled() }}
+    # Intentionally NOT `needs: setup`: prefetching MinerU weights only needs the
+    # repo (scripts + fixtures), not the built harness, so it runs concurrently
+    # with the FFI/harness build from the first stage instead of waiting for it.
+    # Checks out the same ref setup resolves (its later source-sha pin is only
+    # needed by jobs that must match the benchmarked binary's exact revision).
+    if: ${{ !cancelled() }}
     runs-on: runner-medium-arm64
     timeout-minutes: 120
     permissions:
@@ -680,7 +684,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ needs.setup.outputs.source-sha }}
+          ref: ${{ github.event.inputs.branch || github.sha }}
           submodules: recursive
           lfs: true
 
@@ -1005,6 +1009,7 @@ jobs:
     needs:
       [
         setup,
+        prefetch-mineru-models,
         bench-rust,
         bench-docling,
         bench-markitdown,
@@ -1017,7 +1022,10 @@ jobs:
     runs-on: ubuntu-24.04-arm
     permissions:
       contents: write
-    if: ${{ always() && !cancelled() && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') }}
+    # MinerU prefetch is a HARD gate: if it fails, do not publish a partial
+    # baseline -- skip aggregation so the whole run fails. Other frameworks stay
+    # soft (always() tolerates their failures); only prefetch is mandatory.
+    if: ${{ always() && !cancelled() && needs.prefetch-mineru-models.result == 'success' && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') }}
     steps:
       - name: Create GitHub App token (if credentials available)
         id: app-token
@@ -1043,11 +1051,22 @@ jobs:
       - name: Unpack reference corpus cache
         run: tar -C test_documents -xf "${RUNNER_TEMP}/benchmark-corpus-cache/corpus-cache.tar"
 
-      - name: Setup Rust
+      # Reuse the harness binary + xberg-cli that `setup` already built and
+      # uploaded (benchmarks-target) instead of cold-rebuilding them here -- the
+      # xberg-cli is only needed so its on-disk size can be measured, and the
+      # harness binary runs validate-artifacts/consolidate. Same approach as
+      # bench-rust. The runtime still needs the native libs + ORT to execute the
+      # downloaded binary, but not a Rust toolchain or a compile.
+      - name: Download build artifacts (harness binary + xberg-cli)
         if: needs.setup.result == 'success'
-        uses: xberg-io/actions/setup-rust@v1
+        uses: actions/download-artifact@v8
         with:
-          cache-key-prefix: aggregate
+          name: ${{ needs.setup.outputs.artifact-name }}
+          path: target/release
+
+      - name: Restore benchmark binary permissions
+        if: needs.setup.result == 'success'
+        run: scripts/benchmarks/restore-binary-permissions.sh
 
       - name: Install system dependencies (libheif + native libs for harness binary)
         if: needs.setup.result == 'success'
@@ -1058,10 +1077,6 @@ jobs:
         uses: ./.github/actions/setup-onnx-runtime
         with:
           ort-version: ${{ env.ORT_VERSION }}
-
-      - name: Build xberg-cli (release, all features) for disk measurement
-        if: needs.setup.result == 'success'
-        run: cargo build --locked --release -p xberg-cli --features all
 
       - name: Download native benchmark artifacts
         continue-on-error: true
@@ -1101,7 +1116,7 @@ jobs:
         id: validate-native
         if: always()
         run: >-
-          cargo run --locked --release --package benchmark-harness --bin benchmark-harness -- validate-artifacts
+          ./target/release/benchmark-harness validate-artifacts
           --cohort native
           --artifacts-dir benchmark-artifacts/native
           --cohort-manifest tools/benchmark-harness/cohorts/native-pdf-fast-b8.json
@@ -1114,7 +1129,7 @@ jobs:
         id: validate-ocr
         if: always()
         run: >-
-          cargo run --locked --release --package benchmark-harness --bin benchmark-harness -- validate-artifacts
+          ./target/release/benchmark-harness validate-artifacts
           --cohort ocr
           --artifacts-dir benchmark-artifacts/ocr
           --cohort-manifest tools/benchmark-harness/cohorts/ocr-pdf-fast-b4.json
@@ -1129,10 +1144,10 @@ jobs:
           set -euo pipefail
           NATIVE_INPUTS=$(find benchmark-artifacts/native -mindepth 1 -maxdepth 1 -type d | sort | paste -sd, -)
           OCR_INPUTS=$(find benchmark-artifacts/ocr -mindepth 1 -maxdepth 1 -type d | sort | paste -sd, -)
-          cargo run --locked --release --package benchmark-harness --bin benchmark-harness -- consolidate \
+          ./target/release/benchmark-harness consolidate \
             --inputs "$NATIVE_INPUTS" \
             --output consolidated-output/native/
-          cargo run --locked --release --package benchmark-harness --bin benchmark-harness -- consolidate \
+          ./target/release/benchmark-harness consolidate \
             --inputs "$OCR_INPUTS" \
             --output consolidated-output/ocr/
 
@@ -1141,10 +1156,10 @@ jobs:
         if: ${{ always() && steps.validate-native.outcome == 'success' && steps.validate-ocr.outcome == 'success' }}
         run: |
           set -euo pipefail
-          cargo run --locked --release --package benchmark-harness --bin benchmark-harness -- validate-artifacts \
+          ./target/release/benchmark-harness validate-artifacts \
             --cohort native \
             --aggregated-file consolidated-output/native/aggregated.json
-          cargo run --locked --release --package benchmark-harness --bin benchmark-harness -- validate-artifacts \
+          ./target/release/benchmark-harness validate-artifacts \
             --cohort ocr \
             --aggregated-file consolidated-output/ocr/aggregated.json
 
