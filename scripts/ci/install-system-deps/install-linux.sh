@@ -42,6 +42,11 @@ packages=(
   # `-llzma` at the swift link step; the runner ships liblzma5 (runtime) but
   # not the dev symlink, so ld.gold fails with "cannot find -llzma". ~keep
   liblzma-dev
+  # libbz2-dev provides the libbz2.so linker symlink. Same reasoning as
+  # liblzma-dev: the swift package's bzip2 crates (archive/zip/unhwp paths)
+  # emit `-lbz2`; the runner ships libbz2 runtime but not the dev symlink, so
+  # ld.gold fails with "cannot find -lbz2". ~keep
+  libbz2-dev
 )
 
 echo "Installing dependencies..."
