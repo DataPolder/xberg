@@ -93,6 +93,14 @@ liter-llm = ["legacy-base", "ocr-surface", "xberg/liter-llm"]
 classification = ["legacy-base", "xberg/classification"]
 tree-sitter = ["legacy-base", "xberg/tree-sitter", "dep:tree-sitter-language-pack"]
 ner-onnx = ["legacy-base", "xberg/ner-onnx"]
+# NER (default backend: GLiNER via `ner-onnx`) and summarization were silently
+# absent from container builds (#1336): `all` never enabled them, so the
+# processors were compiled out and their config was silently dropped. Ship the
+# default GLiNER/ONNX NER plus the LLM variant, and extractive + LLM
+# summarization, so these stages actually run in `--features all` containers.
+ner-llm = ["legacy-base", "xberg/ner-llm"]
+summarization = ["legacy-base", "xberg/summarization"]
+summarization-llm = ["legacy-base", "xberg/summarization-llm"]
 heic = ["legacy-base", "xberg/heic"]
 all = [
     "default",
@@ -106,6 +114,10 @@ all = [
     "tree-sitter",
     "liter-llm",
     "classification",
+    "ner-onnx",
+    "ner-llm",
+    "summarization",
+    "summarization-llm",
 ]
 
 [dependencies]
