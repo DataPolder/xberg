@@ -536,7 +536,10 @@ package_name = "@xberg-io/xberg"
 # Runtime prebuilt, so CI provisions ORT via Homebrew, whose bottle links a
 # non-relocatable abseil closure that cannot be vendored into a portable .node.
 # Intel Mac users run the arm64 binding under Rosetta or use the WASM package. ~keep
-exclude_platforms = ["darwin-x64"]
+# Windows ARM64 (win32-arm64-msvc) is dropped for parity: no other xberg binding
+# ships Windows on ARM64 (every native build targets x86_64-pc-windows-msvc only),
+# so the target is excluded rather than leaving a declared-but-unbuilt sub-package. ~keep
+exclude_platforms = ["darwin-x64", "win32-arm64-msvc"]
 exclude_types = ["StreamReader", "PooledString"]
 exclude_functions = [
   "calculate_quality_score",

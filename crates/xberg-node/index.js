@@ -66,10 +66,6 @@ const tryLoadBinding = () => {
       "win32", "x64", null, "./xberg-node.win32-x64-msvc.node",
       "@xberg-io/xberg-win32-x64-msvc"
     ],
-    [
-      "win32", "arm64", null, "./xberg-node.win32-arm64-msvc.node",
-      "@xberg-io/xberg-win32-arm64-msvc"
-    ],
   ];
 
   for (const [plat, a, abi, localPath, optionalDep] of targets) {
