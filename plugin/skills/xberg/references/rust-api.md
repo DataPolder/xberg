@@ -1,7 +1,7 @@
 <!--
 AI-RULEZ :: GENERATED FILE — DO NOT EDIT
-Content-Hash: blake3:8739cf333878063df5c7e388dc53edeb5b7acf29cfd7e9418dfa2de994049c1b
-Source-Hash: blake3:cf2e50e4fe88772155b882eacc338a857dfdc086a8a86b7d5d4721d540e33d8c
+Content-Hash: blake3:f9a9d9dc6107ad9aa79ff396f685fdf4dd8a17afbe85dd6bd185e5fab2cfe9d1
+Source-Hash: blake3:6d7616768ddcc1ec0f5ea7ac42658e1974f423fdfd8f05ae09fc25648c143c71
 Schema-Version: v1
 -->
 
@@ -15,11 +15,11 @@ Complete API reference for the Xberg document extraction library in Rust. Xberg 
 cargo add xberg
 ```
 
-The crate version is `1.0.0-rc.1`. Because that is a pre-release, a bare `version = "1"` requirement will **not** resolve to it — pin the pre-release explicitly in `Cargo.toml`:
+The crate version is `1.0.2`. Add it to `Cargo.toml`:
 
 ```toml
 [dependencies]
-xberg = { version = "1.0.0-rc.1", features = ["full"] }
+xberg = { version = "1.0.2", features = ["full"] }
 tokio = { version = "1", features = ["full"] }
 ```
 
@@ -32,7 +32,7 @@ The `tokio-runtime` feature is on by default. Capabilities are gated behind feat
 | Feature              | What it enables                                            |
 | -------------------- | --------------------------------------------------------- |
 | `tokio-runtime`      | Async runtime support (default).                          |
-| `formats`            | All document formats + api/mcp + chunking (no OCR/ML).    |
+| `formats`            | All document formats (no OCR/ML/api/mcp/chunking).        |
 | `full`               | `formats` + ocr + layout + embeddings + tree-sitter + LLM. |
 | `pdf`                | PDF extraction.                                           |
 | `ocr`                | Tesseract-based OCR.                                      |
@@ -170,7 +170,7 @@ async fn main() -> xberg::Result<()> {
         use_cache: true,
         ocr: Some(OcrConfig {
             backend: "tesseract".to_string(),
-            language: "eng+deu".to_string(),
+            language: vec!["eng".to_string(), "deu".to_string()],
             tesseract_config: Some(TesseractConfig { psm: 6, ..Default::default() }),
             ..Default::default()
         }),
@@ -194,7 +194,7 @@ async fn main() -> xberg::Result<()> {
 pub struct OcrConfig {
     pub enabled: bool,                       // default: true
     pub backend: String,                     // "tesseract", "paddleocr", "vlm"
-    pub language: String,                    // "eng", "eng+fra", ...
+    pub language: Vec<String>,               // ["eng"], ["eng", "fra"], ...
     pub tesseract_config: Option<TesseractConfig>,
     // ...
 }
@@ -410,4 +410,4 @@ pub type Result<T> = std::result::Result<T, XbergError>;
 
 ## Version
 
-This reference targets Xberg `1.0.0-rc.1`.
+This reference targets Xberg `1.0.2`.

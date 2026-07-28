@@ -87,8 +87,9 @@ try_download() {
 	Darwin)
 		case "$arch" in
 		arm64 | aarch64) triple="aarch64-apple-darwin" ;;
+		x86_64 | amd64) triple="x86_64-apple-darwin" ;;
 		*)
-			log "no prebuilt macOS archive for $arch (only Apple Silicon is published); falling through"
+			log "no prebuilt macOS archive for $arch; falling through"
 			return 1
 			;;
 		esac

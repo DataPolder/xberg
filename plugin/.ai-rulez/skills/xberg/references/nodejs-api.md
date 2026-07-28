@@ -113,12 +113,12 @@ interface ExtractionConfig {
   chunking?: ChunkingConfig;
   images?: ImageExtractionConfig;
   pdfOptions?: PdfConfig;
-  tokenReduction?: TokenReductionConfig;
+  tokenReduction?: TokenReductionOptions;
   languageDetection?: LanguageDetectionConfig;
   postprocessor?: PostProcessorConfig;
   htmlOutput?: HtmlOutputConfig;
   keywords?: KeywordConfig;
-  pages?: PageExtractionConfig;
+  pages?: PageConfig;
 
   // Output control
   maxConcurrentExtractions?: number;
@@ -136,7 +136,7 @@ const config: ExtractionConfig = {
   enableQualityProcessing: true,
   outputFormat: "markdown",
   ocr: { backend: "tesseract", language: "eng+deu", tesseractConfig: { psm: 6 } },
-  chunking: { maxChars: 1000, maxOverlap: 200 },
+  chunking: { maxCharacters: 1000, overlap: 200 },
 };
 
 const output = await extract({ kind: "uri", uri: "document.pdf" }, config);
@@ -147,23 +147,23 @@ console.log(output.results[0].content);
 
 ```typescript
 interface ChunkingConfig {
-  maxChars?: number; // max characters per chunk
-  maxOverlap?: number; // overlap between chunks
+  maxCharacters?: number; // max characters per chunk
+  overlap?: number; // overlap between chunks
   chunkerType?: "text" | "markdown" | "semantic";
   prependHeadingContext?: boolean; // markdown chunker: prefix heading breadcrumb
-  embedding?: { preset?: string } | Record<string, unknown>; // embedding config
+  embedding?: { model?: { type: "preset"; name: string } } | Record<string, unknown>; // embedding config
   preset?: string; // named preset
 }
 ```
 
-**Key Point**: Use `maxChars` and `maxOverlap`, NOT `maxCharacters` or `overlap`.
+**Key Point**: Use `maxCharacters` and `overlap` (there are no `maxChars`/`maxOverlap` fields).
 
 ```typescript
 const config = {
   chunking: {
-    maxChars: 1000,
-    maxOverlap: 200,
-    embedding: { preset: "balanced" },
+    maxCharacters: 1000,
+    overlap: 200,
+    embedding: { model: { type: "preset", name: "balanced" } },
   },
 };
 const output = await extract({ kind: "uri", uri: "document.pdf" }, config);
@@ -210,10 +210,10 @@ interface LanguageDetectionConfig {
 }
 ```
 
-### `TokenReductionConfig`
+### `TokenReductionOptions`
 
 ```typescript
-interface TokenReductionConfig {
+interface TokenReductionOptions {
   mode?: "off" | "light" | "moderate" | "aggressive" | "maximum";
   preserveImportantWords?: boolean; // default: true
 }
@@ -232,10 +232,10 @@ interface KeywordConfig {
 }
 ```
 
-### `PageExtractionConfig`
+### `PageConfig`
 
 ```typescript
-interface PageExtractionConfig {
+interface PageConfig {
   extractPages?: boolean;
   insertPageMarkers?: boolean;
   markerFormat?: string; // contains {page_num}
@@ -271,7 +271,7 @@ interface ExtractedDocument {
   images?: ExtractedImage[] | null;
   pages?: PageContent[] | null;
   elements?: Element[] | null; // when resultFormat: 'element_based'
-  extractedKeywords?: ExtractedKeyword[] | null;
+  extractedKeywords?: Keyword[] | null;
   qualityScore?: number | null;
   processingWarnings?: ProcessingWarning[];
 }
@@ -305,13 +305,13 @@ interface Chunk {
 }
 ```
 
-### `ExtractedKeyword`
+### `Keyword`
 
 ```typescript
-interface ExtractedKeyword {
+interface Keyword {
   text: string;
   score: number;
-  algorithm: string; // 'yake', 'rake', etc.
+  algorithm: KeywordAlgorithm; // 'yake' | 'rake'
   positions?: number[] | null;
 }
 ```
@@ -370,7 +370,7 @@ const processor = {
     return result;
   },
   processingStage() {
-    return "late"; // 'early' | 'middle' | 'late'
+    return "Late"; // "Early" | "Middle" | "Late"
   },
 };
 
@@ -415,11 +415,11 @@ const backend = {
   supportedLanguages() {
     return ["eng", "deu", "fra"];
   },
-  async processImage(imageBytes, language) {
+  async processImage(imageBytes, config) {
     return {
       content: "extracted text",
-      mime_type: "text/plain",
-      metadata: { confidence: 0.95, language },
+      mimeType: "text/plain",
+      metadata: { confidence: 0.95, language: config.language },
       tables: [],
     };
   },
@@ -434,13 +434,13 @@ registerOcrBackend(backend);
 
 ## Embeddings
 
-Embedding models are selected inside `chunking.embedding` via a `preset` (or a fastembed/custom model object). Presets: `fast`, `balanced`, `quality`, `multilingual`.
+Embedding models are selected inside `chunking.embedding` via a `model` tagged union (`{ type: "preset", name }` for a named preset, or a custom model object). Presets: `fast`, `balanced`, `quality`, `multilingual`.
 
 ```typescript
 const config = {
   chunking: {
-    maxChars: 512,
-    embedding: { preset: "balanced" },
+    maxCharacters: 512,
+    embedding: { model: { type: "preset", name: "balanced" } },
   },
 };
 

@@ -1,6 +1,6 @@
 // AI-RULEZ :: GENERATED FILE — DO NOT EDIT
-// Content-Hash: blake3:76b6477efe57f116ea00ac739c1d78d6a8571ea3061535b355d3078bd7df755c
-// Source-Hash: blake3:cf2e50e4fe88772155b882eacc338a857dfdc086a8a86b7d5d4721d540e33d8c
+// Content-Hash: blake3:a176d5615df7d9fc0f850b5d83d3355f87d3045645f185d67c0d1e5edfb4a6c6
+// Source-Hash: blake3:6d7616768ddcc1ec0f5ea7ac42658e1974f423fdfd8f05ae09fc25648c143c71
 // Schema-Version: v1
 
 import {tool} from "@opencode-ai/plugin";
@@ -60,7 +60,7 @@ function runCli(args, context) {
         resolve({
           title : "xberg CLI not found",
           output :
-              "Install the xberg CLI with `brew install xberg-io/tap/xberg`, or run it via `npx xberg` / `uvx --from xberg xberg`.",
+              "Install the xberg CLI with `brew install xberg-io/tap/xberg`, or run it via `npx -y @xberg-io/xberg-cli` / `uvx --from xberg-cli xberg`.",
           metadata : {exitCode : 127, command : "xberg", subcommand : args[0]},
         });
         return;

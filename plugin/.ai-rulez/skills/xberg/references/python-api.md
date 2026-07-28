@@ -21,7 +21,7 @@ Extract content from a single input (a local path, `file://` URI, HTTP(S) URL, o
 
 **Parameters:**
 
-- `input` (ExtractInput | None): The input to extract. Construct with `ExtractInput.from_uri(...)` or `ExtractInput(kind="bytes", ...)`.
+- `input` (ExtractInput | None): The input to extract. Construct with `ExtractInput(uri=...)` or `ExtractInput(kind="bytes", ...)`.
 - `config` (ExtractionConfig | None): Extraction configuration (uses defaults if None).
 
 **Returns:** `ExtractionResult` with `results`, `errors`, and `summary`.
@@ -33,7 +33,7 @@ import asyncio
 from xberg import ExtractInput, extract, ExtractionConfig
 
 async def main() -> None:
-    result = await extract(ExtractInput.from_uri("document.pdf"), ExtractionConfig())
+    result = await extract(ExtractInput(uri="document.pdf"), ExtractionConfig())
     doc = result.results[0]
     print(doc.content)
     print(doc.metadata)
@@ -100,8 +100,8 @@ Unified input for both entry points.
 from xberg import ExtractInput
 
 # From a path, file:// URI, or URL
-ExtractInput.from_uri("document.pdf")
-ExtractInput.from_uri("https://example.com/report.pdf")
+ExtractInput(uri="document.pdf")
+ExtractInput(uri="https://example.com/report.pdf")
 
 # From raw bytes (mime_type or filename helps detection)
 ExtractInput(kind="bytes", bytes=b"%PDF-1.4 ...", mime_type="application/pdf", filename="document.pdf")
@@ -147,7 +147,7 @@ config = ExtractionConfig(
     ocr=OcrConfig(backend="tesseract", language="eng"),
     chunking=ChunkingConfig(max_characters=1000, overlap=200),
 )
-result = await extract(ExtractInput.from_uri("document.pdf"), config)
+result = await extract(ExtractInput(uri="document.pdf"), config)
 ```
 
 ### FileExtractionConfig
@@ -263,10 +263,13 @@ Embedding model selector. Static constructors:
 def preset(name: str) -> EmbeddingModelType    # "fast", "balanced", "quality", "multilingual"
 
 @staticmethod
-def fastembed(model: str, dimensions: int) -> EmbeddingModelType
+def custom(model_id: str, dimensions: int) -> EmbeddingModelType   # any ONNX model on HuggingFace
 
 @staticmethod
-def custom(model_id: str, dimensions: int) -> EmbeddingModelType   # any ONNX model on HuggingFace
+def llm(llm) -> EmbeddingModelType   # an LLM-backed embedding model
+
+@staticmethod
+def plugin(name: str) -> EmbeddingModelType   # a registered embedding backend
 ```
 
 ```python
@@ -366,7 +369,7 @@ Preprocessing applied to images **before OCR** (not for extracting images from d
 | Field                 | Type | Default | Description                                       |
 | --------------------- | ---- | ------- | ------------------------------------------------- |
 | `target_dpi`          | int  | 300     | Target DPI for normalization before OCR.          |
-| `auto_rotate`         | bool | True    | Detect and correct image rotation.                |
+| `auto_rotate`         | bool | False   | Detect and correct image rotation.                |
 | `deskew`              | bool | True    | Correct skewed images.                            |
 | `denoise`             | bool | False   | Apply denoising filters.                          |
 | `contrast_enhance`    | bool | False   | Enhance contrast.                                 |
@@ -429,7 +432,7 @@ async def main() -> None:
         output_format="markdown",
         language_detection=None,
     )
-    result = await extract(ExtractInput.from_uri("document.pdf"), config)
+    result = await extract(ExtractInput(uri="document.pdf"), config)
     doc = result.results[0]
 
     print(f"Content preview: {doc.content[:200]}")
@@ -449,24 +452,24 @@ asyncio.run(main())
 
 ### Metadata access
 
-Metadata is flat — format-specific fields sit at the top level and are accessed like a mapping:
+Metadata exposes typed attributes — access fields directly. Format-specific metadata lives under `metadata.format`:
 
 ```python
-result = await extract(ExtractInput.from_uri("document.pdf"), ExtractionConfig())
+result = await extract(ExtractInput(uri="document.pdf"), ExtractionConfig())
 metadata = result.results[0].metadata
 
-if metadata.get("page_count"):
-    print(f"Pages: {metadata['page_count']}")
-if metadata.get("title"):
-    print(f"Title: {metadata['title']}")
-if metadata.get("authors"):
-    print(f"Authors: {', '.join(metadata['authors'])}")
+if metadata.pages:
+    print(f"Pages: {metadata.pages.total_count}")
+if metadata.title:
+    print(f"Title: {metadata.title}")
+if metadata.authors:
+    print(f"Authors: {', '.join(metadata.authors)}")
 ```
 
 ### Tables
 
 ```python
-result = await extract(ExtractInput.from_uri("document.pdf"), ExtractionConfig())
+result = await extract(ExtractInput(uri="document.pdf"), ExtractionConfig())
 for table in result.results[0].tables:
     print(f"Table with {len(table.cells)} rows")
     print(table.markdown)
@@ -491,7 +494,7 @@ from xberg import (
 
 async def main() -> None:
     try:
-        result = await extract(ExtractInput.from_uri("document.pdf"), ExtractionConfig())
+        result = await extract(ExtractInput(uri="document.pdf"), ExtractionConfig())
     except ParsingError as e:
         print(f"Failed to parse document: {e}")
     except OcrError as e:

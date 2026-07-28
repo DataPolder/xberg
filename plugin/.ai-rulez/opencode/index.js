@@ -55,7 +55,7 @@ function runCli(args, context) {
         resolve({
           title : "xberg CLI not found",
           output :
-              "Install the xberg CLI with `brew install xberg-io/tap/xberg`, or run it via `npx xberg` / `uvx --from xberg xberg`.",
+              "Install the xberg CLI with `brew install xberg-io/tap/xberg`, or run it via `npx -y @xberg-io/xberg-cli` / `uvx --from xberg-cli xberg`.",
           metadata : {exitCode : 127, command : "xberg", subcommand : args[0]},
         });
         return;

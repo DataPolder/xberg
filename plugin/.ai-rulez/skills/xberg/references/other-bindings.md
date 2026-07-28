@@ -2,7 +2,7 @@
 
 Xberg provides native bindings for many languages, each with precompiled binaries for x86_64 and aarch64 on Linux and macOS. This reference covers installation and basic usage for each binding.
 
-Every binding shares the same shape: build an **`ExtractInput`** (from a URI or bytes), pass it with an **`ExtractionConfig`** to `extract` (or `extract_batch`), and read per-document data from the result **envelope's `results` array** (index `[0]` for a single input). The one exception is WASM, which returns the document directly (no `results` array).
+Every binding shares the same shape: build an **`ExtractInput`** (from a URI or bytes), pass it with an **`ExtractionConfig`** to `extract` (or `extract_batch`), and read per-document data from the result **envelope's `results` array** (index `[0]` for a single input). WASM follows the same shape — its `extract` returns a `WasmExtractionResult` envelope with a `results` array, not the document directly.
 
 ## Go
 
@@ -37,7 +37,7 @@ func main() {
 **With OCR** (config fields are pointers):
 
 ```go
-ocrConfig := &xberg.OcrConfig{Backend: "tesseract", Language: "eng"}
+ocrConfig := &xberg.OcrConfig{Backend: "tesseract", Language: []string{"eng"}}
 config := xberg.ExtractionConfig{Ocr: ocrConfig}
 
 input := xberg.ExtractInputFromURI("scanned.pdf")
@@ -77,7 +77,7 @@ puts result.results.first.content
 config = Xberg::ExtractionConfig.new(
   ocr: Xberg::OcrConfig.new(
     backend: 'tesseract',
-    language: 'eng+fra',
+    language: ['eng', 'fra'],
     tesseract_config: Xberg::TesseractConfig.new(psm: 3)
   )
 )
@@ -89,13 +89,13 @@ See the [Ruby binding documentation](https://github.com/xberg-io/xberg/tree/main
 
 ## Java
 
-**Installation:** add to your Maven `pom.xml` (the binding version tracks the core release, currently `1.0.0-rc.1`):
+**Installation:** add to your Maven `pom.xml` (the binding version tracks the core release, currently `1.0.2`):
 
 ```xml
 <dependency>
     <groupId>io.xberg</groupId>
     <artifactId>xberg</artifactId>
-    <version>1.0.0-rc.1</version>
+    <version>1.0.2</version>
 </dependency>
 ```
 
@@ -125,9 +125,10 @@ public class Example {
 
 ```java
 import io.xberg.OcrConfig;
+import java.util.List;
 
 ExtractionConfig config = ExtractionConfig.builder()
-    .ocr(OcrConfig.builder().backend("tesseract").language("eng").build())
+    .withOcr(OcrConfig.builder().withBackend("tesseract").withLanguage(List.of("eng")).build())
     .build();
 ExtractionResult output = Xberg.extract(
     ExtractInput.builder().withKind(ExtractInputKind.Uri).withUri("scanned.pdf").build(),
@@ -142,7 +143,7 @@ See the [Java binding documentation](https://github.com/xberg-io/xberg/tree/main
 **Installation:**
 
 ```bash
-dotnet add package Xberg
+dotnet add package XbergIo.Xberg
 ```
 
 **Basic Extraction** (async):
@@ -163,7 +164,7 @@ using Xberg;
 
 var config = new ExtractionConfig
 {
-    Ocr = new OcrConfig { Backend = "tesseract", Language = "eng" }
+    Ocr = new OcrConfig { Backend = "tesseract", Language = ["eng"] }
 };
 
 var result = (await XbergConverter.ExtractAsync(
@@ -210,13 +211,15 @@ $result = $output->results[0];
 ```php
 use Xberg\OcrConfig;
 
-$ocrConfig = new OcrConfig();
-$ocrConfig->setBackend('tesseract');
-$ocrConfig->setLanguage('eng');
+$ocrConfig = new OcrConfig(
+    enabled: true,
+    backend: 'tesseract',
+    language: ['eng'],
+    autoRotate: true,
+    vlmFallback: false,
+);
 
-$config = ExtractionConfig::default();
-$config->setForceOcr(true);
-$config->setOcr($ocrConfig);
+$config = new ExtractionConfig(forceOcr: true, ocr: $ocrConfig);
 
 $output = XbergApi::extract(ExtractInput::fromUri('scanned.pdf'), $config);
 $result = $output->results[0];
@@ -227,12 +230,12 @@ See the [PHP binding documentation](https://github.com/xberg-io/xberg/tree/main/
 
 ## Elixir
 
-**Installation:** add to your `mix.exs` dependencies (the binding version tracks the core release, currently `1.0.0-rc.1`):
+**Installation:** add to your `mix.exs` dependencies (the binding version tracks the core release, currently `1.0.2`):
 
 ```elixir
 def deps do
   [
-    {:xberg, "~> 1.0.0-rc.1"}
+    {:xberg, "~> 1.0.2"}
   ]
 end
 ```
@@ -272,7 +275,7 @@ See the [Elixir binding documentation](https://github.com/xberg-io/xberg/tree/ma
 npm install @xberg-io/xberg-wasm
 ```
 
-**Basic Extraction:** the WASM build is bytes-based and must be initialized once with `initWasm()`. Unlike the native bindings, it returns the extracted document **directly** (no `results` array).
+**Basic Extraction:** the WASM build is bytes-based and must be initialized once with `initWasm()`. Like the native bindings, it returns a `WasmExtractionResult` envelope with a `results` array.
 
 ```typescript
 import { initWasm, extract } from "@xberg-io/xberg-wasm";
@@ -283,7 +286,7 @@ const response = await fetch("document.pdf");
 const data = new Uint8Array(await response.arrayBuffer());
 
 const result = await extract({ kind: "bytes", bytes: data, mimeType: "application/pdf" }, undefined);
-console.log(result.content);
+console.log(result.results[0].content);
 ```
 
 **With OCR:**
@@ -291,7 +294,7 @@ console.log(result.content);
 ```typescript
 const config = { force_ocr: true, ocr: { backend: "tesseract", language: "eng" } };
 const result = await extract({ kind: "bytes", bytes: data, mimeType: "application/pdf" }, config);
-console.log(result.content);
+console.log(result.results[0].content);
 ```
 
 Supports browsers, Deno, and Cloudflare Workers.

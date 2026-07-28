@@ -118,15 +118,19 @@ document in the result envelope (`result.results[0].chunks`):
 from xberg import ExtractInput, extract, ExtractionConfig, ChunkingConfig
 
 config = ExtractionConfig(
-    chunking=ChunkingConfig(max_characters=1000, overlap=200),
+    chunking=ChunkingConfig(max_chars=1000, max_overlap=200),
 )
-result = await extract(ExtractInput.from_uri("report.pdf"), config)
+result = await extract(ExtractInput(uri="report.pdf"), config)
 for chunk in result.results[0].chunks or []:
     print(len(chunk.content))
 ```
 
-> Python and Rust `ChunkingConfig` use `max_characters` / `overlap`; Node uses
-> `maxChars` / `maxOverlap`. See `references/python-api.md` and
+> The Rust core struct fields are `max_characters` / `overlap`; TOML/JSON
+> config keys are `max_chars` / `max_overlap` (with `max_characters` /
+> `overlap` accepted as serde aliases); the Python constructor takes kwargs
+> `max_chars` / `max_overlap` while its read-only attributes are
+> `max_characters` / `overlap`; Node's `ChunkingConfig` interface uses
+> `maxCharacters` / `overlap`. See `references/python-api.md` and
 > `references/rust-api.md` in the sibling `xberg` skill.
 
 ## Picking parameters

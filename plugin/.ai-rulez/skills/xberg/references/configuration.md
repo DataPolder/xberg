@@ -56,7 +56,7 @@ In Python, `ExtractionConfig` is a `TypedDict`; pass a plain dict to `extract`. 
 from xberg import extract, ExtractInput
 
 result = await extract(
-    ExtractInput.from_uri("document.pdf"),
+    ExtractInput(uri="document.pdf"),
     config={"force_ocr": True, "chunking": {"max_characters": 1000}},
 )
 ```
@@ -76,7 +76,7 @@ force_ocr = false
 disable_ocr = false
 output_format = "plain"
 result_format = "unified"
-extraction_timeout_secs = 60
+extraction_timeout_secs = 600
 max_archive_depth = 3
 ```
 
@@ -89,8 +89,8 @@ max_archive_depth = 3
 | `disable_ocr`                | boolean          | `false`       | Disable OCR entirely, even for images (cannot be `true` together with `force_ocr`)           |
 | `output_format`              | string           | `"plain"`     | Content render format: `plain`, `markdown`, `djot`, `html`, `json`, `structured`             |
 | `result_format`              | string           | `"unified"`   | Result shape: `unified` or `element_based`                                                   |
-| `extraction_timeout_secs`    | int \| null      | `60`          | Per-file timeout in seconds for batch extraction. `null` disables the timeout                |
-| `max_concurrent_extractions` | int \| null      | `null`        | Max concurrent extractions. `null` = `ceil(num_cpus × 1.5)`                                  |
+| `extraction_timeout_secs`    | int \| null      | `600`         | Per-file timeout in seconds for batch extraction (10 minutes). `null` disables the timeout   |
+| `max_concurrent_extractions` | int \| null      | `null`        | Max concurrent extractions (a ceiling within the thread budget). `null` = resolved thread budget = `min(num_cpus, 8)` (or the configured `concurrency.max_threads`) |
 | `max_embedded_file_bytes`    | int \| null      | `52428800`    | Max uncompressed size (bytes) of a single embedded file before recursive extraction (50 MiB) |
 | `max_archive_depth`          | int              | `3`           | Max recursion depth for archive extraction. `0` disables recursive extraction               |
 | `use_layout_for_markdown`    | boolean          | `false`       | Use layout detection on the non-OCR PDF markdown path (requires `layout` set)               |
@@ -114,7 +114,7 @@ auto_rotate = false
 | Option         | Type             | Default     | Description                                                            |
 | -------------- | ---------------- | ----------- | --------------------------------------------------------------------- |
 | `enabled`      | boolean          | `true`      | Whether OCR is enabled. Setting `false` is equivalent to `disable_ocr` |
-| `backend`      | string           | `""`        | OCR backend: `tesseract`, `paddleocr`/`paddle-ocr`, or `vlm`. Empty resolves to the default backend |
+| `backend`      | string           | `"tesseract"` | OCR backend: `tesseract`, `paddleocr`/`paddle-ocr`, or `vlm`         |
 | `language`     | string or array  | `["eng"]`   | Language code(s). Accepts `"eng"` or `["eng", "deu"]`. Tesseract joins with `+` |
 | `auto_rotate`  | boolean          | `false`     | Enable automatic page rotation based on orientation detection         |
 | `vlm_fallback` | string           | `"disabled"` | VLM fallback policy                                                   |
@@ -214,7 +214,6 @@ include_bbox = true
 | `enabled`                | boolean       | `true`  | Enable hierarchy extraction                          |
 | `k_clusters`             | integer       | `3`     | Number of font-size clusters for hierarchy (1–7)     |
 | `include_bbox`           | boolean       | `true`  | Include bounding boxes in hierarchy blocks           |
-| `ocr_coverage_threshold` | float \| null | `null`  | OCR coverage threshold for smart OCR triggering (0.0–1.0) |
 
 ### Image Processing
 
@@ -294,7 +293,7 @@ show_download_progress = false
 
 | Option                   | Type           | Default | Description                                                       |
 | ------------------------ | -------------- | ------- | ----------------------------------------------------------------- |
-| `model`                  | table          | preset `balanced` | Embedding model (tagged enum, see below). Defaults to the `balanced` preset |
+| `model`                  | table          | preset `gte-modernbert-base` | Embedding model (tagged enum, see below). Defaults to the `gte-modernbert-base` preset (`balanced` is still a selectable preset) |
 | `normalize`              | boolean        | `true`  | Normalize embedding vectors (recommended for cosine similarity)   |
 | `batch_size`             | integer        | `32`    | Batch size for embedding generation                               |
 | `show_download_progress` | boolean        | `false` | Show model download progress                                      |
@@ -437,8 +436,8 @@ from xberg import extract_batch, ExtractInput, FileExtractionConfig
 
 result = await extract_batch(
     [
-        ExtractInput.from_uri("scan.pdf", config=FileExtractionConfig(force_ocr=True)),
-        ExtractInput.from_uri("report.docx"),  # uses batch defaults
+        ExtractInput(uri="scan.pdf", config=FileExtractionConfig(force_ocr=True)),
+        ExtractInput(uri="report.docx"),  # uses batch defaults
     ],
     config={"chunking": {"max_characters": 1000}},  # batch-level default
 )
@@ -573,7 +572,7 @@ Critical config-file keys (verify against the source structs when adding options
 - `overlap` (chunk overlap; default `200`)
 - `chunker_type`, `table_chunking`, `sizing`
 - `enable_table_detection`, `table_min_confidence`, `table_column_threshold`, `table_row_threshold_ratio`
-- `k_clusters`, `include_bbox`, `ocr_coverage_threshold`
+- `k_clusters`, `include_bbox`
 - `auto_rotate`, `auto_adjust_dpi`, `inject_placeholders`
 - `show_download_progress`, `normalize`, `batch_size`
 - `min_confidence`, `detect_multiple`

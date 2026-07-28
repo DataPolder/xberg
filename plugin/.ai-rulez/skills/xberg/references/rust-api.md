@@ -8,11 +8,11 @@ Complete API reference for the Xberg document extraction library in Rust. Xberg 
 cargo add xberg
 ```
 
-The crate version is `1.0.0-rc.1`. Because that is a pre-release, a bare `version = "1"` requirement will **not** resolve to it — pin the pre-release explicitly in `Cargo.toml`:
+The crate version is `1.0.2`. Add it to `Cargo.toml`:
 
 ```toml
 [dependencies]
-xberg = { version = "1.0.0-rc.1", features = ["full"] }
+xberg = { version = "1.0.2", features = ["full"] }
 tokio = { version = "1", features = ["full"] }
 ```
 
@@ -25,7 +25,7 @@ The `tokio-runtime` feature is on by default. Capabilities are gated behind feat
 | Feature              | What it enables                                            |
 | -------------------- | --------------------------------------------------------- |
 | `tokio-runtime`      | Async runtime support (default).                          |
-| `formats`            | All document formats + api/mcp + chunking (no OCR/ML).    |
+| `formats`            | All document formats (no OCR/ML/api/mcp/chunking).        |
 | `full`               | `formats` + ocr + layout + embeddings + tree-sitter + LLM. |
 | `pdf`                | PDF extraction.                                           |
 | `ocr`                | Tesseract-based OCR.                                      |
@@ -163,7 +163,7 @@ async fn main() -> xberg::Result<()> {
         use_cache: true,
         ocr: Some(OcrConfig {
             backend: "tesseract".to_string(),
-            language: "eng+deu".to_string(),
+            language: vec!["eng".to_string(), "deu".to_string()],
             tesseract_config: Some(TesseractConfig { psm: 6, ..Default::default() }),
             ..Default::default()
         }),
@@ -187,7 +187,7 @@ async fn main() -> xberg::Result<()> {
 pub struct OcrConfig {
     pub enabled: bool,                       // default: true
     pub backend: String,                     // "tesseract", "paddleocr", "vlm"
-    pub language: String,                    // "eng", "eng+fra", ...
+    pub language: Vec<String>,               // ["eng"], ["eng", "fra"], ...
     pub tesseract_config: Option<TesseractConfig>,
     // ...
 }
@@ -403,4 +403,4 @@ pub type Result<T> = std::result::Result<T, XbergError>;
 
 ## Version
 
-This reference targets Xberg `1.0.0-rc.1`.
+This reference targets Xberg `1.0.2`.

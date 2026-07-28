@@ -1,7 +1,7 @@
 <!--
 AI-RULEZ :: GENERATED FILE — DO NOT EDIT
-Content-Hash: blake3:a65553e20a7eb4df1973782ebe77ac04181a1627415f93feeb26c1d8b20081aa
-Source-Hash: blake3:cf2e50e4fe88772155b882eacc338a857dfdc086a8a86b7d5d4721d540e33d8c
+Content-Hash: blake3:fc2412f569929a95cf1b988c5c33aa4d064b52712f8d606de11eb58b3f5d86ff
+Source-Hash: blake3:6d7616768ddcc1ec0f5ea7ac42658e1974f423fdfd8f05ae09fc25648c143c71
 Schema-Version: v1
 -->
 
@@ -47,7 +47,7 @@ xberg extract <path> [FLAGS]
 - `-f, --format <text|json|toon>` — CLI output format (default: `text`). Controls how results display, not extraction content format.
 - `--content-format <plain|markdown|djot|html|json>` — Extraction content format (default: `plain`). Controls format of extracted content. (Note: `--output-format` is a hidden deprecated alias.)
 - `--ocr <bool>` — Enable OCR processing.
-- `--ocr-backend <BACKEND>` — OCR backend: `tesseract`, `paddle-ocr`, `vlm`, `candle-trocr`, `candle-paddleocr-vl`, `candle-glm-ocr`, `candle-hunyuan-ocr`, `candle-deepseek-ocr`.
+- `--ocr-backend <BACKEND>` — OCR backend: `tesseract`, `paddle-ocr`, `vlm`, `candle-trocr`, `candle-paddleocr-vl`, `candle-glm-ocr`, `candle-deepseek-ocr`.
 - `--ocr-language <LANG>` — OCR language code.
 - `--ocr-auto-rotate <bool>` — Auto-rotate images before OCR.
 - `--force-ocr <bool>` — Force OCR even if text extraction succeeds.
@@ -132,7 +132,7 @@ xberg batch <paths...> [FLAGS]
 ## Notes
 
 - Batch command defaults to JSON output format (unlike `extract` which defaults to text).
-- Does not support `--mime-type` or `--detect-language` flags.
+- Does not support the `--mime-type` flag (it is specific to the `extract` command).
 
 ## Examples
 

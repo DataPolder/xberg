@@ -40,7 +40,7 @@ xberg extract <path> [FLAGS]
 - `-f, --format <text|json|toon>` — CLI output format (default: `text`). Controls how results display, not extraction content format.
 - `--content-format <plain|markdown|djot|html|json>` — Extraction content format (default: `plain`). Controls format of extracted content. (Note: `--output-format` is a hidden deprecated alias.)
 - `--ocr <bool>` — Enable OCR processing.
-- `--ocr-backend <BACKEND>` — OCR backend: `tesseract`, `paddle-ocr`, `vlm`, `candle-trocr`, `candle-paddleocr-vl`, `candle-glm-ocr`, `candle-hunyuan-ocr`, `candle-deepseek-ocr`.
+- `--ocr-backend <BACKEND>` — OCR backend: `tesseract`, `paddle-ocr`, `vlm`, `candle-trocr`, `candle-paddleocr-vl`, `candle-glm-ocr`, `candle-deepseek-ocr`.
 - `--ocr-language <LANG>` — OCR language code.
 - `--ocr-auto-rotate <bool>` — Auto-rotate images before OCR.
 - `--force-ocr <bool>` — Force OCR even if text extraction succeeds.
@@ -125,7 +125,7 @@ xberg batch <paths...> [FLAGS]
 ## Notes
 
 - Batch command defaults to JSON output format (unlike `extract` which defaults to text).
-- Does not support `--mime-type` or `--detect-language` flags.
+- Does not support the `--mime-type` flag (it is specific to the `extract` command).
 
 ## Examples
 

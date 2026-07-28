@@ -24,8 +24,8 @@ Post-processors enrich extraction results after document parsing. They run non-d
             return "1.0.0"
 
         def process(self, result: ExtractedDocument) -> ExtractedDocument:
-            result.metadata["processed_by"] = "metadata_enricher"
-            result.metadata["char_count"] = len(result.content)
+            result.metadata.additional["processed_by"] = "metadata_enricher"
+            result.metadata.additional["char_count"] = str(len(result.content))
             return result
 
         def processing_stage(self) -> str:
@@ -34,8 +34,8 @@ Post-processors enrich extraction results after document parsing. They run non-d
     register_post_processor(MetadataEnricher())
 
     async def main() -> None:
-        result = await extract(ExtractInput.from_uri("document.pdf"), ExtractionConfig())
-        print(result.results[0].metadata["char_count"])
+        result = await extract(ExtractInput(uri="document.pdf"), ExtractionConfig())
+        print(result.results[0].metadata.additional["char_count"])
 
     asyncio.run(main())
     ```
@@ -126,7 +126,7 @@ Register a custom OCR engine to integrate proprietary or specialized OCR.
 === "Python"
 
     ```python
-    from xberg import register_ocr_backend, ExtractInput, extract, ExtractionConfig, OcrConfig
+    from xberg import register_ocr_backend, ExtractInput, extract, ExtractionConfig, OcrConfig, OcrBackendType
 
     class CustomOcrBackend:
         def name(self) -> str:
@@ -138,18 +138,25 @@ Register a custom OCR engine to integrate proprietary or specialized OCR.
         def supported_languages(self) -> list[str]:
             return ["eng", "deu", "fra", "spa"]
 
-        def process_image(self, image_bytes: bytes, language: str) -> dict:
+        def supports_language(self, language: str) -> bool:
+            return language in self.supported_languages()
+
+        def backend_type(self) -> OcrBackendType:
+            return OcrBackendType.CUSTOM
+
+        # The second argument is the resolved OcrConfig, not a language string.
+        def process_image(self, image_bytes: bytes, config: OcrConfig) -> dict:
+            language = config.language[0] if config.language else "eng"
             # text = my_ocr_engine.recognize(image_bytes, language)
             return {
                 "content": "Extracted text from image",
-                "metadata": {"confidence": 0.95, "language": language},
                 "tables": [],
             }
 
     register_ocr_backend(CustomOcrBackend())
 
     config = ExtractionConfig(ocr=OcrConfig(backend="custom_ocr", language="eng"))
-    # result = await extract(ExtractInput.from_uri("scanned.pdf"), config)
+    # result = await extract(ExtractInput(uri="scanned.pdf"), config)
     ```
 
 === "TypeScript"
@@ -157,19 +164,28 @@ Register a custom OCR engine to integrate proprietary or specialized OCR.
     ```typescript
     import { registerOcrBackend, extract } from "@xberg-io/xberg";
 
+    const supportedLangs = ["eng", "deu", "fra", "spa"];
+
     const backend = {
       name() {
         return "custom_ocr";
       },
       supportedLanguages() {
-        return ["eng", "deu", "fra", "spa"];
+        return supportedLangs;
       },
-      async processImage(imageBytes, language) {
+      supportsLanguage(lang) {
+        return supportedLangs.includes(lang);
+      },
+      backendType() {
+        return "Custom";
+      },
+      // The second argument is the resolved OcrConfig, not a language string.
+      async processImage(imageBytes, config) {
+        const language = config?.language?.[0] ?? "eng";
         // const text = await myOcrEngine.recognize(imageBytes, language);
         return {
           content: "Extracted text from image",
           mime_type: "text/plain",
-          metadata: { confidence: 0.95, language },
           tables: [],
         };
       },
@@ -192,7 +208,7 @@ Override extraction settings for individual inputs by setting `config` on each `
     from xberg import ExtractInput, extract_batch, ExtractionConfig, FileExtractionConfig, OcrConfig
 
     async def main() -> None:
-        report = ExtractInput.from_uri("report.pdf")
+        report = ExtractInput(uri="report.pdf")
         scan = ExtractInput(
             kind="uri",
             uri="scan.tiff",
@@ -266,7 +282,7 @@ Generate vector embeddings for text chunks using ONNX models. Embeddings enable 
         )
     )
 
-    result = await extract(ExtractInput.from_uri("document.pdf"), config)
+    result = await extract(ExtractInput(uri="document.pdf"), config)
     for chunk in result.results[0].chunks or []:
         print(f"{chunk.content[:50]}... -> {len(chunk.embedding) if chunk.embedding else 0} dims")
     ```
@@ -278,9 +294,9 @@ Generate vector embeddings for text chunks using ONNX models. Embeddings enable 
 
     const config = {
       chunking: {
-        maxChars: 512,
-        maxOverlap: 100,
-        embedding: { preset: "balanced" },
+        maxCharacters: 512,
+        overlap: 100,
+        embedding: { model: { type: "preset", name: "balanced" } },
       },
     };
 
@@ -324,7 +340,7 @@ Extract important keywords using YAKE or RAKE.
         )
     )
 
-    result = await extract(ExtractInput.from_uri("document.pdf"), config)
+    result = await extract(ExtractInput(uri="document.pdf"), config)
     for keyword in result.results[0].extracted_keywords or []:
         print(f"{keyword.text}: {keyword.score} ({keyword.algorithm})")
     ```
@@ -367,7 +383,7 @@ Detect document language(s) using ISO 639-1 codes.
         )
     )
 
-    result = await extract(ExtractInput.from_uri("multilingual.pdf"), config)
+    result = await extract(ExtractInput(uri="multilingual.pdf"), config)
     for lang in result.results[0].detected_languages or []:
         print(f"Detected language: {lang}")  # e.g. "en", "de", "fr"
     ```
@@ -403,7 +419,7 @@ Reduce token count in extracted content to lower LLM costs. Higher modes are mor
         )
     )
 
-    result = await extract(ExtractInput.from_uri("document.pdf"), config)
+    result = await extract(ExtractInput(uri="document.pdf"), config)
     print(f"Reduced content length: {len(result.results[0].content)}")
     ```
 
@@ -436,7 +452,7 @@ Track per-page content separately.
         )
     )
 
-    result = await extract(ExtractInput.from_uri("multi_page.pdf"), config)
+    result = await extract(ExtractInput(uri="multi_page.pdf"), config)
     for page in result.results[0].pages or []:
         print(f"Page {page.page_number}: {len(page.content)} chars, {len(page.tables)} tables")
     ```
@@ -470,7 +486,7 @@ Extract semantic elements (Unstructured-compatible) instead of unified content.
     from xberg import ExtractInput, extract, ExtractionConfig
 
     config = ExtractionConfig(result_format="element_based")
-    result = await extract(ExtractInput.from_uri("document.pdf"), config)
+    result = await extract(ExtractInput(uri="document.pdf"), config)
 
     for element in result.results[0].elements or []:
         print(f"Type: {element.element_type}")  # title, heading, narrative_text, ...
@@ -503,7 +519,7 @@ Output extracted content in Djot markup.
     from xberg import ExtractInput, extract, ExtractionConfig
 
     config = ExtractionConfig(output_format="djot")
-    result = await extract(ExtractInput.from_uri("document.pdf"), config)
+    result = await extract(ExtractInput(uri="document.pdf"), config)
     print(result.results[0].content)  # Djot-formatted content
     ```
 
@@ -537,7 +553,7 @@ Cap resource consumption for untrusted input (especially archives).
         )
     )
 
-    result = await extract(ExtractInput.from_uri("archive.zip"), config)
+    result = await extract(ExtractInput(uri="archive.zip"), config)
     ```
 
 === "TypeScript"
@@ -569,10 +585,10 @@ Extraction results are cached by default (content-hash keyed) to speed up repeat
     from xberg import ExtractInput, extract, ExtractionConfig
 
     # Caching on (default)
-    result = await extract(ExtractInput.from_uri("document.pdf"), ExtractionConfig(use_cache=True))
+    result = await extract(ExtractInput(uri="document.pdf"), ExtractionConfig(use_cache=True))
 
     # Disable caching
-    result = await extract(ExtractInput.from_uri("document.pdf"), ExtractionConfig(use_cache=False))
+    result = await extract(ExtractInput(uri="document.pdf"), ExtractionConfig(use_cache=False))
     ```
 
 === "TypeScript"

@@ -1,7 +1,7 @@
 <!--
 AI-RULEZ :: GENERATED FILE — DO NOT EDIT
-Content-Hash: blake3:e61a5dab89a3951bce34de786314cee08890d437c0b3757f8e2062ec74cf4dfd
-Source-Hash: blake3:cf2e50e4fe88772155b882eacc338a857dfdc086a8a86b7d5d4721d540e33d8c
+Content-Hash: blake3:9bcf0b9c4442c132ecdfe8eeead060d4c9484b03ef51d0ed9b2e9be0fdc2000d
+Source-Hash: blake3:6d7616768ddcc1ec0f5ea7ac42658e1974f423fdfd8f05ae09fc25648c143c71
 Schema-Version: v1
 -->
 
@@ -28,9 +28,8 @@ Xberg supports 98+ file formats across 8 major categories with intelligent forma
 | Excel Macro-Enabled      | `.xlsm`    | `application/vnd.ms-excel.sheet.macroEnabled.12`                       | Sheet data, formulas, macros (text only), metadata       |
 | Excel Binary             | `.xlsb`    | `application/vnd.ms-excel.sheet.binary.macroEnabled.12`                | Binary sheet data extraction, metadata                   |
 | Excel Legacy             | `.xls`     | `application/vnd.ms-excel`                                             | Legacy sheet data extraction, metadata                   |
-| Excel Add-in             | `.xla`     | `application/vnd.ms-excel`                                             | Add-in data extraction                                   |
+| Excel Add-in             | `.xla`     | `application/vnd.ms-excel.template.macroEnabled.12`                    | Add-in data extraction                                   |
 | Excel Macro Add-in       | `.xlam`    | `application/vnd.ms-excel.addin.macroEnabled.12`                       | Macro add-in metadata                                    |
-| Excel Template           | `.xltm`    | `application/vnd.ms-excel.template.macroEnabled.12`                    | Template data and metadata                               |
 | Excel Template (XML)     | `.xltx`    | `application/vnd.openxmlformats-officedocument.spreadsheetml.template` | XML template data and metadata                           |
 | Excel Template (Legacy)  | `.xlt`     | `application/vnd.ms-excel`                                             | Legacy template data extraction                          |
 | OpenDocument Spreadsheet | `.ods`     | `application/vnd.oasis.opendocument.spreadsheet`                       | Sheet data, cell values, formulas, metadata              |
@@ -89,8 +88,8 @@ Xberg supports 98+ file formats across 8 major categories with intelligent forma
 | JPEG 2000          | `.jp2`                         | `image/jp2`               | OCR via pure Rust decoder (hayro-jpeg2000), table detection, resolution metadata |
 | JPEG 2000 Extended | `.jpx`                         | `image/jpx`               | Advanced JPEG 2000 features, high-resolution content, metadata                   |
 | JPEG 2000 Compound | `.jpm`                         | `image/jpm`               | Compound image support, mixed content                                            |
-| Motion JPEG 2000   | `.mj2`                         | `video/mj2`               | JPEG 2000 video/sequence metadata                                                |
-| JBIG2              | `.jbig2`, `.jb2`               | `image/jbig2`             | Bi-level image OCR, high compression, technical documents                        |
+| Motion JPEG 2000   | `.mj2`                         | `image/mj2`               | JPEG 2000 video/sequence metadata                                                |
+| JBIG2              | `.jbig2`, `.jb2`               | `image/x-jbig2`           | Bi-level image OCR, high compression, technical documents                        |
 | Portable PixMap    | `.pnm`, `.pbm`, `.pgm`, `.ppm` | `image/x-portable-pixmap` | OCR for plain image formats, raw pixel data                                      |
 
 ### Vector Graphics
@@ -155,20 +154,20 @@ Xberg supports 98+ file formats across 8 major categories with intelligent forma
 
 | Format                  | Extensions  | MIME Type                                | Capabilities                                      |
 | ----------------------- | ----------- | ---------------------------------------- | ------------------------------------------------- |
-| BibTeX                  | `.bib`      | `text/bibtex`                            | Structured parsing, entry types, field extraction |
-| BibLaTeX                | `.biblatex` | `text/bibtex`                            | Extended BibTeX format, advanced field support    |
+| BibTeX                  | `.bib`      | `application/x-bibtex`                    | Structured parsing, entry types, field extraction |
+| BibLaTeX                | `.bib`      | `application/x-biblatex`                  | Extended BibTeX format, advanced field support    |
 | RIS                     | `.ris`      | `application/x-research-info-systems`    | Structured RIS format parsing, type detection     |
-| NIH RIS                 | `.nbib`     | `application/x-research-info-systems`    | NIH/PubMed format, structured citation data       |
+| NIH RIS                 | `.nbib`     | `application/x-pubmed`                    | NIH/PubMed format, structured citation data       |
 | EndNote                 | `.enw`      | `application/x-endnote`                  | EndNote XML format, citation metadata             |
-| Citation Style Language | `.csl`      | `application/vnd.citationstyles.csl+xml` | CSL JSON/XML parsing, style definitions           |
+| Citation Style Language | —           | `application/csl+json`                   | CSL JSON parsing, style definitions               |
 
 ### Scientific & Technical Formats
 
 | Format           | Extensions       | MIME Type                  | Capabilities                                                |
 | ---------------- | ---------------- | -------------------------- | ----------------------------------------------------------- |
 | LaTeX            | `.tex`, `.latex` | `application/x-latex`      | LaTeX source parsing, commands, document structure          |
-| Typst            | `.typ`           | `text/plain`               | Typst markup parsing, document structure                    |
-| JATS XML         | `.jats`          | `application/xml`          | PubMed JATS parsing, article structure, metadata            |
+| Typst            | `.typ`           | `application/x-typst`      | Typst markup parsing, document structure                    |
+| JATS XML         | `.jats`          | `application/x-jats+xml`   | PubMed JATS parsing, article structure, metadata            |
 | Jupyter Notebook | `.ipynb`         | `application/x-ipynb+json` | Cell extraction (code + markdown), output parsing, metadata |
 | DocBook          | `.docbook`       | `application/docbook+xml`  | DocBook XML parsing, semantic structure                     |
 
@@ -202,7 +201,7 @@ OCR is available for image formats:
 
 - **Raster Images**: PNG, JPEG, GIF, WebP, BMP, TIFF
 - **Advanced Formats**: JPEG 2000, JBIG2, PNM/PBM/PGM/PPM
-- **Configurable Backends**: Tesseract (all languages), EasyOCR, PaddleOCR (Python), Guten (Node.js)
+- **Configurable Backends**: Tesseract (default), PaddleOCR (`paddleocr`/`paddle-ocr`), VLM (Candle-based: TrOCR, PaddleOCR-VL, GLM-OCR, DeepSeek-OCR)
 
 ### Table Detection
 
