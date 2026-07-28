@@ -23,8 +23,8 @@
   <a href="https://github.com/xberg-io/xberg/tree/main/packages/go">
     <img src="https://img.shields.io/github/v/tag/xberg-io/xberg?label=Go&color=007ec6&filter=v1*" alt="Go">
   </a>
-  <a href="https://www.nuget.org/packages/Xberg/">
-    <img src="https://img.shields.io/nuget/v/Xberg?label=C%23&color=007ec6" alt="C#">
+  <a href="https://www.nuget.org/packages/XbergIo.Xberg/">
+    <img src="https://img.shields.io/nuget/v/XbergIo.Xberg?label=C%23&color=007ec6" alt="C#">
   </a>
   <a href="https://packagist.org/packages/xberg-io/xberg">
     <img src="https://img.shields.io/packagist/v/xberg-io/xberg?label=PHP&color=007ec6" alt="PHP">
@@ -100,20 +100,20 @@ Add to your `pom.xml`:
 <dependency>
     <groupId>io.xberg</groupId>
     <artifactId>xberg</artifactId>
-    <version>1.0.1</version>
+    <version>1.0.2</version>
 </dependency>
 ```
 
 Kotlin DSL (`build.gradle.kts`):
 
 ```kotlin
-implementation("io.xberg:xberg:1.0.1")
+implementation("io.xberg:xberg:1.0.2")
 ```
 
 Groovy DSL (`build.gradle`):
 
 ```groovy
-implementation 'io.xberg:xberg:1.0.1'
+implementation 'io.xberg:xberg:1.0.2'
 ```
 
 ### System Requirements

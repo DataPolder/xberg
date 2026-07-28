@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.2] - 2026-07-28
+
+1.0.2 is a packaging release. It completes the 1.0.1 rollout — the PHP/Packagist binding failed to
+build for 1.0.1 — and adds a first-party coding-agent plugin. No core extraction behavior changed.
+
+### Added
+
+- **Coding-agent plugin.** A first-party xberg plugin for Claude Code, Codex, Cursor, and OpenCode,
+  with a Hermes variant, ships extraction skills (batch extraction, chunking, OCR, tables, keywords,
+  format selection) that drive xberg through its MCP/CLI surface. Published as
+  `@xberg-io/opencode-xberg` (npm) and `xberg-hermes-plugin` (PyPI).
+
+### Fixed
+
+- The PHP binding now builds against `ort` 2.0.0-rc.13. rc.13 moved the CoreML/CUDA/TensorRT
+  execution-provider types behind matching Cargo features; a fresh dependency resolution (as on the
+  PHP build) picked up rc.13 and failed to compile. Those EP features are now enabled unconditionally
+  — a compile-time `#[cfg]` unlock only, with no SDK dependency or runtime change — so the
+  PHP/Packagist package publishes again.
+
+### Packaging
+
+- Drops the Node `@xberg-io/xberg-win32-arm64-msvc` sub-package. It was declared as an optional
+  platform dependency but never built — no xberg binding targets Windows on ARM64 — leaving an
+  unresolvable optional dependency. The target is removed from the package manifest and loader for
+  parity with the other bindings.
+- Republishes every binding at 1.0.2 to close the 1.0.1 gaps (notably PHP/Packagist).
+
 ## [1.0.1] - 2026-07-28
 
 ### Fixed

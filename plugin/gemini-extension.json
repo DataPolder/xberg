@@ -1,6 +1,6 @@
 {
   "name": "xberg",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Local document extraction: text, tables, metadata, images from 98+ formats with optional OCR.",
   "contextFileName": "GEMINI.md",
   "mcpServers": {

@@ -23,51 +23,19 @@ High-performance document intelligence library for Rust. Extract text, metadata,
 
 This is the core Rust library that powers the Python, TypeScript, and Ruby bindings.
 
-> **Version 5.0.0-rc.17 Release**
-> This is a pre-release version. We invite you to test the library and [report any issues](https://github.com/xberg-io/xberg/issues) you encounter.
->
-> **Note**: The Rust crate is not currently published to crates.io for this RC. Use git dependencies or language bindings (Python, TypeScript, Ruby) instead.
+> **Version 1.0.2**
 
 ## Installation
 
 ```toml
 [dependencies]
-xberg = "5.0.0-rc.17"
+xberg = "1.0.2"
 tokio = { version = "1", features = ["rt", "macros"] }
 ```
 
-## PDFium Linking Options
-
-Xberg offers flexible PDFium linking strategies for different deployment scenarios. **Note:** Language bindings (Python, TypeScript, Ruby, Java, Go, C#, PHP, Elixir) automatically bundle PDFium—no configuration needed. This section applies only to the Rust crate.
-
-| Strategy              | Feature Flag  | Description                           | Use Case                                            |
-| --------------------- | ------------- | ------------------------------------- | --------------------------------------------------- |
-| **Default (Dynamic)** | None          | Links to system PDFium at runtime     | Development, system package users                   |
-| **Static**            | `pdf-static`  | Statically links PDFium into binary   | Single binary distribution, no runtime dependencies |
-| **Bundled**           | `pdf-bundled` | Downloads and embeds PDFium in binary | CI/CD, hermetic builds, largest binary size         |
-| **System**            | `pdf-system`  | Uses system PDFium via pkg-config     | Linux distributions with PDFium package             |
-
-**Example Cargo.toml configurations:**
-
-```toml
-# Default (dynamic linking)
-[dependencies]
-xberg = "5.0.0-rc.17"
-
-# Static linking
-[dependencies]
-xberg = { version = "5.0.0-rc.17", features = ["pdf-static"] }
-
-# Bundled in binary
-[dependencies]
-xberg = { version = "5.0.0-rc.17", features = ["pdf-bundled"] }
-
-# System library (requires PDFium installed)
-[dependencies]
-xberg = { version = "5.0.0-rc.17", features = ["pdf-system"] }
-```
-
-For more details on feature flags and configuration options, see the [Xberg documentation](https://docs.xberg.io).
+Xberg uses a pure-Rust PDF backend (`pdf_oxide`) — no PDFium, no system libraries, and no
+linking configuration required. For the full list of Cargo feature flags, see the
+[Xberg documentation](https://docs.xberg.io).
 
 ## System Requirements
 
@@ -265,7 +233,7 @@ The crate uses feature flags for optional functionality:
 
 ```toml
 [dependencies]
-xberg = { version = "5.0.0-rc.17", features = ["pdf", "excel", "ocr"] }
+xberg = { version = "1.0.2", features = ["pdf", "excel", "ocr"] }
 ```
 
 ### Available Features
@@ -287,9 +255,9 @@ xberg = { version = "5.0.0-rc.17", features = ["pdf", "excel", "ocr"] }
 ### Feature Bundles
 
 ```toml
-xberg = { version = "5.0.0-rc.17", features = ["full"] }
-xberg = { version = "5.0.0-rc.17", features = ["server"] }
-xberg = { version = "5.0.0-rc.17", features = ["cli"] }
+xberg = { version = "1.0.2", features = ["full"] }
+xberg = { version = "1.0.2", features = ["server"] }
+xberg = { version = "1.0.2", features = ["cli"] }
 ```
 
 ## PDF Support
@@ -299,7 +267,7 @@ Enable PDF extraction with the `pdf` feature:
 
 ```toml
 [dependencies]
-xberg = { version = "5.0", features = ["pdf"] }
+xberg = { version = "1.0.2", features = ["pdf"] }
 ```
 
 No native libraries required. Works on all platforms including musl, Docker, and WASM.

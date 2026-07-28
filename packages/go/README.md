@@ -23,8 +23,8 @@
   <a href="https://github.com/xberg-io/xberg/tree/main/packages/go">
     <img src="https://img.shields.io/github/v/tag/xberg-io/xberg?label=Go&color=007ec6&filter=v1*" alt="Go">
   </a>
-  <a href="https://www.nuget.org/packages/Xberg/">
-    <img src="https://img.shields.io/nuget/v/Xberg?label=C%23&color=007ec6" alt="C#">
+  <a href="https://www.nuget.org/packages/XbergIo.Xberg/">
+    <img src="https://img.shields.io/nuget/v/XbergIo.Xberg?label=C%23&color=007ec6" alt="C#">
   </a>
   <a href="https://packagist.org/packages/xberg-io/xberg">
     <img src="https://img.shields.io/packagist/v/xberg-io/xberg?label=PHP&color=007ec6" alt="PHP">
@@ -82,7 +82,7 @@
 
 High-performance document intelligence for Go backed by the Rust core that powers every Xberg binding.
 
-> **Version 1.0.1**
+> **Version 1.0.2**
 > Report issues at [github.com/xberg-io/xberg](https://github.com/xberg-io/xberg/issues).
 
 ## What This Package Provides
@@ -124,7 +124,7 @@ To use this package via `go get`:
 go get github.com/xberg-io/xberg/packages/go@latest
 
 # Or a specific version
-go get github.com/xberg-io/xberg/packages/go@v1.0.1
+go get github.com/xberg-io/xberg/packages/go@v1.0.2
 ```
 
 > ⚠️ Do not run `go get github.com/xberg-io/xberg` — the repository root is not a Go module.
@@ -143,7 +143,7 @@ Download the static library for your platform from [GitHub Releases](https://git
 
 ```bash
 # Example: Linux x86_64
-curl -LO https://github.com/xberg-io/xberg/releases/download/v1.0.1/go-ffi-linux-x86_64.tar.gz
+curl -LO https://github.com/xberg-io/xberg/releases/download/v1.0.2/go-ffi-linux-x86_64.tar.gz
 tar -xzf go-ffi-linux-x86_64.tar.gz
 
 # Copy to a permanent location

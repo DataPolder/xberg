@@ -10,13 +10,13 @@ The Xberg plugin teaches your assistant how to use the library, covering extract
 
 ## Installing
 
-Install the Xberg plugin from the [`xberg-io/plugins`](https://github.com/xberg-io/plugins) marketplace. It ships the Xberg agent skills (extraction APIs, OCR backends, configuration, language conventions) and works with every major coding agent — expand your harness below.
+Install the Xberg plugin from the [`xberg-io/xberg`](https://github.com/xberg-io/xberg) marketplace. It ships the Xberg agent skills (extraction APIs, OCR backends, configuration, language conventions) and works with every major coding agent — expand your harness below.
 
 <details open>
 <summary><strong>Claude Code</strong></summary>
 
 ```text
-/plugin marketplace add xberg-io/plugins
+/plugin marketplace add xberg-io/xberg
 /plugin install xberg@xberg
 ```
 
@@ -26,7 +26,7 @@ Install the Xberg plugin from the [`xberg-io/plugins`](https://github.com/xberg-
 <summary><strong>Codex CLI</strong></summary>
 
 ```text
-/plugins add https://github.com/xberg-io/plugins
+/plugins add https://github.com/xberg-io/xberg
 ```
 
 Then search for `xberg` and select **Install Plugin**.
@@ -35,14 +35,14 @@ Then search for `xberg` and select **Install Plugin**.
 <details>
 <summary><strong>Cursor</strong></summary>
 
-Settings → Plugins → Add from URL → `https://github.com/xberg-io/plugins`, then select **Xberg**.
+Settings → Plugins → Add from URL → `https://github.com/xberg-io/xberg`, then select **Xberg**.
 </details>
 
 <details>
 <summary><strong>Gemini CLI</strong></summary>
 
 ```text
-gemini extensions install https://github.com/xberg-io/plugins
+gemini extensions install https://github.com/xberg-io/xberg
 ```
 
 </details>
@@ -51,7 +51,7 @@ gemini extensions install https://github.com/xberg-io/plugins
 <summary><strong>Factory Droid</strong></summary>
 
 ```text
-droid plugin marketplace add https://github.com/xberg-io/plugins
+droid plugin marketplace add https://github.com/xberg-io/xberg
 droid plugin install xberg@xberg
 ```
 
@@ -61,7 +61,7 @@ droid plugin install xberg@xberg
 <summary><strong>GitHub Copilot CLI</strong></summary>
 
 ```text
-copilot plugin marketplace add https://github.com/xberg-io/plugins
+copilot plugin marketplace add https://github.com/xberg-io/xberg
 copilot plugin install xberg@xberg
 ```
 
@@ -145,7 +145,7 @@ xberg extract document.pdf --format json --output-format markdown
 
 ## Further Reading
 
-- [Plugin marketplace](https://github.com/xberg-io/plugins) — install the plugin in every supported harness
+- [Plugin marketplace](https://github.com/xberg-io/xberg) — install the plugin in every supported harness
 - [Extraction Basics](/guides/extraction/) — core extraction API
 - [Configuration](/guides/configuration/) — all configuration options
 - [Chunking](/guides/chunking/) — split text for RAG
