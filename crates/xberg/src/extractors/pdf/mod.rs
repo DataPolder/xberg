@@ -137,7 +137,15 @@ fn select_pdf_document(
     (doc, origin, structured)
 }
 
-fn inject_unrepresented_tables(doc: &mut InternalDocument, tables: Vec<crate::types::Table>, allow_injection: bool) {
+fn attach_unrepresented_tables(doc: &mut InternalDocument, tables: Vec<crate::types::Table>) {
+    if doc.tables.is_empty() {
+        for table in tables {
+            doc.push_table(table);
+        }
+    }
+}
+
+fn inject_unrepresented_table_elements(doc: &mut InternalDocument, allow_injection: bool) {
     if !allow_injection
         || doc
             .elements
@@ -146,15 +154,9 @@ fn inject_unrepresented_tables(doc: &mut InternalDocument, tables: Vec<crate::ty
     {
         return;
     }
-    if doc.tables.is_empty() {
-        for table in tables {
-            let table_index = doc.push_table(table);
-            doc.push_element(InternalElement::text(ElementKind::Table { table_index }, "", 0));
-        }
-    } else {
-        for table_index in 0..doc.tables.len() as u32 {
-            doc.push_element(InternalElement::text(ElementKind::Table { table_index }, "", 0));
-        }
+
+    for table_index in 0..doc.tables.len() as u32 {
+        doc.push_element(InternalElement::text(ElementKind::Table { table_index }, "", 0));
     }
 }
 
@@ -188,7 +190,15 @@ fn scanned_pages_to_ocr(
             &ocr_config.effective_thresholds(),
         );
         if decision.whole_doc_failure {
-            return None;
+            // A whole-document failure is itself a `ScannedPages` signal (see
+            // `OcrStrategy::ScannedPages` docs): OCR every page rather than
+            // discarding the signal and relying on the caller's `Auto` fallthrough.
+            let page_count = pdf_metadata.pdf_specific.page_count.unwrap_or(0);
+            return if page_count == 0 {
+                None
+            } else {
+                Some((1..=page_count).collect())
+            };
         }
         pages.extend(decision.failing_pages);
     }
@@ -1028,19 +1038,22 @@ impl PdfExtractor {
             ocr_results_map.as_ref(),
         );
         #[cfg(not(any(feature = "ocr", feature = "ocr-pipeline")))]
-        let mut doc = if let Some(mut pre_doc) = pre_rendered_doc {
-            pre_doc.mime_type = mime_type.to_string();
-            pre_doc
-        } else {
-            let mut d = InternalDocument::new("pdf");
-            d.mime_type = mime_type.to_string();
-            for paragraph in text.split("\n\n") {
-                let trimmed = paragraph.trim();
-                if !trimmed.is_empty() {
-                    d.push_element(InternalElement::text(ElementKind::Paragraph, trimmed, 0));
-                }
+        let (mut doc, document_is_structured) = match pre_rendered_doc {
+            Some(mut pre_doc) => {
+                pre_doc.mime_type = mime_type.to_string();
+                (pre_doc, true)
             }
-            d
+            None => {
+                let mut d = InternalDocument::new("pdf");
+                d.mime_type = mime_type.to_string();
+                for paragraph in text.split("\n\n") {
+                    let trimmed = paragraph.trim();
+                    if !trimmed.is_empty() {
+                        d.push_element(InternalElement::text(ElementKind::Paragraph, trimmed, 0));
+                    }
+                }
+                (d, false)
+            }
         };
         #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
         tracing::debug!(?document_origin, document_is_structured, "selected PDF document origin");
@@ -1091,11 +1104,15 @@ impl PdfExtractor {
         doc.form_fields = pdf_form_fields;
 
         #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
-        let allow_table_injection =
-            !document_is_structured || (document_origin == PdfDocumentOrigin::Ocr && doc.tables.is_empty());
+        let allow_table_injection = (!document_is_structured
+            && (config.output_format != crate::core::config::OutputFormat::Plain
+                || document_origin == PdfDocumentOrigin::Ocr))
+            || (document_origin == PdfDocumentOrigin::Ocr && doc.tables.is_empty());
         #[cfg(not(any(feature = "ocr", feature = "ocr-pipeline")))]
-        let allow_table_injection = true;
-        inject_unrepresented_tables(&mut doc, tables, allow_table_injection);
+        let allow_table_injection =
+            document_is_structured || config.output_format != crate::core::config::OutputFormat::Plain;
+        attach_unrepresented_tables(&mut doc, tables);
+        inject_unrepresented_table_elements(&mut doc, allow_table_injection);
 
         if let Some(imgs) = images {
             // The OCR path has its own guarded injection block below (see the `#[cfg(feature = "ocr")]`
@@ -1549,6 +1566,62 @@ mod tests {
         bytes
     }
 
+    #[test]
+    fn flat_plain_text_retains_table_asset_without_duplicate_rendering() {
+        const TABLE_TEXT: &str = "Account balance 42";
+
+        let mut doc = InternalDocument::new("pdf");
+        doc.push_element(InternalElement::text(ElementKind::Paragraph, TABLE_TEXT, 0));
+        let table = crate::types::Table {
+            cells: vec![vec!["Account balance".to_string(), "42".to_string()]],
+            markdown: "| Account balance | 42 |".to_string(),
+            page_number: 1,
+            bounding_box: None,
+            ..Default::default()
+        };
+
+        attach_unrepresented_tables(&mut doc, vec![table]);
+        inject_unrepresented_table_elements(&mut doc, false);
+
+        assert_eq!(doc.tables.len(), 1, "table assets must remain available to callers");
+        assert!(
+            !doc.elements
+                .iter()
+                .any(|element| matches!(element.kind, ElementKind::Table { .. })),
+            "flat plain text must not append a second renderable copy of native table text"
+        );
+
+        let result =
+            crate::extraction::derive::derive_extraction_result(doc, true, crate::core::config::OutputFormat::Plain);
+        assert_eq!(result.content.matches(TABLE_TEXT).count(), 1);
+        assert_eq!(result.tables.len(), 1);
+    }
+
+    #[test]
+    fn table_element_injection_remains_available_for_structured_output() {
+        let mut doc = InternalDocument::new("pdf");
+        let table = crate::types::Table {
+            cells: vec![vec!["Heading".to_string(), "Value".to_string()]],
+            markdown: "| Heading | Value |".to_string(),
+            page_number: 1,
+            bounding_box: None,
+            ..Default::default()
+        };
+
+        attach_unrepresented_tables(&mut doc, vec![table]);
+        inject_unrepresented_table_elements(&mut doc, true);
+
+        assert_eq!(doc.tables.len(), 1);
+        assert_eq!(
+            doc.elements
+                .iter()
+                .filter(|element| matches!(element.kind, ElementKind::Table { .. }))
+                .count(),
+            1,
+            "structured and OCR paths must still be able to render attached table assets"
+        );
+    }
+
     #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
     #[test]
     fn ocr_tables_replace_native_tables_and_are_sorted() {
@@ -1647,7 +1720,8 @@ mod tests {
         assert!(doc.elements.iter().any(|element| element.text == "native page one"));
         assert!(doc.elements.iter().any(|element| element.text == "OCR page two"));
         assert!(!doc.elements.iter().any(|element| element.text == "stale page two"));
-        inject_unrepresented_tables(&mut doc, vec![table], false);
+        attach_unrepresented_tables(&mut doc, vec![table]);
+        inject_unrepresented_table_elements(&mut doc, false);
         assert_eq!(doc.tables.len(), 1, "structured table data must remain available");
         assert!(
             !doc.elements
@@ -1678,7 +1752,8 @@ mod tests {
         );
         let allow_injection = !structured || (origin == PdfDocumentOrigin::Ocr && doc.tables.is_empty());
 
-        inject_unrepresented_tables(&mut doc, vec![table], allow_injection);
+        attach_unrepresented_tables(&mut doc, vec![table]);
+        inject_unrepresented_table_elements(&mut doc, allow_injection);
 
         assert_eq!(doc.tables.len(), 1);
         assert_eq!(
@@ -2012,6 +2087,82 @@ mod tests {
             decision_correct.avg_non_whitespace < decision_wrong.avg_non_whitespace,
             "Correct page count should produce lower per-page averages"
         );
+    }
+
+    /// #1336 bug 2: `ScannedPages` must honor its own whole-document-failure
+    /// signal (OCR every page) rather than discarding it and relying on the
+    /// caller's fallthrough to the `Auto` gate.
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn test_scanned_pages_to_ocr_returns_full_page_set_on_whole_doc_failure() {
+        use crate::core::config::{OcrConfig, OcrStrategy};
+        use crate::pdf::metadata::{PdfExtractionMetadata, PdfMetadata};
+
+        let config = ExtractionConfig {
+            ocr_strategy: OcrStrategy::ScannedPages { min_confidence: 0.7 },
+            ocr: Some(OcrConfig::default()),
+            ..Default::default()
+        };
+
+        let pdf_metadata = PdfExtractionMetadata {
+            title: None,
+            subject: None,
+            authors: None,
+            keywords: None,
+            created_at: None,
+            modified_at: None,
+            created_by: None,
+            pdf_specific: PdfMetadata {
+                page_count: Some(3),
+                scanned_pages: Some(Vec::new()),
+                ..Default::default()
+            },
+            page_structure: None,
+        };
+
+        // Empty native text everywhere triggers `whole_doc_failure` in the per-page gate.
+        let pages = scanned_pages_to_ocr(&config, &pdf_metadata, "", None);
+
+        assert_eq!(
+            pages,
+            Some(vec![1, 2, 3]),
+            "whole-doc failure under ScannedPages must OCR every page, not discard the signal"
+        );
+    }
+
+    /// Whole-doc failure with an unknown page count must not fabricate a page
+    /// range; falling through to `None` (the `Auto` gate) is the safe default.
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn test_scanned_pages_to_ocr_falls_through_when_page_count_unknown() {
+        use crate::core::config::{OcrConfig, OcrStrategy};
+        use crate::pdf::metadata::{PdfExtractionMetadata, PdfMetadata};
+
+        let config = ExtractionConfig {
+            ocr_strategy: OcrStrategy::ScannedPages { min_confidence: 0.7 },
+            ocr: Some(OcrConfig::default()),
+            ..Default::default()
+        };
+
+        let pdf_metadata = PdfExtractionMetadata {
+            title: None,
+            subject: None,
+            authors: None,
+            keywords: None,
+            created_at: None,
+            modified_at: None,
+            created_by: None,
+            pdf_specific: PdfMetadata {
+                page_count: None,
+                scanned_pages: Some(Vec::new()),
+                ..Default::default()
+            },
+            page_structure: None,
+        };
+
+        let pages = scanned_pages_to_ocr(&config, &pdf_metadata, "", None);
+
+        assert_eq!(pages, None);
     }
 
     #[tokio::test]
