@@ -7,6 +7,8 @@
 use super::geometry::Rect;
 use super::types::{LayoutHint, LayoutHintClass, PdfParagraph};
 
+const COMPARABLE_CONTAINMENT_TOLERANCE: f32 = 0.05;
+
 /// Apply layout detection overrides to classified paragraphs.
 ///
 /// Uses two matching strategies:
@@ -83,7 +85,7 @@ fn apply_spatial_overrides(
             continue;
         }
 
-        let best_2d = confident_hints
+        let spatial_matches: Vec<(&LayoutHint, f32)> = confident_hints
             .iter()
             .filter_map(|hint| {
                 let hint_rect = Rect::from_lbrt(hint.left, hint.bottom, hint.right, hint.top);
@@ -98,7 +100,17 @@ fn apply_spatial_overrides(
                     None
                 }
             })
-            .max_by(|a, b| a.1.total_cmp(&b.1));
+            .collect();
+        let max_containment = spatial_matches
+            .iter()
+            .map(|(_, containment)| *containment)
+            .max_by(f32::total_cmp);
+        let best_2d = max_containment.and_then(|maximum| {
+            spatial_matches
+                .into_iter()
+                .filter(|(_, containment)| maximum - containment <= COMPARABLE_CONTAINMENT_TOLERANCE)
+                .max_by(compare_spatial_matches)
+        });
 
         if let Some((hint, containment)) = best_2d {
             tracing::trace!(
@@ -110,6 +122,55 @@ fn apply_spatial_overrides(
             apply_hint_to_paragraph(para, hint, body_font_size);
         }
     }
+}
+
+fn compare_spatial_matches(a: &(&LayoutHint, f32), b: &(&LayoutHint, f32)) -> std::cmp::Ordering {
+    semantic_hint_priority(a.0.class_name)
+        .cmp(&semantic_hint_priority(b.0.class_name))
+        .then_with(|| a.0.confidence.total_cmp(&b.0.confidence))
+        .then_with(|| hint_area(b.0).total_cmp(&hint_area(a.0)))
+        .then_with(|| a.1.total_cmp(&b.1))
+        .then_with(|| layout_hint_class_rank(a.0.class_name).cmp(&layout_hint_class_rank(b.0.class_name)))
+        .then_with(|| a.0.left.total_cmp(&b.0.left))
+        .then_with(|| a.0.bottom.total_cmp(&b.0.bottom))
+        .then_with(|| a.0.right.total_cmp(&b.0.right))
+        .then_with(|| a.0.top.total_cmp(&b.0.top))
+}
+
+fn semantic_hint_priority(class_name: LayoutHintClass) -> u8 {
+    match class_name {
+        LayoutHintClass::Title
+        | LayoutHintClass::SectionHeader
+        | LayoutHintClass::ListItem
+        | LayoutHintClass::Caption
+        | LayoutHintClass::Footnote => 2,
+        _ => 1,
+    }
+}
+
+fn layout_hint_class_rank(class_name: LayoutHintClass) -> u8 {
+    match class_name {
+        LayoutHintClass::Title => 0,
+        LayoutHintClass::SectionHeader => 1,
+        LayoutHintClass::Code => 2,
+        LayoutHintClass::Formula => 3,
+        LayoutHintClass::ListItem => 4,
+        LayoutHintClass::Caption => 5,
+        LayoutHintClass::Footnote => 6,
+        LayoutHintClass::PageHeader => 7,
+        LayoutHintClass::PageFooter => 8,
+        LayoutHintClass::Table => 9,
+        LayoutHintClass::Picture => 10,
+        LayoutHintClass::DocumentIndex => 11,
+        LayoutHintClass::Form => 12,
+        LayoutHintClass::KeyValueRegion => 13,
+        LayoutHintClass::Text => 14,
+        LayoutHintClass::Other => 15,
+    }
+}
+
+fn hint_area(hint: &LayoutHint) -> f32 {
+    (hint.right - hint.left).max(0.0) * (hint.top - hint.bottom).max(0.0)
 }
 
 /// Check if text matches the content expectations of a layout hint class.
@@ -132,8 +193,41 @@ fn matches_hint_text(hint: &LayoutHint, para_text: &str) -> bool {
                 || trimmed.starts_with('*')
                 || trimmed.starts_with('·')
         }
+        L::Formula => has_formula_evidence(para_text),
         _ => true,
     }
+}
+
+fn has_formula_evidence(text: &str) -> bool {
+    let total_chars = text.chars().count();
+    if total_chars == 0 {
+        return false;
+    }
+    let math_chars = text
+        .chars()
+        .filter(|character| {
+            matches!(
+                character,
+                '+' | '='
+                    | '^'
+                    | '∑'
+                    | '∫'
+                    | '∏'
+                    | '√'
+                    | '∞'
+                    | '≤'
+                    | '≥'
+                    | '≠'
+                    | '≈'
+                    | '±'
+                    | '×'
+                    | '÷'
+                    | '∂'
+                    | '∇'
+            )
+        })
+        .count();
+    math_chars >= 3 || (math_chars as f64 / total_chars as f64) >= 0.15
 }
 
 /// Extract full text from a paragraph.
@@ -895,6 +989,7 @@ mod tests {
     #[test]
     fn test_formula_override() {
         let mut paragraphs = vec![make_para(50.0, 600.0, 300.0, 16.0)];
+        paragraphs[0].lines[0].segments[0].text = "E = mc^2".to_string();
         let hints = vec![make_hint(LayoutHintClass::Formula, 0.9, 40.0, 598.0, 400.0, 620.0)];
         apply_layout_overrides(&mut paragraphs, &hints, 0.5, 0.5, None);
         assert!(paragraphs[0].is_formula);
@@ -1503,5 +1598,61 @@ mod tests {
             para2.is_list_item,
             "High-confidence ListItem (0.85) should mark paragraph as list item"
         );
+    }
+
+    #[test]
+    fn semantic_hint_beats_broad_text_when_containment_is_comparable() {
+        let mut paragraphs = vec![make_para(10.0, 100.0, 100.0, 10.0)];
+        let hints = vec![
+            make_hint(LayoutHintClass::Text, 0.95, 10.0, 100.0, 110.0, 110.0),
+            make_hint(LayoutHintClass::SectionHeader, 0.90, 10.0, 100.0, 106.0, 110.0),
+        ];
+
+        apply_layout_overrides(&mut paragraphs, &hints, 0.5, 0.5, None);
+
+        assert_eq!(paragraphs[0].layout_class, Some(LayoutHintClass::SectionHeader));
+        assert_eq!(paragraphs[0].heading_level, Some(2));
+    }
+
+    #[test]
+    fn materially_better_text_containment_is_preserved() {
+        let mut paragraphs = vec![make_para(10.0, 100.0, 100.0, 10.0)];
+        let hints = vec![
+            make_hint(LayoutHintClass::Text, 0.90, 10.0, 100.0, 110.0, 110.0),
+            make_hint(LayoutHintClass::SectionHeader, 0.99, 10.0, 100.0, 100.0, 110.0),
+        ];
+
+        apply_layout_overrides(&mut paragraphs, &hints, 0.5, 0.5, None);
+
+        assert_eq!(paragraphs[0].layout_class, Some(LayoutHintClass::Text));
+        assert_eq!(paragraphs[0].heading_level, None);
+    }
+
+    #[test]
+    fn unvalidated_formula_hint_does_not_beat_comparable_text() {
+        let mut paragraphs = vec![make_para(10.0, 100.0, 100.0, 10.0)];
+        let hints = vec![
+            make_hint(LayoutHintClass::Text, 0.90, 10.0, 100.0, 110.0, 110.0),
+            make_hint(LayoutHintClass::Formula, 0.99, 10.0, 100.0, 106.0, 110.0),
+        ];
+
+        apply_layout_overrides(&mut paragraphs, &hints, 0.5, 0.5, None);
+
+        assert_eq!(paragraphs[0].layout_class, Some(LayoutHintClass::Text));
+        assert!(!paragraphs[0].is_formula);
+    }
+
+    #[test]
+    fn equivalent_semantic_hints_are_selected_independently_of_input_order() {
+        let title = make_hint(LayoutHintClass::Title, 0.90, 10.0, 100.0, 110.0, 110.0);
+        let section = make_hint(LayoutHintClass::SectionHeader, 0.90, 10.0, 100.0, 110.0, 110.0);
+        let mut forward = vec![make_para(10.0, 100.0, 100.0, 10.0)];
+        let mut reverse = forward.clone();
+
+        apply_layout_overrides(&mut forward, &[title.clone(), section.clone()], 0.5, 0.5, None);
+        apply_layout_overrides(&mut reverse, &[section, title], 0.5, 0.5, None);
+
+        assert_eq!(forward[0].layout_class, reverse[0].layout_class);
+        assert_eq!(forward[0].heading_level, reverse[0].heading_level);
     }
 }
