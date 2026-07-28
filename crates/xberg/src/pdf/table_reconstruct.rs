@@ -1084,20 +1084,54 @@ fn is_dense_numeric_grid(grid: &[Vec<String>]) -> bool {
 /// not shredded prose, which is alphabetic. Used only to exempt such grids from
 /// the ≥5-column single-word prose guard (xberg-io/xberg#1316).
 fn is_predominantly_numeric_short_grid(grid: &[Vec<String>]) -> bool {
+    // Measure the numeric fraction two ways and accept if either clears the bar:
+    // over every data cell, and over the fully-populated data rows only. A
+    // borderless line-item table can carry a sparse continuation row — a wrapped
+    // description with the remaining columns blank (xberg-io/xberg#1333). That row
+    // is all-text and, pooled with the complete rows, drags the numeric fraction
+    // below the bar, wrongly voiding the exemption for the genuine numeric rows
+    // above it. Restricting to complete rows lets one continuation row no longer
+    // erase a predominantly-numeric line-item table. The complete-row pass only
+    // ever grants the exemption, never withholds it, so it cannot demote a grid
+    // the pooled pass already accepts.
+    let width = grid.first().map_or(0, Vec::len);
+    short_grid_numeric_ratio_meets_bar(grid, false)
+        || (width > 0 && short_grid_numeric_ratio_meets_bar(grid, true))
+}
+
+/// Whether the numeric fraction of a short grid's data cells clears the
+/// [`SHORT_NUMERIC_MIN_CELL_PERCENT`] bar with at least
+/// [`SHORT_NUMERIC_MIN_DATA_CELLS`] cells of evidence. When `complete_rows_only`
+/// is set, only rows whose every column is filled contribute — so a sparse
+/// continuation row cannot dilute the measurement (see
+/// [`is_predominantly_numeric_short_grid`]).
+fn short_grid_numeric_ratio_meets_bar(grid: &[Vec<String>], complete_rows_only: bool) -> bool {
+    let width = grid.first().map_or(0, Vec::len);
     let mut non_empty_cells = 0usize;
     let mut numeric_cells = 0usize;
-    for cell in grid.iter().skip(1).flat_map(|row| row.iter()) {
-        let trimmed = cell.trim();
-        if trimmed.is_empty() {
+    for row in grid.iter().skip(1) {
+        if complete_rows_only && !is_complete_data_row(row, width) {
             continue;
         }
-        non_empty_cells += 1;
-        if is_numeric_value_cell(trimmed) {
-            numeric_cells += 1;
+        for cell in row {
+            let trimmed = cell.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            non_empty_cells += 1;
+            if is_numeric_value_cell(trimmed) {
+                numeric_cells += 1;
+            }
         }
     }
     non_empty_cells >= SHORT_NUMERIC_MIN_DATA_CELLS
         && numeric_cells.saturating_mul(100) >= non_empty_cells.saturating_mul(SHORT_NUMERIC_MIN_CELL_PERCENT)
+}
+
+/// Whether every one of the grid's `width` columns is filled in this row — i.e.
+/// a self-contained data row rather than a sparse continuation fragment.
+fn is_complete_data_row(row: &[String], width: usize) -> bool {
+    width > 0 && row.len() >= width && row.iter().take(width).all(|cell| !cell.trim().is_empty())
 }
 
 fn is_dense_scalar_grid(grid: &[Vec<String>]) -> bool {
@@ -2438,6 +2472,36 @@ mod tests {
         assert!(
             !is_well_formed_table(&grid),
             "Five-column short prose (upper boundary) should be demoted (issue #36)"
+        );
+    }
+
+    #[test]
+    fn test_sparse_continuation_row_keeps_numeric_line_item_table() {
+        // A five-column borderless line-item table whose second row is a wrapped
+        // description continuation (trailing columns blank). Pooled over all
+        // cells the numeric fraction is 4/8 = 50%, below the 60% bar, but the
+        // complete item row alone is 4/5 = 80% numeric. The continuation row
+        // must not erase the table (issue #1333).
+        let table = vec![
+            vec!["Item".into(), "Qty".into(), "Price".into(), "VAT".into(), "Total".into()],
+            vec![
+                "SYNTH PRODUCT".into(),
+                "1".into(),
+                "120.40".into(),
+                "19%".into(),
+                "120.40".into(),
+            ],
+            vec!["WITH FEE".into(), "each".into(), "$".into(), String::new(), String::new()],
+        ];
+        let result = post_process_table(table.clone(), true, false);
+        assert!(
+            result.is_some(),
+            "Numeric line-item table with a sparse continuation row must survive (layout-guided)"
+        );
+        let result_unsupervised = post_process_table(table, false, false);
+        assert!(
+            result_unsupervised.is_some(),
+            "Numeric line-item table with a sparse continuation row must survive (unsupervised)"
         );
     }
 
