@@ -113,9 +113,17 @@ pub(crate) fn evaluate_ocr_skip_gate(
     decision: &OcrFallbackDecision,
     thresholds: &crate::core::config::OcrQualityThresholds,
 ) -> OcrGateOutcome {
+    // The non-text skip is for genuinely non-textual *structured* content (a
+    // vector diagram or chart the structured extractor rendered faithfully),
+    // where OCR would only add noise. A whole-document quality failure is the
+    // opposite: a scan or a garbage/undecodable text layer with no trustworthy
+    // native text at all, which must reach OCR regardless of how "non-textual"
+    // the stray characters look (issue #1338). Guard it exactly as the
+    // substantive-doc branch below guards against `decision.fallback`.
     let skip_for_non_text = pre_rendered_doc_present
         && total_chars >= thresholds.non_text_min_chars
-        && alnum_ws_ratio < thresholds.alnum_ws_ratio_threshold;
+        && alnum_ws_ratio < thresholds.alnum_ws_ratio_threshold
+        && !decision.whole_doc_failure;
 
     let has_substantive_doc = pre_rendered_doc_present
         && total_chars >= thresholds.substantive_min_chars
@@ -2118,6 +2126,61 @@ mod tests {
         assert!(
             !decision.fallback,
             "normal prose with a few symbols must not trigger OCR fallback via the undecodable-ratio signal"
+        );
+    }
+
+    /// Builds a gate decision with explicit fallback / whole-document-failure
+    /// flags and otherwise-empty stats, for exercising `evaluate_ocr_skip_gate`
+    /// independently of the native-text heuristics.
+    #[cfg(feature = "ocr")]
+    fn gate_decision(fallback: bool, whole_doc_failure: bool) -> OcrFallbackDecision {
+        OcrFallbackDecision {
+            stats: NativeTextStats::from(""),
+            avg_non_whitespace: 0.0,
+            avg_alnum: 0.0,
+            fallback,
+            failing_pages: Vec::new(),
+            whole_doc_failure,
+        }
+    }
+
+    /// A scanned page with a garbage/undecodable text layer produces a
+    /// pre-rendered structured doc plus enough low-alphanumeric characters to
+    /// look "non-textual", but the per-document check flags the whole document.
+    /// The whole-document failure must win over the non-text skip and route to
+    /// OCR, otherwise a scanner PDF is silently returned as empty native text
+    /// (issue #1338).
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn test_whole_doc_failure_overrides_non_text_skip() {
+        let thresholds = t();
+        let outcome = evaluate_ocr_skip_gate(
+            true, // pre-rendered structured doc present
+            50,   // >= non_text_min_chars (20)
+            0.1,  // < alnum_ws_ratio_threshold (0.4): looks non-textual
+            &gate_decision(true, true),
+            &thresholds,
+        );
+        assert_eq!(
+            outcome,
+            OcrGateOutcome::RunFallback,
+            "a whole-document quality failure must route to OCR, not SkipNonText"
+        );
+    }
+
+    /// A genuinely non-textual *structured* document (a rendered diagram whose
+    /// stray label characters are mostly punctuation) that still passes the
+    /// per-document quality check must keep skipping OCR — the guard must not
+    /// over-trigger and OCR every diagram.
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn test_non_text_structured_doc_still_skips_ocr() {
+        let thresholds = t();
+        let outcome = evaluate_ocr_skip_gate(true, 50, 0.1, &gate_decision(false, false), &thresholds);
+        assert_eq!(
+            outcome,
+            OcrGateOutcome::SkipNonText,
+            "a non-textual structured doc that passes the quality check must still skip OCR"
         );
     }
 
