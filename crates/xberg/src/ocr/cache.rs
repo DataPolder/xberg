@@ -14,9 +14,6 @@ impl OcrCache {
     pub(crate) fn new(cache_dir: Option<PathBuf>) -> Result<Self, OcrError> {
         let cache_dir = cache_dir.unwrap_or_else(|| crate::cache_dir::resolve_cache_dir("ocr"));
 
-        fs::create_dir_all(&cache_dir)
-            .map_err(|e| OcrError::CacheError(format!("Failed to create cache directory: {}", e)))?;
-
         Ok(Self { cache_dir })
     }
 
@@ -58,6 +55,9 @@ impl OcrCache {
     ) -> Result<(), OcrError> {
         let cache_key = self.generate_cache_key(image_hash, backend, config);
         let cache_path = self.get_cache_path(&cache_key);
+
+        fs::create_dir_all(&self.cache_dir)
+            .map_err(|e| OcrError::CacheError(format!("Failed to create cache directory: {}", e)))?;
 
         let serialized = rmp_serde::to_vec(result)
             .map_err(|e| OcrError::CacheError(format!("Failed to serialize result: {}", e)))?;
@@ -415,6 +415,44 @@ mod tests {
         assert!(cache.get_cached_result("test2", "tesseract", "eng").unwrap().is_none());
 
         assert!(temp_dir.path().join("other.txt").exists());
+    }
+
+    #[test]
+    fn test_new_does_not_create_cache_dir_when_caching_unused() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let cache_dir = temp_dir.path().join("ocr-cache-disabled");
+
+        let _cache = OcrCache::new(Some(cache_dir.clone())).unwrap();
+
+        assert!(
+            !cache_dir.exists(),
+            "OcrCache::new must not create the cache directory eagerly"
+        );
+    }
+
+    #[test]
+    fn test_set_cached_result_creates_cache_dir_lazily() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let cache_dir = temp_dir.path().join("ocr-cache-enabled");
+        let cache = OcrCache::new(Some(cache_dir.clone())).unwrap();
+
+        assert!(!cache_dir.exists(), "cache dir must not exist before the first write");
+
+        let result = OcrExtractionResult {
+            content: "Lazy dir creation".to_string(),
+            mime_type: "text/plain".to_string(),
+            metadata: HashMap::new(),
+            tables: Vec::new(),
+            ocr_elements: None,
+            internal_document: None,
+        };
+
+        cache.set_cached_result("lazy", "tesseract", "eng", &result).unwrap();
+
+        assert!(cache_dir.exists(), "cache dir must be created on first cached write");
+
+        let retrieved = cache.get_cached_result("lazy", "tesseract", "eng").unwrap();
+        assert_eq!(retrieved.unwrap().content, "Lazy dir creation");
     }
 
     #[test]
