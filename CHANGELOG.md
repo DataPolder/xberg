@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- OCR now emits `tracing` logs when it materializes a Tesseract language pack at runtime: an
+  info line naming the language, destination, and source before the download, one per candidate
+  URL as it is tried, and one on success. Previously a runtime language-pack download was silent,
+  making a first-use OCR stall on a missing pack hard to diagnose. English is unaffected on builds
+  with the `bundle-tessdata-eng` feature (embedded, no download).
+
 ## [1.0.2] - 2026-07-28
 
 1.0.2 is a packaging release. It completes the 1.0.1 rollout — the PHP/Packagist binding failed to
