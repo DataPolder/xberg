@@ -81,6 +81,21 @@ Add the package to `opencode.json`:
 
 </details>
 
+<details>
+<summary><strong>Hermes</strong></summary>
+
+Install the Hermes plugin from PyPI — Hermes auto-discovers it via entry points, so no extra configuration is needed:
+
+```bash
+pip install xberg-hermes-plugin
+```
+
+</details>
+
+:::note[Prefer a raw MCP server?]
+The plugin also bundles an Xberg MCP server, so a harness that speaks [Model Context Protocol](https://modelcontextprotocol.io/) gets the extraction tools without installing the plugin. See [MCP Integration](/guides/mcp-integration/) for the standalone server and direct-CLI configs.
+:::
+
 ## What the Skill Provides
 
 When your AI coding assistant discovers the skill, it knows:
@@ -146,6 +161,7 @@ xberg extract document.pdf --format json --output-format markdown
 ## Further Reading
 
 - [Plugin marketplace](https://github.com/xberg-io/xberg) — install the plugin in every supported harness
+- [MCP Integration](/guides/mcp-integration/) — run Xberg as a standalone MCP server for any MCP-capable agent
 - [Extraction Basics](/guides/extraction/) — core extraction API
 - [Configuration](/guides/configuration/) — all configuration options
 - [Chunking](/guides/chunking/) — split text for RAG

@@ -19,6 +19,47 @@ xberg mcp
 
 That's it. You now have an MCP server running over stdio, ready for any compatible client.
 
+## Bundled with the coding-agent plugin
+
+If you install the [Xberg coding-agent plugin](/guides/ai-coding-assistants/), you already have this MCP server — no separate install. The plugin ships an `.mcp.json` that registers a server named `xberg`:
+
+```json title="plugin .mcp.json"
+{
+  "mcpServers": {
+    "xberg": {
+      "command": "./scripts/mcp-launch.sh",
+      "args": ["mcp", "--transport", "stdio"]
+    }
+  }
+}
+```
+
+`mcp-launch.sh` resolves the CLI at runtime — a cached or on-`PATH` `xberg` first, then `npx -y @xberg-io/xberg-cli@latest`, `uvx --from xberg-cli xberg`, Homebrew, or a prebuilt release archive — so the server runs with no manual install. Override the strategy with `XBERG_LAUNCHER` (`auto` default, or `npx`, `uvx`, `brew`, `download`).
+
+To wire the same launcher into a client yourself without the CLI on `PATH`, point at either package directly:
+
+```json title="MCP client config (npx)"
+{
+  "mcpServers": {
+    "xberg": {
+      "command": "npx",
+      "args": ["-y", "@xberg-io/xberg-cli@latest", "mcp", "--transport", "stdio"]
+    }
+  }
+}
+```
+
+```json title="MCP client config (uvx)"
+{
+  "mcpServers": {
+    "xberg": {
+      "command": "uvx",
+      "args": ["--from", "xberg-cli", "xberg", "mcp", "--transport", "stdio"]
+    }
+  }
+}
+```
+
 ---
 
 ## How It Works
