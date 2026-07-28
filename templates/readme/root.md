@@ -258,13 +258,13 @@ See [MCP integration guide](https://docs.xberg.io/guides/mcp-integration/).
 
 ### AI Coding Assistants
 
-Install the Xberg plugin from [`xberg-io/plugins`](https://github.com/xberg-io/plugins). Ships extraction APIs, OCR backends, configuration, and language conventions.
+Install the Xberg plugin from [`xberg-io/xberg`](https://github.com/xberg-io/xberg). Ships extraction APIs, OCR backends, configuration, and language conventions.
 
 <details open>
 <summary><strong>Claude Code</strong></summary>
 
 ```text
-/plugin marketplace add xberg-io/plugins
+/plugin marketplace add xberg-io/xberg
 /plugin install xberg@xberg
 ```
 
@@ -274,7 +274,7 @@ Install the Xberg plugin from [`xberg-io/plugins`](https://github.com/xberg-io/p
 <summary><strong>Codex CLI</strong></summary>
 
 ```text
-/plugins add https://github.com/xberg-io/plugins
+/plugins add https://github.com/xberg-io/xberg
 ```
 
 Search for `xberg` and select **Install Plugin**.
@@ -284,7 +284,7 @@ Search for `xberg` and select **Install Plugin**.
 <details>
 <summary><strong>Cursor</strong></summary>
 
-Settings → Plugins → Add from URL → `https://github.com/xberg-io/plugins`, then select **xberg**.
+Settings → Plugins → Add from URL → `https://github.com/xberg-io/xberg`, then select **xberg**.
 
 </details>
 
@@ -292,7 +292,7 @@ Settings → Plugins → Add from URL → `https://github.com/xberg-io/plugins`,
 <summary><strong>Gemini CLI</strong></summary>
 
 ```text
-gemini extensions install https://github.com/xberg-io/plugins
+gemini extensions install https://github.com/xberg-io/xberg
 ```
 
 </details>
@@ -301,7 +301,7 @@ gemini extensions install https://github.com/xberg-io/plugins
 <summary><strong>Factory Droid</strong></summary>
 
 ```text
-droid plugin marketplace add https://github.com/xberg-io/plugins
+droid plugin marketplace add https://github.com/xberg-io/xberg
 droid plugin install xberg@xberg
 ```
 
@@ -311,7 +311,7 @@ droid plugin install xberg@xberg
 <summary><strong>GitHub Copilot CLI</strong></summary>
 
 ```text
-copilot plugin marketplace add https://github.com/xberg-io/plugins
+copilot plugin marketplace add https://github.com/xberg-io/xberg
 copilot plugin install xberg@xberg
 ```
 

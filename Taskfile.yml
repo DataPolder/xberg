@@ -34,6 +34,8 @@ includes:
     taskfile: ./.task/tools/version-sync.yml
   integrations:
     taskfile: ./.task/tools/integrations.yml
+  plugin:
+    taskfile: ./.task/tools/plugin.yml
   benchmark:
     taskfile: ./.task/workflows/benchmark.yml
   docs:

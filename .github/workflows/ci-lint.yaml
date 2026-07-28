@@ -18,6 +18,9 @@ on:
       - "Taskfile.yml"
       - "alef.toml"
       - "pyproject.toml"
+      - "plugin/**"
+      - ".claude-plugin/**"
+      - ".agents/plugins/**"
   pull_request:
     branches: [main]
     paths:
@@ -35,6 +38,9 @@ on:
       - "Taskfile.yml"
       - "alef.toml"
       - "pyproject.toml"
+      - "plugin/**"
+      - ".claude-plugin/**"
+      - ".agents/plugins/**"
   workflow_dispatch:
 
 concurrency:
@@ -54,6 +60,20 @@ jobs:
         uses: xberg-io/actions/install-task@v1
       - name: Validate benchmark scripts
         run: task benchmark:validate:scripts
+
+  plugin-freshness:
+    name: Plugin bundle freshness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      # Byte-verify the ai-rulez-generated coding-agent plugin bundles under plugin/
+      # match plugin/.ai-rulez (BLAKE3 provenance). Pinned to the ai-rulez version that
+      # generates them; bump in lockstep with the generator. Regenerate with
+      # `task plugin:generate`. ~keep
+      - name: Verify generated plugin bundles are current
+        run: uvx ai-rulez==4.11.0 verify --recursive --plugin --if-configured
 
   validate:
     uses: xberg-io/actions/.github/workflows/reusable-validate.yml@v1
