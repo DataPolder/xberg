@@ -88,15 +88,44 @@ struct Row {
 /// contract of ML-produced [`LayoutHint`]s (`hint_img_top = page_height -
 /// hint.top`). Returns an empty vector when no band clears the thresholds or the
 /// `XBERG_LAYOUT_NO_GEOMETRIC_TABLES` toggle is set.
-pub(in crate::pdf::structure) fn detect_geometric_table_hints(words: &[HocrWord], page_height: f32) -> Vec<LayoutHint> {
+///
+/// Words whose center falls inside one of `existing_table_hints` (ML `Table`
+/// regions already claimed on this page) are dropped before grouping. This lets
+/// the geometric fallback recover a *second*, spatially separate tabular region
+/// on a page where the ML detector already found one table elsewhere (#1321) —
+/// the page-wide "ML found a table, skip the fallback entirely" branch otherwise
+/// starves that second region. Pass `&[]` to consider every word.
+///
+/// `existing_table_hints` are in PDF (bottom-origin) coordinates, matching the
+/// ML `LayoutHint` contract; they are converted to image-top-origin (matching
+/// `HocrWord`) via `(left, page_height - top, right, page_height - bottom)`
+/// before the containment check, mirroring [`run_bounding_hint`]'s inverse
+/// conversion.
+pub(in crate::pdf::structure) fn detect_geometric_table_hints(
+    words: &[HocrWord],
+    page_height: f32,
+    existing_table_hints: &[&LayoutHint],
+) -> Vec<LayoutHint> {
     if crate::pdf::structure::layout_debug::layout_debug_flags().no_geometric_tables {
         return Vec::new();
     }
+
+    let exclusion_boxes: Vec<(f32, f32, f32, f32)> = existing_table_hints
+        .iter()
+        .map(|h| (h.left, page_height - h.top, h.right, page_height - h.bottom))
+        .collect();
 
     let indexed: Vec<usize> = words
         .iter()
         .enumerate()
         .filter(|(_, w)| !w.text.trim().is_empty())
+        .filter(|(_, w)| {
+            let cx = w.left as f32 + w.width as f32 / 2.0;
+            let cy = w.top as f32 + w.height as f32 / 2.0;
+            !exclusion_boxes
+                .iter()
+                .any(|&(l, t, r, b)| cx >= l && cx <= r && cy >= t && cy <= b)
+        })
         .map(|(i, _)| i)
         .collect();
     if indexed.len() < MIN_TABLE_ROWS * MIN_TABLE_COLS {
@@ -408,7 +437,7 @@ mod tests {
             }
         }
 
-        let hints = detect_geometric_table_hints(&words, 842.0);
+        let hints = detect_geometric_table_hints(&words, 842.0, &[]);
         assert_eq!(hints.len(), 1, "expected exactly one synthesized table region");
         let hint = &hints[0];
         assert_eq!(hint.class_name, LayoutHintClass::Table);
@@ -428,7 +457,7 @@ mod tests {
             words.push(word("some", 40, y, 80));
             words.push(word("phrase", 300, y, 90));
         }
-        let hints = detect_geometric_table_hints(&words, 842.0);
+        let hints = detect_geometric_table_hints(&words, 842.0, &[]);
         assert!(hints.is_empty(), "2-column prose must not be proposed as a table");
     }
 
@@ -445,7 +474,7 @@ mod tests {
                 words.push(word(&format!("word{row}{c}"), *x, y, 70));
             }
         }
-        let hints = detect_geometric_table_hints(&words, 842.0);
+        let hints = detect_geometric_table_hints(&words, 842.0, &[]);
         assert!(hints.is_empty(), "alphabetic grid must not be proposed (numeric gate)");
     }
 
@@ -473,7 +502,7 @@ mod tests {
             words.push(word(c1, col_c, y, 28)); // ends 488
             words.push(word(c2, col_c + 33, y, 28)); // 493
         }
-        let hints = detect_geometric_table_hints(&words, 842.0);
+        let hints = detect_geometric_table_hints(&words, 842.0, &[]);
         assert_eq!(hints.len(), 1, "text-heavy key-value grid must be proposed");
         assert_eq!(hints[0].class_name, LayoutHintClass::Table);
     }
@@ -495,7 +524,7 @@ mod tests {
                 }
             }
         }
-        let hints = detect_geometric_table_hints(&words, 842.0);
+        let hints = detect_geometric_table_hints(&words, 842.0, &[]);
         assert!(hints.is_empty(), "dense multi-column prose must not be proposed");
     }
 
@@ -516,7 +545,7 @@ mod tests {
                 }
             }
         }
-        let hints = detect_geometric_table_hints(&words, 842.0);
+        let hints = detect_geometric_table_hints(&words, 842.0, &[]);
         assert!(
             hints.is_empty(),
             "wide-gutter but dense prose must be rejected by the sparsity cap"
@@ -542,7 +571,7 @@ mod tests {
                 words.push(word(v, *x, y, 40));
             }
         }
-        let hints = detect_geometric_table_hints(&words, 842.0);
+        let hints = detect_geometric_table_hints(&words, 842.0, &[]);
         assert!(
             hints.is_empty(),
             "equation-subscript grid must not be proposed (numeric gate)"
@@ -558,7 +587,7 @@ mod tests {
             word("C", 400, 100, 30),
             word("prose", 40, 200, 300),
         ];
-        let hints = detect_geometric_table_hints(&words, 842.0);
+        let hints = detect_geometric_table_hints(&words, 842.0, &[]);
         assert!(hints.is_empty(), "a lone tabular row must not be proposed");
     }
 
@@ -567,6 +596,117 @@ mod tests {
     /// empty — the flag is exercised by the benchmark A/B, not unit state.)
     #[test]
     fn empty_input_returns_no_hints() {
-        assert!(detect_geometric_table_hints(&[], 842.0).is_empty());
+        assert!(detect_geometric_table_hints(&[], 842.0, &[]).is_empty());
+    }
+
+    /// #1321 reproducer shape: a page with an upper borderless key-value grid
+    /// (the #1319 text-heavy shape) AND a lower, spatially separate cluster
+    /// already claimed by an ML `Table` hint. The page-wide `has_table_hint`
+    /// gate in `pipeline.rs` must no longer suppress geometric recovery of the
+    /// upper region just because the ML detector found a table elsewhere.
+    #[test]
+    fn detects_text_heavy_grid_when_page_also_has_ml_table_hint() {
+        const PAGE_HEIGHT: f32 = 842.0;
+        let col_a = 33u32;
+        let col_b = 330u32;
+        let col_c = 460u32;
+        let rows_text = [
+            ("SAMPLE", "ROAD", "Invoice", "number", "INV", "alpha"),
+            ("DEMO", "CITY", "Order", "number", "ORD", "beta"),
+            ("SYNTH", "COUNTRY", "Invoice", "date", "Jan", "gamma"),
+            ("EXAMPLE", "CORP", "Order", "date", "Feb", "delta"),
+        ];
+        let mut words = Vec::new();
+        for (r, (a1, a2, b1, b2, c1, c2)) in rows_text.iter().enumerate() {
+            let y = 100 + r as u32 * 15;
+            words.push(word(a1, col_a, y, 40));
+            words.push(word(a2, col_a + 45, y, 30));
+            words.push(word(b1, col_b, y, 48));
+            words.push(word(b2, col_b + 53, y, 42));
+            words.push(word(c1, col_c, y, 28));
+            words.push(word(c2, col_c + 33, y, 28));
+        }
+
+        // Spatially separate lower cluster, already recognized by the ML
+        // detector as a `Table` region — its shape doesn't matter, only that
+        // it is excluded before the row-grouping body runs.
+        let lower_xs = [40u32, 200, 360];
+        let lower_min_top = 400u32;
+        let mut lower_max_bottom = 0u32;
+        let mut lower_max_right = 0u32;
+        for r in 0..3u32 {
+            let y = lower_min_top + r * 15;
+            for &x in &lower_xs {
+                let w = word("line", x, y, 50);
+                lower_max_bottom = lower_max_bottom.max(w.top + w.height);
+                lower_max_right = lower_max_right.max(w.left + w.width);
+                words.push(w);
+            }
+        }
+        let lower_hint = LayoutHint {
+            class_name: LayoutHintClass::Table,
+            confidence: 1.0,
+            left: lower_xs[0] as f32,
+            right: lower_max_right as f32,
+            top: PAGE_HEIGHT - lower_min_top as f32,
+            bottom: PAGE_HEIGHT - lower_max_bottom as f32,
+        };
+
+        let hints = detect_geometric_table_hints(&words, PAGE_HEIGHT, &[&lower_hint]);
+        assert_eq!(
+            hints.len(),
+            1,
+            "expected exactly one synthesized region, bounding only the upper grid"
+        );
+        let hint = &hints[0];
+        assert_eq!(hint.class_name, LayoutHintClass::Table);
+        // The synthesized region must not extend down into the excluded lower
+        // cluster's image-top band (bottom, in PDF coords, stays above it).
+        let synthesized_bottom_image_top = PAGE_HEIGHT - hint.bottom;
+        assert!(
+            synthesized_bottom_image_top < lower_min_top as f32,
+            "synthesized region must not reach into the excluded lower cluster"
+        );
+    }
+
+    /// A single grid, fully covered by an `existing_table_hints` bbox, must be
+    /// excluded entirely — every word's center falls inside the exclusion box,
+    /// so no rows survive to be grouped.
+    #[test]
+    fn excludes_words_inside_existing_table_hint() {
+        const PAGE_HEIGHT: f32 = 842.0;
+        let xs = [40u32, 320, 400, 470, 540];
+        let headers = ["Description", "Quantity", "Unit", "VAT", "Total"];
+        let mut words = Vec::new();
+        for (x, h) in xs.iter().zip(headers) {
+            words.push(word(h, *x, 100, 60));
+        }
+        for (row, vals) in [
+            ["PROD_1", "1", "10.00", "19%", "10.00"],
+            ["PROD_2", "2", "20.00", "19%", "40.00"],
+        ]
+        .iter()
+        .enumerate()
+        {
+            let y = 120 + row as u32 * 15;
+            for (x, v) in xs.iter().zip(vals) {
+                words.push(word(v, *x, y, 40));
+            }
+        }
+
+        let covering_hint = LayoutHint {
+            class_name: LayoutHintClass::Table,
+            confidence: 1.0,
+            left: 0.0,
+            right: 700.0,
+            top: PAGE_HEIGHT,
+            bottom: 0.0,
+        };
+
+        let hints = detect_geometric_table_hints(&words, PAGE_HEIGHT, &[&covering_hint]);
+        assert!(
+            hints.is_empty(),
+            "a grid fully covered by an existing hint must be excluded"
+        );
     }
 }

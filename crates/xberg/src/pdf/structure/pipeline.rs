@@ -1391,9 +1391,11 @@ pub(crate) fn extract_document_structure_from_segments(
             let Some(hints) = hints_pages.get(page_idx) else {
                 continue;
             };
-            let has_table_hint = hints
+            let ml_table_hints: Vec<&LayoutHint> = hints
                 .iter()
-                .any(|h| h.class_name == super::types::LayoutHintClass::Table);
+                .filter(|h| h.class_name == super::types::LayoutHintClass::Table)
+                .collect();
+            let has_table_hint = !ml_table_hints.is_empty();
             #[cfg(feature = "layout-detection")]
             let page_height = layout_results
                 .and_then(|results| results.get(page_idx))
@@ -1409,6 +1411,21 @@ pub(crate) fn extract_document_structure_from_segments(
                 );
                 continue;
             }
+            // Run the geometric fallback per-region rather than per-page (#1321):
+            // an ML `Table` hint elsewhere on the page must not suppress recovery
+            // of a spatially separate borderless region, so both paths run
+            // whenever a page has words, with the fallback excluding words
+            // already claimed by an ML table hint.
+            let synthetic = super::regions::detect_geometric_table_hints(&words, page_height, &ml_table_hints);
+            if !synthetic.is_empty() {
+                tracing::debug!(
+                    page = page_idx,
+                    regions = synthetic.len(),
+                    has_table_hint,
+                    "geometric table fallback: synthesized Table region(s) outside existing ML hints"
+                );
+                geometric_table_pages.push((page_idx, words.clone(), page_height, synthetic));
+            }
             if has_table_hint {
                 tracing::trace!(
                     page = page_idx,
@@ -1421,16 +1438,6 @@ pub(crate) fn extract_document_structure_from_segments(
                     words,
                     page_height,
                 });
-            } else {
-                let synthetic = super::regions::detect_geometric_table_hints(&words, page_height);
-                if !synthetic.is_empty() {
-                    tracing::debug!(
-                        page = page_idx,
-                        regions = synthetic.len(),
-                        "geometric table fallback: synthesized Table region(s) on ML-silent page"
-                    );
-                    geometric_table_pages.push((page_idx, words, page_height, synthetic));
-                }
             }
         }
 
