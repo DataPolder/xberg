@@ -118,6 +118,20 @@ fn materialize_fixture_tree(cohort: Cohort, contract: &CohortContract) -> Fixtur
     }
 }
 
+/// The framework name the runner actually writes into artifacts. Xberg batch cells carry a
+/// `-batch` suffix (see `adapters::xberg` and `normalize_run_frameworks`); competitors and
+/// single-file cells use the bare name. Mirroring this here keeps the fixtures faithful to real
+/// artifacts so the validator's suffix handling is exercised.
+fn runtime_framework_name(entry: &benchmark_harness::bench_matrix::MatrixEntry) -> String {
+    use benchmark_harness::bench_matrix::ExecutionMode;
+
+    if matches!(entry.mode, ExecutionMode::Batch) && entry.framework.starts_with("xberg-") {
+        format!("{}-batch", entry.framework)
+    } else {
+        entry.framework.clone()
+    }
+}
+
 fn build_provenance(
     entry: &benchmark_harness::bench_matrix::MatrixEntry,
     contract: &CohortContract,
@@ -140,7 +154,7 @@ fn build_provenance(
             ordered_fixtures: fixture_provenance.to_vec(),
         },
         frameworks: vec![FrameworkProvenance {
-            name: entry.framework.clone(),
+            name: runtime_framework_name(entry),
             version: "0.0.0".to_string(),
             executable: None,
             models: Vec::new(),
@@ -173,7 +187,7 @@ fn build_results(
         .document_stems
         .iter()
         .map(|stem| BenchmarkResult {
-            framework: entry.framework.clone(),
+            framework: runtime_framework_name(entry),
             output_format: entry.output_format,
             file_path: PathBuf::from(format!("/workspace/test_documents/{stem}.pdf")),
             file_size: 1,
@@ -319,6 +333,43 @@ fn accepts_exact_ocr_contract() {
     let required = required_count(&scenario.contract);
     let message = validate(&scenario.args).expect("ocr contract should validate");
     assert_eq!(message, format!("validated {required} ocr benchmark artifacts"));
+}
+
+/// Index of a batch-mode xberg cell in the native matrix — the case that carries the runner's
+/// `-batch` framework-name suffix.
+fn batch_xberg_index(contract: &CohortContract) -> usize {
+    use benchmark_harness::bench_matrix::ExecutionMode;
+    contract
+        .matrix
+        .iter()
+        .position(|entry| entry.framework.starts_with("xberg-") && matches!(entry.mode, ExecutionMode::Batch))
+        .expect("native matrix has a batch xberg cell")
+}
+
+#[test]
+fn accepts_batch_xberg_framework_with_mode_suffix() {
+    // Batch xberg cells write `xberg-<fmt>-<pipeline>-batch`; the validator must accept that
+    // suffixed name against the mode-independent matrix entry (mode is checked via timing.mode).
+    let scenario = artifact_scenario(Cohort::Native);
+    let index = batch_xberg_index(&scenario.contract);
+    let value: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(provenance_path(&scenario, index)).unwrap()).unwrap();
+    assert!(
+        value["frameworks"][0]["name"].as_str().unwrap().ends_with("-batch"),
+        "fixture must carry the runner's -batch suffix"
+    );
+    validate(&scenario.args).expect("suffixed batch xberg name must validate");
+}
+
+#[test]
+fn rejects_batch_xberg_framework_with_wrong_base() {
+    // Stripping the mode suffix must not mask a genuinely wrong base framework name.
+    let scenario = artifact_scenario(Cohort::Native);
+    let index = batch_xberg_index(&scenario.contract);
+    tamper_json(&provenance_path(&scenario, index), |value| {
+        value["frameworks"][0]["name"] = serde_json::json!("xberg-markdown-bogus-batch");
+    });
+    assert_err_contains(validate(&scenario.args), "framework mismatch");
 }
 
 #[test]

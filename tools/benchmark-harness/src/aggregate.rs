@@ -1092,7 +1092,7 @@ fn aggregate_cold_starts(results: &[&BenchmarkResult]) -> Option<DurationPercent
 /// historical result files) are stripped from the base name to preserve backward compatibility.
 ///
 /// Returns `(framework_name, mode)` where `mode` is `"batch"` or `"single"`.
-fn extract_framework_and_mode(framework_name: &str) -> (&str, &str) {
+pub(crate) fn extract_framework_and_mode(framework_name: &str) -> (&str, &str) {
     if let Some(base) = framework_name.strip_suffix("-batch") {
         let normalized = base
             .strip_suffix("-sync")

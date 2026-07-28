@@ -15,7 +15,9 @@ use std::path::{Path, PathBuf};
 
 use serde::de::DeserializeOwned;
 
-use crate::aggregate::{NewConsolidatedResults, PerFixtureRow, PerformancePercentiles, SCHEMA_VERSION};
+use crate::aggregate::{
+    NewConsolidatedResults, PerFixtureRow, PerformancePercentiles, SCHEMA_VERSION, extract_framework_and_mode,
+};
 use crate::bench_matrix::{Cohort, CohortContract, ExecutionMode, MatrixEntry};
 use crate::provenance::RunProvenance;
 use crate::types::{BenchmarkResult, ErrorKind, OcrStatus, OutputFormat};
@@ -393,8 +395,12 @@ fn validate_provenance(
         format!("{}: expected one framework", path.display()),
     )?;
     let framework = &provenance.frameworks[0];
+    // The run side bakes the execution mode into xberg framework names (batch cells emit
+    // `xberg-<fmt>-<pipeline>-batch`), matching how `extract_framework_and_mode` recovers the
+    // base name during aggregation; `entry.framework` is the mode-independent base. Compare the
+    // stripped base — mode itself is validated separately via `timing.mode`/`fixed_batch_size`.
     require(
-        framework.name == entry.framework,
+        extract_framework_and_mode(&framework.name).0 == entry.framework,
         format!("{}: framework mismatch", path.display()),
     )?;
     require(
@@ -446,7 +452,7 @@ fn validate_results(
     };
     for (index, result) in results.iter().enumerate() {
         require(
-            result.framework == entry.framework,
+            extract_framework_and_mode(&result.framework).0 == entry.framework,
             format!("{}: result {index} framework mismatch", path.display()),
         )?;
         require(

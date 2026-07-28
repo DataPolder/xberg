@@ -2411,8 +2411,8 @@ jobs:
 
   publish-pypi:
     name: Publish to PyPI
-    needs: [prepare, python-wheels, python-sdist, check-pypi]
-    if: ${{ needs.prepare.outputs.release_python == 'true' && needs.prepare.outputs.is_tag == 'true' && (needs.check-pypi.outputs.exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
+    needs: [prepare, python-wheels, python-sdist, check-pypi, publish-crates]
+    if: ${{ needs.publish-crates.result != 'failure' && needs.prepare.outputs.release_python == 'true' && needs.prepare.outputs.is_tag == 'true' && (needs.check-pypi.outputs.exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -2444,8 +2444,8 @@ jobs:
 
   publish-cli-proxy:
     name: Publish CLI proxy to PyPI (wheels + sdist)
-    needs: [prepare, check-cli, cli-proxy-wheels]
-    if: ${{ needs.prepare.outputs.release_cli == 'true' && needs.prepare.outputs.is_tag == 'true' && (needs.check-cli.outputs.exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
+    needs: [prepare, check-cli, cli-proxy-wheels, publish-crates]
+    if: ${{ needs.publish-crates.result != 'failure' && needs.prepare.outputs.release_cli == 'true' && needs.prepare.outputs.is_tag == 'true' && (needs.check-cli.outputs.exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -2490,8 +2490,8 @@ jobs:
 
   publish-rubygems:
     name: Publish Ruby gems
-    needs: [prepare, ruby-gem, check-rubygems]
-    if: ${{ needs.prepare.outputs.release_ruby == 'true' && needs.prepare.outputs.is_tag == 'true' && (needs.check-rubygems.outputs.exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
+    needs: [prepare, ruby-gem, check-rubygems, publish-crates]
+    if: ${{ needs.publish-crates.result != 'failure' && needs.prepare.outputs.release_ruby == 'true' && needs.prepare.outputs.is_tag == 'true' && (needs.check-rubygems.outputs.exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -2526,8 +2526,8 @@ jobs:
 
   publish-node:
     name: Publish Node packages
-    needs: [prepare, node-bindings, node-bindings-musl, node-bindings-manylinux, check-npm]
-    if: ${{ needs.prepare.outputs.release_node == 'true' && needs.prepare.outputs.is_tag == 'true' && (needs.check-npm.outputs.node_exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
+    needs: [prepare, node-bindings, node-bindings-musl, node-bindings-manylinux, check-npm, publish-crates]
+    if: ${{ needs.publish-crates.result != 'failure' && needs.prepare.outputs.release_node == 'true' && needs.prepare.outputs.is_tag == 'true' && (needs.check-npm.outputs.node_exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -2668,8 +2668,8 @@ jobs:
   # 1.0.0 release exists. ~keep
   publish-wasm:
     name: Publish WASM package
-    needs: [prepare, wasm-bindings, check-npm]
-    if: ${{ needs.wasm-bindings.result == 'success' && needs.prepare.outputs.release_wasm == 'true' && needs.prepare.outputs.is_tag == 'true' && (needs.check-npm.outputs.wasm_exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
+    needs: [prepare, wasm-bindings, check-npm, publish-crates]
+    if: ${{ needs.wasm-bindings.result == 'success' && needs.publish-crates.result != 'failure' && needs.prepare.outputs.release_wasm == 'true' && needs.prepare.outputs.is_tag == 'true' && (needs.check-npm.outputs.wasm_exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -2732,8 +2732,8 @@ jobs:
 
   publish-packagist:
     name: Trigger Packagist update
-    needs: [prepare, upload-php-pie-release, check-packagist]
-    if: ${{ needs.prepare.outputs.release_php == 'true' && needs.prepare.outputs.is_tag == 'true' && (needs.check-packagist.outputs.exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
+    needs: [prepare, upload-php-pie-release, check-packagist, publish-crates]
+    if: ${{ needs.publish-crates.result != 'failure' && needs.prepare.outputs.release_php == 'true' && needs.prepare.outputs.is_tag == 'true' && (needs.check-packagist.outputs.exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: xberg-io/actions/publish-packagist@v1
@@ -2748,8 +2748,8 @@ jobs:
 
   publish-maven:
     name: Publish Maven (Java) package
-    needs: [prepare, java-natives, java-natives-musl, check-maven]
-    if: ${{ needs.prepare.outputs.release_java == 'true' && needs.prepare.outputs.is_tag == 'true' && (needs.check-maven.outputs.java_exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
+    needs: [prepare, java-natives, java-natives-musl, check-maven, publish-crates]
+    if: ${{ needs.publish-crates.result != 'failure' && needs.prepare.outputs.release_java == 'true' && needs.prepare.outputs.is_tag == 'true' && (needs.check-maven.outputs.java_exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -2799,8 +2799,8 @@ jobs:
 
   publish-kotlin-android:
     name: Publish Kotlin Android (Maven Central via Gradle)
-    needs: [prepare, kotlin-android-natives, check-maven]
-    if: ${{ needs.prepare.outputs.release_kotlin == 'true' && needs.prepare.outputs.is_tag == 'true' && (needs.check-maven.outputs.kotlin_exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
+    needs: [prepare, kotlin-android-natives, check-maven, publish-crates]
+    if: ${{ needs.publish-crates.result != 'failure' && needs.prepare.outputs.release_kotlin == 'true' && needs.prepare.outputs.is_tag == 'true' && (needs.check-maven.outputs.kotlin_exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -2843,8 +2843,8 @@ jobs:
 
   publish-nuget:
     name: Publish NuGet package
-    needs: [prepare, csharp-natives, csharp-natives-musl, check-nuget]
-    if: ${{ needs.prepare.outputs.release_csharp == 'true' && needs.prepare.outputs.is_tag == 'true' && (needs.check-nuget.outputs.exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
+    needs: [prepare, csharp-natives, csharp-natives-musl, check-nuget, publish-crates]
+    if: ${{ needs.publish-crates.result != 'failure' && needs.prepare.outputs.release_csharp == 'true' && needs.prepare.outputs.is_tag == 'true' && (needs.check-nuget.outputs.exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -2958,13 +2958,14 @@ jobs:
 
   publish-hex:
     name: Publish Elixir Hex package
-    needs: [prepare, finalize-github-release-after-uploads, check-hex]
+    needs: [prepare, finalize-github-release-after-uploads, check-hex, publish-crates]
     # Runs whenever the release is finalized, independent of any sibling channel's
     # result. Fetches its NIFs from the finalized release (not run-artifacts), so it
     # only needs finalize to have succeeded. ~keep
     if: >-
       ${{ always()
       && needs.finalize-github-release-after-uploads.result == 'success'
+      && needs.publish-crates.result != 'failure'
       && needs.prepare.outputs.release_elixir == 'true'
       && needs.prepare.outputs.is_tag == 'true'
       && (needs.check-hex.outputs.elixir_exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
@@ -3016,8 +3017,8 @@ jobs:
 
   trigger-pubdev:
     name: Trigger pub.dev publish workflow
-    needs: [prepare, check-pub, upload-dart-release]
-    if: ${{ needs.prepare.outputs.release_dart == 'true' && needs.prepare.outputs.is_tag == 'true' && needs.prepare.outputs.dry_run != 'true' && (needs.check-pub.outputs.exists != 'true' || needs.prepare.outputs.force_republish == 'true') && needs.upload-dart-release.result == 'success' }}
+    needs: [prepare, check-pub, upload-dart-release, publish-crates]
+    if: ${{ needs.publish-crates.result != 'failure' && needs.prepare.outputs.release_dart == 'true' && needs.prepare.outputs.is_tag == 'true' && needs.prepare.outputs.dry_run != 'true' && (needs.check-pub.outputs.exists != 'true' || needs.prepare.outputs.force_republish == 'true') && needs.upload-dart-release.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       actions: write
@@ -3041,7 +3042,7 @@ jobs:
 
   publish-zig:
     name: Publish Zig package metadata
-    needs: [prepare, finalize-github-release-after-uploads, check-zig, c-ffi-libraries]
+    needs: [prepare, finalize-github-release-after-uploads, check-zig, c-ffi-libraries, publish-crates]
     # Consumes c-ffi RUN-artifacts, so c-ffi-libraries must have SUCCEEDED this run
     # (a skip means there are no artifacts to download). Otherwise runs independent
     # of any sibling channel's result, once the release is finalized. ~keep
@@ -3049,6 +3050,7 @@ jobs:
       ${{ always()
       && needs.finalize-github-release-after-uploads.result == 'success'
       && needs.c-ffi-libraries.result == 'success'
+      && needs.publish-crates.result != 'failure'
       && needs.prepare.outputs.release_zig == 'true'
       && needs.prepare.outputs.is_tag == 'true'
       && (needs.check-zig.outputs.exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
@@ -3152,13 +3154,14 @@ jobs:
 
   publish-homebrew-formula:
     name: Update Homebrew formula
-    needs: [prepare, upload-cli-release, check-homebrew]
+    needs: [prepare, upload-cli-release, check-homebrew, publish-crates]
     # Pins release-asset URLs that persist on the release, so a SKIPPED upload-cli
     # on a same-tag retry (asset already uploaded) must not skip the formula bump;
     # only a genuine upload failure should. Independent of all other channels. ~keep
     if: >-
       ${{ always()
       && needs.upload-cli-release.result != 'failure'
+      && needs.publish-crates.result != 'failure'
       && needs.prepare.outputs.release_homebrew == 'true'
       && needs.prepare.outputs.is_tag == 'true'
       && (needs.check-homebrew.outputs.exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
@@ -3486,8 +3489,8 @@ jobs:
 
   cli-proxy:
     name: Publish CLI proxy package (npm)
-    needs: [prepare, check-cli]
-    if: ${{ needs.prepare.outputs.release_cli == 'true' && needs.prepare.outputs.is_tag == 'true' && (needs.check-cli.outputs.exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
+    needs: [prepare, check-cli, publish-crates]
+    if: ${{ needs.publish-crates.result != 'failure' && needs.prepare.outputs.release_cli == 'true' && needs.prepare.outputs.is_tag == 'true' && (needs.check-cli.outputs.exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -3514,9 +3517,10 @@ jobs:
 
   publish-integrations-pypi:
     name: Publish integrations to PyPI
-    needs: [prepare, publish-pypi]
+    needs: [prepare, publish-pypi, publish-crates]
     if: >-
       ${{ !cancelled() && needs.publish-pypi.result != 'failure'
+      && needs.publish-crates.result != 'failure'
       && needs.prepare.outputs.release_python == 'true'
       && needs.prepare.outputs.is_tag == 'true' }}
     runs-on: ubuntu-latest
@@ -3559,9 +3563,10 @@ jobs:
 
   publish-integrations-maven:
     name: Publish spring-ai integration to Maven Central
-    needs: [prepare, publish-maven]
+    needs: [prepare, publish-maven, publish-crates]
     if: >-
       ${{ !cancelled() && needs.publish-maven.result != 'failure'
+      && needs.publish-crates.result != 'failure'
       && needs.prepare.outputs.release_java == 'true'
       && needs.prepare.outputs.is_tag == 'true' }}
     runs-on: ubuntu-latest
@@ -3617,9 +3622,10 @@ jobs:
 
   publish-integrations-npm:
     name: Publish ${{ matrix.package }} to npm
-    needs: [prepare, publish-node]
+    needs: [prepare, publish-node, publish-crates]
     if: >-
       ${{ !cancelled() && needs.publish-node.result != 'failure'
+      && needs.publish-crates.result != 'failure'
       && needs.prepare.outputs.release_node == 'true'
       && needs.prepare.outputs.is_tag == 'true' }}
     runs-on: ubuntu-latest
