@@ -7,10 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [1.0.1] - 2026-07-28
 
 ### Fixed
 
+- **#1321**: Borderless, text-heavy tables are recovered on pages that also contain an ML-detected
+  table. The geometric-table fallback now runs per region instead of per page, so a single ML `Table`
+  hint no longer suppresses borderless-grid recovery across the rest of the page; words already inside
+  an existing table hint are excluded so regions are not detected twice.
+- **#1326**: RTF hex byte escapes now decode through the active font's `\fcharsetN` charset (mapped to
+  a Windows codepage), falling back to `\ansicpgNNNN` and then Windows-1252. Documents that declare a
+  Cyrillic or other non-ANSI font in the font table now decode as readable text instead of
+  Windows-1252 mojibake, and font switches mid-document are tracked across nested groups.
 - **#1328**: Page markers now appear verbatim in Markdown and Djot output. Flat documents no longer
   backslash-escape the marker (`\<\!-- PAGE 1 --\>`), and structured native documents no longer drop
   it entirely.
@@ -22,6 +30,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `LayoutStrategy` enum on `LayoutDetectionConfig` (`strategy` field, default `always`). `auto` pre-screens each PDF page with cheap geometry signals and runs the layout model only on pages likely to benefit; existing configs keep the every-page behavior bit-for-bit. On the OCR path only inference is skipped, since OCR consumes the layout pass's rasters. Skipped pages are auditable via `metadata.format.layout_gated_pages` and `layout_gate_reasons`, and the CLI gains `--layout-strategy` ([#1322](https://github.com/xberg-io/xberg/issues/1322)).
+
+### Packaging
+
+- Republishes `xberg-libwpd` with the static zlib link fix so `xberg-cli` links against a working
+  release. The 1.0.0 `xberg-libwpd` crate was published before the fix and left the librevenge
+  `inflateInit2_`/`inflate`/`inflateEnd` symbols undefined at final link, breaking `xberg-cli` builds
+  from crates.io. No source API changes.
 
 ## [1.0.0] - 2026-07-27
 
