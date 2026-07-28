@@ -354,9 +354,79 @@ const MIN_ORIENTATION_CONFIDENCE: f32 = 0.35;
 #[cfg(auto_rotate)]
 const _: () = assert!(MIN_ORIENTATION_CONFIDENCE == crate::doc_orientation::MIN_CONFIDENCE);
 
-fn preprocess_pix(pix: xberg_tesseract::Pix) -> xberg_tesseract::Result<xberg_tesseract::Pix> {
-    let normalized = pix.background_normalize()?;
-    drop(pix);
+/// Grayscale mean (0–255) below which the image is considered background-
+/// dark rather than background-light.
+///
+/// Scanned documents are background-dominated (background typically covers
+/// 85–95% of pixel area), so the grayscale mean tracks background tone far
+/// more than foreground text tone. A mean below this value means most of the
+/// image is dark, i.e. a plausible dark background.
+const DARK_BACKGROUND_MEAN_THRESHOLD: f64 = 100.0;
+
+/// Grayscale value (0–255) at or above which a pixel counts as "light" when
+/// computing the light-pixel fraction used to guard polarity auto-detection.
+const LIGHT_PIXEL_VALUE_THRESHOLD: u8 = 180;
+
+/// Minimum fraction of light pixels required, alongside a dark mean, before
+/// auto-detection treats an image as light-text-on-dark-background.
+///
+/// Without this guard, a naive `mean < threshold` check would also fire on
+/// uniformly dark, non-text images (e.g. a dark photograph or a heavily
+/// shadowed scan) where inverting would corrupt the image rather than fix
+/// it. Real text/foreground content typically covers at least a small
+/// fraction of a page, so requiring *some* light pixels alongside the dark
+/// mean distinguishes "light text on a dark background" from "uniformly
+/// dark image".
+const MIN_LIGHT_PIXEL_FRACTION_FOR_INVERT: f64 = 0.01;
+
+/// Sampling grid spacing (pixels) used when computing polarity statistics.
+/// Keeps polarity detection cheap on large scans while remaining
+/// representative.
+const POLARITY_SAMPLE_STRIDE: i32 = 4;
+
+/// Decide whether an image should be inverted before OCR.
+///
+/// `force_invert` mirrors `ImagePreprocessingConfig.invert_colors`: `true`
+/// unconditionally forces inversion (an explicit override for cases where
+/// auto-detection disagrees); `false` (the default) falls back to
+/// auto-detection from `mean_gray` and `light_fraction` — see
+/// `DARK_BACKGROUND_MEAN_THRESHOLD` and `MIN_LIGHT_PIXEL_FRACTION_FOR_INVERT`.
+///
+/// This is a pure function so the polarity decision can be unit-tested
+/// without linking native Tesseract/Leptonica.
+fn should_invert_for_polarity(mean_gray: f64, light_fraction: f64, force_invert: bool) -> bool {
+    force_invert
+        || (mean_gray < DARK_BACKGROUND_MEAN_THRESHOLD && light_fraction >= MIN_LIGHT_PIXEL_FRACTION_FOR_INVERT)
+}
+
+/// Preprocess a raw Pix before handing it to Tesseract.
+///
+/// Order matters: polarity (light-on-dark vs. dark-on-light) is detected and
+/// corrected *first*, because `background_normalize` assumes a light
+/// background and Tesseract's own binarizer assumes dark text on a light
+/// background. `force_invert` mirrors `ImagePreprocessingConfig.invert_colors`
+/// (see [`should_invert_for_polarity`]).
+fn preprocess_pix(pix: xberg_tesseract::Pix, force_invert: bool) -> xberg_tesseract::Result<xberg_tesseract::Pix> {
+    let polarity_stats = pix
+        .to_grayscale()
+        .and_then(|gray| gray.grayscale_stats(LIGHT_PIXEL_VALUE_THRESHOLD, POLARITY_SAMPLE_STRIDE))
+        .ok();
+
+    let invert = match polarity_stats {
+        Some((mean_gray, light_fraction)) => should_invert_for_polarity(mean_gray, light_fraction, force_invert),
+        None => force_invert,
+    };
+
+    let source = if invert {
+        let inverted = pix.invert()?;
+        drop(pix);
+        inverted
+    } else {
+        pix
+    };
+
+    let normalized = source.background_normalize()?;
+    drop(source);
 
     let sharpened = normalized.unsharp_mask(3, 0.5)?;
     drop(normalized);
@@ -605,6 +675,8 @@ pub(super) fn perform_ocr(
 
     apply_tesseract_variables(&api, config)?;
 
+    let force_invert_colors = config.preprocessing.as_ref().map(|p| p.invert_colors).unwrap_or(false);
+
     let processed_pix: Option<xberg_tesseract::Pix> = {
         match xberg_tesseract::Pix::from_raw_rgb(&image_data, width, height) {
             Ok(mut pix) => {
@@ -614,7 +686,7 @@ pub(super) fn perform_ocr(
                     let _ = pix.set_resolution(72, 72);
                 }
 
-                let processed = preprocess_pix(pix);
+                let processed = preprocess_pix(pix, force_invert_colors);
                 match processed {
                     Ok(p) => Some(p),
                     Err(e) => {
@@ -703,7 +775,7 @@ pub(super) fn perform_ocr(
 
                     let rotated_pix = xberg_tesseract::Pix::from_raw_rgb(&rotated_data, new_width, new_height)
                         .ok()
-                        .and_then(|pix| preprocess_pix(pix).ok());
+                        .and_then(|pix| preprocess_pix(pix, force_invert_colors).ok());
 
                     if let Some(ref pix) = rotated_pix {
                         api.set_image_2(pix.as_ptr()).map_err(|e| {
@@ -1358,12 +1430,107 @@ mod tests {
         let mut pix = xberg_tesseract::Pix::from_raw_rgb(&rgb_data, width, height).unwrap();
         pix.set_resolution(300, 300).unwrap();
 
-        let processed = preprocess_pix(pix).unwrap();
+        let processed = preprocess_pix(pix, false).unwrap();
 
         assert_eq!(processed.width(), width as i32);
         assert_eq!(processed.height(), height as i32);
         assert_eq!(processed.depth(), 8);
         assert_eq!(processed.get_resolution().unwrap(), (72, 72));
+    }
+
+    #[test]
+    fn test_should_invert_for_polarity_dark_background_with_text() {
+        // Dark background (mean well below threshold) with a clear light-text
+        // fraction should trigger auto-detected inversion.
+        assert!(should_invert_for_polarity(40.0, 0.05, false));
+    }
+
+    #[test]
+    fn test_should_invert_for_polarity_light_background_not_inverted() {
+        // Typical dark-text-on-light-paper scan: high mean, no auto-invert.
+        assert!(!should_invert_for_polarity(220.0, 0.9, false));
+    }
+
+    #[test]
+    fn test_should_invert_for_polarity_uniformly_dark_image_not_inverted() {
+        // Dark mean but essentially no light pixels: a uniformly dark, non-text
+        // image (e.g. a dark photo) should NOT be auto-inverted.
+        assert!(!should_invert_for_polarity(20.0, 0.0, false));
+    }
+
+    #[test]
+    fn test_should_invert_for_polarity_force_true_overrides_light_background() {
+        // Explicit invert_colors=true forces inversion even on a light-mean image.
+        assert!(should_invert_for_polarity(220.0, 0.9, true));
+    }
+
+    #[test]
+    fn test_should_invert_for_polarity_force_false_still_auto_detects() {
+        assert!(should_invert_for_polarity(10.0, 0.5, false));
+    }
+
+    #[test]
+    fn test_preprocess_pix_inverts_light_on_dark_image() {
+        // Synthetic light-text-on-dark-background image: dark background (20)
+        // with a bright "text" region covering ~6% of the image.
+        let width = 40u32;
+        let height = 40u32;
+        let mut rgb_data = Vec::with_capacity((width * height * 3) as usize);
+        for y in 0..height {
+            for x in 0..width {
+                let is_text = (10..13).contains(&y) && (5..25).contains(&x);
+                let value = if is_text { 230u8 } else { 20u8 };
+                rgb_data.extend_from_slice(&[value, value, value]);
+            }
+        }
+
+        let pix = xberg_tesseract::Pix::from_raw_rgb(&rgb_data, width, height).unwrap();
+        let original_gray = pix.to_grayscale().unwrap();
+        let (original_mean, _) = original_gray
+            .grayscale_stats(LIGHT_PIXEL_VALUE_THRESHOLD, POLARITY_SAMPLE_STRIDE)
+            .unwrap();
+        drop(original_gray);
+
+        // Auto-detection with no explicit override should invert: the result's
+        // background (post background_normalize + grayscale) should be light,
+        // i.e. brighter on average than the raw dark-background source.
+        let processed = preprocess_pix(pix, false).unwrap();
+        let (processed_mean, _) = processed
+            .grayscale_stats(LIGHT_PIXEL_VALUE_THRESHOLD, POLARITY_SAMPLE_STRIDE)
+            .unwrap();
+
+        assert!(
+            processed_mean > original_mean,
+            "expected inverted+normalized output to be brighter than the dark-background \
+             source (original_mean={original_mean}, processed_mean={processed_mean})"
+        );
+    }
+
+    #[test]
+    fn test_preprocess_pix_does_not_invert_dark_on_light_image() {
+        // A normal dark-text-on-light-paper image should not be inverted:
+        // processing should keep (or increase) brightness, not flip polarity.
+        let width = 40u32;
+        let height = 40u32;
+        let mut rgb_data = Vec::with_capacity((width * height * 3) as usize);
+        for y in 0..height {
+            for x in 0..width {
+                let is_text = (10..13).contains(&y) && (5..25).contains(&x);
+                let value = if is_text { 20u8 } else { 230u8 };
+                rgb_data.extend_from_slice(&[value, value, value]);
+            }
+        }
+
+        let pix = xberg_tesseract::Pix::from_raw_rgb(&rgb_data, width, height).unwrap();
+        let processed = preprocess_pix(pix, false).unwrap();
+        let (processed_mean, _) = processed
+            .grayscale_stats(LIGHT_PIXEL_VALUE_THRESHOLD, POLARITY_SAMPLE_STRIDE)
+            .unwrap();
+
+        assert!(
+            processed_mean > DARK_BACKGROUND_MEAN_THRESHOLD,
+            "expected light-background image to stay light after preprocessing (mean={processed_mean})"
+        );
     }
 
     #[cfg(auto_rotate)]

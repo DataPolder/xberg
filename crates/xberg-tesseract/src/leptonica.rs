@@ -118,6 +118,19 @@ ffi_extern! {
     /// 8 bpp Pix, or null on failure.
     fn pixConvertRGBToGray(pixs: *mut c_void, rwt: f32, gwt: f32, bwt: f32) -> *mut c_void;
 
+    /// Inverts the pixel values of a Pix (bitwise complement).
+    ///
+    /// Pass null for `pixd` to allocate a new inverted Pix. The input Pix is
+    /// **not** consumed. Returns the inverted Pix, or null on failure.
+    fn pixInvert(pixd: *mut c_void, pixs: *mut c_void) -> *mut c_void;
+
+    /// Reads a single pixel value from a Pix.
+    ///
+    /// Writes the pixel's raw value (for 8 bpp images, the grayscale intensity
+    /// 0–255) into `*pval`. Returns 0 on success, non-zero on error (e.g. `x`/`y`
+    /// out of bounds).
+    fn pixGetPixel(pix: *mut c_void, x: i32, y: i32, pval: *mut u32) -> i32;
+
     /// Creates a Leptonica BOX with the given coordinates.
     fn boxCreate(x: i32, y: i32, w: i32, h: i32) -> *mut c_void;
 
@@ -545,6 +558,102 @@ impl Pix {
         }
     }
 
+    /// Inverts the pixel values of this image (bitwise complement).
+    ///
+    /// For an 8 bpp grayscale image this swaps light and dark: a pixel value
+    /// of `v` becomes `255 - v`. Useful for correcting light-text-on-dark-
+    /// background scans before Tesseract's binarizer runs, since Tesseract
+    /// assumes dark text on a light background. Returns a new Pix; the
+    /// receiver is unchanged.
+    ///
+    /// # Errors
+    ///
+    /// Returns `TesseractError::NullPointerError` if `pixInvert` returns null.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// # use xberg_tesseract::Pix;
+    /// # let rgb = vec![30u8; 16 * 16 * 3];
+    /// # let pix = Pix::from_raw_rgb(&rgb, 16, 16).unwrap();
+    /// let gray = pix.to_grayscale().unwrap();
+    /// let inverted = gray.invert().unwrap();
+    /// let back = inverted.invert().unwrap();
+    /// ```
+    pub fn invert(&self) -> Result<Pix> {
+        let result = unsafe { pixInvert(std::ptr::null_mut(), self.ptr) };
+        if result.is_null() {
+            Err(TesseractError::NullPointerError)
+        } else {
+            Ok(Pix { ptr: result })
+        }
+    }
+
+    /// Estimates the mean pixel value and the fraction of "light" pixels of
+    /// an 8 bpp grayscale image, by sampling a regular grid in a single pass.
+    ///
+    /// Used to decide image polarity (light-on-dark vs. dark-on-light) before
+    /// OCR. `sample_stride` controls the sampling grid spacing in pixels (e.g.
+    /// 4 samples roughly every 4th pixel in each dimension); pass 1 to sample
+    /// every pixel. `light_threshold` is the grayscale value (0–255) at or
+    /// above which a sampled pixel counts towards the returned light
+    /// fraction. Only meaningful on an 8 bpp Pix — behaviour on other bit
+    /// depths is Leptonica-defined and not validated here.
+    ///
+    /// Returns `(mean, light_fraction)`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `TesseractError::OcrError` if no pixels could be sampled
+    /// (zero-sized image) or if `pixGetPixel` fails.
+    pub fn grayscale_stats(&self, light_threshold: u8, sample_stride: i32) -> Result<(f64, f64)> {
+        let stride = sample_stride.max(1);
+        let width = self.width();
+        let height = self.height();
+        if width <= 0 || height <= 0 {
+            return Err(TesseractError::OcrError);
+        }
+
+        let mut sum: u64 = 0;
+        let mut light_count: u64 = 0;
+        let mut count: u64 = 0;
+        let mut y = 0;
+        while y < height {
+            let mut x = 0;
+            while x < width {
+                let mut value: u32 = 0;
+                let status = unsafe { pixGetPixel(self.ptr, x, y, &mut value) };
+                if status != 0 {
+                    return Err(TesseractError::OcrError);
+                }
+                sum += value as u64;
+                if value >= light_threshold as u32 {
+                    light_count += 1;
+                }
+                count += 1;
+                x += stride;
+            }
+            y += stride;
+        }
+
+        if count == 0 {
+            return Err(TesseractError::OcrError);
+        }
+
+        Ok((sum as f64 / count as f64, light_count as f64 / count as f64))
+    }
+
+    /// Estimates the mean pixel value of an 8 bpp grayscale image by sampling
+    /// a regular grid of pixels. See [`Pix::grayscale_stats`] for details.
+    ///
+    /// # Errors
+    ///
+    /// Returns `TesseractError::OcrError` if no pixels could be sampled
+    /// (zero-sized image) or if `pixGetPixel` fails.
+    pub fn mean_gray_value(&self, sample_stride: i32) -> Result<f64> {
+        self.grayscale_stats(255, sample_stride).map(|(mean, _)| mean)
+    }
+
     /// Returns the raw Leptonica `PIX *` pointer.
     ///
     /// Intended for passing this image to `TesseractAPI::set_image_2`.
@@ -681,5 +790,45 @@ mod tests {
         let gray = pix.to_grayscale().expect("to_grayscale failed");
         let binary = gray.adaptive_threshold(32, 32).expect("adaptive_threshold failed");
         assert_eq!(binary.depth(), 1);
+    }
+
+    #[test]
+    fn test_invert_flips_uniform_gray_value() {
+        let pix = make_rgb_pix(16, 16, 30);
+        let gray = pix.to_grayscale().expect("to_grayscale failed");
+        let inverted = gray.invert().expect("invert failed");
+
+        assert_eq!(inverted.width(), gray.width());
+        assert_eq!(inverted.height(), gray.height());
+        assert_eq!(inverted.depth(), 8);
+
+        let original_mean = gray.mean_gray_value(1).expect("mean_gray_value failed");
+        let inverted_mean = inverted.mean_gray_value(1).expect("mean_gray_value failed");
+        assert!((original_mean + inverted_mean - 255.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_invert_twice_round_trips() {
+        let pix = make_rgb_pix(16, 16, 90);
+        let gray = pix.to_grayscale().expect("to_grayscale failed");
+
+        let once = gray.invert().expect("first invert failed");
+        let twice = once.invert().expect("second invert failed");
+
+        let original_mean = gray.mean_gray_value(1).expect("mean_gray_value failed");
+        let round_tripped_mean = twice.mean_gray_value(1).expect("mean_gray_value failed");
+        assert!((original_mean - round_tripped_mean).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_mean_gray_value_light_vs_dark() {
+        let light = make_rgb_pix(8, 8, 220).to_grayscale().expect("to_grayscale failed");
+        let dark = make_rgb_pix(8, 8, 20).to_grayscale().expect("to_grayscale failed");
+
+        let light_mean = light.mean_gray_value(1).expect("mean_gray_value failed");
+        let dark_mean = dark.mean_gray_value(1).expect("mean_gray_value failed");
+
+        assert!(light_mean > 200.0, "light_mean was {light_mean}");
+        assert!(dark_mean < 40.0, "dark_mean was {dark_mean}");
     }
 }
