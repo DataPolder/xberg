@@ -48,7 +48,14 @@ pub(crate) fn download_language_pack(lang: &str, output_dir: &Path) -> Result<()
         ),
     ];
 
+    tracing::info!(
+        "Downloading Tesseract language pack '{}' to {} (source: tessdata_fast)",
+        lang,
+        traineddata_path.display()
+    );
+
     for url in &urls {
+        tracing::info!("Fetching language pack '{}' from {}", lang, url);
         match download_file(url, &traineddata_path) {
             Ok(_) => {
                 tracing::info!(
