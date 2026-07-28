@@ -881,7 +881,20 @@ once_cell = { workspace = true }
 opentelemetry = { version = "0.32", features = ["trace"], optional = true }
 opentelemetry_sdk = { version = "0.32", features = ["rt-tokio"], optional = true }
 org = { version = "0.3", optional = true }
-ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "ndarray", "api-18"], optional = true }
+# coreml/cuda/tensorrt: ort_discovery.rs unconditionally names ort::ep::CoreML/CUDA/TensorRT
+# (runtime-selected GPU execution providers, used whenever any ORT feature is on). ort
+# 2.0.0-rc.13 gated those EP types behind these same-named Cargo features (previously
+# ungated in rc.12); ort-sys's build script does not branch on them (verified: no build-time
+# SDK requirement, no effect on the download-binaries/load-dynamic strategy), so enabling
+# them here is a pure compile-time unlock, safe under both ort-bundled and ort-dynamic.
+ort = { version = "2.0.0-rc.12", default-features = false, features = [
+    "std",
+    "ndarray",
+    "api-18",
+    "coreml",
+    "cuda",
+    "tensorrt",
+], optional = true }
 outlook-pst = { version = "1.2.0", optional = true }
 parking_lot = { workspace = true }
 pastey = "0.2"
