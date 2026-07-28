@@ -303,7 +303,7 @@ jobs:
         with:
           python-version: "3.11"
           cache-prefix: benchmark-docling
-          install-command: "uv sync --no-install-project --no-install-workspace --group dev --group bench-docling"
+          install-command: "uv sync --frozen --no-install-project --no-install-workspace --group dev --group bench-docling"
 
       - name: Install system dependencies
         run: |
@@ -390,7 +390,7 @@ jobs:
         with:
           python-version: "3.11"
           cache-prefix: benchmark-markitdown
-          install-command: "uv sync --no-install-project --no-install-workspace --group dev --group bench-markitdown --prerelease=allow"
+          install-command: "uv sync --frozen --no-install-project --no-install-workspace --group dev --group bench-markitdown --prerelease=allow"
 
       - name: Run benchmark
         env:
@@ -474,7 +474,7 @@ jobs:
         with:
           python-version: "3.11"
           cache-prefix: benchmark-unstructured
-          install-command: "uv sync --no-install-project --no-install-workspace --group dev --group bench-unstructured"
+          install-command: "uv sync --frozen --no-install-project --no-install-workspace --group dev --group bench-unstructured"
 
       - name: Run benchmark
         env:
@@ -646,7 +646,7 @@ jobs:
         with:
           python-version: "3.11"
           cache-prefix: benchmark-pymupdf4llm
-          install-command: "uv sync --no-install-project --no-install-workspace --group dev --group bench-pymupdf4llm"
+          install-command: "uv sync --frozen --no-install-project --no-install-workspace --group dev --group bench-pymupdf4llm"
 
       - name: Run benchmark
         env:
@@ -699,7 +699,7 @@ jobs:
         with:
           python-version: "3.11"
           cache-prefix: benchmark-mineru
-          install-command: "uv sync --no-install-project --no-install-workspace --group dev --group bench-mineru"
+          install-command: "uv sync --frozen --no-install-project --no-install-workspace --group dev --group bench-mineru"
 
       - name: Install system dependencies (libgl1 + libglib2.0-0 for mineru)
         run: |
@@ -843,7 +843,7 @@ jobs:
         with:
           python-version: "3.11"
           cache-prefix: benchmark-mineru
-          install-command: "uv sync --no-install-project --no-install-workspace --group dev --group bench-mineru"
+          install-command: "uv sync --frozen --no-install-project --no-install-workspace --group dev --group bench-mineru"
 
       - name: Install system dependencies (libgl1 + libglib2.0-0 for mineru)
         run: |
