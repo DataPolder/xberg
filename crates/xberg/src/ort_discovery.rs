@@ -125,8 +125,12 @@ pub(crate) fn apply_execution_providers(
             _ => None,
         })
         .unwrap_or_else(|| accel.map(|a| a.provider.clone()).unwrap_or(ExecutionProviderType::Auto));
+    // Only read by the CUDA/TensorRT EP arms, which are cfg-gated behind their respective
+    // Cargo features; unused without at least one of them enabled.
+    #[cfg_attr(not(any(feature = "cuda", feature = "tensorrt")), allow(unused_variables))]
     let device_id = accel.map(|a| a.device_id).unwrap_or(0);
 
+    #[cfg(target_os = "macos")]
     fn build_coreml_ep() -> ort::ep::CoreML {
         use ort::ep::coreml::{ComputeUnits, ModelFormat};
         let mut ep = ort::ep::CoreML::default();
@@ -154,6 +158,7 @@ pub(crate) fn apply_execution_providers(
             tracing::debug!("ORT session: CPU execution provider (explicit)");
             builder
         }
+        #[cfg(target_os = "macos")]
         ExecutionProviderType::CoreMl => {
             let ep = build_coreml_ep();
             if ep.is_available().unwrap_or(false) {
@@ -169,6 +174,14 @@ pub(crate) fn apply_execution_providers(
                 ));
             }
         }
+        #[cfg(not(target_os = "macos"))]
+        ExecutionProviderType::CoreMl => {
+            return Err(ort::Error::new(
+                "CoreML execution provider requested but this build target is not macOS. \
+                 CoreML is only available on macOS.",
+            ));
+        }
+        #[cfg(feature = "cuda")]
         ExecutionProviderType::Cuda => {
             let ep = ort::ep::CUDA::default().with_device_id(device_id as i32);
             if ep.is_available().unwrap_or(false) {
@@ -185,6 +198,14 @@ pub(crate) fn apply_execution_providers(
                 ));
             }
         }
+        #[cfg(not(feature = "cuda"))]
+        ExecutionProviderType::Cuda => {
+            return Err(ort::Error::new(
+                "CUDA execution provider requested but this build was compiled without CUDA \
+                 support; rebuild with the `cuda` feature.",
+            ));
+        }
+        #[cfg(feature = "tensorrt")]
         ExecutionProviderType::TensorRt => {
             let ep = ort::ep::TensorRT::default().with_device_id(device_id as i32);
             if ep.is_available().unwrap_or(false) {
@@ -204,6 +225,13 @@ pub(crate) fn apply_execution_providers(
                 ));
             }
         }
+        #[cfg(not(feature = "tensorrt"))]
+        ExecutionProviderType::TensorRt => {
+            return Err(ort::Error::new(
+                "TensorRT execution provider requested but this build was compiled without \
+                 TensorRT support; rebuild with the `tensorrt` feature.",
+            ));
+        }
         ExecutionProviderType::Auto => {
             #[cfg(target_os = "macos")]
             let builder = {
@@ -218,7 +246,7 @@ pub(crate) fn apply_execution_providers(
                     builder
                 }
             };
-            #[cfg(target_os = "linux")]
+            #[cfg(all(target_os = "linux", feature = "cuda"))]
             let builder = {
                 let ep = ort::ep::CUDA::default();
                 if ep.is_available().unwrap_or(false) {
@@ -233,6 +261,11 @@ pub(crate) fn apply_execution_providers(
                     );
                     builder
                 }
+            };
+            #[cfg(all(target_os = "linux", not(feature = "cuda")))]
+            let builder = {
+                tracing::debug!("ORT session: auto — using CPU. Rebuild with the `cuda` feature for GPU support.");
+                builder
             };
             #[cfg(not(any(target_os = "macos", target_os = "linux")))]
             let builder = {

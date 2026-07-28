@@ -13,10 +13,12 @@
 //! - Network access (models auto-downloaded from HuggingFace)
 //!
 //! Run all GPU tests:
-//!   cargo test -p xberg --features "full,ort-dynamic" --test gpu_acceleration -- --ignored
+//!   cargo test -p xberg --features "full,ort-dynamic,cuda" --test gpu_acceleration -- --ignored
 //!
 //! The `ort-dynamic` feature overrides the bundled CPU-only ORT so a
-//! GPU-enabled ONNX Runtime (via `ORT_DYLIB_PATH`) is loaded at runtime.
+//! GPU-enabled ONNX Runtime (via `ORT_DYLIB_PATH`) is loaded at runtime. The `cuda`
+//! feature compiles in `ort::ep::CUDA` (gated out of `full` by default — see
+//! `ort_discovery.rs` — since the plain `download-binaries` prebuilt has no CUDA support).
 
 #![allow(dead_code)]
 

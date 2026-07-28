@@ -213,6 +213,24 @@ ort-bundled = ["ort?/download-binaries", "ort?/tls-rustls", "xberg-gliner?/ort-b
 # Build-time only: configures ORT to load ONNX Runtime dynamically at runtime.
 # No #[cfg] gates — passed through to the `ort` crate.
 ort-dynamic = ["ort?/load-dynamic", "xberg-gliner?/ort-dynamic"]
+# CoreML EP opt-in. On macOS the target-specific `ort` dependency table already enables
+# `ort/coreml` unconditionally, and `ort_discovery.rs` gates the CoreML EP code behind
+# `target_os = "macos"`; this feature exists for parity with `cuda`/`tensorrt` below and to
+# let callers request it explicitly. Not included in `default`, `full`, or any binding
+# preset — GPU EP prebuilts are opt-in only.
+coreml = ["ort?/coreml"]
+# CUDA EP opt-in. Requires building against a CUDA-enabled ONNX Runtime (the plain
+# `download-binaries` prebuilt has no CUDA support). `ort_discovery.rs` gates the CUDA EP
+# construction code behind `#[cfg(feature = "cuda")]`; without this feature the explicit
+# `cuda` execution-provider request returns a clear build-time error instead of failing to
+# link/load. Not included in `default`, `full`, or any binding preset.
+cuda = ["ort?/cuda"]
+# TensorRT EP opt-in. Requires building against a TensorRT-enabled ONNX Runtime.
+# `ort_discovery.rs` gates the TensorRT EP construction code behind
+# `#[cfg(feature = "tensorrt")]`; without this feature the explicit `tensorrt`
+# execution-provider request returns a clear build-time error. Not included in `default`,
+# `full`, or any binding preset.
+tensorrt = ["ort?/tensorrt"]
 # Layout detection via ONNX Runtime (YOLO + RT-DETR)
 # Document orientation detection using PP-LCNet for auto_rotate
 auto-rotate = [
@@ -881,19 +899,21 @@ once_cell = { workspace = true }
 opentelemetry = { version = "0.32", features = ["trace"], optional = true }
 opentelemetry_sdk = { version = "0.32", features = ["rt-tokio"], optional = true }
 org = { version = "0.3", optional = true }
-# coreml/cuda/tensorrt: ort_discovery.rs unconditionally names ort::ep::CoreML/CUDA/TensorRT
-# (runtime-selected GPU execution providers, used whenever any ORT feature is on). ort
-# 2.0.0-rc.13 gated those EP types behind these same-named Cargo features (previously
-# ungated in rc.12); ort-sys's build script does not branch on them (verified: no build-time
-# SDK requirement, no effect on the download-binaries/load-dynamic strategy), so enabling
-# them here is a pure compile-time unlock, safe under both ort-bundled and ort-dynamic.
+# ort 2.0.0-rc.13 gates ort::ep::CoreML/CUDA/TensorRT behind same-named Cargo features
+# (previously ungated in rc.12). Do NOT blanket-enable coreml/cuda/tensorrt here: ort's
+# `download-binaries` (`ort-bundled`, used by every target except macos-intel) branches on
+# the enabled EP feature set to pick a prebuilt archive, and no `coreml,cuda,tensorrt`
+# prebuilt exists (macOS arm64 only ships `coreml` / `coreml,webgpu` prebuilts) — enabling
+# all three unconditionally compiles fine but fails at runtime with a dyld
+# symbol-not-found. Instead: `coreml` is enabled only on macOS via the target-specific
+# `ort` dependency table below; `cuda`/`tensorrt` are opt-in xberg features (see
+# `[features] cuda`/`tensorrt`) that callers must explicitly request together with a
+# matching CUDA/TensorRT-enabled ONNX Runtime build. `ort_discovery.rs` #[cfg]-gates the
+# corresponding EP construction code to match.
 ort = { version = "2.0.0-rc.13", default-features = false, features = [
     "std",
     "ndarray",
     "api-18",
-    "coreml",
-    "cuda",
-    "tensorrt",
 ], optional = true }
 outlook-pst = { version = "1.2.0", optional = true }
 parking_lot = { workspace = true }
@@ -1117,6 +1137,17 @@ xberg-tesseract = { path = "../xberg-tesseract", default-features = false, featu
 # hf-hub is declared in the target-independent `not(wasm32)` block above.
 [target.'cfg(target_os = "android")'.dependencies]
 ureq = { version = "3.3", default-features = false, features = ["rustls", "json"], optional = true }
+
+# ort CoreML EP (macOS only): Cargo unions this dependency's `features` additively with the
+# base `ort` declaration above for the matching platform, so this only adds `coreml` to the
+# feature set actually compiled on macOS — linux/windows stay on the plain std/ndarray/api-18
+# feature set and resolve the CPU-only `download-binaries` prebuilt. See the comment on the
+# base `ort` dependency for why this must NOT be a blanket feature.
+[target.'cfg(target_os = "macos")'.dependencies.ort]
+version = "2.0.0-rc.13"
+default-features = false
+features = ["coreml"]
+optional = true
 
 [build-dependencies]
 
