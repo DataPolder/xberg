@@ -18,6 +18,7 @@
 
 use super::OxideDocument;
 use crate::pdf::error::{PdfError, Result};
+use crate::pdf::table_reconstruct::table_to_markdown;
 use crate::types::{BoundingBox, Table};
 use std::collections::HashSet;
 
@@ -32,6 +33,15 @@ const DENSE_NUMERIC_MIN_WORDS_PER_ROW: usize = 3;
 const DENSE_NUMERIC_MIN_ROW_WORD_PERCENT: usize = 60;
 const DENSE_NUMERIC_MIN_RECURRING_TRACKS: usize = 4;
 const DENSE_NUMERIC_MIN_TRACK_ROW_PERCENT: usize = 60;
+const LABEL_HEAVY_FINANCIAL_MIN_ROWS: usize = 5;
+const LABEL_HEAVY_FINANCIAL_TRACKS: usize = 4;
+const LABEL_HEAVY_FINANCIAL_MIN_TRACK_ROW_PERCENT: usize = 30;
+const LABEL_HEAVY_FINANCIAL_MIN_TRACK_ROWS: usize = 3;
+const LABEL_HEAVY_FINANCIAL_MIN_DESCRIPTOR_ROW_PERCENT: usize = 50;
+const LABEL_HEAVY_FINANCIAL_MIN_NUMERIC_ROWS: usize = 4;
+const LABEL_HEAVY_FINANCIAL_MIN_VALUES_PER_ROW: usize = 3;
+const LABEL_HEAVY_FINANCIAL_MAX_SECTION_GAP_HEIGHTS: u32 = 4;
+const LABEL_HEAVY_FINANCIAL_MAX_LABEL_GAP_HEIGHTS: u32 = 2;
 const NUMERIC_HEADER_MIN_TRACK_PERCENT: usize = 60;
 const NUMERIC_HEADER_MIN_ALPHA_PERCENT: usize = 60;
 const NUMERIC_HEADER_MAX_ROWS: usize = 2;
@@ -339,14 +349,12 @@ pub(crate) fn extract_tables_heuristic(
             regions.truncate(MAX_REGIONS_PER_PAGE);
         }
 
-        for region in regions {
-            tables.extend(reconstruct_region_tables(
-                &region,
-                page_height,
-                page_number,
-                allow_single_column,
-            ));
-        }
+        tables.extend(reconstruct_page_region_tables(
+            &regions,
+            page_height,
+            page_number,
+            allow_single_column,
+        ));
     }
 
     Ok(HeuristicTableExtraction {
@@ -356,6 +364,344 @@ pub(crate) fn extract_tables_heuristic(
             used_structure_tree,
         },
     })
+}
+
+fn reconstruct_page_region_tables(
+    regions: &[Vec<crate::pdf::table_reconstruct::HocrWord>],
+    page_height: f32,
+    page_number: u32,
+    allow_single_column: bool,
+) -> Vec<Table> {
+    let mut tables = Vec::new();
+    let mut index = 0;
+    while index < regions.len() {
+        let Some((first, first_tracks, track_tolerance)) =
+            reconstruct_label_heavy_financial_region(&regions[index], page_height, page_number)
+        else {
+            tables.extend(reconstruct_region_tables(
+                &regions[index],
+                page_height,
+                page_number,
+                allow_single_column,
+            ));
+            index += 1;
+            continue;
+        };
+
+        let mut chain = vec![first];
+        let mut chain_end = index + 1;
+        while chain_end < regions.len() {
+            let Some((next, next_tracks, next_tolerance)) =
+                reconstruct_label_heavy_financial_region(&regions[chain_end], page_height, page_number)
+            else {
+                break;
+            };
+            let tolerance = track_tolerance.max(next_tolerance);
+            if !first_tracks
+                .iter()
+                .zip(next_tracks.iter())
+                .all(|(left, right)| left.abs_diff(*right) <= tolerance)
+                || !label_heavy_financial_sections_are_contiguous(
+                    &regions[chain_end - 1],
+                    &regions[chain_end],
+                    &next_tracks,
+                    next_tolerance,
+                )
+            {
+                break;
+            }
+            chain.push(next);
+            chain_end += 1;
+        }
+
+        if chain.len() < 2 {
+            tables.extend(reconstruct_region_tables(
+                &regions[index],
+                page_height,
+                page_number,
+                allow_single_column,
+            ));
+            index += 1;
+            continue;
+        }
+
+        tables.push(stitch_label_heavy_financial_sections(chain, page_number));
+        index = chain_end;
+    }
+    tables
+}
+
+fn label_heavy_financial_sections_are_contiguous(
+    previous: &[crate::pdf::table_reconstruct::HocrWord],
+    next: &[crate::pdf::table_reconstruct::HocrWord],
+    next_tracks: &[u32],
+    next_track_tolerance: u32,
+) -> bool {
+    let Some(previous_bottom) = previous.iter().map(|word| word.top + word.height).max() else {
+        return false;
+    };
+    let Some(next_top) = next.iter().map(|word| word.top).min() else {
+        return false;
+    };
+    let median_height = median_region_word_height(previous)
+        .max(median_region_word_height(next))
+        .max(1);
+    let normalized_gap_limit = median_height.saturating_mul(LABEL_HEAVY_FINANCIAL_MAX_SECTION_GAP_HEIGHTS);
+    next_top.saturating_sub(previous_bottom) <= normalized_gap_limit
+        && starts_with_financial_section_label(next, next_tracks, next_track_tolerance)
+}
+
+fn starts_with_financial_section_label(
+    region: &[crate::pdf::table_reconstruct::HocrWord],
+    tracks: &[u32],
+    track_tolerance: u32,
+) -> bool {
+    let row_tolerance = (median_region_word_height(region) / 2).max(3);
+    let rows = numeric_rows(region, row_tolerance);
+    let Some(first_row) = rows.first() else {
+        return false;
+    };
+    let numeric_start = tracks[0].saturating_sub(track_tolerance.saturating_mul(2));
+    if first_row.iter().any(|word| is_numeric_word(&word.text)) {
+        return false;
+    }
+
+    let mut label_words = first_row
+        .iter()
+        .filter(|word| word.text.chars().any(char::is_alphabetic))
+        .copied()
+        .collect::<Vec<_>>();
+    label_words.sort_by_key(|word| word.left);
+    let Some(first_word) = label_words.first() else {
+        return false;
+    };
+    if first_word.left + first_word.width / 2 >= numeric_start {
+        return false;
+    }
+
+    let maximum_label_gap =
+        median_region_word_height(region).saturating_mul(LABEL_HEAVY_FINANCIAL_MAX_LABEL_GAP_HEIGHTS);
+    label_words
+        .windows(2)
+        .all(|pair| pair[1].left.saturating_sub(pair[0].left.saturating_add(pair[0].width)) <= maximum_label_gap)
+}
+
+fn median_region_word_height(region: &[crate::pdf::table_reconstruct::HocrWord]) -> u32 {
+    if region.is_empty() {
+        return 0;
+    }
+    let mut heights: Vec<u32> = region.iter().map(|word| word.height).collect();
+    heights.sort_unstable();
+    heights[heights.len() / 2]
+}
+
+fn reconstruct_label_heavy_financial_region(
+    region: &[crate::pdf::table_reconstruct::HocrWord],
+    page_height: f32,
+    page_number: u32,
+) -> Option<(Table, Vec<u32>, u32)> {
+    let (tracks, row_tolerance, x_tolerance) = label_heavy_financial_tracks(region)?;
+    let rows = numeric_rows(region, row_tolerance);
+    let grid = build_label_heavy_financial_grid(rows, &tracks, x_tolerance);
+    if !is_label_heavy_financial_grid(&grid) {
+        return None;
+    }
+
+    let markdown = table_to_markdown(&grid);
+    let table = Table {
+        cells: grid,
+        markdown,
+        page_number,
+        bounding_box: region_bounding_box(region, page_height),
+        ..Default::default()
+    };
+    Some((table, tracks, x_tolerance))
+}
+
+fn build_label_heavy_financial_grid(
+    rows: Vec<Vec<&crate::pdf::table_reconstruct::HocrWord>>,
+    tracks: &[u32],
+    x_tolerance: u32,
+) -> Vec<Vec<String>> {
+    let numeric_start = tracks[0].saturating_sub(x_tolerance.saturating_mul(2));
+    rows.into_iter()
+        .map(|mut row| {
+            row.sort_by_key(|word| word.left);
+            let descriptor_only = !row.iter().any(|word| is_numeric_word(&word.text))
+                && row.iter().any(|word| word.left + word.width / 2 < numeric_start);
+            let mut cells = vec![Vec::<String>::new(); LABEL_HEAVY_FINANCIAL_TRACKS + 1];
+            for word in row {
+                let center = word.left + word.width / 2;
+                let column = if descriptor_only || center < numeric_start {
+                    0
+                } else {
+                    tracks
+                        .iter()
+                        .enumerate()
+                        .min_by_key(|(_, track)| track.abs_diff(center))
+                        .map_or(0, |(index, _)| index + 1)
+                };
+                cells[column].push(word.text.clone());
+            }
+            cells
+                .into_iter()
+                .enumerate()
+                .map(|(column, words)| normalize_financial_cell(column, words.join(" ")))
+                .collect()
+        })
+        .collect()
+}
+
+fn normalize_financial_cell(column: usize, text: String) -> String {
+    if column > 0 && text == "?" {
+        "—".to_string()
+    } else {
+        text
+    }
+}
+
+fn label_heavy_financial_tracks(region: &[crate::pdf::table_reconstruct::HocrWord]) -> Option<(Vec<u32>, u32, u32)> {
+    if region.is_empty() {
+        return None;
+    }
+    let median_height = median_region_word_height(region).max(1);
+    let row_tolerance = (median_height / 2).max(3);
+    let x_tolerance = median_height.saturating_mul(2).max(12);
+    let rows = numeric_rows(region, row_tolerance);
+    if rows.len() < LABEL_HEAVY_FINANCIAL_MIN_ROWS {
+        return None;
+    }
+
+    let candidates = supported_financial_track_centers(&rows, x_tolerance);
+    if candidates.len() != LABEL_HEAVY_FINANCIAL_TRACKS {
+        return None;
+    }
+    if !has_label_heavy_financial_evidence(&rows, &candidates, x_tolerance)
+        || !financial_track_spacing_is_stable(&candidates)
+    {
+        return None;
+    }
+
+    Some((candidates, row_tolerance, x_tolerance))
+}
+
+fn supported_financial_track_centers(
+    rows: &[Vec<&crate::pdf::table_reconstruct::HocrWord>],
+    x_tolerance: u32,
+) -> Vec<u32> {
+    let minimum_support = rows
+        .len()
+        .saturating_mul(LABEL_HEAVY_FINANCIAL_MIN_TRACK_ROW_PERCENT)
+        .div_ceil(100)
+        .max(LABEL_HEAVY_FINANCIAL_MIN_TRACK_ROWS);
+    let mut candidates: Vec<u32> = rows
+        .iter()
+        .flatten()
+        .filter(|word| is_numeric_word(&word.text))
+        .map(|word| word.left + word.width / 2)
+        .filter(|candidate| financial_track_support(rows, *candidate, x_tolerance) >= minimum_support)
+        .collect();
+    candidates.sort_unstable();
+    candidates.dedup_by(|left, right| left.abs_diff(*right) <= x_tolerance);
+    candidates
+}
+
+fn financial_track_support(
+    rows: &[Vec<&crate::pdf::table_reconstruct::HocrWord>],
+    candidate: u32,
+    x_tolerance: u32,
+) -> usize {
+    rows.iter()
+        .filter(|row| row_has_financial_track(row, candidate, x_tolerance))
+        .count()
+}
+
+fn row_has_financial_track(row: &[&crate::pdf::table_reconstruct::HocrWord], track: u32, x_tolerance: u32) -> bool {
+    row.iter()
+        .any(|word| is_numeric_word(&word.text) && (word.left + word.width / 2).abs_diff(track) <= x_tolerance)
+}
+
+fn has_label_heavy_financial_evidence(
+    rows: &[Vec<&crate::pdf::table_reconstruct::HocrWord>],
+    tracks: &[u32],
+    x_tolerance: u32,
+) -> bool {
+    let numeric_start = tracks[0].saturating_sub(x_tolerance.saturating_mul(2));
+    let descriptor_rows = rows
+        .iter()
+        .filter(|row| {
+            row.iter()
+                .any(|word| word.left + word.width / 2 < numeric_start && word.text.chars().any(char::is_alphabetic))
+        })
+        .count();
+    let numeric_rows = rows
+        .iter()
+        .filter(|row| {
+            tracks
+                .iter()
+                .filter(|track| row_has_financial_track(row, **track, x_tolerance))
+                .count()
+                >= LABEL_HEAVY_FINANCIAL_MIN_VALUES_PER_ROW
+        })
+        .count();
+    descriptor_rows.saturating_mul(100)
+        >= rows
+            .len()
+            .saturating_mul(LABEL_HEAVY_FINANCIAL_MIN_DESCRIPTOR_ROW_PERCENT)
+        && numeric_rows >= LABEL_HEAVY_FINANCIAL_MIN_NUMERIC_ROWS
+}
+
+fn financial_track_spacing_is_stable(tracks: &[u32]) -> bool {
+    let gaps: Vec<u32> = tracks.windows(2).map(|pair| pair[1] - pair[0]).collect();
+    let Some(minimum_gap) = gaps.iter().copied().min() else {
+        return false;
+    };
+    let Some(maximum_gap) = gaps.iter().copied().max() else {
+        return false;
+    };
+    minimum_gap > 0 && maximum_gap <= minimum_gap.saturating_mul(2)
+}
+
+fn is_label_heavy_financial_grid(grid: &[Vec<String>]) -> bool {
+    if grid.len() < LABEL_HEAVY_FINANCIAL_MIN_ROWS
+        || grid.iter().any(|row| row.len() != LABEL_HEAVY_FINANCIAL_TRACKS + 1)
+    {
+        return false;
+    }
+    let numeric_rows = grid
+        .iter()
+        .filter(|row| {
+            row.iter().skip(1).filter(|cell| is_numeric_word(cell)).count() >= LABEL_HEAVY_FINANCIAL_MIN_VALUES_PER_ROW
+        })
+        .count();
+    numeric_rows >= LABEL_HEAVY_FINANCIAL_MIN_NUMERIC_ROWS
+}
+
+fn stitch_label_heavy_financial_sections(sections: Vec<Table>, page_number: u32) -> Table {
+    let mut rows = Vec::new();
+    let mut bounding_box: Option<BoundingBox> = None;
+    for section in sections {
+        rows.extend(section.cells);
+        if let Some(section_box) = section.bounding_box {
+            bounding_box = Some(match bounding_box {
+                Some(mut combined) => {
+                    combined.x0 = combined.x0.min(section_box.x0);
+                    combined.y0 = combined.y0.min(section_box.y0);
+                    combined.x1 = combined.x1.max(section_box.x1);
+                    combined.y1 = combined.y1.max(section_box.y1);
+                    combined
+                }
+                None => section_box,
+            });
+        }
+    }
+    Table {
+        markdown: table_to_markdown(&rows),
+        cells: rows,
+        page_number,
+        bounding_box,
+        ..Default::default()
+    }
 }
 
 fn reconstruct_region_tables(
@@ -902,20 +1248,7 @@ fn reconstruct_region_table_with_column_gap(
         return Err(HeuristicTableRejection::NotWellFormed);
     }
 
-    let img_left = region.iter().map(|w| w.left as f64).fold(f64::INFINITY, f64::min);
-    let img_top = region.iter().map(|w| w.top as f64).fold(f64::INFINITY, f64::min);
-    let img_right = region.iter().map(|w| (w.left + w.width) as f64).fold(0.0_f64, f64::max);
-    let img_bottom = region.iter().map(|w| (w.top + w.height) as f64).fold(0.0_f64, f64::max);
-    let bounding_box = if img_right > img_left && img_bottom > img_top {
-        Some(BoundingBox {
-            x0: img_left,
-            y0: page_height as f64 - img_bottom,
-            x1: img_right,
-            y1: page_height as f64 - img_top,
-        })
-    } else {
-        None
-    };
+    let bounding_box = region_bounding_box(region, page_height);
 
     let markdown = table_to_markdown(&cleaned);
     if markdown.trim().is_empty() {
@@ -928,6 +1261,25 @@ fn reconstruct_region_table_with_column_gap(
         page_number,
         bounding_box,
         ..Default::default()
+    })
+}
+
+fn region_bounding_box(region: &[crate::pdf::table_reconstruct::HocrWord], page_height: f32) -> Option<BoundingBox> {
+    let img_left = region.iter().map(|word| word.left as f64).fold(f64::INFINITY, f64::min);
+    let img_top = region.iter().map(|word| word.top as f64).fold(f64::INFINITY, f64::min);
+    let img_right = region
+        .iter()
+        .map(|word| (word.left + word.width) as f64)
+        .fold(0.0_f64, f64::max);
+    let img_bottom = region
+        .iter()
+        .map(|word| (word.top + word.height) as f64)
+        .fold(0.0_f64, f64::max);
+    (img_right > img_left && img_bottom > img_top).then_some(BoundingBox {
+        x0: img_left,
+        y0: page_height as f64 - img_bottom,
+        x1: img_right,
+        y1: page_height as f64 - img_top,
     })
 }
 
@@ -1731,9 +2083,87 @@ mod tests {
         extend_grid_words(&mut words, &[20, 120, 220, 320, 420]);
 
         assert!(
+            label_heavy_financial_tracks(&words).is_none(),
+            "an ordinary five-column numeric grid must stay on the general reconstruction path"
+        );
+        assert!(
             split_side_by_side_region(&words).is_none(),
             "occupied central column must prevent a side-by-side split"
         );
+    }
+
+    #[test]
+    fn does_not_stitch_independent_aligned_financial_tables() {
+        let x_positions = [20, 140, 220, 300, 380];
+        let mut first = Vec::new();
+        extend_financial_table_words(&mut first, &x_positions, "Pension");
+        let mut second = Vec::new();
+        extend_financial_table_words(&mut second, &x_positions, "Insurance");
+        for word in &mut second {
+            word.top += 300;
+        }
+
+        let (_, first_tracks, _) =
+            reconstruct_label_heavy_financial_region(&first, 792.0, 1).expect("first financial table shape");
+        let (_, second_tracks, second_tolerance) =
+            reconstruct_label_heavy_financial_region(&second, 792.0, 1).expect("second financial table shape");
+        assert_eq!(first_tracks.len(), LABEL_HEAVY_FINANCIAL_TRACKS);
+        assert_eq!(first_tracks, second_tracks);
+        assert!(
+            !label_heavy_financial_sections_are_contiguous(&first, &second, &second_tracks, second_tolerance),
+            "a large normalized vertical gap must stop same-track tables from chaining"
+        );
+
+        let tables = reconstruct_page_region_tables(&[first, second], 792.0, 1, false);
+        assert_eq!(tables.len(), 2, "independent aligned tables must remain distinct");
+    }
+
+    #[test]
+    fn does_not_stitch_close_aligned_table_without_section_label() {
+        let x_positions = [20, 140, 220, 300, 380];
+        let mut first = Vec::new();
+        extend_financial_table_words(&mut first, &x_positions, "Pension");
+        let mut second = Vec::new();
+        extend_financial_table_words(&mut second, &x_positions, "Insurance");
+        second.retain(|word| !(word.top == 100 && word.left == x_positions[0]));
+        for word in second.iter_mut().filter(|word| word.top == 100) {
+            word.text = "2024".to_string();
+        }
+        for word in &mut second {
+            word.top += 130;
+        }
+
+        let (_, second_tracks, second_tolerance) =
+            reconstruct_label_heavy_financial_region(&second, 792.0, 1).expect("second financial table shape");
+        assert!(
+            !label_heavy_financial_sections_are_contiguous(&first, &second, &second_tracks, second_tolerance),
+            "a nearby table without a descriptor-only section label must not chain"
+        );
+
+        let tables = reconstruct_page_region_tables(&[first, second], 792.0, 1, false);
+        assert_eq!(tables.len(), 2, "nearby independent tables must remain distinct");
+    }
+
+    #[test]
+    fn does_not_stitch_close_aligned_table_with_ordinary_header() {
+        let x_positions = [20, 140, 220, 300, 380];
+        let mut first = Vec::new();
+        extend_financial_table_words(&mut first, &x_positions, "Pension");
+        let mut second = Vec::new();
+        extend_financial_table_words(&mut second, &x_positions, "Insurance");
+        for word in &mut second {
+            word.top += 130;
+        }
+
+        let (_, second_tracks, second_tolerance) =
+            reconstruct_label_heavy_financial_region(&second, 792.0, 1).expect("second financial table shape");
+        assert!(
+            !label_heavy_financial_sections_are_contiguous(&first, &second, &second_tracks, second_tolerance),
+            "a nearby Security/Value header must not be treated as a continuation label"
+        );
+
+        let tables = reconstruct_page_region_tables(&[first, second], 792.0, 1, false);
+        assert_eq!(tables.len(), 2, "ordinary table headers must remain distinct");
     }
 
     #[test]
@@ -1858,6 +2288,72 @@ mod tests {
             table.cells[1..]
                 .iter()
                 .all(|row| row.iter().all(|cell| !cell.trim().is_empty()))
+        );
+    }
+
+    #[test]
+    fn test_extract_tables_heuristic_recovers_acn_financial_table() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../test_documents/pdf/ft_ACN_2009_page_102_t0.pdf");
+        let ground_truth_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../test_documents/ground_truth/pdf/ft_ACN_2009_page_102_t0.md");
+        if !path.exists() || !ground_truth_path.exists() {
+            return;
+        }
+        let bytes = std::fs::read(&path).expect("read ACN financial table fixture");
+        let mut doc = OxideDocument::open_bytes(&bytes).expect("open ACN financial table fixture");
+
+        let tables = extract_tables_heuristic(&mut doc, false, &HashSet::new())
+            .expect("heuristic extraction")
+            .tables;
+
+        assert_eq!(
+            tables.len(),
+            1,
+            "ACN fixture should produce one stitched financial table"
+        );
+        let table = &tables[0];
+        assert_eq!(table.cells.len(), 38);
+        assert!(table.cells.iter().all(|row| row.len() == 5), "{:?}", table.cells);
+        assert_eq!(table.cells[0], ["", "2009", "", "2008", ""]);
+        assert_eq!(
+            table.cells[4],
+            ["SFAS 158 measurement date adjustment", "9,015", "3,074", "—", "—"]
+        );
+        for anchor in [
+            "Changes in benefit obligation",
+            "Changes in plan assets",
+            "Reconciliation of funded status",
+            "Amounts recognized in the Consolidated Balance Sheets consist of:",
+        ] {
+            assert!(
+                table.markdown.contains(anchor),
+                "missing ACN section anchor: {anchor}\n{}",
+                table.markdown
+            );
+        }
+
+        let ground_truth = std::fs::read_to_string(&ground_truth_path).expect("read ACN markdown ground truth");
+        let expected_rows = ground_truth
+            .lines()
+            .filter(|line| line.starts_with('|'))
+            .filter(|line| !line.chars().all(|character| matches!(character, '|' | '-' | ' ')))
+            .map(|line| {
+                line.split('|')
+                    .skip(1)
+                    .take(LABEL_HEAVY_FINANCIAL_TRACKS + 1)
+                    .map(|cell| cell.trim().to_string())
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            expected_rows.len(),
+            38,
+            "the checked-in ACN ground truth contains 38 logical rows"
+        );
+        assert_eq!(
+            table.cells, expected_rows,
+            "every reconstructed ACN row must map exactly to the checked-in ground truth"
         );
     }
 
