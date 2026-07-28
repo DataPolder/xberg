@@ -9703,6 +9703,7 @@ const _: fn() = || {
     }
     {
         let LayoutDetectionConfig = None::<crate::LayoutDetectionConfig>.unwrap();
+        let _: crate::LayoutStrategy = LayoutDetectionConfig.strategy;
         let _: Option<f64> = LayoutDetectionConfig.confidence_threshold;
         let _: bool = LayoutDetectionConfig.apply_heuristics;
         let _: crate::TableModel = LayoutDetectionConfig.table_model;
@@ -10230,6 +10231,8 @@ const _: fn() = || {
         let _: Option<i64> = PdfMetadata.page_count;
         let _: Option<f64> = PdfMetadata.scanned_confidence;
         let _: Option<Vec<i64>> = PdfMetadata.scanned_pages;
+        let _: Option<Vec<i64>> = PdfMetadata.layout_gated_pages;
+        let _: Option<Vec<String>> = PdfMetadata.layout_gate_reasons;
     }
     match None::<crate::PiiCategory>.unwrap() {
         crate::PiiCategory::Email => {}
@@ -15040,6 +15043,7 @@ impl SseDecode for crate::LayoutDetection {
 impl SseDecode for crate::LayoutDetectionConfig {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_strategy = <crate::LayoutStrategy>::sse_decode(deserializer);
         let mut var_confidenceThreshold = <Option<f64>>::sse_decode(deserializer);
         let mut var_applyHeuristics = <bool>::sse_decode(deserializer);
         let mut var_tableModel = <crate::TableModel>::sse_decode(deserializer);
@@ -15047,6 +15051,7 @@ impl SseDecode for crate::LayoutDetectionConfig {
         let mut var_acceleration = <Option<crate::AccelerationConfig>>::sse_decode(deserializer);
         let mut var_enableChartUnderstanding = <bool>::sse_decode(deserializer);
         return crate::LayoutDetectionConfig {
+            strategy: var_strategy,
             confidence_threshold: var_confidenceThreshold,
             apply_heuristics: var_applyHeuristics,
             table_model: var_tableModel,
@@ -15069,6 +15074,18 @@ impl SseDecode for crate::LayoutRegion {
             confidence: var_confidence,
             bounding_box: var_boundingBox,
             area_fraction: var_areaFraction,
+        };
+    }
+}
+
+impl SseDecode for crate::LayoutStrategy {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::LayoutStrategy::Always,
+            1 => crate::LayoutStrategy::Auto,
+            _ => unreachable!("Invalid variant for LayoutStrategy: {}", inner),
         };
     }
 }
@@ -18429,6 +18446,8 @@ impl SseDecode for crate::PdfMetadata {
         let mut var_pageCount = <Option<i64>>::sse_decode(deserializer);
         let mut var_scannedConfidence = <Option<f64>>::sse_decode(deserializer);
         let mut var_scannedPages = <Option<Vec<i64>>>::sse_decode(deserializer);
+        let mut var_layoutGatedPages = <Option<Vec<i64>>>::sse_decode(deserializer);
+        let mut var_layoutGateReasons = <Option<Vec<String>>>::sse_decode(deserializer);
         return crate::PdfMetadata {
             pdf_version: var_pdfVersion,
             producer: var_producer,
@@ -18438,6 +18457,8 @@ impl SseDecode for crate::PdfMetadata {
             page_count: var_pageCount,
             scanned_confidence: var_scannedConfidence,
             scanned_pages: var_scannedPages,
+            layout_gated_pages: var_layoutGatedPages,
+            layout_gate_reasons: var_layoutGateReasons,
         };
     }
 }
@@ -23943,6 +23964,7 @@ impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<crate::LayoutDetection>> for c
 impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::LayoutDetectionConfig> {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
+            self.0.strategy.into_into_dart().into_dart(),
             self.0.confidence_threshold.into_into_dart().into_dart(),
             self.0.apply_heuristics.into_into_dart().into_dart(),
             self.0.table_model.into_into_dart().into_dart(),
@@ -23974,6 +23996,22 @@ impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::LayoutRegion> {
 impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for FrbWrapper<crate::LayoutRegion> {}
 impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<crate::LayoutRegion>> for crate::LayoutRegion {
     fn into_into_dart(self) -> FrbWrapper<crate::LayoutRegion> {
+        self.into()
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::LayoutStrategy> {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self.0 {
+            crate::LayoutStrategy::Always => 0.into_dart(),
+            crate::LayoutStrategy::Auto => 1.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for FrbWrapper<crate::LayoutStrategy> {}
+impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<crate::LayoutStrategy>> for crate::LayoutStrategy {
+    fn into_into_dart(self) -> FrbWrapper<crate::LayoutStrategy> {
         self.into()
     }
 }
@@ -25235,6 +25273,8 @@ impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::PdfMetadata> {
             self.0.page_count.into_into_dart().into_dart(),
             self.0.scanned_confidence.into_into_dart().into_dart(),
             self.0.scanned_pages.into_into_dart().into_dart(),
+            self.0.layout_gated_pages.into_into_dart().into_dart(),
+            self.0.layout_gate_reasons.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -29814,6 +29854,7 @@ impl SseEncode for crate::LayoutDetection {
 impl SseEncode for crate::LayoutDetectionConfig {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <crate::LayoutStrategy>::sse_encode(self.strategy, serializer);
         <Option<f64>>::sse_encode(self.confidence_threshold, serializer);
         <bool>::sse_encode(self.apply_heuristics, serializer);
         <crate::TableModel>::sse_encode(self.table_model, serializer);
@@ -29830,6 +29871,22 @@ impl SseEncode for crate::LayoutRegion {
         <f64>::sse_encode(self.confidence, serializer);
         <crate::BoundingBox>::sse_encode(self.bounding_box, serializer);
         <f64>::sse_encode(self.area_fraction, serializer);
+    }
+}
+
+impl SseEncode for crate::LayoutStrategy {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::LayoutStrategy::Always => 0,
+                crate::LayoutStrategy::Auto => 1,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
     }
 }
 
@@ -32628,6 +32685,8 @@ impl SseEncode for crate::PdfMetadata {
         <Option<i64>>::sse_encode(self.page_count, serializer);
         <Option<f64>>::sse_encode(self.scanned_confidence, serializer);
         <Option<Vec<i64>>>::sse_encode(self.scanned_pages, serializer);
+        <Option<Vec<i64>>>::sse_encode(self.layout_gated_pages, serializer);
+        <Option<Vec<String>>>::sse_encode(self.layout_gate_reasons, serializer);
     }
 }
 

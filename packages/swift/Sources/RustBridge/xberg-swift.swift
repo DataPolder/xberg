@@ -1236,6 +1236,9 @@ public func tableModelFromJson<GenericIntoRustString: IntoRustString>(_ json: Ge
 public func tableOverlapPreferenceFromJson<GenericIntoRustString: IntoRustString>(_ json: GenericIntoRustString) throws -> TableOverlapPreference {
     try { let val = __swift_bridge__$table_overlap_preference_from_json({ let rustString = json.intoRustString(); rustString.isOwned = false; return rustString.ptr }()); if val.is_ok { return TableOverlapPreference(ptr: val.ok_or_err!) } else { throw RustString(ptr: val.ok_or_err!) } }()
 }
+public func layoutStrategyFromJson<GenericIntoRustString: IntoRustString>(_ json: GenericIntoRustString) throws -> LayoutStrategy {
+    try { let val = __swift_bridge__$layout_strategy_from_json({ let rustString = json.intoRustString(); rustString.isOwned = false; return rustString.ptr }()); if val.is_ok { return LayoutStrategy(ptr: val.ok_or_err!) } else { throw RustString(ptr: val.ok_or_err!) } }()
+}
 public func callModeFromJson<GenericIntoRustString: IntoRustString>(_ json: GenericIntoRustString) throws -> CallMode {
     try { let val = __swift_bridge__$call_mode_from_json({ let rustString = json.intoRustString(); rustString.isOwned = false; return rustString.ptr }()); if val.is_ok { return CallMode(ptr: val.ok_or_err!) } else { throw RustString(ptr: val.ok_or_err!) } }()
 }
@@ -2267,6 +2270,9 @@ public func __alef_phantom_vec_table_model() -> RustVec<TableModel> {
 }
 public func __alef_phantom_vec_table_overlap_preference() -> RustVec<TableOverlapPreference> {
     RustVec(ptr: __swift_bridge__$__alef_phantom_vec_table_overlap_preference())
+}
+public func __alef_phantom_vec_layout_strategy() -> RustVec<LayoutStrategy> {
+    RustVec(ptr: __swift_bridge__$__alef_phantom_vec_layout_strategy())
 }
 public func __alef_phantom_vec_whisper_model() -> RustVec<WhisperModel> {
     RustVec(ptr: __swift_bridge__$__alef_phantom_vec_whisper_model())
@@ -4692,8 +4698,8 @@ public class LayoutDetectionConfig: LayoutDetectionConfigRefMut {
     }
 }
 extension LayoutDetectionConfig {
-    public convenience init(_ confidence_threshold: Optional<Float>, _ apply_heuristics: Bool, _ table_model: TableModel, _ table_overlap_preference: TableOverlapPreference, _ acceleration: Optional<AccelerationConfig>, _ enable_chart_understanding: Bool) {
-        self.init(ptr: __swift_bridge__$LayoutDetectionConfig$new(confidence_threshold.intoFfiRepr(), apply_heuristics, {table_model.isOwned = false; return table_model.ptr;}(), {table_overlap_preference.isOwned = false; return table_overlap_preference.ptr;}(), { if let val = acceleration { val.isOwned = false; return val.ptr } else { return nil } }(), enable_chart_understanding))
+    public convenience init(_ strategy: LayoutStrategy, _ confidence_threshold: Optional<Float>, _ apply_heuristics: Bool, _ table_model: TableModel, _ table_overlap_preference: TableOverlapPreference, _ acceleration: Optional<AccelerationConfig>, _ enable_chart_understanding: Bool) {
+        self.init(ptr: __swift_bridge__$LayoutDetectionConfig$new({strategy.isOwned = false; return strategy.ptr;}(), confidence_threshold.intoFfiRepr(), apply_heuristics, {table_model.isOwned = false; return table_model.ptr;}(), {table_overlap_preference.isOwned = false; return table_overlap_preference.ptr;}(), { if let val = acceleration { val.isOwned = false; return val.ptr } else { return nil } }(), enable_chart_understanding))
     }
 }
 public class LayoutDetectionConfigRefMut: LayoutDetectionConfigRef {
@@ -4709,6 +4715,10 @@ public class LayoutDetectionConfigRef {
     }
 }
 extension LayoutDetectionConfigRef {
+    public func strategy() -> RustString {
+        RustString(ptr: __swift_bridge__$LayoutDetectionConfig$strategy(ptr))
+    }
+
     public func confidenceThreshold() -> Optional<Float> {
         __swift_bridge__$LayoutDetectionConfig$confidence_threshold(ptr).intoSwiftRepr()
     }
@@ -22696,8 +22706,8 @@ public class PdfMetadata: PdfMetadataRefMut {
     }
 }
 extension PdfMetadata {
-    public convenience init<GenericIntoRustString: IntoRustString>(_ pdf_version: Optional<GenericIntoRustString>, _ producer: Optional<GenericIntoRustString>, _ is_encrypted: Optional<Bool>, _ width: Optional<Int64>, _ height: Optional<Int64>, _ page_count: Optional<UInt32>, _ scanned_confidence: Optional<Float>, _ scanned_pages: Optional<RustVec<UInt32>>) {
-        self.init(ptr: __swift_bridge__$PdfMetadata$new({ if let rustString = optionalStringIntoRustString(pdf_version) { rustString.isOwned = false; return rustString.ptr } else { return nil } }(), { if let rustString = optionalStringIntoRustString(producer) { rustString.isOwned = false; return rustString.ptr } else { return nil } }(), is_encrypted.intoFfiRepr(), width.intoFfiRepr(), height.intoFfiRepr(), page_count.intoFfiRepr(), scanned_confidence.intoFfiRepr(), { if let val = scanned_pages { val.isOwned = false; return val.ptr } else { return nil } }()))
+    public convenience init<GenericIntoRustString: IntoRustString>(_ pdf_version: Optional<GenericIntoRustString>, _ producer: Optional<GenericIntoRustString>, _ is_encrypted: Optional<Bool>, _ width: Optional<Int64>, _ height: Optional<Int64>, _ page_count: Optional<UInt32>, _ scanned_confidence: Optional<Float>, _ scanned_pages: Optional<RustVec<UInt32>>, _ layout_gated_pages: Optional<RustVec<UInt32>>, _ layout_gate_reasons: Optional<RustVec<GenericIntoRustString>>) {
+        self.init(ptr: __swift_bridge__$PdfMetadata$new({ if let rustString = optionalStringIntoRustString(pdf_version) { rustString.isOwned = false; return rustString.ptr } else { return nil } }(), { if let rustString = optionalStringIntoRustString(producer) { rustString.isOwned = false; return rustString.ptr } else { return nil } }(), is_encrypted.intoFfiRepr(), width.intoFfiRepr(), height.intoFfiRepr(), page_count.intoFfiRepr(), scanned_confidence.intoFfiRepr(), { if let val = scanned_pages { val.isOwned = false; return val.ptr } else { return nil } }(), { if let val = layout_gated_pages { val.isOwned = false; return val.ptr } else { return nil } }(), { if let val = layout_gate_reasons { val.isOwned = false; return val.ptr } else { return nil } }()))
     }
 }
 public class PdfMetadataRefMut: PdfMetadataRef {
@@ -22743,6 +22753,14 @@ extension PdfMetadataRef {
 
     public func scannedPages() -> Optional<RustVec<UInt32>> {
         { let val = __swift_bridge__$PdfMetadata$scanned_pages(ptr); if val != nil { return RustVec(ptr: val!) } else { return nil } }()
+    }
+
+    public func layoutGatedPages() -> Optional<RustVec<UInt32>> {
+        { let val = __swift_bridge__$PdfMetadata$layout_gated_pages(ptr); if val != nil { return RustVec(ptr: val!) } else { return nil } }()
+    }
+
+    public func layoutGateReasons() -> Optional<RustVec<RustString>> {
+        { let val = __swift_bridge__$PdfMetadata$layout_gate_reasons(ptr); if val != nil { return RustVec(ptr: val!) } else { return nil } }()
     }
 }
 extension PdfMetadata: Vectorizable {
@@ -24868,6 +24886,86 @@ extension TableOverlapPreference: Vectorizable {
 
     public static func vecOfSelfLen(vecPtr: UnsafeMutableRawPointer) -> UInt {
         __swift_bridge__$Vec_TableOverlapPreference$len(vecPtr)
+    }
+}
+
+
+public class LayoutStrategy: LayoutStrategyRefMut {
+    public var isOwned: Bool = true
+
+    public override init(ptr: UnsafeMutableRawPointer) {
+        super.init(ptr: ptr)
+    }
+
+    deinit {
+        if isOwned {
+            __swift_bridge__$LayoutStrategy$_free(ptr)
+        }
+    }
+}
+public class LayoutStrategyRefMut: LayoutStrategyRef {
+    public override init(ptr: UnsafeMutableRawPointer) {
+        super.init(ptr: ptr)
+    }
+}
+public class LayoutStrategyRef {
+    public var ptr: UnsafeMutableRawPointer
+
+    public init(ptr: UnsafeMutableRawPointer) {
+        self.ptr = ptr
+    }
+}
+extension LayoutStrategyRef {
+    public func to_string() -> RustString {
+        RustString(ptr: __swift_bridge__$LayoutStrategy$to_string(ptr))
+    }
+}
+extension LayoutStrategy: Vectorizable {
+    public static func vecOfSelfNew() -> UnsafeMutableRawPointer {
+        __swift_bridge__$Vec_LayoutStrategy$new()
+    }
+
+    public static func vecOfSelfFree(vecPtr: UnsafeMutableRawPointer) {
+        __swift_bridge__$Vec_LayoutStrategy$drop(vecPtr)
+    }
+
+    public static func vecOfSelfPush(vecPtr: UnsafeMutableRawPointer, value: LayoutStrategy) {
+        __swift_bridge__$Vec_LayoutStrategy$push(vecPtr, {value.isOwned = false; return value.ptr;}())
+    }
+
+    public static func vecOfSelfPop(vecPtr: UnsafeMutableRawPointer) -> Optional<Self> {
+        let pointer = __swift_bridge__$Vec_LayoutStrategy$pop(vecPtr)
+        if pointer == nil {
+            return nil
+        } else {
+            return (LayoutStrategy(ptr: pointer!) as! Self)
+        }
+    }
+
+    public static func vecOfSelfGet(vecPtr: UnsafeMutableRawPointer, index: UInt) -> Optional<LayoutStrategyRef> {
+        let pointer = __swift_bridge__$Vec_LayoutStrategy$get(vecPtr, index)
+        if pointer == nil {
+            return nil
+        } else {
+            return LayoutStrategyRef(ptr: pointer!)
+        }
+    }
+
+    public static func vecOfSelfGetMut(vecPtr: UnsafeMutableRawPointer, index: UInt) -> Optional<LayoutStrategyRefMut> {
+        let pointer = __swift_bridge__$Vec_LayoutStrategy$get_mut(vecPtr, index)
+        if pointer == nil {
+            return nil
+        } else {
+            return LayoutStrategyRefMut(ptr: pointer!)
+        }
+    }
+
+    public static func vecOfSelfAsPtr(vecPtr: UnsafeMutableRawPointer) -> UnsafePointer<LayoutStrategyRef> {
+        UnsafePointer<LayoutStrategyRef>(OpaquePointer(__swift_bridge__$Vec_LayoutStrategy$as_ptr(vecPtr)))
+    }
+
+    public static func vecOfSelfLen(vecPtr: UnsafeMutableRawPointer) -> UInt {
+        __swift_bridge__$Vec_LayoutStrategy$len(vecPtr)
     }
 }
 

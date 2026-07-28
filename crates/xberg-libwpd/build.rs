@@ -235,7 +235,6 @@ mod build_libwpd {
             build.include(vcpkg_triplet_dir().join("include"));
             // Enable C++ exceptions on MSVC. Without /EHsc, MSVC leaves
             // `_CPPUNWIND` undefined, so Boost defines `BOOST_NO_EXCEPTIONS` and
-            // turns `boost::throw_exception` into an undefined external the
             // vendored sources never provide (LNK2019). GCC/clang enable
             // exceptions by default, which is why only the MSVC link failed.
             build.flag("/EHsc");

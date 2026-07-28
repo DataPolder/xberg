@@ -45,7 +45,6 @@ mod tests {
         // Unknown and out-of-range values fall back to Windows-1252.
         assert_eq!(encoding_for_windows_codepage(1717).name(), "windows-1252");
         assert_eq!(encoding_for_windows_codepage(100_000).name(), "windows-1252");
-        // ISO-2022 variants map to the replacement encoding in `to_encoding`;
         // `to_encoding_no_replacement` must fall back to Windows-1252 instead.
         assert_eq!(encoding_for_windows_codepage(50225).name(), "windows-1252");
     }

@@ -15114,15 +15114,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   LayoutDetectionConfig dco_decode_layout_detection_config(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 6)
-    throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
+    if (arr.length != 7)
+    throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
     return LayoutDetectionConfig(
-      confidenceThreshold: dco_decode_opt_box_autoadd_f_64(arr[0]),
-      applyHeuristics: dco_decode_bool(arr[1]),
-      tableModel: dco_decode_table_model(arr[2]),
-      tableOverlapPreference: dco_decode_table_overlap_preference(arr[3]),
-      acceleration: dco_decode_opt_box_autoadd_acceleration_config(arr[4]),
-      enableChartUnderstanding: dco_decode_bool(arr[5]),
+      strategy: dco_decode_layout_strategy(arr[0]),
+      confidenceThreshold: dco_decode_opt_box_autoadd_f_64(arr[1]),
+      applyHeuristics: dco_decode_bool(arr[2]),
+      tableModel: dco_decode_table_model(arr[3]),
+      tableOverlapPreference: dco_decode_table_overlap_preference(arr[4]),
+      acceleration: dco_decode_opt_box_autoadd_acceleration_config(arr[5]),
+      enableChartUnderstanding: dco_decode_bool(arr[6]),
     );
   }
 
@@ -15138,6 +15139,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       boundingBox: dco_decode_bounding_box(arr[2]),
       areaFraction: dco_decode_f_64(arr[3]),
     );
+  }
+
+  @protected
+  LayoutStrategy dco_decode_layout_strategy(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return LayoutStrategy.values[raw as int];
   }
 
   @protected
@@ -17255,8 +17262,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   PdfMetadata dco_decode_pdf_metadata(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 8)
-    throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    if (arr.length != 10)
+    throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
     return PdfMetadata(
       pdfVersion: dco_decode_opt_String(arr[0]),
       producer: dco_decode_opt_String(arr[1]),
@@ -17266,6 +17273,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       pageCount: dco_decode_opt_box_autoadd_i_64(arr[5]),
       scannedConfidence: dco_decode_opt_box_autoadd_f_64(arr[6]),
       scannedPages: dco_decode_opt_list_prim_i_64_strict(arr[7]),
+      layoutGatedPages: dco_decode_opt_list_prim_i_64_strict(arr[8]),
+      layoutGateReasons: dco_decode_opt_list_String(arr[9]),
     );
   }
 
@@ -22952,6 +22961,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     SseDeserializer deserializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_strategy = sse_decode_layout_strategy(deserializer);
     var var_confidenceThreshold = sse_decode_opt_box_autoadd_f_64(deserializer);
     var var_applyHeuristics = sse_decode_bool(deserializer);
     var var_tableModel = sse_decode_table_model(deserializer);
@@ -22963,6 +22973,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     );
     var var_enableChartUnderstanding = sse_decode_bool(deserializer);
     return LayoutDetectionConfig(
+      strategy: var_strategy,
       confidenceThreshold: var_confidenceThreshold,
       applyHeuristics: var_applyHeuristics,
       tableModel: var_tableModel,
@@ -22985,6 +22996,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       boundingBox: var_boundingBox,
       areaFraction: var_areaFraction,
     );
+  }
+
+  @protected
+  LayoutStrategy sse_decode_layout_strategy(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return LayoutStrategy.values[inner];
   }
 
   @protected
@@ -26443,6 +26461,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_pageCount = sse_decode_opt_box_autoadd_i_64(deserializer);
     var var_scannedConfidence = sse_decode_opt_box_autoadd_f_64(deserializer);
     var var_scannedPages = sse_decode_opt_list_prim_i_64_strict(deserializer);
+    var var_layoutGatedPages = sse_decode_opt_list_prim_i_64_strict(
+      deserializer,
+    );
+    var var_layoutGateReasons = sse_decode_opt_list_String(deserializer);
     return PdfMetadata(
       pdfVersion: var_pdfVersion,
       producer: var_producer,
@@ -26452,6 +26474,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       pageCount: var_pageCount,
       scannedConfidence: var_scannedConfidence,
       scannedPages: var_scannedPages,
+      layoutGatedPages: var_layoutGatedPages,
+      layoutGateReasons: var_layoutGateReasons,
     );
   }
 
@@ -31988,6 +32012,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_layout_strategy(self.strategy, serializer);
     sse_encode_opt_box_autoadd_f_64(self.confidenceThreshold, serializer);
     sse_encode_bool(self.applyHeuristics, serializer);
     sse_encode_table_model(self.tableModel, serializer);
@@ -32009,6 +32034,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_f_64(self.confidence, serializer);
     sse_encode_bounding_box(self.boundingBox, serializer);
     sse_encode_f_64(self.areaFraction, serializer);
+  }
+
+  @protected
+  void sse_encode_layout_strategy(
+    LayoutStrategy self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
   }
 
   @protected
@@ -35074,6 +35108,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_box_autoadd_i_64(self.pageCount, serializer);
     sse_encode_opt_box_autoadd_f_64(self.scannedConfidence, serializer);
     sse_encode_opt_list_prim_i_64_strict(self.scannedPages, serializer);
+    sse_encode_opt_list_prim_i_64_strict(self.layoutGatedPages, serializer);
+    sse_encode_opt_list_String(self.layoutGateReasons, serializer);
   }
 
   @protected

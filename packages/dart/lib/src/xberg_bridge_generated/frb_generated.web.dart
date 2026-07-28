@@ -1342,6 +1342,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   LayoutRegion dco_decode_layout_region(dynamic raw);
 
   @protected
+  LayoutStrategy dco_decode_layout_strategy(dynamic raw);
+
+  @protected
   LinkMetadata dco_decode_link_metadata(dynamic raw);
 
   @protected
@@ -3742,6 +3745,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   LayoutRegion sse_decode_layout_region(SseDeserializer deserializer);
+
+  @protected
+  LayoutStrategy sse_decode_layout_strategy(SseDeserializer deserializer);
 
   @protected
   LinkMetadata sse_decode_link_metadata(SseDeserializer deserializer);
@@ -6939,6 +6945,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_layout_region(LayoutRegion self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_layout_strategy(
+    LayoutStrategy self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_link_metadata(LinkMetadata self, SseSerializer serializer);

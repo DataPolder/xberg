@@ -3162,6 +3162,19 @@ void *__swift_bridge__$Vec_TableOverlapPreference$get_mut(void *vec_ptr,
 uintptr_t __swift_bridge__$Vec_TableOverlapPreference$len(void *vec_ptr);
 void *__swift_bridge__$Vec_TableOverlapPreference$as_ptr(void *vec_ptr);
 
+typedef struct LayoutStrategy LayoutStrategy;
+void __swift_bridge__$LayoutStrategy$_free(void *self);
+
+void *__swift_bridge__$Vec_LayoutStrategy$new(void);
+void __swift_bridge__$Vec_LayoutStrategy$drop(void *vec_ptr);
+void __swift_bridge__$Vec_LayoutStrategy$push(void *vec_ptr, void *item_ptr);
+void *__swift_bridge__$Vec_LayoutStrategy$pop(void *vec_ptr);
+void *__swift_bridge__$Vec_LayoutStrategy$get(void *vec_ptr, uintptr_t index);
+void *__swift_bridge__$Vec_LayoutStrategy$get_mut(void *vec_ptr,
+                                                  uintptr_t index);
+uintptr_t __swift_bridge__$Vec_LayoutStrategy$len(void *vec_ptr);
+void *__swift_bridge__$Vec_LayoutStrategy$as_ptr(void *vec_ptr);
+
 typedef struct CallMode CallMode;
 void __swift_bridge__$CallMode$_free(void *self);
 
@@ -4498,9 +4511,10 @@ void *__swift_bridge__$LateInteractionConfig$acceleration(void *self);
 struct __private__OptionU64
 __swift_bridge__$LateInteractionConfig$max_embed_duration_secs(void *self);
 void *__swift_bridge__$LayoutDetectionConfig$new(
-    struct __private__OptionF32 confidence_threshold, bool apply_heuristics,
-    void *table_model, void *table_overlap_preference, void *acceleration,
-    bool enable_chart_understanding);
+    void *strategy, struct __private__OptionF32 confidence_threshold,
+    bool apply_heuristics, void *table_model, void *table_overlap_preference,
+    void *acceleration, bool enable_chart_understanding);
+void *__swift_bridge__$LayoutDetectionConfig$strategy(void *self);
 struct __private__OptionF32
 __swift_bridge__$LayoutDetectionConfig$confidence_threshold(void *self);
 bool __swift_bridge__$LayoutDetectionConfig$apply_heuristics(void *self);
@@ -5968,7 +5982,8 @@ void *__swift_bridge__$PdfMetadata$new(
     struct __private__OptionBool is_encrypted,
     struct __private__OptionI64 width, struct __private__OptionI64 height,
     struct __private__OptionU32 page_count,
-    struct __private__OptionF32 scanned_confidence, void *scanned_pages);
+    struct __private__OptionF32 scanned_confidence, void *scanned_pages,
+    void *layout_gated_pages, void *layout_gate_reasons);
 void *__swift_bridge__$PdfMetadata$pdf_version(void *self);
 void *__swift_bridge__$PdfMetadata$producer(void *self);
 struct __private__OptionBool
@@ -5979,6 +5994,8 @@ struct __private__OptionU32 __swift_bridge__$PdfMetadata$page_count(void *self);
 struct __private__OptionF32
 __swift_bridge__$PdfMetadata$scanned_confidence(void *self);
 void *__swift_bridge__$PdfMetadata$scanned_pages(void *self);
+void *__swift_bridge__$PdfMetadata$layout_gated_pages(void *self);
+void *__swift_bridge__$PdfMetadata$layout_gate_reasons(void *self);
 void *__swift_bridge__$ChunkClassificationEnrichmentConfig$config(void *self);
 void *__swift_bridge__$ProxyConfig$new(void *url, void *username,
                                        void *password);
@@ -6171,6 +6188,7 @@ void *__swift_bridge__$HtmlTheme$to_string(void *self);
 void *__swift_bridge__$LateInteractionModelType$to_string(void *self);
 void *__swift_bridge__$TableModel$to_string(void *self);
 void *__swift_bridge__$TableOverlapPreference$to_string(void *self);
+void *__swift_bridge__$LayoutStrategy$to_string(void *self);
 void *__swift_bridge__$CallMode$to_string(void *self);
 void *__swift_bridge__$MergeMode$to_string(void *self);
 void *__swift_bridge__$NerBackendKind$to_string(void *self);
@@ -6754,6 +6772,8 @@ __swift_bridge__$table_model_from_json(void *json);
 struct __private__ResultPtrAndPtr
 __swift_bridge__$table_overlap_preference_from_json(void *json);
 struct __private__ResultPtrAndPtr
+__swift_bridge__$layout_strategy_from_json(void *json);
+struct __private__ResultPtrAndPtr
 __swift_bridge__$call_mode_from_json(void *json);
 struct __private__ResultPtrAndPtr
 __swift_bridge__$merge_mode_from_json(void *json);
@@ -7162,6 +7182,7 @@ __swift_bridge__$__alef_phantom_vec_chunk_classification_enrichment_config(
 void *__swift_bridge__$__alef_phantom_vec_html_theme(void);
 void *__swift_bridge__$__alef_phantom_vec_table_model(void);
 void *__swift_bridge__$__alef_phantom_vec_table_overlap_preference(void);
+void *__swift_bridge__$__alef_phantom_vec_layout_strategy(void);
 void *__swift_bridge__$__alef_phantom_vec_whisper_model(void);
 void *__swift_bridge__$__alef_phantom_vec_code_content_mode(void);
 void *__swift_bridge__$__alef_phantom_vec_reduction_level(void);

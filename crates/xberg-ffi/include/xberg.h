@@ -1115,6 +1115,16 @@ typedef struct XBERGLayoutDetectionConfig XBERGLayoutDetectionConfig;
  */
 typedef struct XBERGLayoutRegion XBERGLayoutRegion;
 /**
+ * Which PDF pages the layout model runs on.
+ *
+ * Layout detection renders each selected page to a raster and runs ONNX
+ * inference on it, which dominates extraction cost. This controls page
+ * selection; `LayoutStrategy.Always` preserves the historical behavior of
+ * running on every page. Wire format is snake_case in all serializers
+ * (JSON, TOML, YAML).
+ */
+typedef struct XBERGLayoutStrategy XBERGLayoutStrategy;
+/**
  * Link element metadata.
  */
 typedef struct XBERGLinkMetadata XBERGLinkMetadata;
@@ -5392,6 +5402,14 @@ xberg_layout_detection_config_to_json(const XBERGLayoutDetectionConfig *ptr);
  * Pointer must have been returned by this library, or be null.
  */
 void xberg_layout_detection_config_free(XBERGLayoutDetectionConfig *ptr);
+
+/**
+ * Get the `strategy` field from a `LayoutDetectionConfig`.
+ * # Safety
+ * Pointer must be a valid handle returned by this library.
+ */
+XBERGLayoutStrategy *
+xberg_layout_detection_config_strategy(const XBERGLayoutDetectionConfig *ptr);
 
 /**
  * Get the `confidence_threshold` field from a `LayoutDetectionConfig`.
@@ -17379,6 +17397,20 @@ float xberg_pdf_metadata_scanned_confidence(const XBERGPdfMetadata *ptr);
 char *xberg_pdf_metadata_scanned_pages(const XBERGPdfMetadata *ptr);
 
 /**
+ * Get the `layout_gated_pages` field from a `PdfMetadata`.
+ * # Safety
+ * Pointer must be a valid handle returned by this library.
+ */
+char *xberg_pdf_metadata_layout_gated_pages(const XBERGPdfMetadata *ptr);
+
+/**
+ * Get the `layout_gate_reasons` field from a `PdfMetadata`.
+ * # Safety
+ * Pointer must be a valid handle returned by this library.
+ */
+char *xberg_pdf_metadata_layout_gate_reasons(const XBERGPdfMetadata *ptr);
+
+/**
  * Free a `ChunkClassificationEnrichmentConfig` handle.
  * # Safety
  * Pointer must have been returned by this library, or be null.
@@ -18596,6 +18628,20 @@ int32_t xberg_table_overlap_preference_from_i32(int32_t value);
  * is a valid pointer to a `c_char` or null.
  */
 int32_t xberg_table_overlap_preference_from_str(const char *name);
+
+/**
+ * Convert an integer to a `LayoutStrategy` variant. Returns -1 on invalid
+ * input. # Safety Caller must ensure all pointer arguments are valid or null.
+ * Returned pointers must be freed with the appropriate free function.
+ */
+int32_t xberg_layout_strategy_from_i32(int32_t value);
+
+/**
+ * Convert a `LayoutStrategy` serde wire value (C string) to its integer
+ * discriminant. Returns -1 on invalid input. # Safety Caller must ensure `ptr`
+ * is a valid pointer to a `c_char` or null.
+ */
+int32_t xberg_layout_strategy_from_str(const char *name);
 
 /**
  * Convert an integer to a `CallMode` variant. Returns -1 on invalid input.
@@ -19910,6 +19956,31 @@ xberg_table_overlap_preference_to_json(const XBERGTableOverlapPreference *ptr);
  */
 char *xberg_table_overlap_preference_to_string(
     const XBERGTableOverlapPreference *ptr);
+
+/**
+ * Free a heap-allocated `LayoutStrategy` returned by a pointer-returning FFI
+ * function. # Safety Pointer must have been returned by this library, or be
+ * null.
+ */
+void xberg_layout_strategy_free(XBERGLayoutStrategy *ptr);
+
+/**
+ * Serialize a heap-allocated `LayoutStrategy` to a JSON string.
+ * # Safety
+ * `ptr` must be a valid, non-null pointer returned by a `xberg` function.
+ * The returned string must be freed with `xberg_free_string`.
+ */
+char *xberg_layout_strategy_to_json(const XBERGLayoutStrategy *ptr);
+
+/**
+ * Render a heap-allocated `LayoutStrategy` as its string representation
+ * (the unit-variant name as serialized by serde — e.g. `"completed"`,
+ * without surrounding JSON quotes).
+ * # Safety
+ * `ptr` must be a valid, non-null pointer returned by a `xberg` function.
+ * The returned string must be freed with `xberg_free_string`.
+ */
+char *xberg_layout_strategy_to_string(const XBERGLayoutStrategy *ptr);
 
 /**
  * Free a heap-allocated `CallMode` returned by a pointer-returning FFI
