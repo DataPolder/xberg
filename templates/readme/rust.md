@@ -23,16 +23,13 @@ High-performance document intelligence library for Rust. Extract text, metadata,
 
 This is the core Rust library that powers the Python, TypeScript, and Ruby bindings.
 
-> **Version 5.0.0-rc.17 Release**
-> This is a pre-release version. We invite you to test the library and [report any issues](https://github.com/xberg-io/xberg/issues) you encounter.
->
-> **Note**: The Rust crate is not currently published to crates.io for this RC. Use git dependencies or language bindings (Python, TypeScript, Ruby) instead.
+> **Version {{ version }}**
 
 ## Installation
 
 ```toml
 [dependencies]
-xberg = "5.0.0-rc.17"
+xberg = "{{ version }}"
 tokio = { version = "1", features = ["rt", "macros"] }
 ```
 
@@ -52,19 +49,19 @@ Xberg offers flexible PDFium linking strategies for different deployment scenari
 ```toml
 # Default (dynamic linking)
 [dependencies]
-xberg = "5.0.0-rc.17"
+xberg = "{{ version }}"
 
 # Static linking
 [dependencies]
-xberg = { version = "5.0.0-rc.17", features = ["pdf-static"] }
+xberg = { version = "{{ version }}", features = ["pdf-static"] }
 
 # Bundled in binary
 [dependencies]
-xberg = { version = "5.0.0-rc.17", features = ["pdf-bundled"] }
+xberg = { version = "{{ version }}", features = ["pdf-bundled"] }
 
 # System library (requires PDFium installed)
 [dependencies]
-xberg = { version = "5.0.0-rc.17", features = ["pdf-system"] }
+xberg = { version = "{{ version }}", features = ["pdf-system"] }
 ```
 
 For more details on feature flags and configuration options, see the [Xberg documentation](https://docs.xberg.io).
@@ -265,7 +262,7 @@ The crate uses feature flags for optional functionality:
 
 ```toml
 [dependencies]
-xberg = { version = "5.0.0-rc.17", features = ["pdf", "excel", "ocr"] }
+xberg = { version = "{{ version }}", features = ["pdf", "excel", "ocr"] }
 ```
 
 ### Available Features
@@ -287,9 +284,9 @@ xberg = { version = "5.0.0-rc.17", features = ["pdf", "excel", "ocr"] }
 ### Feature Bundles
 
 ```toml
-xberg = { version = "5.0.0-rc.17", features = ["full"] }
-xberg = { version = "5.0.0-rc.17", features = ["server"] }
-xberg = { version = "5.0.0-rc.17", features = ["cli"] }
+xberg = { version = "{{ version }}", features = ["full"] }
+xberg = { version = "{{ version }}", features = ["server"] }
+xberg = { version = "{{ version }}", features = ["cli"] }
 ```
 
 ## PDF Support
@@ -299,7 +296,7 @@ Enable PDF extraction with the `pdf` feature:
 
 ```toml
 [dependencies]
-xberg = { version = "5.0", features = ["pdf"] }
+xberg = { version = "{{ version }}", features = ["pdf"] }
 ```
 
 No native libraries required. Works on all platforms including musl, Docker, and WASM.
