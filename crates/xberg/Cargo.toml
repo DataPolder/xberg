@@ -887,7 +887,7 @@ org = { version = "0.3", optional = true }
 # ungated in rc.12); ort-sys's build script does not branch on them (verified: no build-time
 # SDK requirement, no effect on the download-binaries/load-dynamic strategy), so enabling
 # them here is a pure compile-time unlock, safe under both ort-bundled and ort-dynamic.
-ort = { version = "2.0.0-rc.12", default-features = false, features = [
+ort = { version = "2.0.0-rc.13", default-features = false, features = [
     "std",
     "ndarray",
     "api-18",
