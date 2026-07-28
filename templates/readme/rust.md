@@ -33,38 +33,9 @@ xberg = "{{ version }}"
 tokio = { version = "1", features = ["rt", "macros"] }
 ```
 
-## PDFium Linking Options
-
-Xberg offers flexible PDFium linking strategies for different deployment scenarios. **Note:** Language bindings (Python, TypeScript, Ruby, Java, Go, C#, PHP, Elixir) automatically bundle PDFium—no configuration needed. This section applies only to the Rust crate.
-
-| Strategy              | Feature Flag  | Description                           | Use Case                                            |
-| --------------------- | ------------- | ------------------------------------- | --------------------------------------------------- |
-| **Default (Dynamic)** | None          | Links to system PDFium at runtime     | Development, system package users                   |
-| **Static**            | `pdf-static`  | Statically links PDFium into binary   | Single binary distribution, no runtime dependencies |
-| **Bundled**           | `pdf-bundled` | Downloads and embeds PDFium in binary | CI/CD, hermetic builds, largest binary size         |
-| **System**            | `pdf-system`  | Uses system PDFium via pkg-config     | Linux distributions with PDFium package             |
-
-**Example Cargo.toml configurations:**
-
-```toml
-# Default (dynamic linking)
-[dependencies]
-xberg = "{{ version }}"
-
-# Static linking
-[dependencies]
-xberg = { version = "{{ version }}", features = ["pdf-static"] }
-
-# Bundled in binary
-[dependencies]
-xberg = { version = "{{ version }}", features = ["pdf-bundled"] }
-
-# System library (requires PDFium installed)
-[dependencies]
-xberg = { version = "{{ version }}", features = ["pdf-system"] }
-```
-
-For more details on feature flags and configuration options, see the [Xberg documentation](https://docs.xberg.io).
+Xberg uses a pure-Rust PDF backend (`pdf_oxide`) — no PDFium, no system libraries, and no
+linking configuration required. For the full list of Cargo feature flags, see the
+[Xberg documentation](https://docs.xberg.io).
 
 ## System Requirements
 
