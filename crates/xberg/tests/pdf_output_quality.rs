@@ -279,4 +279,16 @@ fn test_681693_same_line_words_keep_spaces() {
         content.contains("Your data is clean:"),
         "expected genuine same-line word gaps to remain spaces in 681693.pdf"
     );
+    assert!(
+        content.contains("See \\#182 for more infos."),
+        "expected explicit source whitespace to survive overlapping text spans"
+    );
+    assert!(
+        content.contains("MongoKit is a python module"),
+        "expected the MongoKit introduction to retain its word boundary"
+    );
+    assert!(
+        content.contains("## Recent Change Log\n\n### v0.9.1"),
+        "expected the changelog section and adjacent semantic version to retain H2/H3 hierarchy"
+    );
 }

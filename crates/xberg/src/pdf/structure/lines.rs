@@ -56,6 +56,12 @@ pub(super) fn segments_need_space(
         return false;
     }
 
+    let has_explicit_boundary_space = prev_seg.text.chars().last().is_some_and(char::is_whitespace)
+        || next_seg.text.chars().next().is_some_and(char::is_whitespace);
+    if has_explicit_boundary_space {
+        return true;
+    }
+
     if prev_seg.is_bold != next_seg.is_bold
         || prev_seg.is_italic != next_seg.is_italic
         || prev_seg.is_monospace != next_seg.is_monospace
@@ -119,6 +125,20 @@ mod tests {
     }
 
     #[test]
+    fn test_segments_need_space_explicit_whitespace_overrides_negative_overlap() {
+        let prev = segment("infos. ", 100.0, 35.0, 10.0, 700.0);
+        let next = segment("MongoKit", 133.5, 40.0, 10.0, 700.0);
+        assert!(segments_need_space(&prev, "infos.", &next, "MongoKit"));
+    }
+
+    #[test]
+    fn test_segments_need_space_negative_overlap_without_whitespace_stays_joined() {
+        let prev = segment("Mongo", 100.0, 30.0, 10.0, 700.0);
+        let next = segment("Kit", 129.0, 15.0, 10.0, 700.0);
+        assert!(!segments_need_space(&prev, "Mongo", &next, "Kit"));
+    }
+
+    #[test]
     fn test_segments_need_space_distinct_words_insert_space() {
         let prev = segment("office", 100.0, 30.0, 10.0, 700.0);
         let next = segment("is", 140.0, 8.0, 10.0, 700.0);
@@ -171,7 +191,7 @@ mod tests {
 
     #[test]
     fn test_segments_need_space_cjk_adjacent_never_spaces() {
-        let prev = segment("\u{4E00}", 100.0, 12.0, 12.0, 700.0);
+        let prev = segment("\u{4E00} ", 100.0, 12.0, 12.0, 700.0);
         let next = segment("\u{4E01}", 112.0, 12.0, 12.0, 700.0);
         assert!(!segments_need_space(&prev, "\u{4E00}", &next, "\u{4E01}"));
     }

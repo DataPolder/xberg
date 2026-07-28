@@ -16,6 +16,12 @@ const SAL_DIRECTION_PREFIXES: [&str; 6] = [
     "__in",
 ];
 const SAL_DIRECTION_MODIFIERS: [&str; 7] = ["opt", "ecount", "bcount", "full", "part", "z", "nz"];
+const CHANGELOG_VERSION_MAX_LEFT_OFFSET_RATIO: f32 = 0.75;
+const CHANGELOG_VERSION_MAX_VERTICAL_GAP_RATIO: f32 = 2.0;
+const CHANGELOG_VERSION_MAX_VERTICAL_OVERLAP_RATIO: f32 = 0.25;
+const CHANGELOG_COMBINED_MIN_HEIGHT_RATIO: f32 = 1.5;
+const CHANGELOG_COMBINED_MIN_BASELINE_GAP_RATIO: f32 = 0.5;
+type ParagraphBbox = (f32, f32, f32, f32);
 
 /// Demote structure-tree heading tags attached to standalone SAL annotations.
 ///
@@ -633,7 +639,14 @@ pub(super) fn precompute_gap_info(heading_map: &[(f32, Option<u8>)]) -> GapInfo 
 /// 1. Promotes the first heading to H1 when no H1 exists (title inference).
 /// 2. Merges consecutive H1 headings at the same font size into one title (any page).
 /// 3. Demotes numbered section headings from H1 to H2 when a non-numbered title H1 exists.
+/// 4. Preserves changelog section/version hierarchy where geometry confirms adjacency.
 pub(super) fn refine_heading_hierarchy(all_pages: &mut [Vec<PdfParagraph>]) {
+    split_combined_changelog_version_headings(all_pages);
+    refine_heading_hierarchy_inner(all_pages);
+    promote_changelog_version_headings(all_pages);
+}
+
+fn refine_heading_hierarchy_inner(all_pages: &mut [Vec<PdfParagraph>]) {
     let h1_count: usize = all_pages
         .iter()
         .flat_map(|page| page.iter())
@@ -673,6 +686,7 @@ pub(super) fn refine_heading_hierarchy(all_pages: &mut [Vec<PdfParagraph>]) {
                 && first_wc > 0
                 && !first.is_page_furniture
                 && !looks_like_bare_url(&first_text)
+                && !is_changelog_hierarchy_member(page0, 0)
             {
                 all_pages[0][0].heading_level = Some(1);
             }
@@ -727,6 +741,167 @@ pub(super) fn refine_heading_hierarchy(all_pages: &mut [Vec<PdfParagraph>]) {
             }
         }
     }
+}
+
+fn split_combined_changelog_version_headings(all_pages: &mut [Vec<PdfParagraph>]) {
+    for page in all_pages {
+        let mut index = 0;
+        while index < page.len() {
+            let Some(version) = combined_changelog_version(&page[index]) else {
+                index += 1;
+                continue;
+            };
+            if !page[index].is_bold
+                || page[index].is_list_item
+                || page[index].is_code_block
+                || page[index].is_formula
+                || page[index].is_page_furniture
+            {
+                index += 1;
+                continue;
+            }
+            let Some((parent_bbox, version_bbox)) = combined_changelog_split_bboxes(&page[index]) else {
+                index += 1;
+                continue;
+            };
+
+            let mut version_paragraph = page[index].clone();
+            page[index].text = "Recent Change Log".to_string();
+            page[index].lines.clear();
+            page[index].heading_level = Some(2);
+            page[index].block_bbox = Some(parent_bbox);
+            page[index].word_count = 3;
+
+            version_paragraph.text = version;
+            version_paragraph.lines.clear();
+            version_paragraph.heading_level = Some(3);
+            version_paragraph.is_list_item = false;
+            version_paragraph.is_code_block = false;
+            version_paragraph.is_formula = false;
+            version_paragraph.is_page_furniture = false;
+            version_paragraph.block_bbox = Some(version_bbox);
+            version_paragraph.word_count = 1;
+            page.insert(index + 1, version_paragraph);
+            index += 2;
+        }
+    }
+}
+
+fn combined_changelog_version(paragraph: &PdfParagraph) -> Option<String> {
+    let text = effective_text(paragraph);
+    let text = text.trim();
+    let version = if let Some(version) = text.strip_prefix("Recent Change Log\n") {
+        version
+    } else {
+        if !combined_changelog_has_multiline_geometry(paragraph) {
+            return None;
+        }
+        text.strip_prefix("Recent Change Log ")?
+    }
+    .trim();
+    (!version.contains(char::is_whitespace) && is_semantic_version(version)).then(|| version.to_string())
+}
+
+fn combined_changelog_has_multiline_geometry(paragraph: &PdfParagraph) -> bool {
+    let baseline_gap = paragraph
+        .lines
+        .iter()
+        .map(|line| line.baseline_y)
+        .fold(None, |bounds, baseline| match bounds {
+            None => Some((baseline, baseline)),
+            Some((minimum, maximum)) => Some((minimum.min(baseline), maximum.max(baseline))),
+        })
+        .is_some_and(|(minimum, maximum)| {
+            maximum - minimum >= paragraph.dominant_font_size * CHANGELOG_COMBINED_MIN_BASELINE_GAP_RATIO
+        });
+    let tall_bbox = paragraph.block_bbox.is_some_and(|(_, bottom, _, top)| {
+        top - bottom >= paragraph.dominant_font_size * CHANGELOG_COMBINED_MIN_HEIGHT_RATIO
+    });
+
+    baseline_gap || tall_bbox
+}
+
+fn combined_changelog_split_bboxes(paragraph: &PdfParagraph) -> Option<(ParagraphBbox, ParagraphBbox)> {
+    let (left, bottom, right, top) = paragraph.block_bbox.or_else(|| {
+        let mut segments = paragraph.lines.iter().flat_map(|line| line.segments.iter());
+        let first = segments.next()?;
+        Some(segments.fold(
+            (first.x, first.y, first.x + first.width, first.y + first.height),
+            |(left, bottom, right, top), segment| {
+                (
+                    left.min(segment.x),
+                    bottom.min(segment.y),
+                    right.max(segment.x + segment.width),
+                    top.max(segment.y + segment.height),
+                )
+            },
+        ))
+    })?;
+    let midpoint = bottom + (top - bottom) / 2.0;
+    Some(((left, midpoint, right, top), (left, bottom, right, midpoint)))
+}
+
+fn promote_changelog_version_headings(all_pages: &mut [Vec<PdfParagraph>]) {
+    for page in all_pages {
+        for index in 0..page.len().saturating_sub(1) {
+            let (before, after) = page.split_at_mut(index + 1);
+            let parent = &mut before[index];
+            let version = &mut after[0];
+
+            if !is_changelog_version_pair(parent, version) {
+                continue;
+            }
+
+            parent.heading_level = Some(2);
+            version.heading_level = Some(3);
+        }
+    }
+}
+
+fn is_changelog_version_pair(parent: &PdfParagraph, version: &PdfParagraph) -> bool {
+    parent.heading_level.is_some()
+        && effective_text(parent).trim() == "Recent Change Log"
+        && version.is_bold
+        && is_semantic_version(effective_text(version).trim())
+        && !version.is_list_item
+        && !version.is_code_block
+        && !version.is_formula
+        && !version.is_page_furniture
+        && changelog_version_is_near_and_aligned(parent, version)
+}
+
+fn is_semantic_version(text: &str) -> bool {
+    let version = text.strip_prefix('v').unwrap_or(text);
+    let mut parts = version.split('.');
+    let first = parts.next();
+    let second = parts.next();
+    let third = parts.next();
+    let has_extra = parts.next().is_some();
+
+    !has_extra
+        && first.is_some_and(is_ascii_digits)
+        && second.is_some_and(is_ascii_digits)
+        && third.is_none_or(is_ascii_digits)
+}
+
+fn is_ascii_digits(part: &str) -> bool {
+    !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+fn changelog_version_is_near_and_aligned(parent: &PdfParagraph, version: &PdfParagraph) -> bool {
+    let (Some((parent_left, parent_bottom, _, _)), Some((version_left, _, _, version_top))) =
+        (parent.block_bbox, version.block_bbox)
+    else {
+        return false;
+    };
+
+    let reference_size = parent.dominant_font_size.max(version.dominant_font_size);
+    let left_offset = (parent_left - version_left).abs();
+    let vertical_gap = parent_bottom - version_top;
+
+    left_offset <= reference_size * CHANGELOG_VERSION_MAX_LEFT_OFFSET_RATIO
+        && vertical_gap >= -reference_size * CHANGELOG_VERSION_MAX_VERTICAL_OVERLAP_RATIO
+        && vertical_gap <= reference_size * CHANGELOG_VERSION_MAX_VERTICAL_GAP_RATIO
 }
 
 /// Determine heading level for a bold/italic paragraph based on font-size ratio to body.
@@ -1092,7 +1267,11 @@ fn paragraph_plain_text(para: &PdfParagraph) -> String {
 ///    font size IF it's clearly larger than other headings (at least 1.5pt gap).
 fn promote_title_heading(all_pages: &mut [Vec<PdfParagraph>]) {
     for page in all_pages.iter_mut() {
-        for para in page.iter_mut() {
+        for index in 0..page.len() {
+            if is_changelog_hierarchy_member(page, index) {
+                continue;
+            }
+            let para = &mut page[index];
             if para.heading_level.is_some() && para.layout_class == Some(super::types::LayoutHintClass::Title) {
                 para.heading_level = Some(1);
                 return;
@@ -1107,7 +1286,7 @@ fn promote_title_heading(all_pages: &mut [Vec<PdfParagraph>]) {
     let headings: Vec<(usize, f32)> = page
         .iter()
         .enumerate()
-        .filter(|(_, p)| p.heading_level.is_some())
+        .filter(|(index, p)| p.heading_level.is_some() && !is_changelog_hierarchy_member(page, *index))
         .map(|(i, p)| (i, p.dominant_font_size))
         .collect();
 
@@ -1132,6 +1311,11 @@ fn promote_title_heading(all_pages: &mut [Vec<PdfParagraph>]) {
     {
         all_pages[0][idx].heading_level = Some(1);
     }
+}
+
+fn is_changelog_hierarchy_member(page: &[PdfParagraph], index: usize) -> bool {
+    (index + 1 < page.len() && is_changelog_version_pair(&page[index], &page[index + 1]))
+        || (index > 0 && is_changelog_version_pair(&page[index - 1], &page[index]))
 }
 
 /// Merge consecutive H1 paragraphs at the same font size into a single heading.
@@ -2549,6 +2733,183 @@ mod tests {
             Some(1),
             "at the sparsity floor a clearly larger title line must still be promoted"
         );
+    }
+
+    #[test]
+    fn test_refine_preserves_changelog_h2_and_promotes_adjacent_version_to_h3() {
+        let mut title = make_text_paragraph(24.0, "Project Guide", false);
+        title.heading_level = Some(1);
+        let mut changelog = make_text_paragraph(16.0, "Recent Change Log", false);
+        changelog.heading_level = Some(2);
+        changelog.block_bbox = Some((50.0, 700.0, 210.0, 718.0));
+        let mut version = make_text_paragraph(12.0, "v0.9.1", true);
+        version.block_bbox = Some((50.5, 680.0, 105.0, 692.0));
+        let body = make_text_paragraph(12.0, "Maintenance details follow.", true);
+        let mut pages = vec![vec![title, changelog, version, body]];
+
+        refine_heading_hierarchy(&mut pages);
+
+        assert_eq!(pages[0][1].heading_level, Some(2));
+        assert_eq!(pages[0][2].heading_level, Some(3));
+        assert_eq!(pages[0][3].heading_level, None);
+    }
+
+    #[test]
+    fn test_refine_splits_combined_changelog_and_version_heading() {
+        let mut title = make_text_paragraph(24.0, "Project Guide", false);
+        title.heading_level = Some(1);
+        let mut combined = make_text_paragraph(16.0, "Recent Change Log v0.9.1", true);
+        combined.text = "Recent Change Log v0.9.1".to_string();
+        combined.block_bbox = Some((50.0, 664.0, 210.0, 696.0));
+        let mut pages = vec![vec![title, combined]];
+
+        refine_heading_hierarchy(&mut pages);
+
+        assert_eq!(pages[0].len(), 3);
+        assert_eq!(pages[0][1].text, "Recent Change Log");
+        assert_eq!(pages[0][1].heading_level, Some(2));
+        assert_eq!(pages[0][2].text, "v0.9.1");
+        assert_eq!(pages[0][2].heading_level, Some(3));
+        assert!(!pages[0][2].is_list_item);
+        assert!(!pages[0][2].is_code_block);
+        assert!(!pages[0][2].is_formula);
+        assert!(!pages[0][2].is_page_furniture);
+        assert_eq!(pages[0][1].block_bbox, Some((50.0, 680.0, 210.0, 696.0)));
+        assert_eq!(pages[0][2].block_bbox, Some((50.0, 664.0, 210.0, 680.0)));
+    }
+
+    #[test]
+    fn test_refine_splits_combined_changelog_without_preexisting_h1() {
+        let mut combined = make_text_paragraph(16.0, "Recent Change Log v0.9.1", true);
+        combined.text = "Recent Change Log v0.9.1".to_string();
+        combined.block_bbox = Some((50.0, 664.0, 210.0, 696.0));
+        let mut pages = vec![vec![
+            combined,
+            make_text_paragraph(12.0, "First body paragraph.", false),
+            make_text_paragraph(12.0, "Second body paragraph.", false),
+            make_text_paragraph(12.0, "Third body paragraph.", false),
+            make_text_paragraph(12.0, "Fourth body paragraph.", false),
+        ]];
+
+        refine_heading_hierarchy(&mut pages);
+
+        assert_eq!(pages[0][0].heading_level, Some(2));
+        assert_eq!(pages[0][1].heading_level, Some(3));
+        assert!(
+            pages[0].iter().all(|paragraph| paragraph.heading_level != Some(1)),
+            "a synthetic changelog hierarchy must not create an unrelated h1"
+        );
+    }
+
+    #[test]
+    fn test_combined_changelog_split_rejects_ordinary_one_line_heading() {
+        let mut combined = make_text_paragraph(16.0, "Recent Change Log v0.9.1", true);
+        combined.text = "Recent Change Log v0.9.1".to_string();
+        combined.block_bbox = Some((50.0, 680.0, 310.0, 696.0));
+        let mut pages = vec![vec![combined]];
+
+        split_combined_changelog_version_headings(&mut pages);
+
+        assert_eq!(pages[0].len(), 1);
+        assert_eq!(pages[0][0].text, "Recent Change Log v0.9.1");
+        assert_eq!(pages[0][0].heading_level, None);
+    }
+
+    #[test]
+    fn test_combined_changelog_split_accepts_distinct_line_baselines() {
+        let mut combined = make_text_paragraph(16.0, "Recent Change Log v0.9.1", true);
+        combined.text = "Recent Change Log v0.9.1".to_string();
+        let mut version_line = combined.lines[0].clone();
+        version_line.baseline_y = 680.0;
+        version_line.segments[0].y = 680.0;
+        version_line.segments[0].baseline_y = 680.0;
+        combined.lines.push(version_line);
+        let mut pages = vec![vec![combined]];
+
+        split_combined_changelog_version_headings(&mut pages);
+
+        assert_eq!(pages[0].len(), 2);
+        assert_eq!(pages[0][0].heading_level, Some(2));
+        assert_eq!(pages[0][1].heading_level, Some(3));
+        assert!(is_changelog_version_pair(&pages[0][0], &pages[0][1]));
+    }
+
+    #[test]
+    fn test_combined_changelog_split_requires_geometry_and_plain_heading_state() {
+        let make_combined = || {
+            let mut paragraph = make_text_paragraph(16.0, "Recent Change Log v0.9.1", true);
+            paragraph.text = "Recent Change Log v0.9.1".to_string();
+            paragraph
+        };
+
+        let mut without_geometry = vec![vec![make_combined()]];
+        split_combined_changelog_version_headings(&mut without_geometry);
+        assert_eq!(without_geometry[0].len(), 1);
+
+        for invalid_state in 0..4 {
+            let mut paragraph = make_combined();
+            paragraph.block_bbox = Some((50.0, 680.0, 210.0, 696.0));
+            match invalid_state {
+                0 => paragraph.is_list_item = true,
+                1 => paragraph.is_code_block = true,
+                2 => paragraph.is_formula = true,
+                3 => paragraph.is_page_furniture = true,
+                _ => unreachable!(),
+            }
+            let mut pages = vec![vec![paragraph]];
+            split_combined_changelog_version_headings(&mut pages);
+            assert_eq!(pages[0].len(), 1);
+        }
+    }
+
+    #[test]
+    fn test_standalone_recent_change_log_title_can_be_promoted_to_h1() {
+        let mut pages = vec![vec![
+            make_text_paragraph(18.0, "Recent Change Log", false),
+            make_text_paragraph(12.0, "First body paragraph.", false),
+            make_text_paragraph(12.0, "Second body paragraph.", false),
+            make_text_paragraph(12.0, "Third body paragraph.", false),
+            make_text_paragraph(12.0, "Fourth body paragraph.", false),
+        ]];
+
+        refine_heading_hierarchy(&mut pages);
+
+        assert_eq!(pages[0][0].heading_level, Some(1));
+    }
+
+    #[test]
+    fn test_refine_does_not_promote_distant_or_unaligned_changelog_versions() {
+        let mut title = make_text_paragraph(24.0, "Project Guide", false);
+        title.heading_level = Some(1);
+        let mut changelog = make_text_paragraph(16.0, "Recent Change Log", false);
+        changelog.heading_level = Some(2);
+        changelog.block_bbox = Some((50.0, 700.0, 210.0, 718.0));
+        let mut distant_version = make_text_paragraph(12.0, "1.2.3", true);
+        distant_version.block_bbox = Some((50.0, 600.0, 100.0, 612.0));
+        let mut second_changelog = changelog.clone();
+        second_changelog.block_bbox = Some((50.0, 700.0, 210.0, 718.0));
+        let mut unaligned_version = make_text_paragraph(12.0, "v2.0", true);
+        unaligned_version.block_bbox = Some((100.0, 680.0, 150.0, 692.0));
+        let mut pages = vec![
+            vec![title, changelog, distant_version],
+            vec![second_changelog, unaligned_version],
+        ];
+
+        refine_heading_hierarchy(&mut pages);
+
+        assert_eq!(pages[0][1].heading_level, Some(2));
+        assert_eq!(pages[0][2].heading_level, None);
+        assert_eq!(pages[1][0].heading_level, Some(2));
+        assert_eq!(pages[1][1].heading_level, None);
+    }
+
+    #[test]
+    fn test_semantic_version_match_is_bounded_to_two_or_three_numeric_parts() {
+        assert!(is_semantic_version("0.9"));
+        assert!(is_semantic_version("v1.2.3"));
+        assert!(!is_semantic_version("1"));
+        assert!(!is_semantic_version("1.2.3.4"));
+        assert!(!is_semantic_version("version 1.2"));
     }
 
     #[test]
