@@ -83,7 +83,7 @@ Xberg supports 98+ file formats across 8 major categories with intelligent forma
 | JPEG 2000 Compound | `.jpm`                         | `image/jpm`               | Compound image support, mixed content                                            |
 | Motion JPEG 2000   | `.mj2`                         | `image/mj2`               | JPEG 2000 video/sequence metadata                                                |
 | JBIG2              | `.jbig2`, `.jb2`               | `image/x-jbig2`           | Bi-level image OCR, high compression, technical documents                        |
-| Portable PixMap    | `.pnm`, `.pbm`, `.pgm`, `.ppm` | `image/x-portable-pixmap` | OCR for plain image formats, raw pixel data                                      |
+| Portable PixMap    | `.pnm`, `.pbm`, `.pgm`, `.ppm` | `.pnm`=`image/x-portable-anymap`, `.pbm`=`image/x-portable-bitmap`, `.pgm`=`image/x-portable-graymap`, `.ppm`=`image/x-portable-pixmap` | OCR for plain image formats, raw pixel data                                      |
 
 ### Vector Graphics
 
@@ -97,8 +97,7 @@ Xberg supports 98+ file formats across 8 major categories with intelligent forma
 
 | Format           | Extensions      | MIME Type               | Capabilities                                                                       |
 | ---------------- | --------------- | ----------------------- | ---------------------------------------------------------------------------------- |
-| HyperText Markup | `.html`, `.htm` | `text/html`             | DOM parsing, text extraction, metadata (Open Graph, Twitter Card), link extraction |
-| XHTML            | `.xhtml`        | `application/xhtml+xml` | XHTML parsing, metadata extraction, semantic structure                             |
+| HyperText Markup | `.html`, `.htm` | `text/html` (alias `application/xhtml+xml`) | DOM parsing, text extraction, metadata (Open Graph, Twitter Card), link extraction |
 | XML              | `.xml`          | `application/xml`       | DOM parsing, namespace handling, text extraction, structure analysis               |
 
 ### Structured Data Formats
@@ -151,7 +150,7 @@ Xberg supports 98+ file formats across 8 major categories with intelligent forma
 | BibLaTeX                | `.bib`      | `application/x-biblatex`                  | Extended BibTeX format, advanced field support    |
 | RIS                     | `.ris`      | `application/x-research-info-systems`    | Structured RIS format parsing, type detection     |
 | NIH RIS                 | `.nbib`     | `application/x-pubmed`                    | NIH/PubMed format, structured citation data       |
-| EndNote                 | `.enw`      | `application/x-endnote`                  | EndNote XML format, citation metadata             |
+| EndNote                 | `.enw`      | `application/x-endnote+xml`              | EndNote XML format, citation metadata             |
 | Citation Style Language | —           | `application/csl+json`                   | CSL JSON parsing, style definitions               |
 
 ### Scientific & Technical Formats
@@ -169,9 +168,9 @@ Xberg supports 98+ file formats across 8 major categories with intelligent forma
 | Format      | Extensions | MIME Type                | Capabilities                                    |
 | ----------- | ---------- | ------------------------ | ----------------------------------------------- |
 | OPML        | `.opml`    | `application/x-opml+xml` | Outline parsing, hierarchy extraction, metadata |
-| Perl POD    | `.pod`     | `text/x-pod`             | Perl documentation parsing, section extraction  |
-| Manual Page | `.mdoc`    | `text/plain`             | UNIX manual page parsing, section structure     |
-| Troff/Groff | `.troff`   | `text/troff`             | Typesetting markup parsing, document structure  |
+| Perl POD    | —          | `text/x-pod`             | Perl documentation parsing, section extraction  |
+| Manual Page | —          | `text/x-mdoc`            | UNIX manual page parsing, section structure     |
+| Troff/Groff | —          | `text/troff`             | Typesetting markup parsing, document structure  |
 
 ## Format Capabilities Summary
 

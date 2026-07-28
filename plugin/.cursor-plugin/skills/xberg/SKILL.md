@@ -15,8 +15,8 @@ metadata:
 
 <!--
 AI-RULEZ :: GENERATED FILE — DO NOT EDIT
-Content-Hash: blake3:025aff9a0a2d2ab9d928796bce830eb83a18c8924ee3d566e37819630c6ea4fa
-Source-Hash: blake3:6d7616768ddcc1ec0f5ea7ac42658e1974f423fdfd8f05ae09fc25648c143c71
+Content-Hash: blake3:0b22700fea0a121f9488260cdba4bdb39fcb12a9bb6277c1784b9fc7ab3eddc9
+Source-Hash: blake3:ec177e558e2839c3e8f6610cfccdf9bd49cc40d3fea83e0d9bc4f86ea18d9922
 Schema-Version: v1
 -->
 
@@ -148,7 +148,7 @@ config = ExtractionConfig(
         tesseract_config=TesseractConfig(psm=6, enable_table_detection=True),
     ),
     pdf_options=PdfConfig(passwords=["secret123"]),
-    chunking=ChunkingConfig(max_chars=1000, max_overlap=200),
+    chunking=ChunkingConfig(max_characters=1000, overlap=200),
     output_format=OutputFormat("markdown"),
 )
 
@@ -371,7 +371,7 @@ match extract(ExtractInput::from_uri("file.pdf"), &config).await {
 1. **Result is an envelope**: `extract` / `extract_batch` return `ExtractionResult` with `results`, `errors`, and `summary`. Per-document fields (`content`, `tables`, `chunks`, …) are on `result.results[i]`, NOT on the top-level return.
 2. **Async-only**: Python and Node have no sync variants — always `await extract(...)`. Rust `extract` is async; use `#[tokio::main]` or an async context.
 3. **Build the input**: pass an `ExtractInput`, not a bare path. Use `ExtractInput(uri=...)` / `ExtractInput::from_uri(...)` (Python/Rust) or `{ kind: "uri", uri: "..." }` (Node); for bytes use `kind="bytes"` with `bytes`/`mime_type`.
-4. **Python ChunkingConfig fields**: construct with `max_chars` and `max_overlap` (defaults 1000 / 200); the read-only attributes are `max_characters` / `overlap`. Node uses `maxCharacters` / `overlap`; Rust struct fields are `max_characters` / `overlap`.
+4. **Python ChunkingConfig fields**: construct with `max_characters` and `overlap` (defaults 1000 / 200); these are also the readable attributes. When passing config as a dict/JSON, the `max_chars` / `max_overlap` aliases are also accepted. Node uses `maxCharacters` / `overlap`; Rust struct fields are `max_characters` / `overlap`.
 5. **Python errors**: `extract` / `extract_batch` raise a plain `RuntimeError` on failure, not typed `XbergError` subclasses — catch `RuntimeError`. Node throws plain `Error` (no typed error subclasses).
 6. **Rust extract signature**: `extract(input, &config)` — the config is a reference. Use `&ExtractionConfig::default()` for defaults.
 7. **CLI --format vs --content-format**: `--format` controls CLI output (text/json). `--content-format` controls content format (plain/markdown/djot/html).

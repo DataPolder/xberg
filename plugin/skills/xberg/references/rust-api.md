@@ -1,7 +1,7 @@
 <!--
 AI-RULEZ :: GENERATED FILE — DO NOT EDIT
-Content-Hash: blake3:f9a9d9dc6107ad9aa79ff396f685fdf4dd8a17afbe85dd6bd185e5fab2cfe9d1
-Source-Hash: blake3:6d7616768ddcc1ec0f5ea7ac42658e1974f423fdfd8f05ae09fc25648c143c71
+Content-Hash: blake3:12b636531e164bffa6358fe0c6fe897658f543df198e0d04d2a430b0fba77b22
+Source-Hash: blake3:ec177e558e2839c3e8f6610cfccdf9bd49cc40d3fea83e0d9bc4f86ea18d9922
 Schema-Version: v1
 -->
 
@@ -237,7 +237,7 @@ let config = ExtractionConfig {
 `ExtractionConfig::output_format` controls the `content` text format:
 
 ```rust
-pub enum OutputFormat { Plain, Markdown, Djot, Html }
+pub enum OutputFormat { Plain, Markdown, Djot, Html, Json, Structured, Custom(String) }
 ```
 
 `ExtractionConfig::result_format` controls the result structure:
@@ -346,6 +346,7 @@ async fn main() -> xberg::Result<()> {
 ```rust
 pub struct Chunk {
     pub content: String,
+    pub chunk_type: ChunkType,
     pub embedding: Option<Vec<f32>>,
     pub metadata: ChunkMetadata,
 }

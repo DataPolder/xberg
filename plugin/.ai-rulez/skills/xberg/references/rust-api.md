@@ -230,7 +230,7 @@ let config = ExtractionConfig {
 `ExtractionConfig::output_format` controls the `content` text format:
 
 ```rust
-pub enum OutputFormat { Plain, Markdown, Djot, Html }
+pub enum OutputFormat { Plain, Markdown, Djot, Html, Json, Structured, Custom(String) }
 ```
 
 `ExtractionConfig::result_format` controls the result structure:
@@ -339,6 +339,7 @@ async fn main() -> xberg::Result<()> {
 ```rust
 pub struct Chunk {
     pub content: String,
+    pub chunk_type: ChunkType,
     pub embedding: Option<Vec<f32>>,
     pub metadata: ChunkMetadata,
 }

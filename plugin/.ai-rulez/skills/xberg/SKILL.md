@@ -141,7 +141,7 @@ config = ExtractionConfig(
         tesseract_config=TesseractConfig(psm=6, enable_table_detection=True),
     ),
     pdf_options=PdfConfig(passwords=["secret123"]),
-    chunking=ChunkingConfig(max_chars=1000, max_overlap=200),
+    chunking=ChunkingConfig(max_characters=1000, overlap=200),
     output_format=OutputFormat("markdown"),
 )
 
@@ -364,7 +364,7 @@ match extract(ExtractInput::from_uri("file.pdf"), &config).await {
 1. **Result is an envelope**: `extract` / `extract_batch` return `ExtractionResult` with `results`, `errors`, and `summary`. Per-document fields (`content`, `tables`, `chunks`, …) are on `result.results[i]`, NOT on the top-level return.
 2. **Async-only**: Python and Node have no sync variants — always `await extract(...)`. Rust `extract` is async; use `#[tokio::main]` or an async context.
 3. **Build the input**: pass an `ExtractInput`, not a bare path. Use `ExtractInput(uri=...)` / `ExtractInput::from_uri(...)` (Python/Rust) or `{ kind: "uri", uri: "..." }` (Node); for bytes use `kind="bytes"` with `bytes`/`mime_type`.
-4. **Python ChunkingConfig fields**: construct with `max_chars` and `max_overlap` (defaults 1000 / 200); the read-only attributes are `max_characters` / `overlap`. Node uses `maxCharacters` / `overlap`; Rust struct fields are `max_characters` / `overlap`.
+4. **Python ChunkingConfig fields**: construct with `max_characters` and `overlap` (defaults 1000 / 200); these are also the readable attributes. When passing config as a dict/JSON, the `max_chars` / `max_overlap` aliases are also accepted. Node uses `maxCharacters` / `overlap`; Rust struct fields are `max_characters` / `overlap`.
 5. **Python errors**: `extract` / `extract_batch` raise a plain `RuntimeError` on failure, not typed `XbergError` subclasses — catch `RuntimeError`. Node throws plain `Error` (no typed error subclasses).
 6. **Rust extract signature**: `extract(input, &config)` — the config is a reference. Use `&ExtractionConfig::default()` for defaults.
 7. **CLI --format vs --content-format**: `--format` controls CLI output (text/json). `--content-format` controls content format (plain/markdown/djot/html).

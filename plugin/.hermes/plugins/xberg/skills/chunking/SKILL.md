@@ -5,8 +5,8 @@ description: Use when splitting extracted text into chunks for LLM context windo
 
 <!--
 AI-RULEZ :: GENERATED FILE — DO NOT EDIT
-Content-Hash: blake3:023d33bc8d7a1cd1b9ec504757a61f41b34ad01708eb7df72bf8891b05934627
-Source-Hash: blake3:6d7616768ddcc1ec0f5ea7ac42658e1974f423fdfd8f05ae09fc25648c143c71
+Content-Hash: blake3:0b5cd4bec9d2a8f3452e07139ef56d6b87f9f7990714d15483a03435e751af59
+Source-Hash: blake3:ec177e558e2839c3e8f6610cfccdf9bd49cc40d3fea83e0d9bc4f86ea18d9922
 Schema-Version: v1
 -->
 
@@ -125,18 +125,19 @@ document in the result envelope (`result.results[0].chunks`):
 from xberg import ExtractInput, extract, ExtractionConfig, ChunkingConfig
 
 config = ExtractionConfig(
-    chunking=ChunkingConfig(max_chars=1000, max_overlap=200),
+    chunking=ChunkingConfig(max_characters=1000, overlap=200),
 )
 result = await extract(ExtractInput(uri="report.pdf"), config)
 for chunk in result.results[0].chunks or []:
     print(len(chunk.content))
 ```
 
-> The Rust core struct fields are `max_characters` / `overlap`; TOML/JSON
-> config keys are `max_chars` / `max_overlap` (with `max_characters` /
-> `overlap` accepted as serde aliases); the Python constructor takes kwargs
-> `max_chars` / `max_overlap` while its read-only attributes are
-> `max_characters` / `overlap`; Node's `ChunkingConfig` interface uses
+> The public Python `ChunkingConfig` (a dataclass) uses constructor kwargs
+> `max_characters` / `overlap`; the Rust core struct fields are also
+> `max_characters` / `overlap`. TOML/JSON config keys are `max_chars` /
+> `max_overlap` (with `max_characters` / `overlap` accepted as serde aliases),
+> and dict-form config passed to `ExtractionConfig` likewise accepts the
+> `max_chars` / `max_overlap` aliases; Node's `ChunkingConfig` interface uses
 > `maxCharacters` / `overlap`. See `references/python-api.md` and
 > `references/rust-api.md` in the sibling `xberg` skill.
 

@@ -135,7 +135,7 @@ const config: ExtractionConfig = {
   useCache: true,
   enableQualityProcessing: true,
   outputFormat: "markdown",
-  ocr: { backend: "tesseract", language: "eng+deu", tesseractConfig: { psm: 6 } },
+  ocr: { backend: "tesseract", language: ["eng", "deu"], tesseractConfig: { psm: 6 } },
   chunking: { maxCharacters: 1000, overlap: 200 },
 };
 
@@ -175,7 +175,7 @@ console.log(`Total chunks: ${output.results[0].chunks?.length ?? 0}`);
 ```typescript
 interface OcrConfig {
   backend: string; // 'tesseract', 'paddleocr', 'paddle-ocr', 'vlm'
-  language?: string | string[]; // 'eng', 'eng+fra', or ['eng', 'fra']
+  language?: string[]; // ['eng'], ['eng', 'deu']; joined with '+' for Tesseract
   tesseractConfig?: TesseractConfig;
 }
 
@@ -264,7 +264,7 @@ interface ExtractionResult {
 interface ExtractedDocument {
   content: string; // main extracted text
   mimeType: string;
-  metadata: Metadata; // flat — format-specific fields at top level
+  metadata: Metadata; // common fields at top level; format-specific under metadata.format, custom under metadata.additional
   tables: Table[];
   detectedLanguages?: string[] | null;
   chunks?: Chunk[] | null;
@@ -318,12 +318,14 @@ interface Keyword {
 
 ### `Metadata`
 
-Metadata is flat — format-specific fields (`title`, `author`, `pageCount`/`page_count`, Open Graph, etc.) sit at the top level. Access defensively:
+Metadata is **not** flat. Common fields (`title`, `subject`, `authors`, `keywords`, `language`, `createdAt`/`modifiedAt`, `pages`, etc.) sit at the top level, but format-specific fields nest under `metadata.format` (a `FormatMetadata` discriminated union keyed by `format_type`), and custom post-processor fields nest under `metadata.additional`. There is no `page_count`/`pageCount` member on `Metadata`, and use `authors` (an array), not `author`. Read page count from format-specific metadata or from `metadata.pages` (PageStructure):
 
 ```typescript
 const doc = output.results[0];
-if (doc.metadata?.page_count) {
-  console.log(`Pages: ${doc.metadata.page_count}`);
+if (doc.metadata?.format?.format_type === "pdf") {
+  console.log(`Pages: ${doc.metadata.format.pageCount}`);
+} else if (doc.metadata?.pages) {
+  console.log(`Pages: ${doc.metadata.pages}`);
 }
 ```
 

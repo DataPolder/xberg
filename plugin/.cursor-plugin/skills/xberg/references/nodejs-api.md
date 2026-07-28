@@ -1,7 +1,7 @@
 <!--
 AI-RULEZ :: GENERATED FILE — DO NOT EDIT
-Content-Hash: blake3:78d74772aede725b5af4d1eb0127dfc55803c4947fc3bc8ad3d42ab43c7cb8e8
-Source-Hash: blake3:6d7616768ddcc1ec0f5ea7ac42658e1974f423fdfd8f05ae09fc25648c143c71
+Content-Hash: blake3:bda783bcb3934bcf2e64a597e307e0b59a9ba1c01c840a89b173f02eb9bab81d
+Source-Hash: blake3:ec177e558e2839c3e8f6610cfccdf9bd49cc40d3fea83e0d9bc4f86ea18d9922
 Schema-Version: v1
 -->
 
@@ -142,7 +142,7 @@ const config: ExtractionConfig = {
   useCache: true,
   enableQualityProcessing: true,
   outputFormat: "markdown",
-  ocr: { backend: "tesseract", language: "eng+deu", tesseractConfig: { psm: 6 } },
+  ocr: { backend: "tesseract", language: ["eng", "deu"], tesseractConfig: { psm: 6 } },
   chunking: { maxCharacters: 1000, overlap: 200 },
 };
 
@@ -182,7 +182,7 @@ console.log(`Total chunks: ${output.results[0].chunks?.length ?? 0}`);
 ```typescript
 interface OcrConfig {
   backend: string; // 'tesseract', 'paddleocr', 'paddle-ocr', 'vlm'
-  language?: string | string[]; // 'eng', 'eng+fra', or ['eng', 'fra']
+  language?: string[]; // ['eng'], ['eng', 'deu']; joined with '+' for Tesseract
   tesseractConfig?: TesseractConfig;
 }
 
@@ -271,7 +271,7 @@ interface ExtractionResult {
 interface ExtractedDocument {
   content: string; // main extracted text
   mimeType: string;
-  metadata: Metadata; // flat — format-specific fields at top level
+  metadata: Metadata; // common fields at top level; format-specific under metadata.format, custom under metadata.additional
   tables: Table[];
   detectedLanguages?: string[] | null;
   chunks?: Chunk[] | null;
@@ -325,12 +325,14 @@ interface Keyword {
 
 ### `Metadata`
 
-Metadata is flat — format-specific fields (`title`, `author`, `pageCount`/`page_count`, Open Graph, etc.) sit at the top level. Access defensively:
+Metadata is **not** flat. Common fields (`title`, `subject`, `authors`, `keywords`, `language`, `createdAt`/`modifiedAt`, `pages`, etc.) sit at the top level, but format-specific fields nest under `metadata.format` (a `FormatMetadata` discriminated union keyed by `format_type`), and custom post-processor fields nest under `metadata.additional`. There is no `page_count`/`pageCount` member on `Metadata`, and use `authors` (an array), not `author`. Read page count from format-specific metadata or from `metadata.pages` (PageStructure):
 
 ```typescript
 const doc = output.results[0];
-if (doc.metadata?.page_count) {
-  console.log(`Pages: ${doc.metadata.page_count}`);
+if (doc.metadata?.format?.format_type === "pdf") {
+  console.log(`Pages: ${doc.metadata.format.pageCount}`);
+} else if (doc.metadata?.pages) {
+  console.log(`Pages: ${doc.metadata.pages}`);
 }
 ```
 

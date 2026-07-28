@@ -1,7 +1,7 @@
 <!--
 AI-RULEZ :: GENERATED FILE — DO NOT EDIT
-Content-Hash: blake3:37851d928edb05cf15f736d258717f1c0ba4e4b11b5c2574c9980aaa9f1f2b10
-Source-Hash: blake3:6d7616768ddcc1ec0f5ea7ac42658e1974f423fdfd8f05ae09fc25648c143c71
+Content-Hash: blake3:b034a43a10995a097cdd745d1d2a207f7d7970da5a92d2c60b55da43e6aa9e15
+Source-Hash: blake3:ec177e558e2839c3e8f6610cfccdf9bd49cc40d3fea83e0d9bc4f86ea18d9922
 Schema-Version: v1
 -->
 
@@ -30,7 +30,7 @@ Post-processors enrich extraction results after document parsing. They run non-d
         def version(self) -> str:
             return "1.0.0"
 
-        def process(self, result: ExtractedDocument) -> ExtractedDocument:
+        def process(self, result: ExtractedDocument, config: ExtractionConfig) -> ExtractedDocument:
             result.metadata.additional["processed_by"] = "metadata_enricher"
             result.metadata.additional["char_count"] = str(len(result.content))
             return result
@@ -42,7 +42,7 @@ Post-processors enrich extraction results after document parsing. They run non-d
 
     async def main() -> None:
         result = await extract(ExtractInput(uri="document.pdf"), ExtractionConfig())
-        print(result.results[0].metadata.additional["char_count"])
+        print(len(result.results[0].content))
 
     asyncio.run(main())
     ```
@@ -69,7 +69,7 @@ Post-processors enrich extraction results after document parsing. They run non-d
     registerPostProcessor(enricher);
 
     const output = await extract({ kind: "uri", uri: "document.pdf" });
-    console.log(output.results[0].metadata.char_count);
+    console.log(output.results[0].content.length);
     ```
 
 ### Custom Validators
@@ -79,7 +79,7 @@ Validators perform quality checks. Unlike post-processors, a validator that rais
 === "Python"
 
     ```python
-    from xberg import register_validator, ExtractedDocument, ValidationError
+    from xberg import register_validator, ExtractedDocument, ExtractionConfig, ValidationError
 
     class MinimumContentValidator:
         def name(self) -> str:
@@ -88,14 +88,14 @@ Validators perform quality checks. Unlike post-processors, a validator that rais
         def version(self) -> str:
             return "1.0.0"
 
-        def validate(self, result: ExtractedDocument) -> None:
+        def validate(self, result: ExtractedDocument, config: ExtractionConfig) -> None:
             if len(result.content) < 100:
                 raise ValidationError("Extracted content too short (< 100 chars)")
 
         def priority(self) -> int:
             return 100  # higher runs first
 
-        def should_validate(self, result: ExtractedDocument) -> bool:
+        def should_validate(self, result: ExtractedDocument, config: ExtractionConfig) -> bool:
             return "pdf" in result.mime_type.lower()
 
     register_validator(MinimumContentValidator())

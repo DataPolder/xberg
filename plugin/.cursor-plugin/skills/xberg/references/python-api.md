@@ -1,7 +1,7 @@
 <!--
 AI-RULEZ :: GENERATED FILE — DO NOT EDIT
-Content-Hash: blake3:3f7b28c136f9fbe57938acc79ce4d3929eca112dd14fa2d8a62bb8ce7f460038
-Source-Hash: blake3:6d7616768ddcc1ec0f5ea7ac42658e1974f423fdfd8f05ae09fc25648c143c71
+Content-Hash: blake3:ab4e073238ce8da179601b4d98b1aa72c0ff620e9f1b1bb3570fe0f1e162e11a
+Source-Hash: blake3:ec177e558e2839c3e8f6610cfccdf9bd49cc40d3fea83e0d9bc4f86ea18d9922
 Schema-Version: v1
 -->
 
@@ -486,29 +486,20 @@ for table in result.results[0].tables:
 
 ## Error Classes
 
-All exceptions inherit from `XbergError`. The full hierarchy is re-exported from `xberg`:
+The errors raised by `extract()` and `extract_batch()` are plain `RuntimeError` — the typed exception classes below are **not** raised by these entry points, so catch `RuntimeError` (or `Exception`) around an `extract()`/`extract_batch()` call.
 
-`XbergError` (base), `ParsingError`, `ParseError`, `OcrError`, `ValidationError`, `MissingDependencyError`, `UnsupportedFormatError`, `CacheError`, `ImageProcessingError`, `SerializationError`, `PluginError`, `ConfigError`, `SecurityError`, `TranscriptionError`, `EmbeddingError`, `RerankingError`, `XbergTimeoutError`, `IoError`, and others.
+Xberg also defines a family of typed exception classes re-exported from `xberg`. The `XbergError`-rooted ones inherit from `XbergError` (base): `ParsingError`, `OcrError`, `ValidationError`, `MissingDependencyError`, `UnsupportedFormatError`, `CacheError`, `ImageProcessingError`, `SerializationError`, `PluginError`, `SecurityError`, `TranscriptionError`, `EmbeddingError`, `RerankingError`, `XbergTimeoutError`, `IoError`, and others. A few classes sit in separate hierarchies rooted at `Exception` rather than `XbergError` — e.g. `ConfigError`/`PdfAnalysisError` and `ParseError`/`SchemaValidationError`.
 
 > Note: the OCR exception is `OcrError` (not `OCRError`).
 
 ```python
 import asyncio
-from xberg import (
-    ExtractInput, extract, ExtractionConfig,
-    XbergError, ParsingError, OcrError, ValidationError, MissingDependencyError,
-)
+from xberg import ExtractInput, extract, ExtractionConfig
 
 async def main() -> None:
     try:
         result = await extract(ExtractInput(uri="document.pdf"), ExtractionConfig())
-    except ParsingError as e:
-        print(f"Failed to parse document: {e}")
-    except OcrError as e:
-        print(f"OCR failed: {e}")
-    except MissingDependencyError as e:
-        print(f"Missing dependency: {e}")
-    except XbergError as e:
+    except RuntimeError as e:
         print(f"Extraction failed: {e}")
 
 asyncio.run(main())
@@ -524,7 +515,7 @@ Plugins extend the Rust pipeline. Plugin callbacks receive a single `ExtractedDo
 
 `register_post_processor(processor)` — runs after extraction to enrich each result.
 
-Expected methods: `name() -> str`, `version() -> str`, `process(result: ExtractedDocument) -> ExtractedDocument`. Optional: `processing_stage() -> str` (`"early"`, `"middle"`, `"late"`), `should_process(result) -> bool`, `initialize()`, `shutdown()`.
+Required methods: `process(result: ExtractedDocument) -> ExtractedDocument`, `processing_stage() -> str` (`"early"`, `"middle"`, `"late"`). Optional: `name() -> str`, `version() -> str`, `should_process(result) -> bool`, `initialize()`, `shutdown()`.
 
 ```python
 from xberg import register_post_processor, ExtractedDocument

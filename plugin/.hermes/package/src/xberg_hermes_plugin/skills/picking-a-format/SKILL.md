@@ -6,7 +6,7 @@ description: Use when choosing an output format for extracted documents — text
 <!--
 AI-RULEZ :: GENERATED FILE — DO NOT EDIT
 Content-Hash: blake3:470e563273f21e16138f65bd8a6c9b7a7b0c4adb003af8747c2957f3c17df0c4
-Source-Hash: blake3:6d7616768ddcc1ec0f5ea7ac42658e1974f423fdfd8f05ae09fc25648c143c71
+Source-Hash: blake3:ec177e558e2839c3e8f6610cfccdf9bd49cc40d3fea83e0d9bc4f86ea18d9922
 Schema-Version: v1
 -->
 
