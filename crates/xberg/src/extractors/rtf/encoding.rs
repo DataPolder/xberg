@@ -34,6 +34,50 @@ pub(crate) fn decode_ansi_bytes(bytes: &[u8], codepage: u32) -> String {
     decoded.into_owned()
 }
 
+/// Map an RTF `\fcharsetN` value to its corresponding Windows codepage number.
+///
+/// `\fcharset` values are a distinct enumeration from Windows codepage numbers
+/// defined by the RTF 1.9.1 specification's font-charset table — they must not
+/// be confused with (or fed directly to) codepage-numbered APIs.
+///
+/// `\fcharset1` (Default) and `\fcharset2` (Symbol) have no fixed codepage and
+/// return `None`, letting the caller fall back to `\ansicpg` or 1252.
+#[inline]
+pub(crate) fn fcharset_to_codepage(fcharset: u8) -> Option<u32> {
+    match fcharset {
+        0 => Some(1252),
+        77 => Some(10000),
+        78 => Some(10001),
+        79 => Some(10003),
+        80 => Some(10008),
+        81 => Some(10002),
+        83 => Some(10005),
+        84 => Some(10004),
+        85 => Some(10006),
+        86 => Some(10081),
+        87 => Some(10021),
+        88 => Some(10029),
+        89 => Some(10007),
+        128 => Some(932),
+        129 => Some(949),
+        130 => Some(1361),
+        134 => Some(936),
+        136 => Some(950),
+        161 => Some(1253),
+        162 => Some(1254),
+        163 => Some(1258),
+        177 => Some(1255),
+        178 => Some(1256),
+        186 => Some(1257),
+        204 => Some(1251),
+        222 => Some(874),
+        238 => Some(1250),
+        254 => Some(437),
+        255 => Some(850),
+        _ => None,
+    }
+}
+
 /// Parse an RTF control word and extract its value.
 ///
 /// Returns a tuple of (control_word, optional_numeric_value).

@@ -1,12 +1,15 @@
 //! Core RTF parsing logic.
 
-use crate::extractors::rtf::encoding::{decode_ansi_bytes, parse_hex_byte, parse_rtf_control_word};
+use crate::extractors::rtf::encoding::{
+    decode_ansi_bytes, fcharset_to_codepage, parse_hex_byte, parse_rtf_control_word,
+};
 use crate::extractors::rtf::formatting::{map_offset, normalize_whitespace_with_mapping};
 use crate::extractors::rtf::images::{RtfImage, extract_pict_image};
 use crate::extractors::rtf::tables::TableState;
 use crate::types::Table;
 use crate::types::TextAnnotation;
 use crate::types::document_structure::AnnotationKind;
+use std::collections::HashMap;
 
 /// Metadata for a single paragraph extracted from RTF.
 #[cfg_attr(alef, alef(skip))]
@@ -270,6 +273,131 @@ fn parse_rtf_color_table(content: &str) -> Vec<String> {
     colors
 }
 
+/// Extract per-font Windows codepages from the RTF font table.
+///
+/// Looks for `{\fonttbl ...}` (or the ignorable-destination form `{\*\fonttbl ...}`)
+/// and parses each `{\fN ... fontname;}` entry, mapping the font id to a codepage
+/// derived from `\fcharsetN` (preferred) or a literal `\cpgN` fallback.
+///
+/// Per the RTF 1.9.1 spec, `\cpgN` on a font entry is ignored when `\fcharsetN` is
+/// present — even if the fcharset value itself has no fixed codepage (e.g. Default
+/// or Symbol) — so callers should fall further back to `\ansicpg` in that case, not
+/// to this font's `\cpgN`. Fonts with neither `\fcharset` nor `\cpg` get no entry.
+fn parse_font_charset_table(content: &str) -> HashMap<u16, u32> {
+    let mut map = HashMap::new();
+    let Some(start) = content.find("{\\*\\fonttbl").or_else(|| content.find("{\\fonttbl")) else {
+        return map;
+    };
+    let rest = &content[start..];
+    let mut depth = 0;
+    let mut table_content = String::new();
+    for ch in rest.chars() {
+        match ch {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            _ => {}
+        }
+        if depth > 0 {
+            table_content.push(ch);
+        }
+    }
+
+    let mut chars = table_content.chars().peekable();
+    let mut entry_depth: i32 = 0;
+    let mut current_font_id: Option<u16> = None;
+    let mut current_fcharset: Option<u8> = None;
+    let mut current_cpg: Option<u32> = None;
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '{' => {
+                entry_depth += 1;
+                if entry_depth == 2 {
+                    current_font_id = None;
+                    current_fcharset = None;
+                    current_cpg = None;
+                }
+            }
+            '}' => {
+                entry_depth -= 1;
+                if entry_depth == 1
+                    && let Some(id) = current_font_id
+                {
+                    let codepage = if current_fcharset.is_some() {
+                        current_fcharset.and_then(fcharset_to_codepage)
+                    } else {
+                        current_cpg
+                    };
+                    if let Some(cp) = codepage {
+                        map.insert(id, cp);
+                    }
+                }
+            }
+            '\\' => {
+                if entry_depth < 2 {
+                    continue;
+                }
+                let (word, param) = parse_rtf_control_word(&mut chars);
+                match word.as_str() {
+                    "f" => {
+                        if let Some(val) = param {
+                            current_font_id = Some(val.max(0) as u16);
+                        }
+                    }
+                    "fcharset" => {
+                        if let Some(val) = param {
+                            current_fcharset = Some(val.max(0) as u8);
+                        }
+                    }
+                    "cpg" => {
+                        if let Some(val) = param
+                            && val > 0
+                        {
+                            current_cpg = Some(val as u32);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+
+    map
+}
+
+/// Resolve the Windows codepage used to decode a `\'hh` hex escape run.
+///
+/// Priority: the active font's charset (via [`parse_font_charset_table`]) —
+/// preferring an explicit `\fN` in the current scope, falling back to the
+/// document default font set by `\deffN` — then the active `\ansicpgNNNN`,
+/// then RTF's default of 1252.
+///
+/// `\deffN` is document-global rather than scoped: it is typically declared
+/// once, before any nested group has a chance to inherit it, so it is tracked
+/// separately from `font_id_stack` rather than written into the stack itself.
+#[inline]
+fn resolve_decode_codepage(
+    font_id_stack: &[Option<u16>],
+    default_font_id: Option<u16>,
+    font_charsets: &HashMap<u16, u32>,
+    ansi_codepage_stack: &[u32],
+) -> u32 {
+    font_id_stack
+        .last()
+        .copied()
+        .flatten()
+        .or(default_font_id)
+        .and_then(|id| font_charsets.get(&id).copied())
+        .or_else(|| ansi_codepage_stack.last().copied())
+        .unwrap_or(1252)
+}
+
 /// Extract formatting metadata from RTF content.
 ///
 /// This performs a lightweight pass over the RTF to extract:
@@ -279,6 +407,7 @@ fn parse_rtf_color_table(content: &str) -> Vec<String> {
 /// - Hyperlink field instructions
 pub(crate) fn extract_rtf_formatting(content: &str) -> RtfFormattingData {
     let color_table = parse_rtf_color_table(content);
+    let font_charsets = parse_font_charset_table(content);
     let mut spans = Vec::new();
     let mut hyperlinks = Vec::new();
     let mut text_offset: usize = 0;
@@ -325,6 +454,10 @@ pub(crate) fn extract_rtf_formatting(content: &str) -> RtfFormattingData {
     // Mirrors the extraction pass's codepage tracking so both passes count the
     // same number of output bytes for `\'hh` escape runs.
     let mut ansi_codepage_stack: Vec<u32> = vec![1252];
+    // Mirrors the extraction pass's active-font tracking (see `font_id_stack`
+    // in `extract_text_from_rtf`) so `\'hh` escapes decode identically in both.
+    let mut font_id_stack: Vec<Option<u16>> = vec![None];
+    let mut default_font_id: Option<u16> = None;
 
     let skip_dests = [
         "fonttbl",
@@ -368,6 +501,8 @@ pub(crate) fn extract_rtf_formatting(content: &str) -> RtfFormattingData {
                 pending_boundary_space = false;
                 let current_codepage = ansi_codepage_stack.last().copied().unwrap_or(1252);
                 ansi_codepage_stack.push(current_codepage);
+                let current_font = font_id_stack.last().copied().flatten();
+                font_id_stack.push(current_font);
             }
             '}' => {
                 group_depth -= 1;
@@ -375,6 +510,9 @@ pub(crate) fn extract_rtf_formatting(content: &str) -> RtfFormattingData {
                 ignorable_pending = false;
                 if ansi_codepage_stack.len() > 1 {
                     ansi_codepage_stack.pop();
+                }
+                if font_id_stack.len() > 1 {
+                    font_id_stack.pop();
                 }
                 if let Some(parent) = fmt_stack.pop() {
                     let changed = fmt.bold != parent.bold
@@ -483,7 +621,12 @@ pub(crate) fn extract_rtf_formatting(content: &str) -> RtfFormattingData {
                                 continue;
                             }
                             if let Some(bytes) = bytes.as_deref() {
-                                let codepage = ansi_codepage_stack.last().copied().unwrap_or(1252);
+                                let codepage = resolve_decode_codepage(
+                                    &font_id_stack,
+                                    default_font_id,
+                                    &font_charsets,
+                                    &ansi_codepage_stack,
+                                );
                                 let decoded = decode_ansi_bytes(bytes, codepage);
                                 if pending_boundary_space && text_offset > 0 {
                                     text_offset += 1;
@@ -556,6 +699,17 @@ pub(crate) fn extract_rtf_formatting(content: &str) -> RtfFormattingData {
                                 && let Some(codepage) = ansi_codepage_stack.last_mut()
                             {
                                 *codepage = val as u32;
+                            }
+                            if word == "f"
+                                && let Some(val) = param
+                                && let Some(font_id) = font_id_stack.last_mut()
+                            {
+                                *font_id = Some(val.max(0) as u16);
+                            }
+                            if word == "deff"
+                                && let Some(val) = param
+                            {
+                                default_font_id = Some(val.max(0) as u16);
                             }
                             if skip_depth > 0 {
                                 continue;
@@ -905,6 +1059,7 @@ pub(crate) fn extract_text_from_rtf(
     plain: bool,
 ) -> (String, Vec<Table>, Vec<RtfImage>, Vec<ParagraphMeta>, RtfFormattingData) {
     let color_table = parse_rtf_color_table(content);
+    let font_charsets = parse_font_charset_table(content);
     let mut fmt_tracker = FormattingTracker::new();
 
     let mut result = String::new();
@@ -956,6 +1111,16 @@ pub(crate) fn extract_text_from_rtf(
     // overridden by \ansicpgNNNN. Scoped like other document properties.
     let mut ansi_codepage_stack: Vec<u32> = vec![1252];
 
+    // Active font id for \'hh escapes, set by \fN / \deffN. Used to look up a
+    // per-font codepage in `font_charsets` (from \fcharsetN), which takes
+    // priority over `ansi_codepage_stack`. Scoped like other document properties.
+    let mut font_id_stack: Vec<Option<u16>> = vec![None];
+    // Document default font set by \deffN. Unlike font_id_stack, this is not
+    // scoped: \deff is typically declared once, before any nested group could
+    // have inherited it, so it's tracked separately and consulted only when no
+    // scope has set an explicit \fN. See `resolve_decode_codepage`.
+    let mut default_font_id: Option<u16> = None;
+
     let ensure_table = |table_state: &mut Option<TableState>| {
         if table_state.is_none() {
             *table_state = Some(TableState::new());
@@ -982,6 +1147,8 @@ pub(crate) fn extract_text_from_rtf(
                 hidden_stack.push(current_hidden);
                 let current_codepage = ansi_codepage_stack.last().copied().unwrap_or(1252);
                 ansi_codepage_stack.push(current_codepage);
+                let current_font = font_id_stack.last().copied().flatten();
+                font_id_stack.push(current_font);
                 fmt_tracker.push();
                 pending_boundary_space = false;
             }
@@ -998,6 +1165,9 @@ pub(crate) fn extract_text_from_rtf(
                 }
                 if ansi_codepage_stack.len() > 1 {
                     ansi_codepage_stack.pop();
+                }
+                if font_id_stack.len() > 1 {
+                    font_id_stack.pop();
                 }
                 if skip_depth > 0 && group_depth < skip_depth {
                     skip_depth = 0;
@@ -1100,6 +1270,8 @@ pub(crate) fn extract_text_from_rtf(
                                 &mut pending_boundary_space,
                                 &mut hidden_stack,
                                 &mut fmt_tracker,
+                                &mut font_id_stack,
+                                &mut default_font_id,
                             );
                         }
                         '\\' | '{' | '}' => {
@@ -1149,7 +1321,12 @@ pub(crate) fn extract_text_from_rtf(
                             };
 
                             if in_footnote && let Some(bytes) = bytes.as_deref() {
-                                let codepage = ansi_codepage_stack.last().copied().unwrap_or(1252);
+                                let codepage = resolve_decode_codepage(
+                                    &font_id_stack,
+                                    default_font_id,
+                                    &font_charsets,
+                                    &ansi_codepage_stack,
+                                );
                                 footnote_buf.push_str(&decode_ansi_bytes(bytes, codepage));
                             }
                             if skip_depth > 0 {
@@ -1159,7 +1336,12 @@ pub(crate) fn extract_text_from_rtf(
                                 continue;
                             }
                             if let Some(bytes) = bytes.as_deref() {
-                                let codepage = ansi_codepage_stack.last().copied().unwrap_or(1252);
+                                let codepage = resolve_decode_codepage(
+                                    &font_id_stack,
+                                    default_font_id,
+                                    &font_charsets,
+                                    &ansi_codepage_stack,
+                                );
                                 let decoded = decode_ansi_bytes(bytes, codepage);
                                 if let Some(state) = table_state.as_mut()
                                     && state.in_row
@@ -1277,6 +1459,17 @@ pub(crate) fn extract_text_from_rtf(
                                 {
                                     *codepage = val as u32;
                                 }
+                                if control_word == "f"
+                                    && let Some(val) = _param
+                                    && let Some(font_id) = font_id_stack.last_mut()
+                                {
+                                    *font_id = Some(val.max(0) as u16);
+                                }
+                                if control_word == "deff"
+                                    && let Some(val) = _param
+                                {
+                                    default_font_id = Some(val.max(0) as u16);
+                                }
                                 if in_footnote
                                     && control_word == "u"
                                     && let Some(code_num) = _param
@@ -1332,6 +1525,8 @@ pub(crate) fn extract_text_from_rtf(
                                 &mut pending_boundary_space,
                                 &mut hidden_stack,
                                 &mut fmt_tracker,
+                                &mut font_id_stack,
+                                &mut default_font_id,
                             );
                         }
                     }
@@ -1515,8 +1710,22 @@ fn handle_control_word(
     pending_boundary_space: &mut bool,
     hidden_stack: &mut Vec<bool>,
     fmt_tracker: &mut FormattingTracker,
+    font_id_stack: &mut [Option<u16>],
+    default_font_id: &mut Option<u16>,
 ) {
     match control_word {
+        "f" => {
+            if let Some(val) = param
+                && let Some(font_id) = font_id_stack.last_mut()
+            {
+                *font_id = Some(val.max(0) as u16);
+            }
+        }
+        "deff" => {
+            if let Some(val) = param {
+                *default_font_id = Some(val.max(0) as u16);
+            }
+        }
         "v" => {
             let hidden = param.unwrap_or(1) != 0;
             if let Some(h) = hidden_stack.last_mut() {

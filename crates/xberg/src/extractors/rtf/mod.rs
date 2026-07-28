@@ -516,6 +516,78 @@ mod tests {
     }
 
     #[test]
+    fn test_rtf_fcharset_overrides_ansicpg() {
+        // \ansicpg1252 (Latin) but the active font declares \fcharset204 (Cyrillic).
+        // The font's fcharset must win over the document-level \ansicpg.
+        let rtf_content =
+            r#"{\rtf1\ansi\ansicpg1252\deff0{\fonttbl{\f0\fnil\fcharset204 Arial;}}\f0 \'cf\'f0\'e8\'e2\'e5\'f2}"#;
+        let (text, _, _, _, _) = extract_text_from_rtf(rtf_content, true);
+
+        assert!(
+            text.contains("Привет"),
+            "fcharset204 on the active font should decode as cp1251, got: {text:?}"
+        );
+        assert!(
+            !text.contains("Ïðèâåò"),
+            "should not decode CP1251 bytes as Windows-1252 from \\ansicpg, got: {text:?}"
+        );
+    }
+
+    #[test]
+    fn test_rtf_fcharset_font_switch_mid_document() {
+        // f0 is Cyrillic (fcharset204), f1 is Greek (fcharset161). Each run must
+        // decode per the font active at that point in the document.
+        let rtf_content = r#"{\rtf1\ansi\ansicpg1252\deff0{\fonttbl{\f0\fnil\fcharset204 Arial;}{\f1\fnil\fcharset161 Arial;}}\f0 \'cf\'f0\'e8\'e2\'e5\'f2 \f1 \'e3\'e5\'e9\'e1}"#;
+        let (text, _, _, _, _) = extract_text_from_rtf(rtf_content, true);
+
+        assert!(
+            text.contains("Привет"),
+            "f0 run should decode via fcharset204 (cp1251), got: {text:?}"
+        );
+        assert!(
+            text.contains("γεια"),
+            "f1 run should decode via fcharset161 (cp1253), got: {text:?}"
+        );
+    }
+
+    #[test]
+    fn test_rtf_fcharset_ignores_cpg_on_same_font() {
+        // Per spec, \cpgN on a font entry is ignored when \fcharsetN is present.
+        let rtf_content = r#"{\rtf1\ansi\ansicpg1252\deff0{\fonttbl{\f0\fnil\fcharset204\cpg1252 Arial;}}\f0 \'cf\'f0\'e8\'e2\'e5\'f2}"#;
+        let (text, _, _, _, _) = extract_text_from_rtf(rtf_content, true);
+
+        assert!(
+            text.contains("Привет"),
+            "\\fcharset204 must win over the redundant \\cpg1252 on the same font, got: {text:?}"
+        );
+    }
+
+    #[test]
+    fn test_rtf_fcharset_falls_back_to_ansicpg_when_font_has_none() {
+        // f0 declares no \fcharset at all, so decoding must fall back to \ansicpg1251.
+        let rtf_content = r#"{\rtf1\ansi\ansicpg1251\deff0{\fonttbl{\f0\fnil Arial;}}\f0 \'cf\'f0\'e8\'e2\'e5\'f2}"#;
+        let (text, _, _, _, _) = extract_text_from_rtf(rtf_content, true);
+
+        assert!(
+            text.contains("Привет"),
+            "font with no \\fcharset should fall back to \\ansicpg1251, got: {text:?}"
+        );
+    }
+
+    #[test]
+    fn test_rtf_fcharset_deff_alone_is_sufficient() {
+        // No explicit \f0 before the text run: \deff0 alone must select the default font.
+        let rtf_content =
+            r#"{\rtf1\ansi\ansicpg1252\deff0{\fonttbl{\f0\fnil\fcharset204 Arial;}}\'cf\'f0\'e8\'e2\'e5\'f2}"#;
+        let (text, _, _, _, _) = extract_text_from_rtf(rtf_content, true);
+
+        assert!(
+            text.contains("Привет"),
+            "\\deff0 alone should select font 0's fcharset204 (cp1251), got: {text:?}"
+        );
+    }
+
+    #[test]
     fn test_rtf_ansicpg932_multibyte_run() {
         let rtf_content =
             r#"{\rtf1\ansi\ansicpg932\deff0{\fonttbl{\f0\fnil\fcharset128 MS Mincho;}}\f0 \'93\'fa\'96\'7b}"#;
