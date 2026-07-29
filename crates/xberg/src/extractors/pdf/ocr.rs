@@ -1441,22 +1441,21 @@ pub(crate) async fn extract_with_ocr(
                 }
 
                 if let Some(ref ocr_doc) = ocr_result.ocr_internal_document {
-                    let mut paragraphs =
-                        crate::pdf::structure::adapters::ocr_doc_to_paragraphs(ocr_doc, ocr_render_height);
-
-                    if let Some(ref scaled_det) = scaled_detection {
+                    let paragraphs = if let Some(ref scaled_det) = scaled_detection {
                         let hints = super::layout_hints::detection_to_layout_hints_pixel_space(
                             scaled_det,
                             ocr_render_height as f32,
                         );
-                        crate::pdf::structure::layout_classify::apply_layout_overrides(
-                            &mut paragraphs,
+                        crate::pdf::structure::adapters::ocr_doc_to_layout_paragraphs(
+                            ocr_doc,
+                            ocr_render_height,
                             &hints,
                             0.5,
                             0.2,
-                            None,
-                        );
-                    }
+                        )
+                    } else {
+                        crate::pdf::structure::adapters::ocr_doc_to_paragraphs(ocr_doc, ocr_render_height)
+                    };
 
                     tracing::debug!(
                         page = page_idx + 1,

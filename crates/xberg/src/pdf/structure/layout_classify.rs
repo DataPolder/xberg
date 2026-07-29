@@ -27,18 +27,33 @@ pub(crate) fn apply_layout_overrides(
     min_containment: f32,
     body_font_size: Option<f32>,
 ) {
+    let _ = apply_layout_overrides_with_matches(paragraphs, hints, min_confidence, min_containment, body_font_size);
+}
+
+pub(crate) fn apply_layout_overrides_with_matches(
+    paragraphs: &mut [PdfParagraph],
+    hints: &[LayoutHint],
+    min_confidence: f32,
+    min_containment: f32,
+    body_font_size: Option<f32>,
+) -> Vec<Option<usize>> {
     if hints.is_empty() {
-        return;
+        return vec![None; paragraphs.len()];
     }
 
     let has_any_positions = paragraphs.iter().any(|p| compute_paragraph_bbox(p).is_some());
-
-    if has_any_positions {
-        apply_spatial_overrides(paragraphs, hints, min_confidence, min_containment, body_font_size);
+    let matches = if has_any_positions {
+        apply_spatial_overrides_with_matches(paragraphs, hints, min_confidence, min_containment, body_font_size)
     } else {
         tracing::debug!("Skipping proportional layout overrides: structure tree pages use font-size classification");
-    }
+        vec![None; paragraphs.len()]
+    };
 
+    trace_layout_summary(paragraphs);
+    matches
+}
+
+fn trace_layout_summary(paragraphs: &[PdfParagraph]) {
     tracing::debug!(
         total = paragraphs.len(),
         headings = paragraphs.iter().filter(|p| p.heading_level.is_some()).count(),
@@ -66,53 +81,17 @@ pub(crate) fn apply_layout_overrides(
 /// to short paragraphs (≤200 chars), ListItem hints to list marker prefixes. This
 /// prevents false promotion of long body paragraphs that happen to spatially overlap
 /// a heading hint.
-fn apply_spatial_overrides(
+fn apply_spatial_overrides_with_matches(
     paragraphs: &mut [PdfParagraph],
     hints: &[LayoutHint],
     min_confidence: f32,
     min_containment: f32,
     body_font_size: Option<f32>,
-) {
-    let confident_hints: Vec<&LayoutHint> = hints.iter().filter(|h| h.confidence >= min_confidence).collect();
-
+) -> Vec<Option<usize>> {
+    let mut matches = vec![None; paragraphs.len()];
     for (para_idx, para) in paragraphs.iter_mut().enumerate() {
-        let para_bbox = match compute_paragraph_bbox(para) {
-            Some(bbox) => bbox,
-            None => continue,
-        };
-
-        if para_bbox.height() <= 0.0 {
-            continue;
-        }
-
-        let spatial_matches: Vec<(&LayoutHint, f32)> = confident_hints
-            .iter()
-            .filter_map(|hint| {
-                let hint_rect = Rect::from_lbrt(hint.left, hint.bottom, hint.right, hint.top);
-                let containment = para_bbox.intersection_over_self(&hint_rect);
-                if containment >= min_containment {
-                    let para_text = paragraph_text(para);
-                    if !matches_hint_text(hint, &para_text) {
-                        return None;
-                    }
-                    Some((*hint, containment))
-                } else {
-                    None
-                }
-            })
-            .collect();
-        let max_containment = spatial_matches
-            .iter()
-            .map(|(_, containment)| *containment)
-            .max_by(f32::total_cmp);
-        let best_2d = max_containment.and_then(|maximum| {
-            spatial_matches
-                .into_iter()
-                .filter(|(_, containment)| maximum - containment <= COMPARABLE_CONTAINMENT_TOLERANCE)
-                .max_by(compare_spatial_matches)
-        });
-
-        if let Some((hint, containment)) = best_2d {
+        if let Some((hint_index, hint, containment)) = best_spatial_match(para, hints, min_confidence, min_containment)
+        {
             tracing::trace!(
                 para_idx,
                 hint_class = ?hint.class_name,
@@ -120,21 +99,53 @@ fn apply_spatial_overrides(
                 "spatial hint match"
             );
             apply_hint_to_paragraph(para, hint, body_font_size);
+            matches[para_idx] = Some(hint_index);
         }
     }
+    matches
 }
 
-fn compare_spatial_matches(a: &(&LayoutHint, f32), b: &(&LayoutHint, f32)) -> std::cmp::Ordering {
-    semantic_hint_priority(a.0.class_name)
-        .cmp(&semantic_hint_priority(b.0.class_name))
-        .then_with(|| a.0.confidence.total_cmp(&b.0.confidence))
-        .then_with(|| hint_area(b.0).total_cmp(&hint_area(a.0)))
-        .then_with(|| a.1.total_cmp(&b.1))
-        .then_with(|| layout_hint_class_rank(a.0.class_name).cmp(&layout_hint_class_rank(b.0.class_name)))
-        .then_with(|| a.0.left.total_cmp(&b.0.left))
-        .then_with(|| a.0.bottom.total_cmp(&b.0.bottom))
-        .then_with(|| a.0.right.total_cmp(&b.0.right))
-        .then_with(|| a.0.top.total_cmp(&b.0.top))
+fn best_spatial_match<'a>(
+    paragraph: &PdfParagraph,
+    hints: &'a [LayoutHint],
+    min_confidence: f32,
+    min_containment: f32,
+) -> Option<(usize, &'a LayoutHint, f32)> {
+    let paragraph_bbox = compute_paragraph_bbox(paragraph)?;
+    if paragraph_bbox.height() <= 0.0 {
+        return None;
+    }
+    let paragraph_text = paragraph_text(paragraph);
+    let matches = hints.iter().enumerate().filter_map(|(index, hint)| {
+        let hint_rect = Rect::from_lbrt(hint.left, hint.bottom, hint.right, hint.top);
+        let containment = paragraph_bbox.intersection_over_self(&hint_rect);
+        (hint.confidence >= min_confidence
+            && containment >= min_containment
+            && matches_hint_text(hint, &paragraph_text))
+        .then_some((index, hint, containment))
+    });
+    let candidates = matches.collect::<Vec<_>>();
+    let maximum = candidates
+        .iter()
+        .map(|(_, _, containment)| *containment)
+        .max_by(f32::total_cmp)?;
+    candidates
+        .into_iter()
+        .filter(|(_, _, containment)| maximum - containment <= COMPARABLE_CONTAINMENT_TOLERANCE)
+        .max_by(compare_spatial_matches)
+}
+
+fn compare_spatial_matches(a: &(usize, &LayoutHint, f32), b: &(usize, &LayoutHint, f32)) -> std::cmp::Ordering {
+    semantic_hint_priority(a.1.class_name)
+        .cmp(&semantic_hint_priority(b.1.class_name))
+        .then_with(|| a.1.confidence.total_cmp(&b.1.confidence))
+        .then_with(|| hint_area(b.1).total_cmp(&hint_area(a.1)))
+        .then_with(|| a.2.total_cmp(&b.2))
+        .then_with(|| layout_hint_class_rank(a.1.class_name).cmp(&layout_hint_class_rank(b.1.class_name)))
+        .then_with(|| a.1.left.total_cmp(&b.1.left))
+        .then_with(|| a.1.bottom.total_cmp(&b.1.bottom))
+        .then_with(|| a.1.right.total_cmp(&b.1.right))
+        .then_with(|| a.1.top.total_cmp(&b.1.top))
 }
 
 fn semantic_hint_priority(class_name: LayoutHintClass) -> u8 {
