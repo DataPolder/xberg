@@ -25,8 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   emits no semantic heading region.
 - PDF Markdown preserves native heading, list, code, and formula semantics while using layout
   geometry for reading order, grouping, and tables, tolerates minor crop jitter in side-by-side
-  cohorts, and merges sparse currency-affix columns without dropping markers; table-dominant pages
-  also discard bbox-confirmed crop spill while retaining surrounding prose and annotations.
+  cohorts, merges sparse currency-affix columns without dropping markers, and folds wrapped
+  financial-table lines into logical records; table-dominant pages also discard bbox-confirmed crop
+  spill while retaining surrounding prose and annotations.
 
 ## [1.0.3] - 2026-07-29
 

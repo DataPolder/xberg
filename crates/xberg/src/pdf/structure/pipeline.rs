@@ -2578,6 +2578,7 @@ fn prepare_emitted_tables(
         .count();
     deduplicate_overlapping_tables(&mut emitted_tables, native_count, overlap_preference);
     normalize_sparse_currency_affix_columns(&mut emitted_tables);
+    normalize_wrapped_financial_rows(&mut emitted_tables);
     deduplicate_identical_tables(&mut emitted_tables);
     assign_deterministic_table_ids(&mut emitted_tables);
     emitted_tables
@@ -2587,6 +2588,7 @@ const MAX_CURRENCY_AFFIX_CELLS: usize = 3;
 const MAX_CURRENCY_AFFIX_OCCUPANCY: f64 = 0.1;
 const MIN_FINANCIAL_TARGET_CELLS: usize = 5;
 const MIN_FINANCIAL_TARGET_RATIO: f64 = 0.9;
+const MIN_WRAPPED_FINANCIAL_VALUE_ROWS: usize = 8;
 const FINANCIAL_COLUMN_HEADERS: &[&str] = &[
     "shares",
     "par",
@@ -2605,6 +2607,132 @@ fn normalize_sparse_currency_affix_columns(tables: &mut [crate::types::Table]) {
     for table in tables {
         normalize_sparse_currency_affix_columns_in_table(table);
     }
+}
+
+fn normalize_wrapped_financial_rows(tables: &mut [crate::types::Table]) {
+    for table in tables {
+        if !is_wrapped_financial_table(&table.cells) {
+            continue;
+        }
+        fold_wrapped_financial_rows(&mut table.cells);
+        table.markdown = crate::extractors::frontmatter_utils::cells_to_markdown(&table.cells);
+        table.columns = table.cells.first().cloned();
+    }
+}
+
+fn is_wrapped_financial_table(rows: &[Vec<String>]) -> bool {
+    let Some(header) = rows.first() else {
+        return false;
+    };
+    if header.len() < 3
+        || rows.len() <= 1
+        || !header.iter().skip(1).all(|cell| is_financial_column_header(cell))
+        || rows.iter().any(|row| row.len() != header.len())
+    {
+        return false;
+    }
+
+    let body = &rows[1..];
+    let value_rows = body.iter().filter(|row| is_value_bearing_financial_row(row)).count();
+    let descriptor_rows = body
+        .iter()
+        .filter(|row| is_descriptor_only_financial_row(row) && !is_financial_section_label(row))
+        .count();
+    value_rows >= MIN_WRAPPED_FINANCIAL_VALUE_ROWS
+        && descriptor_rows > value_rows
+        && body
+            .iter()
+            .all(|row| is_descriptor_only_financial_row(row) || is_value_bearing_financial_row(row))
+}
+
+fn is_descriptor_only_financial_row(row: &[String]) -> bool {
+    row.first().is_some_and(|cell| !cell.trim().is_empty()) && row.iter().skip(1).all(|cell| cell.trim().is_empty())
+}
+
+fn is_value_bearing_financial_row(row: &[String]) -> bool {
+    row.first().is_some_and(|cell| !cell.trim().is_empty()) && row.iter().skip(1).all(|cell| is_financial_value(cell))
+}
+
+fn is_financial_section_label(row: &[String]) -> bool {
+    if !is_descriptor_only_financial_row(row) {
+        return false;
+    }
+    let text = row[0].trim().to_ascii_lowercase();
+    text.contains("(continued)") || has_allocation_percentage_suffix(&text)
+}
+
+fn has_allocation_percentage_suffix(text: &str) -> bool {
+    const MAX_FOOTNOTE_MARKER_CHARS: usize = 4;
+
+    let Some((dash_index, dash)) = text
+        .char_indices()
+        .rev()
+        .find(|(_, character)| matches!(character, '–' | '—'))
+    else {
+        return false;
+    };
+    if text[..dash_index].trim().is_empty() {
+        return false;
+    }
+    let suffix = text[dash_index + dash.len_utf8()..].trim();
+    let Some((allocation, remainder)) = suffix.split_once('%') else {
+        return false;
+    };
+    let Ok(allocation) = allocation.trim().parse::<f64>() else {
+        return false;
+    };
+    if !allocation.is_finite() || !(0.0..=100.0).contains(&allocation) {
+        return false;
+    }
+
+    let remainder = remainder.trim();
+    if remainder.is_empty() {
+        return true;
+    }
+    let Some(marker) = remainder.strip_prefix('(').and_then(|value| value.strip_suffix(')')) else {
+        return false;
+    };
+    !marker.is_empty()
+        && marker.chars().count() <= MAX_FOOTNOTE_MARKER_CHARS
+        && marker.chars().all(char::is_alphanumeric)
+}
+
+fn is_financial_value(cell: &str) -> bool {
+    let trimmed = cell.trim();
+    if is_financial_number(trimmed) {
+        return true;
+    }
+    trimmed
+        .split_once(' ')
+        .is_some_and(|(marker, value)| is_currency_marker(marker) && is_financial_number(value.trim()))
+}
+
+fn fold_wrapped_financial_rows(rows: &mut Vec<Vec<String>>) {
+    let mut folded = Vec::with_capacity(rows.len());
+    folded.extend(rows.first().cloned());
+    let mut pending = Vec::new();
+    for mut row in rows.iter().skip(1).cloned() {
+        if is_financial_section_label(&row) {
+            folded.append(&mut pending);
+            folded.push(row);
+            continue;
+        }
+        if is_descriptor_only_financial_row(&row) {
+            pending.push(row);
+            continue;
+        }
+        if !pending.is_empty() {
+            let prefix = pending
+                .drain(..)
+                .filter_map(|pending_row| pending_row.into_iter().next())
+                .collect::<Vec<_>>()
+                .join(" ");
+            row[0] = format!("{prefix} {}", row[0]);
+        }
+        folded.push(row);
+    }
+    folded.extend(pending);
+    *rows = folded;
 }
 
 fn normalize_sparse_currency_affix_columns_in_table(table: &mut crate::types::Table) {
@@ -4451,6 +4579,238 @@ mod tests {
             Some(vec!["Security".into(), "Par (000)".into(), "Value".into()])
         );
         assert!(emitted[0].markdown.starts_with("| Security | Par (000) | Value |"));
+    }
+
+    #[test]
+    fn wrapped_financial_rows_fold_into_value_bearing_records() {
+        let mut cells = vec![
+            vec!["Security".into(), "Par (000)".into(), "Value".into()],
+            vec!["Region (continued)".into(), String::new(), String::new()],
+        ];
+        for index in 0..8 {
+            cells.push(vec![format!("Asset {index}, Series"), String::new(), String::new()]);
+            cells.push(vec!["Class A, variable rate".into(), String::new(), String::new()]);
+            cells.push(vec![
+                "maturing in 2035".into(),
+                format!("{},000", index + 1),
+                format!("$ {},500", index + 1),
+            ]);
+        }
+        let mut tables = vec![crate::types::Table {
+            markdown: crate::extractors::frontmatter_utils::cells_to_markdown(&cells),
+            cells,
+            ..Default::default()
+        }];
+
+        normalize_wrapped_financial_rows(&mut tables);
+
+        assert_eq!(tables[0].cells.len(), 10);
+        assert_eq!(
+            tables[0].cells[1],
+            ["Region (continued)", "", ""],
+            "the first descriptor-only section label must remain its own row"
+        );
+        assert_eq!(
+            tables[0].cells[2],
+            [
+                "Asset 0, Series Class A, variable rate maturing in 2035",
+                "1,000",
+                "$ 1,500"
+            ]
+        );
+        assert!(
+            tables[0]
+                .markdown
+                .contains("| Asset 7, Series Class A, variable rate maturing in 2035 | 8,000 | $ 8,500 |")
+        );
+    }
+
+    #[test]
+    fn wrapped_financial_rows_preserve_interior_section_boundaries() {
+        let mut cells = vec![
+            vec!["Security".into(), "Par".into(), "Value".into()],
+            vec!["Region A (continued)".into(), String::new(), String::new()],
+        ];
+        for index in 0..4 {
+            cells.push(vec![format!("Wrapped asset {index}"), String::new(), String::new()]);
+            cells.push(vec!["final line".into(), String::new(), String::new()]);
+            cells.push(vec![
+                "matures 2035".into(),
+                format!("{}", index + 1),
+                format!("{}", index + 101),
+            ]);
+        }
+        cells.push(vec![
+            "Unanchored text before section".into(),
+            String::new(),
+            String::new(),
+        ]);
+        cells.push(vec!["Region B — 2.0%".into(), String::new(), String::new()]);
+        for index in 4..8 {
+            cells.push(vec![format!("Wrapped asset {index}"), String::new(), String::new()]);
+            cells.push(vec!["final line".into(), String::new(), String::new()]);
+            cells.push(vec![
+                "matures 2035".into(),
+                format!("{}", index + 1),
+                format!("{}", index + 101),
+            ]);
+        }
+        let mut tables = vec![crate::types::Table {
+            markdown: crate::extractors::frontmatter_utils::cells_to_markdown(&cells),
+            cells,
+            ..Default::default()
+        }];
+
+        normalize_wrapped_financial_rows(&mut tables);
+
+        let section_index = tables[0]
+            .cells
+            .iter()
+            .position(|row| row[0] == "Region B — 2.0%")
+            .expect("interior section label");
+        assert_eq!(
+            tables[0].cells[section_index - 1],
+            ["Unanchored text before section", "", ""],
+            "pending descriptors must flush unchanged before a new section"
+        );
+        assert_eq!(tables[0].cells[section_index], ["Region B — 2.0%", "", ""]);
+        assert_eq!(
+            tables[0].cells[section_index + 1],
+            ["Wrapped asset 4 final line matures 2035", "5", "105"],
+            "folding may resume after the section boundary"
+        );
+    }
+
+    #[test]
+    fn financial_section_label_accepts_allocation_with_footnote() {
+        let row = vec!["Regional allocation — 0.6%(b)".into(), String::new(), String::new()];
+
+        assert!(is_financial_section_label(&row));
+    }
+
+    #[test]
+    fn financial_section_label_rejects_coupon_description_after_percentage() {
+        let row = vec!["ACME notes — 5.0% senior notes".into(), String::new(), String::new()];
+
+        assert!(!is_financial_section_label(&row));
+    }
+
+    #[test]
+    fn wrapped_financial_rows_fold_without_a_section_label() {
+        let mut cells = vec![vec!["Security".into(), "Par".into(), "Value".into()]];
+        for index in 0..8 {
+            cells.push(vec![format!("Asset {index}, Series"), String::new(), String::new()]);
+            cells.push(vec!["Class A, variable rate".into(), String::new(), String::new()]);
+            cells.push(vec![
+                "maturing in 2035".into(),
+                format!("{},000", index + 1),
+                format!("{},500", index + 1),
+            ]);
+        }
+        let mut tables = vec![crate::types::Table {
+            markdown: crate::extractors::frontmatter_utils::cells_to_markdown(&cells),
+            cells,
+            ..Default::default()
+        }];
+
+        normalize_wrapped_financial_rows(&mut tables);
+
+        assert_eq!(tables[0].cells.len(), 9);
+        assert_eq!(
+            tables[0].cells[1],
+            [
+                "Asset 0, Series Class A, variable rate maturing in 2035",
+                "1,000",
+                "1,500"
+            ]
+        );
+    }
+
+    #[test]
+    fn wrapped_financial_row_folding_preserves_tokens_and_trailing_text() {
+        let mut cells = vec![
+            vec!["Security".into(), "Par".into(), "Value".into()],
+            vec!["Region".into(), String::new(), String::new()],
+        ];
+        for index in 0..8 {
+            cells.push(vec![format!("Wrapped asset {index}"), String::new(), String::new()]);
+            cells.push(vec![
+                "final line".into(),
+                format!("{}", index + 1),
+                format!("{}", index + 101),
+            ]);
+        }
+        cells.push(vec!["Unanchored trailing note".into(), String::new(), String::new()]);
+        let before_tokens = cells
+            .iter()
+            .flatten()
+            .flat_map(|cell| cell.split_whitespace())
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let mut tables = vec![crate::types::Table {
+            markdown: crate::extractors::frontmatter_utils::cells_to_markdown(&cells),
+            cells,
+            ..Default::default()
+        }];
+
+        normalize_wrapped_financial_rows(&mut tables);
+
+        let after_tokens = tables[0]
+            .cells
+            .iter()
+            .flatten()
+            .flat_map(|cell| cell.split_whitespace())
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        assert_eq!(after_tokens, before_tokens);
+        assert_eq!(
+            tables[0].cells.last().expect("trailing row"),
+            &["Unanchored trailing note", "", ""],
+            "descriptor-only text without an immediately following value row must not fold"
+        );
+    }
+
+    #[test]
+    fn wrapped_financial_row_folding_requires_strict_financial_density() {
+        let build_cells = |header: [&str; 3], continuation_rows: usize| {
+            let mut cells = vec![
+                header.map(str::to_string).to_vec(),
+                vec!["Section".into(), String::new(), String::new()],
+            ];
+            for index in 0..8 {
+                if index < continuation_rows {
+                    cells.push(vec![format!("Wrapped {index}"), String::new(), String::new()]);
+                }
+                cells.push(vec![
+                    format!("Asset {index}"),
+                    format!("{}", index + 1),
+                    format!("{}", index + 101),
+                ]);
+            }
+            cells
+        };
+        let non_financial = build_cells(["Name", "Owner", "Status"], 8);
+        let balanced = build_cells(["Security", "Par", "Value"], 7);
+        let mut tables = vec![
+            crate::types::Table {
+                markdown: crate::extractors::frontmatter_utils::cells_to_markdown(&non_financial),
+                cells: non_financial.clone(),
+                ..Default::default()
+            },
+            crate::types::Table {
+                markdown: crate::extractors::frontmatter_utils::cells_to_markdown(&balanced),
+                cells: balanced.clone(),
+                ..Default::default()
+            },
+        ];
+
+        normalize_wrapped_financial_rows(&mut tables);
+
+        assert_eq!(tables[0].cells, non_financial);
+        assert_eq!(
+            tables[1].cells, balanced,
+            "descriptor-only rows must outnumber value-bearing rows after the section label"
+        );
     }
 
     #[test]
