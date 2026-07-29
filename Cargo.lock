@@ -600,6 +600,7 @@ dependencies = [
  "blake3",
  "chrono",
  "clap",
+ "dirs",
  "dotenvy",
  "futures",
  "jsonschema",

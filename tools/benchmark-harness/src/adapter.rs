@@ -14,6 +14,34 @@ use async_trait::async_trait;
 use std::path::Path;
 use std::time::Duration;
 
+/// Canonicalize a Tesseract OCR language request into individual codes.
+///
+/// A request may join languages with `+` (e.g. `"deu+eng"`). Xberg's own
+/// `OcrConfig` deserializer splits on `+` (see `core/config/ocr.rs`), so the
+/// benchmark adapters must build `OcrConfig.language` the same way — otherwise
+/// a single `"deu+eng"` entry is treated as a literal pack name and never
+/// resolves. Whitespace is trimmed and empty segments dropped.
+pub(crate) fn canonicalize_ocr_languages(language: &str) -> Vec<String> {
+    language
+        .split('+')
+        .map(str::trim)
+        .filter(|code| !code.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+pub(crate) fn is_valid_ocr_language_code(code: &str) -> bool {
+    !code.is_empty()
+        && code
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-'))
+}
+
+pub(crate) fn canonical_ocr_language_arg(language: &str) -> Option<String> {
+    let languages = canonicalize_ocr_languages(language);
+    (!languages.is_empty()).then(|| languages.join("+"))
+}
+
 /// Unified interface for document extraction frameworks
 ///
 /// Implementations of this trait can extract content from documents using
@@ -54,6 +82,7 @@ pub trait FrameworkAdapter: Send + Sync {
     /// * `file_path` - Path to the document to extract
     /// * `timeout` - Maximum time to wait for extraction
     /// * `force_ocr` - When true, force OCR even if the document has a text layer
+    /// * `ocr_language` - Optional fixture-specific OCR language code
     /// * `output_format` - Output format for extraction (markdown or plaintext)
     ///
     /// # Returns
@@ -64,6 +93,7 @@ pub trait FrameworkAdapter: Send + Sync {
         file_path: &Path,
         timeout: Duration,
         force_ocr: bool,
+        ocr_language: Option<&str>,
         output_format: OutputFormat,
     ) -> Result<BenchmarkResult>;
 
@@ -78,6 +108,7 @@ pub trait FrameworkAdapter: Send + Sync {
     /// * `file_paths` - Paths to documents to extract
     /// * `timeout` - Maximum time to wait for each extraction
     /// * `force_ocr` - Per-file force_ocr flags (must be same length as file_paths)
+    /// * `ocr_languages` - Per-file optional OCR language codes
     /// * `output_format` - Output format for extraction
     ///
     /// # Returns
@@ -88,9 +119,10 @@ pub trait FrameworkAdapter: Send + Sync {
         file_paths: &[&Path],
         timeout: Duration,
         force_ocr: &[bool],
+        ocr_languages: &[Option<String>],
         output_format: OutputFormat,
     ) -> Result<Vec<BenchmarkResult>> {
-        let _ = (file_paths, timeout, force_ocr, output_format);
+        let _ = (file_paths, timeout, force_ocr, ocr_languages, output_format);
         Err(crate::Error::Config(format!(
             "framework '{}' does not expose a verified native batch API",
             self.name()
@@ -157,7 +189,7 @@ pub trait FrameworkAdapter: Send + Sync {
     /// * `Err(Error)` - Warmup failed
     async fn warmup(&self, warmup_file: &Path, timeout: Duration, output_format: OutputFormat) -> Result<Duration> {
         let start = std::time::Instant::now();
-        let result = self.extract(warmup_file, timeout, false, output_format).await?;
+        let result = self.extract(warmup_file, timeout, false, None, output_format).await?;
         if !result.success {
             return Err(Error::Benchmark(format!(
                 "warmup extraction for '{}' failed: {}",
@@ -169,5 +201,24 @@ pub trait FrameworkAdapter: Send + Sync {
             )));
         }
         Ok(start.elapsed())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{canonical_ocr_language_arg, canonicalize_ocr_languages, is_valid_ocr_language_code};
+
+    #[test]
+    fn canonicalizes_combined_ocr_languages() {
+        assert_eq!(canonicalize_ocr_languages(" deu + eng "), ["deu", "eng"]);
+        assert_eq!(canonical_ocr_language_arg(" deu + eng ").as_deref(), Some("deu+eng"));
+    }
+
+    #[test]
+    fn rejects_empty_or_path_like_ocr_language_codes() {
+        assert!(canonical_ocr_language_arg(" + ").is_none());
+        assert!(is_valid_ocr_language_code("chi_sim"));
+        assert!(!is_valid_ocr_language_code("../deu"));
+        assert!(!is_valid_ocr_language_code(""));
     }
 }

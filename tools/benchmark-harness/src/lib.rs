@@ -58,6 +58,7 @@ pub mod markdown_quality;
 pub mod model_benchmark;
 pub mod monitoring;
 pub mod noise_detection;
+pub mod ocr_preflight;
 pub mod output;
 pub mod pipeline_benchmark;
 pub mod pool_metrics;

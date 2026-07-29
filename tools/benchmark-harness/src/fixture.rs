@@ -123,6 +123,26 @@ impl Fixture {
             });
         }
 
+        if let Some(language) = self.metadata.get("ocr_language") {
+            let Some(language) = language.as_str() else {
+                return Err(Error::InvalidFixture {
+                    path: fixture_path.to_path_buf(),
+                    reason: "metadata.ocr_language must be a string".to_string(),
+                });
+            };
+            let codes = crate::adapter::canonicalize_ocr_languages(language);
+            if codes.is_empty()
+                || codes
+                    .iter()
+                    .any(|code| !crate::adapter::is_valid_ocr_language_code(code))
+            {
+                return Err(Error::InvalidFixture {
+                    path: fixture_path.to_path_buf(),
+                    reason: "metadata.ocr_language must contain '+'-separated Tesseract language codes".to_string(),
+                });
+            }
+        }
+
         if let Some(gt) = &self.ground_truth {
             if let Some(ref tf) = gt.text_file
                 && tf.is_absolute()
@@ -240,6 +260,11 @@ impl Fixture {
             self.file_type.to_lowercase().as_str(),
             "jpg" | "jpeg" | "png" | "gif" | "bmp" | "tiff" | "tif" | "webp" | "jp2" | "jpx" | "jpm" | "mj2"
         )
+    }
+
+    /// Return the fixture-specific OCR language code, if configured.
+    pub fn ocr_language(&self) -> Option<&str> {
+        self.metadata.get("ocr_language").and_then(|value| value.as_str())
     }
 }
 
@@ -486,6 +511,22 @@ mod tests {
         };
 
         assert!(fixture.validate(Path::new("fixture.json")).is_ok());
+    }
+
+    #[test]
+    fn fixture_ocr_language_validation_accepts_codes_and_rejects_paths() {
+        let make_fixture = |language: &str| Fixture {
+            document: PathBuf::from("test.pdf"),
+            file_type: "pdf".to_string(),
+            file_size: 1024,
+            expected_frameworks: vec!["xberg".to_string()],
+            metadata: HashMap::from([("ocr_language".to_string(), serde_json::json!(language))]),
+            ground_truth: None,
+        };
+
+        assert!(make_fixture(" deu + eng ").validate(Path::new("fixture.json")).is_ok());
+        assert!(make_fixture("+").validate(Path::new("fixture.json")).is_err());
+        assert!(make_fixture("../deu").validate(Path::new("fixture.json")).is_err());
     }
 
     #[test]

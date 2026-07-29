@@ -68,6 +68,13 @@ fn normalize_run_frameworks(frameworks: &[String], batch_mode: bool) -> Vec<Stri
     normalized
 }
 
+fn selected_frameworks_use_tesseract(frameworks: &[String]) -> bool {
+    frameworks.is_empty()
+        || frameworks.iter().any(|framework| {
+            framework.starts_with("xberg-") && (framework.contains("-baseline") || framework.contains("-layout"))
+        })
+}
+
 fn parse_model_provenance(values: &[String]) -> Result<Vec<benchmark_harness::ModelProvenance>> {
     values
         .iter()
@@ -711,6 +718,16 @@ async fn main() -> Result<()> {
                 runner.load_fixtures(&fixtures)?;
                 None
             };
+
+            // Fail fast if any fixture pins an OCR language whose Tesseract pack
+            // is not installed locally: xberg would otherwise download it inside
+            // the timed extraction and corrupt the measurement.
+            benchmark_harness::ocr_preflight::run(
+                &fixtures,
+                cohort.as_deref(),
+                ocr,
+                selected_frameworks_use_tesseract(&frameworks),
+            )?;
 
             if batch_size.is_some() && !batch_mode {
                 return Err(benchmark_harness::Error::Config(
@@ -1361,7 +1378,10 @@ fn format_size(bytes: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Commands, normalize_run_frameworks, parse_model_provenance, tracing_filter};
+    use super::{
+        Cli, Commands, normalize_run_frameworks, parse_model_provenance, selected_frameworks_use_tesseract,
+        tracing_filter,
+    };
     use clap::Parser;
 
     #[test]
@@ -1418,6 +1438,18 @@ mod tests {
     fn single_mode_preserves_xberg_names() {
         let names = normalize_run_frameworks(&["xberg-markdown-baseline".to_string()], false);
         assert_eq!(names, ["xberg-markdown-baseline"]);
+    }
+
+    #[test]
+    fn tesseract_preflight_tracks_effective_framework_selection() {
+        assert!(selected_frameworks_use_tesseract(&[]));
+        assert!(selected_frameworks_use_tesseract(&[
+            "xberg-markdown-layout-batch".to_string()
+        ]));
+        assert!(!selected_frameworks_use_tesseract(&[
+            "xberg-markdown-paddle-ocr".to_string()
+        ]));
+        assert!(!selected_frameworks_use_tesseract(&["docling".to_string()]));
     }
 
     #[test]

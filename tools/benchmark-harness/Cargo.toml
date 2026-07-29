@@ -39,6 +39,7 @@ blake3 = { workspace = true }
 chrono = { workspace = true }
 
 clap = { workspace = true }
+dirs = "6"
 futures = { workspace = true }
 jsonschema = "0.49"
 libc = { workspace = true }

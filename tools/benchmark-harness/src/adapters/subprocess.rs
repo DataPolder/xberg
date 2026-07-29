@@ -274,6 +274,95 @@ fn config_json_enables_ocr(args: &[String]) -> bool {
         == Some(true)
 }
 
+fn tesseract_ocr_config_from_args(args: &[String]) -> Option<serde_json::Value> {
+    let cli_backend = args
+        .windows(2)
+        .rev()
+        .find(|pair| pair[0] == "--ocr-backend")
+        .map(|pair| pair[1].as_str());
+    if cli_backend.is_some_and(|backend| backend != "tesseract") {
+        return None;
+    }
+
+    let cli_enabled = args.iter().enumerate().rev().find_map(|(index, arg)| {
+        if arg == "--no-ocr" {
+            return Some(false);
+        }
+        (arg == "--ocr").then(|| args.get(index + 1).is_none_or(|value| value != "false"))
+    });
+    if cli_enabled == Some(false) {
+        return None;
+    }
+
+    let configured_ocr = args
+        .windows(2)
+        .rev()
+        .find(|pair| pair[0] == "--config-json")
+        .and_then(|pair| serde_json::from_str::<serde_json::Value>(&pair[1]).ok())
+        .and_then(|config| config.get("ocr").cloned());
+    if let Some(mut ocr) = configured_ocr {
+        let object = ocr.as_object_mut()?;
+        let configured_backend = object.get("backend").and_then(serde_json::Value::as_str);
+        if cli_backend.is_none() && configured_backend.is_some_and(|backend| backend != "tesseract") {
+            return None;
+        }
+        if cli_enabled != Some(true) && object.get("enabled").and_then(serde_json::Value::as_bool) == Some(false) {
+            return None;
+        }
+        if cli_enabled == Some(true) {
+            object.insert("enabled".to_string(), serde_json::Value::Bool(true));
+        }
+        if cli_backend == Some("tesseract") {
+            object.insert(
+                "backend".to_string(),
+                serde_json::Value::String("tesseract".to_string()),
+            );
+        }
+        return Some(ocr);
+    }
+
+    (cli_enabled == Some(true)).then(|| {
+        serde_json::json!({
+            "enabled": true,
+            "backend": "tesseract",
+            "tesseract_config": {"use_cache": false}
+        })
+    })
+}
+
+fn build_batch_file_configs(
+    file_paths: &[&Path],
+    ocr_languages: &[Option<String>],
+    cwd: &Path,
+    base_ocr: Option<&serde_json::Value>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let Some(base_ocr) = base_ocr else {
+        return serde_json::Map::new();
+    };
+    file_paths
+        .iter()
+        .zip(ocr_languages)
+        .filter_map(|(path, language)| {
+            let languages = crate::adapter::canonicalize_ocr_languages(language.as_deref()?);
+            if languages.is_empty() {
+                return None;
+            }
+            let absolute_path = if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                cwd.join(path)
+            };
+            let mut ocr = base_ocr.clone();
+            ocr.as_object_mut()?
+                .insert("language".to_string(), serde_json::json!(languages));
+            Some((
+                absolute_path.to_string_lossy().into_owned(),
+                serde_json::json!({ "ocr": ocr }),
+            ))
+        })
+        .collect()
+}
+
 /// Base adapter for subprocess-based extraction
 ///
 /// This adapter spawns a subprocess to perform extraction and monitors
@@ -879,6 +968,7 @@ impl SubprocessAdapter {
         file_path: &Path,
         timeout: Duration,
         force_ocr: bool,
+        ocr_language: Option<&str>,
         output_format: OutputFormat,
     ) -> Result<SubprocessExecution> {
         let absolute_path = if file_path.is_absolute() {
@@ -893,6 +983,12 @@ impl SubprocessAdapter {
         }
         let request_args = self.single_file_request_args(force_ocr);
         cmd.args(&request_args);
+        if self.name.starts_with("xberg-")
+            && tesseract_ocr_config_from_args(&request_args).is_some()
+            && let Some(language) = ocr_language.and_then(crate::adapter::canonical_ocr_language_arg)
+        {
+            cmd.arg("--ocr-language").arg(language);
+        }
 
         if self.format_aware {
             cmd.arg(format!("--format={}", output_format));
@@ -922,6 +1018,7 @@ impl SubprocessAdapter {
         file_paths: &[&Path],
         timeout: Duration,
         force_ocr: bool,
+        ocr_languages: &[Option<String>],
         output_format: OutputFormat,
     ) -> Result<SubprocessExecution> {
         if self
@@ -937,7 +1034,27 @@ impl SubprocessAdapter {
         if let Some(dir) = &self.working_dir {
             cmd.current_dir(dir);
         }
-        cmd.args(self.request_args(force_ocr));
+        let request_args = self.request_args(force_ocr);
+        cmd.args(&request_args);
+
+        let file_configs = if self
+            .batch_capability
+            .is_some_and(|capability| capability.entry_point == BatchEntryPoint::XbergCliExtractBatch)
+        {
+            let cwd = std::env::current_dir().map_err(Error::Io)?;
+            let base_ocr = tesseract_ocr_config_from_args(&request_args);
+            let configs = build_batch_file_configs(file_paths, ocr_languages, &cwd, base_ocr.as_ref());
+            if configs.is_empty() {
+                None
+            } else {
+                let mut file = tempfile::NamedTempFile::new().map_err(Error::Io)?;
+                serde_json::to_writer(file.as_file_mut(), &configs)?;
+                cmd.arg("--file-configs").arg(file.path());
+                Some(file)
+            }
+        } else {
+            None
+        };
 
         if self
             .batch_capability
@@ -987,6 +1104,7 @@ impl SubprocessAdapter {
             Duration::from_millis(sampling_ms),
         )
         .await?;
+        drop(file_configs);
         Ok(Self::finish_measured_command(measured, "Batch subprocess"))
     }
 
@@ -1378,6 +1496,7 @@ impl FrameworkAdapter for SubprocessAdapter {
         file_path: &Path,
         timeout: Duration,
         force_ocr: bool,
+        ocr_language: Option<&str>,
         output_format: OutputFormat,
     ) -> Result<BenchmarkResult> {
         let timeout = self.effective_timeout(timeout);
@@ -1386,7 +1505,7 @@ impl FrameworkAdapter for SubprocessAdapter {
         let start_time = std::time::Instant::now();
 
         let execution = match self
-            .execute_subprocess(file_path, timeout, force_ocr, output_format)
+            .execute_subprocess(file_path, timeout, force_ocr, ocr_language, output_format)
             .await
         {
             Ok(result) => result,
@@ -1564,6 +1683,7 @@ impl FrameworkAdapter for SubprocessAdapter {
         file_paths: &[&Path],
         timeout: Duration,
         force_ocr: &[bool],
+        ocr_languages: &[Option<String>],
         output_format: OutputFormat,
     ) -> Result<Vec<BenchmarkResult>> {
         let batch_capability = self.batch_capability.ok_or_else(|| {
@@ -1576,6 +1696,13 @@ impl FrameworkAdapter for SubprocessAdapter {
             return Err(Error::Benchmark(format!(
                 "batch force_ocr cardinality mismatch: received {} flags for {} files",
                 force_ocr.len(),
+                file_paths.len()
+            )));
+        }
+        if ocr_languages.len() != file_paths.len() {
+            return Err(Error::Benchmark(format!(
+                "batch ocr_languages cardinality mismatch: received {} values for {} files",
+                ocr_languages.len(),
                 file_paths.len()
             )));
         }
@@ -1599,7 +1726,7 @@ impl FrameworkAdapter for SubprocessAdapter {
             .unwrap_or(Duration::MAX);
 
         let execution = match self
-            .execute_subprocess_batch(file_paths, timeout, batch_force_ocr, output_format)
+            .execute_subprocess_batch(file_paths, timeout, batch_force_ocr, ocr_languages, output_format)
             .await
         {
             Ok(result) => result,
@@ -2423,7 +2550,13 @@ mod tests {
         let file = tempfile::NamedTempFile::new().unwrap();
 
         let results = adapter
-            .extract_batch(&[file.path()], Duration::from_secs(1), &[false], OutputFormat::Markdown)
+            .extract_batch(
+                &[file.path()],
+                Duration::from_secs(1),
+                &[false],
+                &[None],
+                OutputFormat::Markdown,
+            )
             .await
             .unwrap();
 
@@ -2460,7 +2593,13 @@ mod tests {
         let file = tempfile::NamedTempFile::new().unwrap();
 
         let results = adapter
-            .extract_batch(&[file.path()], Duration::from_secs(1), &[false], OutputFormat::Markdown)
+            .extract_batch(
+                &[file.path()],
+                Duration::from_secs(1),
+                &[false],
+                &[None],
+                OutputFormat::Markdown,
+            )
             .await
             .unwrap();
 
@@ -2493,7 +2632,7 @@ mod tests {
         let file = tempfile::NamedTempFile::new().unwrap();
 
         let result = adapter
-            .extract(file.path(), Duration::from_secs(1), false, OutputFormat::Markdown)
+            .extract(file.path(), Duration::from_secs(1), false, None, OutputFormat::Markdown)
             .await
             .unwrap();
 
@@ -2525,7 +2664,7 @@ mod tests {
         let file = tempfile::NamedTempFile::new().unwrap();
 
         let result = adapter
-            .extract(file.path(), Duration::from_secs(1), false, OutputFormat::Markdown)
+            .extract(file.path(), Duration::from_secs(1), false, None, OutputFormat::Markdown)
             .await
             .unwrap();
 
@@ -2557,7 +2696,7 @@ mod tests {
         let file = tempfile::NamedTempFile::new().unwrap();
 
         let result = adapter
-            .extract(file.path(), Duration::from_secs(1), false, OutputFormat::Markdown)
+            .extract(file.path(), Duration::from_secs(1), false, None, OutputFormat::Markdown)
             .await
             .unwrap();
 
@@ -2576,6 +2715,81 @@ mod tests {
 
         assert_eq!(adapter.request_args(false)[0], "--no-ocr");
         assert_eq!(adapter.request_args(true)[0], "--ocr");
+    }
+
+    #[test]
+    fn tesseract_file_config_preserves_effective_backend_and_cache_settings() {
+        let args = vec![
+            "--config-json".to_string(),
+            r#"{"ocr":{"enabled":true,"backend":"tesseract","tesseract_config":{"use_cache":false}}}"#.to_string(),
+        ];
+        let base_ocr = tesseract_ocr_config_from_args(&args).expect("Tesseract OCR config");
+        let cwd = tempfile::tempdir().unwrap();
+        let input = Path::new("sample.pdf");
+        let configs = build_batch_file_configs(
+            &[input],
+            &[Some(" deu + eng ".to_string())],
+            cwd.path(),
+            Some(&base_ocr),
+        );
+        let config = configs
+            .get(&cwd.path().join(input).to_string_lossy().into_owned())
+            .expect("file config");
+
+        assert_eq!(
+            config.pointer("/ocr/backend").and_then(serde_json::Value::as_str),
+            Some("tesseract")
+        );
+        assert_eq!(
+            config
+                .pointer("/ocr/tesseract_config/use_cache")
+                .and_then(serde_json::Value::as_bool),
+            Some(false)
+        );
+        assert_eq!(
+            config.pointer("/ocr/language"),
+            Some(&serde_json::json!(["deu", "eng"]))
+        );
+    }
+
+    #[test]
+    fn forced_ocr_without_nested_config_synthesizes_uncached_tesseract_config() {
+        let args = vec![
+            "--config-json".to_string(),
+            r#"{"use_cache":false}"#.to_string(),
+            "--ocr".to_string(),
+            "--force-ocr".to_string(),
+            "true".to_string(),
+        ];
+        let ocr = tesseract_ocr_config_from_args(&args).expect("forced Tesseract OCR config");
+
+        assert_eq!(ocr.pointer("/enabled"), Some(&serde_json::json!(true)));
+        assert_eq!(ocr.pointer("/backend"), Some(&serde_json::json!("tesseract")));
+        assert_eq!(
+            ocr.pointer("/tesseract_config/use_cache"),
+            Some(&serde_json::json!(false))
+        );
+    }
+
+    #[test]
+    fn non_tesseract_pipeline_does_not_receive_tessdata_language_override() {
+        let args = vec![
+            "--config-json".to_string(),
+            r#"{"ocr":{"enabled":true,"backend":"tesseract"}}"#.to_string(),
+            "--ocr-backend".to_string(),
+            "paddle-ocr".to_string(),
+        ];
+
+        assert!(tesseract_ocr_config_from_args(&args).is_none());
+        assert!(
+            build_batch_file_configs(
+                &[Path::new("sample.pdf")],
+                &[Some("deu".to_string())],
+                Path::new("/tmp"),
+                None,
+            )
+            .is_empty()
+        );
     }
 
     #[test]
@@ -2693,7 +2907,13 @@ mod tests {
         );
         let input = tempfile::NamedTempFile::new().unwrap();
         let error = adapter
-            .extract_batch(&[input.path()], Duration::from_secs(1), &[], OutputFormat::Markdown)
+            .extract_batch(
+                &[input.path()],
+                Duration::from_secs(1),
+                &[],
+                &[None],
+                OutputFormat::Markdown,
+            )
             .await
             .unwrap_err();
         assert!(error.to_string().contains("force_ocr cardinality mismatch"));
@@ -2715,6 +2935,7 @@ mod tests {
                 &[input.path()],
                 Duration::from_secs(1),
                 &[false],
+                &[None],
                 OutputFormat::Markdown,
             )
             .await
@@ -2740,7 +2961,13 @@ mod tests {
         std::io::Write::write_all(&mut input, &[0; 100]).unwrap();
 
         let result = adapter
-            .extract(input.path(), Duration::from_secs(1), false, OutputFormat::Markdown)
+            .extract(
+                input.path(),
+                Duration::from_secs(1),
+                false,
+                None,
+                OutputFormat::Markdown,
+            )
             .await
             .unwrap();
         let expected = bytes_per_second(result.file_size, result.duration);
@@ -2766,7 +2993,13 @@ mod tests {
         let input = tempfile::NamedTempFile::new().unwrap();
 
         let result = adapter
-            .extract(input.path(), Duration::from_secs(1), false, OutputFormat::Markdown)
+            .extract(
+                input.path(),
+                Duration::from_secs(1),
+                false,
+                None,
+                OutputFormat::Markdown,
+            )
             .await
             .unwrap();
 
@@ -2793,7 +3026,13 @@ mod tests {
         let input = tempfile::NamedTempFile::new().unwrap();
 
         let result = adapter
-            .extract(input.path(), Duration::from_secs(5), false, OutputFormat::Markdown)
+            .extract(
+                input.path(),
+                Duration::from_secs(5),
+                false,
+                None,
+                OutputFormat::Markdown,
+            )
             .await
             .unwrap();
 
@@ -2822,6 +3061,7 @@ mod tests {
                 &[first.path(), second.path()],
                 Duration::from_secs(1),
                 &[false, false],
+                &[None, None],
                 OutputFormat::Markdown,
             )
             .await
@@ -2853,6 +3093,7 @@ mod tests {
                 &[first.path(), second.path()],
                 Duration::from_secs(1),
                 &[false, false],
+                &[None, None],
                 OutputFormat::Markdown,
             )
             .await
@@ -2900,7 +3141,13 @@ mod tests {
         let file = tempfile::NamedTempFile::new().unwrap();
 
         let result = adapter
-            .extract_batch(&[file.path()], Duration::from_secs(1), &[false], OutputFormat::Markdown)
+            .extract_batch(
+                &[file.path()],
+                Duration::from_secs(1),
+                &[false],
+                &[None],
+                OutputFormat::Markdown,
+            )
             .await
             .unwrap()
             .remove(0);
@@ -2929,7 +3176,13 @@ mod tests {
         let file = tempfile::NamedTempFile::new().unwrap();
 
         let result = adapter
-            .extract_batch(&[file.path()], Duration::from_secs(1), &[false], OutputFormat::Markdown)
+            .extract_batch(
+                &[file.path()],
+                Duration::from_secs(1),
+                &[false],
+                &[None],
+                OutputFormat::Markdown,
+            )
             .await
             .unwrap()
             .remove(0);
@@ -2966,6 +3219,7 @@ mod tests {
                 &[first.path(), second.path()],
                 Duration::from_secs(1),
                 &[false, false],
+                &[None, None],
                 OutputFormat::Markdown,
             )
             .await
@@ -3005,6 +3259,7 @@ mod tests {
                 &[input.path()],
                 Duration::from_secs(1),
                 &[false],
+                &[None],
                 OutputFormat::Markdown,
             )
             .await
@@ -3035,6 +3290,7 @@ mod tests {
                 &[input.path()],
                 Duration::from_secs(1),
                 &[false],
+                &[None],
                 OutputFormat::Markdown,
             )
             .await
@@ -3065,6 +3321,7 @@ mod tests {
                 &[first.path(), second.path()],
                 Duration::from_secs(1),
                 &[false, false],
+                &[None, None],
                 OutputFormat::Markdown,
             )
             .await
@@ -3108,6 +3365,7 @@ mod tests {
                 &[first.path(), second.path()],
                 Duration::from_secs(1),
                 &[false, false],
+                &[None, None],
                 OutputFormat::Markdown,
             )
             .await
@@ -3140,6 +3398,7 @@ mod tests {
                 &[first.path(), second.path()],
                 Duration::from_secs(1),
                 &[false, false],
+                &[None, None],
                 OutputFormat::Markdown,
             )
             .await
@@ -3167,6 +3426,7 @@ mod tests {
                 &[first.path(), second.path()],
                 Duration::from_secs(1),
                 &[false, true],
+                &[None, None],
                 OutputFormat::Markdown,
             )
             .await
@@ -3189,7 +3449,13 @@ mod tests {
         let start = Instant::now();
 
         let execution = adapter
-            .execute_subprocess(input.path(), Duration::from_millis(50), false, OutputFormat::Markdown)
+            .execute_subprocess(
+                input.path(),
+                Duration::from_millis(50),
+                false,
+                None,
+                OutputFormat::Markdown,
+            )
             .await
             .unwrap();
 

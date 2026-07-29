@@ -19,6 +19,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+type SingleBenchmarkTask = (PathBuf, String, Arc<dyn FrameworkAdapter>, bool, Option<String>);
+
 fn effective_batch_warmup_iterations(capability: BatchCapability, configured: usize) -> usize {
     if capability.timing_scope == BatchTimingScope::ColdEndToEndSubprocess {
         0
@@ -582,6 +584,7 @@ impl BenchmarkRunner {
         config: &BenchmarkConfig,
         cold_start_duration: Option<Duration>,
         force_ocr: bool,
+        ocr_language: Option<&str>,
         output_format: OutputFormat,
     ) -> Result<BenchmarkResult> {
         let mut all_results = Vec::new();
@@ -589,7 +592,7 @@ impl BenchmarkRunner {
         let estimated_task_duration_ms = if config.profiling.enabled {
             let warmup_start = std::time::Instant::now();
             let warmup_result = adapter
-                .extract(file_path, config.timeout, force_ocr, output_format)
+                .extract(file_path, config.timeout, force_ocr, ocr_language, output_format)
                 .await?;
             let _warmup_duration = warmup_start.elapsed();
             warmup_result.duration.as_millis() as u64
@@ -624,7 +627,7 @@ impl BenchmarkRunner {
         let mut warmup_timed_out = false;
         for _iteration in warmup_start..config.warmup_iterations {
             let result = adapter
-                .extract(file_path, config.timeout, force_ocr, output_format)
+                .extract(file_path, config.timeout, force_ocr, ocr_language, output_format)
                 .await?;
             if result.error_kind == ErrorKind::Timeout {
                 warmup_timed_out = true;
@@ -647,7 +650,7 @@ impl BenchmarkRunner {
         'outer: for _iteration in 0..effective_iterations {
             for _amp in 0..amplification_factor {
                 let result = adapter
-                    .extract(file_path, config.timeout, force_ocr, output_format)
+                    .extract(file_path, config.timeout, force_ocr, ocr_language, output_format)
                     .await?;
                 let timed_out = result.error_kind == ErrorKind::Timeout;
                 all_results.push(result);
@@ -834,6 +837,7 @@ impl BenchmarkRunner {
         config: &BenchmarkConfig,
         cold_start_duration: Option<Duration>,
         force_ocr_flags: Vec<bool>,
+        ocr_languages: Vec<Option<String>>,
         output_format: OutputFormat,
     ) -> Result<Vec<BenchmarkResult>> {
         let batch_capability = adapter.batch_capability().ok_or_else(|| {
@@ -849,6 +853,13 @@ impl BenchmarkRunner {
                 file_paths.len()
             )));
         }
+        if ocr_languages.len() != file_paths.len() {
+            return Err(Error::Benchmark(format!(
+                "batch ocr_languages cardinality mismatch: received {} values for {} files",
+                ocr_languages.len(),
+                file_paths.len()
+            )));
+        }
 
         let warmup_iterations = effective_batch_warmup_iterations(batch_capability, config.warmup_iterations);
         let total_iterations = warmup_iterations + config.benchmark_iterations;
@@ -857,7 +868,7 @@ impl BenchmarkRunner {
         for iteration in 0..total_iterations {
             let refs: Vec<&std::path::Path> = file_paths.iter().map(|p| p.as_path()).collect();
             let mut batch_results = adapter
-                .extract_batch(&refs, config.timeout, &force_ocr_flags, output_format)
+                .extract_batch(&refs, config.timeout, &force_ocr_flags, &ocr_languages, output_format)
                 .await?;
             for result in &mut batch_results {
                 result.framework_capabilities.batch_support = true;
@@ -1137,7 +1148,7 @@ impl BenchmarkRunner {
         if use_batch {
             use std::collections::HashMap;
 
-            let mut adapter_files: HashMap<String, Vec<(PathBuf, bool)>> = HashMap::new();
+            let mut adapter_files: HashMap<String, Vec<(PathBuf, bool, Option<String>)>> = HashMap::new();
 
             for (fixture_path, fixture) in self.fixtures.fixtures() {
                 let force_ocr = fixture.requires_ocr();
@@ -1154,10 +1165,11 @@ impl BenchmarkRunner {
                     let fixture_dir = fixture_path.parent().unwrap_or_else(|| std::path::Path::new("."));
                     let document_path = fixture.resolve_document_path(fixture_dir);
 
-                    adapter_files
-                        .entry(adapter.name().to_string())
-                        .or_default()
-                        .push((document_path, force_ocr));
+                    adapter_files.entry(adapter.name().to_string()).or_default().push((
+                        document_path,
+                        force_ocr,
+                        fixture.ocr_language().map(str::to_string),
+                    ));
                 }
             }
 
@@ -1178,8 +1190,14 @@ impl BenchmarkRunner {
                     })?;
 
                     for range in ranges {
-                        let (file_paths, force_ocr_flags): (Vec<PathBuf>, Vec<bool>) =
-                            entries[range].iter().cloned().unzip();
+                        let mut file_paths = Vec::new();
+                        let mut force_ocr_flags = Vec::new();
+                        let mut ocr_languages = Vec::new();
+                        for (path, force_ocr, ocr_language) in &entries[range] {
+                            file_paths.push(path.clone());
+                            force_ocr_flags.push(*force_ocr);
+                            ocr_languages.push(ocr_language.clone());
+                        }
                         let adapter = Arc::clone(adapter);
                         let config = config.clone();
                         let cold_start = self.cold_start_durations.get(adapter_name).copied();
@@ -1190,6 +1208,7 @@ impl BenchmarkRunner {
                             &config,
                             cold_start,
                             force_ocr_flags,
+                            ocr_languages,
                             self.output_format,
                         )
                         .await
@@ -1211,7 +1230,7 @@ impl BenchmarkRunner {
                 }
             }
         } else {
-            let mut task_queue: Vec<(PathBuf, String, Arc<dyn FrameworkAdapter>, bool)> = Vec::new();
+            let mut task_queue: Vec<SingleBenchmarkTask> = Vec::new();
 
             for (fixture_path, fixture) in self.fixtures.fixtures() {
                 let force_ocr = fixture.requires_ocr();
@@ -1233,13 +1252,14 @@ impl BenchmarkRunner {
                         adapter.name().to_string(),
                         Arc::clone(adapter),
                         force_ocr,
+                        fixture.ocr_language().map(str::to_string),
                     ));
                 }
             }
 
             let config = self.config.clone();
 
-            for (file_path, framework_name, adapter, force_ocr) in task_queue {
+            for (file_path, framework_name, adapter, force_ocr, ocr_language) in task_queue {
                 let cold_start = self.cold_start_durations.get(&framework_name).copied();
                 match Self::run_iterations_static(
                     &file_path,
@@ -1247,6 +1267,7 @@ impl BenchmarkRunner {
                     &config,
                     cold_start,
                     force_ocr,
+                    ocr_language.as_deref(),
                     self.output_format,
                 )
                 .await
@@ -1387,6 +1408,7 @@ mod tests {
             file_path: &Path,
             _timeout: Duration,
             _force_ocr: bool,
+            _ocr_language: Option<&str>,
             output_format: OutputFormat,
         ) -> Result<BenchmarkResult> {
             Ok(Self::success(file_path, output_format))
@@ -1397,6 +1419,7 @@ mod tests {
             file_paths: &[&Path],
             _timeout: Duration,
             _force_ocr: &[bool],
+            _ocr_languages: &[Option<String>],
             output_format: OutputFormat,
         ) -> Result<Vec<BenchmarkResult>> {
             self.batches.lock().unwrap().push(
@@ -1472,6 +1495,7 @@ mod tests {
             file_path: &Path,
             _timeout: Duration,
             _force_ocr: bool,
+            _ocr_language: Option<&str>,
             output_format: OutputFormat,
         ) -> Result<BenchmarkResult> {
             Ok(self.result(file_path, output_format))
@@ -1482,6 +1506,7 @@ mod tests {
             file_paths: &[&Path],
             _timeout: Duration,
             _force_ocr: &[bool],
+            _ocr_languages: &[Option<String>],
             output_format: OutputFormat,
         ) -> Result<Vec<BenchmarkResult>> {
             Ok(file_paths.iter().map(|path| self.result(path, output_format)).collect())
@@ -1515,6 +1540,7 @@ mod tests {
             _file_path: &Path,
             _timeout: Duration,
             _force_ocr: bool,
+            _ocr_language: Option<&str>,
             _output_format: OutputFormat,
         ) -> Result<BenchmarkResult> {
             Err(Error::Benchmark("unused test extraction".to_string()))
@@ -1558,6 +1584,7 @@ mod tests {
             file_path: &Path,
             _timeout: Duration,
             _force_ocr: bool,
+            _ocr_language: Option<&str>,
             output_format: OutputFormat,
         ) -> Result<BenchmarkResult> {
             Ok(BenchmarkResult {
@@ -2083,10 +2110,17 @@ mod tests {
             calls: AtomicUsize::new(0),
         });
 
-        let result =
-            BenchmarkRunner::run_iterations_static(file.path(), adapter, &config, None, false, OutputFormat::Markdown)
-                .await
-                .unwrap();
+        let result = BenchmarkRunner::run_iterations_static(
+            file.path(),
+            adapter,
+            &config,
+            None,
+            false,
+            None,
+            OutputFormat::Markdown,
+        )
+        .await
+        .unwrap();
 
         assert!(!result.success);
         assert_eq!(result.error_kind, ErrorKind::FrameworkError);
@@ -2111,6 +2145,7 @@ mod tests {
             &config,
             None,
             vec![false],
+            vec![None],
             OutputFormat::Markdown,
         )
         .await
