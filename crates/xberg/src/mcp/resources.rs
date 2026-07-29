@@ -41,20 +41,12 @@ pub fn list_resources() -> ListResourcesResult {
             .with_mime_type("application/json"),
     );
 
-    ListResourcesResult {
-        resources,
-        next_cursor: None,
-        meta: None,
-    }
+    ListResourcesResult::with_all_items(resources)
 }
 
 /// Return an empty resource template list (no URI templates are defined).
 pub fn list_resource_templates() -> ListResourceTemplatesResult {
-    ListResourceTemplatesResult {
-        resource_templates: vec![],
-        next_cursor: None,
-        meta: None,
-    }
+    ListResourceTemplatesResult::with_all_items(vec![])
 }
 
 /// Read the contents of a static resource by URI.

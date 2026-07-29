@@ -55,7 +55,8 @@ where
                          Use the extract tool with input={{\"kind\":\"uri\",\"uri\":\"{path}\"}} and \
                          response_format=\"{fmt}\"."
                     ),
-                )]))
+                )])
+                .into())
             })
         },
     ));
@@ -112,7 +113,8 @@ where
                          OCR languages: {languages}",
                         langs = lang_list.join(","),
                     ),
-                )]))
+                )])
+                .into())
             })
         },
     ));
@@ -176,7 +178,8 @@ where
                          2. Pass config={{\"chunking\":{{\"chunker_type\":\"{chunker_type}\",\"max_characters\":{max_characters}}},\"embedding\":{{\"model\":{{\"type\":\"preset\",\"name\":\"{preset}\"}}}}}}.\n\
                          3. Store output.results[*].chunks and each chunk embedding in your vector store."
                     ),
-                )]))
+                )])
+                .into())
             })
         },
     ));

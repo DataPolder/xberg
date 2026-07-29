@@ -107,7 +107,6 @@ impl XbergMcp {
         description = "Extract content from bytes, a local path, file:// URI, remote document URL, or website URL.",
         annotations(title = "Extract", read_only_hint = true, idempotent_hint = true, open_world_hint = true),
         output_schema = rmcp::handler::server::common::schema_for_output::<super::schema::ExtractionResult>()
-            .expect("ExtractionResult schema must be valid")
     )]
     async fn extract(
         &self,
@@ -137,7 +136,6 @@ impl XbergMcp {
         description = "Extract content from multiple bytes, local paths, file:// URIs, remote document URLs, or website URLs.",
         annotations(title = "Extract Batch", read_only_hint = true, idempotent_hint = true, open_world_hint = true),
         output_schema = rmcp::handler::server::common::schema_for_output::<super::schema::ExtractionResult>()
-            .expect("ExtractionResult schema must be valid")
     )]
     async fn extract_batch(
         &self,
@@ -175,7 +173,6 @@ impl XbergMcp {
         description = "Detect the MIME type of a file. Returns the detected MIME type string.",
         annotations(title = "Detect MIME Type", read_only_hint = true, idempotent_hint = true),
         output_schema = rmcp::handler::server::common::schema_for_output::<super::schema::DetectMimeTypeOutput>()
-            .expect("DetectMimeTypeOutput schema must be valid")
     )]
     fn detect_mime_type(
         &self,
@@ -201,7 +198,6 @@ impl XbergMcp {
         description = "Get cache statistics including total files, size, and available disk space.",
         annotations(title = "Cache Stats", read_only_hint = true, idempotent_hint = true),
         output_schema = rmcp::handler::server::common::schema_for_output::<super::schema::CacheStatsOutput>()
-            .expect("CacheStatsOutput schema must be valid")
     )]
     fn cache_stats(
         &self,
@@ -249,7 +245,6 @@ impl XbergMcp {
         description = "List all supported document formats with their file extensions and MIME types.",
         annotations(title = "List Formats", read_only_hint = true, idempotent_hint = true),
         output_schema = rmcp::handler::server::common::schema_for_output::<super::schema::ListFormatsOutput>()
-            .expect("ListFormatsOutput schema must be valid")
     )]
     fn list_formats(
         &self,
@@ -308,7 +303,6 @@ impl XbergMcp {
         description = "Get the current Xberg library version.",
         annotations(title = "Get Version", read_only_hint = true, idempotent_hint = true),
         output_schema = rmcp::handler::server::common::schema_for_output::<super::schema::VersionOutput>()
-            .expect("VersionOutput schema must be valid")
     )]
     fn get_version(
         &self,
@@ -332,7 +326,6 @@ impl XbergMcp {
         description = "Get model manifest listing expected model files, sizes, and SHA256 checksums.",
         annotations(title = "Cache Manifest", read_only_hint = true, idempotent_hint = true),
         output_schema = rmcp::handler::server::common::schema_for_output::<super::schema::CacheManifestOutput>()
-            .expect("CacheManifestOutput schema must be valid")
     )]
     fn cache_manifest(
         &self,
@@ -728,9 +721,9 @@ impl ServerHandler for XbergMcp {
         &self,
         request: ReadResourceRequestParams,
         _context: rmcp::service::RequestContext<rmcp::service::RoleServer>,
-    ) -> impl std::future::Future<Output = Result<ReadResourceResult, rmcp::ErrorData>> + rmcp::service::MaybeSendFuture + '_
+    ) -> impl std::future::Future<Output = Result<ReadResourceResponse, rmcp::ErrorData>> + rmcp::service::MaybeSendFuture + '_
     {
-        std::future::ready(super::resources::read_resource(&request.uri))
+        std::future::ready(super::resources::read_resource(&request.uri).map(Into::into))
     }
 
     fn list_prompts(
@@ -740,18 +733,14 @@ impl ServerHandler for XbergMcp {
     ) -> impl std::future::Future<Output = Result<ListPromptsResult, rmcp::ErrorData>> + rmcp::service::MaybeSendFuture + '_
     {
         let prompts = self.prompt_router.list_all();
-        std::future::ready(Ok(ListPromptsResult {
-            prompts,
-            next_cursor: None,
-            meta: None,
-        }))
+        std::future::ready(Ok(ListPromptsResult::with_all_items(prompts)))
     }
 
     fn get_prompt(
         &self,
         request: GetPromptRequestParams,
         context: rmcp::service::RequestContext<rmcp::service::RoleServer>,
-    ) -> impl std::future::Future<Output = Result<GetPromptResult, rmcp::ErrorData>> + rmcp::service::MaybeSendFuture + '_
+    ) -> impl std::future::Future<Output = Result<GetPromptResponse, rmcp::ErrorData>> + rmcp::service::MaybeSendFuture + '_
     {
         let pr = self.prompt_router.clone();
         let pc = PromptContext::new(self, request.name, request.arguments, context);
