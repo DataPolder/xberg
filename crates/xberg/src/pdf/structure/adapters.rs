@@ -39,13 +39,22 @@ pub(crate) fn ocr_doc_to_layout_paragraphs(
     use crate::types::internal::ElementKind;
     let page_height = page_height_px as f32;
     let mut result = Vec::new();
-
-    for element in doc
+    let elements = doc
         .elements
         .iter()
         .filter(|element| matches!(element.kind, ElementKind::OcrText { .. }))
         .filter(|element| !element.text.trim().is_empty())
-    {
+        .collect::<Vec<_>>();
+
+    for (element_index, element) in elements.iter().enumerate() {
+        let promote_logo_title = element_index == 0
+            && should_promote_logo_followed_by_title(
+                element,
+                elements.get(1).copied(),
+                page_height,
+                hints,
+                min_confidence,
+            );
         let mut lines = make_ocr_line_paragraphs(element, page_height);
         let selected = super::layout_classify::apply_layout_overrides_with_matches(
             &mut lines,
@@ -54,12 +63,129 @@ pub(crate) fn ocr_doc_to_layout_paragraphs(
             min_containment,
             None,
         );
-        let hint_indices = compatible_hint_indices(&lines, hints, selected, min_containment);
+        let mut hint_indices = compatible_hint_indices(&lines, hints, selected, min_containment);
+        if promote_logo_title {
+            promote_second_line_to_title(&mut lines, &mut hint_indices);
+        }
         result.extend(regroup_layout_lines(lines, hint_indices));
     }
 
     trace_conversion(doc, &result);
     result
+}
+
+#[cfg(all(feature = "ocr", feature = "layout-detection"))]
+fn should_promote_logo_followed_by_title(
+    element: &crate::types::internal::InternalElement,
+    next_element: Option<&crate::types::internal::InternalElement>,
+    page_height: f32,
+    hints: &[types::LayoutHint],
+    min_confidence: f32,
+) -> bool {
+    const MAX_LOGO_CHARACTERS: usize = 12;
+    const MAX_LOGO_WORDS: usize = 2;
+    const MIN_TITLE_WORDS: usize = 2;
+    const MAX_TITLE_WORDS: usize = 12;
+    const MAX_TITLE_CHARACTERS: usize = 120;
+
+    let mut lines = element.text.lines();
+    let Some(logo) = lines.next().map(str::trim) else {
+        return false;
+    };
+    let Some(title) = lines.next().map(str::trim) else {
+        return false;
+    };
+    if lines.next().is_some() || logo.is_empty() || title.is_empty() {
+        return false;
+    }
+
+    !has_semantic_heading_hint(hints, min_confidence)
+        && is_uppercase_logo(logo, MAX_LOGO_CHARACTERS, MAX_LOGO_WORDS)
+        && is_conservative_title(title, MIN_TITLE_WORDS, MAX_TITLE_WORDS, MAX_TITLE_CHARACTERS)
+        && next_element.is_some_and(|next| follows_with_prose(element, next, page_height))
+}
+
+#[cfg(all(feature = "ocr", feature = "layout-detection"))]
+fn has_semantic_heading_hint(hints: &[types::LayoutHint], min_confidence: f32) -> bool {
+    hints.iter().any(|hint| {
+        hint.confidence >= min_confidence
+            && matches!(
+                hint.class_name,
+                types::LayoutHintClass::Title | types::LayoutHintClass::SectionHeader
+            )
+    })
+}
+
+#[cfg(all(feature = "ocr", feature = "layout-detection"))]
+fn is_uppercase_logo(text: &str, max_characters: usize, max_words: usize) -> bool {
+    let alphabetic = text
+        .chars()
+        .filter(|character| character.is_alphabetic())
+        .collect::<Vec<_>>();
+    (2..=max_characters).contains(&text.chars().count())
+        && text.split_whitespace().count() <= max_words
+        && alphabetic.len() >= 2
+        && alphabetic.iter().all(|character| character.is_uppercase())
+        && text
+            .chars()
+            .all(|character| character.is_alphabetic() || character.is_whitespace())
+}
+
+#[cfg(all(feature = "ocr", feature = "layout-detection"))]
+fn is_conservative_title(text: &str, min_words: usize, max_words: usize, max_characters: usize) -> bool {
+    let word_count = text.split_whitespace().count();
+    let starts_uppercase = text
+        .chars()
+        .find(|character| character.is_alphabetic())
+        .is_some_and(|character| character.is_uppercase());
+    (min_words..=max_words).contains(&word_count)
+        && text.chars().count() <= max_characters
+        && starts_uppercase
+        && text.chars().any(|character| character.is_lowercase())
+        && !text.ends_with(['.', '!', '?', ':', ';', ','])
+}
+
+#[cfg(all(feature = "ocr", feature = "layout-detection"))]
+fn follows_with_prose(
+    element: &crate::types::internal::InternalElement,
+    next_element: &crate::types::internal::InternalElement,
+    page_height: f32,
+) -> bool {
+    const MIN_PROSE_WORDS: usize = 8;
+    const MIN_FIRST_BLOCK_TOP_FRACTION: f32 = 0.65;
+    const MAX_FIRST_BLOCK_HEIGHT_FRACTION: f32 = 0.15;
+    const MAX_PROSE_GAP_FRACTION: f32 = 0.15;
+
+    let prose = next_element.text.trim();
+    let Some((_, first_bottom, _, first_top)) = pdf_block_bbox(element, page_height) else {
+        return false;
+    };
+    let Some((_, _, _, prose_top)) = pdf_block_bbox(next_element, page_height) else {
+        return false;
+    };
+    let prose_gap = first_bottom - prose_top;
+    first_top >= page_height * MIN_FIRST_BLOCK_TOP_FRACTION
+        && first_top - first_bottom <= page_height * MAX_FIRST_BLOCK_HEIGHT_FRACTION
+        && (0.0..=page_height * MAX_PROSE_GAP_FRACTION).contains(&prose_gap)
+        && prose.split_whitespace().count() >= MIN_PROSE_WORDS
+        && prose.chars().any(|character| character.is_lowercase())
+        && prose.ends_with(['.', '!', '?'])
+}
+
+#[cfg(all(feature = "ocr", feature = "layout-detection"))]
+fn promote_second_line_to_title(lines: &mut [types::PdfParagraph], hint_indices: &mut [Option<usize>]) {
+    const TITLE_LINE_INDEX: usize = 1;
+    let Some(title) = lines.get_mut(TITLE_LINE_INDEX) else {
+        return;
+    };
+    if has_structural_override(title) {
+        return;
+    }
+    title.heading_level = Some(1);
+    title.layout_class = Some(types::LayoutHintClass::Title);
+    if let Some(hint_index) = hint_indices.get_mut(TITLE_LINE_INDEX) {
+        *hint_index = None;
+    }
 }
 
 #[cfg(feature = "ocr")]
@@ -678,6 +804,143 @@ mod tests {
             right: 500.0,
             top,
         }
+    }
+
+    #[cfg(feature = "layout-detection")]
+    fn logo_title_test_document(first_block: &str, prose: Option<&str>) -> InternalDocument {
+        let mut doc = InternalDocument::new("test");
+        let mut first = InternalElement::text(
+            ElementKind::OcrText {
+                level: OcrElementLevel::Block,
+            },
+            first_block,
+            0,
+        );
+        first.bbox = Some(BoundingBox {
+            x0: 100.0,
+            y0: 100.0,
+            x1: 500.0,
+            y1: 180.0,
+        });
+        doc.push_element(first);
+
+        if let Some(prose) = prose {
+            let mut body = InternalElement::text(
+                ElementKind::OcrText {
+                    level: OcrElementLevel::Block,
+                },
+                prose,
+                0,
+            );
+            body.bbox = Some(BoundingBox {
+                x0: 50.0,
+                y0: 220.0,
+                x1: 550.0,
+                y1: 400.0,
+            });
+            doc.push_element(body);
+        }
+        doc
+    }
+
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn test_first_logo_block_promotes_following_title_without_reordering() {
+        let prose = "This is a complete body sentence with enough words to identify ordinary prose.";
+        let doc = logo_title_test_document("IDRH\nNon-text-searchable PDF", Some(prose));
+        let hints = [types::LayoutHint {
+            class_name: types::LayoutHintClass::Text,
+            confidence: 0.97,
+            left: 50.0,
+            bottom: 750.0,
+            right: 550.0,
+            top: 920.0,
+        }];
+
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2);
+
+        assert_eq!(paragraphs.len(), 3);
+        assert_eq!(paragraphs[0].text, "IDRH");
+        assert_eq!(paragraphs[0].heading_level, None);
+        assert_eq!(paragraphs[1].text, "Non-text-searchable PDF");
+        assert_eq!(paragraphs[1].heading_level, Some(1));
+        assert_eq!(paragraphs[1].layout_class, Some(types::LayoutHintClass::Title));
+        assert_eq!(paragraphs[2].text, prose);
+        assert_eq!(paragraphs[2].heading_level, None);
+    }
+
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn test_logo_title_fallback_requires_following_prose() {
+        let doc = logo_title_test_document("IDRH\nNon-text-searchable PDF", None);
+
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &[], 0.5, 0.2);
+
+        assert_eq!(paragraphs.len(), 1);
+        assert_eq!(paragraphs[0].text, "IDRH\nNon-text-searchable PDF");
+        assert_eq!(paragraphs[0].heading_level, None);
+    }
+
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn test_logo_title_fallback_preserves_non_logo_first_blocks() {
+        let prose = "This is a complete body sentence with enough words to identify ordinary prose.";
+        for first_block in [
+            "Quarterly results\nRevenue increased",
+            "Geschäftsstelle Ludwigstraße 23\n80539 München",
+            "NIVE <¥ Rs), ,\nYr A %",
+            "IDRH\nNon-text-searchable PDF.",
+        ] {
+            let doc = logo_title_test_document(first_block, Some(prose));
+
+            let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &[], 0.5, 0.2);
+
+            assert_eq!(paragraphs[0].text, first_block);
+            assert_eq!(paragraphs[0].heading_level, None);
+        }
+    }
+
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn test_logo_title_fallback_defers_to_semantic_heading_hint() {
+        let prose = "This is a complete body sentence with enough words to identify ordinary prose.";
+        let doc = logo_title_test_document("IDRH\nNon-text-searchable PDF", Some(prose));
+        let hints = [types::LayoutHint {
+            class_name: types::LayoutHintClass::SectionHeader,
+            confidence: 0.95,
+            left: 700.0,
+            bottom: 700.0,
+            right: 900.0,
+            top: 750.0,
+        }];
+
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2);
+
+        assert_eq!(paragraphs[0].text, "IDRH\nNon-text-searchable PDF");
+        assert_eq!(paragraphs[0].heading_level, None);
+    }
+
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn test_logo_title_fallback_preserves_existing_structural_override() {
+        let prose = "This is a complete body sentence with enough words to identify ordinary prose.";
+        let doc = logo_title_test_document("IDRH\nfunction title() {", Some(prose));
+        let hints = [types::LayoutHint {
+            class_name: types::LayoutHintClass::Code,
+            confidence: 0.95,
+            left: 100.0,
+            bottom: 820.0,
+            right: 500.0,
+            top: 860.0,
+        }];
+
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2);
+
+        assert_eq!(paragraphs[0].text, "IDRH");
+        assert_eq!(paragraphs[0].heading_level, None);
+        assert!(paragraphs[1].is_code_block);
+        assert_eq!(paragraphs[1].heading_level, None);
+        assert_eq!(paragraphs[1].layout_class, Some(types::LayoutHintClass::Code));
     }
 
     #[cfg(feature = "layout-detection")]

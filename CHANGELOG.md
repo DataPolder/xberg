@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   paragraphs and merging multi-line headings, code, pictures, and wrapped list items by hint.
 - PDF Markdown preserves strong native headings when a lower-confidence layout Code hint lacks
   structured code evidence.
+- OCR Markdown recovers a title from a guarded first-block logo/title pattern when the layout model
+  emits no semantic heading region.
 
 ## [1.0.3] - 2026-07-29
 
