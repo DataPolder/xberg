@@ -60,6 +60,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   preserving RTL, rotated, vertical-writing, and mathematical span order.
 - PDF extraction recovers and stitches label-heavy financial tables without merging independent
   aligned tables.
+- PDF Markdown atomically replaces adjacent native side-by-side table cohorts with validated layout
+  table cohorts, avoiding mixed grids and dropped financial-table structure.
 - PDF Markdown preserves explicit word boundaries and changelog heading hierarchy.
 - OCR Markdown prefers validated semantic layout hints over broad text regions at comparable
   overlap.

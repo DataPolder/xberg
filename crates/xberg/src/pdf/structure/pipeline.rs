@@ -2344,9 +2344,12 @@ fn deduplicate_overlapping_tables(
     let mut protected_layout_children = ahash::AHashSet::new();
 
     if preference != TableOverlapPreference::Native {
-        for (parent, children) in side_by_side_layout_replacements(tables, native_count) {
+        // A complete split cohort is one structural alternative to its native source
+        // cohort. Select it atomically for every non-Native preference: pairwise
+        // content weighting could otherwise mix incompatible rows from both grids.
+        for (parents, children) in side_by_side_layout_replacements(tables, native_count) {
             protected_layout_children.extend(children);
-            to_remove.insert(parent);
+            to_remove.extend(parents);
         }
     }
 
@@ -2432,8 +2435,8 @@ fn deduplicate_overlapping_tables(
     canonicalize_affected_table_rows(tables, affected_rows);
 }
 
-/// A layout child must be almost entirely inside the native parent. This rejects
-/// neighboring or weakly intersecting detections while allowing crop rounding.
+/// Required containment for a layout child and, in one-to-one cohort matching,
+/// reciprocal coverage of its corresponding native parent.
 const SIDE_BY_SIDE_CHILD_PARENT_OVERLAP: f64 = 0.8;
 /// Both children must describe the same row band, rather than stacked tables.
 const SIDE_BY_SIDE_VERTICAL_OVERLAP: f64 = 0.6;
@@ -2447,22 +2450,145 @@ const SIDE_BY_SIDE_PARENT_AREA_COVERAGE: f64 = 0.65;
 /// the same layout table rather than distinct parts of a split table.
 const LAYOUT_CHILD_DUPLICATE_OVERLAP: f64 = 0.9;
 
-fn side_by_side_layout_replacements(tables: &[crate::types::Table], native_count: usize) -> Vec<(usize, Vec<usize>)> {
-    (0..native_count.min(tables.len()))
-        .filter_map(|parent| {
-            let parent_bbox = tables[parent].bounding_box.as_ref()?;
-            let children: Vec<_> = (native_count..tables.len())
-                .filter(|&child| {
-                    tables[child].page_number == tables[parent].page_number
-                        && tables[child].bounding_box.as_ref().is_some_and(|bbox| {
-                            bbox_overlap_fraction(bbox, parent_bbox) >= SIDE_BY_SIDE_CHILD_PARENT_OVERLAP
-                        })
-                })
-                .collect();
-            let children = deduplicate_layout_candidates(tables, children);
-            is_side_by_side_replacement(tables, parent_bbox, &children).then_some((parent, children))
+fn side_by_side_layout_replacements(
+    tables: &[crate::types::Table],
+    native_count: usize,
+) -> Vec<(Vec<usize>, Vec<usize>)> {
+    let native_count = native_count.min(tables.len());
+    let rows = native_candidate_rows(tables, native_count);
+    let mut used_native = ahash::AHashSet::new();
+    let mut used_layout = ahash::AHashSet::new();
+    let mut replacements = Vec::new();
+    for parent in rows.iter().flatten().copied() {
+        let parent_bbox = tables[parent].bounding_box.as_ref().expect("candidate has bbox");
+        let mut children = layout_children_for_parent(tables, native_count, tables[parent].page_number, parent_bbox);
+        children.retain(|child| !used_layout.contains(child));
+        if !used_native.contains(&parent) && is_side_by_side_replacement(tables, parent_bbox, &children) {
+            used_native.insert(parent);
+            used_layout.extend(children.iter().copied());
+            replacements.push((vec![parent], children));
+        }
+    }
+    replacements.extend(side_by_side_native_cohort_replacements(
+        tables,
+        native_count,
+        &rows,
+        &mut used_native,
+        &mut used_layout,
+    ));
+    replacements
+}
+
+fn side_by_side_native_cohort_replacements(
+    tables: &[crate::types::Table],
+    native_count: usize,
+    rows: &[Vec<usize>],
+    used_native: &mut ahash::AHashSet<usize>,
+    used_layout: &mut ahash::AHashSet<usize>,
+) -> Vec<(Vec<usize>, Vec<usize>)> {
+    let mut replacements = Vec::new();
+    for pair in rows.iter().flat_map(|row| row.windows(2)) {
+        let parents = vec![pair[0], pair[1]];
+        if parents.iter().any(|parent| used_native.contains(parent)) {
+            continue;
+        }
+        let Some(parent_bbox) = table_union_bbox(&tables[parents[0]], &tables[parents[1]]) else {
+            continue;
+        };
+        if !is_side_by_side_replacement(tables, &parent_bbox, &parents) {
+            continue;
+        }
+        let mut children =
+            layout_children_for_parent(tables, native_count, tables[parents[0]].page_number, &parent_bbox);
+        children.retain(|child| !used_layout.contains(child));
+        if children.len() != 2
+            || !is_side_by_side_replacement(tables, &parent_bbox, &children)
+            || !replacement_children_correspond(tables, &parents, &children)
+        {
+            continue;
+        }
+        used_native.extend(parents.iter().copied());
+        used_layout.extend(children.iter().copied());
+        replacements.push((parents, children));
+    }
+    replacements
+}
+
+fn native_candidate_rows(tables: &[crate::types::Table], native_count: usize) -> Vec<Vec<usize>> {
+    let mut candidates: Vec<_> = (0..native_count)
+        .filter(|&index| tables[index].bounding_box.is_some())
+        .collect();
+    candidates.sort_by(|&left, &right| {
+        tables[left]
+            .page_number
+            .cmp(&tables[right].page_number)
+            .then_with(|| table_top(tables, right).total_cmp(&table_top(tables, left)))
+            .then_with(|| table_left(tables, left).total_cmp(&table_left(tables, right)))
+    });
+    let mut rows: Vec<Vec<usize>> = Vec::new();
+    for candidate in candidates {
+        let joins_last_row = rows.last().is_some_and(|row| {
+            tables[row[0]].page_number == tables[candidate].page_number
+                && vertical_overlap_fraction(
+                    tables[row[0]].bounding_box.as_ref().expect("candidate has bbox"),
+                    tables[candidate].bounding_box.as_ref().expect("candidate has bbox"),
+                ) >= SIDE_BY_SIDE_VERTICAL_OVERLAP
+        });
+        if joins_last_row {
+            rows.last_mut().expect("row exists").push(candidate);
+        } else {
+            rows.push(vec![candidate]);
+        }
+    }
+    for row in &mut rows {
+        row.sort_by(|&left, &right| table_left(tables, left).total_cmp(&table_left(tables, right)));
+    }
+    rows
+}
+
+fn replacement_children_correspond(tables: &[crate::types::Table], parents: &[usize], children: &[usize]) -> bool {
+    parents.iter().zip(children).all(|(&parent, &child)| {
+        let parent_bbox = tables[parent].bounding_box.as_ref().expect("candidate has bbox");
+        let child_bbox = tables[child].bounding_box.as_ref().expect("candidate has bbox");
+        bbox_overlap_fraction(child_bbox, parent_bbox) >= SIDE_BY_SIDE_CHILD_PARENT_OVERLAP
+            && bbox_overlap_fraction(parent_bbox, child_bbox) >= SIDE_BY_SIDE_CHILD_PARENT_OVERLAP
+    })
+}
+
+fn table_top(tables: &[crate::types::Table], index: usize) -> f64 {
+    tables[index]
+        .bounding_box
+        .as_ref()
+        .map_or(f64::NEG_INFINITY, |bbox| bbox.y1)
+}
+
+fn layout_children_for_parent(
+    tables: &[crate::types::Table],
+    native_count: usize,
+    page_number: u32,
+    parent_bbox: &crate::types::BoundingBox,
+) -> Vec<usize> {
+    let children = (native_count..tables.len())
+        .filter(|&child| {
+            tables[child].page_number == page_number
+                && tables[child]
+                    .bounding_box
+                    .as_ref()
+                    .is_some_and(|bbox| bbox_overlap_fraction(bbox, parent_bbox) >= SIDE_BY_SIDE_CHILD_PARENT_OVERLAP)
         })
-        .collect()
+        .collect();
+    deduplicate_layout_candidates(tables, children)
+}
+
+fn table_union_bbox(left: &crate::types::Table, right: &crate::types::Table) -> Option<crate::types::BoundingBox> {
+    let left = left.bounding_box.as_ref()?;
+    let right = right.bounding_box.as_ref()?;
+    Some(crate::types::BoundingBox {
+        x0: left.x0.min(right.x0),
+        y0: left.y0.min(right.y0),
+        x1: left.x1.max(right.x1),
+        y1: left.y1.max(right.y1),
+    })
 }
 
 fn deduplicate_layout_candidates(tables: &[crate::types::Table], mut candidates: Vec<usize>) -> Vec<usize> {
@@ -3866,6 +3992,129 @@ mod tests {
         assert_eq!(
             emitted.iter().map(|table| table.markdown.as_str()).collect::<Vec<_>>(),
             ["left", "right"]
+        );
+    }
+
+    #[test]
+    fn side_by_side_layout_cohort_replaces_two_content_heavy_native_parents() {
+        use crate::core::config::layout::TableOverlapPreference;
+        let native = vec![
+            ov_table(1, (0.0, 0.0, 95.0, 100.0), &"native left".repeat(100)),
+            ov_table(1, (105.0, 0.0, 200.0, 100.0), &"native right".repeat(100)),
+        ];
+        let layout = vec![
+            ov_table(1, (0.0, 0.0, 95.0, 100.0), "layout left"),
+            ov_table(1, (105.0, 0.0, 200.0, 100.0), "layout right"),
+        ];
+
+        let emitted = prepare_emitted_tables(&native, layout, TableOverlapPreference::Content);
+
+        assert_eq!(
+            emitted.iter().map(|table| table.markdown.as_str()).collect::<Vec<_>>(),
+            ["layout left", "layout right"]
+        );
+    }
+
+    #[test]
+    fn native_preference_keeps_two_parents_over_side_by_side_layout_cohort() {
+        use crate::core::config::layout::TableOverlapPreference;
+        let native = vec![
+            ov_table(1, (0.0, 0.0, 95.0, 100.0), "native left"),
+            ov_table(1, (105.0, 0.0, 200.0, 100.0), "native right"),
+        ];
+        let layout = vec![
+            ov_table(1, (0.0, 0.0, 95.0, 100.0), &"layout left".repeat(100)),
+            ov_table(1, (105.0, 0.0, 200.0, 100.0), &"layout right".repeat(100)),
+        ];
+
+        let emitted = prepare_emitted_tables(&native, layout, TableOverlapPreference::Native);
+
+        assert_eq!(
+            emitted.iter().map(|table| table.markdown.as_str()).collect::<Vec<_>>(),
+            ["native left", "native right"]
+        );
+    }
+
+    #[test]
+    fn one_layout_child_does_not_replace_two_native_parents() {
+        use crate::core::config::layout::TableOverlapPreference;
+        let native = vec![
+            ov_table(1, (0.0, 0.0, 95.0, 100.0), &"native left".repeat(100)),
+            ov_table(1, (105.0, 0.0, 200.0, 100.0), &"native right".repeat(100)),
+        ];
+        let layout = vec![ov_table(1, (0.0, 0.0, 95.0, 100.0), "layout left")];
+
+        let emitted = prepare_emitted_tables(&native, layout, TableOverlapPreference::Content);
+
+        assert_eq!(emitted.len(), 2);
+        assert!(emitted.iter().all(|table| table.markdown.starts_with("native")));
+    }
+
+    #[test]
+    fn stacked_native_parents_do_not_form_side_by_side_replacement_cohort() {
+        let mut tables = vec![
+            ov_table(1, (0.0, 0.0, 200.0, 45.0), "native top"),
+            ov_table(1, (0.0, 55.0, 200.0, 100.0), "native bottom"),
+        ];
+        tables.extend([
+            ov_table(1, (0.0, 0.0, 95.0, 100.0), "layout left"),
+            ov_table(1, (105.0, 0.0, 200.0, 100.0), "layout right"),
+        ]);
+
+        assert!(side_by_side_layout_replacements(&tables, 2).is_empty());
+    }
+
+    #[test]
+    fn weakly_overlapping_layout_children_do_not_replace_two_native_parents() {
+        let mut tables = vec![
+            ov_table(1, (0.0, 0.0, 95.0, 100.0), "native left"),
+            ov_table(1, (105.0, 0.0, 200.0, 100.0), "native right"),
+        ];
+        tables.extend([
+            ov_table(1, (-70.0, 0.0, 80.0, 100.0), "layout left"),
+            ov_table(1, (120.0, 0.0, 270.0, 100.0), "layout right"),
+        ]);
+
+        assert!(side_by_side_layout_replacements(&tables, 2).is_empty());
+    }
+
+    #[test]
+    fn layout_cohort_rejects_child_that_does_not_cover_corresponding_parent() {
+        let mut tables = vec![
+            ov_table(1, (0.0, 0.0, 95.0, 100.0), "native left"),
+            ov_table(1, (105.0, 0.0, 200.0, 100.0), "native right"),
+        ];
+        tables.extend([
+            ov_table(1, (0.0, 0.0, 95.0, 100.0), "layout left"),
+            ov_table(1, (105.0, 0.0, 175.0, 100.0), "layout right"),
+        ]);
+
+        assert!(side_by_side_layout_replacements(&tables, 2).is_empty());
+    }
+
+    #[test]
+    fn three_native_candidates_select_one_disjoint_adjacent_cohort() {
+        use crate::core::config::layout::TableOverlapPreference;
+        let native = vec![
+            ov_table(1, (105.0, 0.0, 200.0, 100.0), &"native middle".repeat(100)),
+            ov_table(1, (210.0, 0.0, 305.0, 100.0), &"native right".repeat(100)),
+            ov_table(1, (0.0, 0.0, 95.0, 100.0), &"native left".repeat(100)),
+        ];
+        let layout = vec![
+            ov_table(1, (210.0, 0.0, 305.0, 100.0), "layout right"),
+            ov_table(1, (0.0, 0.0, 95.0, 100.0), "layout left"),
+            ov_table(1, (105.0, 0.0, 200.0, 100.0), "layout middle"),
+        ];
+        let mut candidates = native.clone();
+        candidates.extend(layout.clone());
+
+        let replacements = side_by_side_layout_replacements(&candidates, native.len());
+        assert_eq!(replacements, [(vec![2, 0], vec![4, 5])]);
+
+        let emitted = prepare_emitted_tables(&native, layout, TableOverlapPreference::Content);
+        assert_eq!(
+            emitted.iter().map(|table| table.markdown.as_str()).collect::<Vec<_>>(),
+            ["layout left", "layout middle", &"native right".repeat(100)]
         );
     }
 
