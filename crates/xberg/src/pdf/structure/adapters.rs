@@ -156,9 +156,12 @@ fn find_ordered_list_successor(
     max_intervening_paragraphs: usize,
 ) -> Option<usize> {
     let first_candidate = predecessor_index + 1;
+    if first_candidate >= positions.len() {
+        return None;
+    }
     let last_candidate = (first_candidate + max_intervening_paragraphs).min(positions.len().saturating_sub(1));
-    for candidate_index in first_candidate..=last_candidate {
-        let (page_index, paragraph_index) = positions[candidate_index];
+    for (offset, &(page_index, paragraph_index)) in positions[first_candidate..=last_candidate].iter().enumerate() {
+        let candidate_index = first_candidate + offset;
         let paragraph = &pages[page_index][paragraph_index];
         if let Some(actual_value) = numeric_list_value(paragraph) {
             return (actual_value == expected_value && is_ordered_list_candidate(paragraph)).then_some(candidate_index);

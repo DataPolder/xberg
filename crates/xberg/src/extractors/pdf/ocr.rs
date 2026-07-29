@@ -4551,7 +4551,7 @@ Name: ___
             ..Default::default()
         };
 
-        let transformed = transform_ocr_elements_to_render_space(&[element.clone()], &metadata, 100, 200);
+        let transformed = transform_ocr_elements_to_render_space(std::slice::from_ref(&element), &metadata, 100, 200);
 
         assert_eq!(transformed[0].geometry, element.geometry);
     }
