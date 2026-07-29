@@ -10,13 +10,69 @@ use rmcp::{
     handler::server::{
         prompt::PromptContext,
         router::{prompt::PromptRouter, tool::ToolRouter},
+        tool::ToolCallContext,
         wrapper::Parameters,
     },
     model::*,
+    task_manager::{TaskExit, TaskManager, TaskOptions},
     tool, tool_handler, tool_router,
     transport::stdio,
 };
 use tower::util::BoxCloneService;
+
+/// Tool names materialized as SEP-2663 tasks (`tasks/get`, `tasks/update`,
+/// `tasks/cancel`) when the calling client declares the tasks extension
+/// capability. These are the operations whose latency (large documents,
+/// batches of inputs, or multi-gigabyte model downloads) benefits from
+/// asynchronous polling instead of holding the `tools/call` request open
+/// for the duration of the work. All other tools stay synchronous.
+const TASK_ELIGIBLE_TOOLS: &[&str] = &["extract", "extract_batch", "cache_warm"];
+
+/// Task TTL for `extract`/`extract_batch`: generous headroom above the
+/// documented OCR performance targets (<2s single page, <10s 10-page
+/// document) to cover pathological large or heavily-scanned documents.
+const EXTRACTION_TASK_TTL_MS: u64 = 15 * 60 * 1000;
+
+/// Task TTL for `cache_warm`: model downloads run over the network against
+/// third-party hosts and can legitimately take longer than extraction.
+const CACHE_WARM_TASK_TTL_MS: u64 = 30 * 60 * 1000;
+
+#[cfg(any(
+    test,
+    feature = "paddle-ocr",
+    feature = "layout-detection",
+    feature = "embeddings",
+    feature = "ner-onnx"
+))]
+#[allow(dead_code)] // Individual dispositions are feature-dependent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CacheWarmDisposition {
+    AvailabilityConfirmed,
+    Downloaded,
+    AlreadyCached,
+}
+
+#[cfg(any(
+    test,
+    feature = "paddle-ocr",
+    feature = "layout-detection",
+    feature = "embeddings",
+    feature = "ner-onnx"
+))]
+fn record_warmed_model(
+    available: &mut Vec<String>,
+    downloaded: &mut Vec<String>,
+    already_cached: &mut Vec<String>,
+    label: String,
+    disposition: CacheWarmDisposition,
+) {
+    available.push(label.clone());
+    match disposition {
+        CacheWarmDisposition::AvailabilityConfirmed => {}
+        CacheWarmDisposition::Downloaded => downloaded.push(label),
+        CacheWarmDisposition::AlreadyCached => already_cached.push(label),
+    }
+}
 
 #[cfg(feature = "mcp-http")]
 use rmcp::transport::streamable_http_server::{
@@ -43,6 +99,9 @@ pub struct XbergMcp {
     /// The lock is held only long enough to clone the service.
     extraction_service:
         std::sync::Mutex<BoxCloneService<ExtractionRequest, crate::types::ExtractedDocument, crate::XbergError>>,
+    /// SEP-2663 task store for tools in [`TASK_ELIGIBLE_TOOLS`]. Cheaply
+    /// cloneable; all clones of an `XbergMcp` share the same task state.
+    tasks: TaskManager,
 }
 
 impl Clone for XbergMcp {
@@ -57,6 +116,7 @@ impl Clone for XbergMcp {
             prompt_router: self.prompt_router.clone(),
             default_config: self.default_config.clone(),
             extraction_service: std::sync::Mutex::new(svc),
+            tasks: self.tasks.clone(),
         }
     }
 }
@@ -99,6 +159,7 @@ impl XbergMcp {
             prompt_router: super::prompts::build_prompt_router(),
             default_config: std::sync::Arc::new(config),
             extraction_service: std::sync::Mutex::new(extraction_service),
+            tasks: TaskManager::new(),
         }
     }
 
@@ -268,7 +329,8 @@ impl XbergMcp {
     /// Shared Hugging Face Hub model cache files are intentionally excluded.
     #[tool(
         description = "Clear Xberg-managed cache files. Shared Hugging Face Hub model cache files are not removed.",
-        annotations(title = "Clear Cache", read_only_hint = false, destructive_hint = true)
+        annotations(title = "Clear Cache", read_only_hint = false, destructive_hint = true),
+        output_schema = rmcp::handler::server::common::schema_for_output::<super::schema::CacheClearOutput>()
     )]
     fn cache_clear(
         &self,
@@ -293,7 +355,14 @@ impl XbergMcp {
             freed_mb
         );
 
-        Ok(CallToolResult::success(vec![ContentBlock::text(response)]))
+        let dto = super::schema::CacheClearOutput {
+            directory: cache_dir.to_string_lossy().into_owned(),
+            removed_files: removed_files as u64,
+            freed_mb,
+        };
+        let mut tool_result = CallToolResult::success(vec![ContentBlock::text(response)]);
+        tool_result.structured_content = serde_json::to_value(&dto).ok();
+        Ok(tool_result)
     }
 
     /// Get Xberg version information.
@@ -387,7 +456,8 @@ impl XbergMcp {
             read_only_hint = false,
             destructive_hint = false,
             open_world_hint = true
-        )
+        ),
+        output_schema = rmcp::handler::server::common::schema_for_output::<super::schema::CacheWarmOutput>()
     )]
     #[allow(unused_mut)]
     fn cache_warm(
@@ -413,6 +483,7 @@ impl XbergMcp {
 
         let cache_base = resolve_cache_base();
 
+        let mut available: Vec<String> = Vec::new();
         let mut downloaded: Vec<String> = Vec::new();
         let mut already_cached: Vec<String> = Vec::new();
 
@@ -423,21 +494,45 @@ impl XbergMcp {
             manager.ensure_all_models().map_err(|e| {
                 rmcp::ErrorData::internal_error(format!("Failed to download PaddleOCR models: {}", e), None)
             })?;
-            downloaded.push("paddle-ocr v2 (server+mobile det, cls, doc_ori, unified+per-script rec)".to_string());
+            record_warmed_model(
+                &mut available,
+                &mut downloaded,
+                &mut already_cached,
+                "paddle-ocr v2 (server+mobile det, cls, doc_ori, unified+per-script rec)".to_string(),
+                CacheWarmDisposition::AvailabilityConfirmed,
+            );
         }
 
         #[cfg(feature = "layout-detection")]
         {
             let layout_dir = cache_base.join("layout");
             let manager = crate::layout::LayoutModelManager::new(Some(layout_dir));
-            let was_cached = manager.is_rtdetr_cached() && manager.is_tatr_cached();
-            if was_cached {
-                already_cached.push("layout (rtdetr, tatr)".to_string());
+            let rtdetr_was_cached = manager.is_rtdetr_cached();
+            let tatr_was_cached = manager.is_tatr_cached();
+            if rtdetr_was_cached && tatr_was_cached {
+                record_warmed_model(
+                    &mut available,
+                    &mut downloaded,
+                    &mut already_cached,
+                    "layout (rtdetr, tatr)".to_string(),
+                    CacheWarmDisposition::AlreadyCached,
+                );
             } else {
                 manager.ensure_all_models().map_err(|e| {
                     rmcp::ErrorData::internal_error(format!("Failed to download layout models: {}", e), None)
                 })?;
-                downloaded.push("layout (rtdetr, tatr)".to_string());
+                let disposition = if !rtdetr_was_cached && !tatr_was_cached {
+                    CacheWarmDisposition::Downloaded
+                } else {
+                    CacheWarmDisposition::AvailabilityConfirmed
+                };
+                record_warmed_model(
+                    &mut available,
+                    &mut downloaded,
+                    &mut already_cached,
+                    "layout (rtdetr, tatr)".to_string(),
+                    disposition,
+                );
             }
         }
 
@@ -479,7 +574,13 @@ impl XbergMcp {
                         None,
                     )
                 })?;
-                downloaded.push(label);
+                record_warmed_model(
+                    &mut available,
+                    &mut downloaded,
+                    &mut already_cached,
+                    label,
+                    CacheWarmDisposition::AvailabilityConfirmed,
+                );
             }
         }
 
@@ -511,10 +612,13 @@ impl XbergMcp {
                             None,
                         )
                     })?;
-                    downloaded.push(format!(
-                        "ner gliner ({model}) -> {} (Hugging Face cache)",
-                        path.display()
-                    ));
+                    record_warmed_model(
+                        &mut available,
+                        &mut downloaded,
+                        &mut already_cached,
+                        format!("ner gliner ({model}) -> {} (Hugging Face cache)", path.display()),
+                        CacheWarmDisposition::AvailabilityConfirmed,
+                    );
                 }
             }
         }
@@ -529,6 +633,13 @@ impl XbergMcp {
             }
         }
 
+        let dto = super::schema::CacheWarmOutput {
+            cache_dir: cache_base.to_string_lossy().into_owned(),
+            available,
+            downloaded,
+            already_cached,
+        };
+
         let response = serde_json::json!({
             "cache_dir": cache_base.to_string_lossy(),
             "xberg_cache_dir": cache_base.to_string_lossy(),
@@ -537,13 +648,94 @@ impl XbergMcp {
             } else {
                 None
             },
-            "downloaded": downloaded,
-            "already_cached": already_cached,
+            "available": dto.available.clone(),
+            "downloaded": dto.downloaded.clone(),
+            "already_cached": dto.already_cached.clone(),
         });
 
-        Ok(CallToolResult::success(vec![ContentBlock::text(
+        let mut tool_result = CallToolResult::success(vec![ContentBlock::text(
             serde_json::to_string_pretty(&response).unwrap_or_default(),
-        )]))
+        )]);
+        tool_result.structured_content = serde_json::to_value(&dto).ok();
+        Ok(tool_result)
+    }
+}
+
+impl XbergMcp {
+    /// Materialize a SEP-2663 task for `request` and return its
+    /// `CreateTaskResult` handle. Only called for tool names in
+    /// [`TASK_ELIGIBLE_TOOLS`] once the caller has confirmed the client
+    /// declared the tasks extension capability; unknown names are rejected
+    /// rather than silently falling back to synchronous execution, since a
+    /// caller reaching this method already committed to the task path.
+    ///
+    /// Cancellation is cooperative (SEP-2663): a `tasks/cancel` unblocks
+    /// [`rmcp::task_manager::TaskContext::cancelled`] and the task settles as
+    /// `cancelled` immediately, but the underlying extraction/download may
+    /// keep running in the background to completion since the core
+    /// extraction APIs do not accept a cancellation token today.
+    fn spawn_task_for_tool(&self, request: CallToolRequestParams) -> Result<CallToolResponse, rmcp::ErrorData> {
+        let arguments = serde_json::Value::Object(request.arguments.unwrap_or_default());
+        let server = self.clone();
+
+        let task = match request.name.as_ref() {
+            "extract" => {
+                let params: super::params::ExtractParams = serde_json::from_value(arguments)
+                    .map_err(|e| rmcp::ErrorData::invalid_params(format!("Invalid extract params: {e}"), None))?;
+                self.tasks
+                    .spawn(TaskOptions::new().with_ttl_ms(EXTRACTION_TASK_TTL_MS), move |ctx| {
+                        Box::pin(async move {
+                            tokio::select! {
+                                _ = ctx.cancelled() => Err(TaskExit::Cancelled),
+                                result = server.extract(Parameters(params)) => result.map_err(TaskExit::Error),
+                            }
+                        })
+                    })
+            }
+            "extract_batch" => {
+                let params: super::params::ExtractBatchParams = serde_json::from_value(arguments)
+                    .map_err(|e| rmcp::ErrorData::invalid_params(format!("Invalid extract_batch params: {e}"), None))?;
+                self.tasks
+                    .spawn(TaskOptions::new().with_ttl_ms(EXTRACTION_TASK_TTL_MS), move |ctx| {
+                        Box::pin(async move {
+                            tokio::select! {
+                                _ = ctx.cancelled() => Err(TaskExit::Cancelled),
+                                result = server.extract_batch(Parameters(params)) => result.map_err(TaskExit::Error),
+                            }
+                        })
+                    })
+            }
+            "cache_warm" => {
+                let params: super::params::CacheWarmParams = serde_json::from_value(arguments)
+                    .map_err(|e| rmcp::ErrorData::invalid_params(format!("Invalid cache_warm params: {e}"), None))?;
+                self.tasks
+                    .spawn(TaskOptions::new().with_ttl_ms(CACHE_WARM_TASK_TTL_MS), move |ctx| {
+                        Box::pin(async move {
+                            // cache_warm is synchronous (blocking downloads/IO); run it off the
+                            // async runtime per the async-and-concurrency rule.
+                            let handle = tokio::task::spawn_blocking(move || server.cache_warm(Parameters(params)));
+                            tokio::select! {
+                                _ = ctx.cancelled() => Err(TaskExit::Cancelled),
+                                joined = handle => match joined {
+                                    Ok(result) => result.map_err(TaskExit::Error),
+                                    Err(join_error) => Err(TaskExit::Error(rmcp::ErrorData::internal_error(
+                                        format!("cache_warm task panicked: {join_error}"),
+                                        None,
+                                    ))),
+                                },
+                            }
+                        })
+                    })
+            }
+            other => {
+                return Err(rmcp::ErrorData::invalid_params(
+                    format!("'{other}' is not a task-eligible tool"),
+                    None,
+                ));
+            }
+        };
+
+        Ok(CallToolResponse::Task(CreateTaskResult::new(task)))
     }
 }
 
@@ -679,6 +871,7 @@ impl ServerHandler for XbergMcp {
             .enable_resources()
             .enable_prompts()
             .enable_completions()
+            .enable_tasks()
             .build();
 
         let server_info = Implementation::new("xberg-mcp", env!("CARGO_PKG_VERSION"))
@@ -696,6 +889,56 @@ impl ServerHandler for XbergMcp {
                  for scanned documents, force_ocr=true to always use OCR even if text extraction \
                  succeeds. Use disable_ocr=true to skip OCR entirely (images return metadata only).",
             )
+    }
+
+    /// Dispatch `tools/call`, materializing a SEP-2663 task for
+    /// [`TASK_ELIGIBLE_TOOLS`] when the client declared the tasks extension
+    /// capability, and falling back to the standard synchronous tool router
+    /// otherwise (including for clients that never declared the capability).
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        context: rmcp::service::RequestContext<rmcp::service::RoleServer>,
+    ) -> Result<CallToolResponse, rmcp::ErrorData> {
+        let client_supports_tasks = context.client_capabilities().is_some_and(|caps| caps.supports_tasks());
+
+        if client_supports_tasks && TASK_ELIGIBLE_TOOLS.contains(&request.name.as_ref()) {
+            return self.spawn_task_for_tool(request);
+        }
+
+        let tcc = ToolCallContext::new(self, request, context);
+        self.tool_router.call(tcc).await
+    }
+
+    /// SEP-2663 `tasks/get`: return the current task state.
+    async fn get_task(
+        &self,
+        request: GetTaskParams,
+        _context: rmcp::service::RequestContext<rmcp::service::RoleServer>,
+    ) -> Result<GetTaskResult, rmcp::ErrorData> {
+        Ok(GetTaskResult::new(self.tasks.get_task(&request.task_id)?))
+    }
+
+    /// SEP-2663 `tasks/update`: none of our task-eligible tools currently
+    /// surface mid-task `inputRequests` (elicitation/sampling/roots), so
+    /// this only exists to acknowledge the request per spec; it delegates to
+    /// the shared [`TaskManager`], which ignores unknown/stale keys.
+    async fn update_task(
+        &self,
+        request: UpdateTaskParams,
+        _context: rmcp::service::RequestContext<rmcp::service::RoleServer>,
+    ) -> Result<(), rmcp::ErrorData> {
+        self.tasks.update_task(&request.task_id, request.input_responses)
+    }
+
+    /// SEP-2663 `tasks/cancel`: cooperative cancellation, see
+    /// [`XbergMcp::spawn_task_for_tool`] for what "cooperative" means here.
+    async fn cancel_task(
+        &self,
+        request: CancelTaskParams,
+        _context: rmcp::service::RequestContext<rmcp::service::RoleServer>,
+    ) -> Result<(), rmcp::ErrorData> {
+        self.tasks.cancel_task(&request.task_id)
     }
 
     fn list_resources(
@@ -1409,6 +1652,8 @@ mod tests {
             "list_formats",
             "cache_stats",
             "cache_manifest",
+            "cache_clear",
+            "cache_warm",
         ];
         for name in structured_tools {
             let tool = tools
@@ -1421,6 +1666,51 @@ mod tests {
                 name
             );
         }
+    }
+
+    #[test]
+    fn test_record_warmed_model_reports_only_confirmed_cache_dispositions() {
+        let mut available = Vec::new();
+        let mut downloaded = Vec::new();
+        let mut already_cached = Vec::new();
+
+        record_warmed_model(
+            &mut available,
+            &mut downloaded,
+            &mut already_cached,
+            "availability-only".to_string(),
+            CacheWarmDisposition::AvailabilityConfirmed,
+        );
+        record_warmed_model(
+            &mut available,
+            &mut downloaded,
+            &mut already_cached,
+            "downloaded".to_string(),
+            CacheWarmDisposition::Downloaded,
+        );
+        record_warmed_model(
+            &mut available,
+            &mut downloaded,
+            &mut already_cached,
+            "cached".to_string(),
+            CacheWarmDisposition::AlreadyCached,
+        );
+
+        assert_eq!(
+            available,
+            vec!["availability-only", "downloaded", "cached"],
+            "every successful warm operation must be reported as available"
+        );
+        assert_eq!(
+            downloaded,
+            vec!["downloaded"],
+            "only a confirmed download belongs in downloaded"
+        );
+        assert_eq!(
+            already_cached,
+            vec!["cached"],
+            "only a confirmed cache hit belongs in already_cached"
+        );
     }
 
     #[test]
@@ -1525,5 +1815,79 @@ mod tests {
             "duplicate of an existing default host must not be added again"
         );
         assert!(config.allowed_hosts.contains(&"proxy.example.com".to_string()));
+    }
+
+    #[test]
+    fn test_capabilities_declare_tasks_extension() {
+        let server = XbergMcp::with_config(ExtractionConfig::default());
+        let info = server.get_info();
+        assert!(
+            info.capabilities.supports_tasks(),
+            "SEP-2663 tasks extension capability should be declared"
+        );
+    }
+
+    #[test]
+    fn test_spawn_task_for_tool_rejects_non_task_eligible_name() {
+        let server = XbergMcp::with_config(ExtractionConfig::default());
+        let request = CallToolRequestParams::new("get_version");
+        let result = server.spawn_task_for_tool(request);
+        assert!(
+            result.is_err(),
+            "non-task-eligible tool names must not materialize a task"
+        );
+    }
+
+    #[test]
+    fn test_spawn_task_for_tool_extract_rejects_invalid_params_synchronously() {
+        let server = XbergMcp::with_config(ExtractionConfig::default());
+        // No arguments at all: ExtractParams.input is required, so this must
+        // fail during deserialization before any task is spawned.
+        let request = CallToolRequestParams::new("extract");
+        let result = server.spawn_task_for_tool(request);
+        assert!(
+            result.is_err(),
+            "missing required 'input' field should be rejected before spawning a task"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_spawn_task_for_tool_extract_task_reaches_terminal_state() {
+        let server = XbergMcp::with_config(ExtractionConfig::default());
+        let mut arguments = rmcp::model::JsonObject::new();
+        arguments.insert(
+            "input".to_string(),
+            serde_json::json!({"kind": "uri", "uri": "/nonexistent/xberg-mcp-task-test.bin"}),
+        );
+        let request = CallToolRequestParams::new("extract").with_arguments(arguments);
+
+        let response = server
+            .spawn_task_for_tool(request)
+            .expect("valid extract params should materialize a task");
+        let task_id = match response {
+            CallToolResponse::Task(create) => create.task.task_id,
+            other => panic!("expected CreateTaskResult, got {other:?}"),
+        };
+
+        let mut detailed = server
+            .tasks
+            .get_task(&task_id)
+            .expect("task should exist right after spawn");
+        for _ in 0..200 {
+            if detailed.status().is_terminal() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            detailed = server
+                .tasks
+                .get_task(&task_id)
+                .expect("task should still be tracked while polling");
+        }
+
+        assert_eq!(
+            detailed.status(),
+            TaskStatus::Failed,
+            "extraction from a nonexistent path should settle as a failed task, not hang"
+        );
     }
 }

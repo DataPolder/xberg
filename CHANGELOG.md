@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- MCP clients can run `extract`, `extract_batch`, and `cache_warm` as cancellable SEP-2663 tasks
+  when they advertise task support; synchronous clients remain compatible.
+- MCP `cache_clear` and `cache_warm` return typed structured results with cleared-file totals and
+  model availability separated from confirmed cache-hit and download status.
+
 ### Fixed
 
 - **#1338**: Default `OcrStrategy::Auto` extraction OCRs scanned PDFs with no native text layer

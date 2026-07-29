@@ -88,6 +88,43 @@ pub struct CacheStatsOutput {
     pub available_space_mb: f64,
 }
 
+/// Structured output for cache clearing.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CacheClearOutput {
+    /// Absolute path to the cache directory that was cleared.
+    #[schemars(description = "Absolute path to the cache directory that was cleared")]
+    pub directory: String,
+    /// Number of files removed.
+    #[schemars(description = "Number of files removed")]
+    pub removed_files: u64,
+    /// Disk space freed in megabytes.
+    #[schemars(description = "Disk space freed in megabytes")]
+    pub freed_mb: f64,
+}
+
+/// Structured output for model cache warming.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CacheWarmOutput {
+    /// Absolute path to the Xberg-managed cache directory.
+    #[schemars(description = "Absolute path to the Xberg-managed cache directory")]
+    pub cache_dir: String,
+    /// Labels of models confirmed available after this call.
+    #[schemars(description = "Labels of models confirmed available after this call")]
+    pub available: Vec<String>,
+    /// Labels of models confirmed to have been newly downloaded during this call.
+    ///
+    /// Some model managers expose only an idempotent warm operation, not whether it
+    /// performed network I/O. Those models appear in `available` but not here.
+    #[schemars(description = "Labels of models confirmed newly downloaded during this call")]
+    pub downloaded: Vec<String>,
+    /// Labels of models confirmed to have already been present in the cache.
+    ///
+    /// Some model managers cannot distinguish a cache hit from a download. Those
+    /// models appear in `available` but not here.
+    #[schemars(description = "Labels of models confirmed already present in the cache")]
+    pub already_cached: Vec<String>,
+}
+
 /// Structured output for the model manifest.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CacheManifestOutput {
