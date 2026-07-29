@@ -110,6 +110,33 @@ fn build_archive_doc_sync(
     )
 }
 
+/// Returns true if `path` names an archive/tooling bookkeeping file (macOS `.DS_Store`,
+/// `__MACOSX/` AppleDouble resource forks, `._`-prefixed AppleDouble sidecars, Python
+/// `__pycache__/`/`.pyc`/`.pyo` bytecode, or Windows `Thumbs.db`/`desktop.ini`) rather than
+/// a real document, so it can be filtered out of archive `children` before extraction.
+fn is_archive_metadata_path(path: &str) -> bool {
+    let components: Vec<&str> = path.split(['/', '\\']).collect();
+    let basename = components.last().copied().unwrap_or(path);
+
+    let has_bookkeeping_dir = components
+        .iter()
+        .any(|component| *component == "__MACOSX" || *component == "__pycache__");
+    if has_bookkeeping_dir {
+        return true;
+    }
+
+    if basename == ".DS_Store" || basename == "Thumbs.db" || basename == "desktop.ini" {
+        return true;
+    }
+
+    if basename.starts_with("._") {
+        return true;
+    }
+
+    let lower = basename.to_ascii_lowercase();
+    lower.ends_with(".pyc") || lower.ends_with(".pyo")
+}
+
 /// Async version with recursive extraction of archive children.
 ///
 /// When `config.max_archive_depth > current_depth`, extracts each file in `file_bytes`
@@ -125,23 +152,34 @@ async fn build_archive_doc(
 ) -> InternalDocument {
     let mut children = Vec::new();
     let mut processing_warnings = Vec::new();
+    let mut filtered_count = 0u32;
 
     if config.max_archive_depth > current_depth && !file_bytes.is_empty() {
         for (path, bytes) in &file_bytes {
+            if is_archive_metadata_path(path) {
+                filtered_count += 1;
+                continue;
+            }
+
             let sniffed_mime = crate::core::mime::detect_mime_type_from_bytes(bytes).ok();
 
             // Sniffing sees markdown/CSV/YAML as plain UTF-8 and returns `text/plain`,
             // so fall back to the extension (as the top-level path does) to reach their
-            // real extractors; a concrete sniff (PDF, DOCX, ...) still wins. ~keep
+            // real extractors; a concrete sniff (PDF, DOCX, ...) still wins. Only default
+            // to plain text when the extension itself maps to a textual type — an
+            // unsniffable, extensionless (or unknown-extension) file is treated as
+            // `application/octet-stream` so the skip below fires instead of misreporting
+            // binary garbage as `text/plain`. ~keep
             let file_mime = match sniffed_mime {
                 Some(m) if m != crate::core::mime::PLAIN_TEXT_MIME_TYPE => m,
                 sniffed => crate::core::mime::detect_mime_type(path, false)
                     .ok()
                     .or(sniffed)
-                    .unwrap_or_else(|| crate::core::mime::PLAIN_TEXT_MIME_TYPE.to_string()),
+                    .unwrap_or_else(|| "application/octet-stream".to_string()),
             };
 
             if file_mime == "application/octet-stream" {
+                filtered_count += 1;
                 continue;
             }
 
@@ -164,6 +202,17 @@ async fn build_archive_doc(
                 }
             }
         }
+    }
+
+    if filtered_count > 0 {
+        processing_warnings.push(ProcessingWarning {
+            source: Cow::Borrowed("archive"),
+            message: Cow::Owned(format!(
+                "Filtered {} bookkeeping/binary entr{} (e.g. .DS_Store, __MACOSX, __pycache__, .pyc) from archive children",
+                filtered_count,
+                if filtered_count == 1 { "y" } else { "ies" }
+            )),
+        });
     }
 
     build_archive_doc_inner(
@@ -606,6 +655,65 @@ mod tests {
         };
         assert_eq!(archive_meta.format, "ZIP");
         assert_eq!(archive_meta.file_count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_zip_filters_bookkeeping_and_binary_junk_from_children() {
+        let extractor = ZipExtractor::new();
+
+        let mut cursor = Cursor::new(Vec::new());
+        {
+            let mut zip = ZipWriter::new(&mut cursor);
+            let options = FileOptions::<'_, ()>::default();
+
+            zip.start_file("report.txt", options).unwrap();
+            zip.write_all(b"Quarterly report body.").unwrap();
+
+            // macOS Finder bookkeeping file (binary "Bud1..." header).
+            zip.start_file(".DS_Store", options).unwrap();
+            zip.write_all(&[0x00, 0x00, 0x00, 0x01, b'B', b'u', b'd', b'1']).unwrap();
+
+            // AppleDouble resource fork sidecar under the macOS archive-utility folder.
+            zip.start_file("__MACOSX/._report.txt", options).unwrap();
+            zip.write_all(&[0x00, 0x05, 0x16, 0x07, 0x00, 0x02, b'M', b'a', b'c', b' ', b'O', b'S', b' ', b'X'])
+                .unwrap();
+
+            // AppleDouble sidecar at the top level (same file, no __MACOSX wrapper).
+            zip.start_file("._report.txt", options).unwrap();
+            zip.write_all(&[0x00, 0x05, 0x16, 0x07, 0x00, 0x02, b'M', b'a', b'c', b' ', b'O', b'S', b' ', b'X'])
+                .unwrap();
+
+            // Python bytecode cache.
+            zip.start_file("__pycache__/mod.cpython-311.pyc", options).unwrap();
+            zip.write_all(&[0x42, 0x0d, 0x0d, 0x0a, 0x00, 0x00, 0x00, 0x00]).unwrap();
+
+            zip.finish().unwrap();
+        }
+
+        let bytes = cursor.into_inner();
+        let config = ExtractionConfig::default();
+
+        let result = extractor
+            .extract_content(&bytes, "application/zip", &config)
+            .await
+            .unwrap();
+
+        let children = result.children.expect("archive should extract the real document");
+        assert_eq!(children.len(), 1, "only report.txt should survive filtering: {children:?}");
+        assert_eq!(children[0].path, "report.txt");
+        assert_eq!(children[0].mime_type, "text/plain");
+
+        assert!(
+            !result.processing_warnings.is_empty(),
+            "expected a ProcessingWarning about filtered bookkeeping/binary entries"
+        );
+        let warning = &result.processing_warnings[0];
+        assert_eq!(warning.source, "archive");
+        assert!(
+            warning.message.contains("Filtered"),
+            "warning message should mention filtering: {}",
+            warning.message
+        );
     }
 
     #[tokio::test]
