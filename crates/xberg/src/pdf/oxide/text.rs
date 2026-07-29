@@ -410,6 +410,181 @@ fn rebuild_text_from_fragmented_spans(spans: &[pdf_oxide::layout::TextSpan]) -> 
     result
 }
 
+const INLINE_FRAGMENT_GAP_RATIO: f32 = 0.1;
+const ROW_RESET_FONT_RATIO: f32 = 1.0;
+
+#[derive(Clone, Copy)]
+struct OrderedSpan<'a> {
+    span: &'a pdf_oxide::layout::TextSpan,
+    glue_to_previous: bool,
+}
+
+fn spans_overlap_vertically(
+    first: &pdf_oxide::layout::TextSpan,
+    second: &pdf_oxide::layout::TextSpan,
+) -> bool {
+    let overlap_start = first.bbox.y.max(second.bbox.y);
+    let overlap_end = (first.bbox.y + first.bbox.height).min(second.bbox.y + second.bbox.height);
+    overlap_end > overlap_start
+}
+
+fn is_short_inline_fragment(span: &pdf_oxide::layout::TextSpan) -> bool {
+    let mut chars = span.text.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    let char_count = 1 + chars.count();
+    if char_count > 3 || span.text.chars().all(char::is_whitespace) {
+        return false;
+    }
+    !(char_count == 1 && matches!(first, 'a' | 'A' | 'I'))
+}
+
+fn find_inline_fragment_anchor(
+    index: usize,
+    spans: &[pdf_oxide::layout::TextSpan],
+    anchors: &[Option<usize>],
+) -> Option<usize> {
+    let span = &spans[index];
+    if span.split_boundary_before || !is_short_inline_fragment(span) {
+        return None;
+    }
+
+    (0..index)
+        .filter(|candidate_index| anchors[*candidate_index].is_none())
+        .filter_map(|candidate_index| {
+            let candidate = &spans[candidate_index];
+            if !spans_overlap_vertically(candidate, span)
+                || (candidate.rotation_degrees - span.rotation_degrees).abs() > f32::EPSILON
+            {
+                return None;
+            }
+            let gap = span.bbox.x - (candidate.bbox.x + candidate.bbox.width);
+            let tolerance = candidate.font_size.max(span.font_size) * INLINE_FRAGMENT_GAP_RATIO;
+            (gap >= -tolerance && gap <= tolerance).then_some((candidate_index, gap.abs()))
+        })
+        .min_by(|(_, first_gap), (_, second_gap)| {
+            first_gap
+                .partial_cmp(second_gap)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|(candidate_index, _)| candidate_index)
+}
+
+fn order_spans_with_inline_fragments(spans: &[pdf_oxide::layout::TextSpan]) -> Vec<OrderedSpan<'_>> {
+    let mut anchors = vec![None; spans.len()];
+    for index in 0..spans.len() {
+        anchors[index] = find_inline_fragment_anchor(index, spans, &anchors);
+    }
+
+    let mut children = vec![Vec::new(); spans.len()];
+    for (index, anchor) in anchors.iter().enumerate() {
+        if let Some(anchor) = anchor {
+            children[*anchor].push(index);
+        }
+    }
+    for attached in &mut children {
+        attached.sort_by(|first, second| {
+            spans[*first]
+                .bbox
+                .x
+                .partial_cmp(&spans[*second].bbox.x)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+    }
+
+    let mut ordered = Vec::with_capacity(spans.len());
+    for (index, span) in spans.iter().enumerate() {
+        if anchors[index].is_some() {
+            continue;
+        }
+        ordered.push(OrderedSpan {
+            span,
+            glue_to_previous: false,
+        });
+        ordered.extend(children[index].iter().map(|child| OrderedSpan {
+            span: &spans[*child],
+            glue_to_previous: true,
+        }));
+    }
+    ordered
+}
+
+fn append_span_separator(
+    text: &mut String,
+    previous: &pdf_oxide::layout::TextSpan,
+    current: OrderedSpan<'_>,
+    paragraph_gap_threshold: f32,
+) {
+    if current.glue_to_previous {
+        return;
+    }
+
+    let span = current.span;
+    let y_gap = (previous.bbox.y - span.bbox.y).abs();
+    let reset_threshold = previous.font_size.max(span.font_size) * ROW_RESET_FONT_RATIO;
+    if span.bbox.x < previous.bbox.x - reset_threshold {
+        if y_gap > paragraph_gap_threshold {
+            text.push_str("\n\n");
+        } else {
+            text.push('\n');
+        }
+        return;
+    }
+
+    if span.split_boundary_before {
+        if !previous.text.ends_with(char::is_whitespace) && !span.text.starts_with(char::is_whitespace) {
+            text.push(' ');
+        }
+        return;
+    }
+
+    let previous_end_x = previous.bbox.x + previous.bbox.width;
+    let effective_height = span.bbox.height.max(previous.bbox.height).max(span.font_size * 0.5);
+    if y_gap < effective_height * 0.5 {
+        if span.bbox.x - previous_end_x > span.font_size * 0.15 {
+            text.push(' ');
+        }
+    } else if y_gap > paragraph_gap_threshold {
+        text.push_str("\n\n");
+    } else {
+        text.push('\n');
+    }
+}
+
+fn assemble_page_text(spans: &[pdf_oxide::layout::TextSpan]) -> String {
+    let mut heights: Vec<f32> = spans.iter().map(|span| span.bbox.height).collect();
+    heights.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let median_height = if heights.is_empty() {
+        1.0
+    } else {
+        heights[heights.len() / 2]
+    };
+    let paragraph_gap_threshold = median_height * 1.5;
+
+    tracing::debug!(
+        span_count = spans.len(),
+        median_height,
+        paragraph_gap_threshold,
+        "paragraph break detection initialized"
+    );
+
+    let ordered = order_spans_with_inline_fragments(spans);
+    let mut text = String::with_capacity(spans.len() * 20);
+    let mut prev_span: Option<&pdf_oxide::layout::TextSpan> = None;
+
+    for current in ordered {
+        let span = current.span;
+        if let Some(prev) = prev_span {
+            append_span_separator(&mut text, prev, current, paragraph_gap_threshold);
+        }
+        text.push_str(&span.text);
+        prev_span = Some(span);
+    }
+
+    text
+}
+
 /// Extract text from a single page using column-aware reading order.
 ///
 /// Uses `extract_page_text_with_options` with `ReadingOrder::ColumnAware` to
@@ -452,46 +627,7 @@ fn extract_page_text_column_aware(doc: &mut pdf_oxide::PdfDocument, page_index: 
         return Ok(text);
     }
 
-    let mut heights: Vec<f32> = page_text_data.spans.iter().map(|s| s.bbox.height).collect();
-    heights.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let median_height = if heights.is_empty() {
-        1.0
-    } else {
-        heights[heights.len() / 2]
-    };
-    let paragraph_gap_threshold = median_height * 1.5;
-
-    tracing::debug!(
-        span_count = page_text_data.spans.len(),
-        median_height,
-        paragraph_gap_threshold,
-        "paragraph break detection initialized"
-    );
-
-    let mut text = String::with_capacity(page_text_data.spans.len() * 20);
-    let mut prev_span: Option<&pdf_oxide::layout::TextSpan> = None;
-
-    for span in page_text_data.spans.iter() {
-        if let Some(prev) = prev_span {
-            let prev_end_x = prev.bbox.x + prev.bbox.width;
-            let y_gap = (prev.bbox.y - span.bbox.y).abs();
-            let eff_height = span.bbox.height.max(prev.bbox.height).max(span.font_size * 0.5);
-            let same_line = y_gap < eff_height * 0.5;
-
-            if same_line {
-                let x_gap = span.bbox.x - prev_end_x;
-                if x_gap > span.font_size * 0.15 {
-                    text.push(' ');
-                }
-            } else if y_gap > paragraph_gap_threshold {
-                text.push_str("\n\n");
-            } else {
-                text.push('\n');
-            }
-        }
-        text.push_str(&span.text);
-        prev_span = Some(span);
-    }
+    let mut text = assemble_page_text(&page_text_data.spans);
 
     append_missing_widget_values(&mut text, &widgets);
 
@@ -522,12 +658,16 @@ mod tests {
     use pdf_oxide::layout::TextSpan;
 
     fn span(text: &str, x: f32, y: f32, height: f32, font_size: f32) -> TextSpan {
+        span_with_width(text, x, y, font_size * 0.6, height, font_size)
+    }
+
+    fn span_with_width(text: &str, x: f32, y: f32, width: f32, height: f32, font_size: f32) -> TextSpan {
         TextSpan {
             text: text.to_string(),
             bbox: Rect {
                 x,
                 y,
-                width: font_size * 0.6,
+                width,
                 height,
             },
             font_size,
@@ -600,5 +740,74 @@ mod tests {
     #[test]
     fn single_span_returns_false() {
         assert!(!is_fragmented_span_list(&[span("A", 100.0, 700.0, 0.0, 12.0)]));
+    }
+
+    #[test]
+    fn detached_subscripts_are_reinserted_into_chemical_formula() {
+        let spans = vec![
+            span_with_width("H", 100.0, 100.0, 6.0, 10.0, 10.0),
+            span_with_width("SO", 108.0, 100.0, 12.0, 10.0, 10.0),
+            span_with_width("solution", 124.0, 100.0, 36.0, 10.0, 10.0),
+            span_with_width("2", 106.0, 96.0, 2.0, 6.0, 6.0),
+            span_with_width("4", 120.0, 96.0, 2.0, 6.0, 6.0),
+        ];
+
+        assert_eq!(assemble_page_text(&spans), "H2SO4 solution");
+    }
+
+    #[test]
+    fn detached_phone_suffix_is_reinserted_without_space() {
+        let spans = vec![
+            span_with_width("273.879.750", 100.0, 100.0, 60.0, 10.0, 10.0),
+            span_with_width("Population", 100.0, 75.0, 45.0, 10.0, 10.0),
+            span_with_width("1", 160.0, 103.0, 3.0, 6.0, 6.0),
+        ];
+
+        assert_eq!(assemble_page_text(&spans), "273.879.7501\n\nPopulation");
+    }
+
+    #[test]
+    fn detached_final_glyph_is_reinserted_into_word() {
+        let spans = vec![
+            span_with_width("eli", 100.0, 100.0, 15.0, 10.0, 10.0),
+            span_with_width("Table", 40.0, 75.0, 25.0, 10.0, 10.0),
+            span_with_width("t", 115.0, 100.0, 5.0, 10.0, 10.0),
+        ];
+
+        assert_eq!(assemble_page_text(&spans), "elit\n\nTable");
+    }
+
+    #[test]
+    fn far_left_reset_starts_new_row_even_when_vertical_bands_overlap() {
+        let spans = vec![
+            span_with_width("1.000", 500.0, 100.0, 30.0, 10.0, 10.0),
+            span_with_width("002", 30.0, 99.0, 18.0, 10.0, 10.0),
+        ];
+
+        assert_eq!(assemble_page_text(&spans), "1.000\n002");
+    }
+
+    #[test]
+    fn split_boundary_before_forces_space_between_adjacent_spans() {
+        let mut next = span_with_width("002", 130.0, 100.0, 18.0, 10.0, 10.0);
+        next.split_boundary_before = true;
+        let spans = vec![span_with_width("1.000", 100.0, 100.0, 30.0, 10.0, 10.0), next];
+
+        assert_eq!(assemble_page_text(&spans), "1.000 002");
+    }
+
+    #[test]
+    fn line_local_repair_preserves_column_aware_order() {
+        let spans = vec![
+            span_with_width("left-top", 40.0, 100.0, 40.0, 10.0, 10.0),
+            span_with_width("left-bottom", 40.0, 80.0, 50.0, 10.0, 10.0),
+            span_with_width("right-top", 300.0, 100.0, 45.0, 10.0, 10.0),
+            span_with_width("right-bottom", 300.0, 80.0, 55.0, 10.0, 10.0),
+        ];
+
+        assert_eq!(
+            assemble_page_text(&spans),
+            "left-top\n\nleft-bottom\n\nright-top\n\nright-bottom"
+        );
     }
 }
