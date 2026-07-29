@@ -704,7 +704,7 @@ impl PdfExtractor {
             if !ocr_pages.is_empty() {
                 if let Some(ref bounds) = boundaries {
                     if !bounds.is_empty() {
-                        let (mixed, results_map, mixed_llm_usage, mixed_rstrs, mixed_formulas) =
+                        let (mixed, results_map, mixed_llm_usage, mixed_rstrs, mixed_formulas, mixed_warnings) =
                             ocr::extract_mixed_ocr_native(&native_text, bounds, ocr_pages, content, config, path)
                                 .await?;
                         ocr_llm_usage = mixed_llm_usage;
@@ -713,6 +713,7 @@ impl PdfExtractor {
                         if !mixed_formulas.is_empty() {
                             ocr_formulas = mixed_formulas;
                         }
+                        ocr_fallback_warnings.extend(mixed_warnings);
                         (mixed, ExtractionMethod::Mixed)
                     } else {
                         tracing::warn!("force_ocr_pages set but no page boundaries available; using native text");
@@ -733,7 +734,7 @@ impl PdfExtractor {
             if let Some(ref bounds) = boundaries
                 && !bounds.is_empty()
             {
-                let (mixed, results_map, mixed_llm_usage, mixed_rstrs, mixed_formulas) =
+                let (mixed, results_map, mixed_llm_usage, mixed_rstrs, mixed_formulas, mixed_warnings) =
                     ocr::extract_mixed_ocr_native(&native_text, bounds, &scanned_pages, content, config, path).await?;
                 ocr_llm_usage = mixed_llm_usage;
                 ocr_results_map = Some(results_map);
@@ -741,26 +742,20 @@ impl PdfExtractor {
                 if !mixed_formulas.is_empty() {
                     ocr_formulas = mixed_formulas;
                 }
+                ocr_fallback_warnings.extend(mixed_warnings);
                 (mixed, ExtractionMethod::Mixed)
             } else {
                 tracing::warn!("scanned pages detected but no page boundaries available; using native text");
                 (native_text, ExtractionMethod::Native)
             }
-        } else if config.ocr.is_some()
-            || ocr::evaluate_native_text_for_ocr(
-                &native_text,
-                pdf_metadata.pdf_specific.page_count,
-                &crate::core::config::OcrConfig::default().effective_thresholds(),
-            )
-            .whole_doc_failure
-        {
-            // Under `Auto`, a document with no trustworthy native text at all (a scan /
-            // no text layer) must reach OCR even when no explicit `ocr` config was given.
-            // The default `ocr: None` means "OCR disabled", but that silently discarded a
-            // detected whole-document failure and returned an empty native result (#1338).
-            // Only the unextractable, whole-document-failure case opts in a default OCR
-            // config here; normal text PDFs never reach the fallback gate and stay native,
-            // and an explicit `ocr` config keeps its full per-page gate behavior.
+        } else if config.ocr.is_some() || native_text.trim().is_empty() {
+            // Under `Auto`, a PDF with NO native text at all (a scan / missing text layer)
+            // must reach OCR even when no explicit `ocr` config was given — the default
+            // `ocr: None` ("OCR disabled") otherwise silently discarded the detected scan
+            // and returned an empty result (#1338). This is gated on genuinely-absent text
+            // a legitimately sparse/short PDF must stay native under a default config, and
+            // heuristic quality failures still require an explicit `ocr` config to trigger
+            // OCR. An explicit `ocr` config keeps its full per-page gate behavior.
             let default_ocr_config = crate::core::config::OcrConfig::default();
             let ocr_config = config.ocr.as_ref().unwrap_or(&default_ocr_config);
             let thresholds = ocr_config.effective_thresholds();
@@ -885,13 +880,14 @@ impl PdfExtractor {
                 ocr::OcrGateOutcome::RunFallbackOnPages(pages) => match boundaries.as_deref() {
                     Some(bounds) if !bounds.is_empty() => {
                         match ocr::extract_mixed_ocr_native(&native_text, bounds, &pages, content, config, path).await {
-                            Ok((mixed, results_map, mixed_llm_usage, mixed_rstrs, mixed_formulas)) => {
+                            Ok((mixed, results_map, mixed_llm_usage, mixed_rstrs, mixed_formulas, mixed_warnings)) => {
                                 ocr_llm_usage = mixed_llm_usage;
                                 ocr_results_map = Some(results_map);
                                 ocr_page_rasters = mixed_rstrs;
                                 if !mixed_formulas.is_empty() {
                                     ocr_formulas = mixed_formulas;
                                 }
+                                ocr_fallback_warnings.extend(mixed_warnings);
                                 (mixed, ExtractionMethod::Mixed)
                             }
                             Err(e) => {
@@ -3135,11 +3131,15 @@ mod tests {
     fn test_ocr_gate_skips_non_textual_content_even_when_fallback_requested() {
         let thresholds = OcrQualityThresholds::default();
 
-        let outcome = ocr::evaluate_ocr_skip_gate(true, 500, 0.1, &mk_decision(true, true, vec![]), &thresholds);
+        // `fallback = true` (a per-page fallback flag) but `whole_doc_failure = false`: the
+        // document still has trustworthy native text, it just looks non-textual. A genuine
+        // whole-document failure instead routes to OCR (issue #1338), so this case must set
+        // `whole_doc_failure = false` to exercise the non-text skip it claims to test.
+        let outcome = ocr::evaluate_ocr_skip_gate(true, 500, 0.1, &mk_decision(true, false, vec![]), &thresholds);
         assert_eq!(
             outcome,
             ocr::OcrGateOutcome::SkipNonText,
-            "non-textual content with a structured doc must skip OCR even if fallback was requested"
+            "non-textual content with a structured doc must skip OCR even if per-page fallback was requested"
         );
     }
 

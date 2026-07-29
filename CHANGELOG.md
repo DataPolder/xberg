@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **#1338**: Default `OcrStrategy::Auto` extraction OCRs scanned PDFs with no native text layer
+  instead of returning empty content; explicit OCR disablement remains authoritative.
+- **#1341**: Synthesized VLM fallback pipelines run for mixed native/OCR PDFs, preserve skipped
+  and failed-stage diagnostics, and retain the last non-empty fallback when every stage scores
+  below threshold.
 - Per-file OCR language overrides now also apply to explicit Tesseract pipeline stages, preserving
   override precedence.
 - PDF plain-text extraction repairs detached subscripts, phone suffixes, and final glyphs while

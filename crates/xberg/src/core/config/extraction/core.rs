@@ -41,7 +41,12 @@ pub struct ExtractionConfig {
     #[serde(default = "default_true")]
     pub enable_quality_processing: bool,
 
-    /// OCR configuration (None = OCR disabled)
+    /// OCR configuration.
+    ///
+    /// `None` does not run OCR for documents that already have usable text. Under
+    /// `OcrStrategy::Auto`, a PDF with no text layer at all (a scan) is still routed
+    /// to OCR with default settings so it is not returned empty (#1338). Set
+    /// [`Self::disable_ocr`] to hard-disable OCR regardless of the detected content.
     #[serde(default)]
     pub ocr: Option<OcrConfig>,
 

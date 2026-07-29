@@ -323,11 +323,42 @@ fn default_priority() -> u32 {
     100
 }
 
+/// Selection policy for a pipeline's best-effort fallback: which stage's result to
+/// return when no stage clears `quality_thresholds.pipeline_min_quality`.
+///
+/// Internal (`pub(crate)`) rather than a field on [`OcrPipelineConfig`]: it is derived
+/// from the [`OcrConfig`] that produced the pipeline (see [`OcrConfig::pipeline_selection`]),
+/// so keeping it off the binding-facing config avoids a public API break and a full
+/// binding regeneration for a behavior-only fix (#1341).
+#[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum OcrPipelineSelection {
+    /// Return the highest-scoring stage result (default).
+    ///
+    /// Correct for pipelines where every stage is an independent attempt at the
+    /// same OCR problem, so the surface quality score is a reasonable proxy for
+    /// which result to keep.
+    #[default]
+    HighestScore,
+
+    /// Return the last stage that produced non-empty text, regardless of score.
+    ///
+    /// Intended for fallback pipelines (e.g. `vlm_fallback`) where a later stage
+    /// only runs because the earlier stage(s) were judged inadequate — so a later
+    /// non-empty result is a deliberate override, not noise, even when it scores
+    /// lower than an earlier stage's output (#1341). An empty result never
+    /// overwrites a prior non-empty one.
+    PreferLastNonEmpty,
+}
+
 /// Multi-backend OCR pipeline with quality-based fallback.
 ///
 /// Backends are tried in priority order (highest first). After each backend
 /// produces output, quality is evaluated. If it meets `quality_thresholds.pipeline_min_quality`,
-/// the result is accepted. Otherwise the next backend is tried.
+/// the result is accepted. Otherwise the next backend is tried; if none clears the
+/// threshold, an internal selection policy derived from the `OcrConfig` decides which
+/// stage's result is returned as the best effort (`vlm_fallback` pipelines prefer their
+/// last non-empty stage; explicit and classical pipelines stay score-based).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OcrPipelineConfig {
     /// Ordered list of backends to try. Sorted by priority (descending) at runtime.
@@ -849,6 +880,30 @@ impl OcrConfig {
             None
         }
     }
+
+    /// Best-effort selection policy for the pipeline this config produces.
+    ///
+    /// A `vlm_fallback` policy synthesises a fallback pipeline whose later VLM stage
+    /// is a deliberate override of an inadequate earlier stage, so its best-effort
+    /// result should be the last non-empty stage rather than the highest-scoring one
+    /// (#1341). Explicit pipelines and the classical paddle auto-fallback keep the
+    /// score-based selection. Mirrors the branch structure of [`Self::effective_pipeline`].
+    #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
+    pub(crate) fn pipeline_selection(&self) -> OcrPipelineSelection {
+        // Explicit pipelines keep score-based selection regardless of vlm_fallback
+        // (they take precedence in `effective_pipeline`).
+        if self.pipeline.is_some() {
+            return OcrPipelineSelection::HighestScore;
+        }
+        // A synthesised vlm_fallback pipeline only adds its VLM stage when `vlm_config`
+        // is present; without it, `effective_pipeline` falls through to the classical
+        // (score-based) pipeline, so match that outcome here.
+        if self.vlm_fallback != VlmFallbackPolicy::Disabled && self.vlm_config.is_some() {
+            OcrPipelineSelection::PreferLastNonEmpty
+        } else {
+            OcrPipelineSelection::HighestScore
+        }
+    }
 }
 
 fn default_ocr_enabled() -> bool {
@@ -1034,6 +1089,11 @@ mod tests {
         assert_eq!(result.stages[0].backend, "paddleocr");
         assert_eq!(result.stages[0].priority, 200);
         assert_eq!(result.stages[0].language, Some(vec!["fra".to_string()]));
+        assert_eq!(
+            config.pipeline_selection(),
+            OcrPipelineSelection::HighestScore,
+            "an explicit pipeline must keep score-based selection"
+        );
     }
 
     #[cfg(all(feature = "ocr", feature = "pdf"))]
@@ -1254,6 +1314,11 @@ mod tests {
             synthesised.quality_thresholds.pipeline_min_quality
         );
         assert!((hand_written.quality_thresholds.pipeline_min_quality - 0.6).abs() < f64::EPSILON,);
+        assert_eq!(
+            config.pipeline_selection(),
+            OcrPipelineSelection::PreferLastNonEmpty,
+            "OnLowQuality synthesis must prefer the last non-empty stage as its best-effort fallback"
+        );
     }
 
     /// `Always` synthesises a single-stage VLM-only pipeline.
@@ -1277,6 +1342,11 @@ mod tests {
         assert_eq!(pipeline.stages[0].backend, "vlm");
         assert_eq!(pipeline.stages[0].priority, 100);
         assert!(pipeline.stages[0].vlm_config.is_some());
+        assert_eq!(
+            config.pipeline_selection(),
+            OcrPipelineSelection::PreferLastNonEmpty,
+            "Always synthesis must prefer the last non-empty stage as its best-effort fallback"
+        );
     }
 
     /// `Disabled` with no explicit pipeline produces no synthesised pipeline
@@ -1398,6 +1468,40 @@ mod tests {
         assert_eq!(deserialized.stages[1].backend, "paddleocr");
         assert_eq!(deserialized.stages[1].priority, 50);
         assert!(deserialized.stages[1].paddle_ocr_config.is_some());
+    }
+
+    /// `pipeline_selection` derives the best-effort policy from the `OcrConfig` rather
+    /// than a serialized pipeline field (#1341): score-based by default and for explicit
+    /// pipelines, last-non-empty only for a genuinely-synthesised vlm_fallback pipeline.
+    #[cfg(all(feature = "ocr", feature = "pdf"))]
+    #[test]
+    fn test_pipeline_selection_derivation() {
+        use super::super::llm::LlmConfig;
+
+        // Default (classical / no fallback): score-based.
+        assert_eq!(
+            OcrConfig::default().pipeline_selection(),
+            OcrPipelineSelection::HighestScore
+        );
+
+        // vlm_fallback requested but no vlm_config: falls through to classical, score-based.
+        let missing_vlm = OcrConfig {
+            vlm_fallback: VlmFallbackPolicy::Always,
+            vlm_config: None,
+            ..Default::default()
+        };
+        assert_eq!(missing_vlm.pipeline_selection(), OcrPipelineSelection::HighestScore);
+
+        // vlm_fallback with vlm_config present: synthesised fallback prefers last non-empty.
+        let with_vlm = OcrConfig {
+            vlm_fallback: VlmFallbackPolicy::Always,
+            vlm_config: Some(LlmConfig {
+                model: "openai/gpt-4o-mini".to_string(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(with_vlm.pipeline_selection(), OcrPipelineSelection::PreferLastNonEmpty);
     }
 
     #[test]

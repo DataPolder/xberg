@@ -56,6 +56,10 @@ pub use ocr::{
     DEFAULT_SCANNED_MIN_CONFIDENCE, OcrConfig, OcrPipelineConfig, OcrPipelineStage, OcrQualityThresholds, OcrStrategy,
     VlmFallbackPolicy,
 };
+// Crate-internal only: the best-effort pipeline selection policy is derived from `OcrConfig`
+// and threaded through OCR internals, deliberately not part of the public/binding-facing API (#1341).
+#[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
+pub(crate) use ocr::OcrPipelineSelection;
 pub use page::PageConfig;
 #[cfg(feature = "pdf")]
 pub use pdf::{HierarchyConfig, PdfConfig};

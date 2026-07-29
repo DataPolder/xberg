@@ -24,22 +24,26 @@ fn test_scanned_no_text_layer_pdf_ocrs_under_default_auto_config() {
         return;
     }
 
-    // Default config: `ocr = None` and `ocr_strategy = Auto`. Before #1338 this returned
-    // empty native content with `ocr_used = false`; now the whole-document text failure
-    // is routed to OCR with a default OCR config.
-    let config = ExtractionConfig::default();
-
-    let result = match extract_uri_document_blocking(path, None, &config) {
-        Ok(doc) => doc,
-        Err(e) => {
-            eprintln!("extraction errored (tessdata likely unavailable): {e}");
-            return;
-        }
+    // Default config except caching is disabled for determinism: `ocr = None` and
+    // `ocr_strategy = Auto`. Before #1338 this returned empty native content with
+    // `ocr_used = false`; now the empty text layer is routed to OCR with a default config.
+    let config = ExtractionConfig {
+        use_cache: false,
+        ..Default::default()
     };
+
+    // Extraction failure (e.g. missing tessdata) must FAIL the test, not skip — a skip
+    // here would let the test pass even when the fix is broken.
+    let result = extract_uri_document_blocking(path, None, &config)
+        .expect("extraction of the scanned repro PDF must succeed under default Auto config");
 
     assert!(
         !result.content.trim().is_empty(),
         "a scanned/text-layer-less PDF must recover OCR text under the default Auto config, \
          got empty content (regression of #1338)"
+    );
+    assert!(
+        result.metadata.ocr_used,
+        "extraction must report ocr_used=true for the scanned PDF under default Auto config"
     );
 }

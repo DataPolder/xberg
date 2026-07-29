@@ -357,6 +357,17 @@ fn normalize_markdown_for_scoring(text: &str) -> String {
                 break;
             }
         }
+        // Strip an ordered-list marker: a run of digits followed by `.` or `)` and a
+        // space (e.g. "1. ", "12) "). Without this, ordered-list-heavy Markdown is
+        // penalized the same way unstripped unordered bullets would be.
+        let digit_prefix_len = content.chars().take_while(char::is_ascii_digit).count();
+        if digit_prefix_len > 0
+            && let Some(rest) = content[digit_prefix_len..]
+                .strip_prefix(". ")
+                .or_else(|| content[digit_prefix_len..].strip_prefix(") "))
+        {
+            content = rest;
+        }
         // Inline structural punctuation becomes whitespace so it leaves the
         // non-whitespace denominator; word-internal '-'/'.' are kept.
         for ch in content.chars() {
@@ -385,7 +396,11 @@ pub(crate) fn compute_quality_score(text: &str, thresholds: &OcrQualityThreshold
     // Score the prose content, not the Markdown scaffolding (#1341). Fall back to the
     // raw text if normalization leaves nothing (e.g. a table-only fragment).
     let normalized = normalize_markdown_for_scoring(trimmed);
-    let scoring_input = if normalized.trim().is_empty() { trimmed } else { normalized.as_str() };
+    let scoring_input = if normalized.trim().is_empty() {
+        trimmed
+    } else {
+        normalized.as_str()
+    };
 
     let stats = NativeTextStats::compute(scoring_input, thresholds);
 
@@ -603,6 +618,7 @@ pub(crate) async fn extract_mixed_ocr_native(
     Vec<crate::types::LlmUsage>,
     Option<Vec<crate::types::ExtractedImage>>,
     Vec<crate::types::Formula>,
+    Vec<crate::types::ProcessingWarning>,
 )> {
     let ocr_set: std::collections::HashSet<u32> = ocr_page_numbers
         .iter()
@@ -624,6 +640,7 @@ pub(crate) async fn extract_mixed_ocr_native(
             Vec::new(),
             None,
             Vec::new(),
+            Vec::new(),
         ));
     }
 
@@ -637,6 +654,7 @@ pub(crate) async fn extract_mixed_ocr_native(
             ahash::AHashMap::new(),
             Vec::new(),
             None,
+            Vec::new(),
             Vec::new(),
         ));
     }
@@ -656,12 +674,6 @@ pub(crate) async fn extract_mixed_ocr_native(
         ocr_config_resolved.acceleration = config.acceleration.clone();
     }
 
-    let backend = {
-        let registry = crate::plugins::registry::get_ocr_backend_registry();
-        let registry = registry.read();
-        registry.get(&ocr_config_resolved.backend)?
-    };
-
     let batch_size = crate::core::config::concurrency::resolve_thread_budget(config.concurrency.as_ref());
 
     let capture_rasters = config.images.as_ref().is_some_and(|c| c.include_page_rasters);
@@ -672,18 +684,33 @@ pub(crate) async fn extract_mixed_ocr_native(
     // configured backend ran here, silently ignoring `vlm_fallback` on the
     // `scanned_pages` / `force_ocr_pages` / per-page-fallback routes (#1341). The
     // default (no fallback, no explicit pipeline) keeps the fast single-backend path.
-    let effective_pipeline = if ocr_config_owned.vlm_fallback
-        != crate::core::config::VlmFallbackPolicy::Disabled
+    let effective_pipeline = if ocr_config_owned.vlm_fallback != crate::core::config::VlmFallbackPolicy::Disabled
         || ocr_config_owned.pipeline.is_some()
     {
         ocr_config_owned.effective_pipeline()
     } else {
         None
     };
+
+    // The top-level `backend` registry lookup is only needed by the single-backend
+    // route below; the pipeline route resolves each of its own stage backends
+    // internally via `run_ocr_pipeline`. Resolving it eagerly meant a
+    // `vlm_fallback = Always` config (or an explicit `pipeline`) that never touches
+    // this top-level backend still failed if it happened to be unregistered
+    // (review follow-up to #1341).
+    let backend = if effective_pipeline.is_none() {
+        let registry = crate::plugins::registry::get_ocr_backend_registry();
+        let registry = registry.read();
+        Some(registry.get(&ocr_config_owned.backend)?)
+    } else {
+        None
+    };
+
     let total = page_indices.len();
     let mut ocr_results: ahash::AHashMap<u32, String> = ahash::AHashMap::with_capacity(total);
     let mut accumulated_llm_usage: Vec<crate::types::LlmUsage> = Vec::new();
     let mut accumulated_formulas: Vec<crate::types::Formula> = Vec::new();
+    let mut accumulated_warnings: Vec<crate::types::ProcessingWarning> = Vec::new();
     let mut captured_rasters: Vec<crate::types::ExtractedImage> = Vec::new();
 
     for batch_start in (0..total).step_by(batch_size) {
@@ -693,28 +720,86 @@ pub(crate) async fn extract_mixed_ocr_native(
 
         // Multi-stage pipeline route (#1341): drive each page through `run_ocr_pipeline`
         // so `vlm_fallback` / explicit-pipeline stages apply here, mirroring the image
-        // extractor's per-image pipeline path. Runs sequentially — the fallback path is
-        // already the slower, less common one; the fast single-backend path below keeps
-        // its per-page parallelism.
+        // extractor's per-image pipeline path. Bounded to this batch's page count (at
+        // most `batch_size`, the resolved worker budget) via a `JoinSet`, mirroring the
+        // concurrency shape of the single-backend path below.
         if let Some(ref pipeline) = effective_pipeline {
-            for (page_idx, image) in &page_images {
-                let (text, _tables, _elements, _doc, usage, _page_texts, _rasters, formulas) =
-                    Box::pin(run_ocr_pipeline(
-                        None,
-                        Some(std::slice::from_ref(image)),
-                        #[cfg(feature = "layout-detection")]
-                        None,
-                        config,
-                        pipeline,
-                        None,
-                    ))
-                    .await?;
-                accumulated_llm_usage.extend(usage);
-                for mut formula in formulas {
-                    formula.page = (*page_idx + 1) as u32;
-                    accumulated_formulas.push(formula);
+            // on wasm32 (no OS threads, and extractor/backend futures are `!Send` there —
+            // see the matching gate on the single-backend path below). Falls back to the
+            // sequential loop there even though `tokio-runtime` may be active.
+            #[cfg(all(feature = "tokio-runtime", not(target_arch = "wasm32")))]
+            {
+                let mut join_set = tokio::task::JoinSet::new();
+                for (page_idx, image) in &page_images {
+                    // Each task needs an owned, 'static image to spawn; wrap in `Arc` so
+                    // concurrent pages don't each pay a full pixel-buffer copy beyond this
+                    // one clone-to-own.
+                    let image_arc = Arc::new(image.clone());
+                    let pipeline_clone = pipeline.clone();
+                    let config_clone = config.clone();
+                    let idx = *page_idx;
+                    join_set.spawn(async move {
+                        let result = Box::pin(run_ocr_pipeline(
+                            None,
+                            Some(std::slice::from_ref(image_arc.as_ref())),
+                            #[cfg(feature = "layout-detection")]
+                            None,
+                            &config_clone,
+                            &pipeline_clone,
+                            None,
+                        ))
+                        .await;
+                        (idx, result)
+                    });
                 }
-                ocr_results.insert((*page_idx + 1) as u32, text);
+                while let Some(join_result) = join_set.join_next().await {
+                    let (page_idx, result) = join_result.map_err(|e| crate::XbergError::Plugin {
+                        message: format!("OCR pipeline task panicked: {}", e),
+                        plugin_name: "ocr".to_string(),
+                    })?;
+                    let (text, _tables, _elements, doc, usage, page_texts, _rasters, formulas) = result?;
+                    accumulated_llm_usage.extend(usage);
+                    if let Some(d) = doc {
+                        accumulated_warnings.extend(d.processing_warnings);
+                    }
+                    for mut formula in formulas {
+                        formula.page = (page_idx + 1) as u32;
+                        accumulated_formulas.push(formula);
+                    }
+                    // `run_ocr_pipeline`/`extract_with_ocr` assemble `text` as if this
+                    // lone image were page 0 of the document, so a configured page marker
+                    // is stamped "page 1" regardless of the real page number. The raw
+                    // `page_texts` entry has no marker injected at that layer, so prefer
+                    // fall back to `text` only if the backend returned no page_texts.
+                    let page_text = page_texts.into_iter().next().unwrap_or(text);
+                    ocr_results.insert((page_idx + 1) as u32, page_text);
+                }
+            }
+            #[cfg(any(not(feature = "tokio-runtime"), target_arch = "wasm32"))]
+            {
+                for (page_idx, image) in &page_images {
+                    let (text, _tables, _elements, doc, usage, page_texts, _rasters, formulas) =
+                        Box::pin(run_ocr_pipeline(
+                            None,
+                            Some(std::slice::from_ref(image)),
+                            #[cfg(feature = "layout-detection")]
+                            None,
+                            config,
+                            pipeline,
+                            None,
+                        ))
+                        .await?;
+                    accumulated_llm_usage.extend(usage);
+                    if let Some(d) = doc {
+                        accumulated_warnings.extend(d.processing_warnings);
+                    }
+                    for mut formula in formulas {
+                        formula.page = (*page_idx + 1) as u32;
+                        accumulated_formulas.push(formula);
+                    }
+                    let page_text = page_texts.into_iter().next().unwrap_or(text);
+                    ocr_results.insert((*page_idx + 1) as u32, page_text);
+                }
             }
             if capture_rasters {
                 for (page_idx, image) in &page_images {
@@ -738,6 +823,10 @@ pub(crate) async fn extract_mixed_ocr_native(
             continue;
         }
 
+        // Reached only when `effective_pipeline` is `None`, so `backend` was resolved above.
+        let backend = backend
+            .as_ref()
+            .expect("backend is resolved above whenever effective_pipeline is None");
         let batch_slice = &page_images;
 
         #[cfg(all(feature = "tokio-runtime", not(target_arch = "wasm32")))]
@@ -784,7 +873,7 @@ pub(crate) async fn extract_mixed_ocr_native(
         {
             let mut join_set = tokio::task::JoinSet::new();
             for (page_idx, data, _w, _h) in &encoded {
-                let backend_clone = Arc::clone(&backend);
+                let backend_clone = Arc::clone(backend);
                 let config_clone = ocr_config_owned.clone();
                 let data_clone = Arc::clone(data);
                 let idx = *page_idx;
@@ -841,6 +930,7 @@ pub(crate) async fn extract_mixed_ocr_native(
         accumulated_llm_usage,
         if capture_rasters { Some(captured_rasters) } else { None },
         accumulated_formulas,
+        accumulated_warnings,
     ))
 }
 
@@ -2096,12 +2186,95 @@ fn cgroup_headroom() -> Option<usize> {
     let usage = std::fs::read_to_string("/sys/fs/cgroup/memory/memory.usage_in_bytes").ok()?;
     parse_cgroup_v1(&limit, &usage)
 }
+/// Decide whether a pipeline stage's result should replace the current best-effort
+/// candidate, given the pipeline's [`OcrPipelineSelection`](crate::core::config::OcrPipelineSelection) policy.
+///
+/// Only called once no stage has cleared `quality_thresholds.pipeline_min_quality` (the
+/// accept-threshold early return in [`run_ocr_pipeline`] handles that case directly).
+/// Pure and backend-free so the policy can be unit-tested without a registered OCR
+/// backend.
+///
+/// - [`OcrPipelineSelection::HighestScore`]: replace only if `candidate_score` strictly
+///   exceeds the current best score (or there is no current best). This is the original,
+///   correctness-blind quality-max behavior.
+/// - [`OcrPipelineSelection::PreferLastNonEmpty`]: replace whenever `candidate_text` is
+///   non-empty, regardless of score, since a later stage in a fallback pipeline only ran
+///   because the earlier stage(s) were judged inadequate. An empty candidate never
+///   replaces an existing best, so a destroyed page still keeps the earlier text.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn should_replace_best_effort_result(
+    selection: crate::core::config::OcrPipelineSelection,
+    best_score: Option<f64>,
+    candidate_text: &str,
+    candidate_score: f64,
+) -> bool {
+    use crate::core::config::OcrPipelineSelection;
+
+    match selection {
+        OcrPipelineSelection::HighestScore => match best_score {
+            Some(best) => candidate_score > best,
+            None => true,
+        },
+        OcrPipelineSelection::PreferLastNonEmpty => !candidate_text.trim().is_empty() || best_score.is_none(),
+    }
+}
+
+/// Attach skipped and failed stage diagnostics to the result that survives the pipeline.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn attach_ocr_pipeline_stage_warnings(
+    mut doc: Option<crate::types::internal::InternalDocument>,
+    text: &str,
+    unavailable_backends: &[String],
+    stage_failures: &[(String, String)],
+) -> Option<crate::types::internal::InternalDocument> {
+    if unavailable_backends.is_empty() && stage_failures.is_empty() {
+        return doc;
+    }
+
+    let retained_doc = doc.get_or_insert_with(|| {
+        let mut doc = crate::types::internal::InternalDocument::new("pdf");
+        for paragraph in text.split("\n\n").map(str::trim).filter(|text| !text.is_empty()) {
+            doc.push_element(crate::types::internal::InternalElement::text(
+                crate::types::internal::ElementKind::Paragraph,
+                paragraph,
+                0,
+            ));
+        }
+        doc
+    });
+
+    for backend in unavailable_backends {
+        retained_doc.processing_warnings.push(crate::types::ProcessingWarning {
+            source: std::borrow::Cow::Borrowed("ocr_pipeline"),
+            message: std::borrow::Cow::Owned(format!(
+                "Requested OCR pipeline backend '{backend}' is unavailable and was skipped."
+            )),
+        });
+    }
+    for (backend, error) in stage_failures {
+        retained_doc.processing_warnings.push(crate::types::ProcessingWarning {
+            source: std::borrow::Cow::Borrowed("ocr_pipeline"),
+            message: std::borrow::Cow::Owned(format!(
+                "OCR fallback backend '{backend}' failed and was skipped: {error}"
+            )),
+        });
+    }
+
+    doc
+}
+
 /// Run a multi-backend OCR pipeline with quality-based fallback.
 ///
 /// Images and layout detections are computed once and shared across all stages.
 /// Each stage produces OCR output that is scored; if the score meets the
 /// pipeline's quality threshold, the result is accepted. Otherwise, the next
-/// backend is tried. Returns the best result seen across all stages.
+/// backend is tried. If no stage clears the threshold, `pipeline.selection`
+/// decides which stage's result is returned as the best effort: the
+/// highest-scoring one ([`OcrPipelineSelection::HighestScore`], the default, used
+/// for explicit and classical auto-fallback pipelines), or the last stage that
+/// produced non-empty text ([`OcrPipelineSelection::PreferLastNonEmpty`], used by
+/// `vlm_fallback`-synthesised pipelines -- see
+/// [`should_replace_best_effort_result`]).
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 pub(crate) async fn run_ocr_pipeline(
     content: Option<&[u8]>,
@@ -2125,18 +2298,27 @@ pub(crate) async fn run_ocr_pipeline(
     let default_ocr_config = crate::core::config::OcrConfig::default();
     let ocr_config = config.ocr.as_ref().unwrap_or(&default_ocr_config);
 
+    // Best-effort selection policy is derived from the config that produced this pipeline
+    // (a `vlm_fallback`-synthesised pipeline prefers its last non-empty stage; explicit and
+    // classical pipelines stay score-based) rather than carried on `OcrPipelineConfig`, so
+    // the binding-facing config stays unchanged (#1341).
+    let selection = ocr_config.pipeline_selection();
+
     let mut stages = pipeline.stages.clone();
     stages.sort_by_key(|b| std::cmp::Reverse(b.priority));
 
     let requested_backends: Vec<String> = stages.iter().map(|s| s.backend.clone()).collect();
-    let available_stages: Vec<_> = {
+    let (available_stages, unavailable_backends): (Vec<_>, Vec<_>) = {
         let registry = get_ocr_backend_registry();
         let registry = registry.read();
         stages
             .into_iter()
-            .filter(|s| registry.get(&s.backend).is_ok())
-            .collect()
+            .partition(|stage| registry.get(&stage.backend).is_ok())
     };
+    let unavailable_backends = unavailable_backends
+        .into_iter()
+        .map(|stage| stage.backend)
+        .collect::<Vec<_>>();
 
     if available_stages.is_empty() {
         return Err(crate::XbergError::Parsing {
@@ -2233,6 +2415,10 @@ pub(crate) async fn run_ocr_pipeline(
                 accumulated_usage.extend(stage_llm_usage);
 
                 if score >= pipeline.quality_thresholds.pipeline_min_quality {
+                    // ~keep Attach prior-stage diagnostics before this accepted-stage early
+                    // return; otherwise successful fallback silently erases why it ran.
+                    let stage_doc =
+                        attach_ocr_pipeline_stage_warnings(stage_doc, &text, &unavailable_backends, &stage_failures);
                     return Ok((
                         text,
                         stage_tables,
@@ -2245,17 +2431,20 @@ pub(crate) async fn run_ocr_pipeline(
                     ));
                 }
 
-                // Prefer the deepest fallback that produced usable text. Stages run in
-                // priority order (primary first), and this branch is reached only when no
-                // stage cleared the accept threshold — so a later non-empty result is a
-                // fallback invoked precisely because the higher-priority stages were
-                // inadequate. Return it rather than the highest surface-score result: a
-                // correctness-blind heuristic can otherwise pin selection to an inadequate
-                // primary (e.g. merged-word tesseract text scoring above a correct VLM
-                // transcription), discarding the very fallback the pipeline ran (#1341).
-                // An empty fallback (e.g. a VLM that declined a destroyed page) never
-                // overwrites, so the classical text is still kept in that case.
-                if !text.trim().is_empty() || best_result.is_none() {
+                // Selection policy decides which stage's result to keep once no stage has
+                // cleared the accept threshold (see `should_replace_best_effort_result`).
+                // `HighestScore` (explicit / classical auto-fallback pipelines) keeps the
+                // original strict quality-max behavior. `PreferLastNonEmpty`
+                // (`vlm_fallback`-synthesised pipelines) prefers the deepest non-empty
+                // fallback instead: stages run in priority order (primary first), so a
+                // later non-empty result was invoked precisely because the higher-priority
+                // stages were inadequate, and a correctness-blind score-max heuristic can
+                // otherwise pin selection to an inadequate primary (e.g. merged-word
+                // tesseract text scoring above a correct VLM transcription), discarding the
+                // very fallback the pipeline ran (#1341). An empty fallback never
+                // overwrites, so the earlier text is still kept in that case.
+                let best_score = best_result.as_ref().map(|(_, best_score, ..)| *best_score);
+                if should_replace_best_effort_result(selection, best_score, &text, score) {
                     best_result = Some((
                         text,
                         score,
@@ -2285,7 +2474,9 @@ pub(crate) async fn run_ocr_pipeline(
             tracing::warn!(
                 score,
                 threshold,
-                "All OCR pipeline backends produced suboptimal quality, using best result"
+                selection = ?selection,
+                "All OCR pipeline backends produced suboptimal quality, using best-effort result \
+                 selected per the pipeline's selection policy"
             );
             let mut doc = doc.unwrap_or_else(|| {
                 let mut d = crate::types::internal::InternalDocument::new("pdf");
@@ -2305,23 +2496,18 @@ pub(crate) async fn run_ocr_pipeline(
                 source: std::borrow::Cow::Borrowed("ocr_pipeline"),
                 message: std::borrow::Cow::Owned(format!(
                     "All OCR pipeline backends scored below the configured quality threshold \
-                     (best score {score:.3} < {threshold:.3}); returning the best-effort result, \
-                     which may be inaccurate or incomplete."
+                     (best score {score:.3} < {threshold:.3}); returning the best-effort result \
+                     chosen by the pipeline's {:?} selection policy, which may be inaccurate or \
+                     incomplete.",
+                    selection
                 )),
             });
-            for (backend, error) in &stage_failures {
-                doc.processing_warnings.push(crate::types::ProcessingWarning {
-                    source: std::borrow::Cow::Borrowed("ocr_pipeline"),
-                    message: std::borrow::Cow::Owned(format!(
-                        "OCR fallback backend '{backend}' failed and was skipped: {error}"
-                    )),
-                });
-            }
+            let doc = attach_ocr_pipeline_stage_warnings(Some(doc), &text, &unavailable_backends, &stage_failures);
             Ok((
                 text,
                 tables,
                 elements,
-                Some(doc),
+                doc,
                 accumulated_usage,
                 page_texts,
                 rasters,
@@ -3354,7 +3540,98 @@ mod tests {
         assert!(!out.contains("---"), "table separator row removed: {out:?}");
         assert!(out.contains("Heading"), "heading text kept: {out:?}");
         assert!(out.contains("bullet item"), "list text kept: {out:?}");
-        assert!(out.contains("bold") && out.contains("italic"), "emphasized words kept: {out:?}");
+        assert!(
+            out.contains("bold") && out.contains("italic"),
+            "emphasized words kept: {out:?}"
+        );
+    }
+
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn test_normalize_markdown_for_scoring_strips_ordered_list_markers() {
+        let input = "1. First item\n2) Second item\n12. Twelfth item\n10) Tenth item";
+        let out = normalize_markdown_for_scoring(input);
+        assert!(!out.contains("1."), "single-digit dot marker removed: {out:?}");
+        assert!(!out.contains("2)"), "single-digit paren marker removed: {out:?}");
+        assert!(!out.contains("12."), "multi-digit dot marker removed: {out:?}");
+        assert!(!out.contains("10)"), "multi-digit paren marker removed: {out:?}");
+        assert!(out.contains("First item"), "first item text kept: {out:?}");
+        assert!(out.contains("Second item"), "second item text kept: {out:?}");
+        assert!(out.contains("Twelfth item"), "twelfth item text kept: {out:?}");
+        assert!(out.contains("Tenth item"), "tenth item text kept: {out:?}");
+    }
+
+    #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+    #[test]
+    fn test_should_replace_best_effort_result_highest_score_keeps_max() {
+        use crate::core::config::OcrPipelineSelection;
+
+        // No current best: always replace.
+        assert!(should_replace_best_effort_result(
+            OcrPipelineSelection::HighestScore,
+            None,
+            "some text",
+            0.1
+        ));
+        // Strictly higher score replaces.
+        assert!(should_replace_best_effort_result(
+            OcrPipelineSelection::HighestScore,
+            Some(0.4),
+            "better text",
+            0.5
+        ));
+        // Equal or lower score does not replace.
+        assert!(!should_replace_best_effort_result(
+            OcrPipelineSelection::HighestScore,
+            Some(0.5),
+            "equal text",
+            0.5
+        ));
+        assert!(!should_replace_best_effort_result(
+            OcrPipelineSelection::HighestScore,
+            Some(0.9),
+            "worse text",
+            0.2
+        ));
+    }
+
+    #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+    #[test]
+    fn test_should_replace_best_effort_result_prefer_last_non_empty_overrides_lower_score() {
+        use crate::core::config::OcrPipelineSelection;
+
+        // A later, non-empty, lower-scoring stage still replaces a higher-scoring
+        // earlier stage under `PreferLastNonEmpty` (#1341: a correct-but-lower-score
+        // VLM transcription must win over a higher-scoring but garbled classical
+        // result).
+        assert!(should_replace_best_effort_result(
+            OcrPipelineSelection::PreferLastNonEmpty,
+            Some(0.9),
+            "correct vlm transcription",
+            0.3
+        ));
+    }
+
+    #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+    #[test]
+    fn test_should_replace_best_effort_result_prefer_last_non_empty_keeps_prior_on_empty_candidate() {
+        use crate::core::config::OcrPipelineSelection;
+
+        // An empty later-stage result (e.g. a VLM that declined a destroyed page)
+        // never overwrites an existing non-empty best.
+        assert!(!should_replace_best_effort_result(
+            OcrPipelineSelection::PreferLastNonEmpty,
+            Some(0.4),
+            "   ",
+            0.0
+        ));
+        // But an empty candidate still becomes the best when there is no prior best.
+        assert!(should_replace_best_effort_result(
+            OcrPipelineSelection::PreferLastNonEmpty,
+            None,
+            "",
+            0.0
+        ));
     }
 
     #[cfg(feature = "ocr")]
@@ -3864,6 +4141,177 @@ mod tests {
         assert_eq!(llm_usage[0].total_tokens, Some(150));
     }
 
+    #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn accepted_fallback_retains_prior_stage_diagnostics() {
+        use crate::core::config::{OcrConfig, OcrPipelineConfig, OcrPipelineStage, OcrQualityThresholds};
+        use crate::plugins::{OcrBackend, OcrBackendType, Plugin};
+        use crate::types::ExtractedDocument;
+        use std::sync::Arc;
+
+        const FAILED_BACKEND: &str = "accepted-fallback-primary-failure";
+        const FALLBACK_BACKEND: &str = "accepted-fallback-success";
+        const UNAVAILABLE_BACKEND: &str = "accepted-fallback-unavailable";
+        const FALLBACK_TEXT: &str =
+            "This readable fallback result contains enough natural language words to clear the OCR quality threshold.";
+
+        struct FailedPrimaryBackend;
+        struct AcceptedFallbackBackend;
+
+        #[async_trait::async_trait]
+        impl OcrBackend for FailedPrimaryBackend {
+            fn backend_type(&self) -> OcrBackendType {
+                OcrBackendType::Custom
+            }
+
+            fn supports_language(&self, _: &str) -> bool {
+                true
+            }
+
+            async fn process_image(&self, _: &[u8], _: &OcrConfig) -> crate::Result<ExtractedDocument> {
+                Err(crate::XbergError::Parsing {
+                    message: "synthetic primary failure".to_string(),
+                    source: None,
+                })
+            }
+        }
+
+        impl Plugin for FailedPrimaryBackend {
+            fn name(&self) -> &str {
+                FAILED_BACKEND
+            }
+
+            fn version(&self) -> String {
+                "1.0.0".to_string()
+            }
+
+            fn initialize(&self) -> crate::Result<()> {
+                Ok(())
+            }
+
+            fn shutdown(&self) -> crate::Result<()> {
+                Ok(())
+            }
+        }
+
+        #[async_trait::async_trait]
+        impl OcrBackend for AcceptedFallbackBackend {
+            fn backend_type(&self) -> OcrBackendType {
+                OcrBackendType::Custom
+            }
+
+            fn supports_language(&self, _: &str) -> bool {
+                true
+            }
+
+            async fn process_image(&self, _: &[u8], _: &OcrConfig) -> crate::Result<ExtractedDocument> {
+                Ok(ExtractedDocument {
+                    content: FALLBACK_TEXT.to_string(),
+                    ..Default::default()
+                })
+            }
+        }
+
+        impl Plugin for AcceptedFallbackBackend {
+            fn name(&self) -> &str {
+                FALLBACK_BACKEND
+            }
+
+            fn version(&self) -> String {
+                "1.0.0".to_string()
+            }
+
+            fn initialize(&self) -> crate::Result<()> {
+                Ok(())
+            }
+
+            fn shutdown(&self) -> crate::Result<()> {
+                Ok(())
+            }
+        }
+
+        crate::plugins::register_ocr_backend(Arc::new(FailedPrimaryBackend)).unwrap();
+        crate::plugins::register_ocr_backend(Arc::new(AcceptedFallbackBackend)).unwrap();
+
+        let pipeline = OcrPipelineConfig {
+            stages: vec![
+                OcrPipelineStage {
+                    backend: FAILED_BACKEND.to_string(),
+                    priority: 120,
+                    language: None,
+                    tesseract_config: None,
+                    paddle_ocr_config: None,
+                    vlm_config: None,
+                    backend_options: None,
+                },
+                OcrPipelineStage {
+                    backend: UNAVAILABLE_BACKEND.to_string(),
+                    priority: 110,
+                    language: None,
+                    tesseract_config: None,
+                    paddle_ocr_config: None,
+                    vlm_config: None,
+                    backend_options: None,
+                },
+                OcrPipelineStage {
+                    backend: FALLBACK_BACKEND.to_string(),
+                    priority: 100,
+                    language: None,
+                    tesseract_config: None,
+                    paddle_ocr_config: None,
+                    vlm_config: None,
+                    backend_options: None,
+                },
+            ],
+            quality_thresholds: OcrQualityThresholds {
+                pipeline_min_quality: 0.05,
+                ..Default::default()
+            },
+        };
+        let config = ExtractionConfig {
+            ocr: Some(OcrConfig {
+                pipeline: Some(pipeline.clone()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let images = vec![image::DynamicImage::new_rgb8(16, 16)];
+
+        let result = run_ocr_pipeline(
+            None,
+            Some(&images),
+            #[cfg(feature = "layout-detection")]
+            None,
+            &config,
+            &pipeline,
+            None,
+        )
+        .await;
+
+        crate::plugins::unregister_ocr_backend(FAILED_BACKEND).unwrap();
+        crate::plugins::unregister_ocr_backend(FALLBACK_BACKEND).unwrap();
+
+        let (text, _, _, doc, _, _, _, _) = result.expect("fallback stage must be accepted");
+        assert_eq!(text, FALLBACK_TEXT);
+        let warnings = doc
+            .expect("accepted fallback diagnostics require an internal document")
+            .processing_warnings;
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning.message.contains(FAILED_BACKEND) && warning.message.contains("failed")),
+            "primary-stage failure must survive accepted fallback: {warnings:?}"
+        );
+        assert!(
+            warnings.iter().any(
+                |warning| warning.message.contains(UNAVAILABLE_BACKEND)
+                    && warning.message.contains("unavailable")
+            ),
+            "unavailable requested stage must be surfaced: {warnings:?}"
+        );
+    }
+
     #[cfg(feature = "ocr")]
     #[test]
     fn test_build_page_raster_image_fields() {
@@ -4013,6 +4461,258 @@ Buffers:           50000 kB
         assert!(result.2.is_empty());
         assert!(result.3.is_none());
         assert!(result.4.is_empty());
+        assert!(result.5.is_empty());
+    }
+
+    /// Minimal 2-page PDF (no content streams, just two bare `/Page` objects) for
+    /// tests that need `extract_mixed_ocr_native` to target a specific *later* page.
+    /// Mirrors `crate::pdf::render::build_minimal_pdf_with_mediabox`, which already
+    /// renders successfully with no content stream.
+    #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
+    fn build_minimal_two_page_pdf(w: f32, h: f32) -> Vec<u8> {
+        let mut buf = Vec::<u8>::new();
+        buf.extend_from_slice(b"%PDF-1.4\n");
+
+        let obj1_offset = buf.len();
+        buf.extend_from_slice(b"1 0 obj\n<</Type /Catalog /Pages 2 0 R>>\nendobj\n");
+
+        let obj2_offset = buf.len();
+        buf.extend_from_slice(b"2 0 obj\n<</Type /Pages /Kids [3 0 R 4 0 R] /Count 2>>\nendobj\n");
+
+        let mb = format!("[0 0 {} {}]", w, h);
+        let obj3_offset = buf.len();
+        buf.extend_from_slice(format!("3 0 obj\n<</Type /Page /MediaBox {} /Parent 2 0 R>>\nendobj\n", mb).as_bytes());
+        let obj4_offset = buf.len();
+        buf.extend_from_slice(format!("4 0 obj\n<</Type /Page /MediaBox {} /Parent 2 0 R>>\nendobj\n", mb).as_bytes());
+
+        let xref_offset = buf.len();
+        buf.extend_from_slice(b"xref\n");
+        buf.extend_from_slice(b"0 5\n");
+        buf.extend_from_slice(b"0000000000 65535 f \n");
+        buf.extend_from_slice(format!("{:010} 00000 n \n", obj1_offset).as_bytes());
+        buf.extend_from_slice(format!("{:010} 00000 n \n", obj2_offset).as_bytes());
+        buf.extend_from_slice(format!("{:010} 00000 n \n", obj3_offset).as_bytes());
+        buf.extend_from_slice(format!("{:010} 00000 n \n", obj4_offset).as_bytes());
+
+        buf.extend_from_slice(b"trailer\n<</Size 5 /Root 1 0 R>>\n");
+        buf.extend_from_slice(format!("startxref\n{}\n%%EOF\n", xref_offset).as_bytes());
+
+        buf
+    }
+
+    /// Regression test (review follow-up to #1341): the nested `run_ocr_pipeline`
+    /// call for a single page assembles its aggregate text as if that lone image
+    /// were page 1 of the document, so a configured page marker is stamped "PAGE 1"
+    /// regardless of which real page is being OCR'd. When only a LATER page (page 2
+    /// here) is routed through the pipeline route, the merged output must carry the
+    /// raw backend text with no leaked "PAGE 1" marker from the nested call.
+    #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
+    #[tokio::test]
+    async fn mixed_ocr_later_page_pipeline_route_does_not_leak_page_one_marker() {
+        use crate::core::config::{OcrConfig, OcrPipelineConfig, OcrPipelineStage, PageConfig};
+        use crate::plugins::{OcrBackend, OcrBackendType, Plugin};
+        use crate::types::{ExtractedDocument, PageBoundary};
+        use std::sync::Arc;
+
+        struct FixedTextBackend;
+
+        #[async_trait::async_trait]
+        impl OcrBackend for FixedTextBackend {
+            fn backend_type(&self) -> OcrBackendType {
+                OcrBackendType::Custom
+            }
+            fn supports_language(&self, _: &str) -> bool {
+                true
+            }
+            async fn process_image(&self, _: &[u8], _: &OcrConfig) -> crate::Result<ExtractedDocument> {
+                Ok(ExtractedDocument {
+                    content: "OCR PAGE TWO CONTENT".to_string(),
+                    ..Default::default()
+                })
+            }
+            fn supports_document_processing(&self) -> bool {
+                false
+            }
+        }
+
+        impl Plugin for FixedTextBackend {
+            fn name(&self) -> &str {
+                "later-page-marker-test-backend"
+            }
+            fn version(&self) -> String {
+                "1.0.0".to_string()
+            }
+            fn initialize(&self) -> crate::Result<()> {
+                Ok(())
+            }
+            fn shutdown(&self) -> crate::Result<()> {
+                Ok(())
+            }
+        }
+
+        crate::plugins::register_ocr_backend(Arc::new(FixedTextBackend)).unwrap();
+
+        let pdf = build_minimal_two_page_pdf(612.0, 792.0);
+
+        let page1_text = "page one native text";
+        let page2_text = "page two native text";
+        let native_text = format!("{page1_text}\n{page2_text}");
+        let boundaries = vec![
+            PageBoundary {
+                byte_start: 0,
+                byte_end: page1_text.len(),
+                page_number: 1,
+            },
+            PageBoundary {
+                byte_start: page1_text.len() + 1,
+                byte_end: native_text.len(),
+                page_number: 2,
+            },
+        ];
+
+        let config = ExtractionConfig {
+            ocr: Some(OcrConfig {
+                // An explicit pipeline (rather than `vlm_fallback`) so the test can
+                // name its own mock backend instead of the hardcoded "vlm" name.
+                pipeline: Some(OcrPipelineConfig {
+                    stages: vec![OcrPipelineStage {
+                        backend: "later-page-marker-test-backend".to_string(),
+                        priority: 100,
+                        language: None,
+                        tesseract_config: None,
+                        paddle_ocr_config: None,
+                        vlm_config: None,
+                        backend_options: None,
+                    }],
+                    quality_thresholds: crate::core::config::OcrQualityThresholds::default(),
+                }),
+                ..Default::default()
+            }),
+            pages: Some(PageConfig {
+                insert_page_markers: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let result = extract_mixed_ocr_native(&native_text, &boundaries, &[2], &pdf, &config, None)
+            .await
+            .unwrap();
+        let merged = result.0;
+
+        assert!(
+            merged.contains("OCR PAGE TWO CONTENT"),
+            "merged output must contain the OCR'd page 2 text: {merged:?}"
+        );
+        assert!(
+            !merged.contains("PAGE 1"),
+            "merged output must not leak a page-1 marker from the nested single-image pipeline call: {merged:?}"
+        );
+        assert!(
+            merged.contains(page1_text),
+            "page 1's native text must be untouched: {merged:?}"
+        );
+
+        crate::plugins::unregister_ocr_backend("later-page-marker-test-backend").unwrap();
+    }
+
+    /// Regression test (review follow-up to #1341): `ProcessingWarning`s produced by
+    /// the nested `run_ocr_pipeline` call (e.g. "no stage cleared the quality
+    /// threshold") must propagate out of `extract_mixed_ocr_native` instead of being
+    /// silently dropped along with the per-page `InternalDocument`.
+    #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
+    #[tokio::test]
+    async fn mixed_ocr_pipeline_route_propagates_below_threshold_warning() {
+        use crate::core::config::{OcrConfig, OcrPipelineConfig, OcrPipelineStage, OcrQualityThresholds};
+        use crate::plugins::{OcrBackend, OcrBackendType, Plugin};
+        use crate::types::{ExtractedDocument, PageBoundary};
+        use std::sync::Arc;
+
+        struct LowQualityBackend;
+
+        #[async_trait::async_trait]
+        impl OcrBackend for LowQualityBackend {
+            fn backend_type(&self) -> OcrBackendType {
+                OcrBackendType::Custom
+            }
+            fn supports_language(&self, _: &str) -> bool {
+                true
+            }
+            async fn process_image(&self, _: &[u8], _: &OcrConfig) -> crate::Result<ExtractedDocument> {
+                Ok(ExtractedDocument {
+                    content: "low quality text".to_string(),
+                    ..Default::default()
+                })
+            }
+            fn supports_document_processing(&self) -> bool {
+                false
+            }
+        }
+
+        impl Plugin for LowQualityBackend {
+            fn name(&self) -> &str {
+                "below-threshold-warning-test-backend"
+            }
+            fn version(&self) -> String {
+                "1.0.0".to_string()
+            }
+            fn initialize(&self) -> crate::Result<()> {
+                Ok(())
+            }
+            fn shutdown(&self) -> crate::Result<()> {
+                Ok(())
+            }
+        }
+
+        crate::plugins::register_ocr_backend(Arc::new(LowQualityBackend)).unwrap();
+
+        let pdf = crate::pdf::render::build_minimal_pdf_with_mediabox(612.0, 792.0);
+        let native_text = "native text";
+        let boundaries = vec![PageBoundary {
+            byte_start: 0,
+            byte_end: native_text.len(),
+            page_number: 1,
+        }];
+
+        let config = ExtractionConfig {
+            ocr: Some(OcrConfig {
+                pipeline: Some(OcrPipelineConfig {
+                    stages: vec![OcrPipelineStage {
+                        backend: "below-threshold-warning-test-backend".to_string(),
+                        priority: 100,
+                        language: None,
+                        tesseract_config: None,
+                        paddle_ocr_config: None,
+                        vlm_config: None,
+                        backend_options: None,
+                    }],
+                    // Impossible to clear: forces the best-effort fallback branch, which
+                    // pushes a "scored below threshold" ProcessingWarning.
+                    quality_thresholds: OcrQualityThresholds {
+                        pipeline_min_quality: 1.1,
+                        ..Default::default()
+                    },
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let result = extract_mixed_ocr_native(native_text, &boundaries, &[1], &pdf, &config, None)
+            .await
+            .unwrap();
+        let warnings = result.5;
+
+        assert!(
+            !warnings.is_empty(),
+            "below-threshold pipeline warnings must propagate out of extract_mixed_ocr_native"
+        );
+        assert!(
+            warnings.iter().any(|w| w.message.contains("quality threshold")),
+            "expected a below-threshold warning, got: {warnings:?}"
+        );
+
+        crate::plugins::unregister_ocr_backend("below-threshold-warning-test-backend").unwrap();
     }
 
     /// Verifies that formulas returned by a per-page OCR backend are accumulated and
