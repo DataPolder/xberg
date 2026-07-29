@@ -40,6 +40,8 @@ pub(crate) mod scan_detect;
 /// PDF logical structure extraction (tagged PDF support).
 pub mod structure;
 #[cfg(feature = "pdf")]
+pub(crate) mod table_normalize;
+#[cfg(feature = "pdf")]
 /// Table reconstruction from PDF text-layer word positions.
 pub mod table_reconstruct;
 #[cfg(feature = "pdf")]

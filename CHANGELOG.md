@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cohorts, merges sparse currency-affix columns without dropping markers, and folds wrapped
   financial-table lines into logical records; table-dominant pages also discard bbox-confirmed crop
   spill while retaining surrounding prose and annotations.
+- PDF Markdown reconstructs paired wrapped financial tables as semantic three-column grids and
+  repairs consistently merged numeric columns from native PDF table detection.
 
 ## [1.0.3] - 2026-07-29
 

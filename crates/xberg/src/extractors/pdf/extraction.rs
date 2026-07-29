@@ -137,6 +137,14 @@ pub(crate) fn extract_all_from_oxide_document(
                         None
                     }
                 };
+                let repaired_tables = combined
+                    .iter_mut()
+                    .map(crate::pdf::table_normalize::repair_consistently_merged_numeric_column)
+                    .filter(|repaired| *repaired)
+                    .count();
+                if repaired_tables > 0 {
+                    tracing::debug!(repaired_tables, "repaired collapsed PDF table columns");
+                }
                 Ok((combined, hierarchy_segments))
             },
             |panic| crate::error::XbergError::Parsing {
