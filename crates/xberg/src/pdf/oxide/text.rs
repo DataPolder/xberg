@@ -411,7 +411,9 @@ fn rebuild_text_from_fragmented_spans(spans: &[pdf_oxide::layout::TextSpan]) -> 
 }
 
 const INLINE_FRAGMENT_GAP_RATIO: f32 = 0.1;
-const ROW_RESET_FONT_RATIO: f32 = 1.0;
+// Detached glyphs are stream-local; bounding the lookup avoids quadratic work on dense pages.
+const MAX_INLINE_FRAGMENT_ANCHOR_LOOKBACK: usize = 256;
+const ROW_RESET_MIN_BACKTRACK_EMS: f32 = 4.0;
 
 #[derive(Clone, Copy)]
 struct OrderedSpan<'a> {
@@ -437,21 +439,37 @@ fn is_short_inline_fragment(span: &pdf_oxide::layout::TextSpan) -> bool {
     !(char_count == 1 && matches!(first, 'a' | 'A' | 'I'))
 }
 
+fn has_rtl_or_bidi_content(text: &str) -> bool {
+    text.chars()
+        .any(|character| pdf_oxide::text::is_rtl_text(character as u32))
+}
+
+fn is_horizontal_ltr(span: &pdf_oxide::layout::TextSpan) -> bool {
+    span.wmode == 0 && !span.rtl_draw_logical && span.rotation_degrees.abs() <= f32::EPSILON
+}
+
 fn find_inline_fragment_anchor(
     index: usize,
     spans: &[pdf_oxide::layout::TextSpan],
     anchors: &[Option<usize>],
 ) -> Option<usize> {
     let span = &spans[index];
-    if span.split_boundary_before || !is_short_inline_fragment(span) {
+    if span.split_boundary_before
+        || !is_short_inline_fragment(span)
+        || !is_horizontal_ltr(span)
+        || has_rtl_or_bidi_content(&span.text)
+    {
         return None;
     }
 
-    (0..index)
+    let search_start = index.saturating_sub(MAX_INLINE_FRAGMENT_ANCHOR_LOOKBACK);
+    (search_start..index)
         .filter(|candidate_index| anchors[*candidate_index].is_none())
         .filter_map(|candidate_index| {
             let candidate = &spans[candidate_index];
-            if !spans_overlap_vertically(candidate, span)
+            if !is_horizontal_ltr(candidate)
+                || has_rtl_or_bidi_content(&candidate.text)
+                || !spans_overlap_vertically(candidate, span)
                 || (candidate.rotation_degrees - span.rotation_degrees).abs() > f32::EPSILON
             {
                 return None;
@@ -510,6 +528,7 @@ fn append_span_separator(
     previous: &pdf_oxide::layout::TextSpan,
     current: OrderedSpan<'_>,
     paragraph_gap_threshold: f32,
+    allow_ltr_row_resets: bool,
 ) {
     if current.glue_to_previous {
         return;
@@ -517,8 +536,12 @@ fn append_span_separator(
 
     let span = current.span;
     let y_gap = (previous.bbox.y - span.bbox.y).abs();
-    let reset_threshold = previous.font_size.max(span.font_size) * ROW_RESET_FONT_RATIO;
-    if span.bbox.x < previous.bbox.x - reset_threshold {
+    let reset_threshold = previous.font_size.max(span.font_size) * ROW_RESET_MIN_BACKTRACK_EMS;
+    let is_horizontal_ltr_pair = is_horizontal_ltr(previous)
+        && is_horizontal_ltr(span)
+        && !has_rtl_or_bidi_content(&previous.text)
+        && !has_rtl_or_bidi_content(&span.text);
+    if allow_ltr_row_resets && is_horizontal_ltr_pair && span.bbox.x < previous.bbox.x - reset_threshold {
         if y_gap > paragraph_gap_threshold {
             text.push_str("\n\n");
         } else {
@@ -565,13 +588,16 @@ fn assemble_page_text(spans: &[pdf_oxide::layout::TextSpan]) -> String {
     );
 
     let ordered = order_spans_with_inline_fragments(spans);
+    let allow_ltr_row_resets = !spans
+        .iter()
+        .any(|span| span.rtl_draw_logical || has_rtl_or_bidi_content(&span.text));
     let mut text = String::with_capacity(spans.len() * 20);
     let mut prev_span: Option<&pdf_oxide::layout::TextSpan> = None;
 
     for current in ordered {
         let span = current.span;
         if let Some(prev) = prev_span {
-            append_span_separator(&mut text, prev, current, paragraph_gap_threshold);
+            append_span_separator(&mut text, prev, current, paragraph_gap_threshold, allow_ltr_row_resets);
         }
         text.push_str(&span.text);
         prev_span = Some(span);
@@ -775,6 +801,88 @@ mod tests {
         ];
 
         assert_eq!(assemble_page_text(&spans), "1.000\n002");
+    }
+
+    #[test]
+    fn far_left_reset_does_not_split_rtl_text() {
+        let mut next = span_with_width("العالم", 430.0, 100.0, 35.0, 10.0, 10.0);
+        next.split_boundary_before = true;
+        let spans = vec![span_with_width("مرحبا", 500.0, 100.0, 30.0, 10.0, 10.0), next];
+
+        assert_eq!(assemble_page_text(&spans), "مرحبا العالم");
+    }
+
+    #[test]
+    fn far_left_reset_respects_rtl_span_metadata_for_ascii_text() {
+        let mut previous = span_with_width("first", 500.0, 100.0, 30.0, 10.0, 10.0);
+        previous.rtl_draw_logical = true;
+        let mut next = span_with_width("second", 430.0, 100.0, 35.0, 10.0, 10.0);
+        next.rtl_draw_logical = true;
+        next.split_boundary_before = true;
+
+        assert_eq!(assemble_page_text(&[previous, next]), "first second");
+    }
+
+    #[test]
+    fn far_left_reset_does_not_split_ascii_numbers_on_rtl_page() {
+        let mut number = span_with_width("123", 500.0, 100.0, 20.0, 10.0, 10.0);
+        number.split_boundary_before = true;
+        let mut next_number = span_with_width("456", 430.0, 100.0, 20.0, 10.0, 10.0);
+        next_number.split_boundary_before = true;
+        let spans = vec![
+            span_with_width("مرحبا", 570.0, 100.0, 30.0, 10.0, 10.0),
+            number,
+            next_number,
+        ];
+
+        assert_eq!(assemble_page_text(&spans), "مرحبا 123 456");
+    }
+
+    #[test]
+    fn moderate_math_backtrack_does_not_start_new_row() {
+        let mut denominator = span_with_width("denominator", 65.0, 96.0, 55.0, 10.0, 10.0);
+        denominator.split_boundary_before = true;
+        let spans = vec![
+            span_with_width("numerator", 100.0, 104.0, 45.0, 10.0, 10.0),
+            denominator,
+        ];
+
+        assert_eq!(assemble_page_text(&spans), "numerator denominator");
+    }
+
+    #[test]
+    fn far_left_reset_does_not_split_rotated_text() {
+        let mut previous = span_with_width("first", 500.0, 100.0, 30.0, 10.0, 10.0);
+        previous.rotation_degrees = 90.0;
+        let mut next = span_with_width("second", 430.0, 100.0, 35.0, 10.0, 10.0);
+        next.rotation_degrees = 90.0;
+        next.split_boundary_before = true;
+
+        assert_eq!(assemble_page_text(&[previous, next]), "first second");
+    }
+
+    #[test]
+    fn inline_fragment_anchor_rejects_non_ltr_geometry() {
+        let mut anchor = span_with_width("word", 100.0, 100.0, 30.0, 10.0, 10.0);
+        anchor.rtl_draw_logical = true;
+        let mut fragment = span_with_width("2", 130.0, 100.0, 3.0, 6.0, 6.0);
+        fragment.rtl_draw_logical = true;
+        let spans = vec![anchor, fragment];
+
+        assert_eq!(find_inline_fragment_anchor(1, &spans, &[None, None]), None);
+    }
+
+    #[test]
+    fn inline_fragment_anchor_search_is_local() {
+        let mut spans = vec![span_with_width("anchor", 100.0, 100.0, 30.0, 10.0, 10.0)];
+        spans.extend(
+            (0..=MAX_INLINE_FRAGMENT_ANCHOR_LOOKBACK)
+                .map(|index| span_with_width("filler", 300.0, index as f32, 30.0, 10.0, 10.0)),
+        );
+        spans.push(span_with_width("2", 130.0, 100.0, 3.0, 6.0, 6.0));
+        let anchors = vec![None; spans.len()];
+
+        assert_eq!(find_inline_fragment_anchor(spans.len() - 1, &spans, &anchors), None);
     }
 
     #[test]

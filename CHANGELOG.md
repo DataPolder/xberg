@@ -56,6 +56,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Per-file OCR language overrides (CLI and benchmark) now reach nested Tesseract configurations.
 - PDF plain-text extraction repairs detached text spans so words are no longer split mid-token.
 - PDF plain-text extraction retains table assets without rendering native table text twice.
+- PDF plain-text extraction repairs detached subscripts, phone suffixes, and final glyphs while
+  preserving RTL, rotated, vertical-writing, and mathematical span order.
 - PDF extraction recovers and stitches label-heavy financial tables without merging independent
   aligned tables.
 - PDF Markdown preserves explicit word boundaries and changelog heading hierarchy.
