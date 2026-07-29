@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- PDF benchmark fixtures can pin Tesseract OCR languages. The benchmark harness validates language
+  codes, checks required packs before timed extraction, and preserves the effective OCR backend and
+  cache settings when applying per-file batch overrides.
+
 ### Changed
 
 - OCR now emits `tracing` logs when it materializes a Tesseract language pack at runtime: an
@@ -16,6 +22,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   URL as it is tried, and one on success. Previously a runtime language-pack download was silent,
   making a first-use OCR stall on a missing pack hard to diagnose. English is unaffected on builds
   with the `bundle-tessdata-eng` feature (embedded, no download).
+
+### Fixed
+
+- PDF plain-text extraction retains table assets without rendering native table text twice.
+- PDF extraction recovers and stitches label-heavy financial tables without merging independent
+  aligned tables.
+- PDF Markdown preserves explicit word boundaries and changelog heading hierarchy.
+- OCR Markdown prefers validated semantic layout hints over broad text regions at comparable
+  overlap.
 
 ## [1.0.2] - 2026-07-28
 
