@@ -156,7 +156,7 @@ pub(crate) async fn vlm_ocr(
     });
 
     let mut request = ChatCompletionRequest::default();
-    request.model = config.model.clone();
+    request.model = normalize_vlm_model(&config.model, config.base_url.as_deref());
     request.messages = vec![message];
     request.temperature = config.temperature;
     request.max_tokens = config.max_tokens;
@@ -179,6 +179,28 @@ pub(crate) async fn vlm_ocr(
         .ok_or_else(|| crate::XbergError::ocr(format!("VLM OCR returned no content (model={})", config.model)))?;
 
     Ok((text, usage))
+}
+
+/// Normalize the VLM model id for the target endpoint.
+///
+/// liter-llm uses a leading `openai/` segment purely to route to its built-in
+/// OpenAI provider; it is not part of the model id the API understands. When the
+/// caller points at OpenAI's own REST endpoint via a custom `base_url` (e.g. a
+/// regional `https://eu.api.openai.com/v1/`), that endpoint rejects the prefixed
+/// form as an invalid model id (issue #1339). Strip the prefix only in that case.
+///
+/// The strip is keyed on the base_url targeting `openai.com` on purpose: gateways
+/// such as OpenRouter or Together are also reached through a custom `base_url` but
+/// require an `org/model` id verbatim, so they must never have a prefix stripped.
+/// With no `base_url` the prefix is what routes liter-llm, so it is left intact.
+fn normalize_vlm_model(model: &str, base_url: Option<&str>) -> String {
+    if let Some(url) = base_url
+        && url.contains("openai.com")
+        && let Some(stripped) = model.strip_prefix("openai/")
+    {
+        return stripped.to_string();
+    }
+    model.to_string()
 }
 
 #[cfg(test)]
@@ -205,6 +227,41 @@ mod tests {
     fn test_vlm_ocr_prompt_en_no_language_hint() {
         let prompt = render_ocr_prompt("en");
         assert!(!prompt.contains("language:"));
+    }
+
+    /// Regression tests for issue #1339: an `openai/`-prefixed model must be sent
+    /// bare to OpenAI's own custom endpoint, but left untouched for gateways and for
+    /// the default (no base_url) provider-routed path.
+    #[test]
+    fn test_normalize_vlm_model_strips_prefix_for_openai_endpoint() {
+        assert_eq!(
+            super::normalize_vlm_model("openai/gpt-4o-mini", Some("https://eu.api.openai.com/v1/")),
+            "gpt-4o-mini"
+        );
+    }
+
+    #[test]
+    fn test_normalize_vlm_model_keeps_prefix_without_base_url() {
+        assert_eq!(
+            super::normalize_vlm_model("openai/gpt-4o-mini", None),
+            "openai/gpt-4o-mini"
+        );
+    }
+
+    #[test]
+    fn test_normalize_vlm_model_keeps_prefix_for_gateway_base_url() {
+        assert_eq!(
+            super::normalize_vlm_model("openai/gpt-4o", Some("https://openrouter.ai/api/v1")),
+            "openai/gpt-4o"
+        );
+    }
+
+    #[test]
+    fn test_normalize_vlm_model_leaves_unprefixed_model_untouched() {
+        assert_eq!(
+            super::normalize_vlm_model("gpt-4o-mini", Some("https://eu.api.openai.com/v1/")),
+            "gpt-4o-mini"
+        );
     }
 
     /// Regression test for issue #1273: an unset VLM `timeout_secs` must not inherit

@@ -71,6 +71,22 @@ impl ImageExtractor {
             }
         };
 
+        // `vlm_fallback` and explicit multi-stage pipelines were only honoured by the
+        // PDF extractor, so a bare image upload always used a single backend and never
+        // fell back to the VLM (issue #1339). When such a policy is configured, route
+        // the image through the same shared pipeline runner. Gated on `pdf` because the
+        // runner lives in that module; a build without `pdf` keeps the single-backend
+        // path unchanged. The default (no fallback, no explicit pipeline) also keeps the
+        // fast path, so ordinary image OCR is unaffected.
+        #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
+        {
+            let wants_pipeline = ocr_config.vlm_fallback != crate::core::config::VlmFallbackPolicy::Disabled
+                || ocr_config.pipeline.is_some();
+            if wants_pipeline && let Some(pipeline) = ocr_config.effective_pipeline() {
+                return self.extract_with_ocr_pipeline(content, config, &pipeline).await;
+            }
+        }
+
         let backend = {
             crate::plugins::ensure_ocr_backends_initialized();
             let registry = get_ocr_backend_registry();
@@ -163,6 +179,75 @@ impl ImageExtractor {
             }
             Ok(doc)
         }
+    }
+
+    /// Route a single image through the multi-stage OCR pipeline (issue #1339).
+    ///
+    /// Decodes the image and reuses the PDF extractor's pipeline runner so that
+    /// `vlm_fallback` / explicit `pipeline` policies apply to bare images the same
+    /// way they do to PDF pages. Gated on `pdf` because the runner lives there.
+    #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
+    async fn extract_with_ocr_pipeline(
+        &self,
+        content: &[u8],
+        config: &ExtractionConfig,
+        pipeline: &crate::core::config::OcrPipelineConfig,
+    ) -> Result<InternalDocument> {
+        let image = image::load_from_memory(content).map_err(|e| crate::XbergError::Parsing {
+            message: format!("Failed to decode image for OCR pipeline: {e}"),
+            source: None,
+        })?;
+        let images = [image];
+
+        let (text, _tables, ocr_elements, pipeline_doc, llm_usage, _page_texts, _rasters, formulas) =
+            Box::pin(crate::extractors::pdf::ocr::run_ocr_pipeline(
+                None,
+                Some(&images),
+                #[cfg(feature = "layout-detection")]
+                None,
+                config,
+                pipeline,
+                None,
+            ))
+            .await?;
+
+        // Build a clean image document from the pipeline text (keeping the "image"
+        // doc type and shape the rest of the image path produces), then carry over
+        // the pipeline's elements, formulas, usage, and — crucially — any processing
+        // warnings, so a fallback backend that failed is visible to the caller
+        // rather than silently swapped for the classical result (issue #1339).
+        let mut doc = build_image_internal_document(Some(&text), None);
+        Self::mark_ocr_extraction(&mut doc);
+        if !ocr_elements.is_empty() {
+            doc.prebuilt_ocr_elements = Some(ocr_elements);
+        }
+        if !formulas.is_empty() {
+            doc.formulas = formulas;
+        }
+        if !llm_usage.is_empty() {
+            doc.llm_usage = Some(llm_usage);
+        }
+        if let Some(pipeline_doc) = pipeline_doc {
+            doc.processing_warnings.extend(pipeline_doc.processing_warnings);
+        }
+
+        let trimmed = text.trim().to_string();
+        if !trimmed.is_empty() {
+            doc.prebuilt_pages = Some(vec![crate::types::PageContent {
+                page_number: 1,
+                content: trimmed,
+                tables: vec![],
+                image_indices: vec![],
+                hierarchy: None,
+                is_blank: None,
+                layout_regions: None,
+                speaker_notes: None,
+                section_name: None,
+                sheet_name: None,
+            }]);
+        }
+
+        Ok(doc)
     }
 
     /// Extract text from image using layout detection + per-region OCR.

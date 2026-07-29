@@ -339,6 +339,31 @@ impl ExtractionConfig {
             }
         }
 
+        // Forward the general LLM credential env vars onto the VLM OCR client. Before
+        // this, `XBERG_LLM_API_KEY` / `XBERG_LLM_BASE_URL` only reached structured
+        // extraction (handled above), so a VLM OCR backend configured with a custom
+        // `base_url` could never resolve its key from the environment and failed with
+        // an authentication error — the env vars the docs promise as highest priority
+        // were silently ignored for the VLM path (issue #1339). This runs after the
+        // `XBERG_VLM_OCR_MODEL` block so a `vlm_config` created there is also covered,
+        // and only applies when VLM OCR is already configured, so it never silently
+        // enables the VLM path. The empty-string guard in the `XBERG_LLM_*` blocks
+        // above already rejects empty values before we get here.
+        if let Some(ref mut ocr) = self.ocr
+            && let Some(ref mut vlm) = ocr.vlm_config
+        {
+            if let Ok(value) = std::env::var("XBERG_LLM_API_KEY")
+                && !value.is_empty()
+            {
+                vlm.api_key = Some(value);
+            }
+            if let Ok(value) = std::env::var("XBERG_LLM_BASE_URL")
+                && !value.is_empty()
+            {
+                vlm.base_url = Some(value);
+            }
+        }
+
         if let Ok(value) = std::env::var("XBERG_VLM_EMBEDDING_MODEL") {
             if value.is_empty() {
                 return Err(XbergError::Validation {
@@ -467,6 +492,60 @@ mod tests {
             other => panic!("expected Plugin variant, got {other:?}"),
         }
         clear_embedding_env();
+    }
+
+    fn clear_llm_cred_env() {
+        unsafe {
+            std::env::remove_var("XBERG_LLM_API_KEY");
+            std::env::remove_var("XBERG_LLM_BASE_URL");
+            std::env::remove_var("XBERG_VLM_OCR_MODEL");
+        }
+    }
+
+    /// Regression test for issue #1339: `XBERG_LLM_API_KEY` / `XBERG_LLM_BASE_URL`
+    /// must be forwarded onto an existing VLM OCR config so a custom `base_url` can
+    /// resolve its credential from the environment.
+    #[test]
+    fn llm_cred_env_forwarded_to_existing_vlm_config() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        clear_llm_cred_env();
+        unsafe {
+            std::env::set_var("XBERG_LLM_API_KEY", "sk-test-key");
+            std::env::set_var("XBERG_LLM_BASE_URL", "https://eu.api.openai.com/v1/");
+        }
+        let mut config = ExtractionConfig {
+            ocr: Some(crate::core::config::OcrConfig {
+                vlm_config: Some(crate::core::config::LlmConfig {
+                    model: "gpt-4o-mini".to_string(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        config.apply_env_overrides().expect("env overrides should apply");
+        let vlm = config.ocr.unwrap().vlm_config.unwrap();
+        assert_eq!(vlm.api_key.as_deref(), Some("sk-test-key"));
+        assert_eq!(vlm.base_url.as_deref(), Some("https://eu.api.openai.com/v1/"));
+        clear_llm_cred_env();
+    }
+
+    /// The forwarding must never fabricate a VLM config: without one, the LLM cred
+    /// env vars only reach structured extraction, not OCR (issue #1339).
+    #[test]
+    fn llm_cred_env_does_not_create_vlm_config() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        clear_llm_cred_env();
+        unsafe {
+            std::env::set_var("XBERG_LLM_API_KEY", "sk-test-key");
+        }
+        let mut config = ExtractionConfig::default();
+        config.apply_env_overrides().expect("env overrides should apply");
+        assert!(
+            config.ocr.as_ref().and_then(|o| o.vlm_config.as_ref()).is_none(),
+            "VLM config must not be auto-created from LLM cred env vars"
+        );
+        clear_llm_cred_env();
     }
 
     fn clear_paddle_model_env() {

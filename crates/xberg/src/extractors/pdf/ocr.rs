@@ -1776,6 +1776,10 @@ pub(crate) async fn run_ocr_pipeline(
     )> = None;
 
     let mut accumulated_usage: Vec<crate::types::LlmUsage> = Vec::new();
+    // Track stages that errored outright (e.g. a VLM fallback that failed
+    // authentication) so the failure is surfaced to the caller instead of being
+    // silently replaced by a lower-quality earlier result (issue #1339).
+    let mut stage_failures: Vec<(String, String)> = Vec::new();
 
     for stage in &available_stages {
         let mut stage_ocr = ocr_config.clone();
@@ -1890,6 +1894,7 @@ pub(crate) async fn run_ocr_pipeline(
                     error = %e,
                     "Pipeline: backend failed, trying next"
                 );
+                stage_failures.push((stage.backend.clone(), e.to_string()));
             }
         }
     }
@@ -1924,6 +1929,14 @@ pub(crate) async fn run_ocr_pipeline(
                      which may be inaccurate or incomplete."
                 )),
             });
+            for (backend, error) in &stage_failures {
+                doc.processing_warnings.push(crate::types::ProcessingWarning {
+                    source: std::borrow::Cow::Borrowed("ocr_pipeline"),
+                    message: std::borrow::Cow::Owned(format!(
+                        "OCR fallback backend '{backend}' failed and was skipped: {error}"
+                    )),
+                });
+            }
             Ok((
                 text,
                 tables,
@@ -1935,10 +1948,22 @@ pub(crate) async fn run_ocr_pipeline(
                 formulas,
             ))
         }
-        None => Err(crate::XbergError::Parsing {
-            message: "All OCR pipeline backends failed".to_string(),
-            source: None,
-        }),
+        None => {
+            let detail = if stage_failures.is_empty() {
+                String::new()
+            } else {
+                let causes = stage_failures
+                    .iter()
+                    .map(|(backend, error)| format!("{backend}: {error}"))
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                format!(" ({causes})")
+            };
+            Err(crate::XbergError::Parsing {
+                message: format!("All OCR pipeline backends failed{detail}"),
+                source: None,
+            })
+        }
     }
 }
 

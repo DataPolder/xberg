@@ -8,7 +8,7 @@ mod extraction;
 mod layout_hints;
 #[cfg(all(feature = "pdf", feature = "layout-detection"))]
 mod layout_runner;
-mod ocr;
+pub(crate) mod ocr;
 mod pages;
 #[cfg(feature = "layout-detection")]
 pub(crate) mod reading_order;
