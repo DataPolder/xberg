@@ -353,8 +353,17 @@ fn build_batch_file_configs(
                 cwd.join(path)
             };
             let mut ocr = base_ocr.clone();
-            ocr.as_object_mut()?
-                .insert("language".to_string(), serde_json::json!(languages));
+            let ocr_object = ocr.as_object_mut()?;
+            ocr_object.insert(
+                "language".to_string(),
+                serde_json::json!(languages.clone()),
+            );
+            if let Some(tesseract_config) = ocr_object
+                .get_mut("tesseract_config")
+                .and_then(serde_json::Value::as_object_mut)
+            {
+                tesseract_config.insert("language".to_string(), serde_json::json!(languages));
+            }
             Some((
                 absolute_path.to_string_lossy().into_owned(),
                 serde_json::json!({ "ocr": ocr }),
@@ -2748,6 +2757,10 @@ mod tests {
         );
         assert_eq!(
             config.pointer("/ocr/language"),
+            Some(&serde_json::json!(["deu", "eng"]))
+        );
+        assert_eq!(
+            config.pointer("/ocr/tesseract_config/language"),
             Some(&serde_json::json!(["deu", "eng"]))
         );
     }

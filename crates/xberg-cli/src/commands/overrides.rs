@@ -589,7 +589,11 @@ impl ExtractionOverrides {
             && let Some(ref lang) = self.ocr_language
             && let Some(ref mut existing_ocr) = config.ocr
         {
-            existing_ocr.language = vec![lang.clone()];
+            let language = vec![lang.clone()];
+            existing_ocr.language = language.clone();
+            if let Some(tesseract_config) = existing_ocr.tesseract_config.as_mut() {
+                tesseract_config.language = language;
+            }
         }
 
         if self.ocr.is_none()
@@ -1158,6 +1162,49 @@ mod tests {
         let ocr = config.ocr.unwrap();
         assert_eq!(ocr.backend, "tesseract");
         assert_eq!(ocr.language, vec!["deu".to_string()]);
+    }
+
+    #[cfg(feature = "ocr-surface")]
+    #[test]
+    fn test_ocr_language_updates_existing_nested_tesseract_config() {
+        let mut config = ExtractionConfig {
+            ocr: Some(OcrConfig {
+                enabled: true,
+                backend: "tesseract".to_string(),
+                language: vec!["eng".to_string()],
+                tesseract_config: Some(xberg::TesseractConfig {
+                    language: vec!["eng".to_string()],
+                    use_cache: false,
+                    ..Default::default()
+                }),
+                output_format: None,
+                paddle_ocr_config: None,
+                element_config: None,
+                quality_thresholds: None,
+                pipeline: None,
+                auto_rotate: false,
+                vlm_config: None,
+                vlm_fallback: Default::default(),
+                vlm_prompt: None,
+                acceleration: None,
+                tessdata_bytes: None,
+                tessdata_path: None,
+                backend_options: None,
+            }),
+            ..Default::default()
+        };
+        let overrides = ExtractionOverrides {
+            ocr_language: Some("deu".to_string()),
+            ..default_overrides()
+        };
+
+        overrides.apply(&mut config);
+
+        let ocr = config.ocr.unwrap();
+        assert_eq!(ocr.language, vec!["deu".to_string()]);
+        let tesseract = ocr.tesseract_config.unwrap();
+        assert_eq!(tesseract.language, vec!["deu".to_string()]);
+        assert!(!tesseract.use_cache);
     }
 
     #[cfg(feature = "ocr-surface")]
