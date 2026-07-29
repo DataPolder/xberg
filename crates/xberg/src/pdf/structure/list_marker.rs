@@ -8,6 +8,7 @@ pub(super) struct OrderedListMarker {
     pub(super) content_start: usize,
     pub(super) has_content: bool,
     pub(super) has_separator: bool,
+    pub(super) numeric_value: Option<u16>,
 }
 
 pub(super) fn parse_ordered_list_marker(text: &str) -> Option<OrderedListMarker> {
@@ -16,44 +17,47 @@ pub(super) fn parse_ordered_list_marker(text: &str) -> Option<OrderedListMarker>
         return None;
     }
     let leading_whitespace = text.len() - trimmed.len();
-    let marker_len = parse_bracketed_numeric_marker(trimmed)
+    let (marker_len, numeric_value) = parse_bracketed_numeric_marker(trimmed)
         .or_else(|| parse_parenthesized_marker(trimmed))
         .or_else(|| parse_suffixed_marker(trimmed))?;
-    finish_marker(text, leading_whitespace + marker_len)
+    finish_marker(text, leading_whitespace + marker_len, numeric_value)
 }
 
-fn parse_bracketed_numeric_marker(text: &str) -> Option<usize> {
+fn parse_bracketed_numeric_marker(text: &str) -> Option<(usize, Option<u16>)> {
     let inner = text.strip_prefix('[')?;
     let closing = inner.find(']')?;
     let marker = &inner[..closing];
-    is_numeric_marker(marker).then_some(closing + 2)
+    numeric_marker_value(marker).map(|value| (closing + 2, Some(value)))
 }
 
-fn parse_parenthesized_marker(text: &str) -> Option<usize> {
+fn parse_parenthesized_marker(text: &str) -> Option<(usize, Option<u16>)> {
     let inner = text.strip_prefix('(')?;
     let closing = inner.find(')')?;
     let marker = &inner[..closing];
-    (!marker.is_empty() && marker.chars().all(char::is_alphanumeric)).then_some(closing + 2)
+    (!marker.is_empty() && marker.chars().all(char::is_alphanumeric))
+        .then(|| (closing + 2, numeric_marker_value(marker)))
 }
 
-fn parse_suffixed_marker(text: &str) -> Option<usize> {
+fn parse_suffixed_marker(text: &str) -> Option<(usize, Option<u16>)> {
     let (delimiter_index, delimiter) = text
         .char_indices()
         .find(|(_, character)| matches!(character, '.' | ')'))?;
     let marker = &text[..delimiter_index];
-    let valid = is_numeric_marker(marker)
+    let numeric_value = numeric_marker_value(marker);
+    let valid = numeric_value.is_some()
         || marker.chars().count() == 1 && marker.chars().all(char::is_alphanumeric)
         || is_roman_marker(marker);
-    valid.then_some(delimiter_index + delimiter.len_utf8())
+    valid.then(|| (delimiter_index + delimiter.len_utf8(), numeric_value))
 }
 
-fn finish_marker(text: &str, marker_end: usize) -> Option<OrderedListMarker> {
+fn finish_marker(text: &str, marker_end: usize, numeric_value: Option<u16>) -> Option<OrderedListMarker> {
     let remainder = text.get(marker_end..)?;
     if remainder.is_empty() {
         return Some(OrderedListMarker {
             content_start: marker_end,
             has_content: false,
             has_separator: false,
+            numeric_value,
         });
     }
     if remainder.chars().next()?.is_whitespace() {
@@ -62,18 +66,22 @@ fn finish_marker(text: &str, marker_end: usize) -> Option<OrderedListMarker> {
             content_start: text.len() - content.len(),
             has_content: !content.is_empty(),
             has_separator: true,
+            numeric_value,
         });
     }
     Some(OrderedListMarker {
         content_start: marker_end,
         has_content: true,
         has_separator: false,
+        numeric_value,
     })
 }
 
-fn is_numeric_marker(marker: &str) -> bool {
+fn numeric_marker_value(marker: &str) -> Option<u16> {
     let length = marker.chars().count();
-    (1..=MAX_NUMERIC_MARKER_DIGITS).contains(&length) && marker.chars().all(|character| character.is_ascii_digit())
+    ((1..=MAX_NUMERIC_MARKER_DIGITS).contains(&length) && marker.chars().all(|character| character.is_ascii_digit()))
+        .then(|| marker.parse().ok())
+        .flatten()
 }
 
 fn is_roman_marker(marker: &str) -> bool {
@@ -101,6 +109,21 @@ mod tests {
             assert!(marker.has_content, "source: {source}");
             assert!(marker.has_separator, "source: {source}");
             assert_eq!(&source[marker.content_start..], expected_content, "source: {source}");
+        }
+    }
+
+    #[test]
+    fn exposes_numeric_values_only_for_numeric_markers() {
+        for (source, expected) in [
+            ("1. first", Some(1)),
+            ("  12) twelfth", Some(12)),
+            ("(7) seventh", Some(7)),
+            ("[42] answer", Some(42)),
+            ("a. alpha", None),
+            ("I. Roman", None),
+        ] {
+            let marker = parse_ordered_list_marker(source).expect("marker should parse");
+            assert_eq!(marker.numeric_value, expected, "source: {source}");
         }
     }
 

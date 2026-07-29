@@ -1780,10 +1780,11 @@ pub(crate) async fn extract_with_ocr(
     let ocr_doc = {
         let has_structured = all_page_paragraphs.iter().any(|p| p.is_some());
         if has_structured {
-            let pages: Vec<Vec<crate::pdf::structure::types::PdfParagraph>> = all_page_paragraphs
+            let mut pages: Vec<Vec<crate::pdf::structure::types::PdfParagraph>> = all_page_paragraphs
                 .into_iter()
                 .map(|opt| opt.unwrap_or_default())
                 .collect();
+            crate::pdf::structure::adapters::promote_anchored_ordered_list_sequences(&mut pages);
             Some(crate::pdf::structure::assemble_internal_document(
                 pages,
                 &collected_tables,

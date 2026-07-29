@@ -1,6 +1,6 @@
 //! OCR-to-structure adapters: convert xberg internal types into the PDF
 //! structure pipeline's paragraph representation.
-#[cfg(feature = "ocr")]
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 use super::types;
 
 /// Convert an OCR-produced [`crate::types::internal::InternalDocument`] into a vec of [`types::PdfParagraph`]s
@@ -72,6 +72,113 @@ pub(crate) fn ocr_doc_to_layout_paragraphs(
 
     trace_conversion(doc, &result);
     result
+}
+
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "layout-detection"))]
+pub(crate) fn promote_anchored_ordered_list_sequences(pages: &mut [Vec<types::PdfParagraph>]) {
+    const MAX_INTERVENING_PARAGRAPHS: usize = 8;
+
+    let positions = nonempty_paragraph_positions(pages);
+    let mut promotions = Vec::new();
+
+    for (position_index, &(page_index, paragraph_index)) in positions.iter().enumerate() {
+        let anchor = &pages[page_index][paragraph_index];
+        let Some(anchor_value) = anchored_numeric_list_value(anchor) else {
+            continue;
+        };
+        let Some(second_value) = anchor_value.checked_add(1) else {
+            continue;
+        };
+        let Some(third_value) = anchor_value.checked_add(2) else {
+            continue;
+        };
+        let Some(second_index) = find_ordered_list_successor(
+            pages,
+            &positions,
+            position_index,
+            second_value,
+            MAX_INTERVENING_PARAGRAPHS,
+        ) else {
+            continue;
+        };
+        let Some(third_index) =
+            find_ordered_list_successor(pages, &positions, second_index, third_value, MAX_INTERVENING_PARAGRAPHS)
+        else {
+            continue;
+        };
+
+        promotions.extend([positions[second_index], positions[third_index]]);
+    }
+
+    promotions.sort_unstable();
+    promotions.dedup();
+    for (page_index, paragraph_index) in promotions {
+        let paragraph = &mut pages[page_index][paragraph_index];
+        paragraph.is_list_item = true;
+        paragraph.layout_class = Some(types::LayoutHintClass::ListItem);
+    }
+}
+
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "layout-detection"))]
+fn nonempty_paragraph_positions(pages: &[Vec<types::PdfParagraph>]) -> Vec<(usize, usize)> {
+    pages
+        .iter()
+        .enumerate()
+        .flat_map(|(page_index, paragraphs)| {
+            paragraphs
+                .iter()
+                .enumerate()
+                .filter(|(_, paragraph)| !paragraph.text.trim().is_empty())
+                .map(move |(paragraph_index, _)| (page_index, paragraph_index))
+        })
+        .collect()
+}
+
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "layout-detection"))]
+fn anchored_numeric_list_value(paragraph: &types::PdfParagraph) -> Option<u16> {
+    paragraph.is_list_item.then(|| numeric_list_value(paragraph)).flatten()
+}
+
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "layout-detection"))]
+fn numeric_list_value(paragraph: &types::PdfParagraph) -> Option<u16> {
+    let marker = super::list_marker::parse_ordered_list_marker(&paragraph.text)?;
+    (marker.has_content && marker.has_separator)
+        .then_some(marker.numeric_value)
+        .flatten()
+}
+
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "layout-detection"))]
+fn find_ordered_list_successor(
+    pages: &[Vec<types::PdfParagraph>],
+    positions: &[(usize, usize)],
+    predecessor_index: usize,
+    expected_value: u16,
+    max_intervening_paragraphs: usize,
+) -> Option<usize> {
+    let first_candidate = predecessor_index + 1;
+    let last_candidate = (first_candidate + max_intervening_paragraphs).min(positions.len().saturating_sub(1));
+    for candidate_index in first_candidate..=last_candidate {
+        let (page_index, paragraph_index) = positions[candidate_index];
+        let paragraph = &pages[page_index][paragraph_index];
+        if let Some(actual_value) = numeric_list_value(paragraph) {
+            return (actual_value == expected_value && is_ordered_list_candidate(paragraph)).then_some(candidate_index);
+        }
+    }
+    None
+}
+
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "layout-detection"))]
+fn is_ordered_list_candidate(paragraph: &types::PdfParagraph) -> bool {
+    paragraph.heading_level.is_none()
+        && !paragraph.is_list_item
+        && !paragraph.is_code_block
+        && !paragraph.is_formula
+        && !paragraph.is_page_furniture
+        && !super::classify::is_numbered_section_heading(&paragraph.text)
+        && matches!(
+            paragraph.layout_class,
+            None | Some(types::LayoutHintClass::Text | types::LayoutHintClass::Other)
+        )
 }
 
 #[cfg(all(feature = "ocr", feature = "layout-detection"))]
@@ -1070,5 +1177,138 @@ mod tests {
         assert_eq!(paragraphs.len(), 1);
         assert_eq!(paragraphs[0].layout_class, Some(types::LayoutHintClass::Picture));
         assert!(paragraphs[0].is_page_furniture);
+    }
+
+    fn ordered_list_test_paragraph(text: &str) -> types::PdfParagraph {
+        make_ocr_paragraph(text.to_string(), Vec::new(), None)
+    }
+
+    fn anchored_ordered_list_test_pages() -> Vec<Vec<types::PdfParagraph>> {
+        let mut anchor = ordered_list_test_paragraph("1. First item");
+        anchor.is_list_item = true;
+        anchor.layout_class = Some(types::LayoutHintClass::ListItem);
+        vec![
+            vec![anchor, ordered_list_test_paragraph("First continuation")],
+            vec![
+                ordered_list_test_paragraph("2. Second item"),
+                ordered_list_test_paragraph("Second continuation one"),
+                ordered_list_test_paragraph("Second continuation two"),
+                ordered_list_test_paragraph("Second continuation three"),
+                ordered_list_test_paragraph("Second continuation four"),
+                ordered_list_test_paragraph("Second continuation five"),
+                ordered_list_test_paragraph("Second continuation six"),
+                ordered_list_test_paragraph("Second continuation seven"),
+                ordered_list_test_paragraph("3. Third item"),
+            ],
+        ]
+    }
+
+    #[test]
+    fn test_promotes_complete_anchored_ordered_list_sequence_across_pages() {
+        let mut pages = anchored_ordered_list_test_pages();
+        pages[1].insert(8, ordered_list_test_paragraph("Second continuation eight"));
+        let original_text = pages
+            .iter()
+            .flatten()
+            .map(|paragraph| paragraph.text.clone())
+            .collect::<Vec<_>>();
+
+        promote_anchored_ordered_list_sequences(&mut pages);
+
+        assert!(pages[1][0].is_list_item);
+        assert_eq!(pages[1][0].layout_class, Some(types::LayoutHintClass::ListItem));
+        assert!(pages[1][9].is_list_item);
+        assert_eq!(pages[1][9].layout_class, Some(types::LayoutHintClass::ListItem));
+        assert_eq!(
+            pages
+                .iter()
+                .flatten()
+                .map(|paragraph| paragraph.text.clone())
+                .collect::<Vec<_>>(),
+            original_text,
+            "promotion must preserve intervening paragraphs and reading order"
+        );
+    }
+
+    #[test]
+    fn test_does_not_promote_unanchored_or_incomplete_ordered_sequences() {
+        let mut unanchored = anchored_ordered_list_test_pages();
+        unanchored[0][0].is_list_item = false;
+        unanchored[0][0].layout_class = None;
+        promote_anchored_ordered_list_sequences(&mut unanchored);
+        assert!(!unanchored[1][0].is_list_item);
+        assert!(!unanchored[1][8].is_list_item);
+
+        let mut incomplete = anchored_ordered_list_test_pages();
+        incomplete[1].pop();
+        promote_anchored_ordered_list_sequences(&mut incomplete);
+        assert!(!incomplete[1][0].is_list_item, "a two-item prefix must not mutate");
+    }
+
+    #[test]
+    fn test_does_not_promote_broken_or_over_gap_ordered_sequences() {
+        let mut broken = anchored_ordered_list_test_pages();
+        broken[1][0].text = "3. Out of sequence".to_string();
+        broken[1][8].text = "4. Still out of sequence".to_string();
+        promote_anchored_ordered_list_sequences(&mut broken);
+        assert!(!broken[1][0].is_list_item);
+        assert!(!broken[1][8].is_list_item);
+
+        let mut over_gap = anchored_ordered_list_test_pages();
+        const EXTRA_CONTINUATIONS: usize = 8;
+        for _ in 0..EXTRA_CONTINUATIONS {
+            over_gap[0].insert(1, ordered_list_test_paragraph("Extra continuation"));
+        }
+        promote_anchored_ordered_list_sequences(&mut over_gap);
+        assert!(!over_gap[1][0].is_list_item);
+        assert!(!over_gap[1][8].is_list_item);
+    }
+
+    #[test]
+    fn test_empty_paragraphs_do_not_consume_ordered_list_gap() {
+        const EMPTY_PARAGRAPHS: usize = 12;
+        const ORIGINAL_THIRD_ITEM_INDEX: usize = 8;
+        let mut pages = anchored_ordered_list_test_pages();
+        for _ in 0..EMPTY_PARAGRAPHS {
+            pages[1].insert(1, ordered_list_test_paragraph(" \n "));
+        }
+
+        promote_anchored_ordered_list_sequences(&mut pages);
+
+        assert!(pages[1][0].is_list_item);
+        assert!(pages[1][ORIGINAL_THIRD_ITEM_INDEX + EMPTY_PARAGRAPHS].is_list_item);
+    }
+
+    #[test]
+    fn test_rejects_structural_ordered_list_candidates() {
+        for structural_kind in ["heading", "list", "code", "formula", "furniture", "caption"] {
+            let mut pages = anchored_ordered_list_test_pages();
+            let candidate = &mut pages[1][0];
+            match structural_kind {
+                "heading" => candidate.heading_level = Some(2),
+                "list" => candidate.is_list_item = true,
+                "code" => candidate.is_code_block = true,
+                "formula" => candidate.is_formula = true,
+                "furniture" => candidate.is_page_furniture = true,
+                "caption" => candidate.layout_class = Some(types::LayoutHintClass::Caption),
+                _ => unreachable!("all test cases are handled"),
+            }
+
+            promote_anchored_ordered_list_sequences(&mut pages);
+
+            assert!(!pages[1][8].is_list_item, "structural kind: {structural_kind}");
+        }
+    }
+
+    #[test]
+    fn test_rejects_numbered_section_heading_candidates() {
+        let mut pages = anchored_ordered_list_test_pages();
+        pages[1][0].text = "2. DEFINITIONS".to_string();
+        pages[1][8].text = "3. TERM".to_string();
+
+        promote_anchored_ordered_list_sequences(&mut pages);
+
+        assert!(!pages[1][0].is_list_item);
+        assert!(!pages[1][8].is_list_item);
     }
 }

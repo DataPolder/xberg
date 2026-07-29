@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   paragraphs and merging multi-line headings, code, pictures, and wrapped list items by hint.
 - Tesseract OCR Markdown aligns layout hints and table-cell matching with DPI-normalized and
   auto-rotated image coordinates, restoring semantic structure on scanned PDFs.
+- OCR Markdown recovers missing ordered-list successors only when an existing numeric list item
+  anchors a complete, bounded three-item sequence across pages.
 - PDF Markdown preserves strong native headings when a lower-confidence layout Code hint lacks
   structured code evidence.
 - OCR Markdown recovers a title from a guarded first-block logo/title pattern when the layout model
