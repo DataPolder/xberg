@@ -34,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   spill while retaining surrounding prose and annotations.
 - PDF Markdown reconstructs paired wrapped financial tables as semantic three-column grids and
   repairs consistently merged numeric columns from native PDF table detection.
+- **#1342**: PDF table reconstruction retains short numeric grids when a small number of inferred
+  columns make the principal data row nearly complete instead of fully populated.
 
 ## [1.0.3] - 2026-07-29
 

@@ -20,6 +20,7 @@ const SHORT_NUMERIC_MIN_DATA_CELLS: usize = 4;
 /// the short borderless tables the corrected preprocessing loses (#1316)
 /// without reopening the #36 fabrication hole.
 const SHORT_NUMERIC_MIN_CELL_PERCENT: usize = 60;
+const SHORT_NUMERIC_MIN_ROW_OCCUPANCY_PERCENT: usize = 85;
 const LARGE_TABLE_MIN_COLUMNS: usize = 6;
 const DEFAULT_MIN_DATA_ROW_DIGIT_CELLS: usize = 3;
 const REPEATED_DATA_ROW_COUNT: usize = 3;
@@ -1085,14 +1086,13 @@ fn is_dense_numeric_grid(grid: &[Vec<String>]) -> bool {
 /// the ≥5-column single-word prose guard (xberg-io/xberg#1316).
 fn is_predominantly_numeric_short_grid(grid: &[Vec<String>]) -> bool {
     // Measure the numeric fraction two ways and accept if either clears the bar:
-    // over every data cell, and over the fully-populated data rows only. A
+    // over every data cell, and over the substantially-populated data rows only. A
     // borderless line-item table can carry a sparse continuation row — a wrapped
     // description with the remaining columns blank (xberg-io/xberg#1333). That row
-    // is all-text and, pooled with the complete rows, drags the numeric fraction
-    // below the bar, wrongly voiding the exemption for the genuine numeric rows
-    // above it. Restricting to complete rows lets one continuation row no longer
-    // erase a predominantly-numeric line-item table. The complete-row pass only
-    // ever grants the exemption, never withholds it, so it cannot demote a grid
+    // is all-text and, pooled with the populated rows, drags the numeric fraction
+    // below the bar. Requiring substantial rather than total occupancy also
+    // tolerates a small number of inferred empty columns (xberg-io/xberg#1342).
+    // This selective pass only grants the exemption, so it cannot demote a grid
     // the pooled pass already accepts.
     let width = grid.first().map_or(0, Vec::len);
     short_grid_numeric_ratio_meets_bar(grid, false) || (width > 0 && short_grid_numeric_ratio_meets_bar(grid, true))
@@ -1100,16 +1100,17 @@ fn is_predominantly_numeric_short_grid(grid: &[Vec<String>]) -> bool {
 
 /// Whether the numeric fraction of a short grid's data cells clears the
 /// [`SHORT_NUMERIC_MIN_CELL_PERCENT`] bar with at least
-/// [`SHORT_NUMERIC_MIN_DATA_CELLS`] cells of evidence. When `complete_rows_only`
-/// is set, only rows whose every column is filled contribute — so a sparse
-/// continuation row cannot dilute the measurement (see
+/// [`SHORT_NUMERIC_MIN_DATA_CELLS`] cells of evidence. When
+/// `substantially_populated_rows_only` is set, only rows meeting
+/// [`SHORT_NUMERIC_MIN_ROW_OCCUPANCY_PERCENT`] contribute, so sparse continuation
+/// rows and a few inferred empty columns do not distort the measurement (see
 /// [`is_predominantly_numeric_short_grid`]).
-fn short_grid_numeric_ratio_meets_bar(grid: &[Vec<String>], complete_rows_only: bool) -> bool {
+fn short_grid_numeric_ratio_meets_bar(grid: &[Vec<String>], substantially_populated_rows_only: bool) -> bool {
     let width = grid.first().map_or(0, Vec::len);
     let mut non_empty_cells = 0usize;
     let mut numeric_cells = 0usize;
     for row in grid.iter().skip(1) {
-        if complete_rows_only && !is_complete_data_row(row, width) {
+        if substantially_populated_rows_only && !is_substantially_populated_data_row(row, width) {
             continue;
         }
         for cell in row {
@@ -1127,10 +1128,13 @@ fn short_grid_numeric_ratio_meets_bar(grid: &[Vec<String>], complete_rows_only: 
         && numeric_cells.saturating_mul(100) >= non_empty_cells.saturating_mul(SHORT_NUMERIC_MIN_CELL_PERCENT)
 }
 
-/// Whether every one of the grid's `width` columns is filled in this row — i.e.
-/// a self-contained data row rather than a sparse continuation fragment.
-fn is_complete_data_row(row: &[String], width: usize) -> bool {
-    width > 0 && row.len() >= width && row.iter().take(width).all(|cell| !cell.trim().is_empty())
+/// Whether the row fills enough of the inferred grid to be self-contained.
+fn is_substantially_populated_data_row(row: &[String], width: usize) -> bool {
+    if width == 0 {
+        return false;
+    }
+    let populated = row.iter().take(width).filter(|cell| !cell.trim().is_empty()).count();
+    populated.saturating_mul(100) >= width.saturating_mul(SHORT_NUMERIC_MIN_ROW_OCCUPANCY_PERCENT)
 }
 
 fn is_dense_scalar_grid(grid: &[Vec<String>]) -> bool {
@@ -2513,6 +2517,93 @@ mod tests {
         assert!(
             result_unsupervised.is_some(),
             "Numeric line-item table with a sparse continuation row must survive (unsupervised)"
+        );
+    }
+
+    #[test]
+    fn test_inferred_columns_keep_sparse_numeric_line_item_table() {
+        // The visible table has five columns, but reconstruction can infer two
+        // extra tracks. The principal row still supplies 6/7 occupied cells and
+        // four numeric values; the sparse fee row must not dilute that evidence.
+        let table = vec![
+            vec![
+                "Item".into(),
+                "Quantity".into(),
+                "Price".into(),
+                "VAT".into(),
+                "Total".into(),
+                String::new(),
+                String::new(),
+            ],
+            vec![
+                "SYNTH PRODUCT".into(),
+                "1".into(),
+                "120.40".into(),
+                "19%".into(),
+                "120.40".into(),
+                "split".into(),
+                String::new(),
+            ],
+            vec![
+                "INCLUDING SYNTHETIC DEVICE FEE".into(),
+                "1".into(),
+                "3.40".into(),
+                String::new(),
+                String::new(),
+                "split".into(),
+                "tail".into(),
+            ],
+        ];
+
+        assert!(
+            post_process_table(table.clone(), true, false).is_some(),
+            "numeric line-item table must survive a small inferred-column overrun"
+        );
+        assert!(
+            post_process_table(table, false, false).is_some(),
+            "the inferred-column recovery must not depend on layout guidance"
+        );
+    }
+
+    #[test]
+    fn test_sparse_numeric_prose_does_not_bypass_short_grid_guard() {
+        let table = vec![
+            vec![
+                "A".into(),
+                "B".into(),
+                "C".into(),
+                "D".into(),
+                "E".into(),
+                "F".into(),
+                "G".into(),
+            ],
+            vec![
+                "alpha".into(),
+                "1".into(),
+                "2".into(),
+                "3".into(),
+                String::new(),
+                String::new(),
+                String::new(),
+            ],
+            vec![
+                "beta".into(),
+                String::new(),
+                String::new(),
+                String::new(),
+                "x".into(),
+                "4".into(),
+                "tail".into(),
+            ],
+        ];
+
+        assert!(
+            post_process_table(table.clone(), true, false).is_none(),
+            "sparse numeric prose must remain rejected when no row fills 85% of the inferred grid"
+        );
+        assert!(
+            post_process_table(table, false, false).is_none(),
+            "the issue #36 guard must remain active without layout guidance"
         );
     }
 
