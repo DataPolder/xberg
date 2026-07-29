@@ -8,6 +8,10 @@ use super::geometry::Rect;
 use super::types::{LayoutHint, LayoutHintClass, PdfParagraph};
 
 const COMPARABLE_CONTAINMENT_TOLERANCE: f32 = 0.05;
+const MAX_PROSE_CODE_SYNTAX_RATIO: f64 = 0.03;
+const CODE_HEADING_OVERRIDE_CONFIDENCE: f32 = 0.8;
+const MIN_STRUCTURED_CODE_SYNTAX_CHARACTERS: usize = 3;
+const MIN_CODE_ASSIGNMENT_OPERATORS: usize = 2;
 
 /// Apply layout detection overrides to classified paragraphs.
 ///
@@ -499,28 +503,34 @@ pub(super) fn apply_hint_to_paragraph(para: &mut PdfParagraph, hint: &LayoutHint
             }
         }
         LayoutHintClass::Code => {
-            let is_prose = {
-                let sentence_endings = para_text
-                    .chars()
-                    .filter(|&c| c == '.' || c == '!' || c == '?' || c == ',')
-                    .count();
-                let syntax_chars = para_text
-                    .chars()
-                    .filter(|c| {
-                        matches!(
-                            c,
-                            '{' | '}' | '(' | ')' | '[' | ']' | ';' | '=' | '<' | '>' | '|' | '@' | '#' | '$'
-                        )
-                    })
-                    .count();
-                let syntax_ratio = if para_text.is_empty() {
-                    0.0
-                } else {
-                    syntax_chars as f64 / para_text.len() as f64
-                };
-                sentence_endings >= 2 && syntax_ratio < 0.03 && word_count > 15
+            let sentence_endings = para_text
+                .chars()
+                .filter(|&c| c == '.' || c == '!' || c == '?' || c == ',')
+                .count();
+            let syntax_chars = para_text
+                .chars()
+                .filter(|c| {
+                    matches!(
+                        c,
+                        '{' | '}' | '(' | ')' | '[' | ']' | ';' | '=' | '<' | '>' | '|' | '@' | '#' | '$'
+                    )
+                })
+                .count();
+            let syntax_ratio = if para_text.is_empty() {
+                0.0
+            } else {
+                syntax_chars as f64 / para_text.len() as f64
             };
-            if !is_prose && !para.is_list_item {
+            let is_prose = sentence_endings >= 2 && syntax_ratio < MAX_PROSE_CODE_SYNTAX_RATIO && word_count > 15;
+            let assignment_operators = para_text.chars().filter(|&character| character == '=').count();
+            let has_structured_code_syntax = syntax_chars >= MIN_STRUCTURED_CODE_SYNTAX_CHARACTERS
+                && (para_text.chars().any(|character| matches!(character, '{' | '}' | ';'))
+                    || assignment_operators >= MIN_CODE_ASSIGNMENT_OPERATORS);
+            let preserves_heading = para.heading_level.is_some()
+                && has_strong_heading_evidence
+                && hint.confidence < CODE_HEADING_OVERRIDE_CONFIDENCE
+                && !has_structured_code_syntax;
+            if !is_prose && !preserves_heading && !para.is_list_item {
                 para.is_code_block = true;
                 para.heading_level = None;
             }
@@ -995,6 +1005,52 @@ mod tests {
             paragraphs[0].is_code_block,
             "Code-like text should be classified as code"
         );
+    }
+
+    #[test]
+    fn test_code_override_preserves_strong_heading_below_confidence_threshold() {
+        for heading in ["Recent Change Log", "C# API", "API (v2)", "Results (n = 10)"] {
+            let mut para = make_para(50.0, 600.0, 300.0, 16.0);
+            para.text = heading.to_string();
+            para.heading_level = Some(2);
+            para.is_bold = true;
+            let mut paragraphs = vec![para];
+            let hints = [make_hint(LayoutHintClass::Code, 0.751_801_5, 40.0, 598.0, 400.0, 620.0)];
+
+            apply_layout_overrides(&mut paragraphs, &hints, 0.5, 0.5, None);
+
+            assert!(!paragraphs[0].is_code_block, "{heading}");
+            assert_eq!(paragraphs[0].heading_level, Some(2), "{heading}");
+        }
+    }
+
+    #[test]
+    fn test_code_override_accepts_structured_code_despite_strong_heading_evidence() {
+        let mut para = make_para(50.0, 600.0, 300.0, 16.0);
+        para.text = "function add(a, b) { return a + b; }".to_string();
+        para.heading_level = Some(2);
+        para.is_bold = true;
+        let mut paragraphs = vec![para];
+        let hints = [make_hint(LayoutHintClass::Code, 0.751_801_5, 40.0, 598.0, 400.0, 620.0)];
+
+        apply_layout_overrides(&mut paragraphs, &hints, 0.5, 0.5, None);
+
+        assert!(paragraphs[0].is_code_block);
+        assert_eq!(paragraphs[0].heading_level, None);
+    }
+
+    #[test]
+    fn test_code_override_accepts_bold_code_without_native_heading() {
+        let mut para = make_para(50.0, 600.0, 300.0, 16.0);
+        para.text = "SELECT ID FROM USERS".to_string();
+        para.is_bold = true;
+        let mut paragraphs = vec![para];
+        let hints = [make_hint(LayoutHintClass::Code, 0.751_801_5, 40.0, 598.0, 400.0, 620.0)];
+
+        apply_layout_overrides(&mut paragraphs, &hints, 0.5, 0.5, None);
+
+        assert!(paragraphs[0].is_code_block);
+        assert_eq!(paragraphs[0].heading_level, None);
     }
 
     #[test]

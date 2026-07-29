@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   table cohorts, avoiding mixed grids and dropped financial-table structure.
 - OCR Markdown applies layout hints to line-local geometry while preserving soft-wrapped body
   paragraphs and merging multi-line headings, code, pictures, and wrapped list items by hint.
+- PDF Markdown preserves strong native headings when a lower-confidence layout Code hint lacks
+  structured code evidence.
 
 ## [1.0.3] - 2026-07-29
 
