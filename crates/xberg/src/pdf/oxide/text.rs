@@ -419,10 +419,7 @@ struct OrderedSpan<'a> {
     glue_to_previous: bool,
 }
 
-fn spans_overlap_vertically(
-    first: &pdf_oxide::layout::TextSpan,
-    second: &pdf_oxide::layout::TextSpan,
-) -> bool {
+fn spans_overlap_vertically(first: &pdf_oxide::layout::TextSpan, second: &pdf_oxide::layout::TextSpan) -> bool {
     let overlap_start = first.bbox.y.max(second.bbox.y);
     let overlap_end = (first.bbox.y + first.bbox.height).min(second.bbox.y + second.bbox.height);
     overlap_end > overlap_start
@@ -464,9 +461,7 @@ fn find_inline_fragment_anchor(
             (gap >= -tolerance && gap <= tolerance).then_some((candidate_index, gap.abs()))
         })
         .min_by(|(_, first_gap), (_, second_gap)| {
-            first_gap
-                .partial_cmp(second_gap)
-                .unwrap_or(std::cmp::Ordering::Equal)
+            first_gap.partial_cmp(second_gap).unwrap_or(std::cmp::Ordering::Equal)
         })
         .map(|(candidate_index, _)| candidate_index)
 }
@@ -664,12 +659,7 @@ mod tests {
     fn span_with_width(text: &str, x: f32, y: f32, width: f32, height: f32, font_size: f32) -> TextSpan {
         TextSpan {
             text: text.to_string(),
-            bbox: Rect {
-                x,
-                y,
-                width,
-                height,
-            },
+            bbox: Rect { x, y, width, height },
             font_size,
             ..TextSpan::default()
         }

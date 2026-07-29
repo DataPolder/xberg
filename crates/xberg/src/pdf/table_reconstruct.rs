@@ -1095,8 +1095,7 @@ fn is_predominantly_numeric_short_grid(grid: &[Vec<String>]) -> bool {
     // ever grants the exemption, never withholds it, so it cannot demote a grid
     // the pooled pass already accepts.
     let width = grid.first().map_or(0, Vec::len);
-    short_grid_numeric_ratio_meets_bar(grid, false)
-        || (width > 0 && short_grid_numeric_ratio_meets_bar(grid, true))
+    short_grid_numeric_ratio_meets_bar(grid, false) || (width > 0 && short_grid_numeric_ratio_meets_bar(grid, true))
 }
 
 /// Whether the numeric fraction of a short grid's data cells clears the
@@ -2483,7 +2482,13 @@ mod tests {
         // complete item row alone is 4/5 = 80% numeric. The continuation row
         // must not erase the table (issue #1333).
         let table = vec![
-            vec!["Item".into(), "Qty".into(), "Price".into(), "VAT".into(), "Total".into()],
+            vec![
+                "Item".into(),
+                "Qty".into(),
+                "Price".into(),
+                "VAT".into(),
+                "Total".into(),
+            ],
             vec![
                 "SYNTH PRODUCT".into(),
                 "1".into(),
@@ -2491,7 +2496,13 @@ mod tests {
                 "19%".into(),
                 "120.40".into(),
             ],
-            vec!["WITH FEE".into(), "each".into(), "$".into(), String::new(), String::new()],
+            vec![
+                "WITH FEE".into(),
+                "each".into(),
+                "$".into(),
+                String::new(),
+                String::new(),
+            ],
         ];
         let result = post_process_table(table.clone(), true, false);
         assert!(

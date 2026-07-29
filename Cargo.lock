@@ -593,7 +593,7 @@ checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
 name = "benchmark-harness"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "ahash 0.8.12",
  "async-trait",
@@ -11607,7 +11607,7 @@ dependencies = [
 
 [[package]]
 name = "xberg"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "aes-gcm",
  "ahash 0.8.12",
@@ -11746,7 +11746,7 @@ dependencies = [
 
 [[package]]
 name = "xberg-candle-ocr"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "base64 0.23.0",
  "candle-core",
@@ -11766,7 +11766,7 @@ dependencies = [
 
 [[package]]
 name = "xberg-cli"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "anstyle",
  "anyhow",
@@ -11788,7 +11788,7 @@ dependencies = [
 
 [[package]]
 name = "xberg-dart"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "async-trait",
  "crawlberg",
@@ -11801,7 +11801,7 @@ dependencies = [
 
 [[package]]
 name = "xberg-ffi"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "ahash 0.8.12",
  "async-trait",
@@ -11816,7 +11816,7 @@ dependencies = [
 
 [[package]]
 name = "xberg-gliner"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "candle-core",
  "candle-nn",
@@ -11839,10 +11839,10 @@ dependencies = [
 
 [[package]]
 name = "xberg-jni"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "async-trait",
- "base64 0.23.0",
+ "base64 0.22.1",
  "futures-util",
  "jni 0.22.4",
  "serde_json",
@@ -11852,7 +11852,7 @@ dependencies = [
 
 [[package]]
 name = "xberg-libheif"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "cfg-if 1.0.4",
  "enumn",
@@ -11864,7 +11864,7 @@ dependencies = [
 
 [[package]]
 name = "xberg-libwpd"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "cc",
  "flate2",
@@ -11877,7 +11877,7 @@ dependencies = [
 
 [[package]]
 name = "xberg-node"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "async-trait",
  "crawlberg",
@@ -11894,7 +11894,7 @@ dependencies = [
 
 [[package]]
 name = "xberg-paddle-ocr"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "geo-clipper",
  "geo-types",
@@ -11909,7 +11909,7 @@ dependencies = [
 
 [[package]]
 name = "xberg-php"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "async-trait",
  "crawlberg",
@@ -11923,7 +11923,7 @@ dependencies = [
 
 [[package]]
 name = "xberg-py"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "async-trait",
  "crawlberg",
@@ -11938,7 +11938,7 @@ dependencies = [
 
 [[package]]
 name = "xberg-swift"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "ahash 0.8.12",
  "async-trait",
@@ -11955,7 +11955,7 @@ dependencies = [
 
 [[package]]
 name = "xberg-tesseract"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "cc",
  "cmake",
@@ -11967,7 +11967,7 @@ dependencies = [
 
 [[package]]
 name = "xberg-wasm"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "async-trait",
  "crawlberg",

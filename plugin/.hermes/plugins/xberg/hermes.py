@@ -1,6 +1,6 @@
 # AI-RULEZ :: GENERATED FILE — DO NOT EDIT
 # Content-Hash: blake3:0e17ccbd3652cd0f7f07b3b26eb28e3c2944109c5f4d71415198822f2e862a9b
-# Source-Hash: blake3:ec177e558e2839c3e8f6610cfccdf9bd49cc40d3fea83e0d9bc4f86ea18d9922
+# Source-Hash: blake3:4f30c10e77f8c5ff8ed30b9e154ad9bcf00fb22405417016845401f0db77e0e4
 # Schema-Version: v1
 
 """Hermes adapter for xberg.

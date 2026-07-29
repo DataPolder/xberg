@@ -354,10 +354,7 @@ fn build_batch_file_configs(
             };
             let mut ocr = base_ocr.clone();
             let ocr_object = ocr.as_object_mut()?;
-            ocr_object.insert(
-                "language".to_string(),
-                serde_json::json!(languages.clone()),
-            );
+            ocr_object.insert("language".to_string(), serde_json::json!(languages.clone()));
             if let Some(tesseract_config) = ocr_object
                 .get_mut("tesseract_config")
                 .and_then(serde_json::Value::as_object_mut)

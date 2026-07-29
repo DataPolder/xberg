@@ -4,10 +4,10 @@
 //! It serves as the baseline for comparing language bindings.
 
 use crate::adapter::FrameworkAdapter;
+use crate::extract_xberg_file;
 use crate::monitoring::ResourceMonitor;
 use crate::types::{BenchmarkResult, ErrorKind, FrameworkCapabilities, OcrStatus, PerformanceMetrics};
 use crate::{Error, Result};
-use crate::{extract_xberg_file, extract_xberg_files};
 use async_trait::async_trait;
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -187,16 +187,23 @@ impl FrameworkAdapter for NativeAdapter {
         )
     }
 
-    async fn extract(&self, file_path: &Path, timeout: Duration, force_ocr: bool) -> Result<BenchmarkResult> {
+    async fn extract(
+        &self,
+        file_path: &Path,
+        timeout: Duration,
+        force_ocr: bool,
+        ocr_language: Option<&str>,
+        output_format: crate::types::OutputFormat,
+    ) -> Result<BenchmarkResult> {
         let file_size = std::fs::metadata(file_path).map_err(Error::Io)?.len();
 
-        let config = if force_ocr && !self.config.force_ocr {
-            let mut c = self.config.clone();
-            c.force_ocr = true;
-            c
-        } else {
-            self.config.clone()
-        };
+        let mut config = self.config.clone();
+        config.force_ocr |= force_ocr;
+        if let Some(language) = ocr_language {
+            // Override only the language, preserving the base backend/pipeline/cache.
+            config.ocr.get_or_insert_with(Default::default).language =
+                crate::adapter::canonicalize_ocr_languages(language);
+        }
 
         let monitor = ResourceMonitor::new();
         let sampling_interval_ms = Self::calculate_adaptive_sampling_interval(file_size);
@@ -239,6 +246,7 @@ impl FrameworkAdapter for NativeAdapter {
             };
             return Ok(BenchmarkResult {
                 framework: self.name().to_string(),
+                output_format,
                 file_path: file_path.to_path_buf(),
                 file_size,
                 success: false,
@@ -302,6 +310,7 @@ impl FrameworkAdapter for NativeAdapter {
 
         Ok(BenchmarkResult {
             framework: self.name().to_string(),
+            output_format,
             file_path: file_path.to_path_buf(),
             file_size,
             success,
@@ -333,19 +342,28 @@ impl FrameworkAdapter for NativeAdapter {
         file_paths: &[&Path],
         timeout: Duration,
         force_ocr: &[bool],
+        ocr_languages: &[Option<String>],
+        output_format: crate::types::OutputFormat,
     ) -> Result<Vec<BenchmarkResult>> {
         if file_paths.is_empty() {
             return Ok(Vec::new());
         }
+        if force_ocr.len() != file_paths.len() || ocr_languages.len() != file_paths.len() {
+            return Err(Error::Benchmark(format!(
+                "native batch config cardinality mismatch for {} files",
+                file_paths.len()
+            )));
+        }
 
-        let any_force_ocr = force_ocr.iter().any(|&f| f);
-        let config = if any_force_ocr && !self.config.force_ocr {
-            let mut c = self.config.clone();
-            c.force_ocr = true;
-            c
-        } else {
-            self.config.clone()
-        };
+        let config = self.config.clone();
+        let inputs: Vec<xberg::ExtractInput> = file_paths
+            .iter()
+            .zip(force_ocr)
+            .zip(ocr_languages)
+            .map(|((path, force_ocr), ocr_language)| {
+                build_batch_input(path, *force_ocr, ocr_language.as_deref(), &config)
+            })
+            .collect();
 
         let total_file_size: u64 = file_paths
             .iter()
@@ -359,8 +377,11 @@ impl FrameworkAdapter for NativeAdapter {
 
         let start = Instant::now();
 
-        let timed_result = tokio::time::timeout(timeout, extract_xberg_files(file_paths, &config)).await;
+        let timed_result = tokio::time::timeout(timeout, xberg::extract_batch(inputs, &config)).await;
         let timed_out = timed_result.is_err();
+        // Keep the whole envelope: output.errors carries per-input failures (with
+        // their original index) that must not be dropped, or successful results
+        // would be misattributed to the wrong files when zipped positionally.
         let batch_result = match timed_result {
             Ok(inner) => inner.map_err(|e| Error::Benchmark(format!("Batch extraction failed: {}", e))),
             Err(_) => Err(Error::Timeout(format!("Batch extraction exceeded {:?}", timeout))),
@@ -373,72 +394,95 @@ impl FrameworkAdapter for NativeAdapter {
         let baseline = monitor.baseline_memory().await;
         let resource_stats = ResourceMonitor::calculate_stats(&samples, &snapshots, baseline);
 
+        let num_files = file_paths.len() as f64;
+        let avg_duration_per_file = Duration::from_secs_f64(total_duration.as_secs_f64() / num_files.max(1.0));
+
+        // Shared builder for a failed per-file row (whole-batch failure and
+        // per-input `output.errors`), so both paths carry identical metrics.
+        let make_failure = |file_path: &Path, error_message: String, error_kind: ErrorKind| -> BenchmarkResult {
+            let file_size = std::fs::metadata(file_path).map(|m| m.len()).unwrap_or(0);
+            let file_extension = file_path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .unwrap_or("")
+                .to_string();
+            BenchmarkResult {
+                framework: self.name().to_string(),
+                output_format,
+                file_path: file_path.to_path_buf(),
+                file_size,
+                success: false,
+                error_message: Some(error_message),
+                error_kind,
+                duration: avg_duration_per_file,
+                extraction_duration: Some(avg_duration_per_file),
+                subprocess_overhead: Some(Duration::ZERO),
+                metrics: PerformanceMetrics {
+                    baseline_memory_bytes: resource_stats.baseline_memory_bytes,
+                    peak_memory_bytes: resource_stats.peak_memory_bytes,
+                    peak_memory_delta_bytes: resource_stats.peak_memory_delta_bytes,
+                    avg_cpu_percent: resource_stats.avg_cpu_percent,
+                    cpu_seconds: resource_stats.cpu_seconds,
+                    throughput_bytes_per_sec: 0.0,
+                    p50_memory_bytes: resource_stats.p50_memory_bytes,
+                    p95_memory_bytes: resource_stats.p95_memory_bytes,
+                    p99_memory_bytes: resource_stats.p99_memory_bytes,
+                },
+                quality: None,
+                iterations: vec![],
+                statistics: None,
+                cold_start_duration: None,
+                file_extension,
+                framework_capabilities: FrameworkCapabilities::default(),
+                pdf_metadata: None,
+                ocr_status: OcrStatus::Unknown,
+                extracted_text: None,
+                system_load: None,
+            }
+        };
+
         if let Err(e) = batch_result {
-            let num_files = file_paths.len() as f64;
-            let avg_duration_per_file = Duration::from_secs_f64(total_duration.as_secs_f64() / num_files.max(1.0));
             let error_kind = if timed_out {
                 ErrorKind::Timeout
             } else {
                 ErrorKind::HarnessError
             };
-
+            let message = e.to_string();
             let failure_results: Vec<BenchmarkResult> = file_paths
                 .iter()
-                .map(|file_path| {
-                    let file_size = std::fs::metadata(file_path).map(|m| m.len()).unwrap_or(0);
-                    let file_extension = file_path
-                        .extension()
-                        .and_then(|ext| ext.to_str())
-                        .unwrap_or("")
-                        .to_string();
-
-                    BenchmarkResult {
-                        framework: self.name().to_string(),
-                        file_path: file_path.to_path_buf(),
-                        file_size,
-                        success: false,
-                        error_message: Some(e.to_string()),
-                        error_kind,
-                        duration: avg_duration_per_file,
-                        extraction_duration: Some(avg_duration_per_file),
-                        subprocess_overhead: Some(Duration::ZERO),
-                        metrics: PerformanceMetrics {
-                            baseline_memory_bytes: resource_stats.baseline_memory_bytes,
-                            peak_memory_bytes: resource_stats.peak_memory_bytes,
-                            peak_memory_delta_bytes: resource_stats.peak_memory_delta_bytes,
-                            avg_cpu_percent: resource_stats.avg_cpu_percent,
-                            cpu_seconds: resource_stats.cpu_seconds,
-                            throughput_bytes_per_sec: 0.0,
-                            p50_memory_bytes: resource_stats.p50_memory_bytes,
-                            p95_memory_bytes: resource_stats.p95_memory_bytes,
-                            p99_memory_bytes: resource_stats.p99_memory_bytes,
-                        },
-                        quality: None,
-                        iterations: vec![],
-                        statistics: None,
-                        cold_start_duration: None,
-                        file_extension,
-                        framework_capabilities: FrameworkCapabilities::default(),
-                        pdf_metadata: None,
-                        ocr_status: OcrStatus::Unknown,
-                        extracted_text: None,
-                        system_load: None,
-                    }
-                })
+                .map(|file_path| make_failure(file_path, message.clone(), error_kind))
                 .collect();
-
             return Ok(failure_results);
         }
 
-        let extraction_results = batch_result.unwrap();
-
-        let num_files = file_paths.len() as f64;
-        let avg_duration_per_file = Duration::from_secs_f64(total_duration.as_secs_f64() / num_files.max(1.0));
+        let output = batch_result.unwrap();
+        let extraction_results = &output.results;
+        // xberg returns successful `results` in discovery order and reports failed
+        // inputs separately in `errors`, each tagged with its original request index.
+        // Walk inputs in order, emitting a failure row for errored indices and
+        // consuming the next success otherwise, so rows stay aligned to file_paths.
+        let error_messages: std::collections::HashMap<usize, String> = output
+            .errors
+            .iter()
+            .map(|item| (item.index, item.message.clone()))
+            .collect();
+        let mut success_cursor = 0usize;
 
         let results: Vec<BenchmarkResult> = file_paths
             .iter()
-            .zip(extraction_results.iter())
-            .map(|(file_path, extraction_result)| {
+            .enumerate()
+            .map(|(input_index, file_path)| {
+                if let Some(message) = error_messages.get(&input_index) {
+                    return make_failure(file_path, message.clone(), ErrorKind::FrameworkError);
+                }
+                let Some(extraction_result) = extraction_results.get(success_cursor) else {
+                    return make_failure(
+                        file_path,
+                        "batch output missing a result for this input".to_string(),
+                        ErrorKind::FrameworkError,
+                    );
+                };
+                success_cursor += 1;
                 let file_size = std::fs::metadata(file_path).map(|m| m.len()).unwrap_or(0);
 
                 let extraction_duration = extraction_result
@@ -474,6 +518,7 @@ impl FrameworkAdapter for NativeAdapter {
 
                 BenchmarkResult {
                     framework: self.name().to_string(),
+                    output_format,
                     file_path: file_path.to_path_buf(),
                     file_size,
                     success,
@@ -552,6 +597,39 @@ startxref
 %%EOF"
 }
 
+/// Build one batch `ExtractInput`, applying per-file OCR overrides on top of the
+/// batch `base` config.
+///
+/// Semantics that keep the batch honest:
+/// - `force_ocr` is folded as `base.force_ocr || per_file` so a per-file `false`
+///   never disables OCR the base forced on (mirrors the single-file `|=`).
+/// - a per-file language clones the base `OcrConfig` and overrides only the
+///   (canonicalized) `language`, so backend/pipeline/cache survive — a Paddle/VLM
+///   backend is never silently turned into Tesseract.
+/// - a file with neither a force flag nor a language gets no per-file config and
+///   inherits the base unchanged (`FileExtractionConfig` fields default to "inherit").
+fn build_batch_input(
+    path: &Path,
+    force_ocr: bool,
+    ocr_language: Option<&str>,
+    base: &ExtractionConfig,
+) -> xberg::ExtractInput {
+    let mut input = xberg::ExtractInput::from_uri(path.to_string_lossy());
+    if force_ocr || ocr_language.is_some() {
+        let mut file_config = xberg::FileExtractionConfig {
+            force_ocr: Some(base.force_ocr || force_ocr),
+            ..Default::default()
+        };
+        if let Some(language) = ocr_language {
+            let mut ocr = base.ocr.clone().unwrap_or_default();
+            ocr.language = crate::adapter::canonicalize_ocr_languages(language);
+            file_config.ocr = Some(ocr);
+        }
+        input.config = Some(file_config);
+    }
+    input
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -562,6 +640,58 @@ mod tests {
     async fn test_native_adapter_creation() {
         let adapter = NativeAdapter::new();
         assert_eq!(adapter.name(), "xberg-rust");
+    }
+
+    fn base_config(force_ocr: bool, backend: Option<&str>) -> ExtractionConfig {
+        let ocr = backend.map(|backend| xberg::OcrConfig {
+            backend: backend.to_string(),
+            language: vec!["eng".to_string()],
+            ..Default::default()
+        });
+        ExtractionConfig {
+            force_ocr,
+            ocr,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn build_batch_input_does_not_disable_base_forced_ocr() {
+        // Base forces OCR; this file passes force_ocr=false but pins a language.
+        // The per-file force_ocr must stay true — never Some(false) over the base.
+        let base = base_config(true, Some("tesseract"));
+        let input = build_batch_input(Path::new("/a.pdf"), false, Some("deu"), &base);
+        let file_config = input.config.expect("file config should be set");
+        assert_eq!(file_config.force_ocr, Some(true));
+    }
+
+    #[test]
+    fn build_batch_input_preserves_backend_and_canonicalizes_language() {
+        // A Paddle base must stay Paddle; only the language changes, split on '+'.
+        let base = base_config(false, Some("paddle"));
+        let input = build_batch_input(Path::new("/a.pdf"), false, Some("deu+eng"), &base);
+        let ocr = input.config.expect("file config").ocr.expect("ocr override");
+        assert_eq!(ocr.backend, "paddle");
+        assert_eq!(ocr.language, vec!["deu".to_string(), "eng".to_string()]);
+    }
+
+    #[test]
+    fn build_batch_input_without_overrides_inherits_base() {
+        // No force flag and no language => no per-file config => inherit the base.
+        let base = base_config(false, Some("paddle"));
+        let input = build_batch_input(Path::new("/a.pdf"), false, None, &base);
+        assert!(input.config.is_none());
+    }
+
+    #[test]
+    fn build_batch_input_force_ocr_without_language_leaves_ocr_inherited() {
+        // Forcing OCR but not pinning a language sets force_ocr but leaves ocr None
+        // so the base OcrConfig (backend/pipeline/cache) is inherited untouched.
+        let base = base_config(false, Some("paddle"));
+        let input = build_batch_input(Path::new("/a.pdf"), true, None, &base);
+        let file_config = input.config.expect("file config");
+        assert_eq!(file_config.force_ocr, Some(true));
+        assert!(file_config.ocr.is_none());
     }
 
     #[tokio::test]

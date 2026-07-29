@@ -2181,7 +2181,7 @@ mod tests {
         let thresholds = t();
         let outcome = evaluate_ocr_skip_gate(
             true, // pre-rendered structured doc present
-            50,   // >= non_text_min_chars (20)
+            50,   
             0.1,  // < alnum_ws_ratio_threshold (0.4): looks non-textual
             &gate_decision(true, true),
             &thresholds,

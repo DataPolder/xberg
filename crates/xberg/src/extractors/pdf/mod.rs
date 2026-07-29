@@ -191,7 +191,6 @@ fn scanned_pages_to_ocr(
         );
         if decision.whole_doc_failure {
             // A whole-document failure is itself a `ScannedPages` signal (see
-            // `OcrStrategy::ScannedPages` docs): OCR every page rather than
             // discarding the signal and relying on the caller's `Auto` fallthrough.
             let page_count = pdf_metadata.pdf_specific.page_count.unwrap_or(0);
             return if page_count == 0 {
