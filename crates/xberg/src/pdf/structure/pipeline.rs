@@ -389,6 +389,13 @@ struct PageInput {
     page_hints: Option<Vec<LayoutHint>>,
     /// Bounding boxes of tables that were successfully extracted for this page.
     table_bboxes: Vec<crate::types::BoundingBox>,
+    /// Whether native semantic classification should be preserved while layout
+    /// hints continue to control reading order and record region provenance.
+    preserve_native_semantics: bool,
+    /// Whether layout geometry should reorder native paragraphs on this page.
+    /// Semantic refinement runs in native order before this spatial order is
+    /// applied during final assembly.
+    use_layout_reading_order: bool,
     /// Per-hint validation results from CC analysis (parallel to page_hints).
     /// Empty when layout-detection is not active.
     #[cfg(feature = "layout-detection")]
@@ -424,6 +431,8 @@ fn process_single_page(
         heuristic_segments,
         page_hints,
         table_bboxes,
+        preserve_native_semantics,
+        use_layout_reading_order,
         #[cfg(feature = "layout-detection")]
         hint_validations,
         #[cfg(feature = "layout-detection")]
@@ -433,6 +442,10 @@ fn process_single_page(
         include_headers,
         include_footers,
     } = input;
+    #[cfg(not(feature = "layout-detection"))]
+    let _ = preserve_native_semantics;
+    #[cfg(not(feature = "layout-detection"))]
+    let _ = use_layout_reading_order;
     if let Some(mut paragraphs) = struct_paragraphs {
         apply_text_repair_to_structure_tree_paragraphs(&mut paragraphs, true);
         if needs_classify {
@@ -478,7 +491,9 @@ fn process_single_page(
         #[cfg(feature = "layout-detection")]
         let mut paragraphs = if let Some(ref hints) = page_hints {
             let wrapper_ownership = wrapper_ownership_by_hint(hints, &hint_validations);
-            if crate::extractors::pdf::reading_order::has_eligible_layout_hints(hints, &wrapper_ownership) {
+            if use_layout_reading_order
+                && crate::extractors::pdf::reading_order::has_eligible_layout_hints(hints, &wrapper_ownership)
+            {
                 process_layout_segment_groups(
                     page_segments,
                     hints,
@@ -490,10 +505,14 @@ fn process_single_page(
                         include_headers,
                         include_footers,
                         page_width_pts,
+                        apply_layout_overrides: !preserve_native_semantics,
                     },
                 )
             } else {
-                segments_to_paragraphs(page_segments, heading_map, &paragraph_gap_ys)
+                let mut paragraphs = segments_to_paragraphs(page_segments, heading_map, &paragraph_gap_ys);
+                let classification_hints = regular_layout_hints(hints);
+                super::layout_classify::annotate_layout_classes(&mut paragraphs, &classification_hints, 0.5, 0.2);
+                paragraphs
             }
         } else {
             segments_to_paragraphs(page_segments, heading_map, &paragraph_gap_ys)
@@ -531,6 +550,154 @@ fn process_single_page(
         retain_page_furniture_safely(&mut paragraphs);
         paragraphs
     }
+}
+
+const TABLE_DOMINANT_MIN_BODY_ROWS: usize = 40;
+const TABLE_DOMINANT_MIN_VISIBLE_CHAR_SHARE: f64 = 0.85;
+const TABLE_SPILL_MIN_PARAGRAPH_OVERLAP: f64 = 0.2;
+
+/// Remove non-semantic spill inside table regions on overwhelmingly tabular pages.
+///
+/// Layout table crops can leave out-of-bounds table continuations as ordinary
+/// paragraphs. The page-level dominance guards are only activation gates: a
+/// paragraph is removed only when enough of its own geometry overlaps an emitted
+/// table rectangle and its content looks like a row continuation or marker,
+/// preserving surrounding headings and short explanatory prose.
+fn suppress_table_dominant_paragraph_spill(pages: &mut [Vec<PdfParagraph>], emitted_tables: &[crate::types::Table]) {
+    for (page_index, paragraphs) in pages.iter_mut().enumerate() {
+        let page_number = page_index.saturating_add(1) as u32;
+        let page_tables = emitted_tables
+            .iter()
+            .filter(|table| table.page_number == page_number)
+            .collect::<Vec<_>>();
+        let body_rows = page_tables
+            .iter()
+            .map(|table| table.cells.len().saturating_sub(1))
+            .sum::<usize>();
+        if body_rows < TABLE_DOMINANT_MIN_BODY_ROWS {
+            continue;
+        }
+
+        let table_chars = page_tables
+            .iter()
+            .flat_map(|table| table.cells.iter().flatten())
+            .map(|cell| visible_char_count(cell))
+            .sum::<usize>();
+        let paragraph_chars = paragraphs
+            .iter()
+            .map(paragraph_text_raw)
+            .map(|text| visible_char_count(&text))
+            .sum::<usize>();
+        let total_chars = table_chars.saturating_add(paragraph_chars);
+        let table_share = if total_chars == 0 {
+            0.0
+        } else {
+            table_chars as f64 / total_chars as f64
+        };
+        if table_share < TABLE_DOMINANT_MIN_VISIBLE_CHAR_SHARE {
+            continue;
+        }
+
+        let table_bboxes = page_tables
+            .iter()
+            .filter_map(|table| table.bounding_box.as_ref())
+            .collect::<Vec<_>>();
+        if table_bboxes.is_empty() {
+            continue;
+        }
+        let before = paragraphs.len();
+        paragraphs.retain(|paragraph| !is_table_crop_spill(paragraph, &table_bboxes));
+        tracing::debug!(
+            page = page_number,
+            body_rows,
+            table_share,
+            removed = before.saturating_sub(paragraphs.len()),
+            "table-dominant paragraph spill cleanup"
+        );
+    }
+}
+
+fn visible_char_count(text: &str) -> usize {
+    text.chars().filter(|character| !character.is_whitespace()).count()
+}
+
+fn is_table_crop_spill(paragraph: &PdfParagraph, table_bboxes: &[&crate::types::BoundingBox]) -> bool {
+    if is_preserved_table_page_annotation(paragraph) {
+        return false;
+    }
+    let Some(paragraph_bbox) = paragraph_geometry_bbox(paragraph) else {
+        return false;
+    };
+    if !table_bboxes.iter().any(|table_bbox| {
+        table_paragraph_overlap_fraction(paragraph_bbox, table_bbox) >= TABLE_SPILL_MIN_PARAGRAPH_OVERLAP
+    }) {
+        return false;
+    }
+
+    let text = paragraph_text_raw(paragraph);
+    let alphabetic_chars = text.chars().filter(|character| character.is_alphabetic()).count();
+    let numeric_chars = text.chars().filter(|character| character.is_numeric()).count();
+    paragraph.word_count >= 13 || alphabetic_chars < 5 || numeric_chars >= alphabetic_chars
+}
+
+fn table_paragraph_overlap_fraction(
+    paragraph_bbox: (f32, f32, f32, f32),
+    table_bbox: &crate::types::BoundingBox,
+) -> f64 {
+    let (raw_left, raw_bottom, raw_right, raw_top) = paragraph_bbox;
+    let paragraph_left = raw_left.min(raw_right) as f64;
+    let paragraph_right = raw_left.max(raw_right) as f64;
+    let paragraph_bottom = raw_bottom.min(raw_top) as f64;
+    let paragraph_top = raw_bottom.max(raw_top) as f64;
+    let paragraph_area = (paragraph_right - paragraph_left) * (paragraph_top - paragraph_bottom);
+    if paragraph_area <= 0.0 {
+        return 0.0;
+    }
+
+    let intersection_width = (paragraph_right.min(table_bbox.x0.max(table_bbox.x1))
+        - paragraph_left.max(table_bbox.x0.min(table_bbox.x1)))
+    .max(0.0);
+    let intersection_height = (paragraph_top.min(table_bbox.y0.max(table_bbox.y1))
+        - paragraph_bottom.max(table_bbox.y0.min(table_bbox.y1)))
+    .max(0.0);
+    intersection_width * intersection_height / paragraph_area
+}
+
+fn is_preserved_table_page_annotation(paragraph: &PdfParagraph) -> bool {
+    if paragraph.heading_level.is_some()
+        || paragraph.caption_for.is_some()
+        || paragraph.is_list_item
+        || paragraph.is_code_block
+        || paragraph.is_formula
+        || matches!(
+            paragraph.layout_class,
+            Some(
+                super::types::LayoutHintClass::Title
+                    | super::types::LayoutHintClass::SectionHeader
+                    | super::types::LayoutHintClass::Caption
+                    | super::types::LayoutHintClass::Footnote
+                    | super::types::LayoutHintClass::PageHeader
+                    | super::types::LayoutHintClass::PageFooter
+                    | super::types::LayoutHintClass::ListItem
+                    | super::types::LayoutHintClass::Code
+                    | super::types::LayoutHintClass::Formula
+                    | super::types::LayoutHintClass::DocumentIndex
+                    | super::types::LayoutHintClass::Form
+                    | super::types::LayoutHintClass::KeyValueRegion
+            )
+        )
+    {
+        return true;
+    }
+
+    let text = paragraph_text_raw(paragraph);
+    let label = text
+        .trim_start()
+        .split_once(char::is_whitespace)
+        .map_or(text.trim(), |(first, _)| first)
+        .trim_end_matches([':', '.'])
+        .to_ascii_lowercase();
+    matches!(label.as_str(), "note" | "notes" | "source" | "sources" | "table")
 }
 
 fn is_wrapper_layout_hint(hint: &LayoutHint) -> bool {
@@ -583,6 +750,14 @@ struct LayoutParagraphContext<'a> {
     include_headers: bool,
     include_footers: bool,
     page_width_pts: Option<f32>,
+    apply_layout_overrides: bool,
+}
+
+#[cfg(feature = "layout-detection")]
+struct NativeLayoutProjection {
+    groups: Vec<crate::extractors::pdf::reading_order::LayoutSegmentGroup>,
+    group_bounds: Vec<Option<(f32, f32, f32, f32)>>,
+    classification_hints: Vec<LayoutHint>,
 }
 
 #[cfg(feature = "layout-detection")]
@@ -602,6 +777,14 @@ fn process_layout_segment_groups(
     );
     if matches!(groups.as_slice(), [group] if group.hint_indices.is_empty() && group.region_path.is_none()) {
         return segments_to_paragraphs(segments, context.heading_map, context.paragraph_gap_ys);
+    }
+    if !context.apply_layout_overrides {
+        let group_bounds = layout_group_bounds(&groups, &segments);
+        let mut paragraphs = segments_to_paragraphs(segments, context.heading_map, context.paragraph_gap_ys);
+        assign_native_paragraph_layout(&mut paragraphs, &groups, &group_bounds);
+        let classification_hints = regular_layout_hints(hints);
+        super::layout_classify::annotate_layout_classes(&mut paragraphs, &classification_hints, 0.5, 0.2);
+        return paragraphs;
     }
     let mut slots = segments.into_iter().map(Some).collect::<Vec<_>>();
     let mut paragraphs = Vec::new();
@@ -623,14 +806,22 @@ fn process_layout_segment_groups(
             .into_iter()
             .filter_map(|index| hints.get(index).cloned())
             .collect::<Vec<_>>();
-        super::layout_classify::apply_layout_overrides(
-            &mut group_paragraphs,
-            &group_hints,
-            0.5,
-            0.2,
-            context.doc_body_font_size,
-        );
-        un_mark_layout_furniture_per_config(&mut group_paragraphs, context.include_headers, context.include_footers);
+        if context.apply_layout_overrides {
+            super::layout_classify::apply_layout_overrides(
+                &mut group_paragraphs,
+                &group_hints,
+                0.5,
+                0.2,
+                context.doc_body_font_size,
+            );
+            un_mark_layout_furniture_per_config(
+                &mut group_paragraphs,
+                context.include_headers,
+                context.include_footers,
+            );
+        } else {
+            super::layout_classify::annotate_layout_classes(&mut group_paragraphs, &group_hints, 0.5, 0.2);
+        }
         for paragraph in &mut group_paragraphs {
             paragraph.layout_region_path = region_path;
         }
@@ -647,6 +838,120 @@ fn process_layout_segment_groups(
         paragraphs.extend(segments_to_paragraphs(leftovers, context.heading_map, &gap_ys));
     }
     paragraphs
+}
+
+#[cfg(feature = "layout-detection")]
+fn assign_native_paragraph_layout(
+    paragraphs: &mut Vec<PdfParagraph>,
+    groups: &[crate::extractors::pdf::reading_order::LayoutSegmentGroup],
+    group_bounds: &[Option<(f32, f32, f32, f32)>],
+) {
+    for paragraph in paragraphs {
+        let group_rank = paragraph_geometry_bbox(paragraph).and_then(|paragraph_bbox| {
+            groups
+                .iter()
+                .enumerate()
+                .filter_map(|(group_index, _)| {
+                    let overlap = group_bounds
+                        .get(group_index)
+                        .and_then(|bounds| *bounds)
+                        .map_or(0.0, |bounds| rectangle_overlap_area(paragraph_bbox, bounds));
+                    (overlap > 0.0).then_some((group_index, overlap))
+                })
+                .max_by(|left, right| left.1.total_cmp(&right.1).then_with(|| right.0.cmp(&left.0)))
+                .map(|(group_index, _)| group_index)
+        });
+        let Some(group_index) = group_rank else {
+            continue;
+        };
+        let Some(mut path) = groups[group_index].region_path else {
+            continue;
+        };
+        let original_root_id = path.root.id;
+        let root_order = groups
+            .iter()
+            .position(|group| {
+                group
+                    .region_path
+                    .is_some_and(|candidate| candidate.root.id == original_root_id)
+            })
+            .unwrap_or(group_index);
+        path.root.id = root_order;
+        if let Some(child) = &mut path.child {
+            child.id = group_index;
+        }
+        paragraph.layout_region_path = Some(path);
+    }
+}
+
+fn reorder_pages_by_layout_region(pages: &mut [Vec<PdfParagraph>]) {
+    for page in pages {
+        page.sort_by_key(|paragraph| {
+            paragraph
+                .layout_region_path
+                .map(|path| path.child.map_or(path.root.id, |child| child.id))
+                .unwrap_or(usize::MAX)
+        });
+    }
+}
+
+fn paragraph_geometry_bbox(paragraph: &PdfParagraph) -> Option<(f32, f32, f32, f32)> {
+    if let Some(block_bbox) = paragraph.block_bbox {
+        return Some(block_bbox);
+    }
+    let mut segments = paragraph.lines.iter().flat_map(|line| line.segments.iter());
+    let first = segments.next()?;
+    let mut bounds = (
+        first.x,
+        first.y.min(first.baseline_y),
+        first.x + first.width,
+        (first.y + first.height).max(first.baseline_y + first.height),
+    );
+    for segment in segments {
+        bounds.0 = bounds.0.min(segment.x);
+        bounds.1 = bounds.1.min(segment.y.min(segment.baseline_y));
+        bounds.2 = bounds.2.max(segment.x + segment.width);
+        bounds.3 = bounds
+            .3
+            .max((segment.y + segment.height).max(segment.baseline_y + segment.height));
+    }
+    Some(bounds)
+}
+
+#[cfg(feature = "layout-detection")]
+fn layout_group_bounds(
+    groups: &[crate::extractors::pdf::reading_order::LayoutSegmentGroup],
+    segments: &[SegmentData],
+) -> Vec<Option<(f32, f32, f32, f32)>> {
+    groups
+        .iter()
+        .map(|group| {
+            let mut group_segments = group.segment_indices.iter().filter_map(|index| segments.get(*index));
+            let first = group_segments.next()?;
+            let mut bounds = (
+                first.x,
+                first.y.min(first.baseline_y),
+                first.x + first.width,
+                (first.y + first.height).max(first.baseline_y + first.height),
+            );
+            for segment in group_segments {
+                bounds.0 = bounds.0.min(segment.x);
+                bounds.1 = bounds.1.min(segment.y.min(segment.baseline_y));
+                bounds.2 = bounds.2.max(segment.x + segment.width);
+                bounds.3 = bounds
+                    .3
+                    .max((segment.y + segment.height).max(segment.baseline_y + segment.height));
+            }
+            Some(bounds)
+        })
+        .collect()
+}
+
+#[cfg(feature = "layout-detection")]
+fn rectangle_overlap_area(left: (f32, f32, f32, f32), right: (f32, f32, f32, f32)) -> f32 {
+    let width = left.2.min(right.2) - left.0.max(right.0);
+    let height = left.3.min(right.3) - left.1.max(right.1);
+    width.max(0.0) * height.max(0.0)
 }
 
 /// Multiple of the median line height a whitespace band must exceed to count
@@ -1764,7 +2069,46 @@ pub(crate) fn extract_document_structure_from_segments(
         }
         map
     };
+    #[cfg(feature = "layout-detection")]
     let effective_layout_hints = layout_hints;
+    #[cfg(feature = "layout-detection")]
+    let native_layout_projections: Vec<Option<NativeLayoutProjection>> = (0..page_count)
+        .map(|page_index| {
+            let hints = effective_layout_hints.and_then(|pages| pages.get(page_index))?;
+            let validations = validations_by_page
+                .get(&page_index)
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            let wrapper_ownership = wrapper_ownership_by_hint(hints, validations);
+            if !crate::extractors::pdf::reading_order::has_eligible_layout_hints(hints, &wrapper_ownership) {
+                return None;
+            }
+
+            let table_bboxes = extracted_table_bboxes_by_page
+                .get(&page_index)
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            let projected_segments =
+                filter_segments_by_table_bboxes(all_page_segments[page_index].clone(), table_bboxes);
+            let no_reorder = super::layout_debug::layout_debug_flags().no_reorder;
+            let page_width_pts = layout_results
+                .and_then(|results| results.get(page_index))
+                .map(|result| result.page_width_pts);
+            let groups = crate::extractors::pdf::reading_order::plan_segment_groups_by_layout(
+                &projected_segments,
+                hints,
+                &wrapper_ownership,
+                no_reorder,
+                page_width_pts,
+            );
+            let group_bounds = layout_group_bounds(&groups, &projected_segments);
+            Some(NativeLayoutProjection {
+                groups,
+                group_bounds,
+                classification_hints: regular_layout_hints(hints),
+            })
+        })
+        .collect();
     let page_inputs: Vec<PageInput> = (0..page_count)
         .map(|i| {
             let heuristic_segments = std::mem::take(&mut all_page_segments[i]);
@@ -1773,8 +2117,12 @@ pub(crate) fn extract_document_structure_from_segments(
                 page_index: i,
                 struct_paragraphs: None,
                 heuristic_segments,
-                page_hints: effective_layout_hints.and_then(|h| h.get(i)).cloned(),
+                // Native paragraphs are fully refined without layout semantic
+                // annotations. Geometry is projected after semantic refinement.
+                page_hints: None,
                 table_bboxes: extracted_table_bboxes_by_page.get(&i).cloned().unwrap_or_default(),
+                preserve_native_semantics: true,
+                use_layout_reading_order: false,
                 #[cfg(feature = "layout-detection")]
                 hint_validations: validations_by_page.get(&i).cloned().unwrap_or_default(),
                 #[cfg(feature = "layout-detection")]
@@ -1824,6 +2172,20 @@ pub(crate) fn extract_document_structure_from_segments(
         deduplicate_paragraphs(&mut all_page_paragraphs);
     }
     compact_final_heading_hierarchy(&mut all_page_paragraphs);
+    #[cfg(feature = "layout-detection")]
+    for (page, projection) in all_page_paragraphs.iter_mut().zip(native_layout_projections) {
+        let Some(projection) = projection else {
+            continue;
+        };
+        assign_native_paragraph_layout(page, &projection.groups, &projection.group_bounds);
+        super::layout_classify::annotate_layout_classes(page, &projection.classification_hints, 0.5, 0.2);
+    }
+    // Spill cleanup runs after deferred annotation so layout-only captions,
+    // footnotes, and furniture retain their semantic provenance.
+    suppress_table_dominant_paragraph_spill(&mut all_page_paragraphs, &emitted_tables);
+    // Native semantic roles are finalized in source order before the
+    // independent layout geometry projection controls final reading order.
+    reorder_pages_by_layout_region(&mut all_page_paragraphs);
 
     let total_paragraphs: usize = all_page_paragraphs.iter().map(|p| p.len()).sum();
     tracing::debug!(
@@ -2215,9 +2577,135 @@ fn prepare_emitted_tables(
         .filter(|table| !table.markdown.trim().is_empty())
         .count();
     deduplicate_overlapping_tables(&mut emitted_tables, native_count, overlap_preference);
+    normalize_sparse_currency_affix_columns(&mut emitted_tables);
     deduplicate_identical_tables(&mut emitted_tables);
     assign_deterministic_table_ids(&mut emitted_tables);
     emitted_tables
+}
+
+const MAX_CURRENCY_AFFIX_CELLS: usize = 3;
+const MAX_CURRENCY_AFFIX_OCCUPANCY: f64 = 0.1;
+const MIN_FINANCIAL_TARGET_CELLS: usize = 5;
+const MIN_FINANCIAL_TARGET_RATIO: f64 = 0.9;
+const FINANCIAL_COLUMN_HEADERS: &[&str] = &[
+    "shares",
+    "par",
+    "principal",
+    "quantity",
+    "value",
+    "market value",
+    "cost",
+];
+const ISO_CURRENCY_CODES: &[&str] = &[
+    "AUD", "BRL", "CAD", "CHF", "CNY", "DKK", "EUR", "GBP", "HKD", "INR", "JPY", "KRW", "MXN", "NOK", "NZD", "SEK",
+    "SGD", "USD", "ZAR",
+];
+
+fn normalize_sparse_currency_affix_columns(tables: &mut [crate::types::Table]) {
+    for table in tables {
+        normalize_sparse_currency_affix_columns_in_table(table);
+    }
+}
+
+fn normalize_sparse_currency_affix_columns_in_table(table: &mut crate::types::Table) {
+    let Some(header) = table.cells.first() else {
+        return;
+    };
+    if table.cells.len() <= 1 || header.len() < 2 {
+        return;
+    }
+
+    let mut source_columns = (0..header.len() - 1)
+        .filter(|&source| {
+            header[source].trim().is_empty()
+                && header
+                    .get(source + 1)
+                    .is_some_and(|target| is_financial_column_header(target))
+                && is_sparse_currency_affix_column(&table.cells[1..], source, source + 1)
+        })
+        .collect::<Vec<_>>();
+    source_columns.sort_unstable_by(|left, right| right.cmp(left));
+    let normalized = !source_columns.is_empty();
+
+    for source in source_columns {
+        merge_currency_affix_column(&mut table.cells, source);
+    }
+    if normalized {
+        table.markdown = crate::extractors::frontmatter_utils::cells_to_markdown(&table.cells);
+        table.columns = table.cells.first().cloned();
+    }
+}
+
+fn is_financial_column_header(header: &str) -> bool {
+    let normalized = header.trim().to_ascii_lowercase();
+    FINANCIAL_COLUMN_HEADERS
+        .iter()
+        .any(|candidate| normalized == *candidate || normalized.starts_with(&format!("{candidate} ")))
+}
+
+fn is_sparse_currency_affix_column(rows: &[Vec<String>], source: usize, target: usize) -> bool {
+    let source_cells = rows
+        .iter()
+        .filter_map(|row| row.get(source))
+        .map(|cell| cell.trim())
+        .filter(|cell| !cell.is_empty())
+        .collect::<Vec<_>>();
+    let occupied_limit =
+        MAX_CURRENCY_AFFIX_CELLS.min(((rows.len() as f64) * MAX_CURRENCY_AFFIX_OCCUPANCY).ceil() as usize);
+    if source_cells.is_empty()
+        || source_cells.len() > occupied_limit
+        || !source_cells.iter().all(|cell| is_currency_marker(cell))
+        || rows.iter().any(|row| {
+            row.get(source).is_some_and(|cell| !cell.trim().is_empty())
+                && row.get(target).is_none_or(|cell| cell.trim().is_empty())
+        })
+    {
+        return false;
+    }
+
+    let target_cells = rows
+        .iter()
+        .filter_map(|row| row.get(target))
+        .map(|cell| cell.trim())
+        .filter(|cell| !cell.is_empty())
+        .collect::<Vec<_>>();
+    target_cells.len() >= MIN_FINANCIAL_TARGET_CELLS
+        && target_cells.iter().filter(|cell| is_financial_number(cell)).count() as f64 / target_cells.len() as f64
+            >= MIN_FINANCIAL_TARGET_RATIO
+}
+
+fn is_currency_marker(cell: &str) -> bool {
+    const CURRENCY_SYMBOLS: &[&str] = &["$", "€", "£", "¥", "₹", "₩", "₽", "₺", "₪", "₫", "₦", "₱", "฿"];
+    CURRENCY_SYMBOLS.contains(&cell) || ISO_CURRENCY_CODES.contains(&cell.to_ascii_uppercase().as_str())
+}
+
+fn is_financial_number(cell: &str) -> bool {
+    let mut has_digit = false;
+    cell.chars().all(|character| {
+        if character.is_ascii_digit() {
+            has_digit = true;
+            true
+        } else {
+            character.is_ascii_whitespace() || matches!(character, ',' | '.' | '-' | '+' | '(' | ')' | '%')
+        }
+    }) && has_digit
+}
+
+fn merge_currency_affix_column(rows: &mut [Vec<String>], source: usize) {
+    for row in rows {
+        if row.len() <= source {
+            continue;
+        }
+        if let Some(marker) = row.get(source).map(|cell| cell.trim()).filter(|cell| !cell.is_empty())
+            && let Some(value) = row
+                .get(source + 1)
+                .map(|cell| cell.trim())
+                .filter(|cell| !cell.is_empty())
+        {
+            row[source + 1] = format!("{marker} {value}");
+        }
+        row.remove(source);
+    }
 }
 
 /// Collapse byte-identical table duplicates on the same page.
@@ -2438,6 +2926,8 @@ fn deduplicate_overlapping_tables(
 /// Required containment for a layout child and, in one-to-one cohort matching,
 /// reciprocal coverage of its corresponding native parent.
 const SIDE_BY_SIDE_CHILD_PARENT_OVERLAP: f64 = 0.8;
+/// Crop jitter tolerance for reciprocal one-to-one cohort correspondence.
+const SIDE_BY_SIDE_CORRESPONDENCE_EPSILON: f64 = 0.005;
 /// Both children must describe the same row band, rather than stacked tables.
 const SIDE_BY_SIDE_VERTICAL_OVERLAP: f64 = 0.6;
 /// The children together must account for most of the parent's horizontal span.
@@ -2547,12 +3037,30 @@ fn native_candidate_rows(tables: &[crate::types::Table], native_count: usize) ->
 }
 
 fn replacement_children_correspond(tables: &[crate::types::Table], parents: &[usize], children: &[usize]) -> bool {
-    parents.iter().zip(children).all(|(&parent, &child)| {
-        let parent_bbox = tables[parent].bounding_box.as_ref().expect("candidate has bbox");
-        let child_bbox = tables[child].bounding_box.as_ref().expect("candidate has bbox");
-        bbox_overlap_fraction(child_bbox, parent_bbox) >= SIDE_BY_SIDE_CHILD_PARENT_OVERLAP
-            && bbox_overlap_fraction(parent_bbox, child_bbox) >= SIDE_BY_SIDE_CHILD_PARENT_OVERLAP
-    })
+    parents
+        .iter()
+        .zip(children)
+        .enumerate()
+        .all(|(position, (&parent, &child))| {
+            let parent_bbox = tables[parent].bounding_box.as_ref().expect("candidate has bbox");
+            let child_bbox = tables[child].bounding_box.as_ref().expect("candidate has bbox");
+            let paired_intersection = bbox_intersection_area(parent_bbox, child_bbox);
+            let sibling_intersection = children
+                .get(1 - position)
+                .and_then(|&sibling| tables[sibling].bounding_box.as_ref())
+                .map_or(0.0, |sibling_bbox| bbox_intersection_area(parent_bbox, sibling_bbox));
+            bbox_center_x(child_bbox) >= parent_bbox.x0
+                && bbox_center_x(child_bbox) <= parent_bbox.x1
+                && paired_intersection > sibling_intersection
+                && bbox_overlap_fraction(child_bbox, parent_bbox) + SIDE_BY_SIDE_CORRESPONDENCE_EPSILON
+                    >= SIDE_BY_SIDE_CHILD_PARENT_OVERLAP
+                && bbox_overlap_fraction(parent_bbox, child_bbox) + SIDE_BY_SIDE_CORRESPONDENCE_EPSILON
+                    >= SIDE_BY_SIDE_CHILD_PARENT_OVERLAP
+        })
+}
+
+fn bbox_center_x(bbox: &crate::types::BoundingBox) -> f64 {
+    (bbox.x0 + bbox.x1) / 2.0
 }
 
 fn table_top(tables: &[crate::types::Table], index: usize) -> f64 {
@@ -3908,6 +4416,117 @@ mod tests {
     }
 
     #[test]
+    fn sparse_currency_affix_columns_merge_into_financial_values() {
+        use crate::core::config::layout::TableOverlapPreference;
+
+        let mut cells = vec![vec![
+            "Security".into(),
+            String::new(),
+            "Par (000)".into(),
+            String::new(),
+            "Value".into(),
+        ]];
+        for index in 0..12 {
+            cells.push(vec![
+                format!("Bond {index}"),
+                if index == 0 { "USD".into() } else { String::new() },
+                format!("{},000", index + 1),
+                if index == 0 { "$".into() } else { String::new() },
+                format!("{},500", index + 1),
+            ]);
+        }
+        let table = crate::types::Table {
+            markdown: crate::extractors::frontmatter_utils::cells_to_markdown(&cells),
+            cells,
+            page_number: 1,
+            ..Default::default()
+        };
+
+        let emitted = prepare_emitted_tables(&[table], Vec::new(), TableOverlapPreference::Content);
+
+        assert_eq!(emitted[0].cells[0], ["Security", "Par (000)", "Value"]);
+        assert_eq!(emitted[0].cells[1], ["Bond 0", "USD 1,000", "$ 1,500"]);
+        assert_eq!(
+            emitted[0].columns,
+            Some(vec!["Security".into(), "Par (000)".into(), "Value".into()])
+        );
+        assert!(emitted[0].markdown.starts_with("| Security | Par (000) | Value |"));
+    }
+
+    #[test]
+    fn named_or_non_currency_columns_are_not_collapsed() {
+        let build_table = |source_header: &str, source_value: &str| {
+            let mut cells = vec![vec!["Security".into(), source_header.into(), "Value".into()]];
+            for index in 0..12 {
+                cells.push(vec![
+                    format!("Asset {index}"),
+                    if index == 0 { source_value.into() } else { String::new() },
+                    format!("{index},000"),
+                ]);
+            }
+            crate::types::Table {
+                markdown: crate::extractors::frontmatter_utils::cells_to_markdown(&cells),
+                cells,
+                ..Default::default()
+            }
+        };
+        let mut tables = vec![build_table("Currency", "USD"), build_table("", "kg")];
+
+        normalize_sparse_currency_affix_columns(&mut tables);
+
+        assert_eq!(
+            tables[0].cells[0].len(),
+            3,
+            "an explicitly named Currency column is semantic"
+        );
+        assert_eq!(
+            tables[1].cells[0].len(),
+            3,
+            "an arbitrary sparse unit is not a currency marker"
+        );
+    }
+
+    #[test]
+    fn dense_currency_columns_are_not_collapsed() {
+        let mut cells = vec![vec!["Security".into(), String::new(), "Value".into()]];
+        for index in 0..10 {
+            cells.push(vec![
+                format!("Asset {index}"),
+                if index < 2 { "USD".into() } else { String::new() },
+                format!("{index},000"),
+            ]);
+        }
+        let mut tables = vec![crate::types::Table {
+            markdown: crate::extractors::frontmatter_utils::cells_to_markdown(&cells),
+            cells,
+            ..Default::default()
+        }];
+
+        normalize_sparse_currency_affix_columns(&mut tables);
+
+        assert_eq!(tables[0].cells[0].len(), 3);
+    }
+
+    #[test]
+    fn currency_marker_without_target_value_is_preserved() {
+        let mut cells = vec![vec!["Security".into(), String::new(), "Value".into()]];
+        cells.push(vec!["Currency declaration".into(), "USD".into(), String::new()]);
+        for index in 0..11 {
+            cells.push(vec![format!("Asset {index}"), String::new(), format!("{index},000")]);
+        }
+        let mut tables = vec![crate::types::Table {
+            markdown: crate::extractors::frontmatter_utils::cells_to_markdown(&cells),
+            cells,
+            ..Default::default()
+        }];
+
+        normalize_sparse_currency_affix_columns(&mut tables);
+
+        assert_eq!(tables[0].cells[0].len(), 3);
+        assert_eq!(tables[0].cells[1][1], "USD");
+    }
+
+    #[test]
     fn dedup_content_preference_keeps_larger_table() {
         use crate::core::config::layout::TableOverlapPreference;
         let mut tables = vec![
@@ -4090,6 +4709,46 @@ mod tests {
         ]);
 
         assert!(side_by_side_layout_replacements(&tables, 2).is_empty());
+    }
+
+    #[test]
+    fn layout_cohort_accepts_reciprocal_crop_within_tolerance() {
+        let mut tables = vec![
+            ov_table(1, (0.0, 0.0, 100.0, 100.0), "native left"),
+            ov_table(1, (110.0, 0.0, 210.0, 100.0), "native right"),
+        ];
+        tables.extend([
+            ov_table(1, (0.0, 0.0, 79.6, 100.0), "layout left"),
+            ov_table(1, (110.0, 0.0, 210.0, 100.0), "layout right"),
+        ]);
+
+        assert_eq!(side_by_side_layout_replacements(&tables, 2), [(vec![0, 1], vec![2, 3])]);
+    }
+
+    #[test]
+    fn layout_cohort_rejects_reciprocal_crop_below_tolerance() {
+        let mut tables = vec![
+            ov_table(1, (0.0, 0.0, 100.0, 100.0), "native left"),
+            ov_table(1, (110.0, 0.0, 210.0, 100.0), "native right"),
+        ];
+        tables.extend([
+            ov_table(1, (0.0, 0.0, 79.4, 100.0), "layout left"),
+            ov_table(1, (110.0, 0.0, 210.0, 100.0), "layout right"),
+        ]);
+
+        assert!(side_by_side_layout_replacements(&tables, 2).is_empty());
+    }
+
+    #[test]
+    fn layout_cohort_rejects_child_owned_by_sibling_parent() {
+        let tables = vec![
+            ov_table(1, (0.0, 0.0, 100.0, 100.0), "native left"),
+            ov_table(1, (110.0, 0.0, 210.0, 100.0), "native right"),
+            ov_table(1, (90.0, 0.0, 210.0, 100.0), "layout crossing"),
+            ov_table(1, (110.0, 0.0, 210.0, 100.0), "layout right"),
+        ];
+
+        assert!(!replacement_children_correspond(&tables, &[0, 1], &[2, 3]));
     }
 
     #[test]
@@ -4981,6 +5640,110 @@ mod tests {
         paragraph
     }
 
+    fn table_with_body_rows(body_rows: usize, cell: &str) -> crate::types::Table {
+        let mut cells = vec![vec!["Column".to_string()]];
+        cells.extend((0..body_rows).map(|_| vec![cell.to_string()]));
+        crate::types::Table {
+            cells,
+            page_number: 1,
+            bounding_box: Some(crate::types::BoundingBox {
+                x0: 0.0,
+                y0: 100.0,
+                x1: 500.0,
+                y1: 700.0,
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn table_dominant_page_removes_spill_but_preserves_annotations() {
+        let mut heading = outline_heading("Decorative title", 1);
+        heading.block_bbox = Some((10.0, 650.0, 200.0, 680.0));
+        let mut spill =
+            outline_para("AB Carval Euro CLO Series Class D three month EURIBOR at 3.75 percent 02/15/37 2,350");
+        spill.block_bbox = Some((10.0, 350.0, 490.0, 390.0));
+        let mut short_prose = outline_para("Rates shown are unaudited.");
+        short_prose.block_bbox = Some((10.0, 300.0, 250.0, 320.0));
+        let expected_side_prose = "This explanatory sidebar remains because it sits entirely beside the detected table despite sharing its vertical band.";
+        let mut side_prose = outline_para(expected_side_prose);
+        side_prose.block_bbox = Some((520.0, 300.0, 700.0, 340.0));
+        let mut note = outline_para("Note: values are unaudited");
+        note.block_bbox = Some((10.0, 250.0, 250.0, 270.0));
+        let mut caption = outline_para("Source: annual filing");
+        caption.layout_class = Some(LayoutHintClass::Caption);
+        caption.block_bbox = Some((10.0, 200.0, 250.0, 220.0));
+        let mut pages = vec![vec![heading, spill, short_prose, side_prose, note, caption]];
+        let tables = vec![table_with_body_rows(
+            TABLE_DOMINANT_MIN_BODY_ROWS,
+            "long-table-value-1234567890-long-table-value-1234567890-long-table-value-1234567890",
+        )];
+
+        suppress_table_dominant_paragraph_spill(&mut pages, &tables);
+
+        assert_eq!(pages[0].len(), 5);
+        assert_eq!(paragraph_text_raw(&pages[0][0]), "Decorative title");
+        assert_eq!(paragraph_text_raw(&pages[0][1]), "Rates shown are unaudited.");
+        assert_eq!(paragraph_text_raw(&pages[0][2]), expected_side_prose);
+        assert_eq!(paragraph_text_raw(&pages[0][3]), "Note: values are unaudited");
+        assert_eq!(paragraph_text_raw(&pages[0][4]), "Source: annual filing");
+    }
+
+    #[test]
+    fn table_dominant_cleanup_preserves_mixed_prose_pages() {
+        let prose =
+            "This explanatory paragraph is intentionally much longer than the compact table values. ".repeat(12);
+        let mut pages = vec![vec![outline_para(&prose)]];
+        let tables = vec![table_with_body_rows(TABLE_DOMINANT_MIN_BODY_ROWS, "1")];
+
+        suppress_table_dominant_paragraph_spill(&mut pages, &tables);
+
+        assert_eq!(pages[0].len(), 1);
+        assert_eq!(paragraph_text_raw(&pages[0][0]), prose);
+    }
+
+    #[test]
+    fn table_dominant_cleanup_requires_minimum_body_rows() {
+        let mut pages = vec![vec![outline_heading("Keep this title", 1)]];
+        let tables = vec![table_with_body_rows(
+            TABLE_DOMINANT_MIN_BODY_ROWS - 1,
+            "long-table-value-1234567890",
+        )];
+
+        suppress_table_dominant_paragraph_spill(&mut pages, &tables);
+
+        assert_eq!(pages[0].len(), 1);
+        assert_eq!(paragraph_text_raw(&pages[0][0]), "Keep this title");
+    }
+
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn deferred_layout_caption_survives_table_dominant_cleanup() {
+        let caption_text = "2024 2025 2026 2027 2028 2029 2030 2031 2032 2033 2034 2035 2036";
+        let mut caption = outline_para(caption_text);
+        caption.block_bbox = Some((10.0, 350.0, 490.0, 390.0));
+        let mut pages = vec![vec![caption]];
+        let hints = vec![LayoutHint {
+            class_name: LayoutHintClass::Caption,
+            confidence: 0.99,
+            left: 0.0,
+            bottom: 340.0,
+            right: 500.0,
+            top: 400.0,
+        }];
+        let tables = vec![table_with_body_rows(
+            TABLE_DOMINANT_MIN_BODY_ROWS,
+            "long-table-value-1234567890-long-table-value-1234567890-long-table-value-1234567890",
+        )];
+
+        crate::pdf::structure::layout_classify::annotate_layout_classes(&mut pages[0], &hints, 0.5, 0.2);
+        suppress_table_dominant_paragraph_spill(&mut pages, &tables);
+
+        assert_eq!(pages[0].len(), 1);
+        assert_eq!(paragraph_text_raw(&pages[0][0]), caption_text);
+        assert_eq!(pages[0][0].layout_class, Some(LayoutHintClass::Caption));
+    }
+
     #[test]
     fn final_heading_compaction_changes_rendered_markdown_levels() {
         let mut pages = vec![vec![
@@ -5234,6 +5997,8 @@ where new shares are issued;";
                 heuristic_segments: segments,
                 page_hints: None,
                 table_bboxes: Vec::new(),
+                preserve_native_semantics: false,
+                use_layout_reading_order: false,
                 #[cfg(feature = "layout-detection")]
                 hint_validations: Vec::new(),
                 #[cfg(feature = "layout-detection")]
@@ -5264,6 +6029,8 @@ where new shares are issued;";
                     heuristic_segments: segments.clone(),
                     page_hints,
                     table_bboxes: Vec::new(),
+                    preserve_native_semantics: false,
+                    use_layout_reading_order: false,
                     hint_validations: Vec::new(),
                     page_width_pts: None,
                     needs_classify: false,
@@ -5310,12 +6077,15 @@ where new shares are issued;";
             segment.height = 10.0;
             segment
         };
-        let segments = vec![
+        let mut segments = vec![
             positioned_segment("bottom-left", 10.0, 205.0),
             positioned_segment("top-left", 90.0, 305.0),
             positioned_segment("top-right", 200.0, 305.0),
             positioned_segment("bottom-right", 250.0, 205.0),
         ];
+        for (index, segment) in segments.iter_mut().enumerate() {
+            segment.assigned_role = Some(if index % 2 == 0 { 2 } else { 3 });
+        }
         let hint = |left, bottom, right, top| LayoutHint {
             class_name: crate::pdf::structure::types::LayoutHintClass::Text,
             confidence: 0.95,
@@ -5330,14 +6100,16 @@ where new shares are issued;";
             hint(120.0, 300.0, 240.0, 320.0),
             hint(160.0, 200.0, 280.0, 220.0),
         ];
-        let process = |page_width_pts| {
-            process_single_page(
+        let process = |page_width_pts, table_bboxes, _has_emitted_table| {
+            let mut pages = vec![process_single_page(
                 PageInput {
                     page_index: 0,
                     struct_paragraphs: None,
                     heuristic_segments: segments.clone(),
                     page_hints: Some(hints.clone()),
-                    table_bboxes: Vec::new(),
+                    table_bboxes,
+                    preserve_native_semantics: true,
+                    use_layout_reading_order: true,
                     hint_validations: Vec::new(),
                     page_width_pts,
                     needs_classify: false,
@@ -5347,18 +6119,158 @@ where new shares are issued;";
                 },
                 &[],
                 None,
-            )
-            .iter()
-            .map(paragraph_text)
-            .collect::<Vec<_>>()
+            )];
+            reorder_pages_by_layout_region(&mut pages);
+            pages[0].iter().map(paragraph_text).collect::<Vec<_>>()
         };
 
-        assert_eq!(process(None), ["top-left", "bottom-left", "top-right", "bottom-right"]);
         assert_eq!(
-            process(Some(400.0)),
+            process(None, Vec::new(), false),
+            ["top-left", "bottom-left", "top-right", "bottom-right"]
+        );
+        assert_eq!(
+            process(Some(400.0), Vec::new(), false),
             ["top-left", "top-right", "bottom-left", "bottom-right"],
             "the actual page width must reach layout graph dilation"
         );
+        assert_eq!(
+            process(
+                Some(400.0),
+                vec![crate::types::BoundingBox {
+                    x0: 0.0,
+                    y0: 0.0,
+                    x1: 50.0,
+                    y1: 50.0,
+                }],
+                true,
+            ),
+            ["top-left", "top-right", "bottom-left", "bottom-right"],
+            "an emitted table must not disable layout reading order for surrounding prose"
+        );
+    }
+
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn stacked_layout_groups_preserve_native_paragraph_assembly() {
+        let segments = vec![
+            heuristic_segment("One continuous", 700.0, 120.0, false),
+            heuristic_segment("paragraph.", 688.0, 100.0, false),
+        ];
+        let hints = vec![
+            LayoutHint {
+                class_name: LayoutHintClass::Text,
+                confidence: 0.99,
+                left: 0.0,
+                bottom: 685.0,
+                right: 200.0,
+                top: 705.0,
+            },
+            LayoutHint {
+                class_name: LayoutHintClass::Text,
+                confidence: 0.99,
+                left: 0.0,
+                bottom: 673.0,
+                right: 200.0,
+                top: 693.0,
+            },
+        ];
+        let output = process_single_page(
+            PageInput {
+                page_index: 0,
+                struct_paragraphs: None,
+                heuristic_segments: segments,
+                page_hints: Some(hints),
+                table_bboxes: Vec::new(),
+                preserve_native_semantics: true,
+                use_layout_reading_order: false,
+                hint_validations: Vec::new(),
+                page_width_pts: Some(612.0),
+                needs_classify: false,
+                paragraph_gap_ys: Vec::new(),
+                include_headers: true,
+                include_footers: true,
+            },
+            &[],
+            None,
+        );
+
+        assert_eq!(output.len(), 1);
+        assert_eq!(paragraph_text(&output[0]), "One continuous paragraph.");
+    }
+
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn bboxless_emitted_table_page_preserves_native_semantics_and_layout_class() {
+        let segment = heuristic_segment("Ordinary prose.", 700.0, 220.0, false);
+        let paragraph_gap_ys = compute_paragraph_gap_ys(std::slice::from_ref(&segment));
+        let output = process_single_page(
+            PageInput {
+                page_index: 0,
+                struct_paragraphs: None,
+                heuristic_segments: vec![segment],
+                page_hints: Some(vec![LayoutHint {
+                    class_name: LayoutHintClass::Title,
+                    confidence: 0.99,
+                    left: 0.0,
+                    bottom: 680.0,
+                    right: 300.0,
+                    top: 720.0,
+                }]),
+                table_bboxes: Vec::new(),
+                preserve_native_semantics: true,
+                use_layout_reading_order: true,
+                hint_validations: Vec::new(),
+                page_width_pts: Some(612.0),
+                needs_classify: false,
+                paragraph_gap_ys,
+                include_headers: true,
+                include_footers: true,
+            },
+            &[],
+            None,
+        );
+
+        assert_eq!(output.len(), 1);
+        assert_eq!(paragraph_text(&output[0]), "Ordinary prose.");
+        assert_eq!(output[0].heading_level, None);
+        assert_eq!(output[0].layout_class, Some(LayoutHintClass::Title));
+    }
+
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn emitted_table_page_annotates_caption_without_overriding_native_semantics() {
+        let segment = heuristic_segment("Source: annual filing", 100.0, 220.0, false);
+        let output = process_single_page(
+            PageInput {
+                page_index: 0,
+                struct_paragraphs: None,
+                heuristic_segments: vec![segment],
+                page_hints: Some(vec![LayoutHint {
+                    class_name: LayoutHintClass::Caption,
+                    confidence: 0.99,
+                    left: 0.0,
+                    bottom: 80.0,
+                    right: 300.0,
+                    top: 120.0,
+                }]),
+                table_bboxes: Vec::new(),
+                preserve_native_semantics: true,
+                use_layout_reading_order: true,
+                hint_validations: Vec::new(),
+                page_width_pts: Some(612.0),
+                needs_classify: false,
+                paragraph_gap_ys: Vec::new(),
+                include_headers: true,
+                include_footers: true,
+            },
+            &[],
+            None,
+        );
+
+        assert_eq!(output.len(), 1);
+        assert_eq!(paragraph_text(&output[0]), "Source: annual filing");
+        assert_eq!(output[0].heading_level, None);
+        assert_eq!(output[0].layout_class, Some(LayoutHintClass::Caption));
     }
 
     #[test]
@@ -5430,6 +6342,8 @@ where new shares are issued;";
                 heuristic_segments: Vec::new(),
                 page_hints: None,
                 table_bboxes: Vec::new(),
+                preserve_native_semantics: false,
+                use_layout_reading_order: false,
                 #[cfg(feature = "layout-detection")]
                 hint_validations: Vec::new(),
                 #[cfg(feature = "layout-detection")]
@@ -5474,6 +6388,8 @@ where new shares are issued;";
                     top: 655.0,
                 }]),
                 table_bboxes: Vec::new(),
+                preserve_native_semantics: false,
+                use_layout_reading_order: false,
                 #[cfg(feature = "layout-detection")]
                 hint_validations: Vec::new(),
                 #[cfg(feature = "layout-detection")]
@@ -6369,6 +7285,8 @@ where new shares are issued;";
                 ],
                 page_hints: None,
                 table_bboxes: vec![],
+                preserve_native_semantics: false,
+                use_layout_reading_order: false,
                 #[cfg(feature = "layout-detection")]
                 hint_validations: vec![],
                 #[cfg(feature = "layout-detection")]
@@ -6421,6 +7339,8 @@ where new shares are issued;";
                 ],
                 page_hints: None,
                 table_bboxes: vec![],
+                preserve_native_semantics: false,
+                use_layout_reading_order: false,
                 #[cfg(feature = "layout-detection")]
                 hint_validations: vec![],
                 #[cfg(feature = "layout-detection")]

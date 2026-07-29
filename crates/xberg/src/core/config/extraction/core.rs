@@ -282,12 +282,12 @@ pub struct ExtractionConfig {
 
     /// Run layout detection on the non-OCR PDF markdown path.
     ///
-    /// When `true` and `layout` is `Some(_)`, layout regions inform heading,
-    /// table, list, and figure detection in the structure pipeline that would
-    /// otherwise rely on font-clustering heuristics alone. Significantly
-    /// improves SF1 (structural F1) at the cost of inference latency
-    /// (~150-300ms/page CPU, ~20-50ms/page GPU). Default: `false`.
-    /// Requires the `layout-detection` feature.
+    /// When `true` and `layout` is `Some(_)`, layout regions inform reading
+    /// order, region grouping, and table detection while native font/tag
+    /// semantics remain authoritative for headings, lists, code, and formulas.
+    /// OCR layout classification is unchanged. This improves structural output
+    /// at the cost of inference latency (~150-300ms/page CPU, ~20-50ms/page
+    /// GPU). Default: `false`. Requires the `layout-detection` feature.
     #[serde(default)]
     pub use_layout_for_markdown: bool,
 

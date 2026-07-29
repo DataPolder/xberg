@@ -101,19 +101,14 @@ fn test_use_layout_for_markdown_produces_headings() {
     );
 }
 
-/// **Strict regression guard** — `use_layout_for_markdown=true` must produce
-/// strictly more ATX headings than the baseline (font-clustering only).
+/// Layout geometry must not rewrite native heading semantics.
 ///
-/// This is the test that catches the catastrophic bug where RT-DETR runs but
-/// its detections never reach `apply_layout_overrides`, making the layout
-/// pipeline a 70× slower no-op (identical SF1 to baseline). Presence-only
-/// tests (see `test_use_layout_for_markdown_produces_headings`) pass even
-/// when the layout path is broken, because font-clustering finds some
-/// headings on its own. Only an *inequality* against the baseline reveals
-/// whether layout hints actually changed classification.
+/// The native PDF path uses layout regions for reading order, grouping, and
+/// tables. Font/tag-derived heading roles remain authoritative; OCR keeps its
+/// separate layout-semantic classification path.
 #[test]
 #[ignore = "requires layout model files (ORT inference)"]
-fn test_use_layout_for_markdown_adds_headings_vs_baseline() {
+fn test_use_layout_for_markdown_preserves_native_headings() {
     if !test_documents_available() {
         return;
     }
@@ -122,34 +117,30 @@ fn test_use_layout_for_markdown_adds_headings_vs_baseline() {
     let baseline = extract_md(pdf, &baseline_config());
     let layout = extract_md(pdf, &layout_for_markdown_config());
 
-    fn count_atx_headings(content: &str) -> usize {
-        content
+    fn atx_headings(content: &str) -> Vec<(String, usize)> {
+        let mut headings = content
             .lines()
-            .filter(|line| {
+            .filter_map(|line| {
                 let trimmed = line.trim_start();
-                trimmed.starts_with("# ")
-                    || trimmed.starts_with("## ")
-                    || trimmed.starts_with("### ")
-                    || trimmed.starts_with("#### ")
-                    || trimmed.starts_with("##### ")
-                    || trimmed.starts_with("###### ")
+                let level = trimmed.chars().take_while(|character| *character == '#').count();
+                (1..=6)
+                    .contains(&level)
+                    .then(|| trimmed.get(level..))
+                    .flatten()
+                    .filter(|remainder| remainder.starts_with(' '))
+                    .map(|remainder| (remainder.trim().to_owned(), level))
             })
-            .count()
+            .collect::<Vec<_>>();
+        headings.sort();
+        headings
     }
 
-    let baseline_h = count_atx_headings(&baseline);
-    let layout_h = count_atx_headings(&layout);
+    let baseline_headings = atx_headings(&baseline);
+    let layout_headings = atx_headings(&layout);
 
-    assert!(
-        layout_h > baseline_h,
-        "use_layout_for_markdown=true must add at least one heading vs baseline.\n\
-         baseline_headings = {}, layout_headings = {}\n\
-         If these are equal, layout detections are not flowing into \
-         apply_layout_overrides. Check pdf/mod.rs:169 (`layout_hints` should \
-         not be hardcoded `None`) and the pixel→PDF coord-space conversion in \
-         extractors/pdf/layout_hints.rs.",
-        baseline_h,
-        layout_h
+    assert_eq!(
+        baseline_headings, layout_headings,
+        "layout geometry must preserve native heading texts and levels"
     );
 }
 

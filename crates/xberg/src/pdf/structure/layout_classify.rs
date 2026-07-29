@@ -34,6 +34,25 @@ pub(crate) fn apply_layout_overrides(
     let _ = apply_layout_overrides_with_matches(paragraphs, hints, min_confidence, min_containment, body_font_size);
 }
 
+/// Record spatial layout classes without changing native paragraph semantics.
+///
+/// This supports consumers that need region provenance (for example guarded
+/// table-spill cleanup) while preserving font- and tag-derived headings, lists,
+/// code, and formulas.
+#[cfg(feature = "layout-detection")]
+pub(crate) fn annotate_layout_classes(
+    paragraphs: &mut [PdfParagraph],
+    hints: &[LayoutHint],
+    min_confidence: f32,
+    min_containment: f32,
+) {
+    for paragraph in paragraphs {
+        if let Some((_, hint, _)) = best_spatial_match(paragraph, hints, min_confidence, min_containment) {
+            paragraph.layout_class = Some(hint.class_name);
+        }
+    }
+}
+
 pub(crate) fn apply_layout_overrides_with_matches(
     paragraphs: &mut [PdfParagraph],
     hints: &[LayoutHint],
