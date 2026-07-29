@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Per-file OCR language overrides now also apply to explicit Tesseract pipeline stages, preserving
+  override precedence.
+
+## [1.0.3] - 2026-07-29
+
 ### Added
 
 - PDF benchmark fixtures can pin Tesseract OCR languages. The benchmark harness validates language
@@ -17,24 +24,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Upgraded `rmcp` to 3.0.0 and migrated the MCP server to its 3.0 API (schema output, the new
+  cache-scope/result-type/TTL list-result fields, and the `GetPromptResponse`/`ReadResourceResponse`
+  handler enums). The exposed tools, prompts, and resources are unchanged.
 - OCR now emits `tracing` logs when it materializes a Tesseract language pack at runtime: an
   info line naming the language, destination, and source before the download, one per candidate
   URL as it is tried, and one on success. Previously a runtime language-pack download was silent,
   making a first-use OCR stall on a missing pack hard to diagnose. English is unaffected on builds
   with the `bundle-tessdata-eng` feature (embedded, no download).
+- Dependency bumps: `liter-llm` 1.11.4, `toml` 1.1.4.
 
 ### Fixed
 
+- **#1333**: A sparse continuation row no longer dilutes the numeric ratio used to classify a grid, so
+  numeric line-item tables with a trailing partial row are kept as tables instead of being flattened to
+  prose.
+- **#1336**: Tesseract no longer creates OCR cache directories when caching is disabled; the cache
+  directory is created lazily, only when a result is written.
+- **#1337**: Light-text-on-dark-background scans are auto-inverted before OCR via mean-luminance
+  polarity detection, and the previously-dead `invert_colors` config is honored as an explicit override
+  (`Some` forces, `None` auto-detects).
+- **#1338**: NER and summarization processors are now compiled into the container and CLI builds — they
+  were feature-gated out, so `ner`/`summarization` config was silently dropped. Under
+  `OcrStrategy::ScannedPages`, a whole-document text failure now OCRs every page instead of discarding
+  the signal.
+- **#1339**: VLM OCR forwards `XBERG_LLM_*` env credentials to `ocr.vlm_config` when a custom
+  `base_url` is set, normalizes openai.com model names, routes bare images through the OCR pipeline so
+  `vlm_fallback` `on_low_quality` fires, and surfaces per-stage OCR failures as processing warnings.
 - Linux builds without CUDA or TensorRT no longer fail under strict warning settings because of an
   unused ONNX Runtime execution-provider trait import.
+- Per-file OCR language overrides (CLI and benchmark) now reach nested Tesseract configurations.
+- PDF plain-text extraction repairs detached text spans so words are no longer split mid-token.
 - PDF plain-text extraction retains table assets without rendering native table text twice.
 - PDF extraction recovers and stitches label-heavy financial tables without merging independent
   aligned tables.
 - PDF Markdown preserves explicit word boundaries and changelog heading hierarchy.
 - OCR Markdown prefers validated semantic layout hints over broad text regions at comparable
   overlap.
-- CLI and benchmark per-file OCR language overrides now reach nested Tesseract configurations and
-  explicit Tesseract pipeline stages, preserving override precedence.
 
 ## [1.0.2] - 2026-07-28
 
