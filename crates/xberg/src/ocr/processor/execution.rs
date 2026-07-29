@@ -607,6 +607,10 @@ pub(super) fn perform_ocr(
                 (image_data, w, h, 300)
             }
         };
+    #[cfg_attr(not(auto_rotate), allow(unused_mut))]
+    let mut ocr_image_width = width;
+    #[cfg_attr(not(auto_rotate), allow(unused_mut))]
+    let mut ocr_image_height = height;
 
     let bytes_per_pixel: u32 = 3;
     let bytes_per_line = width * bytes_per_pixel;
@@ -797,6 +801,8 @@ pub(super) fn perform_ocr(
                     api.set_source_resolution(source_dpi).map_err(|e| {
                         OcrError::ProcessingFailed(format!("Failed to set source resolution after rotation: {}", e))
                     })?;
+                    ocr_image_width = new_width;
+                    ocr_image_height = new_height;
 
                     log_ci_debug(ci_debug_enabled, "auto_rotate", || {
                         format!("rotated={}° new_dimensions={}x{}", orient_deg, new_width, new_height)
@@ -920,6 +926,14 @@ pub(super) fn perform_ocr(
 
     let mut metadata = HashMap::new();
     metadata.insert(
+        crate::ocr::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY.to_string(),
+        serde_json::Value::Number(ocr_image_width.into()),
+    );
+    metadata.insert(
+        crate::ocr::OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY.to_string(),
+        serde_json::Value::Number(ocr_image_height.into()),
+    );
+    metadata.insert(
         "language".to_string(),
         serde_json::Value::String(config.language.clone()),
     );
@@ -961,7 +975,7 @@ pub(super) fn perform_ocr(
 
     if let Some((orient_deg, orient_conf, ref script_name, script_conf)) = detected_orientation {
         metadata.insert(
-            "orientation_degrees".to_string(),
+            crate::ocr::OCR_ORIENTATION_DEGREES_METADATA_KEY.to_string(),
             serde_json::Value::Number(serde_json::Number::from(orient_deg)),
         );
         metadata.insert(
@@ -981,7 +995,10 @@ pub(super) fn perform_ocr(
             ),
         );
         if orient_deg != 0 && orient_conf > MIN_ORIENTATION_CONFIDENCE {
-            metadata.insert("auto_rotated".to_string(), serde_json::Value::Bool(true));
+            metadata.insert(
+                crate::ocr::OCR_AUTO_ROTATED_METADATA_KEY.to_string(),
+                serde_json::Value::Bool(true),
+            );
         }
     }
 

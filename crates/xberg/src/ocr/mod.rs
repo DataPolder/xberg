@@ -38,6 +38,12 @@
 //! xberg = { version = "4.0", features = ["ocr"] }
 //! ```
 mod backends;
+
+pub(crate) const OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY: &str = "ocr_processed_image_width";
+pub(crate) const OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY: &str = "ocr_processed_image_height";
+pub(crate) const OCR_ORIENTATION_DEGREES_METADATA_KEY: &str = "orientation_degrees";
+pub(crate) const OCR_AUTO_ROTATED_METADATA_KEY: &str = "auto_rotated";
+
 #[cfg(feature = "ocr")]
 /// Persistent file-backed cache for OCR results keyed by image hash and config.
 pub mod cache;

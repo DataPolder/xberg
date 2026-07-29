@@ -7,6 +7,8 @@ use crate::ocr::error::OcrError;
 use crate::ocr::types::TesseractConfig;
 use xberg_tesseract::TesseractAPI;
 
+const TESSERACT_RESULT_SCHEMA_VERSION: u8 = 2;
+
 /// Compute a deterministic hash of the OCR configuration.
 ///
 /// This hash is used as part of the cache key to ensure different
@@ -20,7 +22,12 @@ use xberg_tesseract::TesseractAPI;
 ///
 /// Hexadecimal string representation of the configuration hash
 pub(super) fn hash_config(config: &TesseractConfig) -> String {
+    hash_config_for_schema(config, TESSERACT_RESULT_SCHEMA_VERSION)
+}
+
+fn hash_config_for_schema(config: &TesseractConfig, result_schema_version: u8) -> String {
     let mut hasher = blake3::Hasher::new();
+    hasher.update(&[result_schema_version]);
     hash_bytes(&mut hasher, config.language.as_bytes());
     hasher.update(&config.psm.to_le_bytes());
     hasher.update(&config.oem.to_le_bytes());
@@ -169,6 +176,13 @@ mod tests {
 
         assert_eq!(hash1, hash2);
         assert_eq!(hash1.len(), 32);
+    }
+
+    #[test]
+    fn test_hash_config_frames_result_schema_version() {
+        let config = create_test_config();
+
+        assert_ne!(hash_config_for_schema(&config, 1), hash_config_for_schema(&config, 2));
     }
 
     #[test]

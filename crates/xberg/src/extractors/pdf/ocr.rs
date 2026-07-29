@@ -1068,6 +1068,269 @@ fn analyze_container_markers(elements: &[crate::types::internal::InternalElement
     analysis
 }
 
+#[cfg(feature = "layout-detection")]
+fn valid_ocr_layout_dimension(value: &serde_json::Value) -> Option<u32> {
+    let value = value.as_f64()?;
+    if !value.is_finite() || value <= 0.0 || value > u32::MAX as f64 || value.fract() != 0.0 {
+        return None;
+    }
+    Some(value as u32)
+}
+
+#[cfg(feature = "layout-detection")]
+fn processed_ocr_layout_dimensions(metadata: &crate::types::Metadata) -> Option<(u32, u32)> {
+    let width = metadata
+        .additional
+        .get(crate::ocr::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY)
+        .and_then(valid_ocr_layout_dimension);
+    let height = metadata
+        .additional
+        .get(crate::ocr::OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY)
+        .and_then(valid_ocr_layout_dimension);
+
+    match (width, height) {
+        (Some(width), Some(height)) => Some((width, height)),
+        _ => None,
+    }
+}
+
+#[cfg(feature = "layout-detection")]
+fn resolved_ocr_layout_dimensions(
+    metadata: &crate::types::Metadata,
+    render_width: u32,
+    render_height: u32,
+) -> (u32, u32) {
+    processed_ocr_layout_dimensions(metadata).unwrap_or((render_width, render_height))
+}
+
+#[cfg(feature = "layout-detection")]
+fn scale_detection_to_dimensions(
+    detection: &crate::layout::DetectionResult,
+    target_width: u32,
+    target_height: u32,
+) -> crate::layout::DetectionResult {
+    if detection.page_width == 0 || detection.page_height == 0 || target_width == 0 || target_height == 0 {
+        return detection.clone();
+    }
+
+    let scale_x = target_width as f32 / detection.page_width as f32;
+    let scale_y = target_height as f32 / detection.page_height as f32;
+    let mut scaled = detection.clone();
+    scaled.page_width = target_width;
+    scaled.page_height = target_height;
+    for region in &mut scaled.detections {
+        region.bbox.x1 *= scale_x;
+        region.bbox.y1 *= scale_y;
+        region.bbox.x2 *= scale_x;
+        region.bbox.y2 *= scale_y;
+    }
+    scaled
+}
+
+#[cfg(feature = "layout-detection")]
+fn resolved_ocr_correction_degrees(metadata: &crate::types::Metadata) -> Option<u16> {
+    if !metadata
+        .additional
+        .get(crate::ocr::OCR_AUTO_ROTATED_METADATA_KEY)
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+    {
+        return None;
+    }
+    let orientation = metadata
+        .additional
+        .get(crate::ocr::OCR_ORIENTATION_DEGREES_METADATA_KEY)
+        .and_then(serde_json::Value::as_i64)?;
+    if !matches!(orientation, 0 | 90 | 180 | 270) {
+        return None;
+    }
+    Some(((360 - orientation) % 360) as u16)
+}
+
+#[cfg(feature = "layout-detection")]
+fn rotate_detection(
+    mut detection: crate::layout::DetectionResult,
+    correction_degrees: u16,
+) -> crate::layout::DetectionResult {
+    let source_width = detection.page_width as f32;
+    let source_height = detection.page_height as f32;
+    for region in &mut detection.detections {
+        let (x1, y1, x2, y2) = (region.bbox.x1, region.bbox.y1, region.bbox.x2, region.bbox.y2);
+        match correction_degrees {
+            90 => {
+                region.bbox.x1 = source_height - y2;
+                region.bbox.y1 = x1;
+                region.bbox.x2 = source_height - y1;
+                region.bbox.y2 = x2;
+            }
+            180 => {
+                region.bbox.x1 = source_width - x2;
+                region.bbox.y1 = source_height - y2;
+                region.bbox.x2 = source_width - x1;
+                region.bbox.y2 = source_height - y1;
+            }
+            270 => {
+                region.bbox.x1 = y1;
+                region.bbox.y1 = source_width - x2;
+                region.bbox.x2 = y2;
+                region.bbox.y2 = source_width - x1;
+            }
+            _ => {}
+        }
+    }
+    if matches!(correction_degrees, 90 | 270) {
+        std::mem::swap(&mut detection.page_width, &mut detection.page_height);
+    }
+    detection
+}
+
+#[cfg(feature = "layout-detection")]
+fn scale_detection_to_ocr_coordinates(
+    detection: &crate::layout::DetectionResult,
+    metadata: &crate::types::Metadata,
+    render_width: u32,
+    render_height: u32,
+) -> crate::layout::DetectionResult {
+    let Some((final_width, final_height)) = processed_ocr_layout_dimensions(metadata) else {
+        return scale_detection_to_dimensions(detection, render_width, render_height);
+    };
+    let Some(correction_degrees) = resolved_ocr_correction_degrees(metadata) else {
+        return scale_detection_to_dimensions(detection, final_width, final_height);
+    };
+    let (pre_rotation_width, pre_rotation_height) = if matches!(correction_degrees, 90 | 270) {
+        (final_height, final_width)
+    } else {
+        (final_width, final_height)
+    };
+    let scaled = scale_detection_to_dimensions(detection, pre_rotation_width, pre_rotation_height);
+    rotate_detection(scaled, correction_degrees)
+}
+
+#[cfg(feature = "layout-detection")]
+fn inverse_rotate_ocr_point(
+    x: f64,
+    y: f64,
+    correction_degrees: u16,
+    pre_rotation_width: f64,
+    pre_rotation_height: f64,
+) -> (f64, f64) {
+    match correction_degrees {
+        90 => (y, pre_rotation_height - x),
+        180 => (pre_rotation_width - x, pre_rotation_height - y),
+        270 => (pre_rotation_width - y, x),
+        _ => (x, y),
+    }
+}
+
+#[cfg(feature = "layout-detection")]
+fn transform_ocr_point_to_render(
+    point: (u32, u32),
+    correction_degrees: u16,
+    pre_rotation_dimensions: (u32, u32),
+    render_dimensions: (u32, u32),
+) -> (u32, u32) {
+    let (pre_width, pre_height) = pre_rotation_dimensions;
+    let (render_width, render_height) = render_dimensions;
+    let (x, y) = inverse_rotate_ocr_point(
+        point.0 as f64,
+        point.1 as f64,
+        correction_degrees,
+        pre_width as f64,
+        pre_height as f64,
+    );
+    let render_x = (x * render_width as f64 / pre_width as f64)
+        .round()
+        .clamp(0.0, render_width as f64) as u32;
+    let render_y = (y * render_height as f64 / pre_height as f64)
+        .round()
+        .clamp(0.0, render_height as f64) as u32;
+    (render_x, render_y)
+}
+
+#[cfg(feature = "layout-detection")]
+fn transform_ocr_geometry_to_render(
+    geometry: &crate::types::OcrBoundingGeometry,
+    correction_degrees: u16,
+    pre_rotation_dimensions: (u32, u32),
+    render_dimensions: (u32, u32),
+) -> crate::types::OcrBoundingGeometry {
+    match geometry {
+        crate::types::OcrBoundingGeometry::Rectangle {
+            left,
+            top,
+            width,
+            height,
+        } => {
+            let first = transform_ocr_point_to_render(
+                (*left, *top),
+                correction_degrees,
+                pre_rotation_dimensions,
+                render_dimensions,
+            );
+            let second = transform_ocr_point_to_render(
+                (left.saturating_add(*width), top.saturating_add(*height)),
+                correction_degrees,
+                pre_rotation_dimensions,
+                render_dimensions,
+            );
+            let left = first.0.min(second.0);
+            let top = first.1.min(second.1);
+            crate::types::OcrBoundingGeometry::Rectangle {
+                left,
+                top,
+                width: first.0.max(second.0).saturating_sub(left),
+                height: first.1.max(second.1).saturating_sub(top),
+            }
+        }
+        crate::types::OcrBoundingGeometry::Quadrilateral { points } => {
+            let points = points.map(|point| {
+                transform_ocr_point_to_render(point, correction_degrees, pre_rotation_dimensions, render_dimensions)
+            });
+            crate::types::OcrBoundingGeometry::Quadrilateral { points }
+        }
+    }
+}
+
+#[cfg(feature = "layout-detection")]
+fn transform_ocr_elements_to_render_space(
+    elements: &[crate::types::OcrElement],
+    metadata: &crate::types::Metadata,
+    render_width: u32,
+    render_height: u32,
+) -> Vec<crate::types::OcrElement> {
+    let Some((final_width, final_height)) = processed_ocr_layout_dimensions(metadata) else {
+        return elements.to_vec();
+    };
+    let auto_rotated = metadata
+        .additional
+        .get(crate::ocr::OCR_AUTO_ROTATED_METADATA_KEY)
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let correction_degrees = resolved_ocr_correction_degrees(metadata);
+    if auto_rotated && correction_degrees.is_none() {
+        return elements.to_vec();
+    }
+    let correction_degrees = correction_degrees.unwrap_or(0);
+    let pre_rotation_dimensions = if matches!(correction_degrees, 90 | 270) {
+        (final_height, final_width)
+    } else {
+        (final_width, final_height)
+    };
+    elements
+        .iter()
+        .cloned()
+        .map(|mut element| {
+            element.geometry = transform_ocr_geometry_to_render(
+                &element.geometry,
+                correction_degrees,
+                pre_rotation_dimensions,
+                (render_width, render_height),
+            );
+            element
+        })
+        .collect()
+}
+
 /// Extract text from PDF using OCR on pre-rendered page images.
 ///
 /// When `layout_detections` are provided (pixel-space, from the same images),
@@ -1395,22 +1658,21 @@ pub(crate) async fn extract_with_ocr(
 
                 let ocr_render_width = encoded_batch[offset].2;
                 let ocr_render_height = encoded_batch[offset].3;
-                let scaled_detection: Option<crate::layout::DetectionResult> = detection.map(|det| {
-                    let sx = ocr_render_width as f32 / det.page_width as f32;
-                    let sy = ocr_render_height as f32 / det.page_height as f32;
-                    let mut scaled = det.clone();
-                    scaled.page_width = ocr_render_width;
-                    scaled.page_height = ocr_render_height;
-                    for region in &mut scaled.detections {
-                        region.bbox.x1 *= sx;
-                        region.bbox.y1 *= sy;
-                        region.bbox.x2 *= sx;
-                        region.bbox.y2 *= sy;
-                    }
-                    scaled
+                let render_scaled_detection =
+                    detection.map(|det| scale_detection_to_dimensions(det, ocr_render_width, ocr_render_height));
+                let (_, ocr_layout_height) =
+                    resolved_ocr_layout_dimensions(&ocr_result.metadata, ocr_render_width, ocr_render_height);
+                let ocr_scaled_detection = detection.map(|det| {
+                    scale_detection_to_ocr_coordinates(det, &ocr_result.metadata, ocr_render_width, ocr_render_height)
                 });
+                let render_ocr_elements = transform_ocr_elements_to_render_space(
+                    elements,
+                    &ocr_result.metadata,
+                    ocr_render_width,
+                    ocr_render_height,
+                );
 
-                let recognized_tables = match (scaled_detection.as_ref(), tatr_model.as_mut()) {
+                let recognized_tables = match (render_scaled_detection.as_ref(), tatr_model.as_mut()) {
                     (Some(scaled_det), Some(model)) => {
                         let rgb = if let Some(ref slice) = batch_slice {
                             slice[offset].to_rgb8()
@@ -1423,7 +1685,12 @@ pub(crate) async fn extract_with_ocr(
                                 })?;
                             decoded.to_rgb8()
                         };
-                        crate::ocr::layout_assembly::recognize_page_tables(&rgb, scaled_det, elements, model)
+                        crate::ocr::layout_assembly::recognize_page_tables(
+                            &rgb,
+                            scaled_det,
+                            &render_ocr_elements,
+                            model,
+                        )
                     }
                     _ => Vec::new(),
                 };
@@ -1441,20 +1708,20 @@ pub(crate) async fn extract_with_ocr(
                 }
 
                 if let Some(ref ocr_doc) = ocr_result.ocr_internal_document {
-                    let paragraphs = if let Some(ref scaled_det) = scaled_detection {
+                    let paragraphs = if let Some(ref scaled_det) = ocr_scaled_detection {
                         let hints = super::layout_hints::detection_to_layout_hints_pixel_space(
                             scaled_det,
-                            ocr_render_height as f32,
+                            ocr_layout_height as f32,
                         );
                         crate::pdf::structure::adapters::ocr_doc_to_layout_paragraphs(
                             ocr_doc,
-                            ocr_render_height,
+                            ocr_layout_height,
                             &hints,
                             0.5,
                             0.2,
                         )
                     } else {
-                        crate::pdf::structure::adapters::ocr_doc_to_paragraphs(ocr_doc, ocr_render_height)
+                        crate::pdf::structure::adapters::ocr_doc_to_paragraphs(ocr_doc, ocr_layout_height)
                     };
 
                     tracing::debug!(
@@ -2180,8 +2447,8 @@ mod tests {
         let thresholds = t();
         let outcome = evaluate_ocr_skip_gate(
             true, // pre-rendered structured doc present
-            50,   
-            0.1,  // < alnum_ws_ratio_threshold (0.4): looks non-textual
+            50,
+            0.1, // < alnum_ws_ratio_threshold (0.4): looks non-textual
             &gate_decision(true, true),
             &thresholds,
         );
@@ -3915,5 +4182,220 @@ Name: ___
             !decision.fallback,
             "Dense numeric table should NOT trigger OCR fallback"
         );
+    }
+
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn ocr_layout_dimensions_use_valid_processed_image_metadata() {
+        let mut metadata = crate::types::Metadata::default();
+        metadata.additional.insert(
+            crate::ocr::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY.into(),
+            serde_json::json!(2000),
+        );
+        metadata.additional.insert(
+            crate::ocr::OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY.into(),
+            serde_json::json!(3000),
+        );
+
+        assert_eq!(resolved_ocr_layout_dimensions(&metadata, 1000, 1500), (2000, 3000));
+    }
+
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn ocr_layout_dimensions_fall_back_for_incomplete_or_invalid_metadata() {
+        let mut metadata = crate::types::Metadata::default();
+        metadata.additional.insert(
+            crate::ocr::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY.into(),
+            serde_json::json!(0),
+        );
+        metadata.additional.insert(
+            crate::ocr::OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY.into(),
+            serde_json::json!(3000),
+        );
+
+        assert_eq!(resolved_ocr_layout_dimensions(&metadata, 1000, 1500), (1000, 1500));
+
+        metadata.additional.insert(
+            crate::ocr::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY.into(),
+            serde_json::json!(2000),
+        );
+        metadata
+            .additional
+            .remove(crate::ocr::OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY);
+
+        assert_eq!(resolved_ocr_layout_dimensions(&metadata, 1000, 1500), (1000, 1500));
+    }
+
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn detection_scaling_targets_ocr_coordinate_space() {
+        let detection = crate::layout::DetectionResult {
+            page_width: 1000,
+            page_height: 1500,
+            detections: vec![crate::layout::LayoutDetection {
+                class_name: crate::layout::LayoutClass::SectionHeader,
+                confidence: 0.9,
+                bbox: crate::layout::BBox {
+                    x1: 100.0,
+                    y1: 200.0,
+                    x2: 400.0,
+                    y2: 300.0,
+                },
+            }],
+        };
+
+        let scaled = scale_detection_to_dimensions(&detection, 2000, 3000);
+
+        assert_eq!(scaled.page_width, 2000);
+        assert_eq!(scaled.page_height, 3000);
+        assert_eq!(scaled.detections[0].bbox.x1, 200.0);
+        assert_eq!(scaled.detections[0].bbox.y1, 400.0);
+        assert_eq!(scaled.detections[0].bbox.x2, 800.0);
+        assert_eq!(scaled.detections[0].bbox.y2, 600.0);
+    }
+
+    #[cfg(feature = "layout-detection")]
+    fn rotated_ocr_metadata(final_width: u32, final_height: u32, orientation_degrees: i32) -> crate::types::Metadata {
+        let mut metadata = crate::types::Metadata::default();
+        metadata.additional.insert(
+            crate::ocr::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY.into(),
+            serde_json::json!(final_width),
+        );
+        metadata.additional.insert(
+            crate::ocr::OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY.into(),
+            serde_json::json!(final_height),
+        );
+        metadata.additional.insert(
+            crate::ocr::OCR_AUTO_ROTATED_METADATA_KEY.into(),
+            serde_json::json!(true),
+        );
+        metadata.additional.insert(
+            crate::ocr::OCR_ORIENTATION_DEGREES_METADATA_KEY.into(),
+            serde_json::json!(orientation_degrees),
+        );
+        metadata
+    }
+
+    #[cfg(feature = "layout-detection")]
+    fn rotation_test_detection() -> crate::layout::DetectionResult {
+        crate::layout::DetectionResult {
+            page_width: 100,
+            page_height: 200,
+            detections: vec![crate::layout::LayoutDetection {
+                class_name: crate::layout::LayoutClass::SectionHeader,
+                confidence: 0.9,
+                bbox: crate::layout::BBox {
+                    x1: 10.0,
+                    y1: 20.0,
+                    x2: 30.0,
+                    y2: 60.0,
+                },
+            }],
+        }
+    }
+
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn ocr_detection_rotation_matches_clockwise_90_pixel_transform() {
+        let metadata = rotated_ocr_metadata(200, 100, 270);
+        let scaled = scale_detection_to_ocr_coordinates(&rotation_test_detection(), &metadata, 100, 200);
+        let bbox = scaled.detections[0].bbox;
+
+        assert_eq!((scaled.page_width, scaled.page_height), (200, 100));
+        assert_eq!((bbox.x1, bbox.y1, bbox.x2, bbox.y2), (140.0, 10.0, 180.0, 30.0));
+    }
+
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn ocr_detection_rotation_matches_180_pixel_transform() {
+        let metadata = rotated_ocr_metadata(100, 200, 180);
+        let scaled = scale_detection_to_ocr_coordinates(&rotation_test_detection(), &metadata, 100, 200);
+        let bbox = scaled.detections[0].bbox;
+
+        assert_eq!((scaled.page_width, scaled.page_height), (100, 200));
+        assert_eq!((bbox.x1, bbox.y1, bbox.x2, bbox.y2), (70.0, 140.0, 90.0, 180.0));
+    }
+
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn ocr_detection_rotation_matches_clockwise_270_pixel_transform() {
+        let metadata = rotated_ocr_metadata(200, 100, 90);
+        let scaled = scale_detection_to_ocr_coordinates(&rotation_test_detection(), &metadata, 100, 200);
+        let bbox = scaled.detections[0].bbox;
+
+        assert_eq!((scaled.page_width, scaled.page_height), (200, 100));
+        assert_eq!((bbox.x1, bbox.y1, bbox.x2, bbox.y2), (20.0, 70.0, 60.0, 90.0));
+    }
+
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn invalid_rotation_metadata_preserves_dimension_only_fallback() {
+        let metadata = rotated_ocr_metadata(200, 400, 45);
+        let scaled = scale_detection_to_ocr_coordinates(&rotation_test_detection(), &metadata, 100, 200);
+        let bbox = scaled.detections[0].bbox;
+
+        assert_eq!((scaled.page_width, scaled.page_height), (200, 400));
+        assert_eq!((bbox.x1, bbox.y1, bbox.x2, bbox.y2), (20.0, 40.0, 60.0, 120.0));
+    }
+
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn rotated_ocr_elements_transform_back_to_render_coordinates() {
+        let cases = [
+            (270, (140, 10, 40, 20)),
+            (180, (70, 140, 20, 40)),
+            (90, (20, 70, 40, 20)),
+        ];
+
+        for (orientation, (left, top, width, height)) in cases {
+            let metadata = if orientation == 180 {
+                rotated_ocr_metadata(100, 200, orientation)
+            } else {
+                rotated_ocr_metadata(200, 100, orientation)
+            };
+            let element = crate::types::OcrElement {
+                text: "heading".to_string(),
+                geometry: crate::types::OcrBoundingGeometry::Rectangle {
+                    left,
+                    top,
+                    width,
+                    height,
+                },
+                ..Default::default()
+            };
+
+            let transformed = transform_ocr_elements_to_render_space(&[element], &metadata, 100, 200);
+
+            assert_eq!(
+                transformed[0].geometry,
+                crate::types::OcrBoundingGeometry::Rectangle {
+                    left: 10,
+                    top: 20,
+                    width: 20,
+                    height: 40,
+                },
+                "orientation {orientation}"
+            );
+        }
+    }
+
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn invalid_ocr_element_metadata_preserves_original_geometry() {
+        let metadata = rotated_ocr_metadata(200, 400, 45);
+        let element = crate::types::OcrElement {
+            text: "heading".to_string(),
+            geometry: crate::types::OcrBoundingGeometry::Rectangle {
+                left: 20,
+                top: 40,
+                width: 60,
+                height: 80,
+            },
+            ..Default::default()
+        };
+
+        let transformed = transform_ocr_elements_to_render_space(&[element.clone()], &metadata, 100, 200);
+
+        assert_eq!(transformed[0].geometry, element.geometry);
     }
 }
