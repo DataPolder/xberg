@@ -320,6 +320,57 @@ pub(crate) fn evaluate_native_text_for_ocr(
     }
 }
 
+/// Normalize structural Markdown markers out of OCR text **for scoring only**.
+///
+/// The quality heuristics in [`NativeTextStats`] measure surface text shape
+/// (alphanumeric ratio, word length, fragmentation). Structural Markdown — table
+/// pipes, heading hashes, list bullets, emphasis, code fences — is non-alphanumeric
+/// and tokenizes into short fragments, so a richer, *more accurate* VLM result that
+/// emits Markdown scores **lower** than plain prose from a classical backend. That
+/// systematically disadvantages the VLM in pipeline selection (#1341).
+///
+/// This replaces structural punctuation with spaces (dropping it from the
+/// non-whitespace denominator) and skips code-fence / table-separator lines, so the
+/// score reflects the prose content rather than the formatting. The returned string
+/// is used only as scoring input; the emitted OCR text is never altered. Inline
+/// hyphens and periods are preserved so real word lengths are unaffected.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn normalize_markdown_for_scoring(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        // Code-fence markers carry no prose.
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            continue;
+        }
+        // Table separator rows (e.g. `|---|:--:|`) are pure structure.
+        let compact: String = trimmed.chars().filter(|c| !c.is_whitespace()).collect();
+        if !compact.is_empty() && compact.chars().all(|c| matches!(c, '|' | '-' | ':' | '+')) {
+            continue;
+        }
+        // Strip a single leading block marker: heading, blockquote, or list bullet.
+        let mut content = trimmed.trim_start_matches('#').trim_start();
+        content = content.trim_start_matches('>').trim_start();
+        for bullet in ["- ", "* ", "+ "] {
+            if let Some(rest) = content.strip_prefix(bullet) {
+                content = rest;
+                break;
+            }
+        }
+        // Inline structural punctuation becomes whitespace so it leaves the
+        // non-whitespace denominator; word-internal '-'/'.' are kept.
+        for ch in content.chars() {
+            if matches!(ch, '|' | '`' | '*' | '_' | '~' | '#') {
+                out.push(' ');
+            } else {
+                out.push(ch);
+            }
+        }
+        out.push('\n');
+    }
+    out
+}
+
 /// Compute a quality score (0.0-1.0) for OCR output text.
 ///
 /// Used by the pipeline to decide whether to accept a result or try the next backend.
@@ -331,7 +382,12 @@ pub(crate) fn compute_quality_score(text: &str, thresholds: &OcrQualityThreshold
         return 0.0;
     }
 
-    let stats = NativeTextStats::compute(trimmed, thresholds);
+    // Score the prose content, not the Markdown scaffolding (#1341). Fall back to the
+    // raw text if normalization leaves nothing (e.g. a table-only fragment).
+    let normalized = normalize_markdown_for_scoring(trimmed);
+    let scoring_input = if normalized.trim().is_empty() { trimmed } else { normalized.as_str() };
+
+    let stats = NativeTextStats::compute(scoring_input, thresholds);
 
     let alnum_score = stats.alnum_ratio.min(1.0);
     let fragmentation_score = 1.0 - stats.fragmented_word_ratio.min(1.0);
@@ -610,6 +666,20 @@ pub(crate) async fn extract_mixed_ocr_native(
 
     let capture_rasters = config.images.as_ref().is_some_and(|c| c.include_page_rasters);
     let ocr_config_owned = ocr_config_resolved;
+    // When a `vlm_fallback` policy or an explicit multi-stage `pipeline` is configured,
+    // each page must run through the shared pipeline runner so fallback backends (e.g.
+    // the VLM) apply on this mixed/per-page OCR route too. Previously only the single
+    // configured backend ran here, silently ignoring `vlm_fallback` on the
+    // `scanned_pages` / `force_ocr_pages` / per-page-fallback routes (#1341). The
+    // default (no fallback, no explicit pipeline) keeps the fast single-backend path.
+    let effective_pipeline = if ocr_config_owned.vlm_fallback
+        != crate::core::config::VlmFallbackPolicy::Disabled
+        || ocr_config_owned.pipeline.is_some()
+    {
+        ocr_config_owned.effective_pipeline()
+    } else {
+        None
+    };
     let total = page_indices.len();
     let mut ocr_results: ahash::AHashMap<u32, String> = ahash::AHashMap::with_capacity(total);
     let mut accumulated_llm_usage: Vec<crate::types::LlmUsage> = Vec::new();
@@ -620,6 +690,54 @@ pub(crate) async fn extract_mixed_ocr_native(
         let batch_end = (batch_start + batch_size).min(total);
         let page_images =
             render_selected_pages_from_document(&render_doc, &page_rotations, &page_indices[batch_start..batch_end])?;
+
+        // Multi-stage pipeline route (#1341): drive each page through `run_ocr_pipeline`
+        // so `vlm_fallback` / explicit-pipeline stages apply here, mirroring the image
+        // extractor's per-image pipeline path. Runs sequentially — the fallback path is
+        // already the slower, less common one; the fast single-backend path below keeps
+        // its per-page parallelism.
+        if let Some(ref pipeline) = effective_pipeline {
+            for (page_idx, image) in &page_images {
+                let (text, _tables, _elements, _doc, usage, _page_texts, _rasters, formulas) =
+                    Box::pin(run_ocr_pipeline(
+                        None,
+                        Some(std::slice::from_ref(image)),
+                        #[cfg(feature = "layout-detection")]
+                        None,
+                        config,
+                        pipeline,
+                        None,
+                    ))
+                    .await?;
+                accumulated_llm_usage.extend(usage);
+                for mut formula in formulas {
+                    formula.page = (*page_idx + 1) as u32;
+                    accumulated_formulas.push(formula);
+                }
+                ocr_results.insert((*page_idx + 1) as u32, text);
+            }
+            if capture_rasters {
+                for (page_idx, image) in &page_images {
+                    let rgb = image.to_rgb8();
+                    let (w, h) = rgb.dimensions();
+                    let mut buf = Cursor::new(Vec::new());
+                    PngEncoder::new(&mut buf)
+                        .write_image(&rgb, w, h, image::ColorType::Rgb8.into())
+                        .map_err(|e| crate::XbergError::Parsing {
+                            message: format!("Failed to encode page {} raster: {}", page_idx + 1, e),
+                            source: None,
+                        })?;
+                    captured_rasters.push(build_page_raster_image(
+                        *page_idx,
+                        bytes::Bytes::from(buf.into_inner()),
+                        w,
+                        h,
+                    ));
+                }
+            }
+            continue;
+        }
+
         let batch_slice = &page_images;
 
         #[cfg(all(feature = "tokio-runtime", not(target_arch = "wasm32")))]
@@ -2127,32 +2245,27 @@ pub(crate) async fn run_ocr_pipeline(
                     ));
                 }
 
-                match best_result {
-                    Some((_, best_score, _, _, _, _, _, _)) if score > best_score => {
-                        best_result = Some((
-                            text,
-                            score,
-                            stage_tables,
-                            stage_ocr_elements,
-                            stage_doc,
-                            stage_page_texts,
-                            stage_rasters,
-                            stage_formulas,
-                        ));
-                    }
-                    None => {
-                        best_result = Some((
-                            text,
-                            score,
-                            stage_tables,
-                            stage_ocr_elements,
-                            stage_doc,
-                            stage_page_texts,
-                            stage_rasters,
-                            stage_formulas,
-                        ));
-                    }
-                    _ => {}
+                // Prefer the deepest fallback that produced usable text. Stages run in
+                // priority order (primary first), and this branch is reached only when no
+                // stage cleared the accept threshold — so a later non-empty result is a
+                // fallback invoked precisely because the higher-priority stages were
+                // inadequate. Return it rather than the highest surface-score result: a
+                // correctness-blind heuristic can otherwise pin selection to an inadequate
+                // primary (e.g. merged-word tesseract text scoring above a correct VLM
+                // transcription), discarding the very fallback the pipeline ran (#1341).
+                // An empty fallback (e.g. a VLM that declined a destroyed page) never
+                // overwrites, so the classical text is still kept in that case.
+                if !text.trim().is_empty() || best_result.is_none() {
+                    best_result = Some((
+                        text,
+                        score,
+                        stage_tables,
+                        stage_ocr_elements,
+                        stage_doc,
+                        stage_page_texts,
+                        stage_rasters,
+                        stage_formulas,
+                    ));
                 }
             }
             Err(e) => {
@@ -3222,6 +3335,49 @@ mod tests {
         assert!(
             garbled_score > empty_score,
             "garbled ({garbled_score}) > empty ({empty_score})"
+        );
+    }
+
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn test_normalize_markdown_for_scoring_strips_structure() {
+        let input = "# Heading\n\n\
+                     | Col A | Col B |\n| --- | --- |\n| one | two |\n\n\
+                     - bullet item\n\
+                     ```\ncode fence body\n```\n\
+                     **bold** and _italic_ words";
+        let out = normalize_markdown_for_scoring(input);
+        assert!(!out.contains('|'), "table pipes removed: {out:?}");
+        assert!(!out.contains('#'), "heading hashes removed: {out:?}");
+        assert!(!out.contains('*') && !out.contains('_'), "emphasis removed: {out:?}");
+        assert!(!out.contains("```"), "code fence markers removed: {out:?}");
+        assert!(!out.contains("---"), "table separator row removed: {out:?}");
+        assert!(out.contains("Heading"), "heading text kept: {out:?}");
+        assert!(out.contains("bullet item"), "list text kept: {out:?}");
+        assert!(out.contains("bold") && out.contains("italic"), "emphasized words kept: {out:?}");
+    }
+
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn test_quality_score_markdown_not_penalized() {
+        // A VLM that emits correct, structured Markdown must not score materially below
+        // the same prose without structure, or pipeline selection discards the richer
+        // result in favor of a classical backend (#1341).
+        let thresholds = t();
+        let plain = "Quarterly revenue rose across every region this year. The northern \
+                     division led growth while the southern division held steady and the \
+                     eastern division recovered from the prior downturn this fiscal period.";
+        let markdown = "## Quarterly revenue\n\n\
+                        Quarterly revenue rose across every region this year.\n\n\
+                        | Region | Trend |\n| --- | --- |\n| Northern | led growth |\n\
+                        | Southern | held steady |\n| Eastern | recovered |\n\n\
+                        - The northern division led growth this fiscal period\n\
+                        - The southern division held steady while the eastern recovered";
+        let plain_score = compute_quality_score(plain, &thresholds);
+        let markdown_score = compute_quality_score(markdown, &thresholds);
+        assert!(
+            markdown_score >= plain_score - 0.05,
+            "structured markdown ({markdown_score}) must not be heavily penalized vs plain prose ({plain_score})"
         );
     }
 
