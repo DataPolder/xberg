@@ -746,7 +746,23 @@ impl PdfExtractor {
                 tracing::warn!("scanned pages detected but no page boundaries available; using native text");
                 (native_text, ExtractionMethod::Native)
             }
-        } else if let Some(ocr_config) = config.ocr.as_ref() {
+        } else if config.ocr.is_some()
+            || ocr::evaluate_native_text_for_ocr(
+                &native_text,
+                pdf_metadata.pdf_specific.page_count,
+                &crate::core::config::OcrConfig::default().effective_thresholds(),
+            )
+            .whole_doc_failure
+        {
+            // Under `Auto`, a document with no trustworthy native text at all (a scan /
+            // no text layer) must reach OCR even when no explicit `ocr` config was given.
+            // The default `ocr: None` means "OCR disabled", but that silently discarded a
+            // detected whole-document failure and returned an empty native result (#1338).
+            // Only the unextractable, whole-document-failure case opts in a default OCR
+            // config here; normal text PDFs never reach the fallback gate and stay native,
+            // and an explicit `ocr` config keeps its full per-page gate behavior.
+            let default_ocr_config = crate::core::config::OcrConfig::default();
+            let ocr_config = config.ocr.as_ref().unwrap_or(&default_ocr_config);
             let thresholds = ocr_config.effective_thresholds();
             let decision = ocr::evaluate_per_page_ocr(
                 &native_text,
