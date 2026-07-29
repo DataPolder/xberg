@@ -432,6 +432,40 @@ impl InternalDocumentBuilder {
         self.doc.push_element(element)
     }
 
+    pub(crate) fn element_count(&self) -> u32 {
+        self.doc.elements.len() as u32
+    }
+
+    /// Insert a pre-constructed `InternalElement` immediately before the element
+    /// currently at `index`, shifting every later element index by one.
+    ///
+    /// Used to place out-of-band content (e.g. an image detected mid-page) into
+    /// its correct reading-order position after surrounding elements have already
+    /// been pushed. Any existing `Relationship::source` or
+    /// `RelationshipTarget::Index` that pointed at or past `index` is bumped so
+    /// caption and other relationships keep pointing at the same logical element.
+    ///
+    /// `index` is clamped to the current element count, so passing an
+    /// out-of-range index behaves like [`Self::push_element`].
+    pub fn insert_element_before(&mut self, index: u32, element: InternalElement) -> u32 {
+        let index = (index as usize).min(self.doc.elements.len()) as u32;
+        self.doc.elements.insert(index as usize, element);
+        self.node_count += 1;
+
+        for relationship in &mut self.doc.relationships {
+            if relationship.source >= index {
+                relationship.source += 1;
+            }
+            if let RelationshipTarget::Index(target) = &mut relationship.target
+                && *target >= index
+            {
+                *target += 1;
+            }
+        }
+
+        index
+    }
+
     /// Append every element from a sub-document into this builder in reading order.
     ///
     /// Tables, images, element relationships, and URIs are carried over, with

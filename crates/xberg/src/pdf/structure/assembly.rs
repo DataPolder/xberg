@@ -65,29 +65,26 @@ pub(crate) fn assemble_internal_document(
             );
         }
 
-        if let Some(page_tables) = page_tables {
-            assemble_page_elements_with_tables(&mut builder, paragraphs, &page_tables, page_num);
+        let (paragraph_elem_map, page_end_transition_index) = if let Some(page_tables) = page_tables {
+            assemble_page_elements_with_tables(&mut builder, paragraphs, &page_tables, page_num)
         } else {
-            assemble_page_elements(&mut builder, paragraphs, page_num);
-        }
+            assemble_page_elements(&mut builder, paragraphs, page_num)
+        };
 
         if page_has_content {
             has_emitted_content = true;
         }
 
         if let Some(image_indices) = images_by_page.get(&((page_idx + 1) as u32)) {
-            for &image_index in image_indices {
-                let ocr_text = images
-                    .and_then(|imgs| imgs.get(image_index as usize))
-                    .and_then(|img| img.ocr_result.as_ref())
-                    .map(|res| res.content.as_str())
-                    .unwrap_or("");
-
-                let elem =
-                    crate::types::internal::InternalElement::text(ElementKind::Image { image_index }, ocr_text, 0)
-                        .with_page((page_idx + 1) as u32);
-                builder.push_element(elem);
-            }
+            interleave_images_into_page(
+                &mut builder,
+                paragraphs,
+                &paragraph_elem_map,
+                page_end_transition_index,
+                image_indices,
+                images,
+                (page_idx + 1) as u32,
+            );
         }
     }
 
@@ -121,16 +118,32 @@ pub(crate) fn assemble_internal_document(
     doc
 }
 
+#[derive(Clone, Copy)]
+struct ParagraphElementPosition {
+    paragraph_index: usize,
+    element_index: u32,
+    transition_index: u32,
+}
+
 /// Push paragraph elements for a page without tables.
-fn assemble_page_elements(builder: &mut InternalDocumentBuilder, paragraphs: &[PdfParagraph], page: Option<u32>) {
+///
+/// Returns the element and structural-transition positions for every non-caption
+/// paragraph in page order, used by [`interleave_images_into_page`].
+fn assemble_page_elements(
+    builder: &mut InternalDocumentBuilder,
+    paragraphs: &[PdfParagraph],
+    page: Option<u32>,
+) -> (Vec<ParagraphElementPosition>, u32) {
     let mut in_list = false;
     let mut open_regions = Vec::new();
+    let mut paragraph_elem_map = Vec::new();
 
     for (para_idx, para) in paragraphs.iter().enumerate() {
         if para.caption_for.is_some() {
             continue;
         }
 
+        let transition_index = builder.element_count();
         transition_layout_path(
             builder,
             &mut open_regions,
@@ -148,21 +161,146 @@ fn assemble_page_elements(builder: &mut InternalDocumentBuilder, paragraphs: &[P
         }
 
         let elem_idx = push_paragraph_element(builder, para, page);
+        paragraph_elem_map.push(ParagraphElementPosition {
+            paragraph_index: para_idx,
+            element_index: elem_idx,
+            transition_index,
+        });
 
         emit_caption_elements(builder, paragraphs, para_idx, page, elem_idx);
     }
 
+    let page_end_transition_index = builder.element_count();
     close_list(builder, &mut in_list);
     close_layout_path(builder, &mut open_regions);
+
+    (paragraph_elem_map, page_end_transition_index)
+}
+
+/// Insert each page image at its correct reading-order position among the page's
+/// already-pushed paragraph elements, so VLM captions and OCR text render inline
+/// instead of trailing the whole page.
+///
+/// For every image with a `bounding_box` on a page that has at least one
+/// positioned paragraph (`block_bbox.is_some()`), the image is inserted before the
+/// first horizontally-overlapping paragraph whose top-y is below the image's top-y.
+/// If no such paragraph exists, vertical order alone is used as a fallback. Images
+/// without a `bounding_box`, or on pages with no positioned paragraphs, retain the
+/// pre-existing append-after-text behavior.
+fn interleave_images_into_page(
+    builder: &mut InternalDocumentBuilder,
+    paragraphs: &[PdfParagraph],
+    paragraph_elem_map: &[ParagraphElementPosition],
+    page_end_transition_index: u32,
+    image_indices: &[u32],
+    images: Option<&[crate::types::ExtractedImage]>,
+    page_number: u32,
+) {
+    let page_has_positioned_paragraph = paragraph_elem_map
+        .iter()
+        .any(|position| paragraphs[position.paragraph_index].block_bbox.is_some());
+
+    let mut positioned: Vec<(u32, usize, u32)> = Vec::new();
+    let mut appended: Vec<u32> = Vec::new();
+
+    for (source_order, &image_index) in image_indices.iter().enumerate() {
+        let image_bbox = images
+            .and_then(|imgs| imgs.get(image_index as usize))
+            .and_then(|img| img.bounding_box);
+
+        let target = image_bbox
+            .filter(|_| page_has_positioned_paragraph)
+            .and_then(|bbox| image_target_element(paragraphs, paragraph_elem_map, page_end_transition_index, bbox));
+
+        match target {
+            Some(elem_idx) => positioned.push((elem_idx, source_order, image_index)),
+            None => appended.push(image_index),
+        }
+    }
+
+    // Insert from the highest target index down so earlier insertions never shift
+    // pending target indices. For an equal target, reverse source order preserves
+    // the original image order despite repeated insert-before operations.
+    positioned.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
+    for (elem_idx, _, image_index) in positioned {
+        let elem = image_element(images, image_index, page_number);
+        builder.insert_element_before(elem_idx, elem);
+    }
+
+    for image_index in appended {
+        let elem = image_element(images, image_index, page_number);
+        builder.push_element(elem);
+    }
+}
+
+fn image_target_element(
+    paragraphs: &[PdfParagraph],
+    paragraph_elem_map: &[ParagraphElementPosition],
+    page_end_transition_index: u32,
+    image_bbox: crate::types::BoundingBox,
+) -> Option<u32> {
+    let image_top = image_bbox.y1 as f32;
+    let below_image = |para_idx: usize| {
+        paragraphs[para_idx]
+            .block_bbox
+            .is_some_and(|(_, _, _, top)| top < image_top)
+    };
+    let horizontally_overlaps = |para_idx: usize| {
+        paragraphs[para_idx]
+            .block_bbox
+            .is_some_and(|(left, _, right, _)| left < image_bbox.x1 as f32 && right > image_bbox.x0 as f32)
+    };
+
+    if let Some(position) = paragraph_elem_map
+        .iter()
+        .find(|position| horizontally_overlaps(position.paragraph_index) && below_image(position.paragraph_index))
+    {
+        return Some(position.element_index);
+    }
+
+    if let Some(position) = paragraph_elem_map
+        .iter()
+        .rposition(|position| horizontally_overlaps(position.paragraph_index))
+    {
+        return Some(
+            paragraph_elem_map
+                .get(position + 1)
+                .map_or(page_end_transition_index, |next| next.transition_index),
+        );
+    }
+
+    paragraph_elem_map
+        .iter()
+        .find(|position| below_image(position.paragraph_index))
+        .map(|position| position.element_index)
+}
+
+/// Build the `ElementKind::Image` element for an image, carrying its OCR text (if any).
+fn image_element(
+    images: Option<&[crate::types::ExtractedImage]>,
+    image_index: u32,
+    page_number: u32,
+) -> crate::types::internal::InternalElement {
+    let ocr_text = images
+        .and_then(|imgs| imgs.get(image_index as usize))
+        .and_then(|img| img.ocr_result.as_ref())
+        .map(|res| res.content.as_str())
+        .unwrap_or("");
+
+    crate::types::internal::InternalElement::text(ElementKind::Image { image_index }, ocr_text, 0)
+        .with_page(page_number)
 }
 
 /// Push paragraph elements in their established reading order, with tables interleaved.
+///
+/// Returns the element and structural-transition positions for every non-caption
+/// paragraph in page order, used by [`interleave_images_into_page`].
 fn assemble_page_elements_with_tables(
     builder: &mut InternalDocumentBuilder,
     paragraphs: &[PdfParagraph],
     tables: &[&crate::types::Table],
     page: Option<u32>,
-) {
+) -> (Vec<ParagraphElementPosition>, u32) {
     let mut positioned: Vec<(f32, &crate::types::Table)> = Vec::new();
     let mut unpositioned: Vec<&crate::types::Table> = Vec::new();
 
@@ -199,6 +337,7 @@ fn assemble_page_elements_with_tables(
 
     let mut in_list = false;
     let mut open_regions = Vec::new();
+    let mut paragraph_elem_map = Vec::new();
 
     for (slot, slot_tables) in tables_at_slot.into_iter().enumerate() {
         for table in slot_tables {
@@ -211,6 +350,7 @@ fn assemble_page_elements_with_tables(
             continue;
         };
 
+        let transition_index = builder.element_count();
         transition_layout_path(
             builder,
             &mut open_regions,
@@ -228,15 +368,23 @@ fn assemble_page_elements_with_tables(
         }
 
         let elem_idx = push_paragraph_element(builder, para, page);
+        paragraph_elem_map.push(ParagraphElementPosition {
+            paragraph_index: para_idx,
+            element_index: elem_idx,
+            transition_index,
+        });
         emit_caption_elements(builder, paragraphs, para_idx, page, elem_idx);
     }
 
+    let page_end_transition_index = builder.element_count();
     close_list(builder, &mut in_list);
     close_layout_path(builder, &mut open_regions);
 
     for table in unpositioned {
         push_table_element(builder, table, page);
     }
+
+    (paragraph_elem_map, page_end_transition_index)
 }
 
 fn close_list(builder: &mut InternalDocumentBuilder, in_list: &mut bool) {
@@ -1486,6 +1634,308 @@ mod tests {
             .filter(|e| matches!(e.kind, ElementKind::Image { .. }))
             .count();
         assert_eq!(image_count, 0, "no image elements when positions is empty");
+    }
+
+    /// Build a minimal `ExtractedImage` with (or without) a bounding box, for
+    /// exercising `interleave_images_into_page` via `assemble_internal_document`.
+    fn make_image_at(
+        image_index: u32,
+        page_number: u32,
+        bounding_box: Option<crate::types::BoundingBox>,
+    ) -> crate::types::ExtractedImage {
+        crate::types::ExtractedImage {
+            data: bytes::Bytes::new(),
+            format: std::borrow::Cow::Borrowed("png"),
+            image_index,
+            page_number: Some(page_number),
+            width: None,
+            height: None,
+            colorspace: None,
+            bits_per_component: None,
+            is_mask: false,
+            description: None,
+            ocr_result: None,
+            bounding_box,
+            source_path: None,
+            cluster_id: None,
+            caption: None,
+            qr_codes: None,
+            image_kind: None,
+            kind_confidence: None,
+            data_base64: None,
+        }
+    }
+
+    /// Element sequence including images, in reading order.
+    fn page_elements_with_images(document: &InternalDocument) -> Vec<&str> {
+        document
+            .elements
+            .iter()
+            .filter_map(|element| match &element.kind {
+                ElementKind::Paragraph => Some(element.text.as_str()),
+                ElementKind::Image { .. } => Some("<image>"),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_positioned_image_is_interleaved_between_paragraphs_by_bbox() {
+        // "Top" paragraph sits high on the page (top-y 900), "Bottom" sits low (top-y 300).
+        // The image's top-y (600) falls strictly between them, so it must land between
+        // the two paragraph elements in the assembled sequence, not after both.
+        let pages = vec![vec![
+            make_paragraph_in_box("Top", 900.0, 40.0, 560.0),
+            make_paragraph_in_box("Bottom", 300.0, 40.0, 560.0),
+        ]];
+        let image_bbox = crate::types::BoundingBox {
+            x0: 40.0,
+            y0: 550.0,
+            x1: 560.0,
+            y1: 600.0,
+        };
+        let images = vec![make_image_at(0, 1, Some(image_bbox))];
+        let image_positions = vec![(1u32, 0u32)];
+
+        let document = assemble_internal_document(pages, &[], Some(&images), &image_positions);
+
+        let labels = page_elements_with_images(&document);
+        assert_eq!(
+            labels,
+            vec!["Top", "<image>", "Bottom"],
+            "image must be interleaved strictly between the two paragraphs, got {labels:?}"
+        );
+
+        let top_idx = document
+            .elements
+            .iter()
+            .position(|e| e.text == "Top")
+            .expect("Top paragraph must be present");
+        let image_idx = document
+            .elements
+            .iter()
+            .position(|e| matches!(e.kind, ElementKind::Image { .. }))
+            .expect("image element must be present");
+        let bottom_idx = document
+            .elements
+            .iter()
+            .position(|e| e.text == "Bottom")
+            .expect("Bottom paragraph must be present");
+        assert!(
+            top_idx < image_idx && image_idx < bottom_idx,
+            "image index ({image_idx}) must be strictly between Top ({top_idx}) and Bottom ({bottom_idx})"
+        );
+    }
+
+    #[test]
+    fn test_image_without_bbox_falls_back_to_append_after_text() {
+        // No bounding_box on the image (as when pdf_oxide's capped fast path is used, or on
+        // the pure-heuristic path with no spatial data) must reproduce the pre-existing
+        // append-after-text behavior exactly, and must never panic.
+        let pages = vec![vec![
+            make_paragraph_in_box("Top", 900.0, 40.0, 560.0),
+            make_paragraph_in_box("Bottom", 300.0, 40.0, 560.0),
+        ]];
+        let images = vec![make_image_at(0, 1, None)];
+        let image_positions = vec![(1u32, 0u32)];
+
+        let document = assemble_internal_document(pages, &[], Some(&images), &image_positions);
+
+        let labels = page_elements_with_images(&document);
+        assert_eq!(
+            labels,
+            vec!["Top", "Bottom", "<image>"],
+            "image without a bounding_box must append after all page text, got {labels:?}"
+        );
+    }
+
+    #[test]
+    fn test_positioned_image_prefers_paragraph_in_same_column() {
+        let pages = vec![vec![
+            make_paragraph_in_box("Left top", 900.0, 40.0, 280.0),
+            make_paragraph_in_box("Left bottom", 300.0, 40.0, 280.0),
+            make_paragraph_in_box("Right top", 880.0, 320.0, 560.0),
+            make_paragraph_in_box("Right bottom", 280.0, 320.0, 560.0),
+        ]];
+        let image_bbox = crate::types::BoundingBox {
+            x0: 320.0,
+            y0: 550.0,
+            x1: 560.0,
+            y1: 600.0,
+        };
+        let images = vec![make_image_at(0, 1, Some(image_bbox))];
+
+        let document = assemble_internal_document(pages, &[], Some(&images), &[(1, 0)]);
+
+        assert_eq!(
+            page_elements_with_images(&document),
+            vec!["Left top", "Left bottom", "Right top", "<image>", "Right bottom"]
+        );
+    }
+
+    #[test]
+    fn test_positioned_images_preserve_source_order_at_same_target() {
+        let pages = vec![vec![
+            make_paragraph_in_box("Top", 900.0, 40.0, 560.0),
+            make_paragraph_in_box("Bottom", 300.0, 40.0, 560.0),
+        ]];
+        let image_bbox = crate::types::BoundingBox {
+            x0: 40.0,
+            y0: 550.0,
+            x1: 560.0,
+            y1: 600.0,
+        };
+        let images = vec![
+            make_image_at(0, 1, Some(image_bbox)),
+            make_image_at(1, 1, Some(image_bbox)),
+        ];
+
+        let document = assemble_internal_document(pages, &[], Some(&images), &[(1, 0), (1, 1)]);
+        let image_indices: Vec<u32> = document
+            .elements
+            .iter()
+            .filter_map(|element| match element.kind {
+                ElementKind::Image { image_index } => Some(image_index),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(image_indices, vec![0, 1]);
+    }
+
+    #[test]
+    fn test_image_below_left_column_stays_before_next_column() {
+        let pages = vec![vec![
+            make_paragraph_in_box("Left top", 900.0, 40.0, 280.0),
+            make_paragraph_in_box("Left bottom", 500.0, 40.0, 280.0),
+            make_paragraph_in_box("Right top", 880.0, 320.0, 560.0),
+            make_paragraph_in_box("Right bottom", 480.0, 320.0, 560.0),
+        ]];
+        let image_bbox = crate::types::BoundingBox {
+            x0: 40.0,
+            y0: 320.0,
+            x1: 280.0,
+            y1: 380.0,
+        };
+        let images = vec![make_image_at(0, 1, Some(image_bbox))];
+
+        let document = assemble_internal_document(pages, &[], Some(&images), &[(1, 0)]);
+
+        assert_eq!(
+            page_elements_with_images(&document),
+            vec!["Left top", "Left bottom", "<image>", "Right top", "Right bottom"]
+        );
+    }
+
+    #[test]
+    fn test_image_below_right_column_appends_after_that_column() {
+        let pages = vec![vec![
+            make_paragraph_in_box("Left top", 900.0, 40.0, 280.0),
+            make_paragraph_in_box("Left bottom", 500.0, 40.0, 280.0),
+            make_paragraph_in_box("Right top", 880.0, 320.0, 560.0),
+            make_paragraph_in_box("Right bottom", 480.0, 320.0, 560.0),
+        ]];
+        let image_bbox = crate::types::BoundingBox {
+            x0: 320.0,
+            y0: 320.0,
+            x1: 560.0,
+            y1: 380.0,
+        };
+        let images = vec![make_image_at(0, 1, Some(image_bbox))];
+
+        let document = assemble_internal_document(pages, &[], Some(&images), &[(1, 0)]);
+
+        assert_eq!(
+            page_elements_with_images(&document),
+            vec!["Left top", "Left bottom", "Right top", "Right bottom", "<image>"]
+        );
+    }
+
+    #[test]
+    fn test_image_between_layout_columns_stays_outside_next_group() {
+        let column_path = |id| LayoutRegionPath {
+            root: LayoutRegionTag {
+                id,
+                class_name: Some(LayoutHintClass::Text),
+            },
+            child: None,
+        };
+        let mut left_top = make_paragraph_in_box("Left top", 900.0, 40.0, 280.0);
+        left_top.layout_region_path = Some(column_path(1));
+        let mut left_bottom = make_paragraph_in_box("Left bottom", 500.0, 40.0, 280.0);
+        left_bottom.layout_region_path = Some(column_path(1));
+        let mut right_top = make_paragraph_in_box("Right top", 880.0, 320.0, 560.0);
+        right_top.layout_region_path = Some(column_path(2));
+        let mut right_bottom = make_paragraph_in_box("Right bottom", 480.0, 320.0, 560.0);
+        right_bottom.layout_region_path = Some(column_path(2));
+        let pages = vec![vec![left_top, left_bottom, right_top, right_bottom]];
+        let left_image_bbox = crate::types::BoundingBox {
+            x0: 40.0,
+            y0: 320.0,
+            x1: 280.0,
+            y1: 380.0,
+        };
+        let right_image_bbox = crate::types::BoundingBox {
+            x0: 320.0,
+            y0: 320.0,
+            x1: 560.0,
+            y1: 380.0,
+        };
+        let images = vec![
+            make_image_at(0, 1, Some(left_image_bbox)),
+            make_image_at(1, 1, Some(right_image_bbox)),
+        ];
+
+        let document = assemble_internal_document(pages, &[], Some(&images), &[(1, 0), (1, 1)]);
+        let index_of_text = |text: &str| {
+            document
+                .elements
+                .iter()
+                .position(|element| element.text == text)
+                .expect("paragraph must be present")
+        };
+        let image_element_index = |expected_image_index| {
+            document
+                .elements
+                .iter()
+                .position(|element| {
+                    matches!(
+                        element.kind,
+                        ElementKind::Image { image_index } if image_index == expected_image_index
+                    )
+                })
+                .expect("image must be present")
+        };
+        let left_image_index = image_element_index(0);
+        let right_image_index = image_element_index(1);
+        let group_ends = document
+            .elements
+            .iter()
+            .enumerate()
+            .filter_map(|(index, element)| (element.kind == ElementKind::GroupEnd).then_some(index))
+            .collect::<Vec<_>>();
+        let group_starts = document
+            .elements
+            .iter()
+            .enumerate()
+            .filter_map(|(index, element)| (element.kind == ElementKind::GroupStart).then_some(index))
+            .collect::<Vec<_>>();
+
+        assert_eq!(group_starts.len(), 2);
+        assert_eq!(group_ends.len(), 2);
+        assert!(
+            index_of_text("Left bottom") < left_image_index
+                && left_image_index < group_ends[0]
+                && group_ends[0] < group_starts[1]
+                && group_starts[1] < index_of_text("Right top"),
+            "left-column image must remain inside the left group and before the right group: {:?}",
+            document.elements.iter().map(|element| element.kind).collect::<Vec<_>>()
+        );
+        assert!(
+            index_of_text("Right bottom") < right_image_index && right_image_index < group_ends[1],
+            "right-column image must remain inside the final group: {:?}",
+            document.elements.iter().map(|element| element.kind).collect::<Vec<_>>()
+        );
     }
 
     #[test]

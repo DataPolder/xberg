@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **#1341**: Synthesized VLM fallback pipelines run for mixed native/OCR PDFs, preserve skipped
   and failed-stage diagnostics, and retain the last non-empty fallback when every stage scores
   below threshold.
+- **#1340**: PDF images and generated captions render at bounding-box-aware reading-order
+  positions, remain within the correct layout column, preserve source order, and stay consistent
+  through chunking, translation, and redaction.
 - Per-file OCR language overrides now also apply to explicit Tesseract pipeline stages, preserving
   override precedence.
 - PDF plain-text extraction repairs detached subscripts, phone suffixes, and final glyphs while

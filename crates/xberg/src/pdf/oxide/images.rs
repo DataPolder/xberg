@@ -35,115 +35,28 @@ fn detect_image_format_from_bytes(data: &[u8]) -> &'static str {
     }
 }
 
-/// Extract at most `limit` images from a page by walking its XObject resource dictionary.
+/// Extract at most `limit` images in content-stream paint order.
 ///
-/// Unlike `doc.doc.extract_images(page_idx)` which decompresses every image on the page
-/// before returning, this function stops after `limit` successful decompressions, avoiding
-/// the eager-API cost for images beyond the cap.
-///
-/// **Trade-offs vs. `extract_images()`**:
-/// - Does not cover inline images (`BI`/`EI` content stream operators). Those are rare in
-///   practice for PDFs that embed large numbers of images.
-/// - Uses XObject resource dictionary order sorted alphabetically for determinism.
-///   Content stream `Do`-operator order may differ.
-///
-/// On any error accessing the resource dictionary the function returns an empty vec.
-/// The caller may then fall back to the full eager path.
-fn extract_n_images_from_xobject_resources(
+/// `page_image_handles` performs the cheap content-stream/CTM pass first, allowing
+/// the cap to be applied before image decompression while preserving bounding boxes,
+/// inline images, and images nested in Form XObjects.
+fn extract_n_images_from_page_handles(
     doc: &OxideDocument,
     page_idx: usize,
     limit: usize,
 ) -> Result<Vec<pdf_oxide::extractors::PdfImage>> {
-    let resources = match doc.doc.get_page_resources(page_idx) {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::debug!(page = page_idx, "get_page_resources failed: {e}");
-            return Ok(Vec::new());
-        }
-    };
-
-    let res_dict = match resources.as_dict() {
-        Some(d) => d,
-        None => return Ok(Vec::new()),
-    };
-
-    let xobj_entry = match res_dict.get("XObject") {
-        Some(x) => x,
-        None => return Ok(Vec::new()),
-    };
-
-    let xobj_owned;
-    let xobj_obj = if let Some(r) = xobj_entry.as_reference() {
-        match doc.doc.load_object(r) {
-            Ok(o) => {
-                xobj_owned = o;
-                &xobj_owned
-            }
-            Err(e) => {
-                tracing::debug!(page = page_idx, "load XObject dict ref failed: {e}");
-                return Ok(Vec::new());
-            }
-        }
-    } else {
-        xobj_entry
-    };
-
-    let xobj_dict = match xobj_obj.as_dict() {
-        Some(d) => d,
-        None => return Ok(Vec::new()),
-    };
-
-    let mut names: Vec<String> = xobj_dict.keys().cloned().collect();
-    names.sort();
-
+    let handles = doc.doc.page_image_handles(page_idx).map_err(|error| {
+        PdfError::ExtractionFailed(format!(
+            "enumerating image handles for PDF page {}: {error}",
+            page_idx + 1
+        ))
+    })?;
     let mut images = Vec::new();
-
-    for name in &names {
-        if images.len() >= limit {
-            break;
-        }
-
-        let val = match xobj_dict.get(name.as_str()) {
-            Some(v) => v,
-            None => continue,
-        };
-
-        let obj_ref = val.as_reference();
-
-        if let Some(r) = obj_ref
-            && doc.doc.is_form_xobject(r)
-        {
-            continue;
-        }
-
-        let loaded;
-        let xobj = if let Some(r) = obj_ref {
-            match doc.doc.load_object(r) {
-                Ok(o) => {
-                    loaded = o;
-                    &loaded
-                }
-                Err(e) => {
-                    tracing::debug!(page = page_idx, xobject = %name, "load XObject failed: {e}");
-                    continue;
-                }
-            }
-        } else {
-            val
-        };
-
-        if xobj.as_dict().and_then(|d| d.get("Subtype")).and_then(|s| s.as_name()) != Some("Image") {
-            continue;
-        }
-
-        match pdf_oxide::extractors::extract_image_from_xobject(Some(&doc.doc), xobj, obj_ref, None) {
+    for handle in handles.into_iter().take(limit) {
+        match handle.decode() {
             Ok(img) => images.push(img),
-            Err(e) => {
-                tracing::debug!(
-                    page = page_idx,
-                    xobject = %name,
-                    "image decompression failed: {e}"
-                );
+            Err(error) => {
+                tracing::debug!(page = page_idx, "image decompression failed: {error}");
             }
         }
     }
@@ -250,9 +163,18 @@ pub(crate) fn extract_images_with_data(
 
         let oxide_images = match max_images_per_page.map(|n| n as usize) {
             Some(limit) => {
-                let xobj_images = extract_n_images_from_xobject_resources(doc, page_idx, limit).unwrap_or_default();
-                if !xobj_images.is_empty() {
-                    xobj_images
+                let handle_images = match extract_n_images_from_page_handles(doc, page_idx, limit) {
+                    Ok(images) => images,
+                    Err(error) => {
+                        tracing::debug!(
+                            page = page_idx,
+                            "capped image-handle extraction failed; falling back to eager extraction: {error}"
+                        );
+                        Vec::new()
+                    }
+                };
+                if !handle_images.is_empty() {
+                    handle_images
                 } else {
                     match doc.doc.extract_images(page_idx) {
                         Ok(imgs) => imgs.into_iter().take(limit).collect(),
@@ -307,7 +229,12 @@ pub(crate) fn extract_images_with_data(
                 is_mask: false,
                 description: None,
                 ocr_result: None,
-                bounding_box: None,
+                bounding_box: oxide_img.bbox().map(|r| crate::types::BoundingBox {
+                    x0: r.x as f64,
+                    y0: r.y as f64,
+                    x1: (r.x + r.width) as f64,
+                    y1: (r.y + r.height) as f64,
+                }),
                 source_path: None,
                 image_kind: None,
                 kind_confidence: None,
@@ -528,6 +455,55 @@ mod tests {
             "pre-cancelled token must cause extraction to return empty vec immediately, \
              got {} image(s)",
             result.len()
+        );
+    }
+
+    /// The default (uncapped) extraction path routes through `PdfDocument::extract_images`,
+    /// which walks content streams tracking the CTM and calls `PdfImage::set_bbox` for every
+    /// image `Do` operator. Confirms `bounding_box` is populated end-to-end for a real fixture.
+    #[test]
+    fn test_extract_images_with_data_default_path_populates_bounding_box() {
+        let pdf_path = test_documents_dir().join("pdf/embedded_images_tables.pdf");
+        assert!(
+            pdf_path.exists(),
+            "missing fixture: test PDF not found at {}",
+            pdf_path.display()
+        );
+
+        let bytes = std::fs::read(&pdf_path).expect("failed to read test PDF");
+        let mut doc = crate::pdf::oxide::OxideDocument::open_bytes(&bytes).expect("failed to open PDF");
+
+        let result = extract_images_with_data(&mut doc, None, None).expect("extraction must not error");
+
+        assert!(!result.is_empty(), "fixture must contain at least one image");
+        assert!(
+            result.iter().all(|img| img.bounding_box.is_some()),
+            "every image extracted via the default (uncapped) path must carry a bounding_box \
+             from pdf_oxide's CTM-tracked extract_images(); got: {:?}",
+            result.iter().map(|img| img.bounding_box).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_extract_images_with_data_capped_path_preserves_bounding_box() {
+        let pdf_path = test_documents_dir().join("pdf/embedded_images_tables.pdf");
+        assert!(
+            pdf_path.exists(),
+            "missing fixture: test PDF not found at {}",
+            pdf_path.display()
+        );
+
+        let bytes = std::fs::read(&pdf_path).expect("failed to read test PDF");
+        let mut doc = crate::pdf::oxide::OxideDocument::open_bytes(&bytes).expect("failed to open PDF");
+
+        let result = extract_images_with_data(&mut doc, Some(50), None).expect("extraction must not error");
+
+        assert!(!result.is_empty(), "fixture must contain at least one image");
+        assert!(
+            result.iter().all(|img| img.bounding_box.is_some()),
+            "the capped image-handle path must preserve CTM-derived bounding boxes; \
+             got: {:?}",
+            result.iter().map(|img| img.bounding_box).collect::<Vec<_>>()
         );
     }
 

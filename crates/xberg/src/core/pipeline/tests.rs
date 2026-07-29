@@ -804,6 +804,188 @@ async fn test_middle_postprocessors_run_after_explicit_chunking() {
 
 #[tokio::test]
 #[serial]
+#[cfg(all(feature = "captioning", feature = "redaction", feature = "chunking"))]
+async fn captioning_prepass_keeps_redaction_and_chunks_consistent() {
+    use crate::core::config::{CaptioningConfig, LlmConfig, RedactionConfig};
+    use crate::plugins::{Plugin, PostProcessor, ProcessingStage};
+    use crate::types::ExtractedImage;
+    use async_trait::async_trait;
+    use bytes::Bytes;
+    use std::sync::Arc;
+
+    const ORIGINAL_PII: &str = "alice@example.com";
+    const CAPTION_PREFIX: &str = "Photo owned by";
+
+    struct StubCaptioningProcessor;
+
+    impl Plugin for StubCaptioningProcessor {
+        fn name(&self) -> &str {
+            CAPTIONING_PROCESSOR_NAME
+        }
+
+        fn version(&self) -> String {
+            "1.0.0".to_string()
+        }
+
+        fn initialize(&self) -> Result<()> {
+            Ok(())
+        }
+
+        fn shutdown(&self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[async_trait]
+    impl PostProcessor for StubCaptioningProcessor {
+        async fn process(&self, result: &mut ExtractedDocument, _config: &ExtractionConfig) -> Result<()> {
+            for image in result.images.iter_mut().flatten() {
+                let caption = format!("{CAPTION_PREFIX} {ORIGINAL_PII}");
+                image.description = Some(caption.clone());
+                image.caption = Some(caption);
+            }
+            result.processing_warnings.push(crate::types::ProcessingWarning {
+                source: Cow::Borrowed("captioning"),
+                message: Cow::Borrowed("synthetic caption warning"),
+            });
+            result.llm_usage.get_or_insert_default().push(crate::types::LlmUsage {
+                model: "synthetic-caption-model".to_string(),
+                source: "captioning".to_string(),
+                ..Default::default()
+            });
+            Ok(())
+        }
+
+        fn processing_stage(&self) -> ProcessingStage {
+            ProcessingStage::Middle
+        }
+
+        fn priority(&self) -> i32 {
+            50
+        }
+    }
+
+    initialize_features();
+    crate::plugins::processor::builtin::redaction::register().unwrap();
+    let registry = crate::plugins::registry::get_post_processor_registry();
+    registry.write().register(Arc::new(StubCaptioningProcessor)).unwrap();
+    clear_processor_cache().unwrap();
+
+    let mut doc = make_doc(&format!("Contact {ORIGINAL_PII}."), "application/pdf");
+    doc.processing_warnings.push(crate::types::ProcessingWarning {
+        source: Cow::Borrowed("extraction"),
+        message: Cow::Borrowed("synthetic extraction warning"),
+    });
+    doc.llm_usage = Some(vec![crate::types::LlmUsage {
+        model: "synthetic-extraction-model".to_string(),
+        source: "extraction".to_string(),
+        ..Default::default()
+    }]);
+    let image_index = doc.push_image(ExtractedImage {
+        data: Bytes::from_static(b"synthetic image"),
+        format: Cow::Borrowed("png"),
+        image_index: 0,
+        width: Some(100),
+        height: Some(100),
+        ..Default::default()
+    });
+    doc.push_element(InternalElement::text(ElementKind::Image { image_index }, "", 0));
+
+    let config = ExtractionConfig {
+        captioning: Some(CaptioningConfig {
+            llm: LlmConfig::default(),
+            prompt: None,
+            min_image_area: 1,
+        }),
+        redaction: Some(RedactionConfig::default()),
+        chunking: Some(crate::ChunkingConfig {
+            max_characters: 500,
+            overlap: 0,
+            ..Default::default()
+        }),
+        output_format: OutputFormat::Markdown,
+        ..Default::default()
+    };
+
+    let processed = run_pipeline(doc, &config).await;
+
+    crate::plugins::processor::builtin::captioning::register().unwrap();
+    clear_processor_cache().unwrap();
+
+    let processed = processed.unwrap();
+    assert!(
+        processed.content.contains(CAPTION_PREFIX),
+        "redacted output must retain the generated caption: {}",
+        processed.content
+    );
+    assert!(
+        !processed.content.contains(ORIGINAL_PII),
+        "redacted output must not restore original PII: {}",
+        processed.content
+    );
+    if let Some(formatted_content) = processed.formatted_content.as_deref() {
+        assert!(
+            formatted_content.contains(CAPTION_PREFIX),
+            "formatted output must retain the generated caption: {formatted_content}"
+        );
+        assert!(
+            !formatted_content.contains(ORIGINAL_PII),
+            "formatted output must not restore original PII: {formatted_content}"
+        );
+    }
+
+    let caption = processed
+        .images
+        .as_deref()
+        .and_then(|images| images.first())
+        .and_then(|image| image.caption.as_deref())
+        .expect("captioning must retain the image caption");
+    assert!(caption.contains(CAPTION_PREFIX), "image caption was lost: {caption}");
+    assert!(
+        !caption.contains(ORIGINAL_PII),
+        "image caption must be redacted: {caption}"
+    );
+
+    let chunk_text = processed
+        .chunks
+        .as_ref()
+        .expect("chunking must produce chunks")
+        .iter()
+        .map(|chunk| chunk.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        chunk_text.contains(CAPTION_PREFIX),
+        "chunks must include the generated caption: {chunk_text}"
+    );
+    assert!(
+        !chunk_text.contains(ORIGINAL_PII),
+        "redacted chunks must not contain original PII: {chunk_text}"
+    );
+    assert_eq!(
+        processed
+            .processing_warnings
+            .iter()
+            .map(|warning| warning.source.as_ref())
+            .collect::<Vec<_>>(),
+        vec!["extraction", "captioning"],
+        "captioning prepass must preserve existing warnings and append its own"
+    );
+    assert_eq!(
+        processed
+            .llm_usage
+            .as_ref()
+            .expect("prepass must preserve LLM usage")
+            .iter()
+            .map(|usage| usage.source.as_str())
+            .collect::<Vec<_>>(),
+        vec!["extraction", "captioning"],
+        "captioning prepass must preserve existing usage and append its own"
+    );
+}
+
+#[tokio::test]
+#[serial]
 async fn test_run_pipeline_with_output_format_plain() {
     let doc = make_doc("test content", "text/plain");
 

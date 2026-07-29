@@ -25,6 +25,76 @@ use execution::{execute_processor_stages, execute_validators};
 use features::{execute_chunking, execute_language_detection, execute_token_reduction};
 use initialization::{get_processors_from_cache, initialize_features, initialize_processor_cache};
 
+const CAPTIONING_PROCESSOR_NAME: &str = "captioning";
+
+type PostProcessorHandle = std::sync::Arc<dyn crate::plugins::PostProcessor>;
+
+fn processors_without_captioning(
+    processors: &std::sync::Arc<Vec<PostProcessorHandle>>,
+) -> std::sync::Arc<Vec<PostProcessorHandle>> {
+    std::sync::Arc::new(
+        processors
+            .iter()
+            .filter(|processor| processor.name() != CAPTIONING_PROCESSOR_NAME)
+            .cloned()
+            .collect(),
+    )
+}
+
+async fn run_captioning_prepass(
+    doc: &mut InternalDocument,
+    config: &ExtractionConfig,
+    include_structure: bool,
+    pp_config: &Option<&crate::core::config::PostProcessorConfig>,
+    middle_processors: &std::sync::Arc<Vec<PostProcessorHandle>>,
+) -> Result<()> {
+    if config.captioning.is_none() {
+        return Ok(());
+    }
+
+    let captioning_processors = std::sync::Arc::new(
+        middle_processors
+            .iter()
+            .filter(|processor| processor.name() == CAPTIONING_PROCESSOR_NAME)
+            .cloned()
+            .collect::<Vec<_>>(),
+    );
+    if captioning_processors.is_empty() {
+        return Ok(());
+    }
+
+    crate::extraction::derive::resolve_relationships(doc);
+    let mut caption_result = crate::extraction::derive::derive_extraction_result(
+        doc.clone(),
+        include_structure,
+        config.output_format.clone(),
+    );
+
+    execute_processor_stages(
+        &mut caption_result,
+        config,
+        pp_config,
+        &[(crate::plugins::ProcessingStage::Middle, captioning_processors)],
+    )
+    .await?;
+
+    if let Some(captioned_images) = caption_result.images.as_ref() {
+        let mut description_changed = false;
+        for (retained, captioned) in doc.images.iter_mut().zip(captioned_images) {
+            description_changed |= retained.description != captioned.description;
+            retained.description = captioned.description.clone();
+            retained.caption = captioned.caption.clone();
+        }
+        if description_changed {
+            doc.pre_rendered_content = None;
+        }
+    }
+    doc.processing_warnings = caption_result.processing_warnings;
+    doc.llm_usage = caption_result.llm_usage;
+
+    Ok(())
+}
+
 /// Run the post-processing pipeline on an `InternalDocument`.
 ///
 /// Derives `ExtractedDocument` from `InternalDocument` via the derivation pipeline,
@@ -97,6 +167,23 @@ pub async fn run_pipeline(mut doc: InternalDocument, config: &ExtractionConfig) 
     replace_embedded_image_markdown_with_ocr(&mut doc);
     append_embedded_image_ocr_text(&mut doc);
 
+    let pp_config = config.postprocessor.as_ref();
+    let postprocessing_enabled = pp_config.is_none_or(|processor_config| processor_config.enabled);
+    let processor_stages = if postprocessing_enabled {
+        initialize_features();
+        initialize_processor_cache()?;
+
+        let (early_processors, middle_processors, late_processors) = get_processors_from_cache()?;
+        Some((early_processors, middle_processors, late_processors))
+    } else {
+        None
+    };
+
+    let include_structure = config.include_document_structure;
+    if let Some((_, middle_processors, _)) = &processor_stages {
+        run_captioning_prepass(&mut doc, config, include_structure, &pp_config, middle_processors).await?;
+    }
+
     #[cfg(feature = "chunking")]
     let chunker_heading_source = {
         let needs_markdown = config.chunking.as_ref().is_some_and(|c| {
@@ -139,7 +226,7 @@ pub async fn run_pipeline(mut doc: InternalDocument, config: &ExtractionConfig) 
     } else {
         None
     };
-    let include_structure = config.include_document_structure;
+
     let mut result =
         crate::extraction::derive::derive_extraction_result(doc, include_structure, config.output_format.clone());
     result.internal_document = doc_for_elements;
@@ -165,19 +252,6 @@ pub async fn run_pipeline(mut doc: InternalDocument, config: &ExtractionConfig) 
         apply_data_base64_pass(&mut result, image_cfg);
     }
 
-    let pp_config = config.postprocessor.as_ref();
-    let postprocessing_enabled = pp_config.is_none_or(|c| c.enabled);
-
-    let processor_stages = if postprocessing_enabled {
-        initialize_features();
-        initialize_processor_cache()?;
-
-        let (early_processors, middle_processors, late_processors) = get_processors_from_cache()?;
-        Some((early_processors, middle_processors, late_processors))
-    } else {
-        None
-    };
-
     if let Some((early_processors, _, _)) = &processor_stages {
         execute_processor_stages(
             &mut result,
@@ -200,15 +274,17 @@ pub async fn run_pipeline(mut doc: InternalDocument, config: &ExtractionConfig) 
     }
 
     if let Some((_, middle_processors, late_processors)) = &processor_stages {
+        let middle_processors = if config.captioning.is_some() {
+            processors_without_captioning(middle_processors)
+        } else {
+            std::sync::Arc::clone(middle_processors)
+        };
         execute_processor_stages(
             &mut result,
             config,
             &pp_config,
             &[
-                (
-                    crate::plugins::ProcessingStage::Middle,
-                    std::sync::Arc::clone(middle_processors),
-                ),
+                (crate::plugins::ProcessingStage::Middle, middle_processors),
                 (
                     crate::plugins::ProcessingStage::Late,
                     std::sync::Arc::clone(late_processors),
