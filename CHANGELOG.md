@@ -33,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PDF Markdown preserves explicit word boundaries and changelog heading hierarchy.
 - OCR Markdown prefers validated semantic layout hints over broad text regions at comparable
   overlap.
+- CLI and benchmark per-file OCR language overrides now reach nested Tesseract configurations and
+  explicit Tesseract pipeline stages, preserving override precedence.
 
 ## [1.0.2] - 2026-07-28
 

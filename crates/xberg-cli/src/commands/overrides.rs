@@ -592,7 +592,18 @@ impl ExtractionOverrides {
             let language = vec![lang.clone()];
             existing_ocr.language = language.clone();
             if let Some(tesseract_config) = existing_ocr.tesseract_config.as_mut() {
-                tesseract_config.language = language;
+                tesseract_config.language = language.clone();
+            }
+            if let Some(pipeline) = existing_ocr.pipeline.as_mut() {
+                for stage in &mut pipeline.stages {
+                    if stage.backend != "tesseract" {
+                        continue;
+                    }
+                    stage.language = Some(language.clone());
+                    if let Some(tesseract_config) = stage.tesseract_config.as_mut() {
+                        tesseract_config.language = language.clone();
+                    }
+                }
             }
         }
 
@@ -1205,6 +1216,65 @@ mod tests {
         let tesseract = ocr.tesseract_config.unwrap();
         assert_eq!(tesseract.language, vec!["deu".to_string()]);
         assert!(!tesseract.use_cache);
+    }
+
+    #[cfg(feature = "ocr-surface")]
+    #[test]
+    fn test_ocr_language_updates_tesseract_pipeline_stages() {
+        let tesseract_config = xberg::TesseractConfig {
+            language: vec!["eng".to_string()],
+            use_cache: false,
+            ..Default::default()
+        };
+        let mut config = ExtractionConfig {
+            ocr: Some(OcrConfig {
+                pipeline: Some(xberg::OcrPipelineConfig {
+                    stages: vec![
+                        xberg::OcrPipelineStage {
+                            backend: "tesseract".to_string(),
+                            priority: 100,
+                            language: Some(vec!["eng".to_string()]),
+                            tesseract_config: Some(tesseract_config),
+                            paddle_ocr_config: None,
+                            vlm_config: None,
+                            backend_options: None,
+                        },
+                        xberg::OcrPipelineStage {
+                            backend: "paddle-ocr".to_string(),
+                            priority: 90,
+                            language: Some(vec!["en".to_string()]),
+                            tesseract_config: None,
+                            paddle_ocr_config: None,
+                            vlm_config: None,
+                            backend_options: None,
+                        },
+                    ],
+                    quality_thresholds: Default::default(),
+                }),
+                ..OcrConfig::default()
+            }),
+            ..Default::default()
+        };
+        let overrides = ExtractionOverrides {
+            ocr_language: Some("deu".to_string()),
+            ..default_overrides()
+        };
+
+        overrides.apply(&mut config);
+
+        let stages = &config.ocr.unwrap().pipeline.unwrap().stages;
+        assert_eq!(stages[0].language, Some(vec!["deu".to_string()]));
+        assert_eq!(
+            stages[0].tesseract_config.as_ref().unwrap().language,
+            vec!["deu".to_string()]
+        );
+        assert_eq!(stages[1].backend, "paddle-ocr");
+        assert_eq!(stages[1].priority, 90);
+        assert_eq!(stages[1].language, Some(vec!["en".to_string()]));
+        assert!(stages[1].tesseract_config.is_none());
+        assert!(stages[1].paddle_ocr_config.is_none());
+        assert!(stages[1].vlm_config.is_none());
+        assert!(stages[1].backend_options.is_none());
     }
 
     #[cfg(feature = "ocr-surface")]

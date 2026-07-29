@@ -359,7 +359,28 @@ fn build_batch_file_configs(
                 .get_mut("tesseract_config")
                 .and_then(serde_json::Value::as_object_mut)
             {
-                tesseract_config.insert("language".to_string(), serde_json::json!(languages));
+                tesseract_config.insert("language".to_string(), serde_json::json!(languages.clone()));
+            }
+            if let Some(stages) = ocr_object
+                .get_mut("pipeline")
+                .and_then(|pipeline| pipeline.get_mut("stages"))
+                .and_then(serde_json::Value::as_array_mut)
+            {
+                for stage in stages {
+                    let Some(stage_object) = stage.as_object_mut() else {
+                        continue;
+                    };
+                    if stage_object.get("backend").and_then(serde_json::Value::as_str) != Some("tesseract") {
+                        continue;
+                    }
+                    stage_object.insert("language".to_string(), serde_json::json!(languages.clone()));
+                    if let Some(tesseract_config) = stage_object
+                        .get_mut("tesseract_config")
+                        .and_then(serde_json::Value::as_object_mut)
+                    {
+                        tesseract_config.insert("language".to_string(), serde_json::json!(languages.clone()));
+                    }
+                }
             }
             Some((
                 absolute_path.to_string_lossy().into_owned(),
@@ -2759,6 +2780,50 @@ mod tests {
         assert_eq!(
             config.pointer("/ocr/tesseract_config/language"),
             Some(&serde_json::json!(["deu", "eng"]))
+        );
+    }
+
+    #[test]
+    fn tesseract_file_config_updates_pipeline_stage_languages() {
+        let config = serde_json::json!({
+            "ocr": {
+                "enabled": true,
+                "backend": "tesseract",
+                "pipeline": {
+                    "stages": [
+                        {
+                            "backend": "tesseract",
+                            "language": ["eng"],
+                            "tesseract_config": {"language": ["eng"], "use_cache": false}
+                        },
+                        {"backend": "paddle-ocr", "language": ["en"]}
+                    ]
+                }
+            }
+        });
+        let args = vec!["--config-json".to_string(), config.to_string()];
+        let base_ocr = tesseract_ocr_config_from_args(&args).expect("Tesseract OCR config");
+        let cwd = tempfile::tempdir().unwrap();
+        let input = Path::new("sample.pdf");
+        let configs = build_batch_file_configs(&[input], &[Some("deu".to_string())], cwd.path(), Some(&base_ocr));
+        let config = configs
+            .get(&cwd.path().join(input).to_string_lossy().into_owned())
+            .expect("file config");
+
+        assert_eq!(
+            config.pointer("/ocr/pipeline/stages/0/language"),
+            Some(&serde_json::json!(["deu"]))
+        );
+        assert_eq!(
+            config.pointer("/ocr/pipeline/stages/0/tesseract_config/language"),
+            Some(&serde_json::json!(["deu"]))
+        );
+        assert_eq!(
+            config.pointer("/ocr/pipeline/stages/1"),
+            Some(&serde_json::json!({
+                "backend": "paddle-ocr",
+                "language": ["en"]
+            }))
         );
     }
 
