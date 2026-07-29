@@ -96,6 +96,13 @@ impl PostProcessor for CaptioningProcessor {
                 Ok((text, usage)) => {
                     let trimmed = text.trim().to_string();
                     if !trimmed.is_empty() {
+                        // Renderers emit `description` at the image placeholder but never
+                        // read `caption`, so a caption produced here would otherwise never
+                        // reach the output text. Mirror it into `description` when that is
+                        // unset so the VLM caption is actually rendered at the image (#1340).
+                        if image.description.is_none() {
+                            image.description = Some(trimmed.clone());
+                        }
                         image.caption = Some(trimmed);
                     }
                     if let Some(mut usage) = usage {
