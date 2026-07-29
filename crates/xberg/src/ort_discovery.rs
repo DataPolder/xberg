@@ -112,6 +112,7 @@ pub(crate) fn apply_execution_providers(
     accel: Option<&crate::core::config::acceleration::AccelerationConfig>,
 ) -> Result<ort::session::builder::SessionBuilder, ort::Error> {
     use crate::core::config::acceleration::ExecutionProviderType;
+    #[cfg(any(target_os = "macos", feature = "cuda", feature = "tensorrt"))]
     use ort::ep::ExecutionProvider;
 
     let provider = std::env::var("XBERG_ORT_EP")

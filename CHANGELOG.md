@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Linux builds without CUDA or TensorRT no longer fail under strict warning settings because of an
+  unused ONNX Runtime execution-provider trait import.
 - PDF plain-text extraction retains table assets without rendering native table text twice.
 - PDF extraction recovers and stitches label-heavy financial tables without merging independent
   aligned tables.
