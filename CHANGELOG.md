@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Per-file OCR language overrides now also apply to explicit Tesseract pipeline stages, preserving
   override precedence.
+- PDF plain-text extraction repairs detached subscripts, phone suffixes, and final glyphs while
+  preserving RTL, rotated, vertical-writing, and mathematical span order.
+- PDF Markdown atomically replaces adjacent native side-by-side table cohorts with validated layout
+  table cohorts, avoiding mixed grids and dropped financial-table structure.
+- OCR Markdown applies layout hints to line-local geometry while preserving soft-wrapped body
+  paragraphs and merging multi-line headings, code, pictures, and wrapped list items by hint.
 
 ## [1.0.3] - 2026-07-29
 
@@ -56,12 +62,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Per-file OCR language overrides (CLI and benchmark) now reach nested Tesseract configurations.
 - PDF plain-text extraction repairs detached text spans so words are no longer split mid-token.
 - PDF plain-text extraction retains table assets without rendering native table text twice.
-- PDF plain-text extraction repairs detached subscripts, phone suffixes, and final glyphs while
-  preserving RTL, rotated, vertical-writing, and mathematical span order.
 - PDF extraction recovers and stitches label-heavy financial tables without merging independent
   aligned tables.
-- PDF Markdown atomically replaces adjacent native side-by-side table cohorts with validated layout
-  table cohorts, avoiding mixed grids and dropped financial-table structure.
 - PDF Markdown preserves explicit word boundaries and changelog heading hierarchy.
 - OCR Markdown prefers validated semantic layout hints over broad text regions at comparable
   overlap.
