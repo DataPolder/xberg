@@ -341,8 +341,6 @@ jobs:
           ITERATIONS: ${{ env.ITERATIONS }}
           TIMEOUT: ${{ github.event.inputs.timeout }}
           COHORT: tools/benchmark-harness/cohorts/${{ matrix.cohort }}.json
-          BATCH_SIZE: ${{ matrix.mode == 'batch' && (matrix.cohort == 'native-pdf-fast-b8' && 8 || 4) || '' }}
-          OCR_ENABLED: ${{ matrix.cohort == 'ocr-pdf-fast-b4' }}
           UV_NO_SYNC: "1"
         run: scripts/benchmarks/run-benchmark.sh
 
@@ -367,8 +365,8 @@ jobs:
       matrix:
         mode: [single-file]
         output_format: [markdown, plaintext]
-        # MarkItDown emits markdown; run it over PDF plus the office/markup families it supports.
-        cohort: [native-pdf-fast-b8, native-office-fast, native-markup-fast]
+        # MarkItDown emits markdown; run it over PDF plus the office/markup/data families it supports.
+        cohort: [native-pdf-fast-b8, native-office-fast, native-markup-fast, native-data-fast]
         exclude:
           - output_format: plaintext
     steps:
@@ -449,8 +447,8 @@ jobs:
       matrix:
         mode: [single-file]
         output_format: [plaintext]
-        # Unstructured emits plaintext; run it over PDF plus the office/markup/email families.
-        cohort: [native-pdf-fast-b8, native-office-fast, native-markup-fast, native-email-fast]
+        # Unstructured emits plaintext; run it over PDF plus the office/markup/email/data families.
+        cohort: [native-pdf-fast-b8, native-office-fast, native-markup-fast, native-email-fast, native-data-fast]
     steps:
       - uses: actions/checkout@v6
         with:
@@ -1281,11 +1279,15 @@ jobs:
           echo "prepare-release-assets=${{ steps.prepare-release-assets.outcome }}"
 
       - name: Create GitHub Release with benchmark results
-        # Only the required producers gate publication: `setup` + `bench-rust` (xberg, the SUT and
-        # the sole required framework in every cohort's contract), plus the validation/prepare
-        # steps. Every competitor is best-effort -- multi-format family cohorts are heterogeneous,
-        # so a competitor that cannot read one member format fails its own job without blocking the
-        # baseline; its partial results still flow into the aggregate as non-gating data.
+        # Publication gates on the required producer jobs (setup + bench-rust; xberg is required in
+        # every cohort) AND on validate-artifacts, which enforces the full contract. The validator
+        # is the real gate for competitors: the PDF cohorts' competitor cells (docling, liteparse,
+        # tika, markitdown, unstructured, pymupdf4llm) are REQUIRED, so a missing one fails
+        # validate-artifacts and blocks the release even though we dropped the per-competitor
+        # `needs.*.result` gates. Only the competitor cells on the heterogeneous family cohorts are
+        # best-effort (optional in the contract): a framework that cannot read one member format of
+        # a family fails its own job without blocking the baseline, and its partial results still
+        # flow into the aggregate as non-gating data.
         if: >-
           ${{
             always() &&

@@ -49,11 +49,6 @@ if [ -n "$COHORT" ] && [ -n "$SHARD" ]; then
   exit 1
 fi
 
-if [ "$MODE" = "batch" ] && [ -n "$COHORT" ] && [ -z "$BATCH_SIZE" ]; then
-  echo "::error::BATCH_SIZE is required when MODE=batch uses a cohort" >&2
-  exit 1
-fi
-
 if [ -n "$BATCH_SIZE" ]; then
   if [[ ! "$BATCH_SIZE" =~ ^[1-9][0-9]*$ ]]; then
     echo "::error::BATCH_SIZE must be a positive integer: $BATCH_SIZE" >&2
