@@ -48,10 +48,12 @@ fn get_supported_formats(framework_name: &str) -> Vec<String> {
     match framework_name {
         "liteparse" => vec!["pdf".to_string()],
 
-        "pymupdf4llm" => vec!["pdf", "epub", "fb2", "svg", "txt", "png", "jpg", "jpeg", "bmp", "tiff", "tif"]
-            .into_iter()
-            .map(|s| s.to_string())
-            .collect(),
+        "pymupdf4llm" => vec![
+            "pdf", "epub", "fb2", "svg", "txt", "png", "jpg", "jpeg", "bmp", "tiff", "tif",
+        ]
+        .into_iter()
+        .map(|s| s.to_string())
+        .collect(),
 
         "docling" => vec![
             "pdf", "docx", "pptx", "xlsx", "html", "htm", "md", "markdown", "asciidoc", "csv", "jats", "vtt", "png",
@@ -72,8 +74,8 @@ fn get_supported_formats(framework_name: &str) -> Vec<String> {
         .collect(),
 
         "markitdown" => vec![
-            "pdf", "docx", "pptx", "xlsx", "xls", "html", "htm", "xml", "md", "markdown", "txt", "csv", "json",
-            "epub", "ipynb", "msg", "png", "jpg", "jpeg", "bmp", "tiff", "tif", "zip",
+            "pdf", "docx", "pptx", "xlsx", "xls", "html", "htm", "xml", "md", "markdown", "txt", "csv", "json", "epub",
+            "ipynb", "msg", "png", "jpg", "jpeg", "bmp", "tiff", "tif", "zip",
         ]
         .into_iter()
         .map(|s| s.to_string())
