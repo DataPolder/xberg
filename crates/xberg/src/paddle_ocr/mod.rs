@@ -164,6 +164,10 @@ pub(crate) fn select_paddle_language(languages: &[String]) -> (&'static str, Vec
     let paddle_lang = match map_language_code(primary) {
         Some(code) => code,
         None => {
+            tracing::warn!(
+                requested = %primary,
+                "paddle-ocr: requested language is not supported; falling back to the 'en' recognition model"
+            );
             warnings.push(crate::types::ProcessingWarning {
                 source: Cow::Borrowed("paddle-ocr"),
                 message: Cow::Owned(format!(
@@ -183,6 +187,11 @@ pub(crate) fn select_paddle_language(languages: &[String]) -> (&'static str, Vec
         .collect();
 
     if !uncovered.is_empty() {
+        tracing::warn!(
+            selected = %paddle_lang,
+            uncovered = %uncovered.join(", "),
+            "paddle-ocr: single recognition model per run; requested languages are not covered by the selected model and their text may be dropped"
+        );
         warnings.push(crate::types::ProcessingWarning {
             source: Cow::Borrowed("paddle-ocr"),
             message: Cow::Owned(format!(

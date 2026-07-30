@@ -547,6 +547,7 @@ impl PdfExtractor {
             markdown_layout_hints,
             mut markdown_layout_detections,
             markdown_layout_gate_decisions,
+            markdown_layout_warning,
         ) = layout_runner::maybe_run_layout_for_markdown(content, config).await;
 
         #[cfg(all(feature = "pdf", feature = "layout-detection"))]
@@ -766,24 +767,21 @@ impl PdfExtractor {
                 &thresholds,
             );
 
-            if std::env::var("XBERG_DEBUG_OCR").is_ok() {
-                eprintln!(
-                    "[xberg::pdf::ocr] fallback={} non_whitespace={} alnum={} meaningful_words={} \
-                     avg_non_whitespace={:.2} avg_alnum={:.2} alnum_ratio={:.3} fragmented_word_ratio={:.3} \
-                     avg_word_length={:.2} word_count={} consecutive_repeat_ratio={:.3}",
-                    decision.fallback,
-                    decision.stats.non_whitespace,
-                    decision.stats.alnum,
-                    decision.stats.meaningful_words,
-                    decision.avg_non_whitespace,
-                    decision.avg_alnum,
-                    decision.stats.alnum_ratio,
-                    decision.stats.fragmented_word_ratio,
-                    decision.stats.avg_word_length,
-                    decision.stats.word_count,
-                    decision.stats.consecutive_repeat_ratio
-                );
-            }
+            tracing::debug!(
+                target: "xberg::pdf::ocr",
+                fallback = decision.fallback,
+                non_whitespace = decision.stats.non_whitespace,
+                alnum = decision.stats.alnum,
+                meaningful_words = decision.stats.meaningful_words,
+                avg_non_whitespace = decision.avg_non_whitespace,
+                avg_alnum = decision.avg_alnum,
+                alnum_ratio = decision.stats.alnum_ratio,
+                fragmented_word_ratio = decision.stats.fragmented_word_ratio,
+                avg_word_length = decision.stats.avg_word_length,
+                word_count = decision.stats.word_count,
+                consecutive_repeat_ratio = decision.stats.consecutive_repeat_ratio,
+                "per-page OCR gate decision",
+            );
 
             let total_chars = native_text.chars().count();
             let alnum_ws_chars = native_text
@@ -1071,6 +1069,14 @@ impl PdfExtractor {
 
         #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
         doc.processing_warnings.append(&mut ocr_fallback_warnings);
+
+        // Surface a hard layout-inference failure (e.g. CoreML kernel error) so
+        // degraded no-layout output is never silent to the caller (#1344). Runs
+        // whenever layout-detection is on, independent of OCR.
+        #[cfg(all(feature = "pdf", feature = "layout-detection"))]
+        if let Some(warning) = markdown_layout_warning {
+            crate::core::diagnostics::push_warning_deduped(&mut doc.processing_warnings, warning);
+        }
 
         // Record the auto layout gate's audit trail from whichever pass ran
         // it. Compiled whenever `pdf` is on so `ocr_layout_gate_audit` keeps

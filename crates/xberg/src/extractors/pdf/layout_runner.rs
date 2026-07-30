@@ -459,8 +459,12 @@ pub(super) fn run_layout_for_pdf_pages(
 /// the `Auto` gate skipped every page, or on soft failure (logged so the
 /// markdown path continues without layout hints). The fifth value carries the
 /// `Auto` gate's per-page decisions whenever the gate ran, including the
-/// all-gated case. Rendering and inference run off the async executor when a
-/// Tokio runtime is enabled.
+/// all-gated case. The sixth value is `Some` only on a hard inference failure
+/// (e.g. a CoreML `ExecuteKernel` runtime error): it carries a
+/// `ProcessingWarning` so the caller can surface the silent degradation to the
+/// user instead of returning byte-identical no-layout output with no signal
+/// (#1344). Rendering and inference run off the async executor when a Tokio
+/// runtime is enabled.
 #[cfg(all(feature = "pdf", feature = "layout-detection"))]
 type LayoutForMarkdownOptional = (
     Option<Vec<image::RgbImage>>,
@@ -468,6 +472,7 @@ type LayoutForMarkdownOptional = (
     Option<Vec<Vec<LayoutHint>>>,
     Option<Vec<crate::layout::DetectionResult>>,
     Option<Vec<PageGateDecision>>,
+    Option<crate::types::ProcessingWarning>,
 );
 
 #[cfg(all(feature = "pdf", feature = "layout-detection"))]
@@ -476,13 +481,13 @@ pub(super) async fn maybe_run_layout_for_markdown(
     config: &ExtractionConfig,
 ) -> LayoutForMarkdownOptional {
     if !config.use_layout_for_markdown {
-        return (None, None, None, None, None);
+        return (None, None, None, None, None, None);
     }
     let Some(layout_config) = config.resolved_layout_config() else {
-        return (None, None, None, None, None);
+        return (None, None, None, None, None, None);
     };
     if config.force_ocr {
-        return (None, None, None, None, None);
+        return (None, None, None, None, None, None);
     }
     let thread_budget = crate::core::config::concurrency::resolve_thread_budget(config.concurrency.as_ref());
     match run_layout_for_pdf_pages_async(
@@ -509,6 +514,7 @@ pub(super) async fn maybe_run_layout_for_markdown(
                 Some(hints),
                 Some(detections),
                 gate_decisions,
+                None,
             )
         }
         Ok(LayoutRunOutput {
@@ -516,14 +522,20 @@ pub(super) async fn maybe_run_layout_for_markdown(
             gate_decisions,
         }) => {
             tracing::info!("layout-for-markdown: auto gate skipped every page, continuing without layout hints");
-            (None, None, None, None, gate_decisions)
+            (None, None, None, None, gate_decisions, None)
         }
         Err(e) => {
             tracing::warn!(
                 error = %e,
                 "layout-for-markdown: detection failed, continuing without layout hints"
             );
-            (None, None, None, None, None)
+            let warning = crate::types::ProcessingWarning {
+                source: std::borrow::Cow::Borrowed("layout"),
+                message: std::borrow::Cow::Owned(format!(
+                    "layout detection failed ({e}); document extracted without layout hints"
+                )),
+            };
+            (None, None, None, None, None, Some(warning))
         }
     }
 }

@@ -15,6 +15,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the single selected recognition model (previously their text was silently dropped), and OCR
   metadata now reports the recognition model actually used instead of joining every requested
   language.
+- **#1344**: A hard layout-inference failure (for example a CoreML `ExecuteKernel` runtime error)
+  now surfaces a `ProcessingWarning` instead of silently returning byte-identical no-layout output
+  with empty `processing_warnings`; the failure is also logged at `warn` level.
+
+### Changed
+
+- Internal diagnostics that previously wrote to stderr via `eprintln!` (per-page OCR gate decisions,
+  GLM-OCR debug tensor stats, the CLI `--output-format` deprecation notice) now emit through
+  `tracing` at the appropriate level, so verbosity is controlled with `RUST_LOG` / `--log-level`
+  instead of ad-hoc `XBERG_DEBUG_OCR` / `XBERG_GLM_DEBUG` environment variables.
+- Repeated per-page and per-backend warnings from external dependencies (OCR engines, layout models)
+  are now de-duplicated by `(source, message)`, so an N-page document surfaces one warning per
+  distinct problem rather than N copies. The paddle-ocr uncovered-language warning is also logged.
 
 ## [1.0.4] - 2026-07-30
 

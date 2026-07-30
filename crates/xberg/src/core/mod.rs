@@ -34,6 +34,11 @@ pub mod batch_mode;
 pub mod batch_optimizations;
 pub mod config;
 pub mod config_validation;
+#[cfg(all(
+    feature = "pdf",
+    any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection")
+))]
+pub(crate) mod diagnostics;
 pub mod extract;
 pub(crate) mod extractor;
 pub mod formats;
