@@ -30,12 +30,14 @@ const SPARSE_FONT_TIER_TOLERANCE: f32 = 0.5;
 // unique document title; reserve H1 for a title and emit these sections as H2. ~keep
 const SPARSE_REPEATED_TIER_HEADING_LEVEL: u8 = 2;
 
+type HeadingMap = Vec<(f32, Option<u8>)>;
+
 fn sparse_multi_page_heading_map(
     all_page_segments: &[Vec<SegmentData>],
     heuristic_pages: &[usize],
     all_blocks: &[TextBlock],
     has_struct_tree_blocks: bool,
-) -> Result<Option<Vec<(f32, Option<u8>)>>> {
+) -> Result<Option<HeadingMap>> {
     if has_struct_tree_blocks || heuristic_pages.len() < SPARSE_REPEATED_TIER_MIN_PAGES {
         return Ok(None);
     }
