@@ -1,3 +1,5 @@
+#![deny(clippy::print_stdout, clippy::print_stderr)]
+#![cfg_attr(test, allow(clippy::print_stdout, clippy::print_stderr))]
 //! WordPerfect structured document extraction for Xberg.
 //!
 //! Thin, safe wrapper over [libwpd](https://libwpd.sourceforge.net/) and its

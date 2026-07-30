@@ -1,3 +1,7 @@
+// stdout is this binary's output contract, so `print_stdout` is allowed here;
+// diagnostics must still go through `tracing`, so `print_stderr` is denied.
+#![deny(clippy::print_stderr)]
+#![cfg_attr(test, allow(clippy::print_stderr))]
 //! Xberg CLI - Command-line interface for document intelligence.
 //!
 //! This binary provides a command-line interface to the Xberg document intelligence

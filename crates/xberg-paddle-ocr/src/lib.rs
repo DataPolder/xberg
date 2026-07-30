@@ -1,3 +1,5 @@
+#![deny(clippy::print_stdout, clippy::print_stderr)]
+#![cfg_attr(test, allow(clippy::print_stdout, clippy::print_stderr))]
 //! # xberg-paddle-ocr
 //!
 //! PaddleOCR via ONNX Runtime for Xberg - high-performance text detection and recognition.

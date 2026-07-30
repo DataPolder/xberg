@@ -872,9 +872,9 @@ fn build_tatr_grid_table(
         }
         grid.push(grid_row);
     }
-    eprintln!("TATR GRID: {grid:#?}");
+    tracing::trace!("TATR GRID: {grid:#?}");
     for (row_index, row_cells) in cell_words.iter().enumerate() {
-        eprintln!("TATR ROW {row_index}");
+        tracing::trace!("TATR ROW {row_index}");
         for (column_index, cell_word_indices) in row_cells.iter().enumerate() {
             let positioned = cell_word_indices
                 .iter()
@@ -883,7 +883,7 @@ fn build_tatr_grid_table(
                     (word.text.as_str(), word.left, word.top, word.width, word.height)
                 })
                 .collect::<Vec<_>>();
-            eprintln!("  COL {column_index}: {positioned:?}");
+            tracing::trace!("  COL {column_index}: {positioned:?}");
         }
     }
 
