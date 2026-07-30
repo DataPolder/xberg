@@ -517,6 +517,7 @@ fn extract_segments_from_page_inner(
             return Ok(Vec::new());
         }
     };
+    super::text::reorder_sparse_two_column_page(&mut page_text_data.spans, page_text_data.page_width);
     let reading_order = select_reading_order(
         &page_text_data.spans,
         page_text_data.page_width,

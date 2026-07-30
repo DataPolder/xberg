@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   64-bit `size()` into a 32-bit `const unsigned` param — is patched to cast `(unsigned)` (matching
   every sibling subdocument site), which the newest MSVC toolchain (14.5x) otherwise rejects as a
   hard error. The vcpkg zlib probing in `build.rs` is removed.
+- **#1345**: Sparse native two-column PDFs preserve column-block reading order instead of
+  interleaving their four text lines row-by-row across the gutter.
 - **#1346**: PaddleOCR emits a `ProcessingWarning` when requested languages are not covered by
   the single selected recognition model (previously their text was silently dropped), and OCR
   metadata now reports the recognition model actually used instead of joining every requested

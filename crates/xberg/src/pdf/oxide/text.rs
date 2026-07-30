@@ -62,16 +62,17 @@ pub(crate) fn extract_text_and_metadata(
 pub(crate) fn extract_spans_from_page(
     doc: &mut pdf_oxide::PdfDocument,
     page_index: usize,
-) -> Result<Vec<crate::extractors::pdf::reading_order::TextSpan>> {
+) -> Result<(Vec<crate::extractors::pdf::reading_order::TextSpan>, bool)> {
     use pdf_oxide::document::ReadingOrder;
 
-    let page_text_data = super::guard_oxide_panic(
+    let mut page_text_data = super::guard_oxide_panic(
         || {
             doc.extract_page_text_with_options(page_index, ReadingOrder::ColumnAware)
                 .map_err(|e| PdfError::TextExtractionFailed(format!("Failed to extract page text: {}", e)))
         },
         |panic| PdfError::TextExtractionFailed(format!("Page text extraction panicked in pdf_oxide: {}", panic)),
     )?;
+    let reordered_sparse_columns = reorder_sparse_two_column_page(&mut page_text_data.spans, page_text_data.page_width);
 
     let spans = page_text_data
         .spans
@@ -85,7 +86,7 @@ pub(crate) fn extract_spans_from_page(
         })
         .collect();
 
-    Ok(spans)
+    Ok((spans, reordered_sparse_columns))
 }
 
 /// Extract text from a pdf_oxide document with optional page boundary tracking.
@@ -606,23 +607,162 @@ fn assemble_page_text(spans: &[pdf_oxide::layout::TextSpan]) -> String {
     text
 }
 
-/// Extract text from a single page using column-aware reading order.
+// pdf_oxide's XY-Cut does not split regions with fewer than five spans.
+// These guards cover the issue #1345 four-span sentence without reclassifying
+// sparse tables or forms as prose columns.
+const MIN_SPARSE_COLUMN_GUTTER_FRACTION: f32 = 0.05;
+const MIN_SPARSE_COLUMN_GUTTER_PTS: f32 = 15.0;
+const MIN_SPARSE_COLUMN_CONTENT_WIDTH_PTS: f32 = 144.0;
+const MIN_SPARSE_COLUMN_WORDS: usize = 2;
+const MIN_SPARSE_COLUMN_WORDS_PER_SIDE: usize = 6;
+const MIN_SPARSE_COLUMN_ALPHA_CHARS: usize = 8;
+const MIN_SPARSE_COLUMN_ALPHA_RATIO: f32 = 0.55;
+const MIN_SPARSE_COLUMN_VERTICAL_OVERLAP: f32 = 0.5;
+const XY_CUT_MIN_SPANS_FOR_SPLIT: usize = 5;
+
+fn is_sparse_column_prose(span: &pdf_oxide::layout::TextSpan) -> bool {
+    let alpha_chars = span.text.chars().filter(|character| character.is_alphabetic()).count();
+    let non_whitespace_chars = span.text.chars().filter(|character| !character.is_whitespace()).count();
+    let word_count = span.text.split_whitespace().count();
+    let geometry_is_valid = span.bbox.x.is_finite()
+        && span.bbox.y.is_finite()
+        && span.bbox.width.is_finite()
+        && span.bbox.height.is_finite()
+        && span.bbox.width > 0.0;
+
+    geometry_is_valid
+        && !span.is_monospace
+        && is_horizontal_ltr(span)
+        && !has_rtl_or_bidi_content(&span.text)
+        && !span.text.contains(':')
+        && word_count >= MIN_SPARSE_COLUMN_WORDS
+        && alpha_chars >= MIN_SPARSE_COLUMN_ALPHA_CHARS
+        && alpha_chars as f32 / non_whitespace_chars.max(1) as f32 >= MIN_SPARSE_COLUMN_ALPHA_RATIO
+}
+
+fn sparse_columns_overlap(left: &[&pdf_oxide::layout::TextSpan], right: &[&pdf_oxide::layout::TextSpan]) -> bool {
+    let extent = |side: &[&pdf_oxide::layout::TextSpan]| {
+        side.iter()
+            .map(|span| span.bbox.y)
+            .fold((f32::INFINITY, f32::NEG_INFINITY), |(low, high), y| {
+                (low.min(y), high.max(y))
+            })
+    };
+    let (left_low, left_high) = extent(left);
+    let (right_low, right_high) = extent(right);
+    let overlap = (left_high.min(right_high) - left_low.max(right_low)).max(0.0);
+    let shorter_extent = (left_high - left_low).min(right_high - right_low);
+
+    shorter_extent > 0.0 && overlap / shorter_extent >= MIN_SPARSE_COLUMN_VERTICAL_OVERLAP
+}
+
+fn sparse_columns_continue_one_sentence(
+    left: &[&pdf_oxide::layout::TextSpan],
+    right: &[&pdf_oxide::layout::TextSpan],
+) -> bool {
+    let mut left_by_y = left.to_vec();
+    let mut right_by_y = right.to_vec();
+    left_by_y.sort_by(|first, second| second.bbox.y.total_cmp(&first.bbox.y));
+    right_by_y.sort_by(|first, second| second.bbox.y.total_cmp(&first.bbox.y));
+    let starts_lowercase = |span: &&pdf_oxide::layout::TextSpan| {
+        span.text
+            .chars()
+            .find(|character| character.is_alphabetic())
+            .is_some_and(char::is_lowercase)
+    };
+    let starts_uppercase = |span: &&pdf_oxide::layout::TextSpan| {
+        span.text
+            .chars()
+            .find(|character| character.is_alphabetic())
+            .is_some_and(char::is_uppercase)
+    };
+    let has_terminal = |span: &&pdf_oxide::layout::TextSpan| {
+        span.text
+            .trim_end()
+            .ends_with(|character: char| matches!(character, '.' | '!' | '?'))
+    };
+    let continuations = [&left_by_y[1], &right_by_y[0], &right_by_y[1]];
+    let all_spans = left_by_y.iter().chain(&right_by_y);
+
+    starts_uppercase(&left_by_y[0])
+        && continuations.into_iter().all(starts_lowercase)
+        && all_spans.clone().filter(|span| has_terminal(span)).count() == 1
+        && has_terminal(&right_by_y[1])
+}
+
+fn is_sparse_column_split(spans: &[pdf_oxide::layout::TextSpan], split_x: f32, min_gutter: f32) -> bool {
+    let left: Vec<_> = spans.iter().filter(|span| span.bbox.x < split_x).collect();
+    let right: Vec<_> = spans.iter().filter(|span| span.bbox.x >= split_x).collect();
+    if left.len() != 2 || right.len() != 2 {
+        return false;
+    }
+    let word_count = |side: &[&pdf_oxide::layout::TextSpan]| {
+        side.iter()
+            .map(|span| span.text.split_whitespace().count())
+            .sum::<usize>()
+    };
+    if word_count(&left) < MIN_SPARSE_COLUMN_WORDS_PER_SIDE || word_count(&right) < MIN_SPARSE_COLUMN_WORDS_PER_SIDE {
+        return false;
+    }
+    let left_right = left
+        .iter()
+        .map(|span| span.bbox.x + span.bbox.width)
+        .fold(f32::NEG_INFINITY, f32::max);
+
+    split_x - left_right >= min_gutter
+        && sparse_columns_overlap(&left, &right)
+        && sparse_columns_continue_one_sentence(&left, &right)
+}
+
+fn sparse_column_split(spans: &[pdf_oxide::layout::TextSpan], page_width: f32) -> Option<f32> {
+    let has_sparse_prose_shape =
+        spans.len() == XY_CUT_MIN_SPANS_FOR_SPLIT - 1 && spans.iter().all(is_sparse_column_prose);
+    let content_left = spans.iter().map(|span| span.bbox.x).fold(f32::INFINITY, f32::min);
+    let content_right = spans
+        .iter()
+        .map(|span| span.bbox.x + span.bbox.width)
+        .fold(f32::NEG_INFINITY, f32::max);
+    if !has_sparse_prose_shape || content_right - content_left < MIN_SPARSE_COLUMN_CONTENT_WIDTH_PTS {
+        return None;
+    }
+    let min_gutter = (page_width * MIN_SPARSE_COLUMN_GUTTER_FRACTION).max(MIN_SPARSE_COLUMN_GUTTER_PTS);
+    let mut starts: Vec<f32> = spans.iter().map(|span| span.bbox.x).collect();
+    starts.sort_by(f32::total_cmp);
+    starts.dedup_by(|left, right| (*left - *right).abs() <= f32::EPSILON);
+
+    starts
+        .into_iter()
+        .find(|&split_x| is_sparse_column_split(spans, split_x, min_gutter))
+}
+
+/// Reorder the guarded four-span, two-column sentence shape.
 ///
-/// Uses `extract_page_text_with_options` with `ReadingOrder::ColumnAware` to
-/// apply XY-Cut column detection. This reads each column top-to-bottom before
-/// moving to the next, avoiding interleaved text in multi-column layouts.
+/// Returns `true` only when the sparse prose classifier matched and reordered
+/// the spans. Callers use this signal to preserve the result across a broad
+/// single layout hint.
+pub(crate) fn reorder_sparse_two_column_page(spans: &mut [pdf_oxide::layout::TextSpan], page_width: f32) -> bool {
+    let Some(split_x) = sparse_column_split(spans, page_width) else {
+        return false;
+    };
+    spans.sort_by(|left, right| {
+        let left_column = usize::from(left.bbox.x >= split_x);
+        let right_column = usize::from(right.bbox.x >= split_x);
+        left_column
+            .cmp(&right_column)
+            .then_with(|| right.bbox.y.total_cmp(&left.bbox.y))
+            .then_with(|| left.bbox.x.total_cmp(&right.bbox.x))
+    });
+    true
+}
+
+/// Extract text from one page with column-aware ordering and guarded repairs.
 ///
-/// Detects paragraph breaks via vertical gap heuristics: when the gap between
-/// lines exceeds 1.5x the median line height, inserts a paragraph break (\n\n).
-///
-/// Applies a fragmentation repair pass for PDFs that position each glyph via its
-/// own BT…ET block (issue #962): detected by ≥ MIN_DISORDER_COUNT same-line x-reset
-/// events, which occur when ColumnAware ordering groups spans by y-level rather than
-/// reading order; repaired by re-sorting on position rather than relying on stream order.
+/// Applies sparse-column and glyph-fragmentation repairs before assembling the
+/// page text.
 fn extract_page_text_column_aware(doc: &mut pdf_oxide::PdfDocument, page_index: usize) -> Result<String> {
     let widgets = collect_widget_field_values(doc, page_index);
 
-    let page_text_data = super::guard_oxide_panic(
+    let mut page_text_data = super::guard_oxide_panic(
         || {
             doc.extract_page_text_with_options(page_index, ReadingOrder::ColumnAware)
                 .map_err(|e| {
@@ -637,6 +777,8 @@ fn extract_page_text_column_aware(doc: &mut pdf_oxide::PdfDocument, page_index: 
             ))
         },
     )?;
+
+    reorder_sparse_two_column_page(&mut page_text_data.spans, page_text_data.page_width);
 
     if is_fragmented_span_list(&page_text_data.spans) {
         tracing::debug!(
@@ -906,6 +1048,150 @@ mod tests {
         assert_eq!(
             assemble_page_text(&spans),
             "left-top\n\nleft-bottom\n\nright-top\n\nright-bottom"
+        );
+    }
+
+    #[test]
+    fn sparse_two_column_prose_reorders_by_column() {
+        let mut spans = vec![
+            span_with_width("The committee reviewed the annual", 60.0, 712.0, 175.0, 11.0, 11.0),
+            span_with_width("approved the budget for the", 330.0, 712.0, 145.0, 11.0, 11.0),
+            span_with_width("report and", 60.0, 698.0, 52.0, 11.0, 11.0),
+            span_with_width("coming fiscal year.", 330.0, 698.0, 92.0, 11.0, 11.0),
+        ];
+
+        assert!(reorder_sparse_two_column_page(&mut spans, 612.0));
+
+        assert_eq!(
+            spans.iter().map(|span| span.text.as_str()).collect::<Vec<_>>(),
+            [
+                "The committee reviewed the annual",
+                "report and",
+                "approved the budget for the",
+                "coming fiscal year."
+            ]
+        );
+    }
+
+    #[test]
+    fn sparse_two_column_table_keeps_row_order() {
+        let mut spans = vec![
+            span_with_width(
+                "Regional revenue for the northern market.",
+                60.0,
+                712.0,
+                210.0,
+                11.0,
+                11.0,
+            ),
+            span_with_width("Annual total for the current period.", 330.0, 712.0, 190.0, 11.0, 11.0),
+            span_with_width(
+                "Operating expense for the northern market.",
+                60.0,
+                698.0,
+                220.0,
+                11.0,
+                11.0,
+            ),
+            span_with_width(
+                "Quarterly total for the current period.",
+                330.0,
+                698.0,
+                200.0,
+                11.0,
+                11.0,
+            ),
+        ];
+        let original = spans.iter().map(|span| span.text.clone()).collect::<Vec<_>>();
+
+        assert!(!reorder_sparse_two_column_page(&mut spans, 612.0));
+
+        assert_eq!(
+            spans.iter().map(|span| span.text.as_str()).collect::<Vec<_>>(),
+            original.iter().map(String::as_str).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn sparse_verbose_form_keeps_row_order() {
+        let mut spans = vec![
+            span_with_width(
+                "Account holder full legal name appears here:",
+                60.0,
+                712.0,
+                215.0,
+                11.0,
+                11.0,
+            ),
+            span_with_width(
+                "Mailing address for all official correspondence:",
+                330.0,
+                712.0,
+                225.0,
+                11.0,
+                11.0,
+            ),
+            span_with_width(
+                "Emergency contact relationship and telephone number:",
+                60.0,
+                698.0,
+                235.0,
+                11.0,
+                11.0,
+            ),
+            span_with_width(
+                "Preferred delivery method for annual notices:",
+                330.0,
+                698.0,
+                215.0,
+                11.0,
+                11.0,
+            ),
+        ];
+        let original = spans.iter().map(|span| span.text.clone()).collect::<Vec<_>>();
+
+        assert!(!reorder_sparse_two_column_page(&mut spans, 612.0));
+        assert_eq!(
+            spans.iter().map(|span| span.text.as_str()).collect::<Vec<_>>(),
+            original.iter().map(String::as_str).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn sparse_lowercase_table_keeps_row_order() {
+        let mut spans = vec![
+            span_with_width(
+                "regional revenue for the northern market",
+                60.0,
+                712.0,
+                210.0,
+                11.0,
+                11.0,
+            ),
+            span_with_width("annual total for the current period", 330.0, 712.0, 190.0, 11.0, 11.0),
+            span_with_width(
+                "operating expense for the northern market",
+                60.0,
+                698.0,
+                220.0,
+                11.0,
+                11.0,
+            ),
+            span_with_width(
+                "quarterly total for the current period.",
+                330.0,
+                698.0,
+                200.0,
+                11.0,
+                11.0,
+            ),
+        ];
+        let original = spans.iter().map(|span| span.text.clone()).collect::<Vec<_>>();
+
+        assert!(!reorder_sparse_two_column_page(&mut spans, 612.0));
+        assert_eq!(
+            spans.iter().map(|span| span.text.as_str()).collect::<Vec<_>>(),
+            original.iter().map(String::as_str).collect::<Vec<_>>()
         );
     }
 }

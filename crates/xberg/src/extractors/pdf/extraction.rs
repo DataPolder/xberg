@@ -347,17 +347,18 @@ fn apply_reading_order_reordering(
     let mut reordered_pages = Vec::with_capacity(page_count);
 
     for (page_idx, hints) in layout_hints_per_page.iter().enumerate().take(page_count) {
-        let spans = crate::pdf::oxide::text::extract_spans_from_page(&mut doc.doc, page_idx).map_err(|e| {
-            crate::error::XbergError::Parsing {
-                message: format!(
-                    "reading-order reordering: failed to extract spans from page {}: {e}",
-                    page_idx + 1
-                ),
-                source: None,
-            }
-        })?;
+        let (spans, reordered_sparse_columns) =
+            crate::pdf::oxide::text::extract_spans_from_page(&mut doc.doc, page_idx).map_err(|e| {
+                crate::error::XbergError::Parsing {
+                    message: format!(
+                        "reading-order reordering: failed to extract spans from page {}: {e}",
+                        page_idx + 1
+                    ),
+                    source: None,
+                }
+            })?;
 
-        let span_order: Vec<usize> = if hints.is_empty() {
+        let span_order: Vec<usize> = if hints.is_empty() || (reordered_sparse_columns && hints.len() == 1) {
             (0..spans.len()).collect()
         } else {
             reading_order::reorder_spans_by_layout(&spans, hints)
