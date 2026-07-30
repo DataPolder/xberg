@@ -36,6 +36,12 @@ if [ -n "$COHORT" ]; then
     echo "::error::Benchmark cohort has an invalid manifest shape: $COHORT" >&2
     exit 1
   fi
+  # The manifest is authoritative for OCR and batch size, so the workflow no longer keys these
+  # off the cohort name. A legacy manifest without `ocr_enabled` defaults to non-OCR.
+  OCR_ENABLED="$(jq -r '.ocr_enabled // false' "$COHORT")"
+  if [ "$MODE" = "batch" ] && [ -z "$BATCH_SIZE" ]; then
+    BATCH_SIZE="$(jq -r '.batch_size' "$COHORT")"
+  fi
 fi
 
 if [ -n "$COHORT" ] && [ -n "$SHARD" ]; then

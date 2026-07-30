@@ -174,7 +174,23 @@ jobs:
         pipeline: [baseline, layout]
         output_format: [markdown, plaintext]
         mode: [single-file, batch]
-        cohort: [native-pdf-fast-b8, ocr-pdf-fast-b4]
+        cohort:
+          - native-pdf-fast-b8
+          - ocr-pdf-fast-b4
+          - native-office-fast
+          - native-markup-fast
+          - native-ebook-fast
+          - native-email-fast
+          - native-data-fast
+          - ocr-images-fast
+        # The layout pipeline only benefits rendered-page formats (PDF, images); for the other
+        # families a layout run would merely duplicate baseline, so drop those cells.
+        exclude:
+          - { pipeline: layout, cohort: native-office-fast }
+          - { pipeline: layout, cohort: native-markup-fast }
+          - { pipeline: layout, cohort: native-ebook-fast }
+          - { pipeline: layout, cohort: native-email-fast }
+          - { pipeline: layout, cohort: native-data-fast }
     steps:
       - uses: actions/checkout@v6
         with:
@@ -233,8 +249,6 @@ jobs:
           ITERATIONS: ${{ env.ITERATIONS }}
           TIMEOUT: ${{ github.event.inputs.timeout }}
           COHORT: tools/benchmark-harness/cohorts/${{ matrix.cohort }}.json
-          BATCH_SIZE: ${{ matrix.mode == 'batch' && (matrix.cohort == 'native-pdf-fast-b8' && 8 || 4) || '' }}
-          OCR_ENABLED: ${{ matrix.cohort == 'ocr-pdf-fast-b4' }}
         run: scripts/benchmarks/run-benchmark.sh
 
       - name: Upload artifacts
@@ -258,7 +272,16 @@ jobs:
       matrix:
         mode: [single-file, batch]
         output_format: [markdown, plaintext]
-        cohort: [native-pdf-fast-b8, ocr-pdf-fast-b4]
+        # Docling supports the multi-format families it has native readers for (office,
+        # markup, data) plus images; ebook/email are xberg-only. Cells for formats Docling
+        # cannot read are best-effort in the release contract, so partial coverage is fine.
+        cohort:
+          - native-pdf-fast-b8
+          - ocr-pdf-fast-b4
+          - native-office-fast
+          - native-markup-fast
+          - native-data-fast
+          - ocr-images-fast
     steps:
       - uses: actions/checkout@v6
         with:
@@ -332,7 +355,7 @@ jobs:
           retention-days: 30
 
   bench-markitdown:
-    name: markitdown (${{ matrix.output_format }}, ${{ matrix.mode }}, native-pdf-fast-b8)
+    name: markitdown (${{ matrix.output_format }}, ${{ matrix.mode }}, ${{ matrix.cohort }})
     needs: [setup, bench-rust]
     if: ${{ needs.setup.result == 'success' && !cancelled() }}
     runs-on: runner-medium-arm64
@@ -344,6 +367,8 @@ jobs:
       matrix:
         mode: [single-file]
         output_format: [markdown, plaintext]
+        # MarkItDown emits markdown; run it over PDF plus the office/markup families it supports.
+        cohort: [native-pdf-fast-b8, native-office-fast, native-markup-fast]
         exclude:
           - output_format: plaintext
     steps:
@@ -399,8 +424,7 @@ jobs:
           OUTPUT_FORMAT: ${{ matrix.output_format }}
           ITERATIONS: ${{ env.ITERATIONS }}
           TIMEOUT: ${{ github.event.inputs.timeout }}
-          OCR_ENABLED: "false"
-          COHORT: tools/benchmark-harness/cohorts/native-pdf-fast-b8.json
+          COHORT: tools/benchmark-harness/cohorts/${{ matrix.cohort }}.json
           UV_NO_SYNC: "1"
         run: scripts/benchmarks/run-benchmark.sh
 
@@ -408,12 +432,12 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: benchmarks-markitdown-${{ matrix.output_format }}-${{ matrix.mode }}-native-pdf-fast-b8-${{ github.run_id }}
+          name: benchmarks-markitdown-${{ matrix.output_format }}-${{ matrix.mode }}-${{ matrix.cohort }}-${{ github.run_id }}
           path: benchmark-results/
           retention-days: 30
 
   bench-unstructured:
-    name: unstructured (${{ matrix.output_format }}, ${{ matrix.mode }}, native-pdf-fast-b8)
+    name: unstructured (${{ matrix.output_format }}, ${{ matrix.mode }}, ${{ matrix.cohort }})
     needs: [setup, bench-rust]
     if: ${{ needs.setup.result == 'success' && !cancelled() }}
     runs-on: runner-medium-arm64
@@ -425,6 +449,8 @@ jobs:
       matrix:
         mode: [single-file]
         output_format: [plaintext]
+        # Unstructured emits plaintext; run it over PDF plus the office/markup/email families.
+        cohort: [native-pdf-fast-b8, native-office-fast, native-markup-fast, native-email-fast]
     steps:
       - uses: actions/checkout@v6
         with:
@@ -483,8 +509,7 @@ jobs:
           OUTPUT_FORMAT: ${{ matrix.output_format }}
           ITERATIONS: ${{ env.ITERATIONS }}
           TIMEOUT: ${{ github.event.inputs.timeout }}
-          COHORT: tools/benchmark-harness/cohorts/native-pdf-fast-b8.json
-          OCR_ENABLED: "false"
+          COHORT: tools/benchmark-harness/cohorts/${{ matrix.cohort }}.json
           UV_NO_SYNC: "1"
         run: scripts/benchmarks/run-benchmark.sh
 
@@ -492,12 +517,12 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: benchmarks-unstructured-${{ matrix.output_format }}-${{ matrix.mode }}-native-pdf-fast-b8-${{ github.run_id }}
+          name: benchmarks-unstructured-${{ matrix.output_format }}-${{ matrix.mode }}-${{ matrix.cohort }}-${{ github.run_id }}
           path: benchmark-results/
           retention-days: 30
 
   bench-tika:
-    name: tika (${{ matrix.output_format }}, ${{ matrix.mode }}, native-pdf-fast-b8)
+    name: tika (${{ matrix.output_format }}, ${{ matrix.mode }}, ${{ matrix.cohort }})
     needs: [setup, bench-rust]
     if: ${{ needs.setup.result == 'success' && !cancelled() }}
     runs-on: runner-medium-arm64
@@ -509,6 +534,14 @@ jobs:
       matrix:
         mode: [single-file]
         output_format: [markdown, plaintext]
+        # Tika is the broadest competitor: PDF plus office/markup/ebook/email/data families.
+        cohort:
+          - native-pdf-fast-b8
+          - native-office-fast
+          - native-markup-fast
+          - native-ebook-fast
+          - native-email-fast
+          - native-data-fast
         exclude:
           - output_format: markdown
     steps:
@@ -570,20 +603,19 @@ jobs:
           OUTPUT_FORMAT: ${{ matrix.output_format }}
           ITERATIONS: ${{ env.ITERATIONS }}
           TIMEOUT: ${{ github.event.inputs.timeout }}
-          COHORT: tools/benchmark-harness/cohorts/native-pdf-fast-b8.json
-          OCR_ENABLED: "false"
+          COHORT: tools/benchmark-harness/cohorts/${{ matrix.cohort }}.json
         run: scripts/benchmarks/run-benchmark.sh
 
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: benchmarks-tika-${{ matrix.output_format }}-${{ matrix.mode }}-native-pdf-fast-b8-${{ github.run_id }}
+          name: benchmarks-tika-${{ matrix.output_format }}-${{ matrix.mode }}-${{ matrix.cohort }}-${{ github.run_id }}
           path: benchmark-results/
           retention-days: 30
 
   bench-pymupdf4llm:
-    name: pymupdf4llm (${{ matrix.output_format }}, ${{ matrix.mode }}, native-pdf-fast-b8)
+    name: pymupdf4llm (${{ matrix.output_format }}, ${{ matrix.mode }}, ${{ matrix.cohort }})
     needs: [setup, bench-rust]
     if: ${{ needs.setup.result == 'success' && !cancelled() }}
     runs-on: runner-medium-arm64
@@ -595,6 +627,8 @@ jobs:
       matrix:
         mode: [single-file]
         output_format: [markdown, plaintext]
+        # PyMuPDF4LLM emits markdown; run it over PDF plus the ebook and OCR-image families.
+        cohort: [native-pdf-fast-b8, native-ebook-fast, ocr-images-fast]
         exclude:
           - output_format: plaintext
     steps:
@@ -656,8 +690,7 @@ jobs:
           ITERATIONS: ${{ env.ITERATIONS }}
           TIMEOUT: ${{ github.event.inputs.timeout }}
           TESSDATA_PREFIX: /usr/share/tesseract-ocr/5/tessdata
-          COHORT: tools/benchmark-harness/cohorts/native-pdf-fast-b8.json
-          OCR_ENABLED: "false"
+          COHORT: tools/benchmark-harness/cohorts/${{ matrix.cohort }}.json
           UV_NO_SYNC: "1"
         run: scripts/benchmarks/run-benchmark.sh
 
@@ -665,7 +698,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: benchmarks-pymupdf4llm-${{ matrix.output_format }}-${{ matrix.mode }}-native-pdf-fast-b8-${{ github.run_id }}
+          name: benchmarks-pymupdf4llm-${{ matrix.output_format }}-${{ matrix.mode }}-${{ matrix.cohort }}-${{ github.run_id }}
           path: benchmark-results/
           retention-days: 30
 
@@ -796,7 +829,8 @@ jobs:
       matrix:
         mode: [single-file]
         output_format: [markdown, plaintext]
-        cohort: [native-pdf-fast-b8, ocr-pdf-fast-b4]
+        # MinerU handles PDF (native + OCR) and document images.
+        cohort: [native-pdf-fast-b8, ocr-pdf-fast-b4, ocr-images-fast]
         exclude:
           - output_format: plaintext
     steps:
@@ -899,7 +933,6 @@ jobs:
           ITERATIONS: ${{ env.ITERATIONS }}
           TIMEOUT: ${{ github.event.inputs.timeout }}
           COHORT: tools/benchmark-harness/cohorts/${{ matrix.cohort }}.json
-          OCR_ENABLED: ${{ matrix.cohort == 'ocr-pdf-fast-b4' }}
           UV_NO_SYNC: "1"
           # Belt-and-suspenders: cap any stray unbounded network call (offline) so it
           # fails fast and loud instead of hanging the full timeout. Bench-only, so the
@@ -992,8 +1025,6 @@ jobs:
           ITERATIONS: ${{ env.ITERATIONS }}
           TIMEOUT: ${{ github.event.inputs.timeout }}
           COHORT: tools/benchmark-harness/cohorts/${{ matrix.cohort }}.json
-          BATCH_SIZE: ${{ matrix.mode == 'batch' && (matrix.cohort == 'native-pdf-fast-b8' && 8 || 4) || '' }}
-          OCR_ENABLED: ${{ matrix.cohort == 'ocr-pdf-fast-b4' }}
         run: scripts/benchmarks/run-benchmark.sh
 
       - name: Upload artifacts
@@ -1078,27 +1109,50 @@ jobs:
         with:
           ort-version: ${{ env.ORT_VERSION }}
 
-      - name: Download native benchmark artifacts
+      - name: Download all benchmark artifacts
         continue-on-error: true
         uses: actions/download-artifact@v8
         with:
-          pattern: "benchmarks-*-native-pdf-fast-b8-${{ github.run_id }}"
-          path: benchmark-artifacts/native/
+          pattern: "benchmarks-*-${{ github.run_id }}"
+          path: benchmark-artifacts/_all/
           merge-multiple: false
 
-      - name: Download OCR benchmark artifacts
-        continue-on-error: true
-        uses: actions/download-artifact@v8
-        with:
-          pattern: "benchmarks-*-ocr-pdf-fast-b4-${{ github.run_id }}"
-          path: benchmark-artifacts/ocr/
-          merge-multiple: false
+      - name: Partition artifacts into per-cohort directories
+        if: always()
+        run: |
+          set -euo pipefail
+          RUN_ID="${{ github.run_id }}"
+          # CliCohort -> cohort-manifest basename. No basename is a suffix of another, so a
+          # single trailing match assigns each artifact directory to exactly one cohort.
+          declare -A COHORT_BASENAME=(
+            [native]=native-pdf-fast-b8
+            [ocr]=ocr-pdf-fast-b4
+            [office]=native-office-fast
+            [markup]=native-markup-fast
+            [ebook]=native-ebook-fast
+            [email]=native-email-fast
+            [data]=native-data-fast
+            [images]=ocr-images-fast
+          )
+          shopt -s nullglob
+          for dir in benchmark-artifacts/_all/*/; do
+            name="$(basename "$dir")"
+            stem="${name%-"$RUN_ID"}"
+            for clicohort in "${!COHORT_BASENAME[@]}"; do
+              base="${COHORT_BASENAME[$clicohort]}"
+              if [[ "$stem" == *-"$base" ]]; then
+                mkdir -p "benchmark-artifacts/$clicohort"
+                mv "$dir" "benchmark-artifacts/$clicohort/$name"
+                break
+              fi
+            done
+          done
 
       - name: Log downloaded benchmark artifact inventory
         if: always()
         run: |
           set -uo pipefail
-          for cohort in native ocr; do
+          for cohort in native ocr office markup ebook email data images; do
             root="benchmark-artifacts/${cohort}"
             echo "=== ${cohort} artifacts (${root}) ==="
             if [ ! -d "$root" ]; then
@@ -1112,56 +1166,58 @@ jobs:
             done
           done
 
-      - name: Validate native benchmark artifacts
-        id: validate-native
+      - name: Validate benchmark artifacts (all cohorts)
+        id: validate-artifacts
         if: always()
-        run: >-
-          ./target/release/benchmark-harness validate-artifacts
-          --cohort native
-          --artifacts-dir benchmark-artifacts/native
-          --cohort-manifest tools/benchmark-harness/cohorts/native-pdf-fast-b8.json
-          --fixtures-root tools/benchmark-harness/fixtures
-          --source-sha '${{ needs.setup.outputs.source-sha }}'
-          --run-id '${{ github.run_id }}'
-          --iterations '${{ env.ITERATIONS }}'
-
-      - name: Validate OCR benchmark artifacts
-        id: validate-ocr
-        if: always()
-        run: >-
-          ./target/release/benchmark-harness validate-artifacts
-          --cohort ocr
-          --artifacts-dir benchmark-artifacts/ocr
-          --cohort-manifest tools/benchmark-harness/cohorts/ocr-pdf-fast-b4.json
-          --fixtures-root tools/benchmark-harness/fixtures
-          --source-sha '${{ needs.setup.outputs.source-sha }}'
-          --run-id '${{ github.run_id }}'
-          --iterations '${{ env.ITERATIONS }}'
-
-      - name: Consolidate native and OCR results
-        if: ${{ always() && steps.validate-native.outcome == 'success' && steps.validate-ocr.outcome == 'success' }}
         run: |
           set -euo pipefail
-          NATIVE_INPUTS=$(find benchmark-artifacts/native -mindepth 1 -maxdepth 1 -type d | sort | paste -sd, -)
-          OCR_INPUTS=$(find benchmark-artifacts/ocr -mindepth 1 -maxdepth 1 -type d | sort | paste -sd, -)
-          ./target/release/benchmark-harness consolidate \
-            --inputs "$NATIVE_INPUTS" \
-            --output consolidated-output/native/
-          ./target/release/benchmark-harness consolidate \
-            --inputs "$OCR_INPUTS" \
-            --output consolidated-output/ocr/
+          declare -A COHORT_BASENAME=(
+            [native]=native-pdf-fast-b8
+            [ocr]=ocr-pdf-fast-b4
+            [office]=native-office-fast
+            [markup]=native-markup-fast
+            [ebook]=native-ebook-fast
+            [email]=native-email-fast
+            [data]=native-data-fast
+            [images]=ocr-images-fast
+          )
+          for clicohort in native ocr office markup ebook email data images; do
+            base="${COHORT_BASENAME[$clicohort]}"
+            # mkdir so a cohort whose required producer emitted nothing yields the validator's
+            # "missing artifacts" contract error rather than an opaque read_dir failure.
+            mkdir -p "benchmark-artifacts/$clicohort"
+            echo "=== validate-artifacts: $clicohort ($base) ==="
+            ./target/release/benchmark-harness validate-artifacts \
+              --cohort "$clicohort" \
+              --artifacts-dir "benchmark-artifacts/$clicohort" \
+              --cohort-manifest "tools/benchmark-harness/cohorts/$base.json" \
+              --fixtures-root tools/benchmark-harness/fixtures \
+              --source-sha '${{ needs.setup.outputs.source-sha }}' \
+              --run-id '${{ github.run_id }}' \
+              --iterations '${{ env.ITERATIONS }}'
+          done
 
-      - name: Validate native and OCR aggregates
+      - name: Consolidate results (all cohorts)
+        if: ${{ always() && steps.validate-artifacts.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          for clicohort in native ocr office markup ebook email data images; do
+            INPUTS=$(find "benchmark-artifacts/$clicohort" -mindepth 1 -maxdepth 1 -type d | sort | paste -sd, -)
+            ./target/release/benchmark-harness consolidate \
+              --inputs "$INPUTS" \
+              --output "consolidated-output/$clicohort/"
+          done
+
+      - name: Validate aggregates (all cohorts)
         id: validate-aggregates
-        if: ${{ always() && steps.validate-native.outcome == 'success' && steps.validate-ocr.outcome == 'success' }}
+        if: ${{ always() && steps.validate-artifacts.outcome == 'success' }}
         run: |
           set -euo pipefail
-          ./target/release/benchmark-harness validate-artifacts \
-            --cohort native \
-            --aggregated-file consolidated-output/native/aggregated.json
-          ./target/release/benchmark-harness validate-artifacts \
-            --cohort ocr \
-            --aggregated-file consolidated-output/ocr/aggregated.json
+          for clicohort in native ocr office markup ebook email data images; do
+            ./target/release/benchmark-harness validate-artifacts \
+              --cohort "$clicohort" \
+              --aggregated-file "consolidated-output/$clicohort/aggregated.json"
+          done
 
       - name: Prepare cohort release assets
         id: prepare-release-assets
@@ -1169,49 +1225,42 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release-assets
-          cp consolidated-output/native/aggregated.json release-assets/benchmarks-native-aggregated.json
-          cp consolidated-output/ocr/aggregated.json release-assets/benchmarks-ocr-aggregated.json
           SOURCE_SHA="${{ needs.setup.outputs.source-sha }}"
           UPDATED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
           RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          # expected_matrix_keys counts the REQUIRED (non-optional) cells the aggregate must
-          # contain; optional_matrix_keys is MinerU's best-effort cell (decoupled from the
-          # release gate). Keep both in sync with bench_matrix.rs {native,ocr}_matrix() and
-          # cohort_manifest_blake3 with {NATIVE,OCR}_MANIFEST_BLAKE3.
+          RUN_ID="${{ github.run_id }}"
+          # Per-cohort manifest name, BLAKE3, and required/optional matrix key counts come
+          # straight from the pinned bench_matrix contract via `cohort-contract`, so the release
+          # metadata can never drift from the validator (no hand-copied hashes/counts here).
+          index_cohorts='{}'
+          for clicohort in native ocr office markup ebook email data images; do
+            cp "consolidated-output/$clicohort/aggregated.json" "release-assets/benchmarks-$clicohort-aggregated.json"
+            contract="$(./target/release/benchmark-harness cohort-contract --cohort "$clicohort")"
+            jq -n \
+              --arg cohort "$(jq -r '.manifest_name' <<<"$contract")" \
+              --arg cohort_hash "$(jq -r '.manifest_blake3' <<<"$contract")" \
+              --argjson expected "$(jq -r '.expected_matrix_keys' <<<"$contract")" \
+              --argjson optional "$(jq -r '.optional_matrix_keys' <<<"$contract")" \
+              --arg commit "$SOURCE_SHA" \
+              --arg run_id "$RUN_ID" \
+              --arg run_url "$RUN_URL" \
+              --arg updated_at "$UPDATED_AT" \
+              '{cohort: $cohort, cohort_manifest_blake3: $cohort_hash, expected_matrix_keys: $expected, optional_matrix_keys: $optional, commit: $commit, run_id: $run_id, run_url: $run_url, updated_at: $updated_at}' \
+              > "release-assets/benchmarks-$clicohort-metadata.json"
+            index_cohorts="$(jq \
+              --arg k "$clicohort" \
+              --arg agg "benchmarks-$clicohort-aggregated.json" \
+              --arg meta "benchmarks-$clicohort-metadata.json" \
+              '.[$k] = {aggregated: $agg, metadata: $meta}' <<<"$index_cohorts")"
+          done
           jq -n \
-            --arg cohort "native-pdf-fast-b8-v1" \
-            --arg cohort_hash "c10d1f78d3f9d61070c0d91e7bfe90a904b69c9d3261536eb1dcff2081c73f6b" \
             --arg commit "$SOURCE_SHA" \
-            --arg run_id "${{ github.run_id }}" \
+            --arg run_id "$RUN_ID" \
             --arg run_url "$RUN_URL" \
             --arg updated_at "$UPDATED_AT" \
-            '{cohort: $cohort, cohort_manifest_blake3: $cohort_hash, expected_matrix_keys: 20, optional_matrix_keys: 1, commit: $commit, run_id: $run_id, run_url: $run_url, updated_at: $updated_at}' \
-            > release-assets/benchmarks-native-metadata.json
-          jq -n \
-            --arg cohort "ocr-pdf-fast-b4-v1" \
-            --arg cohort_hash "f9e4e881b70111df10516a5f2cf2ed648f67b299f9116bafb34746e98436b66b" \
-            --arg commit "$SOURCE_SHA" \
-            --arg run_id "${{ github.run_id }}" \
-            --arg run_url "$RUN_URL" \
-            --arg updated_at "$UPDATED_AT" \
-            '{cohort: $cohort, cohort_manifest_blake3: $cohort_hash, expected_matrix_keys: 16, optional_matrix_keys: 1, commit: $commit, run_id: $run_id, run_url: $run_url, updated_at: $updated_at}' \
-            > release-assets/benchmarks-ocr-metadata.json
-          jq -n \
-            --arg commit "$SOURCE_SHA" \
-            --arg run_id "${{ github.run_id }}" \
-            --arg run_url "$RUN_URL" \
-            --arg updated_at "$UPDATED_AT" \
-            '{
-              schema_version: 1,
-              commit: $commit,
-              run_id: $run_id,
-              run_url: $run_url,
-              updated_at: $updated_at,
-              cohorts: {
-                native: {aggregated: "benchmarks-native-aggregated.json", metadata: "benchmarks-native-metadata.json"},
-                ocr: {aggregated: "benchmarks-ocr-aggregated.json", metadata: "benchmarks-ocr-metadata.json"}
-              }
-            }' > release-assets/benchmarks-index.json
+            --argjson cohorts "$index_cohorts" \
+            '{schema_version: 1, commit: $commit, run_id: $run_id, run_url: $run_url, updated_at: $updated_at, cohorts: $cohorts}' \
+            > release-assets/benchmarks-index.json
 
       - name: Log aggregation gate status
         if: always()
@@ -1227,27 +1276,24 @@ jobs:
           echo "bench-mineru=${{ needs.bench-mineru.result }} (optional; NOT a release gate)"
           echo "bench-liteparse=${{ needs.bench-liteparse.result }}"
           echo "=== Aggregation step outcomes ==="
-          echo "validate-native=${{ steps.validate-native.outcome }}"
-          echo "validate-ocr=${{ steps.validate-ocr.outcome }}"
+          echo "validate-artifacts=${{ steps.validate-artifacts.outcome }}"
           echo "validate-aggregates=${{ steps.validate-aggregates.outcome }}"
           echo "prepare-release-assets=${{ steps.prepare-release-assets.outcome }}"
 
       - name: Create GitHub Release with benchmark results
+        # Only the required producers gate publication: `setup` + `bench-rust` (xberg, the SUT and
+        # the sole required framework in every cohort's contract), plus the validation/prepare
+        # steps. Every competitor is best-effort -- multi-format family cohorts are heterogeneous,
+        # so a competitor that cannot read one member format fails its own job without blocking the
+        # baseline; its partial results still flow into the aggregate as non-gating data.
         if: >-
           ${{
             always() &&
-            steps.validate-native.outcome == 'success' &&
-            steps.validate-ocr.outcome == 'success' &&
+            steps.validate-artifacts.outcome == 'success' &&
             steps.validate-aggregates.outcome == 'success' &&
             steps.prepare-release-assets.outcome == 'success' &&
             needs.setup.result == 'success' &&
-            needs.bench-rust.result == 'success' &&
-            needs.bench-docling.result == 'success' &&
-            needs.bench-markitdown.result == 'success' &&
-            needs.bench-unstructured.result == 'success' &&
-            needs.bench-tika.result == 'success' &&
-            needs.bench-pymupdf4llm.result == 'success' &&
-            needs.bench-liteparse.result == 'success'
+            needs.bench-rust.result == 'success'
           }}
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
@@ -1270,8 +1316,4 @@ jobs:
 
           **Commit:** ${SOURCE_SHA}
           **Date:** ${DATE}" \
-            release-assets/benchmarks-native-aggregated.json \
-            release-assets/benchmarks-native-metadata.json \
-            release-assets/benchmarks-ocr-aggregated.json \
-            release-assets/benchmarks-ocr-metadata.json \
-            release-assets/benchmarks-index.json
+            release-assets/*.json
