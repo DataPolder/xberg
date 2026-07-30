@@ -26,6 +26,9 @@ use super::types::{LayoutHint, PdfParagraph};
 const SPARSE_REPEATED_TIER_MIN_PAGES: usize = 2;
 const SPARSE_FONT_TIER_CLUSTER_COUNT: usize = 2;
 const SPARSE_FONT_TIER_TOLERANCE: f32 = 0.5;
+// A tier repeated at the top of multiple pages represents peer sections, not a
+// unique document title; reserve H1 for a title and emit these sections as H2. ~keep
+const SPARSE_REPEATED_TIER_HEADING_LEVEL: u8 = 2;
 
 fn sparse_multi_page_heading_map(
     all_page_segments: &[Vec<SegmentData>],
@@ -82,7 +85,8 @@ fn sparse_multi_page_heading_map(
         clusters
             .iter()
             .map(|cluster| {
-                let level = ((cluster.centroid - heading_font_size).abs() <= SPARSE_FONT_TIER_TOLERANCE).then_some(1);
+                let level = ((cluster.centroid - heading_font_size).abs() <= SPARSE_FONT_TIER_TOLERANCE)
+                    .then_some(SPARSE_REPEATED_TIER_HEADING_LEVEL);
                 (cluster.centroid, level)
             })
             .collect(),
@@ -7672,8 +7676,8 @@ where new shares are issued;";
             .iter()
             .find(|(font_size, _)| (*font_size - 24.0).abs() < 0.5);
         assert!(
-            repeated_tier.is_some_and(|(_, level)| level.is_some()),
-            "a repeated 24pt tier across pages with a 12pt body tier must be promoted; got: {heading_map:?}"
+            repeated_tier.is_some_and(|(_, level)| *level == Some(2)),
+            "a repeated 24pt tier across pages with a 12pt body tier must be promoted to H2; got: {heading_map:?}"
         );
     }
 

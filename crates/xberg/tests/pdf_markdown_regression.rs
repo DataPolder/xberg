@@ -327,21 +327,14 @@ fn test_hello_structure_preserves_repeated_multi_page_headings() {
 
     let pdf_path = resolve_pdf_path("hello_structure").expect("hello_structure.pdf fixture must exist");
     let result = extract_with_format(&pdf_path, OutputFormat::Markdown).expect("hello_structure.pdf must extract");
-    let is_heading = |expected: &str| {
-        result
-            .content
-            .lines()
-            .any(|line| line.starts_with('#') && line.trim_start_matches('#').trim() == expected)
-    };
-
     assert!(
-        is_heading("Hello World"),
-        "first repeated 24pt tier must be a heading; got:\n{}",
+        result.content.lines().any(|line| line == "# Hello World"),
+        "first repeated 24pt tier must remain the document title; got:\n{}",
         result.content
     );
     assert!(
-        is_heading("Goodbye Cruel World..."),
-        "second repeated 24pt tier must be a heading; got:\n{}",
+        result.content.lines().any(|line| line == "## Goodbye Cruel World..."),
+        "subsequent repeated 24pt tiers must be H2 headings; got:\n{}",
         result.content
     );
     assert!(
