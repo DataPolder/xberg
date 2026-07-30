@@ -389,7 +389,11 @@ fn layout_provider_is_accelerated(config: &LayoutDetectionConfig) -> bool {
 #[cfg(all(feature = "pdf", feature = "layout-detection"))]
 fn layout_config_forced_to_cpu(config: &LayoutDetectionConfig) -> LayoutDetectionConfig {
     use crate::core::config::acceleration::{AccelerationConfig, ExecutionProviderType};
-    let device_id = config.acceleration.as_ref().map(|acceleration| acceleration.device_id).unwrap_or(0);
+    let device_id = config
+        .acceleration
+        .as_ref()
+        .map(|acceleration| acceleration.device_id)
+        .unwrap_or(0);
     let mut cpu_config = config.clone();
     cpu_config.acceleration = Some(AccelerationConfig {
         provider: ExecutionProviderType::Cpu,
@@ -658,7 +662,10 @@ mod tests {
             ExecutionProviderType::TensorRt,
         ] {
             let config = layout_config_with_provider(provider, 0);
-            assert!(layout_provider_is_accelerated(&config), "GPU provider must be accelerated");
+            assert!(
+                layout_provider_is_accelerated(&config),
+                "GPU provider must be accelerated"
+            );
         }
     }
 
@@ -670,9 +677,15 @@ mod tests {
             !layout_provider_is_accelerated(&cpu_config),
             "a CPU-forced config must not be treated as accelerated (no retry loop)"
         );
-        let acceleration = cpu_config.acceleration.as_ref().expect("forced config carries acceleration");
+        let acceleration = cpu_config
+            .acceleration
+            .as_ref()
+            .expect("forced config carries acceleration");
         assert_eq!(acceleration.provider, ExecutionProviderType::Cpu);
-        assert_eq!(acceleration.device_id, 3, "device id must be preserved across the CPU fallback");
+        assert_eq!(
+            acceleration.device_id, 3,
+            "device id must be preserved across the CPU fallback"
+        );
     }
 
     fn rendered_page(page_index: usize, width: u32, page_width_pts: f32) -> RenderedLayoutPage {

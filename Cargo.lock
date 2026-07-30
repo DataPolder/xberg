@@ -11817,6 +11817,7 @@ dependencies = [
  "html-to-markdown-rs",
  "serde_json",
  "tokio",
+ "tracing",
  "xberg",
 ]
 
@@ -11832,6 +11833,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "tracing",
  "xberg",
 ]
 
@@ -11868,6 +11870,7 @@ dependencies = [
  "jni 0.22.4",
  "serde_json",
  "tokio",
+ "tracing",
  "xberg",
 ]
 
@@ -11910,6 +11913,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "tokio-util",
+ "tracing",
  "xberg",
 ]
 
@@ -11939,6 +11943,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tracing",
  "xberg",
 ]
 
@@ -11954,6 +11959,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tracing",
  "xberg",
 ]
 
@@ -12003,6 +12009,7 @@ dependencies = [
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
+ "tracing",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-bindgen-test",

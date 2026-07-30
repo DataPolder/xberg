@@ -1,5 +1,6 @@
 package io.xberg;
 
+
 /**
  * Bridge interface for the Validator plugin system.
  *
@@ -8,24 +9,21 @@ package io.xberg;
  */
 public interface IValidator {
 
-  /** Plugin name (used for registry keying). */
-  String name();
+    /** Plugin name (used for registry keying). */
+    String name();
 
-  /** Plugin version. */
-  String version();
+    /** Plugin version. */
+    String version();
 
-  /** Initialize the plugin. */
-  default void initialize() throws Exception {}
+    /** Initialize the plugin. */
+    default void initialize() throws Exception {}
 
-  /** Shut down the plugin. */
-  default void shutdown() throws Exception {}
+    /** Shut down the plugin. */
+    default void shutdown() throws Exception {}
 
-  /** validate. */ void validate(ExtractedDocument result,
-                                 ExtractionConfig config) throws Exception;
+/** validate. */    void validate(ExtractedDocument result, ExtractionConfig config) throws Exception;
 
-  /** should_validate. */ boolean should_validate(ExtractedDocument _result,
-                                                  ExtractionConfig _config)
-      throws Exception;
+/** should_validate. */    boolean should_validate(ExtractedDocument _result, ExtractionConfig _config) throws Exception;
 
-  /** priority. */ int priority() throws Exception;
+/** priority. */    int priority() throws Exception;
 }

@@ -95,9 +95,7 @@ fn union_block_bbox(
     next: Option<(f32, f32, f32, f32)>,
 ) -> Option<(f32, f32, f32, f32)> {
     match (current, next) {
-        (Some((cl, cb, cr, ct)), Some((nl, nb, nr, nt))) => {
-            Some((cl.min(nl), cb.min(nb), cr.max(nr), ct.max(nt)))
-        }
+        (Some((cl, cb, cr, ct)), Some((nl, nb, nr, nt))) => Some((cl.min(nl), cb.min(nb), cr.max(nr), ct.max(nt))),
         (Some(bbox), None) | (None, Some(bbox)) => Some(bbox),
         (None, None) => None,
     }
