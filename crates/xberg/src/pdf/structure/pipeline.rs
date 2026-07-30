@@ -23,6 +23,72 @@ use super::text_repair::{
 };
 use super::types::{LayoutHint, PdfParagraph};
 
+const SPARSE_REPEATED_TIER_MIN_PAGES: usize = 2;
+const SPARSE_FONT_TIER_CLUSTER_COUNT: usize = 2;
+const SPARSE_FONT_TIER_TOLERANCE: f32 = 0.5;
+
+fn sparse_multi_page_heading_map(
+    all_page_segments: &[Vec<SegmentData>],
+    heuristic_pages: &[usize],
+    all_blocks: &[TextBlock],
+    has_struct_tree_blocks: bool,
+) -> Result<Option<Vec<(f32, Option<u8>)>>> {
+    if has_struct_tree_blocks || heuristic_pages.len() < SPARSE_REPEATED_TIER_MIN_PAGES {
+        return Ok(None);
+    }
+
+    let clusters = cluster_font_sizes(all_blocks, SPARSE_FONT_TIER_CLUSTER_COUNT)?;
+    if clusters.len() != SPARSE_FONT_TIER_CLUSTER_COUNT {
+        return Ok(None);
+    }
+
+    let has_only_two_narrow_font_tiers = all_blocks.iter().all(|block| {
+        block.font_size.is_finite()
+            && clusters
+                .iter()
+                .any(|cluster| (block.font_size - cluster.centroid).abs() <= SPARSE_FONT_TIER_TOLERANCE)
+    });
+    if !has_only_two_narrow_font_tiers {
+        return Ok(None);
+    }
+
+    let heading_font_size = clusters[0].centroid;
+    let body_font_size = clusters[1].centroid;
+    let has_distinct_body_tier = heading_font_size - body_font_size > SPARSE_FONT_TIER_TOLERANCE;
+    let clears_font_gate = heading_font_size >= body_font_size * MIN_HEADING_FONT_RATIO
+        && heading_font_size >= body_font_size + MIN_HEADING_FONT_GAP;
+    if !has_distinct_body_tier || !clears_font_gate {
+        return Ok(None);
+    }
+
+    let repeated_pages: ahash::AHashSet<usize> = heuristic_pages
+        .iter()
+        .copied()
+        .filter(|&page_index| {
+            all_page_segments[page_index]
+                .iter()
+                .find(|segment| !segment.text.trim().is_empty())
+                .is_some_and(|segment| {
+                    segment.font_size.is_finite()
+                        && (segment.font_size - heading_font_size).abs() <= SPARSE_FONT_TIER_TOLERANCE
+                })
+        })
+        .collect();
+    if repeated_pages.len() < SPARSE_REPEATED_TIER_MIN_PAGES {
+        return Ok(None);
+    }
+
+    Ok(Some(
+        clusters
+            .iter()
+            .map(|cluster| {
+                let level = ((cluster.centroid - heading_font_size).abs() <= SPARSE_FONT_TIER_TOLERANCE).then_some(1);
+                (cluster.centroid, level)
+            })
+            .collect(),
+    ))
+}
+
 /// Stage 2: Cluster font sizes globally and assign heading levels.
 ///
 /// Returns (heading_map, set of struct-tree page indices needing font-size classification).
@@ -97,18 +163,31 @@ fn build_heading_map(
     let heading_map = if all_blocks.is_empty() {
         Vec::new()
     } else if paragraph_count < MIN_BLOCKS_FOR_FONT_HEADING {
-        // Sparsity gate: too few text blocks to establish a reliable body-font
-        // baseline. Return a body-only map (every cluster centroid mapped to
-        // `None`) and skip both k-means heading promotion and the fallback
-        // title promotion, so a lone larger line on a cover/title/one-line
-        // document is not over-promoted to a heading. ~keep
-        tracing::debug!(
-            paragraph_count,
-            min_blocks = MIN_BLOCKS_FOR_FONT_HEADING,
-            "heading map: document too sparse for font-size heading inference; suppressing promotion"
-        );
-        let clusters = cluster_font_sizes(&all_blocks, 1)?;
-        clusters.iter().map(|c| (c.centroid, None)).collect()
+        if let Some(map) = sparse_multi_page_heading_map(
+            all_page_segments,
+            heuristic_pages,
+            &all_blocks,
+            !struct_tree_needs_classify.is_empty(),
+        )? {
+            tracing::debug!(
+                paragraph_count,
+                "heading map: promoting a repeated sparse font tier across pages"
+            );
+            map
+        } else {
+            // Sparsity gate: too few text blocks to establish a reliable body-font
+            // baseline. Return a body-only map (every cluster centroid mapped to
+            // `None`) and skip both k-means heading promotion and the fallback
+            // title promotion, so a lone larger line on a cover/title/one-line
+            // document is not over-promoted to a heading. ~keep
+            tracing::debug!(
+                paragraph_count,
+                min_blocks = MIN_BLOCKS_FOR_FONT_HEADING,
+                "heading map: document too sparse for font-size heading inference; suppressing promotion"
+            );
+            let clusters = cluster_font_sizes(&all_blocks, 1)?;
+            clusters.iter().map(|c| (c.centroid, None)).collect()
+        }
     } else {
         let effective_k = if paragraph_count < 20 {
             k_clusters.min(2usize.max(paragraph_count / 4))
@@ -7549,15 +7628,15 @@ where new shares are issued;";
         let _ = title_entry;
     }
 
-    /// Sparsity gate: a three-block document with one clearly larger first line
-    /// (the `hello_structure.pdf` shape) must NOT promote that line to a heading.
-    /// A larger opening line in a tiny document is display prose, not a title.
+    /// Sparsity gate: a three-block, single-page document with one clearly larger
+    /// first line must NOT promote that line to a heading. A larger opening line
+    /// in a tiny document is display prose, not necessarily a title.
     #[test]
-    fn test_build_heading_map_sparse_doc_no_heading_promotion() {
+    fn test_build_heading_map_sparse_single_page_doc_no_heading_promotion() {
         let all_page_segments = vec![vec![
-            seg_with_font("Hello World", 24.0),
-            seg_with_font("Goodbye Cruel World...", 12.0),
-            seg_with_font("I'll be back shortly!", 12.0),
+            seg_with_font("Display Text", 24.0),
+            seg_with_font("Body paragraph one.", 12.0),
+            seg_with_font("Body paragraph two.", 12.0),
         ]];
         let struct_tree_results = vec![None];
         let heuristic_pages = vec![0usize];
@@ -7568,6 +7647,83 @@ where new shares are issued;";
         assert!(
             heading_map.iter().all(|(_, level)| level.is_none()),
             "3-block doc must not promote the larger first line to a heading; got: {heading_map:?}"
+        );
+    }
+
+    /// A sparse multi-page document has stronger evidence than a cover or title
+    /// page when the same large-font tier repeats on separate pages and a smaller
+    /// body tier is also present. This is the `hello_structure.pdf` shape.
+    #[test]
+    fn test_build_heading_map_sparse_multi_page_repeated_tier_promotes_headings() {
+        let all_page_segments = vec![
+            vec![seg_with_font("Hello World", 24.0)],
+            vec![
+                seg_with_font("Goodbye Cruel World...", 24.0),
+                seg_with_font("I'll be back shortly!", 12.0),
+            ],
+        ];
+        let struct_tree_results = vec![None, None];
+        let heuristic_pages = vec![0usize, 1usize];
+
+        let (heading_map, _) = build_heading_map(&all_page_segments, &struct_tree_results, &heuristic_pages, 4)
+            .expect("build_heading_map must succeed");
+
+        let repeated_tier = heading_map
+            .iter()
+            .find(|(font_size, _)| (*font_size - 24.0).abs() < 0.5);
+        assert!(
+            repeated_tier.is_some_and(|(_, level)| level.is_some()),
+            "a repeated 24pt tier across pages with a 12pt body tier must be promoted; got: {heading_map:?}"
+        );
+    }
+
+    #[test]
+    fn test_build_heading_map_sparse_multi_page_does_not_promote_non_repeated_intermediate_tier() {
+        use crate::pdf::structure::classify::{find_heading_level, precompute_gap_info};
+
+        let all_page_segments = vec![
+            vec![seg_with_font("Repeated Heading One", 22.0)],
+            vec![
+                seg_with_font("Repeated Heading Two", 22.0),
+                seg_with_font("Display prose", 21.0),
+                seg_with_font("Body paragraph.", 12.0),
+            ],
+        ];
+        let struct_tree_results = vec![None, None];
+        let heuristic_pages = vec![0usize, 1usize];
+
+        let (heading_map, _) = build_heading_map(&all_page_segments, &struct_tree_results, &heuristic_pages, 4)
+            .expect("build_heading_map must succeed");
+        let gap_info = precompute_gap_info(&heading_map);
+
+        assert_eq!(
+            find_heading_level(21.0, &heading_map, &gap_info),
+            None,
+            "a non-repeated intermediate font tier must remain prose; got: {heading_map:?}"
+        );
+    }
+
+    #[test]
+    fn test_build_heading_map_sparse_multi_page_does_not_promote_repeated_mid_page_display_text() {
+        let all_page_segments = vec![
+            vec![
+                seg_with_font("Body paragraph one.", 12.0),
+                seg_with_font("Repeated display text", 24.0),
+            ],
+            vec![
+                seg_with_font("Body paragraph two.", 12.0),
+                seg_with_font("Repeated pull quote", 24.0),
+            ],
+        ];
+        let struct_tree_results = vec![None, None];
+        let heuristic_pages = vec![0usize, 1usize];
+
+        let (heading_map, _) = build_heading_map(&all_page_segments, &struct_tree_results, &heuristic_pages, 4)
+            .expect("build_heading_map must succeed");
+
+        assert!(
+            heading_map.iter().all(|(_, level)| level.is_none()),
+            "repeated mid-page display text must remain prose in sparse documents; got: {heading_map:?}"
         );
     }
 

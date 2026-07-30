@@ -318,6 +318,42 @@ fn extract_with_format(pdf_path: &std::path::Path, format: OutputFormat) -> Opti
     extract_uri_document_blocking(pdf_path, None, &config).ok()
 }
 
+#[test]
+fn test_hello_structure_preserves_repeated_multi_page_headings() {
+    if !test_documents_available() {
+        println!("Skipping: test_documents not available");
+        return;
+    }
+
+    let pdf_path = resolve_pdf_path("hello_structure").expect("hello_structure.pdf fixture must exist");
+    let result = extract_with_format(&pdf_path, OutputFormat::Markdown).expect("hello_structure.pdf must extract");
+    let is_heading = |expected: &str| {
+        result
+            .content
+            .lines()
+            .any(|line| line.starts_with('#') && line.trim_start_matches('#').trim() == expected)
+    };
+
+    assert!(
+        is_heading("Hello World"),
+        "first repeated 24pt tier must be a heading; got:\n{}",
+        result.content
+    );
+    assert!(
+        is_heading("Goodbye Cruel World..."),
+        "second repeated 24pt tier must be a heading; got:\n{}",
+        result.content
+    );
+    assert!(
+        !result
+            .content
+            .lines()
+            .any(|line| line.starts_with('#') && line.contains("I'll be back shortly")),
+        "12pt body tier must remain a paragraph; got:\n{}",
+        result.content
+    );
+}
+
 /// Result of running the quality gate across all documents.
 #[allow(dead_code)]
 struct QualityGateResult {

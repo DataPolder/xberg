@@ -51,6 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   repairs consistently merged numeric columns from native PDF table detection.
 - **#1342**: PDF table reconstruction retains short numeric grids when a small number of inferred
   columns make the principal data row nearly complete instead of fully populated.
+- PDF Markdown recognizes repeated large-font heading tiers across sparse multi-page documents while
+  retaining the single-page sparse-document safeguard against display-text false positives.
 
 ## [1.0.3] - 2026-07-29
 
