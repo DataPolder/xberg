@@ -872,21 +872,6 @@ fn build_tatr_grid_table(
         }
         grid.push(grid_row);
     }
-    tracing::trace!("TATR GRID: {grid:#?}");
-    for (row_index, row_cells) in cell_words.iter().enumerate() {
-        tracing::trace!("TATR ROW {row_index}");
-        for (column_index, cell_word_indices) in row_cells.iter().enumerate() {
-            let positioned = cell_word_indices
-                .iter()
-                .map(|(word_index, _, _)| {
-                    let word = words[*word_index];
-                    (word.text.as_str(), word.left, word.top, word.width, word.height)
-                })
-                .collect::<Vec<_>>();
-            tracing::trace!("  COL {column_index}: {positioned:?}");
-        }
-    }
-
     let consumed_bottom =
         append_unconsumed_aligned_rows(&mut grid, words, &mut word_consumed, consumed_bottom, &converted_cells);
 
