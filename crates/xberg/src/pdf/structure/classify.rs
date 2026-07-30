@@ -21,6 +21,8 @@ const CHANGELOG_VERSION_MAX_VERTICAL_GAP_RATIO: f32 = 2.0;
 const CHANGELOG_VERSION_MAX_VERTICAL_OVERLAP_RATIO: f32 = 0.25;
 const CHANGELOG_COMBINED_MIN_HEIGHT_RATIO: f32 = 1.5;
 const CHANGELOG_COMBINED_MIN_BASELINE_GAP_RATIO: f32 = 0.5;
+const SPARSE_PEER_HEADING_MIN_PAGES: usize = 2;
+const SPARSE_PEER_HEADING_FONT_TOLERANCE: f32 = 0.5;
 type ParagraphBbox = (f32, f32, f32, f32);
 
 /// Demote structure-tree heading tags attached to standalone SAL annotations.
@@ -636,7 +638,8 @@ pub(super) fn precompute_gap_info(heading_map: &[(f32, Option<u8>)]) -> GapInfo 
 
 /// Refine heading levels across the entire document.
 ///
-/// 1. Promotes the first heading to H1 when no H1 exists (title inference).
+/// 1. Promotes the first heading to H1 when no H1 exists (title inference),
+///    unless a sparse document repeats the same H2 tier at the start of pages.
 /// 2. Merges consecutive H1 headings at the same font size into one title (any page).
 /// 3. Demotes numbered section headings from H1 to H2 when a non-numbered title H1 exists.
 /// 4. Preserves changelog section/version hierarchy where geometry confirms adjacency.
@@ -658,7 +661,7 @@ fn refine_heading_hierarchy_inner(all_pages: &mut [Vec<PdfParagraph>]) {
             .iter()
             .flat_map(|page| page.iter())
             .any(|p| p.heading_level.is_some());
-        if has_any_heading {
+        if has_any_heading && !has_repeated_sparse_peer_heading_tier(all_pages) {
             promote_title_heading(all_pages);
         }
 
@@ -1257,6 +1260,42 @@ fn paragraph_plain_text(para: &PdfParagraph) -> String {
         .map(|s| s.text.as_str())
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// Preserve peer H2 sections when a sparse document repeats their font tier at
+/// the start of multiple pages. This prevents generic title inference from
+/// arbitrarily promoting only the first peer section. ~keep
+fn has_repeated_sparse_peer_heading_tier(all_pages: &[Vec<PdfParagraph>]) -> bool {
+    let paragraph_count: usize = all_pages.iter().map(Vec::len).sum();
+    if paragraph_count >= MIN_BLOCKS_FOR_FONT_HEADING {
+        return false;
+    }
+
+    let has_explicit_title = all_pages
+        .iter()
+        .flat_map(|page| page.iter())
+        .any(|paragraph| paragraph.heading_level.is_some() && paragraph.layout_class == Some(LayoutHintClass::Title));
+    if has_explicit_title {
+        return false;
+    }
+
+    let leading_h2_fonts: Vec<f32> = all_pages
+        .iter()
+        .filter_map(|page| {
+            page.iter()
+                .find(|paragraph| !paragraph.is_page_furniture && !paragraph_plain_text(paragraph).trim().is_empty())
+                .filter(|paragraph| paragraph.heading_level == Some(2) && paragraph.dominant_font_size.is_finite())
+                .map(|paragraph| paragraph.dominant_font_size)
+        })
+        .collect();
+
+    leading_h2_fonts.iter().any(|candidate| {
+        leading_h2_fonts
+            .iter()
+            .filter(|font_size| (**font_size - *candidate).abs() <= SPARSE_PEER_HEADING_FONT_TOLERANCE)
+            .count()
+            >= SPARSE_PEER_HEADING_MIN_PAGES
+    })
 }
 
 /// Promote the most likely title heading to H1 when no H1 exists.
@@ -2732,6 +2771,40 @@ mod tests {
             pages[0][0].heading_level,
             Some(1),
             "at the sparsity floor a clearly larger title line must still be promoted"
+        );
+    }
+
+    #[test]
+    fn refine_heading_hierarchy_should_promote_single_leading_h2_to_h1() {
+        let mut heading = make_text_paragraph(24.0, "Hello World", false);
+        heading.heading_level = Some(2);
+        let body = make_text_paragraph(12.0, "I'll be back shortly!", false);
+        let mut pages = vec![vec![heading, body]];
+
+        refine_heading_hierarchy(&mut pages);
+
+        assert_eq!(pages[0][0].heading_level, Some(1));
+    }
+
+    #[test]
+    fn refine_heading_hierarchy_should_preserve_repeated_cross_page_h2_tier() {
+        let mut first_heading = make_text_paragraph(24.0, "Hello World", false);
+        first_heading.heading_level = Some(2);
+        let mut second_heading = make_text_paragraph(24.0, "Goodbye Cruel World...", false);
+        second_heading.heading_level = Some(2);
+        let mut pages = vec![
+            vec![first_heading, make_text_paragraph(12.0, "First page body text.", false)],
+            vec![
+                second_heading,
+                make_text_paragraph(12.0, "Second page body text.", false),
+            ],
+        ];
+
+        refine_heading_hierarchy(&mut pages);
+
+        assert_eq!(
+            [pages[0][0].heading_level, pages[1][0].heading_level],
+            [Some(2), Some(2)]
         );
     }
 
