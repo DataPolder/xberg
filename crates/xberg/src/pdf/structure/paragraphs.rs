@@ -2,12 +2,24 @@
 
 use super::types::PdfParagraph;
 
+/// Maximum baseline-to-baseline gap, as a multiple of the larger paragraph's
+/// dominant font size, permitted when merging a continuation paragraph.
+///
+/// A wrapped continuation line sits roughly one line-height (leading is
+/// typically 1.0–1.6× the font size) below its predecessor. A gap several times
+/// larger means the two paragraphs come from spatially distinct regions — e.g. a
+/// recipient block near the top of an invoice and a legal footer near the
+/// bottom — and must never be joined into one logical paragraph, which would
+/// associate their text (and mangle the merged block's bounding box). See #1350.
+const MAX_CONTINUATION_LINE_GAP_MULTIPLE: f32 = 3.0;
+
 /// Merge consecutive body-text paragraphs that are continuations of the same logical paragraph.
 ///
 /// Two consecutive paragraphs are merged if:
 /// - Both are body text (no heading_level, not is_list_item)
 /// - The first paragraph doesn't end with sentence-ending punctuation
 /// - Font sizes are within 2pt of each other
+/// - Their baselines are within [`MAX_CONTINUATION_LINE_GAP_MULTIPLE`] line-heights
 pub(super) fn merge_continuation_paragraphs(paragraphs: &mut Vec<PdfParagraph>) {
     if paragraphs.len() < 2 {
         return;
@@ -35,10 +47,17 @@ pub(super) fn merge_continuation_paragraphs(paragraphs: &mut Vec<PdfParagraph>) 
         let bold_compatible = current.is_bold == next.is_bold;
         let continuation_signal = !ends_with_sentence_terminator(&current) || starts_with_lowercase_continuation(&next);
         let same_region = current.layout_region_path == next.layout_region_path;
-        let should_merge = both_body && fonts_compatible && bold_compatible && continuation_signal && same_region;
+        let vertical_gap_compatible = baselines_within_continuation_gap(&current, &next);
+        let should_merge = both_body
+            && fonts_compatible
+            && bold_compatible
+            && continuation_signal
+            && same_region
+            && vertical_gap_compatible;
 
         if should_merge {
             current.text.clear();
+            current.block_bbox = union_block_bbox(current.block_bbox, next.block_bbox);
             current.lines.extend(next.lines);
         } else {
             paragraphs.push(current);
@@ -47,6 +66,41 @@ pub(super) fn merge_continuation_paragraphs(paragraphs: &mut Vec<PdfParagraph>) 
     }
 
     paragraphs.push(current);
+}
+
+/// Whether `next`'s first baseline is close enough below `current`'s last
+/// baseline to be a wrapped continuation rather than a spatially distant block.
+///
+/// Returns `true` when either paragraph lacks per-line geometry (`baseline_y`
+/// unset on the structure-tree path), preserving the prior behavior for inputs
+/// where a vertical distance cannot be computed.
+fn baselines_within_continuation_gap(current: &PdfParagraph, next: &PdfParagraph) -> bool {
+    let (Some(current_last), Some(next_first)) = (current.lines.last(), next.lines.first()) else {
+        return true;
+    };
+    // No geometry available (e.g. synthesized paragraphs): fall back to allowing
+    // the merge, gated by the other continuation signals.
+    if current_last.baseline_y == 0.0 || next_first.baseline_y == 0.0 {
+        return true;
+    }
+    let gap = (current_last.baseline_y - next_first.baseline_y).abs();
+    let line_height = current.dominant_font_size.max(next.dominant_font_size).max(1.0);
+    gap <= line_height * MAX_CONTINUATION_LINE_GAP_MULTIPLE
+}
+
+/// Union of two optional block bounding boxes in `(left, bottom, right, top)`
+/// PDF-coordinate form, so a merged paragraph's box spans all of its text.
+fn union_block_bbox(
+    current: Option<(f32, f32, f32, f32)>,
+    next: Option<(f32, f32, f32, f32)>,
+) -> Option<(f32, f32, f32, f32)> {
+    match (current, next) {
+        (Some((cl, cb, cr, ct)), Some((nl, nb, nr, nt))) => {
+            Some((cl.min(nl), cb.min(nb), cr.max(nr), ct.max(nt)))
+        }
+        (Some(bbox), None) | (None, Some(bbox)) => Some(bbox),
+        (None, None) => None,
+    }
 }
 
 /// Check if a paragraph starts with a lowercase letter, indicating it's a
@@ -219,6 +273,61 @@ mod tests {
             block_bbox: None,
             word_count,
         }
+    }
+
+    fn make_body_paragraph_at(text: &str, font_size: f32, baseline_y: f32) -> PdfParagraph {
+        let mut para = make_body_paragraph(text, font_size);
+        para.lines[0].baseline_y = baseline_y;
+        if let Some(segment) = para.lines[0].segments.first_mut() {
+            segment.baseline_y = baseline_y;
+            segment.y = baseline_y;
+        }
+        para
+    }
+
+    #[test]
+    fn test_no_merge_across_distant_regions() {
+        // A buyer tax ID in the upper recipient block and a seller tax ID in the
+        // page footer are ~590pt apart. Neither ends with a sentence terminator,
+        // so the older heuristic would merge them; the vertical-gap guard must
+        // keep them separate. Regression for #1350.
+        let mut paragraphs = vec![
+            make_body_paragraph_at("Buyer tax ID SYNTH-BUYER-TAX-359370919", 8.0, 185.5),
+            make_body_paragraph_at("Seller tax ID SYNTH-SELLER-TAX-815876165", 8.0, 775.0),
+        ];
+        merge_continuation_paragraphs(&mut paragraphs);
+        assert_eq!(
+            paragraphs.len(),
+            2,
+            "paragraphs from spatially distant regions must not merge"
+        );
+    }
+
+    #[test]
+    fn test_merge_adjacent_lines_within_gap() {
+        // Genuine wrapped continuation one line-height apart still merges.
+        let mut paragraphs = vec![
+            make_body_paragraph_at("The committee reviewed the annual", 11.0, 712.0),
+            make_body_paragraph_at("report and approved the budget", 11.0, 698.0),
+        ];
+        merge_continuation_paragraphs(&mut paragraphs);
+        assert_eq!(paragraphs.len(), 1, "adjacent continuation lines should merge");
+    }
+
+    #[test]
+    fn test_merge_unions_block_bbox() {
+        let mut upper = make_body_paragraph_at("first line without terminator", 11.0, 712.0);
+        upper.block_bbox = Some((60.0, 705.0, 260.0, 720.0));
+        let mut lower = make_body_paragraph_at("second line continues", 11.0, 698.0);
+        lower.block_bbox = Some((60.0, 691.0, 300.0, 706.0));
+        let mut paragraphs = vec![upper, lower];
+        merge_continuation_paragraphs(&mut paragraphs);
+        assert_eq!(paragraphs.len(), 1, "adjacent lines should merge");
+        assert_eq!(
+            paragraphs[0].block_bbox,
+            Some((60.0, 691.0, 300.0, 720.0)),
+            "merged block bbox must span both source boxes"
+        );
     }
 
     #[test]
