@@ -1338,7 +1338,10 @@ typedef struct XBERGOcrMetadata XBERGOcrMetadata;
  *
  * Backends are tried in priority order (highest first). After each backend
  * produces output, quality is evaluated. If it meets `quality_thresholds.pipeline_min_quality`,
- * the result is accepted. Otherwise the next backend is tried.
+ * the result is accepted. Otherwise the next backend is tried; if none clears the
+ * threshold, an internal selection policy derived from the `OcrConfig` decides which
+ * stage's result is returned as the best effort (`vlm_fallback` pipelines prefer their
+ * last non-empty stage; explicit and classical pipelines stay score-based).
  */
 typedef struct XBERGOcrPipelineConfig XBERGOcrPipelineConfig;
 /**

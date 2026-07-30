@@ -671,21 +671,27 @@ mod tests {
 
             // macOS Finder bookkeeping file (binary "Bud1..." header).
             zip.start_file(".DS_Store", options).unwrap();
-            zip.write_all(&[0x00, 0x00, 0x00, 0x01, b'B', b'u', b'd', b'1']).unwrap();
+            zip.write_all(&[0x00, 0x00, 0x00, 0x01, b'B', b'u', b'd', b'1'])
+                .unwrap();
 
             // AppleDouble resource fork sidecar under the macOS archive-utility folder.
             zip.start_file("__MACOSX/._report.txt", options).unwrap();
-            zip.write_all(&[0x00, 0x05, 0x16, 0x07, 0x00, 0x02, b'M', b'a', b'c', b' ', b'O', b'S', b' ', b'X'])
-                .unwrap();
+            zip.write_all(&[
+                0x00, 0x05, 0x16, 0x07, 0x00, 0x02, b'M', b'a', b'c', b' ', b'O', b'S', b' ', b'X',
+            ])
+            .unwrap();
 
             // AppleDouble sidecar at the top level (same file, no __MACOSX wrapper).
             zip.start_file("._report.txt", options).unwrap();
-            zip.write_all(&[0x00, 0x05, 0x16, 0x07, 0x00, 0x02, b'M', b'a', b'c', b' ', b'O', b'S', b' ', b'X'])
-                .unwrap();
+            zip.write_all(&[
+                0x00, 0x05, 0x16, 0x07, 0x00, 0x02, b'M', b'a', b'c', b' ', b'O', b'S', b' ', b'X',
+            ])
+            .unwrap();
 
             // Python bytecode cache.
             zip.start_file("__pycache__/mod.cpython-311.pyc", options).unwrap();
-            zip.write_all(&[0x42, 0x0d, 0x0d, 0x0a, 0x00, 0x00, 0x00, 0x00]).unwrap();
+            zip.write_all(&[0x42, 0x0d, 0x0d, 0x0a, 0x00, 0x00, 0x00, 0x00])
+                .unwrap();
 
             zip.finish().unwrap();
         }
@@ -699,7 +705,11 @@ mod tests {
             .unwrap();
 
         let children = result.children.expect("archive should extract the real document");
-        assert_eq!(children.len(), 1, "only report.txt should survive filtering: {children:?}");
+        assert_eq!(
+            children.len(),
+            1,
+            "only report.txt should survive filtering: {children:?}"
+        );
         assert_eq!(children[0].path, "report.txt");
         assert_eq!(children[0].mime_type, "text/plain");
 

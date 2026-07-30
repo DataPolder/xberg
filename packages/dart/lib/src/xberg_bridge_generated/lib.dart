@@ -6480,7 +6480,12 @@ class ExtractionConfig {
   /// Enable quality post-processing
   final bool enableQualityProcessing;
 
-  /// OCR configuration (None = OCR disabled)
+  /// OCR configuration.
+  ///
+  /// `None` does not run OCR for documents that already have usable text. Under
+  /// `OcrStrategy::Auto`, a PDF with no text layer at all (a scan) is still routed
+  /// to OCR with default settings so it is not returned empty (#1338). Set
+  /// [`Self::disable_ocr`] to hard-disable OCR regardless of the detected content.
   final OcrConfig? ocr;
 
   /// Force OCR even for searchable PDFs
@@ -6687,12 +6692,12 @@ class ExtractionConfig {
 
   /// Run layout detection on the non-OCR PDF markdown path.
   ///
-  /// When `true` and `layout` is `Some(_)`, layout regions inform heading,
-  /// table, list, and figure detection in the structure pipeline that would
-  /// otherwise rely on font-clustering heuristics alone. Significantly
-  /// improves SF1 (structural F1) at the cost of inference latency
-  /// (~150-300ms/page CPU, ~20-50ms/page GPU). Default: `false`.
-  /// Requires the `layout-detection` feature.
+  /// When `true` and `layout` is `Some(_)`, layout regions inform reading
+  /// order, region grouping, and table detection while native font/tag
+  /// semantics remain authoritative for headings, lists, code, and formulas.
+  /// OCR layout classification is unchanged. This improves structural output
+  /// at the cost of inference latency (~150-300ms/page CPU, ~20-50ms/page
+  /// GPU). Default: `false`. Requires the `layout-detection` feature.
   final bool useLayoutForMarkdown;
 
   /// Enable structured document tree output.
@@ -10947,7 +10952,10 @@ class OcrMetadata {
 ///
 /// Backends are tried in priority order (highest first). After each backend
 /// produces output, quality is evaluated. If it meets `quality_thresholds.pipeline_min_quality`,
-/// the result is accepted. Otherwise the next backend is tried.
+/// the result is accepted. Otherwise the next backend is tried; if none clears the
+/// threshold, an internal selection policy derived from the `OcrConfig` decides which
+/// stage's result is returned as the best effort (`vlm_fallback` pipelines prefer their
+/// last non-empty stage; explicit and classical pipelines stay score-based).
 class OcrPipelineConfig {
   /// Ordered list of backends to try. Sorted by priority (descending) at runtime.
   final List<OcrPipelineStage> stages;

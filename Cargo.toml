@@ -23,7 +23,7 @@ default-members = ["crates/xberg", "crates/xberg-cli"]
 resolver = "2"
 
 [workspace.package]
-version = "1.0.3"
+version = "1.0.4"
 edition = "2024"
 rust-version = "1.91"
 authors = ["Na'aman Hirschfeld <naaman@xberg.io>"]
@@ -122,7 +122,7 @@ tracing = "0.1"
 # and WASM-safe; the top-level `tract` facade instead defaults to CUDA and bundles
 # GPU backends, so it is unusable here. See issue #1275.
 tract-onnx = { version = "0.23.4", default-features = false }
-tree-sitter-language-pack = { version = "1.13.6", default-features = false, features = ["serde"] }
+tree-sitter-language-pack = { version = "1.13.7", default-features = false, features = ["serde"] }
 url = "2.5.8"
 wasm-bindgen = { version = "0.2", features = ["enable-interning"] }
 wasm-bindgen-futures = "0.4"
@@ -136,8 +136,8 @@ web-sys = { version = "0.3", features = [
     "Window",
     "Response",
 ] }
-xberg = { path = "./crates/xberg", version = "1.0.3", default-features = false }
-xberg-gliner = { path = "./crates/xberg-gliner", version = "1.0.3", default-features = false }
+xberg = { path = "./crates/xberg", version = "1.0.4", default-features = false }
+xberg-gliner = { path = "./crates/xberg-gliner", version = "1.0.4", default-features = false }
 
 [patch.crates-io]
 xberg = { path = "crates/xberg" }
