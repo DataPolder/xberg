@@ -1,5 +1,5 @@
 #![deny(clippy::print_stdout, clippy::print_stderr)]
-#![cfg_attr(test, allow(clippy::print_stdout, clippy::print_stderr))]
+#![cfg_attr(test, allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro))]
 //! Xberg - High-Performance Document Intelligence Library
 //!
 //! Xberg is a Rust-first document extraction library with language-agnostic plugin support.

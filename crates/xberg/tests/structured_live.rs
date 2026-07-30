@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Live integration tests for public structured extraction.
 //!
 //! These tests hit real provider APIs and require API keys in the workspace

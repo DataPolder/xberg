@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Diagnostic test to trace PaddleOCR detection pipeline.
 //!
 //! This test isolates each step to determine where empty results originate.

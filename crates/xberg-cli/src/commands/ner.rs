@@ -16,6 +16,10 @@ use crate::{WireFormat, style};
 /// list of xberg GLiNER aliases or catalog ids. `all` downloads every variant
 /// xberg knows about.
 #[allow(dead_code)]
+#[expect(
+    clippy::print_stdout,
+    reason = "NER download summary is the command's stdout result output"
+)]
 pub fn download_command(
     ner: bool,
     models: Vec<String>,

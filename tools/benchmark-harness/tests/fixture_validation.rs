@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Comprehensive fixture validation integration tests
 //!
 //! This module ensures the fixture corpus maintains quality and consistency by:

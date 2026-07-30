@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Regression tests for PPTX/PPSX extraction bugs
 //!
 //! GitHub Issue #321: PPTX extraction fails on shapes without txBody (image placeholders) + PPSX not supported

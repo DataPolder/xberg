@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! End-to-end integration tests for `ImageExtractionConfig.output_format`.
 //!
 //! Drives real extractors through `extract_uri_document_blocking` and asserts that the

@@ -34,6 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Raw `println!`/`eprintln!`/`print!`/`eprint!`/`dbg!` are now denied in production code across the
+  whole workspace (clippy `print_stdout`/`print_stderr`/`dbg_macro`); `tracing` is the sole
+  diagnostic surface. The CLI's machine-readable result output to stdout opts back in per call site
+  (`#[expect(clippy::print_stdout)]`), and the regenerated language bindings route their FFI-bridge
+  diagnostics through `tracing` instead of `eprintln!`.
 - Internal diagnostics that previously wrote to stderr via `eprintln!` (per-page OCR gate decisions,
   GLM-OCR debug tensor stats, the CLI `--output-format` deprecation notice) now emit through
   `tracing` at the appropriate level, so verbosity is controlled with `RUST_LOG` / `--log-level`

@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! End-to-end tests for `split_and_extract` (multi-document PDF splitting).
 //!
 //! Fixture required (relative to `test_documents/`):

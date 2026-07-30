@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Regression tests for PDF image extraction in markdown output.
 //!
 //! Verifies that embedded images in PDFs produce proper `![](image_N.fmt)`

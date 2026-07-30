@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Configuration features integration tests.
 //!
 //! Tests for chunking, language detection, caching, token reduction, and quality processing.

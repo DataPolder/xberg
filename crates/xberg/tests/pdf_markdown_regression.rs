@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! PDF extraction regression tests using ground truth.
 //!
 //! These tests ensure extraction quality does not regress across all output formats

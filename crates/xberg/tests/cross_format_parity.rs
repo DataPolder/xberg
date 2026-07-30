@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Cross-format output parity tests.
 //!
 //! Verify that all output formats (Markdown, HTML, Djot, Plain) produce

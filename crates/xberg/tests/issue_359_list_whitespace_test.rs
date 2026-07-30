@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Regression test for https://github.com/xberg-io/xberg/issues/359
 //!
 //! DOCX list items with multiple text runs should preserve whitespace between runs.

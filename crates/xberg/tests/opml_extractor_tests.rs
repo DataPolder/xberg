@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Comprehensive TDD test suite for OPML (Outline Processor Markup Language) extraction
 //!
 //! This test suite validates OPML extraction capabilities.

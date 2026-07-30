@@ -1,3 +1,6 @@
+// Internal dev tool: stdout IS this binary's report output, so raw printing is intentional. ~keep
+#![allow(clippy::print_stdout, clippy::print_stderr)]
+
 use std::path::PathBuf;
 
 use benchmark_harness::Result;

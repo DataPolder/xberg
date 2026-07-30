@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Comprehensive CLI end-to-end integration tests for configuration flags.
 //!
 //! This test suite validates the new configuration features including:

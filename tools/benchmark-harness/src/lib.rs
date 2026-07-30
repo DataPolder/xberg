@@ -36,6 +36,8 @@
 //! | [`types`] | Core data types (`BenchmarkResult`, `QualityMetrics`, etc.). |
 
 #![allow(missing_docs)]
+// Internal dev tool: stdout IS this harness's report output, so raw printing is intentional. ~keep
+#![allow(clippy::print_stdout, clippy::print_stderr)]
 
 pub mod adapter;
 pub mod adapters;

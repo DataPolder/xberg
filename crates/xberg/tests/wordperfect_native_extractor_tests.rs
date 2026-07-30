@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Integration tests for the native WordPerfect extractor.
 //!
 //! These drive the full public extraction path — `WordPerfectExtractor::extract`

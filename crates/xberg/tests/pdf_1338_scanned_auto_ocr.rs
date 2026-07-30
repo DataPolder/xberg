@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Regression test for issue #1338.
 //!
 //! Under the default `Auto` strategy with no explicit `ocr` config (`ocr: None`,

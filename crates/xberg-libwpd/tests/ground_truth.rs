@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Full-decode tests against the WordPerfect corpus in the `test_documents`
 //! submodule, covering WP 4.2 through Corel WP6 and the Macintosh variants.
 //!

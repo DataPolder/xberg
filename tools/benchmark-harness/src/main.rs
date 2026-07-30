@@ -1,5 +1,8 @@
 //! Benchmark harness CLI
 
+// Internal dev tool: stdout IS this binary's report output, so raw printing is intentional. ~keep
+#![allow(clippy::print_stdout, clippy::print_stderr)]
+
 #[cfg(feature = "memory-profiling")]
 #[global_allocator]
 static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;

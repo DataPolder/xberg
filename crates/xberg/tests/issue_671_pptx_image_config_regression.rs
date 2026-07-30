@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Regression tests for https://github.com/xberg-io/xberg/issues/671
 //!
 //! ImageExtractionConfig.inject_placeholders was silently ignored on PPTX:

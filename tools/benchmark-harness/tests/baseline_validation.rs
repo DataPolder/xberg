@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Baseline validation tests for benchmark infrastructure
 //!
 //! These tests verify that the benchmark infrastructure fixes (Phase 1.1-1.3) are working

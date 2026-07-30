@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Integration tests for PDF text hierarchy detection.
 //!
 //! Tests the extraction and detection of document hierarchy levels (H1-H6)

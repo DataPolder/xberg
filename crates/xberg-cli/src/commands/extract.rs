@@ -123,6 +123,10 @@ fn write_extracted_images(images: &[ExtractedImage], output_dir: &Path) -> Resul
 /// to compute `process_init_ms` for the optional stage-timing breakdown (see
 /// [`stage_timing_requested`]); pass `None` to skip that measurement entirely (e.g. from tests
 /// that construct this call directly).
+#[expect(
+    clippy::print_stdout,
+    reason = "extracted content and JSON/TOON envelope are the command's stdout result output"
+)]
 pub fn extract_command(
     input: ExtractInputSource,
     config: ExtractionConfig,
@@ -175,6 +179,10 @@ pub fn extract_command(
 }
 
 /// Execute batch extraction command with optional per-file configuration overrides
+#[expect(
+    clippy::print_stdout,
+    reason = "batch extraction results are the command's stdout result output"
+)]
 pub fn batch_command(
     uris: Vec<String>,
     file_configs_map: Option<std::collections::HashMap<String, serde_json::Value>>,

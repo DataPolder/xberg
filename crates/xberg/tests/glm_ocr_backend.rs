@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(feature = "candle-glm-ocr")]
 
 //! End-to-end integration test for `GlmOcrBackend` through the `OcrBackend` trait.

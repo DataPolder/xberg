@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![allow(clippy::len_zero, clippy::unnecessary_get_then_check, clippy::single_match)]
 #![cfg(feature = "office")]
 //! Comprehensive behavioral tests for Typst extractor against Pandoc baselines.

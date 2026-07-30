@@ -32,6 +32,10 @@ impl CacheManifestEntry {
 }
 
 /// Execute cache stats command
+#[expect(
+    clippy::print_stdout,
+    reason = "cache statistics are the command's stdout result output"
+)]
 pub fn stats_command(cache_dir: Option<PathBuf>, format: WireFormat) -> Result<()> {
     let default_cache_dir = std::env::current_dir()
         .context("Failed to get current directory")?
@@ -104,6 +108,10 @@ pub fn stats_command(cache_dir: Option<PathBuf>, format: WireFormat) -> Result<(
 }
 
 /// Clear the Xberg-managed cache. Shared Hugging Face cache files are excluded.
+#[expect(
+    clippy::print_stdout,
+    reason = "cache clear summary is the command's stdout result output"
+)]
 pub fn clear_command(cache_dir: Option<PathBuf>, format: WireFormat) -> Result<()> {
     let default_cache_dir = std::env::current_dir()
         .context("Failed to get current directory")?
@@ -175,6 +183,10 @@ pub fn manifest_command(format: WireFormat) -> Result<()> {
 }
 
 #[cfg(any(feature = "paddle-ocr", feature = "layout-detection", feature = "ner-onnx"))]
+#[expect(
+    clippy::print_stdout,
+    reason = "model manifest is the command's stdout result output"
+)]
 fn manifest_command_inner(format: WireFormat) -> Result<()> {
     let mut entries: Vec<CacheManifestEntry> = Vec::new();
 
@@ -290,6 +302,10 @@ fn manifest_command_inner(format: WireFormat) -> Result<()> {
     feature = "ner-onnx"
 ))]
 #[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::print_stdout,
+    reason = "cache warm download summary is the command's stdout result output"
+)]
 pub fn warm_command(
     cache_dir: Option<PathBuf>,
     format: WireFormat,

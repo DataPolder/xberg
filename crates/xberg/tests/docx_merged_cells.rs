@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Regression test for xberg-io/xberg#1223 / #1212: DOCX table cells after a
 //! horizontal merge must keep their column position. A cell following a
 //! gridSpan=2 must land in column 2, not shift to column 1.

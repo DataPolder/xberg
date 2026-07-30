@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! End-to-end integration test for the candle PaddleOCR-VL engine.
 //!
 //! Marked `#[ignore]` because it pulls ~1.8 GB of safetensors from

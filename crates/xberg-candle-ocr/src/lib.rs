@@ -1,5 +1,5 @@
 #![deny(clippy::print_stdout, clippy::print_stderr)]
-#![cfg_attr(test, allow(clippy::print_stdout, clippy::print_stderr))]
+#![cfg_attr(test, allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro))]
 //! # xberg-candle-ocr
 //!
 //! Candle-based VLM OCR engines for Xberg. Pure-Rust transformer OCR.

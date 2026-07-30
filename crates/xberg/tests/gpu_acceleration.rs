@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! GPU acceleration integration tests for all ORT-backed subsystems.
 //!
 //! Covers every code path that uses AccelerationConfig → apply_execution_providers:

@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Integration tests for the JSON timing envelope added to `xberg extract` and
 //! `xberg batch`.
 //!

@@ -9,6 +9,10 @@ use crate::{WireFormat, style};
 /// When `provider` is `"local"` (default), uses the ONNX preset model.
 /// When `provider` is `"llm"`, uses liter-llm with the specified model and API key.
 /// When `provider` is `"plugin"`, dispatches to a pre-registered in-process embedding backend.
+#[expect(
+    clippy::print_stdout,
+    reason = "embedding vectors are the command's stdout result output"
+)]
 pub fn embed_command(
     texts: Vec<String>,
     preset: &str,

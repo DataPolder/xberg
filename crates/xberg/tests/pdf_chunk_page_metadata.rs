@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Integration tests verifying that chunk `first_page`/`last_page` are populated
 //! for all chunks when extracting single-page and multi-page PDFs with chunking enabled.
 //!

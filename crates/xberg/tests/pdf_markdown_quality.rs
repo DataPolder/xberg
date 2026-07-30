@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! PDF markdown quality smoke tests: verify extraction produces structural elements.
 //!
 //! These are lightweight assertions — detailed quality scoring and A/B comparisons

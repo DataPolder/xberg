@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Gated smoke test: requires a real GLiNER2 PyTorch safetensors snapshot
 //! and a real PEFT LoRA adapter on disk. Run explicitly with:
 //!

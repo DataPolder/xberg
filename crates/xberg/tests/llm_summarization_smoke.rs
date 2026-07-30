@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Live smoke test for the abstractive summarisation path.
 //!
 //! Skipped automatically when no provider API key is present in the

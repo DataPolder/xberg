@@ -15,6 +15,10 @@ use crate::{WireFormat, style};
 /// - Specific languages by name
 /// - All available languages (--all)
 /// - Language groups (--groups)
+#[expect(
+    clippy::print_stdout,
+    reason = "tree-sitter download summary is the command's stdout result output"
+)]
 pub fn download_command(
     languages: Vec<String>,
     all: bool,
@@ -110,6 +114,10 @@ pub fn download_command(
 ///
 /// Lists available or downloaded tree-sitter languages, optionally filtering
 /// by a name substring.
+#[expect(
+    clippy::print_stdout,
+    reason = "tree-sitter language list is the command's stdout result output"
+)]
 pub fn list_command(downloaded_only: bool, filter: Option<String>, format: WireFormat) -> Result<()> {
     let languages = if downloaded_only {
         tree_sitter_language_pack::downloaded_languages()
@@ -172,6 +180,10 @@ pub fn list_command(downloaded_only: bool, filter: Option<String>, format: WireF
 /// Execute the tree-sitter cache-dir command.
 ///
 /// Displays the effective cache directory for tree-sitter grammar parsers.
+#[expect(
+    clippy::print_stdout,
+    reason = "tree-sitter cache directory is the command's stdout result output"
+)]
 pub fn cache_dir_command(format: WireFormat) -> Result<()> {
     let dir = tree_sitter_language_pack::cache_dir().context("Failed to determine tree-sitter cache directory")?;
     let dir_str = dir.to_string_lossy();
@@ -202,6 +214,10 @@ pub fn cache_dir_command(format: WireFormat) -> Result<()> {
 /// Execute the tree-sitter clean command.
 ///
 /// Clears all cached tree-sitter grammar parser shared libraries.
+#[expect(
+    clippy::print_stdout,
+    reason = "tree-sitter clean status is the command's stdout result output"
+)]
 pub fn clean_command(format: WireFormat) -> Result<()> {
     tree_sitter_language_pack::clean_cache().context("Failed to clean tree-sitter cache")?;
 

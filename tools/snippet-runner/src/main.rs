@@ -1,3 +1,6 @@
+// Internal dev tool: stdout IS this validator's report output, so raw printing is intentional. ~keep
+#![allow(clippy::print_stdout, clippy::print_stderr)]
+
 use clap::{Parser, Subcommand};
 use snippet_runner::discovery;
 use snippet_runner::output;

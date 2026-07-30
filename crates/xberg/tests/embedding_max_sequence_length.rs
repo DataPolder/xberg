@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Regression test for hardcoded 512-token embedding truncation (issue #1223).
 //!
 //! Before the fix, `get_or_init_engine` always configured the tokenizer with a

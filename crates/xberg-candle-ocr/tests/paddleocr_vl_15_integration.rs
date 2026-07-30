@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Network-gated smoke test for PaddleOCR-VL 1.5 end-to-end inference.
 //!
 //! **HuggingFace model**: `paddlepaddle/paddleocr-v4` (PaddleOCR-VL 1.5 vision-language variant)

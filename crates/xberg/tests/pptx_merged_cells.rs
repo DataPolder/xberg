@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Regression guard for xberg-io/xberg#1223: a PPTX table cell with a
 //! horizontal merge must keep every following cell in its own column. xberg's
 //! own DrawingML parser iterates all `<a:tc>` including the `hMerge` placeholder

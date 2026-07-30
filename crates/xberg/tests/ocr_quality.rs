@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! OCR quality assessment tests.
 //!
 //! This module tests OCR quality by comparing against ground truth (native PDF text layers).

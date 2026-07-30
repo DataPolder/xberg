@@ -1,7 +1,9 @@
-// stdout is this binary's output contract, so `print_stdout` is allowed here;
-// diagnostics must still go through `tracing`, so `print_stderr` is denied.
+// stdout is this binary's output contract, but per the org logging policy each
+// result-output site opts in explicitly via `#[expect(clippy::print_stdout)]`;
+// diagnostics must go through `tracing`, so both raw print macros are denied. ~keep
 #![deny(clippy::print_stderr)]
-#![cfg_attr(test, allow(clippy::print_stderr))]
+#![deny(clippy::print_stdout)]
+#![cfg_attr(test, allow(clippy::print_stderr, clippy::print_stdout))]
 //! Xberg CLI - Command-line interface for document intelligence.
 //!
 //! This binary provides a command-line interface to the Xberg document intelligence
@@ -600,6 +602,10 @@ impl From<ContentOutputFormatArg> for ContentOutputFormat {
     }
 }
 
+#[expect(
+    clippy::print_stdout,
+    reason = "detect/formats/version/api-schema results are the CLI's stdout output contract"
+)]
 fn main() -> Result<()> {
     // Captured as early as feasible for the optional per-stage cold-start timing breakdown (see
     // `commands::extract::stage_timing_requested`). Gated on the env var so the timing path is

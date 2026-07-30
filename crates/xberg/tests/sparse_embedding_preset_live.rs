@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Live validation for self-hosted SPLADE sparse-embedding presets.
 //!
 //! Downloads the preset's ONNX model from `xberg-io/sparse-embeddings` and runs

@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Regression guard for xberg-io/xberg#1223: an XLSX merged header must keep
 //! every following cell in its own column. calamine's `worksheet_range` returns
 //! a dense grid where a merged region carries its value in the origin cell and

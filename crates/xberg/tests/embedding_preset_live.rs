@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Live validation for self-hosted 2026-gen embedding presets.
 //!
 //! Downloads the preset's ONNX model from the `xberg-io/*` mirror and runs real
