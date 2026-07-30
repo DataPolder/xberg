@@ -177,14 +177,13 @@ pub fn create_xberg_adapter(
     } else {
         format!("xberg-{}-{}", format_slug, pipeline.as_str())
     };
-    let supported_formats = vec![
-        "pdf", "docx", "doc", "xlsx", "xls", "pptx", "ppt", "txt", "md", "html", "xml", "json", "odt", "ods", "odp",
-        "epub", "rtf", "wpd", "wp", "csv", "json", "yaml", "png", "jpg", "jpeg", "gif", "bmp", "tiff", "tif", "webp",
-        "zip", "tar", "gz", "7z",
-    ]
-    .into_iter()
-    .map(|s| s.to_string())
-    .collect();
+    // Derive the benchmarkable format list from xberg's own MIME registry so it never drifts from
+    // what xberg can actually extract (a stale hardcoded list silently filtered out fixtures for
+    // formats like fb2/eml/msg/rst/org/latex/typst/docbook/tsv, which xberg fully supports).
+    let supported_formats = xberg::list_supported_formats()
+        .into_iter()
+        .map(|format| format.extension)
+        .collect();
 
     let env = vec![(STAGE_TIMING_ENV_VAR.to_string(), "1".to_string())];
 

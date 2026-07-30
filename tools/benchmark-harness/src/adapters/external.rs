@@ -48,7 +48,7 @@ fn get_supported_formats(framework_name: &str) -> Vec<String> {
     match framework_name {
         "liteparse" => vec!["pdf".to_string()],
 
-        "pymupdf4llm" => vec!["pdf", "epub", "svg", "txt", "png", "jpg", "jpeg", "bmp", "tiff", "tif"]
+        "pymupdf4llm" => vec!["pdf", "epub", "fb2", "svg", "txt", "png", "jpg", "jpeg", "bmp", "tiff", "tif"]
             .into_iter()
             .map(|s| s.to_string())
             .collect(),
@@ -72,8 +72,8 @@ fn get_supported_formats(framework_name: &str) -> Vec<String> {
         .collect(),
 
         "markitdown" => vec![
-            "pdf", "docx", "pptx", "xlsx", "xls", "html", "htm", "xml", "csv", "json", "epub", "ipynb", "msg", "png",
-            "jpg", "jpeg", "bmp", "tiff", "tif", "zip",
+            "pdf", "docx", "pptx", "xlsx", "xls", "html", "htm", "xml", "md", "markdown", "txt", "csv", "json",
+            "epub", "ipynb", "msg", "png", "jpg", "jpeg", "bmp", "tiff", "tif", "zip",
         ]
         .into_iter()
         .map(|s| s.to_string())
@@ -87,7 +87,10 @@ fn get_supported_formats(framework_name: &str) -> Vec<String> {
         .map(|s| s.to_string())
         .collect(),
 
-        "mineru" => vec!["pdf", "png", "jpg"].into_iter().map(|s| s.to_string()).collect(),
+        "mineru" => vec!["pdf", "png", "jpg", "jpeg", "bmp", "tiff", "tif", "webp"]
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect(),
 
         _ => vec![
             "pdf", "docx", "doc", "xlsx", "xls", "pptx", "ppt", "txt", "md", "html", "xml", "json", "wpd", "wp",
