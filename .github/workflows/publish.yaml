@@ -596,6 +596,24 @@ jobs:
           use-napi-cross: "false"
           pack-target-tarball: node-bindings-${{ matrix.target }}.tar.gz
 
+      - name: Ship the alef-generated index.d.ts, not napi's regenerated one
+        shell: bash
+        run: |
+          set -euo pipefail
+          # `napi build` (run inside build-node-napi) regenerates
+          # crates/xberg-node/index.d.ts from the Rust napi idents, reintroducing
+          # dangling `Js*` type references that TypeScript resolves to `any`
+          # (#1351). The committed file is alef-generated and correct, so restore
+          # it and repack the per-target tarball so the clean declaration file is
+          # what ships. On macOS the vendor step below repacks again with the
+          # dylib closure, reusing this restored file; on the other targets this
+          # repack produces the final tarball (build-node-napi does not repack).
+          git checkout HEAD -- crates/xberg-node/index.d.ts
+          members=(npm)
+          [ -f crates/xberg-node/index.js ] && members+=(index.js)
+          [ -f crates/xberg-node/index.d.ts ] && members+=(index.d.ts)
+          tar -czf "node-bindings-${{ matrix.target }}.tar.gz" -C crates/xberg-node "${members[@]}"
+
       - name: Vendor macOS dylib closure (libheif + codecs) into the .node package
         if: contains(matrix.target, 'apple-darwin')
         shell: bash
