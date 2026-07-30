@@ -360,6 +360,44 @@ fn assemble_layout_page(
 }
 
 #[cfg(all(feature = "pdf", feature = "layout-detection"))]
+/// Whether the layout config would run inference on a hardware-accelerated
+/// execution provider rather than plain CPU.
+///
+/// An explicit `Cpu` is never accelerated; `CoreMl`/`Cuda`/`TensorRt` always
+/// are. `Auto` is accelerated only on platforms whose auto-selection picks a GPU
+/// EP — macOS (CoreML) and Linux built with `cuda` — mirroring the selection in
+/// [`crate::ort_discovery`]. Used to decide whether a failed inference is worth
+/// retrying on CPU (#1344).
+#[cfg(all(feature = "pdf", feature = "layout-detection"))]
+fn layout_provider_is_accelerated(config: &LayoutDetectionConfig) -> bool {
+    use crate::core::config::acceleration::ExecutionProviderType;
+    let provider = config
+        .acceleration
+        .as_ref()
+        .map(|acceleration| &acceleration.provider)
+        .unwrap_or(&ExecutionProviderType::Auto);
+    match provider {
+        ExecutionProviderType::Cpu => false,
+        ExecutionProviderType::CoreMl | ExecutionProviderType::Cuda | ExecutionProviderType::TensorRt => true,
+        ExecutionProviderType::Auto => cfg!(target_os = "macos") || cfg!(all(target_os = "linux", feature = "cuda")),
+    }
+}
+
+/// Clone `config` with its execution provider forced to CPU, preserving every
+/// other layout setting. The distinct acceleration key routes the retry to a
+/// separate CPU engine, leaving the accelerated engine pool untouched (#1344).
+#[cfg(all(feature = "pdf", feature = "layout-detection"))]
+fn layout_config_forced_to_cpu(config: &LayoutDetectionConfig) -> LayoutDetectionConfig {
+    use crate::core::config::acceleration::{AccelerationConfig, ExecutionProviderType};
+    let device_id = config.acceleration.as_ref().map(|acceleration| acceleration.device_id).unwrap_or(0);
+    let mut cpu_config = config.clone();
+    cpu_config.acceleration = Some(AccelerationConfig {
+        provider: ExecutionProviderType::Cpu,
+        device_id,
+    });
+    cpu_config
+}
+
 pub(super) fn run_layout_for_pdf_pages(
     content: &[u8],
     layout_config: &LayoutDetectionConfig,
@@ -499,14 +537,33 @@ pub(super) async fn maybe_run_layout_for_markdown(
         return (None, None, None, None, None, None);
     }
     let thread_budget = crate::core::config::concurrency::resolve_thread_budget(config.concurrency.as_ref());
-    match run_layout_for_pdf_pages_async(
-        content,
-        layout_config.as_ref(),
-        thread_budget,
-        GatedPageHandling::SkipRender,
-    )
-    .await
+    let layout_config_ref = layout_config.as_ref();
+    let mut run_result =
+        run_layout_for_pdf_pages_async(content, layout_config_ref, thread_budget, GatedPageHandling::SkipRender).await;
+
+    // A hard inference failure on a hardware-accelerated execution provider (for
+    // example a CoreML `ExecuteKernel` runtime error under `Auto` on macOS) does
+    // not mean the model is unrunnable — the always-available CPU provider handles
+    // it. Retry once on CPU so the document keeps its layout instead of silently
+    // degrading to byte-identical no-layout output. Only if CPU also fails do we
+    // surface the degradation as a `ProcessingWarning` below (#1344).
+    if let Err(accelerated_error) = &run_result
+        && layout_provider_is_accelerated(layout_config_ref)
     {
+        tracing::warn!(
+            error = %accelerated_error,
+            "layout-for-markdown: accelerated inference failed, retrying on CPU"
+        );
+        let cpu_config = layout_config_forced_to_cpu(layout_config_ref);
+        let cpu_result =
+            run_layout_for_pdf_pages_async(content, &cpu_config, thread_budget, GatedPageHandling::SkipRender).await;
+        if cpu_result.is_ok() {
+            tracing::info!("layout-for-markdown: CPU retry recovered layout after accelerated inference failure");
+        }
+        run_result = cpu_result;
+    }
+
+    match run_result {
         Ok(LayoutRunOutput {
             data: Some((images, results, hints, detections)),
             gate_decisions,
@@ -573,10 +630,50 @@ pub(super) async fn run_layout_for_ocr(
 mod tests {
     use super::{
         FAILED_RENDER_PLACEHOLDER_SIDE, GatedPageHandling, RenderedLayoutPage, assemble_layout_chunk,
-        displayed_page_dimensions, gate_selects_page, render_failure_placeholder, render_layout_chunk,
-        validate_batch_cardinality,
+        displayed_page_dimensions, gate_selects_page, layout_config_forced_to_cpu, layout_provider_is_accelerated,
+        render_failure_placeholder, render_layout_chunk, validate_batch_cardinality,
     };
+    use crate::core::config::acceleration::{AccelerationConfig, ExecutionProviderType};
+    use crate::core::config::layout::LayoutDetectionConfig;
     use crate::pdf::layout_gate::PageGateDecision;
+
+    fn layout_config_with_provider(provider: ExecutionProviderType, device_id: u32) -> LayoutDetectionConfig {
+        LayoutDetectionConfig {
+            acceleration: Some(AccelerationConfig { provider, device_id }),
+            ..LayoutDetectionConfig::default()
+        }
+    }
+
+    #[test]
+    fn explicit_cpu_provider_is_not_accelerated() {
+        let config = layout_config_with_provider(ExecutionProviderType::Cpu, 0);
+        assert!(!layout_provider_is_accelerated(&config));
+    }
+
+    #[test]
+    fn gpu_providers_are_accelerated() {
+        for provider in [
+            ExecutionProviderType::CoreMl,
+            ExecutionProviderType::Cuda,
+            ExecutionProviderType::TensorRt,
+        ] {
+            let config = layout_config_with_provider(provider, 0);
+            assert!(layout_provider_is_accelerated(&config), "GPU provider must be accelerated");
+        }
+    }
+
+    #[test]
+    fn forcing_cpu_preserves_device_id_and_sets_cpu_provider() {
+        let config = layout_config_with_provider(ExecutionProviderType::Cuda, 3);
+        let cpu_config = layout_config_forced_to_cpu(&config);
+        assert!(
+            !layout_provider_is_accelerated(&cpu_config),
+            "a CPU-forced config must not be treated as accelerated (no retry loop)"
+        );
+        let acceleration = cpu_config.acceleration.as_ref().expect("forced config carries acceleration");
+        assert_eq!(acceleration.provider, ExecutionProviderType::Cpu);
+        assert_eq!(acceleration.device_id, 3, "device id must be preserved across the CPU fallback");
+    }
 
     fn rendered_page(page_index: usize, width: u32, page_width_pts: f32) -> RenderedLayoutPage {
         RenderedLayoutPage {
