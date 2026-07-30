@@ -594,22 +594,30 @@ fn zero_bucket(total_sample_count: usize) -> PerformancePercentiles {
 }
 
 fn build_aggregate(contract: &CohortContract, cohort: Cohort) -> NewConsolidatedResults {
+    // Real per-extension buckets derived from the contract, so family cohorts (office, images, …)
+    // produce the multi-file-type shape the validator now checks — not a single fake "pdf" bucket.
+    let mut ext_counts: HashMap<&str, usize> = HashMap::new();
+    for extension in contract.document_extensions {
+        *ext_counts.entry(*extension).or_insert(0) += 1;
+    }
     let mut by_framework_mode = HashMap::new();
     for entry in &contract.matrix {
-        let bucket = zero_bucket(contract.fixtures.len());
         let mut by_file_type = HashMap::new();
-        by_file_type.insert(
-            "pdf".to_string(),
-            FileTypeAggregation {
-                file_type: "pdf".to_string(),
-                no_ocr: if cohort.expects_ocr() {
-                    None
-                } else {
-                    Some(bucket.clone())
+        for (extension, count) in &ext_counts {
+            let bucket = zero_bucket(*count);
+            by_file_type.insert(
+                (*extension).to_string(),
+                FileTypeAggregation {
+                    file_type: (*extension).to_string(),
+                    no_ocr: if cohort.expects_ocr() {
+                        None
+                    } else {
+                        Some(bucket.clone())
+                    },
+                    with_ocr: if cohort.expects_ocr() { Some(bucket) } else { None },
                 },
-                with_ocr: if cohort.expects_ocr() { Some(bucket) } else { None },
-            },
-        );
+            );
+        }
         by_framework_mode.insert(
             entry.aggregate_key(),
             FrameworkModeAggregation {
@@ -627,42 +635,46 @@ fn build_aggregate(contract: &CohortContract, cohort: Cohort) -> NewConsolidated
         .matrix
         .iter()
         .flat_map(|entry| {
-            contract.document_stems.iter().map(move |stem| PerFixtureRow {
-                framework: entry.framework.clone(),
-                output_format: entry.output_format,
-                execution_mode: entry.mode.aggregate_slug().to_string(),
-                ocr: Some(cohort.expects_ocr()),
-                fixture_id: (*stem).to_string(),
-                file_type: "pdf".to_string(),
-                duration_ms: 0.0,
-                peak_memory_mb: 0.0,
-                f1_text: None,
-                f1_layout: None,
-                f1_numeric: None,
-                quality_score: None,
-                correct: None,
-                success: true,
-                error_kind: None,
-                file_size: 1,
-                throughput_bytes_per_sec: 0.0,
-                avg_cpu_percent: 0.0,
-                cpu_seconds: 0.0,
-                baseline_memory_bytes: 0,
-                peak_memory_delta_bytes: 0,
-                p50_memory_bytes: 0,
-                p95_memory_bytes: 0,
-                p99_memory_bytes: 0,
-                extraction_duration_ms: None,
-                subprocess_overhead_ms: None,
-                cold_start_duration_ms: None,
-                error_message: None,
-                quality: None,
-                pdf_metadata: None,
-                framework_capabilities: FrameworkCapabilities::default(),
-                system_load: None,
-                iterations: Vec::new(),
-                statistics: None,
-            })
+            contract
+                .document_stems
+                .iter()
+                .zip(contract.document_extensions.iter())
+                .map(move |(stem, extension)| PerFixtureRow {
+                    framework: entry.framework.clone(),
+                    output_format: entry.output_format,
+                    execution_mode: entry.mode.aggregate_slug().to_string(),
+                    ocr: Some(cohort.expects_ocr()),
+                    fixture_id: (*stem).to_string(),
+                    file_type: (*extension).to_string(),
+                    duration_ms: 0.0,
+                    peak_memory_mb: 0.0,
+                    f1_text: None,
+                    f1_layout: None,
+                    f1_numeric: None,
+                    quality_score: None,
+                    correct: None,
+                    success: true,
+                    error_kind: None,
+                    file_size: 1,
+                    throughput_bytes_per_sec: 0.0,
+                    avg_cpu_percent: 0.0,
+                    cpu_seconds: 0.0,
+                    baseline_memory_bytes: 0,
+                    peak_memory_delta_bytes: 0,
+                    p50_memory_bytes: 0,
+                    p95_memory_bytes: 0,
+                    p99_memory_bytes: 0,
+                    extraction_duration_ms: None,
+                    subprocess_overhead_ms: None,
+                    cold_start_duration_ms: None,
+                    error_message: None,
+                    quality: None,
+                    pdf_metadata: None,
+                    framework_capabilities: FrameworkCapabilities::default(),
+                    system_load: None,
+                    iterations: Vec::new(),
+                    statistics: None,
+                })
         })
         .collect();
 
@@ -840,23 +852,55 @@ fn rejects_aggregate_group_without_file_type_metrics() {
 }
 
 #[test]
-fn rejects_aggregate_when_file_type_sample_counts_do_not_sum_to_fixtures() {
-    // Multi-extension cohorts are allowed, but the per-file-type sample counts must still sum to
-    // the cohort's fixture count. Duplicating the pdf bucket as a second file type doubles the
-    // total and must be rejected.
-    let contract = Cohort::Native.contract();
-    let mut aggregate = build_aggregate(&contract, Cohort::Native);
-    let first_group = aggregate.by_framework_mode.values_mut().next().unwrap();
-    let pdf = first_group.by_file_type.get("pdf").unwrap().clone();
-    first_group.by_file_type.insert(
-        "docx".to_string(),
+fn accepts_aggregate_with_multiple_file_type_buckets() {
+    // The office cohort spans 7 extensions (docx×2, doc, pptx, ppt, xlsx, odt, rtf); build_aggregate
+    // now emits that real per-extension bucket shape, which must validate.
+    let contract = Cohort::Office.contract();
+    let aggregate = build_aggregate(&contract, Cohort::Office);
+    let (_root, path) = write_aggregate(&aggregate);
+    validate(&aggregate_args(Cohort::Office, path)).expect("multi-file-type office aggregate should validate");
+}
+
+#[test]
+fn rejects_aggregate_with_unexpected_file_type_bucket() {
+    // A file-type bucket the cohort's fixtures don't contain must be rejected, even if counts sum.
+    let contract = Cohort::Office.contract();
+    let mut aggregate = build_aggregate(&contract, Cohort::Office);
+    let group = aggregate.by_framework_mode.values_mut().next().unwrap();
+    // Move all `docx` samples (2) into a bogus `pdf` bucket: totals still sum to 8, but pdf is not
+    // an office extension and docx is now missing.
+    let docx = group.by_file_type.remove("docx").unwrap();
+    group.by_file_type.insert(
+        "pdf".to_string(),
         FileTypeAggregation {
-            file_type: "docx".to_string(),
-            ..pdf
+            file_type: "pdf".to_string(),
+            ..docx
         },
     );
     let (_root, path) = write_aggregate(&aggregate);
-    assert_err_contains(validate(&aggregate_args(Cohort::Native, path)), "samples, expected");
+    assert_err_contains(validate(&aggregate_args(Cohort::Office, path)), "file-type buckets");
+}
+
+#[test]
+fn rejects_aggregate_with_wrong_file_type_sample_count() {
+    // The right extensions but a mis-bucketed count (docx should be 2, not 1) must be rejected —
+    // the per-extension check the sum-only check used to miss.
+    let contract = Cohort::Office.contract();
+    let mut aggregate = build_aggregate(&contract, Cohort::Office);
+    let group = aggregate.by_framework_mode.values_mut().next().unwrap();
+    group
+        .by_file_type
+        .get_mut("docx")
+        .unwrap()
+        .no_ocr
+        .as_mut()
+        .unwrap()
+        .total_sample_count = 1;
+    let (_root, path) = write_aggregate(&aggregate);
+    assert_err_contains(
+        validate(&aggregate_args(Cohort::Office, path)),
+        "file type docx covers 1 samples, expected 2",
+    );
 }
 
 #[test]

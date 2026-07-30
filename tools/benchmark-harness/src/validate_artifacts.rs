@@ -271,6 +271,24 @@ fn expected_fixtures(fixtures_root: &Path, contract: &CohortContract) -> Result<
         "cohort document identities do not match the release contract",
     )?;
 
+    let extensions: Vec<String> = names
+        .iter()
+        .map(|name| {
+            Path::new(name)
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .unwrap_or_default()
+                .to_ascii_lowercase()
+        })
+        .collect();
+    require(
+        extensions
+            .iter()
+            .map(String::as_str)
+            .eq(contract.document_extensions.iter().copied()),
+        "cohort document extensions do not match the release contract",
+    )?;
+
     Ok(expected)
 }
 
@@ -565,7 +583,8 @@ fn validate_raw_artifacts(
 
 /// Validate one file-type bucket has no errors and report its sample count. Cohorts can span
 /// several file types (e.g. the office family: docx, pptx, xlsx), so each fixture lands in its own
-/// file-type bucket; the caller sums the counts and checks the total against `fixtures.len()`.
+/// file-type bucket; the caller checks each bucket's count against the cohort's expected
+/// per-extension fixture counts.
 fn validate_bucket(bucket: &PerformancePercentiles, key: &str) -> Result<usize> {
     require(bucket.framework_errors == 0, format!("{key}: nonzero framework_errors"))?;
     require(bucket.harness_errors == 0, format!("{key}: nonzero harness_errors"))?;
@@ -629,6 +648,12 @@ fn validate_aggregate(path: &Path, cohort: Cohort, contract: &CohortContract) ->
     )?;
 
     let expects_ocr = cohort.expects_ocr();
+    // Expected per-extension sample counts, so validation catches a consolidation bug that
+    // mis-buckets samples across file types (which would still sum to fixtures.len()).
+    let mut expected_ext_counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for extension in contract.document_extensions {
+        *expected_ext_counts.entry(*extension).or_insert(0) += 1;
+    }
     for (key, group) in &aggregate.by_framework_mode {
         if optional_agg_keys.contains(key) {
             continue;
@@ -638,10 +663,9 @@ fn validate_aggregate(path: &Path, cohort: Cohort, contract: &CohortContract) ->
             format!("{}: group {key} has no file-type metrics", path.display()),
         )?;
         // A cohort's OCR expectation is uniform, so every fixture in every file-type bucket must
-        // sit on the same OCR side; the opposite side must be empty. Sum the per-bucket sample
-        // counts and require the total to equal the cohort's fixture count.
-        let mut total_samples = 0usize;
-        for file_group in group.by_file_type.values() {
+        // sit on the same OCR side; the opposite side must be empty.
+        let mut actual_ext_counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+        for (file_type, file_group) in &group.by_file_type {
             let (present, absent) = if expects_ocr {
                 (&file_group.with_ocr, &file_group.no_ocr)
             } else {
@@ -650,28 +674,42 @@ fn validate_aggregate(path: &Path, cohort: Cohort, contract: &CohortContract) ->
             require(
                 absent.is_none(),
                 format!(
-                    "{}: group {key} file type {} has wrong OCR bucket",
-                    path.display(),
-                    file_group.file_type
+                    "{}: group {key} file type {file_type} has wrong OCR bucket",
+                    path.display()
                 ),
             )?;
             let bucket = present.as_ref().ok_or_else(|| {
                 contract_error(format!(
-                    "{}: group {key} file type {} missing OCR bucket",
-                    path.display(),
-                    file_group.file_type
+                    "{}: group {key} file type {file_type} missing OCR bucket",
+                    path.display()
                 ))
             })?;
-            total_samples += validate_bucket(bucket, key)?;
+            actual_ext_counts.insert(file_type.as_str(), validate_bucket(bucket, key)?);
         }
+        let expected_set: HashSet<&str> = expected_ext_counts.keys().copied().collect();
+        let actual_set: HashSet<&str> = actual_ext_counts.keys().copied().collect();
         require(
-            total_samples == contract.fixtures.len(),
+            expected_set == actual_set,
             format!(
-                "{}: group {key} covers {total_samples} samples, expected {}",
+                "{}: group {key} {}",
                 path.display(),
-                contract.fixtures.len()
+                describe_set_mismatch(
+                    "file-type buckets",
+                    expected_set.iter().copied(),
+                    actual_set.iter().copied()
+                )
             ),
         )?;
+        for (extension, expected_count) in &expected_ext_counts {
+            let actual = actual_ext_counts.get(extension).copied().unwrap_or(0);
+            require(
+                actual == *expected_count,
+                format!(
+                    "{}: group {key} file type {extension} covers {actual} samples, expected {expected_count}",
+                    path.display()
+                ),
+            )?;
+        }
     }
 
     let rows: Vec<&PerFixtureRow> = aggregate

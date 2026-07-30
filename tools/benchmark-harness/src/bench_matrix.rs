@@ -91,6 +91,10 @@ pub struct CohortContract {
     pub fixtures: &'static [&'static str],
     /// Expected document basename stems, in fixture order.
     pub document_stems: &'static [&'static str],
+    /// Expected document file extensions (lowercase, the `by_file_type` bucket keys), in fixture
+    /// order. Lets the aggregate validator assert each file-type bucket's sample count matches how
+    /// many of the cohort's fixtures are of that extension, not merely that the total sums right.
+    pub document_extensions: &'static [&'static str],
     /// Every expected framework x output-format x execution-mode cell.
     pub matrix: Vec<MatrixEntry>,
 }
@@ -157,9 +161,15 @@ impl Cohort {
             })
     }
 
-    /// Whether every result in this cohort's artifacts is expected to have used OCR.
+    /// Whether every result in this cohort's artifacts is expected to report OCR as *used*.
+    ///
+    /// Only the scanned-PDF cohort qualifies. The image cohort still runs with OCR enabled
+    /// (`ocr_enabled` in its manifest), but xberg treats OCR as the intrinsic text path for a
+    /// bare image rather than a fallback, so its results report `OcrStatus::NotUsed` — the same
+    /// bucket a native cohort lands in. Requiring `Used` here would make every image result fail
+    /// validation.
     pub fn expects_ocr(self) -> bool {
-        matches!(self, Cohort::Ocr | Cohort::Images)
+        matches!(self, Cohort::Ocr)
     }
 
     /// Whether this cohort's xberg cells include the rendered-page `layout` pipeline variant in
@@ -210,6 +220,7 @@ const NATIVE_DOCUMENT_STEMS: &[&str] = &[
     "pb_fqr-retail-blackrock-global-allocation-fund-inc_page4",
     "pb_sample_page_16_page1",
 ];
+const NATIVE_DOCUMENT_EXTENSIONS: &[&str] = &["pdf", "pdf", "pdf", "pdf", "pdf", "pdf", "pdf", "pdf"];
 
 const OCR_MANIFEST_NAME: &str = "ocr-pdf-fast-b4-v1";
 const OCR_MANIFEST_BLAKE3: &str = "ffe90935b7b73cba69ff76b1e71dc3512fb78e6fba9cff675a358c48073a82d0";
@@ -221,6 +232,7 @@ const OCR_FIXTURES: &[&str] = &[
     "pdf_image_only_german.json",
 ];
 const OCR_DOCUMENT_STEMS: &[&str] = &["non_searchable", "ocr_test", "scanned", "image_only_german_pdf"];
+const OCR_DOCUMENT_EXTENSIONS: &[&str] = &["pdf", "pdf", "pdf", "pdf"];
 
 const OFFICE_COHORT: &str = "native-office-fast";
 const OFFICE_MANIFEST_NAME: &str = "native-office-fast-v1";
@@ -246,6 +258,7 @@ const OFFICE_DOCUMENT_STEMS: &[&str] = &[
     "headers",
     "formatting",
 ];
+const OFFICE_DOCUMENT_EXTENSIONS: &[&str] = &["docx", "docx", "doc", "pptx", "ppt", "xlsx", "odt", "rtf"];
 
 const MARKUP_COHORT: &str = "native-markup-fast";
 const MARKUP_MANIFEST_NAME: &str = "native-markup-fast-v1";
@@ -271,6 +284,7 @@ const MARKUP_DOCUMENT_STEMS: &[&str] = &[
     "tables",
     "docbook-chapter",
 ];
+const MARKUP_DOCUMENT_EXTENSIONS: &[&str] = &["html", "md", "md", "tex", "typ", "rst", "org", "docbook"];
 
 const EBOOK_COHORT: &str = "native-ebook-fast";
 const EBOOK_MANIFEST_NAME: &str = "native-ebook-fast-v1";
@@ -285,6 +299,7 @@ const EBOOK_FIXTURES: &[&str] = &[
     "fb2_titles.json",
 ];
 const EBOOK_DOCUMENT_STEMS: &[&str] = &["simple", "features", "wasteland", "basic", "tables", "titles"];
+const EBOOK_DOCUMENT_EXTENSIONS: &[&str] = &["epub", "epub", "epub", "fb2", "fb2", "fb2"];
 
 const EMAIL_COHORT: &str = "native-email-fast";
 const EMAIL_MANIFEST_NAME: &str = "native-email-fast-v1";
@@ -306,6 +321,7 @@ const EMAIL_DOCUMENT_STEMS: &[&str] = &[
     "fake-email",
     "msg_with_attachments_alt",
 ];
+const EMAIL_DOCUMENT_EXTENSIONS: &[&str] = &["eml", "eml", "eml", "msg", "msg", "msg"];
 
 const DATA_COHORT: &str = "native-data-fast";
 const DATA_MANIFEST_NAME: &str = "native-data-fast-v1";
@@ -327,6 +343,7 @@ const DATA_DOCUMENT_STEMS: &[&str] = &[
     "complex_nested",
     "sample_config",
 ];
+const DATA_DOCUMENT_EXTENSIONS: &[&str] = &["csv", "csv", "tsv", "json", "json", "yaml"];
 
 const IMAGES_COHORT: &str = "ocr-images-fast";
 const IMAGES_MANIFEST_NAME: &str = "ocr-images-fast-v1";
@@ -348,6 +365,7 @@ const IMAGES_DOCUMENT_STEMS: &[&str] = &[
     "invoice_image",
     "complex_document",
 ];
+const IMAGES_DOCUMENT_EXTENSIONS: &[&str] = &["png", "png", "jpeg", "tif", "png", "png"];
 
 fn matrix_entry(
     artifact: String,
@@ -538,6 +556,7 @@ fn native_contract() -> CohortContract {
         batch_size: NATIVE_BATCH_SIZE,
         fixtures: NATIVE_FIXTURES,
         document_stems: NATIVE_DOCUMENT_STEMS,
+        document_extensions: NATIVE_DOCUMENT_EXTENSIONS,
         matrix: native_matrix(),
     }
 }
@@ -549,6 +568,7 @@ fn ocr_contract() -> CohortContract {
         batch_size: OCR_BATCH_SIZE,
         fixtures: OCR_FIXTURES,
         document_stems: OCR_DOCUMENT_STEMS,
+        document_extensions: OCR_DOCUMENT_EXTENSIONS,
         matrix: ocr_matrix(),
     }
 }
@@ -560,6 +580,7 @@ fn office_contract() -> CohortContract {
         batch_size: OFFICE_BATCH_SIZE,
         fixtures: OFFICE_FIXTURES,
         document_stems: OFFICE_DOCUMENT_STEMS,
+        document_extensions: OFFICE_DOCUMENT_EXTENSIONS,
         matrix: office_matrix(),
     }
 }
@@ -571,6 +592,7 @@ fn markup_contract() -> CohortContract {
         batch_size: MARKUP_BATCH_SIZE,
         fixtures: MARKUP_FIXTURES,
         document_stems: MARKUP_DOCUMENT_STEMS,
+        document_extensions: MARKUP_DOCUMENT_EXTENSIONS,
         matrix: markup_matrix(),
     }
 }
@@ -582,6 +604,7 @@ fn ebook_contract() -> CohortContract {
         batch_size: EBOOK_BATCH_SIZE,
         fixtures: EBOOK_FIXTURES,
         document_stems: EBOOK_DOCUMENT_STEMS,
+        document_extensions: EBOOK_DOCUMENT_EXTENSIONS,
         matrix: ebook_matrix(),
     }
 }
@@ -593,6 +616,7 @@ fn email_contract() -> CohortContract {
         batch_size: EMAIL_BATCH_SIZE,
         fixtures: EMAIL_FIXTURES,
         document_stems: EMAIL_DOCUMENT_STEMS,
+        document_extensions: EMAIL_DOCUMENT_EXTENSIONS,
         matrix: email_matrix(),
     }
 }
@@ -604,6 +628,7 @@ fn data_contract() -> CohortContract {
         batch_size: DATA_BATCH_SIZE,
         fixtures: DATA_FIXTURES,
         document_stems: DATA_DOCUMENT_STEMS,
+        document_extensions: DATA_DOCUMENT_EXTENSIONS,
         matrix: data_matrix(),
     }
 }
@@ -615,6 +640,7 @@ fn images_contract() -> CohortContract {
         batch_size: IMAGES_BATCH_SIZE,
         fixtures: IMAGES_FIXTURES,
         document_stems: IMAGES_DOCUMENT_STEMS,
+        document_extensions: IMAGES_DOCUMENT_EXTENSIONS,
         matrix: images_matrix(),
     }
 }
