@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "name": "native-data-fast-v1",
+  "batch_size": 6,
+  "ocr_enabled": false,
+  "fixtures": [
+    "csv/csv-comma.json",
+    "csv/csv-semicolon.json",
+    "tsv_data.json",
+    "json_simple.json",
+    "json_nested.json",
+    "yaml_config.json"
+  ]
+}

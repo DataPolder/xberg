@@ -33,13 +33,32 @@ enum CliCohort {
     Native,
     /// OCR fast PDF cohort
     Ocr,
+    /// Office family (docx, doc, pptx, ppt, xlsx, odt, rtf)
+    Office,
+    /// Markup family (html, md, latex, typst, rst, org, docbook)
+    Markup,
+    /// E-book family (epub, fb2)
+    Ebook,
+    /// E-mail family (eml, msg)
+    Email,
+    /// Structured-data family (csv, tsv, json, yaml)
+    Data,
+    /// OCR document-image family (png, jpeg, tiff)
+    Images,
 }
 
 impl From<CliCohort> for benchmark_harness::bench_matrix::Cohort {
     fn from(cohort: CliCohort) -> Self {
+        use benchmark_harness::bench_matrix::Cohort;
         match cohort {
-            CliCohort::Native => benchmark_harness::bench_matrix::Cohort::Native,
-            CliCohort::Ocr => benchmark_harness::bench_matrix::Cohort::Ocr,
+            CliCohort::Native => Cohort::Native,
+            CliCohort::Ocr => Cohort::Ocr,
+            CliCohort::Office => Cohort::Office,
+            CliCohort::Markup => Cohort::Markup,
+            CliCohort::Ebook => Cohort::Ebook,
+            CliCohort::Email => Cohort::Email,
+            CliCohort::Data => Cohort::Data,
+            CliCohort::Images => Cohort::Images,
         }
     }
 }
@@ -455,6 +474,15 @@ enum Commands {
         /// Benchmark iterations every provenance.json/results.json must record
         #[arg(long, default_value = "3")]
         iterations: usize,
+    },
+
+    /// Print one cohort's pinned release-contract summary (manifest name, BLAKE3, batch size,
+    /// required/optional matrix cell counts, OCR flag) as a single JSON line. The release
+    /// workflow consumes this so cohort metadata has a single source of truth in bench_matrix.
+    CohortContract {
+        /// Which cohort's contract to print
+        #[arg(long)]
+        cohort: CliCohort,
     },
 }
 
@@ -1287,6 +1315,26 @@ async fn main() -> Result<()> {
 
             let message = validate(&args)?;
             println!("{message}");
+            Ok(())
+        }
+
+        Commands::CohortContract { cohort } => {
+            let cohort: benchmark_harness::bench_matrix::Cohort = cohort.into();
+            let contract = cohort.contract();
+            let required = contract.matrix.iter().filter(|entry| !entry.optional).count();
+            let optional = contract.matrix.iter().filter(|entry| entry.optional).count();
+            let summary = serde_json::json!({
+                "cohort": cohort.as_str(),
+                "manifest_name": contract.manifest_name,
+                "manifest_blake3": contract.manifest_blake3,
+                "batch_size": contract.batch_size,
+                "expects_ocr": cohort.expects_ocr(),
+                "expected_matrix_keys": required,
+                "optional_matrix_keys": optional,
+            });
+            let json = serde_json::to_string(&summary)
+                .map_err(|error| benchmark_harness::Error::Benchmark(format!("serialize cohort contract: {error}")))?;
+            println!("{json}");
             Ok(())
         }
 

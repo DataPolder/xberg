@@ -73,6 +73,12 @@ fn materialize_fixture_tree(cohort: Cohort, contract: &CohortContract) -> Fixtur
     let cohort_slug = match cohort {
         Cohort::Native => "native-pdf-fast-b8",
         Cohort::Ocr => "ocr-pdf-fast-b4",
+        Cohort::Office => "native-office-fast",
+        Cohort::Markup => "native-markup-fast",
+        Cohort::Ebook => "native-ebook-fast",
+        Cohort::Email => "native-email-fast",
+        Cohort::Data => "native-data-fast",
+        Cohort::Images => "ocr-images-fast",
     };
     std::fs::copy(repo_path(&format!("cohorts/{cohort_slug}.json")), &cohort_manifest).expect("copy cohort manifest");
     let manifest_blake3 = blake3_hex(&cohort_manifest);
@@ -820,20 +826,24 @@ fn rejects_ocr_aggregate_with_only_no_ocr_bucket() {
 }
 
 #[test]
-fn rejects_aggregate_missing_pdf_file_type() {
+fn rejects_aggregate_group_without_file_type_metrics() {
+    // A group with no file-type buckets can never account for the cohort's fixtures.
     let contract = Cohort::Native.contract();
     let mut aggregate = build_aggregate(&contract, Cohort::Native);
     let first_group = aggregate.by_framework_mode.values_mut().next().unwrap();
-    first_group.by_file_type.remove("pdf");
+    first_group.by_file_type.clear();
     let (_root, path) = write_aggregate(&aggregate);
     assert_err_contains(
         validate(&aggregate_args(Cohort::Native, path)),
-        "must contain only pdf metrics",
+        "has no file-type metrics",
     );
 }
 
 #[test]
-fn rejects_aggregate_extra_file_type() {
+fn rejects_aggregate_when_file_type_sample_counts_do_not_sum_to_fixtures() {
+    // Multi-extension cohorts are allowed, but the per-file-type sample counts must still sum to
+    // the cohort's fixture count. Duplicating the pdf bucket as a second file type doubles the
+    // total and must be rejected.
     let contract = Cohort::Native.contract();
     let mut aggregate = build_aggregate(&contract, Cohort::Native);
     let first_group = aggregate.by_framework_mode.values_mut().next().unwrap();
@@ -846,10 +856,7 @@ fn rejects_aggregate_extra_file_type() {
         },
     );
     let (_root, path) = write_aggregate(&aggregate);
-    assert_err_contains(
-        validate(&aggregate_args(Cohort::Native, path)),
-        "must contain only pdf metrics",
-    );
+    assert_err_contains(validate(&aggregate_args(Cohort::Native, path)), "samples, expected");
 }
 
 #[test]

@@ -95,38 +95,78 @@ pub struct CohortContract {
     pub matrix: Vec<MatrixEntry>,
 }
 
-/// Which cohort's release contract is being validated.
+/// Which cohort's release contract is being validated. PDF cohorts (`Native`, `Ocr`) and the
+/// image cohort exercise the rendered-page layout pipeline, so their xberg cells run both the
+/// `baseline` and `layout` variants; the remaining per-format-family cohorts have no rendered
+/// page, so xberg runs `baseline` only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Cohort {
     /// Native (non-OCR) fast PDF cohort.
     Native,
     /// OCR fast PDF cohort.
     Ocr,
+    /// Word-processing / presentation / spreadsheet family (docx, doc, pptx, ppt, xlsx, odt, rtf).
+    Office,
+    /// Markup / typesetting family (html, md, latex, typst, rst, org, docbook).
+    Markup,
+    /// E-book family (epub, fb2).
+    Ebook,
+    /// E-mail family (eml, msg).
+    Email,
+    /// Structured-data family (csv, tsv, json, yaml).
+    Data,
+    /// OCR document-image family (png, jpeg, tiff).
+    Images,
 }
 
 impl Cohort {
+    /// Every cohort, in canonical order.
+    pub const ALL: [Cohort; 8] = [
+        Cohort::Native,
+        Cohort::Ocr,
+        Cohort::Office,
+        Cohort::Markup,
+        Cohort::Ebook,
+        Cohort::Email,
+        Cohort::Data,
+        Cohort::Images,
+    ];
+
     /// The `--cohort` CLI value for this cohort.
     pub fn as_str(self) -> &'static str {
         match self {
             Cohort::Native => "native",
             Cohort::Ocr => "ocr",
+            Cohort::Office => "office",
+            Cohort::Markup => "markup",
+            Cohort::Ebook => "ebook",
+            Cohort::Email => "email",
+            Cohort::Data => "data",
+            Cohort::Images => "images",
         }
     }
 
     /// Parse a `--cohort` CLI value.
     pub fn parse(value: &str) -> Result<Self> {
-        match value {
-            "native" => Ok(Cohort::Native),
-            "ocr" => Ok(Cohort::Ocr),
-            other => Err(Error::Config(format!(
-                "unknown cohort '{other}': expected one of: native, ocr"
-            ))),
-        }
+        Cohort::ALL
+            .into_iter()
+            .find(|cohort| cohort.as_str() == value)
+            .ok_or_else(|| {
+                let names = Cohort::ALL.map(Cohort::as_str).join(", ");
+                Error::Config(format!("unknown cohort '{value}': expected one of: {names}"))
+            })
     }
 
     /// Whether every result in this cohort's artifacts is expected to have used OCR.
     pub fn expects_ocr(self) -> bool {
-        matches!(self, Cohort::Ocr)
+        matches!(self, Cohort::Ocr | Cohort::Images)
+    }
+
+    /// Whether this cohort's xberg cells include the rendered-page `layout` pipeline variant in
+    /// addition to `baseline`. Only formats with a rendered page (PDF, images) benefit; for the
+    /// other families a `layout` run would merely duplicate `baseline`.
+    pub fn includes_layout(self) -> bool {
+        matches!(self, Cohort::Native | Cohort::Ocr | Cohort::Images)
     }
 
     /// Build this cohort's pinned release contract.
@@ -134,6 +174,12 @@ impl Cohort {
         match self {
             Cohort::Native => native_contract(),
             Cohort::Ocr => ocr_contract(),
+            Cohort::Office => office_contract(),
+            Cohort::Markup => markup_contract(),
+            Cohort::Ebook => ebook_contract(),
+            Cohort::Email => email_contract(),
+            Cohort::Data => data_contract(),
+            Cohort::Images => images_contract(),
         }
     }
 }
@@ -142,7 +188,7 @@ const NATIVE_COHORT: &str = "native-pdf-fast-b8";
 const OCR_COHORT: &str = "ocr-pdf-fast-b4";
 
 const NATIVE_MANIFEST_NAME: &str = "native-pdf-fast-b8-v1";
-const NATIVE_MANIFEST_BLAKE3: &str = "c10d1f78d3f9d61070c0d91e7bfe90a904b69c9d3261536eb1dcff2081c73f6b";
+const NATIVE_MANIFEST_BLAKE3: &str = "3c32b27d07eb604a144661701daeada440c78dfd2d7344d29b7898c4114b2d81";
 const NATIVE_BATCH_SIZE: usize = 8;
 const NATIVE_FIXTURES: &[&str] = &[
     "pdf_tiny_memo.json",
@@ -166,7 +212,7 @@ const NATIVE_DOCUMENT_STEMS: &[&str] = &[
 ];
 
 const OCR_MANIFEST_NAME: &str = "ocr-pdf-fast-b4-v1";
-const OCR_MANIFEST_BLAKE3: &str = "f9e4e881b70111df10516a5f2cf2ed648f67b299f9116bafb34746e98436b66b";
+const OCR_MANIFEST_BLAKE3: &str = "ffe90935b7b73cba69ff76b1e71dc3512fb78e6fba9cff675a358c48073a82d0";
 const OCR_BATCH_SIZE: usize = 4;
 const OCR_FIXTURES: &[&str] = &[
     "pdf_non_searchable.json",
@@ -175,6 +221,133 @@ const OCR_FIXTURES: &[&str] = &[
     "pdf_image_only_german.json",
 ];
 const OCR_DOCUMENT_STEMS: &[&str] = &["non_searchable", "ocr_test", "scanned", "image_only_german_pdf"];
+
+const OFFICE_COHORT: &str = "native-office-fast";
+const OFFICE_MANIFEST_NAME: &str = "native-office-fast-v1";
+const OFFICE_MANIFEST_BLAKE3: &str = "da00b5e555de6dd7e6226a626a23d1db334599350ae3b956b874936b149f7f60";
+const OFFICE_BATCH_SIZE: usize = 8;
+const OFFICE_FIXTURES: &[&str] = &[
+    "docx_simple.json",
+    "docx/docx_tables.json",
+    "doc/unit_test_lists.json",
+    "pptx/powerpoint_sample.json",
+    "ppt_presentation.json",
+    "xlsx/excel_multi_sheet.json",
+    "odt/headers.json",
+    "rtf/formatting.json",
+];
+const OFFICE_DOCUMENT_STEMS: &[&str] = &[
+    "lorem_ipsum",
+    "docx_tables",
+    "unit_test_lists",
+    "powerpoint_sample",
+    "simple",
+    "excel_multi_sheet",
+    "headers",
+    "formatting",
+];
+
+const MARKUP_COHORT: &str = "native-markup-fast";
+const MARKUP_MANIFEST_NAME: &str = "native-markup-fast-v1";
+const MARKUP_MANIFEST_BLAKE3: &str = "6ffa2e256ea2b28b7f4ce2494df421d5cdb2b1df0300631a25979be2dcd459aa";
+const MARKUP_BATCH_SIZE: usize = 8;
+const MARKUP_FIXTURES: &[&str] = &[
+    "html/complex_table.json",
+    "markdown_simple.json",
+    "markdown_tables.json",
+    "latex/basic_sections.json",
+    "typst_simple.json",
+    "rst/restructured_text.json",
+    "org/tables.json",
+    "docbook_chapter.json",
+];
+const MARKUP_DOCUMENT_STEMS: &[&str] = &[
+    "complex_table",
+    "simple_metadata",
+    "tables.pandoc",
+    "basic_sections",
+    "simple",
+    "restructured_text",
+    "tables",
+    "docbook-chapter",
+];
+
+const EBOOK_COHORT: &str = "native-ebook-fast";
+const EBOOK_MANIFEST_NAME: &str = "native-ebook-fast-v1";
+const EBOOK_MANIFEST_BLAKE3: &str = "de4b330755eb815ac33e0e6a171c1d11f1b4c65b46ac548f679f74b379811667";
+const EBOOK_BATCH_SIZE: usize = 6;
+const EBOOK_FIXTURES: &[&str] = &[
+    "epub/simple.json",
+    "epub/features.json",
+    "epub/wasteland.json",
+    "fb2_basic.json",
+    "fb2_tables.json",
+    "fb2_titles.json",
+];
+const EBOOK_DOCUMENT_STEMS: &[&str] = &["simple", "features", "wasteland", "basic", "tables", "titles"];
+
+const EMAIL_COHORT: &str = "native-email-fast";
+const EMAIL_MANIFEST_NAME: &str = "native-email-fast-v1";
+const EMAIL_MANIFEST_BLAKE3: &str = "0bcedb2e4daae6314e05a2ff0c788028707caf12713f176f10f0cc471966f080";
+const EMAIL_BATCH_SIZE: usize = 6;
+const EMAIL_FIXTURES: &[&str] = &[
+    "eml_simple.json",
+    "eml_multipart.json",
+    "eml/email-no-html-content-1.json",
+    "msg_simple.json",
+    "msg/fake-email.json",
+    "msg_attachments.json",
+];
+const EMAIL_DOCUMENT_STEMS: &[&str] = &[
+    "plain_text_only",
+    "multipart_email",
+    "email-no-html-content-1",
+    "simple_msg",
+    "fake-email",
+    "msg_with_attachments_alt",
+];
+
+const DATA_COHORT: &str = "native-data-fast";
+const DATA_MANIFEST_NAME: &str = "native-data-fast-v1";
+const DATA_MANIFEST_BLAKE3: &str = "de2595f6ba5ca275f8adc7367755089c2d9fa064489d874f314bc4a80e83c1b3";
+const DATA_BATCH_SIZE: usize = 6;
+const DATA_FIXTURES: &[&str] = &[
+    "csv/csv-comma.json",
+    "csv/csv-semicolon.json",
+    "tsv_data.json",
+    "json_simple.json",
+    "json_nested.json",
+    "yaml_config.json",
+];
+const DATA_DOCUMENT_STEMS: &[&str] = &[
+    "csv-comma",
+    "csv-semicolon",
+    "employees",
+    "simple",
+    "complex_nested",
+    "sample_config",
+];
+
+const IMAGES_COHORT: &str = "ocr-images-fast";
+const IMAGES_MANIFEST_NAME: &str = "ocr-images-fast-v1";
+const IMAGES_MANIFEST_BLAKE3: &str = "b3c74126fc378702d6afe07b1d419dcbe84e76ba49a8bbaa80c106c60d013ee7";
+const IMAGES_BATCH_SIZE: usize = 6;
+const IMAGES_FIXTURES: &[&str] = &[
+    "image_scanned.json",
+    "image_ocr_test_original.json",
+    "image_text.json",
+    "tif_ocr.json",
+    "image_invoice.json",
+    "image_table.json",
+];
+const IMAGES_DOCUMENT_STEMS: &[&str] = &[
+    "english_and_korean",
+    "ocr_test_original",
+    "jpn_vert",
+    "ocr_image",
+    "invoice_image",
+    "complex_document",
+];
 
 fn matrix_entry(
     artifact: String,
@@ -191,10 +364,17 @@ fn matrix_entry(
     }
 }
 
-/// The four native Xberg cells (baseline/layout pipelines x markdown/plaintext x single/batch).
-fn xberg_entries(cohort: &str) -> Vec<MatrixEntry> {
+/// The Xberg cells for a cohort: markdown/plaintext x single/batch for each enabled pipeline.
+/// Rendered-page cohorts (`include_layout`) run both `baseline` and `layout` (8 cells); the
+/// remaining families run `baseline` only (4 cells).
+fn xberg_entries(cohort: &str, include_layout: bool) -> Vec<MatrixEntry> {
+    let pipelines: &[&str] = if include_layout {
+        &["baseline", "layout"]
+    } else {
+        &["baseline"]
+    };
     let mut entries = Vec::new();
-    for pipeline in ["baseline", "layout"] {
+    for &pipeline in pipelines {
         for output_format in [OutputFormat::Markdown, OutputFormat::Plaintext] {
             for mode in [ExecutionMode::SingleFile, ExecutionMode::Batch] {
                 entries.push(matrix_entry(
@@ -242,8 +422,27 @@ fn markdown_single_file_entry(framework: &str, cohort: &str) -> MatrixEntry {
     )
 }
 
+/// The single plaintext/single-file cell for one framework (e.g. Tika, Unstructured, whose only
+/// benchmarked output is plaintext).
+fn plaintext_single_file_entry(framework: &str, cohort: &str) -> MatrixEntry {
+    matrix_entry(
+        format!("benchmarks-{framework}-plaintext-single-file-{cohort}"),
+        framework,
+        OutputFormat::Plaintext,
+        ExecutionMode::SingleFile,
+    )
+}
+
+/// Mark every entry best-effort. Competitor cells in the per-format-family cohorts are optional:
+/// a framework may not support every extension in a family, and the harness only emits/validates
+/// a cell when the framework covers the whole cohort. Absence never fails validation; a present,
+/// complete cell still flows into the aggregate.
+fn optional(entries: Vec<MatrixEntry>) -> Vec<MatrixEntry> {
+    entries.into_iter().map(MatrixEntry::into_optional).collect()
+}
+
 fn native_matrix() -> Vec<MatrixEntry> {
-    let mut matrix = xberg_entries(NATIVE_COHORT);
+    let mut matrix = xberg_entries(NATIVE_COHORT, true);
     matrix.extend(grid_entries("docling", NATIVE_COHORT));
     matrix.push(matrix_entry(
         format!("benchmarks-markitdown-markdown-single-file-{NATIVE_COHORT}"),
@@ -275,10 +474,60 @@ fn native_matrix() -> Vec<MatrixEntry> {
 }
 
 fn ocr_matrix() -> Vec<MatrixEntry> {
-    let mut matrix = xberg_entries(OCR_COHORT);
+    let mut matrix = xberg_entries(OCR_COHORT, true);
     matrix.extend(grid_entries("docling", OCR_COHORT));
     matrix.push(markdown_single_file_entry("mineru", OCR_COHORT).into_optional());
     matrix.extend(grid_entries("liteparse", OCR_COHORT));
+    matrix
+}
+
+/// Office, markup, and data families share the broad-office competitor set (Docling grid plus the
+/// MarkItDown/Unstructured/Tika single-file cells), all best-effort.
+fn broad_office_competitors(cohort: &str) -> Vec<MatrixEntry> {
+    let mut competitors = optional(grid_entries("docling", cohort));
+    competitors.push(markdown_single_file_entry("markitdown", cohort).into_optional());
+    competitors.push(plaintext_single_file_entry("unstructured", cohort).into_optional());
+    competitors.push(plaintext_single_file_entry("tika", cohort).into_optional());
+    competitors
+}
+
+fn office_matrix() -> Vec<MatrixEntry> {
+    let mut matrix = xberg_entries(OFFICE_COHORT, false);
+    matrix.extend(broad_office_competitors(OFFICE_COHORT));
+    matrix
+}
+
+fn markup_matrix() -> Vec<MatrixEntry> {
+    let mut matrix = xberg_entries(MARKUP_COHORT, false);
+    matrix.extend(broad_office_competitors(MARKUP_COHORT));
+    matrix
+}
+
+fn data_matrix() -> Vec<MatrixEntry> {
+    let mut matrix = xberg_entries(DATA_COHORT, false);
+    matrix.extend(broad_office_competitors(DATA_COHORT));
+    matrix
+}
+
+fn ebook_matrix() -> Vec<MatrixEntry> {
+    let mut matrix = xberg_entries(EBOOK_COHORT, false);
+    matrix.push(plaintext_single_file_entry("tika", EBOOK_COHORT).into_optional());
+    matrix.push(markdown_single_file_entry("pymupdf4llm", EBOOK_COHORT).into_optional());
+    matrix
+}
+
+fn email_matrix() -> Vec<MatrixEntry> {
+    let mut matrix = xberg_entries(EMAIL_COHORT, false);
+    matrix.push(plaintext_single_file_entry("unstructured", EMAIL_COHORT).into_optional());
+    matrix.push(plaintext_single_file_entry("tika", EMAIL_COHORT).into_optional());
+    matrix
+}
+
+fn images_matrix() -> Vec<MatrixEntry> {
+    let mut matrix = xberg_entries(IMAGES_COHORT, true);
+    matrix.extend(optional(grid_entries("docling", IMAGES_COHORT)));
+    matrix.push(markdown_single_file_entry("pymupdf4llm", IMAGES_COHORT).into_optional());
+    matrix.push(markdown_single_file_entry("mineru", IMAGES_COHORT).into_optional());
     matrix
 }
 
@@ -304,62 +553,158 @@ fn ocr_contract() -> CohortContract {
     }
 }
 
+fn office_contract() -> CohortContract {
+    CohortContract {
+        manifest_name: OFFICE_MANIFEST_NAME,
+        manifest_blake3: OFFICE_MANIFEST_BLAKE3,
+        batch_size: OFFICE_BATCH_SIZE,
+        fixtures: OFFICE_FIXTURES,
+        document_stems: OFFICE_DOCUMENT_STEMS,
+        matrix: office_matrix(),
+    }
+}
+
+fn markup_contract() -> CohortContract {
+    CohortContract {
+        manifest_name: MARKUP_MANIFEST_NAME,
+        manifest_blake3: MARKUP_MANIFEST_BLAKE3,
+        batch_size: MARKUP_BATCH_SIZE,
+        fixtures: MARKUP_FIXTURES,
+        document_stems: MARKUP_DOCUMENT_STEMS,
+        matrix: markup_matrix(),
+    }
+}
+
+fn ebook_contract() -> CohortContract {
+    CohortContract {
+        manifest_name: EBOOK_MANIFEST_NAME,
+        manifest_blake3: EBOOK_MANIFEST_BLAKE3,
+        batch_size: EBOOK_BATCH_SIZE,
+        fixtures: EBOOK_FIXTURES,
+        document_stems: EBOOK_DOCUMENT_STEMS,
+        matrix: ebook_matrix(),
+    }
+}
+
+fn email_contract() -> CohortContract {
+    CohortContract {
+        manifest_name: EMAIL_MANIFEST_NAME,
+        manifest_blake3: EMAIL_MANIFEST_BLAKE3,
+        batch_size: EMAIL_BATCH_SIZE,
+        fixtures: EMAIL_FIXTURES,
+        document_stems: EMAIL_DOCUMENT_STEMS,
+        matrix: email_matrix(),
+    }
+}
+
+fn data_contract() -> CohortContract {
+    CohortContract {
+        manifest_name: DATA_MANIFEST_NAME,
+        manifest_blake3: DATA_MANIFEST_BLAKE3,
+        batch_size: DATA_BATCH_SIZE,
+        fixtures: DATA_FIXTURES,
+        document_stems: DATA_DOCUMENT_STEMS,
+        matrix: data_matrix(),
+    }
+}
+
+fn images_contract() -> CohortContract {
+    CohortContract {
+        manifest_name: IMAGES_MANIFEST_NAME,
+        manifest_blake3: IMAGES_MANIFEST_BLAKE3,
+        batch_size: IMAGES_BATCH_SIZE,
+        fixtures: IMAGES_FIXTURES,
+        document_stems: IMAGES_DOCUMENT_STEMS,
+        matrix: images_matrix(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::HashSet;
 
+    /// (cohort, total cells, required (non-optional) cells). The required count is what the raw
+    /// artifact / aggregate validators gate publication on; optional competitor cells are allowed
+    /// but never required for the per-format-family cohorts.
+    const CONTRACT_CELL_COUNTS: [(Cohort, usize, usize); 8] = [
+        (Cohort::Native, 21, 20),
+        (Cohort::Ocr, 17, 16),
+        (Cohort::Office, 11, 4),
+        (Cohort::Markup, 11, 4),
+        (Cohort::Ebook, 6, 4),
+        (Cohort::Email, 6, 4),
+        (Cohort::Data, 11, 4),
+        (Cohort::Images, 14, 8),
+    ];
+
     #[test]
-    fn native_contract_key_counts_are_exact() {
-        let contract = Cohort::Native.contract();
-        assert_eq!(contract.matrix.len(), 21);
-        assert_eq!(
-            contract
-                .matrix
-                .iter()
-                .map(|entry| &entry.artifact)
-                .collect::<HashSet<_>>()
-                .len(),
-            contract.matrix.len()
-        );
-        assert_eq!(
-            contract
-                .matrix
-                .iter()
-                .map(MatrixEntry::aggregate_key)
-                .collect::<HashSet<_>>()
-                .len(),
-            contract.matrix.len()
-        );
+    fn contract_cell_counts_are_exact_and_uniquely_keyed() {
+        for (cohort, total, required) in CONTRACT_CELL_COUNTS {
+            let contract = cohort.contract();
+            assert_eq!(contract.matrix.len(), total, "{} total cells", cohort.as_str());
+            assert_eq!(
+                contract.matrix.iter().filter(|entry| !entry.optional).count(),
+                required,
+                "{} required cells",
+                cohort.as_str()
+            );
+            assert_eq!(
+                contract
+                    .matrix
+                    .iter()
+                    .map(|entry| &entry.artifact)
+                    .collect::<HashSet<_>>()
+                    .len(),
+                contract.matrix.len(),
+                "{} artifact names must be unique",
+                cohort.as_str()
+            );
+            assert_eq!(
+                contract
+                    .matrix
+                    .iter()
+                    .map(MatrixEntry::aggregate_key)
+                    .collect::<HashSet<_>>()
+                    .len(),
+                contract.matrix.len(),
+                "{} aggregate keys must be unique",
+                cohort.as_str()
+            );
+        }
     }
 
     #[test]
-    fn ocr_contract_key_counts_are_exact() {
-        let contract = Cohort::Ocr.contract();
-        assert_eq!(contract.matrix.len(), 17);
-        assert_eq!(
-            contract
+    fn only_rendered_page_cohorts_run_the_layout_pipeline() {
+        for cohort in Cohort::ALL {
+            let contract = cohort.contract();
+            let has_layout = contract
                 .matrix
                 .iter()
-                .map(|entry| &entry.artifact)
-                .collect::<HashSet<_>>()
-                .len(),
-            contract.matrix.len()
-        );
-        assert_eq!(
-            contract
+                .any(|entry| entry.framework.starts_with("xberg-") && entry.framework.ends_with("-layout"));
+            assert_eq!(
+                has_layout,
+                cohort.includes_layout(),
+                "{}: layout-pipeline presence must match includes_layout()",
+                cohort.as_str()
+            );
+            let xberg_required = contract
                 .matrix
                 .iter()
-                .map(MatrixEntry::aggregate_key)
-                .collect::<HashSet<_>>()
-                .len(),
-            contract.matrix.len()
-        );
+                .filter(|entry| entry.framework.starts_with("xberg-"))
+                .count();
+            assert_eq!(
+                xberg_required,
+                if cohort.includes_layout() { 8 } else { 4 },
+                "{}: xberg cell count",
+                cohort.as_str()
+            );
+        }
     }
 
     #[test]
-    fn mineru_is_single_file_only_in_every_cohort() {
-        for cohort in [Cohort::Native, Cohort::Ocr] {
+    fn mineru_is_single_file_only_wherever_present() {
+        for cohort in Cohort::ALL {
             let contract = cohort.contract();
             let mineru_modes: Vec<ExecutionMode> = contract
                 .matrix
@@ -367,17 +712,20 @@ mod tests {
                 .filter(|entry| entry.framework == "mineru")
                 .map(|entry| entry.mode)
                 .collect();
-            assert_eq!(mineru_modes, vec![ExecutionMode::SingleFile]);
+            assert!(
+                mineru_modes.iter().all(|mode| *mode == ExecutionMode::SingleFile),
+                "{}: mineru must be single-file only",
+                cohort.as_str()
+            );
         }
     }
 
     #[test]
     fn cohort_parse_round_trips_as_str() {
-        assert_eq!(Cohort::parse("native").unwrap(), Cohort::Native);
-        assert_eq!(Cohort::parse("ocr").unwrap(), Cohort::Ocr);
+        for cohort in Cohort::ALL {
+            assert_eq!(Cohort::parse(cohort.as_str()).unwrap(), cohort);
+        }
         assert!(Cohort::parse("bogus").is_err());
-        assert_eq!(Cohort::Native.as_str(), "native");
-        assert_eq!(Cohort::Ocr.as_str(), "ocr");
     }
 
     #[test]

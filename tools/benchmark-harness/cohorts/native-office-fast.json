@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "name": "native-office-fast-v1",
+  "batch_size": 8,
+  "ocr_enabled": false,
+  "fixtures": [
+    "docx_simple.json",
+    "docx/docx_tables.json",
+    "doc/unit_test_lists.json",
+    "pptx/powerpoint_sample.json",
+    "ppt_presentation.json",
+    "xlsx/excel_multi_sheet.json",
+    "odt/headers.json",
+    "rtf/formatting.json"
+  ]
+}

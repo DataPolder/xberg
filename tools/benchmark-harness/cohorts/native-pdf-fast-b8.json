@@ -2,6 +2,7 @@
   "schema_version": 1,
   "name": "native-pdf-fast-b8-v1",
   "batch_size": 8,
+  "ocr_enabled": false,
   "fixtures": [
     "pdf_tiny_memo.json",
     "pdf_tables.json",

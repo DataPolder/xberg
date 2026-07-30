@@ -17,6 +17,11 @@ pub struct CohortManifest {
     pub schema_version: u32,
     pub name: String,
     pub batch_size: usize,
+    /// Whether every fixture in this cohort is expected to exercise OCR. Absent in legacy
+    /// manifests (defaults to `false`); the workflow reads it to decide the `--ocr` flag rather
+    /// than matching on the cohort name.
+    #[serde(default)]
+    pub ocr_enabled: bool,
     pub fixtures: Vec<PathBuf>,
 }
 
@@ -223,6 +228,65 @@ mod tests {
             ] {
                 assert!(ground_truth_path.is_file());
                 assert!(std::fs::metadata(ground_truth_path).unwrap().len() > 0);
+            }
+        }
+    }
+
+    #[test]
+    fn family_cohorts_load_with_resolvable_documents() {
+        let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let fixtures_root = crate_root.join("fixtures");
+        // (manifest file stem, manifest `name`, expected fixture count, ocr_enabled).
+        let cohorts = [
+            ("native-office-fast", "native-office-fast-v1", 8, false),
+            ("native-markup-fast", "native-markup-fast-v1", 8, false),
+            ("native-ebook-fast", "native-ebook-fast-v1", 6, false),
+            ("native-email-fast", "native-email-fast-v1", 6, false),
+            ("native-data-fast", "native-data-fast-v1", 6, false),
+            ("ocr-images-fast", "ocr-images-fast-v1", 6, true),
+        ];
+        for (stem, name, count, ocr_enabled) in cohorts {
+            let manifest_path = crate_root.join(format!("cohorts/{stem}.json"));
+            let manifest = CohortManifest::from_file(&manifest_path).unwrap();
+            let fixtures = manifest.load_fixtures(&fixtures_root, &manifest_path).unwrap();
+
+            assert_eq!(manifest.name, name, "{stem} name");
+            assert_eq!(manifest.ocr_enabled, ocr_enabled, "{stem} ocr_enabled");
+            assert_eq!(fixtures.len(), count, "{stem} fixture count");
+            assert!(count.is_multiple_of(manifest.batch_size), "{stem} batch divisibility");
+
+            let mut document_names = HashSet::new();
+            for (fixture_path, fixture) in fixtures.fixtures() {
+                let fixture_dir = fixture_path.parent().unwrap();
+                let document_path = fixture.resolve_document_path(fixture_dir);
+                assert!(
+                    document_path.is_file(),
+                    "{stem}: missing document {}",
+                    document_path.display()
+                );
+                assert_eq!(
+                    fixture.file_size,
+                    std::fs::metadata(&document_path).unwrap().len(),
+                    "{stem}: document size mismatch for {}",
+                    document_path.display()
+                );
+                let basename = document_path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap()
+                    .to_string();
+                assert!(document_names.insert(basename), "{stem}: duplicate document basename");
+
+                let ground_truth = fixture.resolve_ground_truth_path(fixture_dir).unwrap();
+                assert!(
+                    ground_truth.is_file(),
+                    "{stem}: missing ground truth {}",
+                    ground_truth.display()
+                );
+                assert!(
+                    std::fs::metadata(&ground_truth).unwrap().len() > 0,
+                    "{stem}: empty ground truth"
+                );
             }
         }
     }

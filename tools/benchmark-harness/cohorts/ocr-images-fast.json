@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "name": "ocr-images-fast-v1",
+  "batch_size": 6,
+  "ocr_enabled": true,
+  "fixtures": [
+    "image_scanned.json",
+    "image_ocr_test_original.json",
+    "image_text.json",
+    "tif_ocr.json",
+    "image_invoice.json",
+    "image_table.json"
+  ]
+}

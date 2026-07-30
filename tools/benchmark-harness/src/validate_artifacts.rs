@@ -563,11 +563,10 @@ fn validate_raw_artifacts(
     ))
 }
 
-fn validate_bucket(bucket: &PerformancePercentiles, contract: &CohortContract, key: &str) -> Result<()> {
-    require(
-        bucket.total_sample_count == contract.fixtures.len(),
-        format!("{key}: fixture count mismatch"),
-    )?;
+/// Validate one file-type bucket has no errors and report its sample count. Cohorts can span
+/// several file types (e.g. the office family: docx, pptx, xlsx), so each fixture lands in its own
+/// file-type bucket; the caller sums the counts and checks the total against `fixtures.len()`.
+fn validate_bucket(bucket: &PerformancePercentiles, key: &str) -> Result<usize> {
     require(bucket.framework_errors == 0, format!("{key}: nonzero framework_errors"))?;
     require(bucket.harness_errors == 0, format!("{key}: nonzero harness_errors"))?;
     require(
@@ -576,7 +575,7 @@ fn validate_bucket(bucket: &PerformancePercentiles, contract: &CohortContract, k
     )?;
     require(bucket.timeouts == 0, format!("{key}: nonzero timeouts"))?;
     require(bucket.empty_content == 0, format!("{key}: nonzero empty_content"))?;
-    Ok(())
+    Ok(bucket.total_sample_count)
 }
 
 fn identity_string(
@@ -635,35 +634,44 @@ fn validate_aggregate(path: &Path, cohort: Cohort, contract: &CohortContract) ->
             continue;
         }
         require(
-            group.by_file_type.len() == 1 && group.by_file_type.contains_key("pdf"),
-            format!("{}: group {key} must contain only pdf metrics", path.display()),
+            !group.by_file_type.is_empty(),
+            format!("{}: group {key} has no file-type metrics", path.display()),
         )?;
-        let file_group = group
-            .by_file_type
-            .get("pdf")
-            .ok_or_else(|| contract_error(format!("{}: malformed file group in {key}", path.display())))?;
-
-        if expects_ocr {
+        // A cohort's OCR expectation is uniform, so every fixture in every file-type bucket must
+        // sit on the same OCR side; the opposite side must be empty. Sum the per-bucket sample
+        // counts and require the total to equal the cohort's fixture count.
+        let mut total_samples = 0usize;
+        for file_group in group.by_file_type.values() {
+            let (present, absent) = if expects_ocr {
+                (&file_group.with_ocr, &file_group.no_ocr)
+            } else {
+                (&file_group.no_ocr, &file_group.with_ocr)
+            };
             require(
-                file_group.no_ocr.is_none(),
-                format!("{}: group {key} has wrong OCR bucket", path.display()),
+                absent.is_none(),
+                format!(
+                    "{}: group {key} file type {} has wrong OCR bucket",
+                    path.display(),
+                    file_group.file_type
+                ),
             )?;
-            let bucket = file_group
-                .with_ocr
-                .as_ref()
-                .ok_or_else(|| contract_error(format!("{}: group {key} missing with_ocr", path.display())))?;
-            validate_bucket(bucket, contract, key)?;
-        } else {
-            require(
-                file_group.with_ocr.is_none(),
-                format!("{}: group {key} has wrong OCR bucket", path.display()),
-            )?;
-            let bucket = file_group
-                .no_ocr
-                .as_ref()
-                .ok_or_else(|| contract_error(format!("{}: group {key} missing no_ocr", path.display())))?;
-            validate_bucket(bucket, contract, key)?;
+            let bucket = present.as_ref().ok_or_else(|| {
+                contract_error(format!(
+                    "{}: group {key} file type {} missing OCR bucket",
+                    path.display(),
+                    file_group.file_type
+                ))
+            })?;
+            total_samples += validate_bucket(bucket, key)?;
         }
+        require(
+            total_samples == contract.fixtures.len(),
+            format!(
+                "{}: group {key} covers {total_samples} samples, expected {}",
+                path.display(),
+                contract.fixtures.len()
+            ),
+        )?;
     }
 
     let rows: Vec<&PerFixtureRow> = aggregate
