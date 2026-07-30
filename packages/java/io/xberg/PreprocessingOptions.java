@@ -3,8 +3,8 @@
 // To verify freshness: alef verify --exit-code
 package io.xberg;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.fasterxml.jackson.databind.annotation.JsonPOJOBuilder;
 
@@ -17,63 +17,57 @@ public record PreprocessingOptions(
     @JsonProperty("enabled") boolean enabled,
     @JsonProperty("preset") PreprocessingPreset preset,
     @JsonProperty("remove_navigation") boolean removeNavigation,
-    @JsonProperty("remove_forms") boolean removeForms
-) {
-    /** Creates a new Builder for constructing instances of this record. */
-    public static Builder builder() {
-        return new Builder();
+    @JsonProperty("remove_forms") boolean removeForms) {
+  /** Creates a new Builder for constructing instances of this record. */
+  public static Builder builder() { return new Builder(); }
+
+  // CPD-OFF
+  /** Jackson builder for PreprocessingOptions deserialization. */
+  @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
+  @JsonPOJOBuilder(withPrefix = "with", buildMethodName = "build")
+  public static final class Builder {
+
+    private boolean enabled = true;
+    private PreprocessingPreset preset;
+    @JsonProperty("remove_navigation") private boolean removeNavigation = true;
+    @JsonProperty("remove_forms") private boolean removeForms = true;
+
+    /** Sets the enabled field. */
+    @JsonProperty("enabled")
+    public Builder withEnabled(final boolean value) {
+      this.enabled = value;
+      return this;
     }
 
-    // CPD-OFF
-    /** Jackson builder for PreprocessingOptions deserialization. */
-    @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
-    @JsonPOJOBuilder(withPrefix = "with", buildMethodName = "build")
-    public static final class Builder {
-
-        private boolean enabled = true;
-        private PreprocessingPreset preset;
-        @JsonProperty("remove_navigation")
-        private boolean removeNavigation = true;
-        @JsonProperty("remove_forms")
-        private boolean removeForms = true;
-
-        /** Sets the enabled field. */
-        @JsonProperty("enabled")
-        public Builder withEnabled(final boolean value) {
-            this.enabled = value;
-            return this;
-        }
-
-        /** Sets the preset field. */
-        @JsonProperty("preset")
-        public Builder withPreset(final PreprocessingPreset value) {
-            this.preset = value;
-            return this;
-        }
-
-        /** Sets the removeNavigation field. */
-        @JsonProperty("remove_navigation")
-        public Builder withRemoveNavigation(final boolean value) {
-            this.removeNavigation = value;
-            return this;
-        }
-
-        /** Sets the removeForms field. */
-        @JsonProperty("remove_forms")
-        public Builder withRemoveForms(final boolean value) {
-            this.removeForms = value;
-            return this;
-        }
-
-        /** Constructs a PreprocessingOptions instance from the builder's current state. */
-        public PreprocessingOptions build() {
-            return new PreprocessingOptions(
-                enabled,
-                preset,
-                removeNavigation,
-                removeForms
-            );
-        }
+    /** Sets the preset field. */
+    @JsonProperty("preset")
+    public Builder withPreset(final PreprocessingPreset value) {
+      this.preset = value;
+      return this;
     }
-    // CPD-ON
+
+    /** Sets the removeNavigation field. */
+    @JsonProperty("remove_navigation")
+    public Builder withRemoveNavigation(final boolean value) {
+      this.removeNavigation = value;
+      return this;
+    }
+
+    /** Sets the removeForms field. */
+    @JsonProperty("remove_forms")
+    public Builder withRemoveForms(final boolean value) {
+      this.removeForms = value;
+      return this;
+    }
+
+    /**
+     * Constructs a PreprocessingOptions instance from the builder's current
+     * state.
+     */
+    public PreprocessingOptions build() {
+      return new PreprocessingOptions(enabled, preset, removeNavigation,
+                                      removeForms);
+    }
+  }
+  // CPD-ON
 }

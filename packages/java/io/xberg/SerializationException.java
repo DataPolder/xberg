@@ -8,9 +8,7 @@ public class SerializationException extends XbergErrorException {
   private static final long serialVersionUID = 1L;
 
   /** Creates a new SerializationException with the given message. */
-  public SerializationException(final String message) {
-    super(message);
-  }
+  public SerializationException(final String message) { super(message); }
 
   /** Creates a new SerializationException with the given message and cause. */
   public SerializationException(final String message, final Throwable cause) {

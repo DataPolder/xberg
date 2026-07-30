@@ -13,47 +13,44 @@ import com.fasterxml.jackson.annotation.JsonValue;
  */
 @SuppressWarnings("PMD")
 public enum HeadingStyle {
-    /**
-     * Underlined style (=== for h1, --- for h2).
-     */
-    Underlined("underlined"),
-    /**
-     * ATX style (# for h1, ## for h2, etc.). Default.
-     */
-    Atx("atx"),
-    /**
-     * ATX closed style (# title #, with closing hashes).
-     */
-    AtxClosed("atxclosed");
+  /**
+   * Underlined style (=== for h1, --- for h2).
+   */
+  Underlined("underlined"),
+  /**
+   * ATX style (# for h1, ## for h2, etc.). Default.
+   */
+  Atx("atx"),
+  /**
+   * ATX closed style (# title #, with closing hashes).
+   */
+  AtxClosed("atxclosed");
 
+  /** The string value. */
+  private final String value;
 
-    /** The string value. */
-    private final String value;
+  HeadingStyle(final String value) { this.value = value; }
 
-    HeadingStyle(final String value) {
-        this.value = value;
+  /** Returns the string value. */
+  @JsonValue
+  public String getValue() {
+    return value;
+  }
+
+  /** Creates an instance from a string value. */
+  @JsonCreator
+  public static HeadingStyle fromValue(final String value) {
+    for (HeadingStyle e : values()) {
+      if (e.value.equalsIgnoreCase(value)) {
+        return e;
+      }
     }
+    throw new IllegalArgumentException("Unknown HeadingStyle value: " + value);
+  }
 
-    /** Returns the string value. */
-    @JsonValue
-    public String getValue() {
-        return value;
-    }
-
-    /** Creates an instance from a string value. */
-    @JsonCreator
-    public static HeadingStyle fromValue(final String value) {
-        for (HeadingStyle e : values()) {
-            if (e.value.equalsIgnoreCase(value)) {
-                return e;
-            }
-        }
-        throw new IllegalArgumentException("Unknown HeadingStyle value: " + value);
-    }
-
-    /** Returns the wire-format string value (matches JSON serialization). */
-    @Override
-    public String toString() {
-        return value;
-    }
+  /** Returns the wire-format string value (matches JSON serialization). */
+  @Override
+  public String toString() {
+    return value;
+  }
 }

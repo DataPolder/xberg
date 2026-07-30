@@ -11,63 +11,61 @@ import com.fasterxml.jackson.annotation.JsonValue;
  */
 @SuppressWarnings("PMD")
 public enum PdfAnnotationType {
-    /**
-     * Sticky note / text annotation
-     */
-    Text("text"),
-    /**
-     * Highlighted text region
-     */
-    Highlight("highlight"),
-    /**
-     * Hyperlink annotation
-     */
-    Link("link"),
-    /**
-     * Rubber stamp annotation
-     */
-    Stamp("stamp"),
-    /**
-     * Underline text markup
-     */
-    Underline("underline"),
-    /**
-     * Strikeout text markup
-     */
-    StrikeOut("strike_out"),
-    /**
-     * Any other annotation type
-     */
-    Other("other");
+  /**
+   * Sticky note / text annotation
+   */
+  Text("text"),
+  /**
+   * Highlighted text region
+   */
+  Highlight("highlight"),
+  /**
+   * Hyperlink annotation
+   */
+  Link("link"),
+  /**
+   * Rubber stamp annotation
+   */
+  Stamp("stamp"),
+  /**
+   * Underline text markup
+   */
+  Underline("underline"),
+  /**
+   * Strikeout text markup
+   */
+  StrikeOut("strike_out"),
+  /**
+   * Any other annotation type
+   */
+  Other("other");
 
+  /** The string value. */
+  private final String value;
 
-    /** The string value. */
-    private final String value;
+  PdfAnnotationType(final String value) { this.value = value; }
 
-    PdfAnnotationType(final String value) {
-        this.value = value;
+  /** Returns the string value. */
+  @JsonValue
+  public String getValue() {
+    return value;
+  }
+
+  /** Creates an instance from a string value. */
+  @JsonCreator
+  public static PdfAnnotationType fromValue(final String value) {
+    for (PdfAnnotationType e : values()) {
+      if (e.value.equalsIgnoreCase(value)) {
+        return e;
+      }
     }
+    throw new IllegalArgumentException("Unknown PdfAnnotationType value: " +
+                                       value);
+  }
 
-    /** Returns the string value. */
-    @JsonValue
-    public String getValue() {
-        return value;
-    }
-
-    /** Creates an instance from a string value. */
-    @JsonCreator
-    public static PdfAnnotationType fromValue(final String value) {
-        for (PdfAnnotationType e : values()) {
-            if (e.value.equalsIgnoreCase(value)) {
-                return e;
-            }
-        }
-        throw new IllegalArgumentException("Unknown PdfAnnotationType value: " + value);
-    }
-
-    /** Returns the wire-format string value (matches JSON serialization). */
-    @Override
-    public String toString() {
-        return value;
-    }
+  /** Returns the wire-format string value (matches JSON serialization). */
+  @Override
+  public String toString() {
+    return value;
+  }
 }

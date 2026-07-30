@@ -1,6 +1,6 @@
 {
   "name": "@xberg-io/opencode-xberg",
-  "version": "1.0.3",
+  "version": "1.0.5",
   "description": "Local document extraction: text, tables, metadata, images from 98+ formats with optional OCR.",
   "keywords": [
     "document-intelligence",

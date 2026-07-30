@@ -5513,7 +5513,7 @@ pub const LateInteractionModelType = union(enum) {
     preset: []const u8,
     /// Use a custom ColBERT ONNX model from HuggingFace.
     custom: struct {
-        model_id: []const u8,
+    model_id: []const u8,
         model_file: ?[]const u8,
         additional_files: []const []const u8,
         max_length: ?i64,
@@ -5741,7 +5741,7 @@ pub const ChunkSizing = union(enum) {
     /// Size measured in tokens from a HuggingFace tokenizer or a registered
     /// tokenizer backend.
     tokenizer: struct {
-        model: []const u8,
+    model: []const u8,
         cache_dir: ?[]const u8,
     },
 };
@@ -5752,7 +5752,7 @@ pub const EmbeddingModelType = union(enum) {
     preset: []const u8,
     /// Use a custom ONNX model from HuggingFace
     custom: struct {
-        model_id: []const u8,
+    model_id: []const u8,
         dimensions: u64,
     },
     /// Provider-hosted embedding model via liter-llm.
@@ -5810,7 +5810,7 @@ pub const RerankerModelType = union(enum) {
     preset: []const u8,
     /// Use a custom ONNX cross-encoder from HuggingFace.
     custom: struct {
-        model_id: []const u8,
+    model_id: []const u8,
         model_file: ?[]const u8,
         additional_files: []const []const u8,
         max_length: ?i64,
@@ -5844,7 +5844,7 @@ pub const SparseEmbeddingModelType = union(enum) {
     preset: []const u8,
     /// Use a custom SPLADE (`BertForMaskedLM`) ONNX model from HuggingFace.
     custom: struct {
-        model_id: []const u8,
+    model_id: []const u8,
         model_file: ?[]const u8,
         additional_files: []const []const u8,
         max_length: ?i64,
@@ -6087,7 +6087,7 @@ pub const NodeContent = union(enum) {
     title: []const u8,
     /// Section heading with level (1-6).
     heading: struct {
-        level: u8,
+    level: u8,
         text: []const u8,
     },
     /// Body text paragraph.
@@ -6100,13 +6100,13 @@ pub const NodeContent = union(enum) {
     table: TableGrid,
     /// Image reference.
     image: struct {
-        description: ?[]const u8,
+    description: ?[]const u8,
         image_index: ?u32,
         src: ?[]const u8,
     },
     /// Code block.
     code: struct {
-        text: []const u8,
+    text: []const u8,
         language: ?[]const u8,
     },
     /// Block quote — container, children carry the quoted content.
@@ -6120,7 +6120,7 @@ pub const NodeContent = union(enum) {
     /// `heading_level` + `heading_text` capture the section heading directly
     /// rather than relying on a first-child positional convention.
     group: struct {
-        label: ?[]const u8,
+    label: ?[]const u8,
         heading_level: ?u8,
         heading_text: ?[]const u8,
     },
@@ -6128,26 +6128,26 @@ pub const NodeContent = union(enum) {
     page_break: void,
     /// Presentation slide container — children are the slide's content nodes.
     slide: struct {
-        number: u32,
+    number: u32,
         title: ?[]const u8,
     },
     /// Definition list container — children are `DefinitionItem` nodes.
     definition_list: void,
     /// Individual definition list entry with term and definition.
     definition_item: struct {
-        term: []const u8,
+    term: []const u8,
         definition: []const u8,
     },
     /// Citation or bibliographic reference.
     citation: struct {
-        key: []const u8,
+    key: []const u8,
         text: []const u8,
     },
     /// Admonition / callout container (note, warning, tip, etc.).
     ///
     /// Children carry the admonition body content.
     admonition: struct {
-        kind: []const u8,
+    kind: []const u8,
         title: ?[]const u8,
     },
     /// Raw block preserved verbatim from the source format.
@@ -6155,7 +6155,7 @@ pub const NodeContent = union(enum) {
     /// Used for content that cannot be mapped to a semantic node type
     /// (e.g. JSX in MDX, raw LaTeX in markdown, embedded HTML).
     raw_block: struct {
-        format: []const u8,
+    format: []const u8,
         content: []const u8,
     },
     /// Structured metadata block (email headers, YAML frontmatter, etc.).
@@ -6180,7 +6180,7 @@ pub const AnnotationKind = union(enum) {
     superscript: void,
     /// Hyperlink annotation.
     link: struct {
-        url: []const u8,
+    url: []const u8,
         title: ?[]const u8,
     },
     /// Highlighted text (PDF highlights, HTML `<mark>`).
@@ -6191,7 +6191,7 @@ pub const AnnotationKind = union(enum) {
     font_size: []const u8,
     /// Extensible annotation for format-specific styling.
     custom: struct {
-        name: []const u8,
+    name: []const u8,
         value: ?[]const u8,
     },
 };
@@ -6495,7 +6495,7 @@ pub const StructuredDataType = enum {
 pub const OcrBoundingGeometry = union(enum) {
     /// Axis-aligned bounding box (typical for Tesseract output).
     rectangle: struct {
-        left: u32,
+    left: u32,
         top: u32,
         width: u32,
         height: u32,
@@ -6618,7 +6618,7 @@ pub const RevisionAnchor = union(enum) {
     paragraph: u64,
     /// Cell inside a table.
     table_cell: struct {
-        row: u64,
+    row: u64,
         col: u64,
         table_index: u64,
     },
@@ -6628,7 +6628,7 @@ pub const RevisionAnchor = union(enum) {
     slide: u64,
     /// Spreadsheet cell or range, identified by sheet index and optional name.
     sheet: struct {
-        index: u64,
+    index: u64,
         name: ?[]const u8,
     },
 };
@@ -6731,17 +6731,17 @@ pub const SchemaCompliance = enum {
 pub const NoChunkingReason = union(enum) {
     /// File is below size threshold.
     small_file: struct {
-        size_bytes: u64,
+    size_bytes: u64,
         threshold_bytes: u64,
     },
     /// Document has fewer pages than threshold.
     few_pages: struct {
-        page_count: u32,
+    page_count: u32,
         threshold: u32,
     },
     /// PDF has substantial text layer (OCR not needed).
     text_layer_detected: struct {
-        text_coverage: f32,
+    text_coverage: f32,
         avg_chars_per_page: u32,
     },
     /// Document format does not support chunking.
@@ -6756,22 +6756,22 @@ pub const NoChunkingReason = union(enum) {
 pub const ChunkingReason = union(enum) {
     /// File exceeds size threshold.
     large_file: struct {
-        size_bytes: u64,
+    size_bytes: u64,
         threshold_bytes: u64,
     },
     /// Document has many pages.
     many_pages: struct {
-        page_count: u32,
+    page_count: u32,
         threshold: u32,
     },
     /// PDF requires OCR and is large.
     ocr_required: struct {
-        page_count: u32,
+    page_count: u32,
         force_ocr: bool,
     },
     /// Both size and page count exceed thresholds.
     large_and_many_pages: struct {
-        size_bytes: u64,
+    size_bytes: u64,
         page_count: u32,
     },
 };
@@ -6964,14 +6964,14 @@ pub const BrowserBackend = enum {
 pub const AuthConfig = union(enum) {
     /// HTTP Basic authentication.
     basic: struct {
-        username: []const u8,
+    username: []const u8,
         password: []const u8,
     },
     /// Bearer token authentication.
     bearer: []const u8,
     /// Custom authentication header.
     header: struct {
-        name: []const u8,
+    name: []const u8,
         value: []const u8,
     },
 };
@@ -7140,7 +7140,7 @@ pub fn extract(input: []const u8, config: []const u8) XbergError![]u8 {
         const owned = try std.heap.c_allocator.dupe(u8, slice);
         break :blk owned;
     }
-;
+    ;
 }
 
 /// Extract content from multiple bytes or URI inputs.
@@ -7171,7 +7171,7 @@ pub fn extract_batch(inputs: []const u8, config: []const u8) XbergError![]u8 {
         const owned = try std.heap.c_allocator.dupe(u8, slice);
         break :blk owned;
     }
-;
+    ;
 }
 
 /// Discover all pages and sitemaps reachable from `uri` without extracting document content.
@@ -7213,7 +7213,7 @@ pub fn map_url(uri: []const u8, config: []const u8) XbergError![]u8 {
         const owned = try std.heap.c_allocator.dupe(u8, slice);
         break :blk owned;
     }
-;
+    ;
 }
 
 /// List all supported document formats.
@@ -7237,7 +7237,7 @@ pub fn list_supported_formats() error{OutOfMemory}![]u8 {
         _free_string(_result);
         break :blk owned;
     }
-;
+    ;
 }
 
 /// List the names of all registered embedding backends.
@@ -7260,7 +7260,7 @@ pub fn list_embedding_backends() XbergError![]u8 {
         _free_string(_result);
         break :blk owned;
     }
-;
+    ;
 }
 
 /// List names of all registered document extractors.
@@ -7280,7 +7280,7 @@ pub fn list_document_extractors() XbergError![]u8 {
         _free_string(_result);
         break :blk owned;
     }
-;
+    ;
 }
 
 /// List all registered OCR backends.
@@ -7306,7 +7306,7 @@ pub fn list_ocr_backends() XbergError![]u8 {
         _free_string(_result);
         break :blk owned;
     }
-;
+    ;
 }
 
 /// List all registered post-processor names.
@@ -7334,7 +7334,7 @@ pub fn list_post_processors() XbergError![]u8 {
         _free_string(_result);
         break :blk owned;
     }
-;
+    ;
 }
 
 /// List names of all registered renderers.
@@ -7358,7 +7358,7 @@ pub fn list_renderers() XbergError![]u8 {
         _free_string(_result);
         break :blk owned;
     }
-;
+    ;
 }
 
 /// List the names of all registered reranker backends.
@@ -7383,7 +7383,7 @@ pub fn list_reranker_backends() XbergError![]u8 {
         _free_string(_result);
         break :blk owned;
     }
-;
+    ;
 }
 
 /// List the names of all registered tokenizer backends.
@@ -7406,7 +7406,7 @@ pub fn list_tokenizer_backends() XbergError![]u8 {
         _free_string(_result);
         break :blk owned;
     }
-;
+    ;
 }
 
 /// List names of all registered validators.
@@ -7426,7 +7426,7 @@ pub fn list_validators() XbergError![]u8 {
         _free_string(_result);
         break :blk owned;
     }
-;
+    ;
 }
 
 /// Run chunk classification against an extraction result.
@@ -7490,7 +7490,7 @@ pub fn find_unmarked_claims(markdown: []const u8) error{OutOfMemory}![]u8 {
         _free_string(_result);
         break :blk owned;
     }
-;
+    ;
 }
 
 /// Verify that an excerpt appears verbatim in source text.
@@ -7569,7 +7569,7 @@ pub fn max_sim_rank(query: []const u8, docs: []const u8) error{OutOfMemory,Inval
         _free_string(_result);
         break :blk owned;
     }
-;
+    ;
 }
 
 /// Vtable for a Zig implementation of the `OcrBackend` trait.
@@ -7820,7 +7820,7 @@ pub fn make_ocr_backend_vtable(comptime T: type, instance: *T) IOcrBackend {
                 const self: *T = @ptrCast(@alignCast(ud));
                 _ = image_bytes_len;
                 if (self.process_image(image_bytes_ptr, config)) |value| {
-// String-like return type ([*c]const u8): already a C string pointer.
+                    // String-like return type ([*c]const u8): already a C string pointer.
                     // Use directly without JSON formatting (zig 0.16 stringify can't handle [*c]const u8).
                     if (out_result) |ptr| ptr.* = @constCast(value);
                     return 0;
@@ -7836,7 +7836,7 @@ pub fn make_ocr_backend_vtable(comptime T: type, instance: *T) IOcrBackend {
             fn thunk(ud: ?*anyopaque, path: [*c]const u8, config: [*c]const u8, out_result: ?*?[*c]u8, out_error: ?*?[*c]u8) callconv(.c) i32 {
                 const self: *T = @ptrCast(@alignCast(ud));
                 if (self.process_image_file(path, config)) |value| {
-// String-like return type ([*c]const u8): already a C string pointer.
+                    // String-like return type ([*c]const u8): already a C string pointer.
                     // Use directly without JSON formatting (zig 0.16 stringify can't handle [*c]const u8).
                     if (out_result) |ptr| ptr.* = @constCast(value);
                     return 0;
@@ -7902,7 +7902,7 @@ pub fn make_ocr_backend_vtable(comptime T: type, instance: *T) IOcrBackend {
             fn thunk(ud: ?*anyopaque, _path: [*c]const u8, _config: [*c]const u8, out_result: ?*?[*c]u8, out_error: ?*?[*c]u8) callconv(.c) i32 {
                 const self: *T = @ptrCast(@alignCast(ud));
                 if (self.process_document(_path, _config)) |value| {
-// String-like return type ([*c]const u8): already a C string pointer.
+                    // String-like return type ([*c]const u8): already a C string pointer.
                     // Use directly without JSON formatting (zig 0.16 stringify can't handle [*c]const u8).
                     if (out_result) |ptr| ptr.* = @constCast(value);
                     return 0;
@@ -8667,7 +8667,7 @@ pub fn make_document_extractor_vtable(comptime T: type, instance: *T) IDocumentE
             fn thunk(ud: ?*anyopaque, input: [*c]const u8, config: [*c]const u8, out_result: ?*?[*c]u8, out_error: ?*?[*c]u8) callconv(.c) i32 {
                 const self: *T = @ptrCast(@alignCast(ud));
                 if (self.extract(input, config)) |value| {
-// String-like return type ([*c]const u8): already a C string pointer.
+                    // String-like return type ([*c]const u8): already a C string pointer.
                     // Use directly without JSON formatting (zig 0.16 stringify can't handle [*c]const u8).
                     if (out_result) |ptr| ptr.* = @constCast(value);
                     return 0;
@@ -8854,7 +8854,7 @@ pub fn make_embedding_backend_vtable(comptime T: type, instance: *T) IEmbeddingB
             fn thunk(ud: ?*anyopaque, texts: [*c]const u8, out_result: ?*?[*c]u8, out_error: ?*?[*c]u8) callconv(.c) i32 {
                 const self: *T = @ptrCast(@alignCast(ud));
                 if (self.embed(texts)) |value| {
-// String-like return type ([*c]const u8): already a C string pointer.
+                    // String-like return type ([*c]const u8): already a C string pointer.
                     // Use directly without JSON formatting (zig 0.16 stringify can't handle [*c]const u8).
                     if (out_result) |ptr| ptr.* = @constCast(value);
                     return 0;
@@ -9002,7 +9002,7 @@ pub fn make_renderer_vtable(comptime T: type, instance: *T) IRenderer {
             fn thunk(ud: ?*anyopaque, result: [*c]const u8, out_result: ?*?[*c]u8, out_error: ?*?[*c]u8) callconv(.c) i32 {
                 const self: *T = @ptrCast(@alignCast(ud));
                 if (self.render_result(result)) |value| {
-// String-like return type ([*c]const u8): already a C string pointer.
+                    // String-like return type ([*c]const u8): already a C string pointer.
                     // Use directly without JSON formatting (zig 0.16 stringify can't handle [*c]const u8).
                     if (out_result) |ptr| ptr.* = @constCast(value);
                     return 0;
@@ -9157,7 +9157,7 @@ pub fn make_reranker_backend_vtable(comptime T: type, instance: *T) IRerankerBac
             fn thunk(ud: ?*anyopaque, query: [*c]const u8, documents: [*c]const u8, out_result: ?*?[*c]u8, out_error: ?*?[*c]u8) callconv(.c) i32 {
                 const self: *T = @ptrCast(@alignCast(ud));
                 if (self.rerank(query, documents)) |value| {
-// String-like return type ([*c]const u8): already a C string pointer.
+                    // String-like return type ([*c]const u8): already a C string pointer.
                     // Use directly without JSON formatting (zig 0.16 stringify can't handle [*c]const u8).
                     if (out_result) |ptr| ptr.* = @constCast(value);
                     return 0;
@@ -9332,7 +9332,7 @@ pub const TokenCounter = struct {
 
     /// Release the underlying FFI handle. Safe to call once per instance.
     pub fn free(self: *TokenCounter) void {
-        c.xberg_token_counter_free(@as(*c.XBERGTokenCounter, @ptrCast(self._handle)));
+    c.xberg_token_counter_free(@as(*c.XBERGTokenCounter, @ptrCast(self._handle)));
     }
 };
 
@@ -9352,7 +9352,7 @@ pub const MetaSchema = struct {
     /// Validate `raw` against the meta-schema and deserialize into a `Preset`,
     /// stamping the fingerprint over the canonical file bytes.
     pub fn parse_preset(self: *MetaSchema, path: []const u8, raw: []const u8) (LoadError||error{OutOfMemory})![]u8 {
-        const path_z = try std.heap.c_allocator.dupeZ(u8, path);
+    const path_z = try std.heap.c_allocator.dupeZ(u8, path);
         defer std.heap.c_allocator.free(path_z);
         const _result = c.xberg_meta_schema_parse_preset(@as(*c.XBERGMetaSchema, @ptrCast(self._handle)), path_z, raw.ptr, raw.len);
         if (_result == null) {
@@ -9370,7 +9370,7 @@ pub const MetaSchema = struct {
 
     /// Release the underlying FFI handle. Safe to call once per instance.
     pub fn free(self: *MetaSchema) void {
-        c.xberg_meta_schema_free(@as(*c.XBERGMetaSchema, @ptrCast(self._handle)));
+    c.xberg_meta_schema_free(@as(*c.XBERGMetaSchema, @ptrCast(self._handle)));
     }
 };
 
@@ -9388,7 +9388,7 @@ pub const Registry = struct {
 
     /// Look up a preset by its identifier.
     pub fn get(self: *Registry, id: []const u8) error{OutOfMemory}!?[]u8 {
-        const id_z = try std.heap.c_allocator.dupeZ(u8, id);
+    const id_z = try std.heap.c_allocator.dupeZ(u8, id);
         defer std.heap.c_allocator.free(id_z);
         const _result = c.xberg_registry_get(@as(*c.XBERGRegistry, @ptrCast(self._handle)), id_z);
         return _result;
@@ -9396,7 +9396,7 @@ pub const Registry = struct {
 
     /// Materialize a `PresetSummary` list for the public registry endpoint.
     pub fn summaries(self: *Registry) error{OutOfMemory}![]u8 {
-        const _result = c.xberg_registry_summaries(@as(*c.XBERGRegistry, @ptrCast(self._handle)));
+    const _result = c.xberg_registry_summaries(@as(*c.XBERGRegistry, @ptrCast(self._handle)));
         return blk: {
             const slice = std.mem.span(_result);
             const owned = try std.heap.c_allocator.dupe(u8, slice);
@@ -9407,20 +9407,20 @@ pub const Registry = struct {
 
     /// Number of presets currently loaded.
     pub fn len(self: *Registry) u64 {
-        const _result = c.xberg_registry_len(@as(*c.XBERGRegistry, @ptrCast(self._handle)));
+    const _result = c.xberg_registry_len(@as(*c.XBERGRegistry, @ptrCast(self._handle)));
         return _result;
     }
 
     /// Whether the registry contains zero presets.
     pub fn is_empty(self: *Registry) bool {
-        const _result = c.xberg_registry_is_empty(@as(*c.XBERGRegistry, @ptrCast(self._handle)));
+    const _result = c.xberg_registry_is_empty(@as(*c.XBERGRegistry, @ptrCast(self._handle)));
         return _result;
     }
 
     /// Read raw sample bytes for `<preset_id>` from
     /// `library/<id>/samples/<name>`. Returns `null` when the file is absent.
     pub fn sample_bytes(self: *Registry, preset_id: []const u8, name: []const u8) error{OutOfMemory}!?[]const u8 {
-        const preset_id_z = try std.heap.c_allocator.dupeZ(u8, preset_id);
+    const preset_id_z = try std.heap.c_allocator.dupeZ(u8, preset_id);
         defer std.heap.c_allocator.free(preset_id_z);
         const name_z = try std.heap.c_allocator.dupeZ(u8, name);
         defer std.heap.c_allocator.free(name_z);
@@ -9444,7 +9444,7 @@ pub const Registry = struct {
     /// This is the injection point for downstream catalogs that add curated
     /// presets on top of the single embedded OSS preset.
     pub fn extend_from_dir(self: *Registry, dir: []const u8) (LoadError||error{OutOfMemory})!u64 {
-        const dir_z = try std.heap.c_allocator.dupeZ(u8, dir);
+    const dir_z = try std.heap.c_allocator.dupeZ(u8, dir);
         defer std.heap.c_allocator.free(dir_z);
         const _result = c.xberg_registry_extend_from_dir(@as(*c.XBERGRegistry, @ptrCast(self._handle)), dir_z);
         if (_result == null) {
@@ -9455,7 +9455,7 @@ pub const Registry = struct {
 
     /// Release the underlying FFI handle. Safe to call once per instance.
     pub fn free(self: *Registry) void {
-        c.xberg_registry_free(@as(*c.XBERGRegistry, @ptrCast(self._handle)));
+    c.xberg_registry_free(@as(*c.XBERGRegistry, @ptrCast(self._handle)));
     }
 };
 
@@ -9469,6 +9469,6 @@ pub const ChunkClassificationEnrichmentConfig = struct {
 
     /// Release the underlying FFI handle. Safe to call once per instance.
     pub fn free(self: *ChunkClassificationEnrichmentConfig) void {
-        c.xberg_chunk_classification_enrichment_config_free(@as(*c.XBERGChunkClassificationEnrichmentConfig, @ptrCast(self._handle)));
+    c.xberg_chunk_classification_enrichment_config_free(@as(*c.XBERGChunkClassificationEnrichmentConfig, @ptrCast(self._handle)));
     }
 };

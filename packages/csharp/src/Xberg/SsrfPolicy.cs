@@ -13,54 +13,54 @@ namespace Xberg;
 /// <summary>
 /// SSRF policy configuration.
 /// </summary>
-public sealed record SsrfPolicy
-{
-    /// <summary>
-    /// If true, reject URLs that resolve to private/metadata IP ranges.
-    /// </summary>
-    [JsonPropertyName("deny_private")]
-    public bool DenyPrivate { get; init; } = true;
+public sealed record SsrfPolicy {
+  /// <summary>
+  /// If true, reject URLs that resolve to private/metadata IP ranges.
+  /// </summary>
+  [JsonPropertyName("deny_private")]
+  public bool DenyPrivate { get; init; } = true;
 
-    /// <summary>
-    /// Maximum number of HTTP redirects to follow during validation.
-    /// </summary>
-    [JsonPropertyName("max_redirects")]
-    public byte MaxRedirects { get; init; } = 5;
+  /// <summary>
+  /// Maximum number of HTTP redirects to follow during validation.
+  /// </summary>
+  [JsonPropertyName("max_redirects")]
+  public byte MaxRedirects {
+    get; init;
+  } = 5;
 
-
-    /// <summary>
-    /// Parse a <see cref="SsrfPolicy"/> from a JSON string.
-    /// </summary>
-    /// <exception cref="XbergException">When the JSON cannot be deserialised.</exception>
-    public static SsrfPolicy FromJson(string json)
-    {
-        try
-        {
-            return JsonSerializer.Deserialize<SsrfPolicy>(json, JsonOptions)
-                ?? throw new XbergException($"Failed to parse SsrfPolicy from JSON: deserializer returned null");
-        }
-        catch (XbergException)
-        {
-            throw;
-        }
-        catch (Exception e)
-        {
-            throw new XbergException($"Failed to parse SsrfPolicy from JSON: {e.Message}", e);
-        }
+  /// <summary>
+  /// Parse a <see cref="SsrfPolicy"/> from a JSON string.
+  /// </summary>
+  /// <exception cref="XbergException">When the JSON cannot be
+  /// deserialised.</exception>
+  public static SsrfPolicy FromJson(string json) {
+    try {
+      return JsonSerializer.Deserialize<SsrfPolicy>(json, JsonOptions) ??
+             throw new XbergException(
+                 $"Failed to parse SsrfPolicy from JSON: deserializer returned null");
+    } catch (XbergException) {
+      throw;
+    } catch (Exception e) {
+      throw new XbergException(
+          $"Failed to parse SsrfPolicy from JSON: {e.Message}", e);
     }
+  }
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingDefault,
-        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.SnakeCaseLower), new ByteArrayJsonConverter() },
-    };
+  private static readonly JsonSerializerOptions JsonOptions = new() {
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingDefault,
+    Converters = { new JsonStringEnumConverter(JsonNamingPolicy.SnakeCaseLower),
+                   new ByteArrayJsonConverter() },
+  };
 
-    /// <summary>Options for serializing config/input objects to FFI. Strips nulls
-    /// (nullable C# fields default to null and would override required Rust fields with
-    /// non-deserialisable nulls) but preserves explicit false/0 so caller intent is kept.</summary>
-    private static readonly JsonSerializerOptions JsonSerializationOptions = new()
-    {
+  /// <summary>Options for serializing config/input objects to FFI. Strips nulls
+  /// (nullable C# fields default to null and would override required Rust
+  /// fields with non-deserialisable nulls) but preserves explicit false/0 so
+  /// caller intent is kept.</summary>
+  private static readonly JsonSerializerOptions JsonSerializationOptions =
+      new() {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.SnakeCaseLower), new ByteArrayJsonConverter() },
-    };
+        Converters = { new JsonStringEnumConverter(
+                           JsonNamingPolicy.SnakeCaseLower),
+                       new ByteArrayJsonConverter() },
+      };
 }

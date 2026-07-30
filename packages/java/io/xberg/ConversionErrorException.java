@@ -9,9 +9,7 @@ public class ConversionErrorException extends XbergRsException {
   private static final long serialVersionUID = 1L;
 
   /** Creates a new ConversionErrorException. */
-  public ConversionErrorException(final String message) {
-    super(2, message);
-  }
+  public ConversionErrorException(final String message) { super(2, message); }
 
   /** Creates a new ConversionErrorException with a cause. */
   public ConversionErrorException(final String message, final Throwable cause) {

@@ -13,51 +13,49 @@ import com.fasterxml.jackson.annotation.JsonValue;
  */
 @SuppressWarnings("PMD")
 public enum HighlightStyle {
-    /**
-     * Double equals syntax (==text==). Default. Pandoc-compatible.
-     */
-    DoubleEqual("doubleequal"),
-    /**
-     * Preserve as HTML (==text==). Original HTML tag.
-     */
-    Html("html"),
-    /**
-     * Render as bold (**text**). Uses strong emphasis.
-     */
-    Bold("bold"),
-    /**
-     * Strip formatting, render as plain text. No markup.
-     */
-    None("none");
+  /**
+   * Double equals syntax (==text==). Default. Pandoc-compatible.
+   */
+  DoubleEqual("doubleequal"),
+  /**
+   * Preserve as HTML (==text==). Original HTML tag.
+   */
+  Html("html"),
+  /**
+   * Render as bold (**text**). Uses strong emphasis.
+   */
+  Bold("bold"),
+  /**
+   * Strip formatting, render as plain text. No markup.
+   */
+  None("none");
 
+  /** The string value. */
+  private final String value;
 
-    /** The string value. */
-    private final String value;
+  HighlightStyle(final String value) { this.value = value; }
 
-    HighlightStyle(final String value) {
-        this.value = value;
+  /** Returns the string value. */
+  @JsonValue
+  public String getValue() {
+    return value;
+  }
+
+  /** Creates an instance from a string value. */
+  @JsonCreator
+  public static HighlightStyle fromValue(final String value) {
+    for (HighlightStyle e : values()) {
+      if (e.value.equalsIgnoreCase(value)) {
+        return e;
+      }
     }
+    throw new IllegalArgumentException("Unknown HighlightStyle value: " +
+                                       value);
+  }
 
-    /** Returns the string value. */
-    @JsonValue
-    public String getValue() {
-        return value;
-    }
-
-    /** Creates an instance from a string value. */
-    @JsonCreator
-    public static HighlightStyle fromValue(final String value) {
-        for (HighlightStyle e : values()) {
-            if (e.value.equalsIgnoreCase(value)) {
-                return e;
-            }
-        }
-        throw new IllegalArgumentException("Unknown HighlightStyle value: " + value);
-    }
-
-    /** Returns the wire-format string value (matches JSON serialization). */
-    @Override
-    public String toString() {
-        return value;
-    }
+  /** Returns the wire-format string value (matches JSON serialization). */
+  @Override
+  public String toString() {
+    return value;
+  }
 }

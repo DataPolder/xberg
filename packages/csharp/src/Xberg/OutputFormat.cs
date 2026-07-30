@@ -16,81 +16,69 @@ namespace Xberg;
 /// boxes and confidence scores.
 /// </summary>
 [JsonConverter(typeof(OutputFormatJsonConverter))]
-public enum OutputFormat
-{
-    /// <summary>
-    /// Plain text content only (default)
-    /// </summary>
-    [JsonPropertyName("plain")]
-    Plain,
-    /// <summary>
-    /// Markdown format
-    /// </summary>
-    [JsonPropertyName("markdown")]
-    Markdown,
-    /// <summary>
-    /// Djot markup format
-    /// </summary>
-    [JsonPropertyName("djot")]
-    Djot,
-    /// <summary>
-    /// HTML format
-    /// </summary>
-    [JsonPropertyName("html")]
-    Html,
-    /// <summary>
-    /// JSON tree format with heading-driven sections.
-    /// </summary>
-    [JsonPropertyName("json")]
-    Json,
-    /// <summary>
-    /// Structured JSON format with full OCR element metadata.
-    /// </summary>
-    [JsonPropertyName("structured")]
-    Structured,
-    /// <summary>
-    /// Custom renderer registered via the RendererRegistry.
-    /// The string is the renderer name (e.g., "docx", "latex").
-    /// </summary>
-    [JsonPropertyName("custom")]
-    Custom,
+public enum OutputFormat {
+  /// <summary>
+  /// Plain text content only (default)
+  /// </summary>
+  [JsonPropertyName("plain")] Plain,
+  /// <summary>
+  /// Markdown format
+  /// </summary>
+  [JsonPropertyName("markdown")] Markdown,
+  /// <summary>
+  /// Djot markup format
+  /// </summary>
+  [JsonPropertyName("djot")] Djot,
+  /// <summary>
+  /// HTML format
+  /// </summary>
+  [JsonPropertyName("html")] Html,
+  /// <summary>
+  /// JSON tree format with heading-driven sections.
+  /// </summary>
+  [JsonPropertyName("json")] Json,
+  /// <summary>
+  /// Structured JSON format with full OCR element metadata.
+  /// </summary>
+  [JsonPropertyName("structured")] Structured,
+  /// <summary>
+  /// Custom renderer registered via the RendererRegistry.
+  /// The string is the renderer name (e.g., "docx", "latex").
+  /// </summary>
+  [JsonPropertyName("custom")] Custom,
 }
 
-
 /// <summary>
-/// Custom JSON converter for <see cref="OutputFormat"/> that respects explicit variant names.
+/// Custom JSON converter for <see cref="OutputFormat"/> that respects explicit
+/// variant names.
 /// </summary>
-internal sealed class OutputFormatJsonConverter : JsonConverter<OutputFormat>
-{
-    public override OutputFormat Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-    {
-        var value = reader.GetString();
-        return value switch
-        {
-            "plain" => OutputFormat.Plain,
-            "markdown" => OutputFormat.Markdown,
-            "djot" => OutputFormat.Djot,
-            "html" => OutputFormat.Html,
-            "json" => OutputFormat.Json,
-            "structured" => OutputFormat.Structured,
-            "custom" => OutputFormat.Custom,
-            _ => throw new JsonException($"Unknown OutputFormat value: {value}")
-        };
-    }
+internal sealed class OutputFormatJsonConverter : JsonConverter<OutputFormat> {
+  public override OutputFormat Read(ref Utf8JsonReader reader,
+                                    Type typeToConvert,
+                                    JsonSerializerOptions options) {
+    var value = reader.GetString();
+    return value switch { "plain" => OutputFormat.Plain,
+                          "markdown" => OutputFormat.Markdown,
+                          "djot" => OutputFormat.Djot,
+                          "html" => OutputFormat.Html,
+                          "json" => OutputFormat.Json,
+                          "structured" => OutputFormat.Structured,
+                          "custom" => OutputFormat.Custom,
+                          _ => throw new JsonException(
+                              $"Unknown OutputFormat value: {value}") };
+  }
 
-    public override void Write(Utf8JsonWriter writer, OutputFormat value, JsonSerializerOptions options)
-    {
-        var str = value switch
-        {
-            OutputFormat.Plain => "plain",
-            OutputFormat.Markdown => "markdown",
-            OutputFormat.Djot => "djot",
-            OutputFormat.Html => "html",
-            OutputFormat.Json => "json",
-            OutputFormat.Structured => "structured",
-            OutputFormat.Custom => "custom",
-            _ => throw new JsonException($"Unknown OutputFormat value: {value}")
-        };
-        writer.WriteStringValue(str);
-    }
+  public override void Write(Utf8JsonWriter writer, OutputFormat value,
+                             JsonSerializerOptions options) {
+    var str = value switch { OutputFormat.Plain => "plain",
+                             OutputFormat.Markdown => "markdown",
+                             OutputFormat.Djot => "djot",
+                             OutputFormat.Html => "html",
+                             OutputFormat.Json => "json",
+                             OutputFormat.Structured => "structured",
+                             OutputFormat.Custom => "custom",
+                             _ => throw new JsonException(
+                                 $"Unknown OutputFormat value: {value}") };
+    writer.WriteStringValue(str);
+  }
 }

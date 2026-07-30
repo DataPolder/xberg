@@ -22,7 +22,5 @@ public class XbergRsException extends Exception {
   }
 
   /** Returns the error code. */
-  public int getCode() {
-    return code;
-  }
+  public int getCode() { return code; }
 }

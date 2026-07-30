@@ -3,11 +3,11 @@
 // To verify freshness: alef verify --exit-code
 package io.xberg;
 
-import java.util.Map;
-import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.fasterxml.jackson.databind.annotation.JsonPOJOBuilder;
+import java.util.Map;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -18,121 +18,103 @@ import org.jspecify.annotations.Nullable;
  */
 @JsonInclude(JsonInclude.Include.NON_ABSENT)
 @JsonDeserialize(builder = LlmConfig.Builder.class)
-public record LlmConfig(
-    @JsonProperty("model") String model,
-    @Nullable @JsonProperty("api_key") String apiKey,
-    @Nullable @JsonProperty("base_url") String baseUrl,
-    @Nullable @JsonProperty("timeout_secs") Long timeoutSecs,
-    @Nullable @JsonProperty("max_retries") Integer maxRetries,
-    @Nullable @JsonProperty("temperature") Double temperature,
-    @Nullable @JsonProperty("max_tokens") Long maxTokens,
-    @Nullable @JsonProperty("load_env") Boolean loadEnv,
-    @Nullable @JsonProperty("headers") Map<String, String> headers
-) {
-    /** Creates a new Builder for constructing instances of this record. */
-    public static Builder builder() {
-        return new Builder();
+public record
+LlmConfig(@JsonProperty("model") String model,
+          @Nullable @JsonProperty("api_key") String apiKey,
+          @Nullable @JsonProperty("base_url") String baseUrl,
+          @Nullable @JsonProperty("timeout_secs") Long timeoutSecs,
+          @Nullable @JsonProperty("max_retries") Integer maxRetries,
+          @Nullable @JsonProperty("temperature") Double temperature,
+          @Nullable @JsonProperty("max_tokens") Long maxTokens,
+          @Nullable @JsonProperty("load_env") Boolean loadEnv,
+          @Nullable @JsonProperty("headers") Map<String, String> headers) {
+  /** Creates a new Builder for constructing instances of this record. */
+  public static Builder builder() { return new Builder(); }
+
+  // CPD-OFF
+  /** Jackson builder for LlmConfig deserialization. */
+  @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
+  @JsonPOJOBuilder(withPrefix = "with", buildMethodName = "build")
+  public static final class Builder {
+
+    private String model;
+    @JsonProperty("api_key") @Nullable private String apiKey;
+    @JsonProperty("base_url") @Nullable private String baseUrl;
+    @JsonProperty("timeout_secs") @Nullable private Long timeoutSecs;
+    @JsonProperty("max_retries") @Nullable private Integer maxRetries;
+    @Nullable private Double temperature;
+    @JsonProperty("max_tokens") @Nullable private Long maxTokens;
+    @JsonProperty("load_env") @Nullable private Boolean loadEnv;
+    @Nullable private Map<String, String> headers;
+
+    /** Sets the model field. */
+    @JsonProperty("model")
+    public Builder withModel(final String value) {
+      this.model = value;
+      return this;
     }
 
-    // CPD-OFF
-    /** Jackson builder for LlmConfig deserialization. */
-    @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
-    @JsonPOJOBuilder(withPrefix = "with", buildMethodName = "build")
-    public static final class Builder {
-
-        private String model;
-        @JsonProperty("api_key")
-        @Nullable private String apiKey;
-        @JsonProperty("base_url")
-        @Nullable private String baseUrl;
-        @JsonProperty("timeout_secs")
-        @Nullable private Long timeoutSecs;
-        @JsonProperty("max_retries")
-        @Nullable private Integer maxRetries;
-        @Nullable private Double temperature;
-        @JsonProperty("max_tokens")
-        @Nullable private Long maxTokens;
-        @JsonProperty("load_env")
-        @Nullable private Boolean loadEnv;
-        @Nullable private Map<String, String> headers;
-
-        /** Sets the model field. */
-        @JsonProperty("model")
-        public Builder withModel(final String value) {
-            this.model = value;
-            return this;
-        }
-
-        /** Sets the apiKey field. */
-        @JsonProperty("api_key")
-        public Builder withApiKey(final @Nullable String value) {
-            this.apiKey = value;
-            return this;
-        }
-
-        /** Sets the baseUrl field. */
-        @JsonProperty("base_url")
-        public Builder withBaseUrl(final @Nullable String value) {
-            this.baseUrl = value;
-            return this;
-        }
-
-        /** Sets the timeoutSecs field. */
-        @JsonProperty("timeout_secs")
-        public Builder withTimeoutSecs(final @Nullable Long value) {
-            this.timeoutSecs = value;
-            return this;
-        }
-
-        /** Sets the maxRetries field. */
-        @JsonProperty("max_retries")
-        public Builder withMaxRetries(final @Nullable Integer value) {
-            this.maxRetries = value;
-            return this;
-        }
-
-        /** Sets the temperature field. */
-        @JsonProperty("temperature")
-        public Builder withTemperature(final @Nullable Double value) {
-            this.temperature = value;
-            return this;
-        }
-
-        /** Sets the maxTokens field. */
-        @JsonProperty("max_tokens")
-        public Builder withMaxTokens(final @Nullable Long value) {
-            this.maxTokens = value;
-            return this;
-        }
-
-        /** Sets the loadEnv field. */
-        @JsonProperty("load_env")
-        public Builder withLoadEnv(final @Nullable Boolean value) {
-            this.loadEnv = value;
-            return this;
-        }
-
-        /** Sets the headers field. */
-        @JsonProperty("headers")
-        public Builder withHeaders(final @Nullable Map<String, String> value) {
-            this.headers = value;
-            return this;
-        }
-
-        /** Constructs a LlmConfig instance from the builder's current state. */
-        public LlmConfig build() {
-            return new LlmConfig(
-                model,
-                apiKey,
-                baseUrl,
-                timeoutSecs,
-                maxRetries,
-                temperature,
-                maxTokens,
-                loadEnv,
-                headers
-            );
-        }
+    /** Sets the apiKey field. */
+    @JsonProperty("api_key")
+    public Builder withApiKey(final @Nullable String value) {
+      this.apiKey = value;
+      return this;
     }
-    // CPD-ON
+
+    /** Sets the baseUrl field. */
+    @JsonProperty("base_url")
+    public Builder withBaseUrl(final @Nullable String value) {
+      this.baseUrl = value;
+      return this;
+    }
+
+    /** Sets the timeoutSecs field. */
+    @JsonProperty("timeout_secs")
+    public Builder withTimeoutSecs(final @Nullable Long value) {
+      this.timeoutSecs = value;
+      return this;
+    }
+
+    /** Sets the maxRetries field. */
+    @JsonProperty("max_retries")
+    public Builder withMaxRetries(final @Nullable Integer value) {
+      this.maxRetries = value;
+      return this;
+    }
+
+    /** Sets the temperature field. */
+    @JsonProperty("temperature")
+    public Builder withTemperature(final @Nullable Double value) {
+      this.temperature = value;
+      return this;
+    }
+
+    /** Sets the maxTokens field. */
+    @JsonProperty("max_tokens")
+    public Builder withMaxTokens(final @Nullable Long value) {
+      this.maxTokens = value;
+      return this;
+    }
+
+    /** Sets the loadEnv field. */
+    @JsonProperty("load_env")
+    public Builder withLoadEnv(final @Nullable Boolean value) {
+      this.loadEnv = value;
+      return this;
+    }
+
+    /** Sets the headers field. */
+    @JsonProperty("headers")
+    public Builder withHeaders(final @Nullable Map<String, String> value) {
+      this.headers = value;
+      return this;
+    }
+
+    /** Constructs a LlmConfig instance from the builder's current state. */
+    public LlmConfig build() {
+      return new LlmConfig(model, apiKey, baseUrl, timeoutSecs, maxRetries,
+                           temperature, maxTokens, loadEnv, headers);
+    }
+  }
+  // CPD-ON
 }

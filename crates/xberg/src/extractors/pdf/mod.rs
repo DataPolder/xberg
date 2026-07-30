@@ -346,7 +346,9 @@ async fn run_ocr_with_layout(
     let owned_layout = if precomputed_layout_detections.is_none() || precomputed_layout_images.is_none() {
         if let Some(layout_config) = config.resolved_layout_config() {
             let thread_budget = crate::core::config::concurrency::resolve_thread_budget(config.concurrency.as_ref());
-            match layout_runner::run_layout_for_ocr(content, layout_config.as_ref(), thread_budget).await {
+            let outcome = layout_runner::run_layout_for_ocr(content, layout_config.as_ref(), thread_budget).await;
+            layout_warning = outcome.warning;
+            match outcome.result {
                 Ok(layout_runner::LayoutRunOutput {
                     data: Some(layout),
                     gate_decisions,
@@ -362,14 +364,7 @@ async fn run_ocr_with_layout(
                     ocr_layout_gate_decisions = layout_gate_metadata(gate_decisions.as_deref());
                     None
                 }
-                Err(error) => {
-                    tracing::warn!(
-                        error = %error,
-                        "OCR layout detection failed; continuing without layout assembly"
-                    );
-                    layout_warning = Some(layout_runner::layout_failure_warning(&error));
-                    None
-                }
+                Err(_) => None,
             }
         } else {
             None

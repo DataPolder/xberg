@@ -15,65 +15,62 @@ import com.fasterxml.jackson.annotation.JsonValue;
  */
 @SuppressWarnings("PMD")
 public enum RegionKind {
-    /**
-     * A figure, diagram, chart, or image region.
-     *
-     * VLM prompt: describe the diagram / chart, including axis labels,
-     * legend entries, and any embedded text.
-     */
-    Figure("figure"),
-    /**
-     * A densely formatted or complex table that classical extraction garbles.
-     *
-     * VLM prompt: extract the table as GitHub-Flavoured Markdown.
-     */
-    DenseTable("densetable"),
-    /**
-     * A region whose layout the classical pipeline cannot handle (multi-column
-     * insets, heavily annotated forms, mixed text+diagram).
-     *
-     * VLM prompt: extract all text and structure as markdown, preserving
-     * reading order.
-     */
-    ComplexLayout("complexlayout"),
-    /**
-     * A standalone image to be captioned (not extracted as figure markdown).
-     *
-     * VLM prompt: produce a single-sentence alt-text-style caption suitable
-     * for accessibility tooling and downstream indexing. Used by the
-     * captioning post-processor to populate
-     * ExtractedImage.caption(crate.types.ExtractedImage.caption).
-     */
-    Caption("caption");
+  /**
+   * A figure, diagram, chart, or image region.
+   *
+   * VLM prompt: describe the diagram / chart, including axis labels,
+   * legend entries, and any embedded text.
+   */
+  Figure("figure"),
+  /**
+   * A densely formatted or complex table that classical extraction garbles.
+   *
+   * VLM prompt: extract the table as GitHub-Flavoured Markdown.
+   */
+  DenseTable("densetable"),
+  /**
+   * A region whose layout the classical pipeline cannot handle (multi-column
+   * insets, heavily annotated forms, mixed text+diagram).
+   *
+   * VLM prompt: extract all text and structure as markdown, preserving
+   * reading order.
+   */
+  ComplexLayout("complexlayout"),
+  /**
+   * A standalone image to be captioned (not extracted as figure markdown).
+   *
+   * VLM prompt: produce a single-sentence alt-text-style caption suitable
+   * for accessibility tooling and downstream indexing. Used by the
+   * captioning post-processor to populate
+   * ExtractedImage.caption(crate.types.ExtractedImage.caption).
+   */
+  Caption("caption");
 
+  /** The string value. */
+  private final String value;
 
-    /** The string value. */
-    private final String value;
+  RegionKind(final String value) { this.value = value; }
 
-    RegionKind(final String value) {
-        this.value = value;
+  /** Returns the string value. */
+  @JsonValue
+  public String getValue() {
+    return value;
+  }
+
+  /** Creates an instance from a string value. */
+  @JsonCreator
+  public static RegionKind fromValue(final String value) {
+    for (RegionKind e : values()) {
+      if (e.value.equalsIgnoreCase(value)) {
+        return e;
+      }
     }
+    throw new IllegalArgumentException("Unknown RegionKind value: " + value);
+  }
 
-    /** Returns the string value. */
-    @JsonValue
-    public String getValue() {
-        return value;
-    }
-
-    /** Creates an instance from a string value. */
-    @JsonCreator
-    public static RegionKind fromValue(final String value) {
-        for (RegionKind e : values()) {
-            if (e.value.equalsIgnoreCase(value)) {
-                return e;
-            }
-        }
-        throw new IllegalArgumentException("Unknown RegionKind value: " + value);
-    }
-
-    /** Returns the wire-format string value (matches JSON serialization). */
-    @Override
-    public String toString() {
-        return value;
-    }
+  /** Returns the wire-format string value (matches JSON serialization). */
+  @Override
+  public String toString() {
+    return value;
+  }
 }

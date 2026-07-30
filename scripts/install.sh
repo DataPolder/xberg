@@ -137,7 +137,8 @@ install() {
 
   if [ -d "${stage_dir}/lib" ] && [ "$(ls -A "${stage_dir}/lib" 2>/dev/null)" ]; then
     mkdir -p "${install_dir}/lib"
-    cp "${stage_dir}/lib/"* "${install_dir}/lib/"
+    # -R so nested library directories (e.g. lib/libheif) are copied, not skipped
+    cp -R "${stage_dir}/lib/"* "${install_dir}/lib/"
     info "Installed runtime libraries to ${install_dir}/lib/"
   fi
 

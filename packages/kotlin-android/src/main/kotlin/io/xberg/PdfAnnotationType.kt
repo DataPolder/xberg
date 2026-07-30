@@ -45,29 +45,29 @@ enum class PdfAnnotationType {
 
     @com.fasterxml.jackson.annotation.JsonValue
     fun toWire(): String =
-        when (this) {
-            TEXT -> "text"
-            HIGHLIGHT -> "highlight"
-            LINK -> "link"
-            STAMP -> "stamp"
-            UNDERLINE -> "underline"
-            STRIKE_OUT -> "strike_out"
-            OTHER -> "other"
-        }
+    when (this) {
+        TEXT -> "text"
+        HIGHLIGHT -> "highlight"
+        LINK -> "link"
+        STAMP -> "stamp"
+        UNDERLINE -> "underline"
+        STRIKE_OUT -> "strike_out"
+        OTHER -> "other"
+    }
 
     companion object {
         @com.fasterxml.jackson.annotation.JsonCreator
         @JvmStatic
         fun fromWire(value: String): PdfAnnotationType =
-            when (value) {
-                "text" -> TEXT
-                "highlight" -> HIGHLIGHT
-                "link" -> LINK
-                "stamp" -> STAMP
-                "underline" -> UNDERLINE
-                "strike_out" -> STRIKE_OUT
-                "other" -> OTHER
-                else -> throw IllegalArgumentException("Unknown PdfAnnotationType value: $value")
-            }
+        when (value) {
+            "text" -> TEXT
+            "highlight" -> HIGHLIGHT
+            "link" -> LINK
+            "stamp" -> STAMP
+            "underline" -> UNDERLINE
+            "strike_out" -> STRIKE_OUT
+            "other" -> OTHER
+            else -> throw IllegalArgumentException("Unknown PdfAnnotationType value: $value")
+        }
     }
 }

@@ -501,12 +501,12 @@ pub(super) fn run_layout_for_pdf_pages(
 /// the `Auto` gate skipped every page, or on soft failure (logged so the
 /// markdown path continues without layout hints). The fifth value carries the
 /// `Auto` gate's per-page decisions whenever the gate ran, including the
-/// all-gated case. The sixth value is `Some` only on a hard inference failure
-/// (e.g. a CoreML `ExecuteKernel` runtime error): it carries a
-/// `ProcessingWarning` so the caller can surface the silent degradation to the
-/// user instead of returning byte-identical no-layout output with no signal
-/// (#1344). Rendering and inference run off the async executor when a Tokio
-/// runtime is enabled.
+/// all-gated case. The sixth value is `Some` whenever an accelerated execution
+/// provider failed at inference (e.g. a CoreML `ExecuteKernel` runtime error): it
+/// carries a `ProcessingWarning` so the caller can surface the degradation —
+/// whether layout was recovered on the CPU fallback or lost entirely — instead of
+/// returning no-layout output with no signal (#1344). Rendering and inference run
+/// off the async executor when a Tokio runtime is enabled.
 #[cfg(all(feature = "pdf", feature = "layout-detection"))]
 type LayoutForMarkdownOptional = (
     Option<Vec<image::RgbImage>>,
@@ -526,6 +526,90 @@ pub(super) fn layout_failure_warning(error: &crate::XbergError) -> crate::types:
     }
 }
 
+/// Warning emitted when an accelerated execution provider failed at inference but
+/// the always-available CPU provider recovered the layout pass. The document keeps
+/// its layout; the warning records that the requested acceleration was unusable so
+/// callers still surface it instead of the failure silently costing performance (#1344).
+#[cfg(all(feature = "pdf", feature = "layout-detection"))]
+pub(super) fn layout_cpu_fallback_warning(error: &crate::XbergError) -> crate::types::ProcessingWarning {
+    crate::types::ProcessingWarning {
+        source: std::borrow::Cow::Borrowed("layout"),
+        message: std::borrow::Cow::Owned(format!("layout acceleration failed ({error}); recovered on CPU")),
+    }
+}
+
+/// Result of a layout pass that may have fallen back to CPU after an accelerated
+/// inference failure.
+///
+/// `result` is `Ok` when layout ran — possibly on the CPU fallback engine — and
+/// `Err` when even CPU failed (the caller then continues without layout hints).
+/// `warning` is `Some` whenever a fallback or failure occurred: a recovered pass
+/// carries [`layout_cpu_fallback_warning`], a total failure carries
+/// [`layout_failure_warning`]. It is `None` only when the first attempt succeeded.
+#[cfg(all(feature = "pdf", feature = "layout-detection"))]
+pub(super) struct LayoutFallbackOutcome {
+    pub(super) result: Result<LayoutRunOutput>,
+    pub(super) warning: Option<crate::types::ProcessingWarning>,
+}
+
+/// Run the layout pass and, when an accelerated execution provider fails at
+/// inference (for example a CoreML `ExecuteKernel` runtime error), retry once on
+/// the always-available CPU provider before giving up. Shared by the markdown and
+/// OCR layout paths so both recover identically and surface the same warning (#1344).
+#[cfg(all(feature = "pdf", feature = "layout-detection"))]
+pub(super) async fn run_layout_with_cpu_fallback(
+    content: &[u8],
+    layout_config: &LayoutDetectionConfig,
+    thread_budget: usize,
+    gated_handling: GatedPageHandling,
+) -> LayoutFallbackOutcome {
+    let first = run_layout_for_pdf_pages_async(content, layout_config, thread_budget, gated_handling).await;
+    let Err(accelerated_error) = &first else {
+        return LayoutFallbackOutcome {
+            result: first,
+            warning: None,
+        };
+    };
+
+    // A non-accelerated provider (explicit CPU, or an `Auto` that resolves to CPU
+    // on this platform) has nowhere to fall back to: surface the failure as-is.
+    if !layout_provider_is_accelerated(layout_config) {
+        let warning = layout_failure_warning(accelerated_error);
+        return LayoutFallbackOutcome {
+            result: first,
+            warning: Some(warning),
+        };
+    }
+
+    tracing::warn!(
+        error = %accelerated_error,
+        "layout: accelerated inference failed, retrying on CPU"
+    );
+    let fallback_warning = layout_cpu_fallback_warning(accelerated_error);
+    let cpu_config = layout_config_forced_to_cpu(layout_config);
+    let cpu_result = run_layout_for_pdf_pages_async(content, &cpu_config, thread_budget, gated_handling).await;
+    match &cpu_result {
+        Ok(_) => {
+            tracing::info!("layout: CPU retry recovered layout after accelerated inference failure");
+            LayoutFallbackOutcome {
+                result: cpu_result,
+                warning: Some(fallback_warning),
+            }
+        }
+        Err(cpu_error) => {
+            tracing::warn!(
+                error = %cpu_error,
+                "layout: CPU retry also failed, continuing without layout hints"
+            );
+            let warning = layout_failure_warning(cpu_error);
+            LayoutFallbackOutcome {
+                result: cpu_result,
+                warning: Some(warning),
+            }
+        }
+    }
+}
+
 #[cfg(all(feature = "pdf", feature = "layout-detection"))]
 pub(super) async fn maybe_run_layout_for_markdown(
     content: &[u8],
@@ -541,33 +625,15 @@ pub(super) async fn maybe_run_layout_for_markdown(
         return (None, None, None, None, None, None);
     }
     let thread_budget = crate::core::config::concurrency::resolve_thread_budget(config.concurrency.as_ref());
-    let layout_config_ref = layout_config.as_ref();
-    let mut run_result =
-        run_layout_for_pdf_pages_async(content, layout_config_ref, thread_budget, GatedPageHandling::SkipRender).await;
+    let outcome = run_layout_with_cpu_fallback(
+        content,
+        layout_config.as_ref(),
+        thread_budget,
+        GatedPageHandling::SkipRender,
+    )
+    .await;
 
-    // A hard inference failure on a hardware-accelerated execution provider (for
-    // example a CoreML `ExecuteKernel` runtime error under `Auto` on macOS) does
-    // not mean the model is unrunnable — the always-available CPU provider handles
-    // it. Retry once on CPU so the document keeps its layout instead of silently
-    // degrading to byte-identical no-layout output. Only if CPU also fails do we
-    // surface the degradation as a `ProcessingWarning` below (#1344).
-    if let Err(accelerated_error) = &run_result
-        && layout_provider_is_accelerated(layout_config_ref)
-    {
-        tracing::warn!(
-            error = %accelerated_error,
-            "layout-for-markdown: accelerated inference failed, retrying on CPU"
-        );
-        let cpu_config = layout_config_forced_to_cpu(layout_config_ref);
-        let cpu_result =
-            run_layout_for_pdf_pages_async(content, &cpu_config, thread_budget, GatedPageHandling::SkipRender).await;
-        if cpu_result.is_ok() {
-            tracing::info!("layout-for-markdown: CPU retry recovered layout after accelerated inference failure");
-        }
-        run_result = cpu_result;
-    }
-
-    match run_result {
+    match outcome.result {
         Ok(LayoutRunOutput {
             data: Some((images, results, hints, detections)),
             gate_decisions,
@@ -584,7 +650,7 @@ pub(super) async fn maybe_run_layout_for_markdown(
                 Some(hints),
                 Some(detections),
                 gate_decisions,
-                None,
+                outcome.warning,
             )
         }
         Ok(LayoutRunOutput {
@@ -592,23 +658,17 @@ pub(super) async fn maybe_run_layout_for_markdown(
             gate_decisions,
         }) => {
             tracing::info!("layout-for-markdown: auto gate skipped every page, continuing without layout hints");
-            (None, None, None, None, gate_decisions, None)
+            (None, None, None, None, gate_decisions, outcome.warning)
         }
-        Err(e) => {
-            tracing::warn!(
-                error = %e,
-                "layout-for-markdown: detection failed, continuing without layout hints"
-            );
-            let warning = layout_failure_warning(&e);
-            (None, None, None, None, None, Some(warning))
-        }
+        Err(_) => (None, None, None, None, None, outcome.warning),
     }
 }
 
 /// Run the layout pass used by OCR without blocking a Tokio worker thread.
 ///
-/// `data: None` means the `Auto` gate skipped every page: the caller proceeds
-/// exactly as if layout were off, rendering its own OCR rasters once.
+/// `result` holds `data: None` when the `Auto` gate skipped every page: the caller
+/// then proceeds exactly as if layout were off, rendering its own OCR rasters once.
+/// Mirrors the markdown path's CPU fallback and warning on accelerated failure (#1344).
 #[cfg(all(
     feature = "pdf",
     feature = "layout-detection",
@@ -618,10 +678,10 @@ pub(super) async fn run_layout_for_ocr(
     content: &[u8],
     layout_config: &LayoutDetectionConfig,
     thread_budget: usize,
-) -> Result<LayoutRunOutput> {
+) -> LayoutFallbackOutcome {
     // OCR consumes the layout pass's rasters as its input images, so gated
     // pages still render; only model inference is skipped for them.
-    run_layout_for_pdf_pages_async(
+    run_layout_with_cpu_fallback(
         content,
         layout_config,
         thread_budget,

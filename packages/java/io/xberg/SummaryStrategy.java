@@ -11,46 +11,44 @@ import com.fasterxml.jackson.annotation.JsonValue;
  */
 @SuppressWarnings("PMD")
 public enum SummaryStrategy {
-    /**
-     * Pure-Rust extractive summary (TextRank over the chunk graph). Deterministic,
-     * fast, no external service required.
-     */
-    Extractive("extractive"),
-    /**
-     * Abstractive summary produced by liter-llm. Requires {@code liter-llm} feature and
-     * a configured {@code LlmConfig}. Token usage is captured in
-     * ExtractedDocument.llm_usage(super.extraction.ExtractedDocument.llm_usage).
-     */
-    Abstractive("abstractive");
+  /**
+   * Pure-Rust extractive summary (TextRank over the chunk graph).
+   * Deterministic, fast, no external service required.
+   */
+  Extractive("extractive"),
+  /**
+   * Abstractive summary produced by liter-llm. Requires {@code liter-llm}
+   * feature and a configured {@code LlmConfig}. Token usage is captured in
+   * ExtractedDocument.llm_usage(super.extraction.ExtractedDocument.llm_usage).
+   */
+  Abstractive("abstractive");
 
+  /** The string value. */
+  private final String value;
 
-    /** The string value. */
-    private final String value;
+  SummaryStrategy(final String value) { this.value = value; }
 
-    SummaryStrategy(final String value) {
-        this.value = value;
+  /** Returns the string value. */
+  @JsonValue
+  public String getValue() {
+    return value;
+  }
+
+  /** Creates an instance from a string value. */
+  @JsonCreator
+  public static SummaryStrategy fromValue(final String value) {
+    for (SummaryStrategy e : values()) {
+      if (e.value.equalsIgnoreCase(value)) {
+        return e;
+      }
     }
+    throw new IllegalArgumentException("Unknown SummaryStrategy value: " +
+                                       value);
+  }
 
-    /** Returns the string value. */
-    @JsonValue
-    public String getValue() {
-        return value;
-    }
-
-    /** Creates an instance from a string value. */
-    @JsonCreator
-    public static SummaryStrategy fromValue(final String value) {
-        for (SummaryStrategy e : values()) {
-            if (e.value.equalsIgnoreCase(value)) {
-                return e;
-            }
-        }
-        throw new IllegalArgumentException("Unknown SummaryStrategy value: " + value);
-    }
-
-    /** Returns the wire-format string value (matches JSON serialization). */
-    @Override
-    public String toString() {
-        return value;
-    }
+  /** Returns the wire-format string value (matches JSON serialization). */
+  @Override
+  public String toString() {
+    return value;
+  }
 }

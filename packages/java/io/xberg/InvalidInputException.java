@@ -9,9 +9,7 @@ public class InvalidInputException extends XbergRsException {
   private static final long serialVersionUID = 1L;
 
   /** Creates a new InvalidInputException. */
-  public InvalidInputException(final String message) {
-    super(1, message);
-  }
+  public InvalidInputException(final String message) { super(1, message); }
 
   /** Creates a new InvalidInputException with a cause. */
   public InvalidInputException(final String message, final Throwable cause) {

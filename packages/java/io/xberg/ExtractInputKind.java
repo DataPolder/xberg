@@ -11,43 +11,41 @@ import com.fasterxml.jackson.annotation.JsonValue;
  */
 @SuppressWarnings("PMD")
 public enum ExtractInputKind {
-    /**
-     * Raw in-memory bytes.
-     */
-    Bytes("bytes"),
-    /**
-     * A filesystem path, {@code file://} URI, or HTTP(S) URL.
-     */
-    Uri("uri");
+  /**
+   * Raw in-memory bytes.
+   */
+  Bytes("bytes"),
+  /**
+   * A filesystem path, {@code file://} URI, or HTTP(S) URL.
+   */
+  Uri("uri");
 
+  /** The string value. */
+  private final String value;
 
-    /** The string value. */
-    private final String value;
+  ExtractInputKind(final String value) { this.value = value; }
 
-    ExtractInputKind(final String value) {
-        this.value = value;
+  /** Returns the string value. */
+  @JsonValue
+  public String getValue() {
+    return value;
+  }
+
+  /** Creates an instance from a string value. */
+  @JsonCreator
+  public static ExtractInputKind fromValue(final String value) {
+    for (ExtractInputKind e : values()) {
+      if (e.value.equalsIgnoreCase(value)) {
+        return e;
+      }
     }
+    throw new IllegalArgumentException("Unknown ExtractInputKind value: " +
+                                       value);
+  }
 
-    /** Returns the string value. */
-    @JsonValue
-    public String getValue() {
-        return value;
-    }
-
-    /** Creates an instance from a string value. */
-    @JsonCreator
-    public static ExtractInputKind fromValue(final String value) {
-        for (ExtractInputKind e : values()) {
-            if (e.value.equalsIgnoreCase(value)) {
-                return e;
-            }
-        }
-        throw new IllegalArgumentException("Unknown ExtractInputKind value: " + value);
-    }
-
-    /** Returns the wire-format string value (matches JSON serialization). */
-    @Override
-    public String toString() {
-        return value;
-    }
+  /** Returns the wire-format string value (matches JSON serialization). */
+  @Override
+  public String toString() {
+    return value;
+  }
 }

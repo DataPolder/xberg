@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-07-30
+
 ### Fixed
 
 - **`xberg-libwpd` Windows build**: the WordPerfect extractor now compiles and links on
@@ -27,10 +29,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the single selected recognition model (previously their text was silently dropped), and OCR
   metadata now reports the recognition model actually used instead of joining every requested
   language.
-- **#1344**: A hard layout-inference failure (for example a CoreML `ExecuteKernel` runtime error)
-  now surfaces a `ProcessingWarning` instead of silently returning byte-identical no-layout output
-  with empty `processing_warnings`; the failure is also logged at `warn` level. macOS auto
-  acceleration uses CPU for RT-DETR, whose current export fails under CoreML.
+- **#1344**: Layout inference no longer silently degrades to no-layout output when a hardware
+  execution provider fails. macOS `auto` acceleration resolves RT-DETR to CPU up front (its current
+  export cannot execute under CoreML), so the common path never attempts a failing provider. When an
+  *explicit* accelerated provider does fail at inference (for example a CoreML `ExecuteKernel`
+  error), both the markdown and OCR layout paths retry once on the always-available CPU provider and
+  recover the layout, and either way surface a `ProcessingWarning` (recovered-on-CPU, or lost
+  entirely if CPU also fails) instead of returning byte-identical no-layout output with empty
+  `processing_warnings`.
+- **#1349**: Successful TATR table reconstruction no longer writes source cell content and
+  coordinates to stderr; the debug output is removed.
+- **#1350**: The Markdown hierarchy no longer merges a distant header and footer into one block —
+  paragraph continuation now rejects merges across a large vertical baseline gap and recomputes the
+  merged block's bounding box.
+- **#1351**: The published Node package ships the alef-generated `index.d.ts` (clean, consistent
+  types) rather than the raw `napi build` output, which emitted references to undefined `Js*` types.
+- **#1353**: The install script copies nested runtime library directories (for example
+  `lib/libheif`) with `cp -R`, instead of failing with `cp: -r not specified; omitting directory` on
+  Linux musl installs.
 
 ### Changed
 

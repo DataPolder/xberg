@@ -7,7 +7,8 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
 
 /**
- * How partial results from multiple model calls (e.g. per page batch) are combined.
+ * How partial results from multiple model calls (e.g. per page batch) are
+ * combined.
  *
  * Canonical home for the merge strategy referenced by presets and by the
  * structured pipeline's post-processing. There is intentionally only one merge
@@ -15,47 +16,44 @@ import com.fasterxml.jackson.annotation.JsonValue;
  */
 @SuppressWarnings("PMD")
 public enum MergeMode {
-    /**
-     * Deep-merge JSON objects field by field (later calls fill missing fields).
-     */
-    ObjectMerge("object_merge"),
-    /**
-     * Concatenate top-level arrays across calls.
-     */
-    ArrayConcat("array_concat"),
-    /**
-     * Keep the first non-empty result; ignore subsequent calls.
-     */
-    ObjectFirst("object_first");
+  /**
+   * Deep-merge JSON objects field by field (later calls fill missing fields).
+   */
+  ObjectMerge("object_merge"),
+  /**
+   * Concatenate top-level arrays across calls.
+   */
+  ArrayConcat("array_concat"),
+  /**
+   * Keep the first non-empty result; ignore subsequent calls.
+   */
+  ObjectFirst("object_first");
 
+  /** The string value. */
+  private final String value;
 
-    /** The string value. */
-    private final String value;
+  MergeMode(final String value) { this.value = value; }
 
-    MergeMode(final String value) {
-        this.value = value;
+  /** Returns the string value. */
+  @JsonValue
+  public String getValue() {
+    return value;
+  }
+
+  /** Creates an instance from a string value. */
+  @JsonCreator
+  public static MergeMode fromValue(final String value) {
+    for (MergeMode e : values()) {
+      if (e.value.equalsIgnoreCase(value)) {
+        return e;
+      }
     }
+    throw new IllegalArgumentException("Unknown MergeMode value: " + value);
+  }
 
-    /** Returns the string value. */
-    @JsonValue
-    public String getValue() {
-        return value;
-    }
-
-    /** Creates an instance from a string value. */
-    @JsonCreator
-    public static MergeMode fromValue(final String value) {
-        for (MergeMode e : values()) {
-            if (e.value.equalsIgnoreCase(value)) {
-                return e;
-            }
-        }
-        throw new IllegalArgumentException("Unknown MergeMode value: " + value);
-    }
-
-    /** Returns the wire-format string value (matches JSON serialization). */
-    @Override
-    public String toString() {
-        return value;
-    }
+  /** Returns the wire-format string value (matches JSON serialization). */
+  @Override
+  public String toString() {
+    return value;
+  }
 }
