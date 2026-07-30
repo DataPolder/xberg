@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`xberg-libwpd` Windows build**: the WordPerfect extractor now compiles and links on
+  `x86_64-pc-windows-msvc`, unblocking the full-feature Windows binary of downstream consumers. Two
+  first-ship gaps in the vendored C++ build are fixed: (1) zlib (needed by librevenge's
+  `RVNGZipStream`) is now built from source via `libz-sys` on Windows too — as it already was on
+  Linux/macOS — instead of relying on a vcpkg-installed zlib that CI did not reliably provide
+  (`fatal error C1083: Cannot open include file: 'zlib.h'`); and (2) a narrowing
+  `std::make_shared<WP6SubDocument>(…, m_streamData.size())` call in `WP6GeneralTextPacket.cpp` — a
+  64-bit `size()` into a 32-bit `const unsigned` param — is patched to cast `(unsigned)` (matching
+  every sibling subdocument site), which the newest MSVC toolchain (14.5x) otherwise rejects as a
+  hard error. The vcpkg zlib probing in `build.rs` is removed.
 - **#1346**: PaddleOCR emits a `ProcessingWarning` when requested languages are not covered by
   the single selected recognition model (previously their text was silently dropped), and OCR
   metadata now reports the recognition model actually used instead of joining every requested
@@ -85,8 +95,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   columns make the principal data row nearly complete instead of fully populated.
 - PDF Markdown recognizes repeated large-font heading tiers across sparse multi-page documents while
   retaining the single-page sparse-document safeguard against display-text false positives.
-- Wide PDF numeric tables retain validated three-row headers while preserving the compact prose and
-  caption safeguards used by smaller grids.
 
 ## [1.0.3] - 2026-07-29
 

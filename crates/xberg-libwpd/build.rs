@@ -39,12 +39,6 @@ mod build_libwpd {
     // (see vendor/PROVENANCE.md). ~keep
     const BOOST_SUBSET_SHA256: &str = "802ee17c5e380efbcbb696468ee3c7090aa409db89c2063b4c9b8d3e3aff1e08";
 
-    /// vcpkg triplet used for Windows native deps across this workspace's CI
-    /// (see `scripts/ci/install-system-deps/install-windows.ps1`, which
-    /// installs `libheif` the same way). Only used for zlib on Windows now
-    /// that boost is vendored.
-    const VCPKG_TRIPLET: &str = "x64-windows-static-md";
-
     /// The OS we are building *for*, per Cargo. See the module docs for why this
     /// is not `cfg!(target_os)`.
     pub fn target_os() -> String {
@@ -53,20 +47,6 @@ mod build_libwpd {
 
     fn targeting_windows() -> bool {
         target_os() == "windows"
-    }
-
-    /// Root of a vcpkg installation, honoring `VCPKG_ROOT`/
-    /// `VCPKG_INSTALLATION_ROOT` (both set by CI), falling back to the
-    /// default `C:\vcpkg` install location.
-    fn vcpkg_root() -> PathBuf {
-        env::var("VCPKG_ROOT")
-            .or_else(|_| env::var("VCPKG_INSTALLATION_ROOT"))
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from(r"C:\vcpkg"))
-    }
-
-    fn vcpkg_triplet_dir() -> PathBuf {
-        vcpkg_root().join("installed").join(VCPKG_TRIPLET)
     }
 
     fn verify_sha256(bytes: &[u8], expected: &str) {
@@ -114,70 +94,19 @@ mod build_libwpd {
         root
     }
 
-    /// zlib on the `x64-windows-static-md` triplet is a static library, but its
-    /// file name is not stable across vcpkg/zlib versions: classic zlib CMake
-    /// emits `zlibstatic.lib` (debug `zlibstaticd.lib`), newer ports emit
-    /// `zs.lib`/`zsd.lib` (see the `-lzs`/`-lzsd`/`-lzd` pkgconfig rewrites in
-    /// vcpkg's zlib portfile), and some renamed variants ship
-    /// `zlib.lib`/`zlibd.lib`. We probe the disk for whichever the installed
-    /// cache actually produced instead of hard-coding one name. Release libs
-    /// live in `<triplet>/lib`; debug libs (trailing `d`) in
-    /// `<triplet>/debug/lib`.
-    const ZLIB_RELEASE_STEMS: &[&str] = &["zlibstatic", "zlib", "zs", "z"];
-    const ZLIB_DEBUG_STEMS: &[&str] = &["zlibstaticd", "zlibd", "zsd", "zd"];
-
-    /// First `<stem>.lib` present in `dir`, returned as a `rustc-link-lib` stem
-    /// (no `.lib` extension), trying `stems` in order.
-    fn find_zlib_lib(dir: &Path, stems: &[&str]) -> Option<String> {
-        stems
-            .iter()
-            .find(|stem| dir.join(format!("{stem}.lib")).is_file())
-            .map(|stem| (*stem).to_string())
-    }
-
+    /// Link the static zlib that `libz-sys` built from source for the target.
+    ///
+    /// `libz-sys` (a build-time dep on every desktop target) compiles zlib with
+    /// `cc` — matching this crate's own `-MD`/release-CRT C++ build, so there is
+    /// no LNK2038 CRT mismatch on MSVC — puts the archive on the link search path,
+    /// and exports its headers via `DEP_Z_INCLUDE` (consumed in `build`). We
+    /// re-emit the link here, AFTER this crate's objects (librevenge's
+    /// `RVNGZipStream.o` calls `inflate*`), because a GNU-ld command line orders
+    /// libz-sys's own directive before the references and discards the archive
+    /// (`undefined reference to inflateInit2_`). MSVC's linker has no such
+    /// ordering constraint, so re-emitting is harmless there.
     fn link_zlib() {
-        if !targeting_windows() {
-            // On unix, `libz-sys` (static feature) builds a `libz.a` for the
-            // target and puts it on the link search path. Re-emit the link from
-            // this crate — whose objects (librevenge's RVNGZipStream.o) call
-            // `inflate*` — so the archive is ordered after those objects on the
-            // GNU-ld command line. Relying on libz-sys's own directive alone
-            // ordered the archive before the references, so ld discarded it and
-            // the final binary failed with `undefined reference to inflateInit2_`.
-            // Headers come from `DEP_Z_INCLUDE` (consumed in `build`).
-            println!("cargo:rustc-link-lib=static=z");
-            return;
-        }
-
-        // The librevenge/libwpd C++ sources are compiled by `cc` with `-MD`
-        // (the release dynamic CRT — `cc` uses `-MD` regardless of the Cargo
-        // profile unless `crt-static` is set), and rustc's MSVC target links
-        // the release CRT even for dev builds. So we link the RELEASE vcpkg
-        // zlib (`<triplet>/lib`) in *both* profiles; linking the debug zlib
-        // (`<triplet>/debug/lib`, built with `-MDd`) would trip LNK2038
-        // RuntimeLibrary mismatches. The debug dir is only a last-resort
-        // fallback for a release-stripped cache.
-        let triplet = vcpkg_triplet_dir();
-        let release_lib = triplet.join("lib");
-        let debug_lib = triplet.join("debug").join("lib");
-
-        let resolved = find_zlib_lib(&release_lib, ZLIB_RELEASE_STEMS)
-            .map(|stem| (release_lib.clone(), stem))
-            .or_else(|| find_zlib_lib(&debug_lib, ZLIB_DEBUG_STEMS).map(|stem| (debug_lib.clone(), stem)));
-
-        match resolved {
-            Some((dir, stem)) => {
-                println!("cargo:rustc-link-search=native={}", dir.display());
-                println!("cargo:rustc-link-lib={stem}");
-            }
-            None => {
-                // Nothing on disk (missing/broken vcpkg cache). Emit the
-                // most-likely release name so the linker fails loudly with a
-                // clear "could not open" error against the release lib dir.
-                println!("cargo:rustc-link-search=native={}", release_lib.display());
-                println!("cargo:rustc-link-lib=zlibstatic");
-            }
-        }
+        println!("cargo:rustc-link-lib=static=z");
     }
 
     fn cpp_files(dir: &Path) -> Vec<PathBuf> {
@@ -188,6 +117,38 @@ mod build_libwpd {
             .collect();
         files.sort();
         files
+    }
+
+    /// Patch a narrowing conversion the newest MSVC toolchain (14.5x) rejects as a
+    /// hard error inside `std::make_shared`'s perfect-forwarding.
+    ///
+    /// `WP6GeneralTextPacket.cpp` builds its subdocument with
+    /// `make_shared<WP6SubDocument>(m_streamData.data(), m_streamData.size())`, but
+    /// `WP6SubDocument`'s constructor takes `const unsigned dataSize` (u32), so the
+    /// 64-bit `std::vector::size()` narrows on the way in. Every sibling
+    /// subdocument site in libwpd already casts `(unsigned)`; this lone site does
+    /// not. GCC/clang accept the narrowing (which is why only MSVC failed), so the
+    /// cast is a no-op everywhere else.
+    ///
+    /// The vendored source is re-extracted from `vendor/libwpd-0.10.3.tar.gz` into
+    /// `OUT_DIR` on every build, so we patch that fresh copy rather than the
+    /// committed tarball — patching the tarball would break the `LIBWPD_SHA256`
+    /// provenance invariant. Panics if the anchor is gone so a future libwpd bump
+    /// cannot silently drop the fix.
+    fn patch_wpd_msvc_narrowing(wpd: &Path) {
+        const FILE: &str = "src/lib/WP6GeneralTextPacket.cpp";
+        const ANCHOR: &str = "m_streamData.data(), m_streamData.size()";
+        const PATCHED: &str = "m_streamData.data(), (unsigned)m_streamData.size()";
+
+        let path = wpd.join(FILE);
+        let source = fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {path:?}: {e}"));
+        assert!(
+            source.contains(ANCHOR),
+            "expected narrowing anchor {ANCHOR:?} in {path:?}; the vendored libwpd source changed — \
+             re-check the MSVC make_shared<WP6SubDocument> narrowing patch"
+        );
+        let patched = source.replace(ANCHOR, PATCHED);
+        fs::write(&path, patched).unwrap_or_else(|e| panic!("writing {path:?}: {e}"));
     }
 
     pub fn build() {
@@ -205,6 +166,7 @@ mod build_libwpd {
             Some(LIBWPD_SHA256),
             &format!("libwpd-{LIBWPD_VERSION}"),
         );
+        patch_wpd_msvc_narrowing(&wpd);
         // Extracting `boost-subset.tar.gz` reproduces the `boost/boost/...`
         // layout `bcp` produces, so the include root is the extracted `boost`
         // dir itself (headers live one level below it, at
@@ -229,24 +191,21 @@ mod build_libwpd {
         // Force-include the shim rather than patch the upstream sources. ~keep
         if targeting_windows() {
             build.flag("/FImsvc_compat.h");
-            // librevenge's RVNGZipStream.cpp does `#include <zlib.h>`. On Unix
-            // zlib is a system header; on Windows it lives in the vcpkg triplet
-            // include dir (installed alongside the zlib we link in link_zlib).
-            build.include(vcpkg_triplet_dir().join("include"));
             // Enable C++ exceptions on MSVC. Without /EHsc, MSVC leaves
             // `_CPPUNWIND` undefined, so Boost defines `BOOST_NO_EXCEPTIONS` and
             // vendored sources never provide (LNK2019). GCC/clang enable
             // exceptions by default, which is why only the MSVC link failed.
             build.flag("/EHsc");
-        } else {
-            // On unix, `libz-sys` (a unix-only dependency) built a static zlib
-            // and exported its header directory as `DEP_Z_INCLUDE`. Add it so
-            // librevenge's RVNGZipStream.cpp can find `<zlib.h>` even under zig
-            // cross-compilation, where the host `/usr/include` is invisible to
-            // the target sysroot (the failure was `zlib.h file not found`).
-            if let Ok(zlib_include) = env::var("DEP_Z_INCLUDE") {
-                build.include(zlib_include);
-            }
+        }
+
+        // librevenge's RVNGZipStream.cpp does `#include <zlib.h>`. `libz-sys`
+        // built a static zlib from source for the target — on every desktop OS,
+        // including Windows/MSVC — and exported its header directory as
+        // `DEP_Z_INCLUDE`. Add it so `<zlib.h>` resolves without a host or vcpkg
+        // zlib, including under cross-compilation where the host `/usr/include` is
+        // invisible to the target sysroot (the failure was `zlib.h not found`).
+        if let Ok(zlib_include) = env::var("DEP_Z_INCLUDE") {
+            build.include(zlib_include);
         }
 
         for f in cpp_files(&rev.join("src/lib")) {
@@ -272,10 +231,6 @@ mod build_libwpd {
         println!("cargo:rerun-if-changed=vendor/librevenge-0.0.6.tar.gz");
         println!("cargo:rerun-if-changed=vendor/libwpd-0.10.3.tar.gz");
         println!("cargo:rerun-if-changed=vendor/boost-subset.tar.gz");
-        if targeting_windows() {
-            println!("cargo:rerun-if-env-changed=VCPKG_ROOT");
-            println!("cargo:rerun-if-env-changed=VCPKG_INSTALLATION_ROOT");
-        }
     }
 }
 

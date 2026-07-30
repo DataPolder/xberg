@@ -28,9 +28,10 @@ tracing = { workspace = true }
 # zlib for the vendored librevenge RVNGZipStream (used by RVNGStreamImplementation
 # to read structured/zip streams). libz-sys builds a static zlib from source for
 # the target and exports `DEP_Z_INCLUDE` to this crate's build script, so the C++
-# sources compile and link zlib under cross-compilation without a host libz.
-# Windows keeps the vcpkg zlib path in build.rs, so libz-sys is unix-only here.
-[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+# sources compile and link zlib without a host libz — on every desktop target,
+# including Windows/MSVC (which previously relied on a vcpkg-installed zlib that
+# CI did not reliably provide).
+[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
 libz-sys = { workspace = true }
 
 # libwpd and librevenge are built from vendored C++ source archives under
