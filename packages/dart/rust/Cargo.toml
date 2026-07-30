@@ -7,7 +7,7 @@ license = "MIT"
 [package.metadata.cargo-machete]
 # Umbrella + sibling crates are pulled in so flutter_rust_bridge can resolve
 # every referenced type, but the generated Rust wrapper only `use`s a subset.
-ignored = ["async-trait", "crawlberg", "html-to-markdown-rs", "xberg"]
+ignored = ["async-trait", "crawlberg", "html-to-markdown-rs", "tracing", "xberg"]
 
 [lib]
 crate-type = ["cdylib", "staticlib"]
@@ -57,6 +57,7 @@ flutter_rust_bridge = "=2.12.0"
 html-to-markdown-rs = { default-features = false, workspace = true }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
+tracing = "0.1"
 [target.'cfg(not(any(target_os = "android", target_os = "ios", target_os = "windows", all(target_os = "macos", target_arch = "x86_64"))))'.dependencies]
 xberg = { path = "../../../crates/xberg", features = ["pdf", "excel", "office", "hwp", "hwpx", "iwork", "email", "html", "xml", "archives", "mdx", "svg", "language-detection", "chunking", "chunking-tokenizers", "quality", "keywords", "diff", "api", "api-types", "mcp", "ocr", "paddle-ocr", "paddle-ocr-types", "layout-detection", "layout-types", "embeddings", "embedding-presets", "reranker", "reranker-presets", "sparse-embeddings", "sparse-embedding-presets", "late-interaction", "late-interaction-presets", "transcription-types", "tree-sitter", "liter-llm", "tokio-runtime", "ner-llm", "ner-onnx", "redaction", "summarization", "classification", "captioning", "qr-codes", "auto-rotate-types", "stopwords"] }
 [target.'cfg(target_os = "android")'.dependencies]
