@@ -44,14 +44,14 @@ const GLM_OCR_MODEL_SHA256: &str = "a16eb0de98d199293371c560f95f83130d2a2c961244
 
 use serde::{Deserialize, Serialize};
 
-/// Diagnostic helper: when `XBERG_GLM_DEBUG` is set, log per-stage tensor stats
-/// (shape, NaN/Inf counts, min/max/mean) to stderr. No-op otherwise.
+/// Diagnostic helper: at `TRACE` level, log per-stage tensor stats (shape,
+/// NaN/Inf counts, min/max/mean) via `tracing`. No-op when trace is disabled.
 ///
 /// Exists to bisect the CPU-vs-CUDA numerical divergence in the GLM-OCR
 /// pipeline: the F32 CPU path recognises text correctly, but the F32 CUDA path
 /// emits EOS first (empty output), so some op produces garbage/NaN only on CUDA.
 pub(crate) fn glm_debug_tensor(label: &str, t: &candle_core::Tensor) {
-    if std::env::var_os("XBERG_GLM_DEBUG").is_none() {
+    if !tracing::enabled!(tracing::Level::TRACE) {
         return;
     }
     let dims = t.dims().to_vec();
@@ -62,7 +62,7 @@ pub(crate) fn glm_debug_tensor(label: &str, t: &candle_core::Tensor) {
     {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("[glm-debug] {label}: shape={dims:?} (stat error: {e})");
+            tracing::trace!("[glm-debug] {label}: shape={dims:?} (stat error: {e})");
             return;
         }
     };
@@ -77,7 +77,7 @@ pub(crate) fn glm_debug_tensor(label: &str, t: &candle_core::Tensor) {
         let mean = finite.iter().sum::<f32>() / finite.len() as f32;
         (min, max, mean)
     };
-    eprintln!(
+    tracing::trace!(
         "[glm-debug] {label}: shape={dims:?} n={} nan={nan} inf={inf} min={min:.4} max={max:.4} mean={mean:.4}",
         flat.len()
     );

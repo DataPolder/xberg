@@ -97,9 +97,9 @@ mod imp {
             }
             .map_err(|e| CandleOcrError::InferenceFailed(format!("Sampling: {}", e)))?;
 
-            if output_ids.len() < 5 && std::env::var_os("XBERG_GLM_DEBUG").is_some() {
+            if output_ids.len() < 5 && tracing::enabled!(tracing::Level::TRACE) {
                 super::super::glm_debug_tensor(&format!("logits_step{}", output_ids.len()), &penalized_logits);
-                eprintln!(
+                tracing::trace!(
                     "[glm-debug] step{}: token_id={} is_eos={}",
                     output_ids.len(),
                     token_id,

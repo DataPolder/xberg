@@ -762,7 +762,7 @@ impl ExtractionOverrides {
     fn apply_output_format(&self, config: &mut ExtractionConfig) {
         let final_format = self.content_format.or_else(|| {
             if self.output_format.is_some() {
-                eprintln!("warning: '--output-format' is deprecated, use '--content-format' instead");
+                tracing::warn!("'--output-format' is deprecated, use '--content-format' instead");
             }
             self.output_format
         });

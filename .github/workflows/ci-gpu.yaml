@@ -341,9 +341,11 @@ jobs:
         env:
           XBERG_REQUIRE_MODELS: "1"
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          RUST_LOG: "xberg=debug,xberg_candle_ocr=debug"
+          # glm-ocr debug tensor stats now route through `tracing` at TRACE
+          # (the XBERG_GLM_DEBUG env gate was removed); trocr/deepseek/paddleocr
+          # still use their own XBERG_*_DEBUG env gates.
+          RUST_LOG: "xberg=debug,xberg_candle_ocr=trace"
           XBERG_TROCR_DEBUG: "1"
-          XBERG_GLM_DEBUG: "1"
           XBERG_DEEPSEEK_DEBUG: "1"
           XBERG_PADDLEOCR_VL_DEBUG: "1"
         run: |

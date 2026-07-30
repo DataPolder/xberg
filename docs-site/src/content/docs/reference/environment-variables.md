@@ -465,20 +465,20 @@ export XBERG_CI_DEBUG=yes
 - Performance profiling in CI pipelines
 - Understanding extraction pipeline behavior
 
-### XBERG_DEBUG_OCR
+### XBERG_DEBUG_OCR (removed — use `RUST_LOG`)
 
-**Type**: `Boolean` (presence check: set to any value to enable)
-**Default**: Disabled (unset)
+**Superseded**: OCR debug output now routes through `tracing` instead of a dedicated environment
+variable. Setting `XBERG_DEBUG_OCR` no longer does anything; select the log level instead.
 
-Enable OCR-specific debug output. Outputs diagnostic information about OCR decisions, fallbacks, and text coverage metrics.
+The per-page OCR gate decision (fallback, character counts, coverage ratios) is emitted at `debug`
+level under the `xberg::pdf::ocr` target.
 
 ```bash title="Enable OCR Debug Logging"
-# Enable OCR debug logging
-export XBERG_DEBUG_OCR=1
+# Enable via the tracing filter (the CLI also accepts --log-level debug)
+export RUST_LOG="xberg::pdf::ocr=debug"
 
-# Output example:
-# [xberg::pdf::ocr] fallback=true non_whitespace=8543 alnum=7234 meaningful_words=312
-# [xberg::pdf::ocr] avg_non_whitespace=45.2 avg_alnum=38.1 alnum_ratio=0.847
+# Output example (emitted at debug level):
+# per-page OCR gate decision fallback=true non_whitespace=8543 alnum=7234 meaningful_words=312 ...
 ```
 
 **Diagnostic Information**:
@@ -760,7 +760,7 @@ services:
       XBERG_PORT: "8000"
       XBERG_CACHE_ENABLED: "false" # Disable for fresh testing
       XBERG_CI_DEBUG: "1" # Enable debug output
-      XBERG_DEBUG_OCR: "1"
+      RUST_LOG: "xberg::pdf::ocr=debug" # OCR gate diagnostics (was XBERG_DEBUG_OCR)
       XBERG_CACHE_DIR: "/tmp/xberg"
 ```
 
