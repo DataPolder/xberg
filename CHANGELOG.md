@@ -9,12 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-07-30
+
 ### Added
 
 - MCP clients can run `extract`, `extract_batch`, and `cache_warm` as cancellable SEP-2663 tasks
   when they advertise task support; synchronous clients remain compatible.
 - MCP `cache_clear` and `cache_warm` return typed structured results with cleared-file totals and
   model availability separated from confirmed cache-hit and download status.
+
+### Changed
+
+- Dependency bumps: `crawlberg` 1.0.11, `tree-sitter-language-pack` 1.13.6, `base64` 0.23
+  (xberg-jni).
 
 ### Fixed
 
@@ -26,6 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **#1340**: PDF images and generated captions render at bounding-box-aware reading-order
   positions, remain within the correct layout column, preserve source order, and stay consistent
   through chunking, translation, and redaction.
+- **#1343**: Archive extraction skips macOS/tooling metadata entries (`__MACOSX/`, AppleDouble
+  `._*`, `.DS_Store`, `Thumbs.db`, `desktop.ini`, `__pycache__/`, `.pyc`/`.pyo`) instead of emitting
+  them as `text/plain` children, and unsniffable extensionless members default to
+  `application/octet-stream`; a single aggregated warning records what was filtered.
 - Per-file OCR language overrides now also apply to explicit Tesseract pipeline stages, preserving
   override precedence.
 - PDF plain-text extraction repairs detached subscripts, phone suffixes, and final glyphs while

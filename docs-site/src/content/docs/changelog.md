@@ -9,6 +9,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.4] - 2026-07-30
+
+### Added
+
+- MCP clients can run `extract`, `extract_batch`, and `cache_warm` as cancellable SEP-2663 tasks
+  when they advertise task support; synchronous clients remain compatible.
+- MCP `cache_clear` and `cache_warm` return typed structured results with cleared-file totals and
+  model availability separated from confirmed cache-hit and download status.
+
+### Changed
+
+- Dependency bumps: `crawlberg` 1.0.11, `tree-sitter-language-pack` 1.13.6, `base64` 0.23
+  (xberg-jni).
+
+### Fixed
+
+- **#1338**: Default `OcrStrategy::Auto` extraction OCRs scanned PDFs with no native text layer
+  instead of returning empty content; explicit OCR disablement remains authoritative.
+- **#1341**: Synthesized VLM fallback pipelines run for mixed native/OCR PDFs, preserve skipped
+  and failed-stage diagnostics, and retain the last non-empty fallback when every stage scores
+  below threshold.
+- **#1340**: PDF images and generated captions render at bounding-box-aware reading-order
+  positions, remain within the correct layout column, preserve source order, and stay consistent
+  through chunking, translation, and redaction.
+- **#1343**: Archive extraction skips macOS/tooling metadata entries (`__MACOSX/`, AppleDouble
+  `._*`, `.DS_Store`, `Thumbs.db`, `desktop.ini`, `__pycache__/`, `.pyc`/`.pyo`) instead of emitting
+  them as `text/plain` children, and unsniffable extensionless members default to
+  `application/octet-stream`; a single aggregated warning records what was filtered.
+- Per-file OCR language overrides now also apply to explicit Tesseract pipeline stages, preserving
+  override precedence.
+- PDF plain-text extraction repairs detached subscripts, phone suffixes, and final glyphs while
+  preserving RTL, rotated, vertical-writing, and mathematical span order.
+- PDF Markdown atomically replaces adjacent native side-by-side table cohorts with validated layout
+  table cohorts, avoiding mixed grids and dropped financial-table structure.
+- OCR Markdown applies layout hints to line-local geometry while preserving soft-wrapped body
+  paragraphs and merging multi-line headings, code, pictures, and wrapped list items by hint.
+- Tesseract OCR Markdown aligns layout hints and table-cell matching with DPI-normalized and
+  auto-rotated image coordinates, restoring semantic structure on scanned PDFs.
+- OCR Markdown recovers missing ordered-list successors only when an existing numeric list item
+  anchors a complete, bounded three-item sequence across pages.
+- PDF Markdown preserves strong native headings when a lower-confidence layout Code hint lacks
+  structured code evidence.
+- OCR Markdown recovers a title from a guarded first-block logo/title pattern when the layout model
+  emits no semantic heading region.
+- PDF Markdown preserves native heading, list, code, and formula semantics while using layout
+  geometry for reading order, grouping, and tables, tolerates minor crop jitter in side-by-side
+  cohorts, merges sparse currency-affix columns without dropping markers, and folds wrapped
+  financial-table lines into logical records; table-dominant pages also discard bbox-confirmed crop
+  spill while retaining surrounding prose and annotations.
+- PDF Markdown reconstructs paired wrapped financial tables as semantic three-column grids and
+  repairs consistently merged numeric columns from native PDF table detection.
+- **#1342**: PDF table reconstruction retains short numeric grids when a small number of inferred
+  columns make the principal data row nearly complete instead of fully populated.
+- PDF Markdown recognizes repeated large-font heading tiers across sparse multi-page documents while
+  retaining the single-page sparse-document safeguard against display-text false positives.
+- Wide PDF numeric tables retain validated three-row headers while preserving the compact prose and
+  caption safeguards used by smaller grids.
+
 ## [1.0.3] - 2026-07-29
 
 ### Added
