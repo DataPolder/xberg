@@ -53,6 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   columns make the principal data row nearly complete instead of fully populated.
 - PDF Markdown recognizes repeated large-font heading tiers across sparse multi-page documents while
   retaining the single-page sparse-document safeguard against display-text false positives.
+- Wide PDF numeric tables retain validated three-row headers while preserving the compact prose and
+  caption safeguards used by smaller grids.
 
 ## [1.0.3] - 2026-07-29
 

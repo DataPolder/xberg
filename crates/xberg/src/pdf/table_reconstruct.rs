@@ -25,6 +25,10 @@ const LARGE_TABLE_MIN_COLUMNS: usize = 6;
 const DEFAULT_MIN_DATA_ROW_DIGIT_CELLS: usize = 3;
 const REPEATED_DATA_ROW_COUNT: usize = 3;
 const ROW_SHAPE_MIN_OVERLAP_PERCENT: usize = 80;
+const DEFAULT_HEADER_MAX_ROWS: usize = 2;
+const WIDE_HEADER_MAX_ROWS: usize = 3;
+const WIDE_HEADER_MIN_COLUMNS: usize = 12;
+const WIDE_HEADER_MIN_COVERED_PERCENT: usize = 60;
 const DENSE_SCALAR_MIN_DATA_ROWS: usize = 20;
 const DENSE_SCALAR_MIN_COLUMNS: usize = 6;
 const DENSE_SCALAR_MIN_FILLED_PERCENT: usize = 75;
@@ -249,8 +253,9 @@ fn post_process_table_inner(
     };
     let mut data_rows = table[data_start..].to_vec();
 
-    if header_rows.len() > 2 {
-        header_rows = header_rows[header_rows.len() - 2..].to_vec();
+    let header_row_limit = retained_header_row_limit(&header_rows, col_count, layout_guided);
+    if header_rows.len() > header_row_limit {
+        header_rows = header_rows[header_rows.len() - header_row_limit..].to_vec();
     }
 
     if header_rows.is_empty() {
@@ -531,6 +536,33 @@ fn post_process_table_inner(
     }
 
     Some(processed)
+}
+
+fn retained_header_row_limit(header_rows: &[Vec<String>], column_count: usize, layout_guided: bool) -> usize {
+    if !layout_guided || header_rows.len() < WIDE_HEADER_MAX_ROWS || column_count < WIDE_HEADER_MIN_COLUMNS {
+        return DEFAULT_HEADER_MAX_ROWS;
+    }
+
+    let candidate = &header_rows[header_rows.len() - WIDE_HEADER_MAX_ROWS..];
+    if candidate
+        .iter()
+        .any(|row| row.iter().all(|cell| cell.trim().is_empty()))
+    {
+        return DEFAULT_HEADER_MAX_ROWS;
+    }
+
+    let extra_row_covered_columns = candidate[0]
+        .iter()
+        .take(column_count)
+        .filter(|cell| !cell.trim().is_empty())
+        .count();
+    // ~keep The added top line must independently span the wide grid. Union
+    // coverage would admit a half-width title above two dense header rows.
+    if extra_row_covered_columns.saturating_mul(100) >= column_count.saturating_mul(WIDE_HEADER_MIN_COVERED_PERCENT) {
+        WIDE_HEADER_MAX_ROWS
+    } else {
+        DEFAULT_HEADER_MAX_ROWS
+    }
 }
 
 fn find_data_start(table: &[Vec<String>], layout_guided: bool) -> usize {
@@ -1871,6 +1903,74 @@ mod tests {
         assert_eq!(processed[0].len(), 9);
         assert!(processed[0][0].contains("Patient"));
         assert!(is_well_formed_table(&processed));
+    }
+
+    #[test]
+    fn retains_three_row_header_for_wide_numeric_table() {
+        let labels: Vec<char> = ('A'..='L').collect();
+        let mut table = vec![
+            labels.iter().map(|label| format!("Upper {label}")).collect(),
+            labels.iter().map(|label| format!("Field {label}")).collect(),
+            labels.iter().map(|label| format!("unit {label}")).collect(),
+        ];
+        for row in 1..=6 {
+            table.push(labels.iter().map(|_| format!("{row}.000")).collect());
+        }
+
+        let processed = post_process_table(table, true, false).expect("wide numeric table should be retained");
+
+        let expected_header: Vec<String> = labels
+            .iter()
+            .map(|label| format!("Upper {label} Field {label} unit {label}"))
+            .collect();
+        assert_eq!(processed[0], expected_header);
+        assert_eq!(processed.len(), 7);
+    }
+
+    #[test]
+    fn sparse_three_row_prose_is_not_retained_as_wide_table_header() {
+        let empty_row = || vec![String::new(); 12];
+        let mut title = empty_row();
+        title[4] = "State of Arkansas".into();
+        title[5] = "Insurance Company".into();
+        let mut subtitle = empty_row();
+        subtitle[5] = "Private Passenger".into();
+        subtitle[6] = "Automobile".into();
+        let mut caption = empty_row();
+        caption[5] = "Annual Mileage".into();
+        let mut table = vec![title, subtitle, caption];
+        for row in 1..=6 {
+            table.push((0..12).map(|_| format!("{row}.000")).collect());
+        }
+
+        let processed = post_process_table(table, true, false).expect("numeric body should be retained");
+
+        assert!(!processed[0].iter().any(|cell| cell.contains("State of Arkansas")));
+    }
+
+    #[test]
+    fn half_width_title_is_not_retained_above_dense_two_row_header() {
+        let column_labels: Vec<char> = ('A'..='X').collect();
+        let mut title = vec![String::new(); 24];
+        for (label, cell) in column_labels.iter().zip(title.iter_mut()).take(12) {
+            *cell = format!("Annual title {label}");
+        }
+        let labels: Vec<String> = column_labels.iter().map(|label| format!("Field {label}")).collect();
+        let units: Vec<String> = column_labels.iter().map(|label| format!("unit {label}")).collect();
+        let mut table = vec![title, labels.clone(), units.clone()];
+        for row in 1..=6 {
+            table.push((0..24).map(|column| format!("{row}.{column}")).collect());
+        }
+
+        let processed = post_process_table(table, true, false).expect("numeric body should be retained");
+        let expected_header: Vec<String> = labels
+            .iter()
+            .zip(&units)
+            .map(|(label, unit)| format!("{label} {unit}"))
+            .collect();
+
+        assert_eq!(processed[0], expected_header);
+        assert!(!processed[0].iter().any(|cell| cell.contains("Annual title")));
     }
 
     #[test]
