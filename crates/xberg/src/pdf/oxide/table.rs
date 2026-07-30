@@ -1527,7 +1527,6 @@ fn split_numeric_track_candidate(
     column_positions: &[u32],
     column: usize,
 ) -> Option<bool> {
-    let header_row_limit = split_numeric_track_header_row_limit(grid);
     let mut left_numeric = 0usize;
     let mut right_numeric = 0usize;
     let mut left_header = false;
@@ -1545,13 +1544,16 @@ fn split_numeric_track_candidate(
         } else {
             continue;
         };
+        // TODO: Support a third header row only after the repair can prove
+        // header identity across both candidate tracks.
+        // ~keep The two-row cap prevents merging real adjacent numeric columns.
         if is_numeric_word(text) {
             if on_left {
                 left_numeric += 1;
             } else {
                 right_numeric += 1;
             }
-        } else if row_index >= header_row_limit {
+        } else if row_index >= SPLIT_NUMERIC_TRACK_MAX_HEADER_ROWS {
             return None;
         } else if on_left {
             left_header = true;
@@ -1584,29 +1586,6 @@ fn split_numeric_track_candidate(
     numeric_widths.sort_unstable();
     let median_width = *numeric_widths.get(numeric_widths.len() / 2)?;
     (separation.saturating_mul(2) < median_width).then_some(left_header)
-}
-
-fn split_numeric_track_header_row_limit(grid: &[Vec<String>]) -> usize {
-    let column_count = grid.first().map_or(0, Vec::len);
-    if grid.len() < ALIGNED_NUMERIC_HEADER_MAX_ROWS || column_count < THREE_ROW_HEADER_MIN_TRACKS {
-        return SPLIT_NUMERIC_TRACK_MAX_HEADER_ROWS;
-    }
-
-    if grid[..ALIGNED_NUMERIC_HEADER_MAX_ROWS]
-        .iter()
-        .any(|row| !row.iter().any(|cell| cell.chars().any(char::is_alphabetic)))
-    {
-        return SPLIT_NUMERIC_TRACK_MAX_HEADER_ROWS;
-    }
-
-    let extra_row_covered_columns = grid[0].iter().filter(|cell| !cell.trim().is_empty()).count();
-    // ~keep Row three is safe for split-track repair only when the added top
-    // line independently spans a wide grid; half-width titles remain capped.
-    if extra_row_covered_columns.saturating_mul(100) >= column_count.saturating_mul(NUMERIC_HEADER_MIN_TRACK_PERCENT) {
-        ALIGNED_NUMERIC_HEADER_MAX_ROWS
-    } else {
-        SPLIT_NUMERIC_TRACK_MAX_HEADER_ROWS
-    }
 }
 
 fn is_dense_numeric_region(region: &[crate::pdf::table_reconstruct::HocrWord]) -> bool {
@@ -2976,7 +2955,7 @@ mod tests {
     }
 
     #[test]
-    fn repairs_split_numeric_track_after_dense_three_row_header() {
+    fn preserves_distinct_numeric_tracks_after_dense_three_row_header() {
         let labels: Vec<char> = ('A'..='K').collect();
         let mut grid = Vec::new();
         for prefix in ["Upper", "Field", "unit"] {
@@ -3001,17 +2980,10 @@ mod tests {
         }
         let mut positions = vec![20, 100, 104];
         positions.extend((0..10).map(|column| 160 + column * 40));
+        let original = grid.clone();
 
-        assert!(repair_split_numeric_track(&mut grid, &words, &positions));
-        let processed = crate::pdf::table_reconstruct::post_process_table(grid, true, false)
-            .expect("repaired wide table should survive post-processing");
-        let mut expected_header = vec!["Upper ID Field ID unit ID".to_string()];
-        expected_header.extend(
-            labels
-                .iter()
-                .map(|label| format!("Upper {label} Field {label} unit {label}")),
-        );
-        assert_eq!(processed[0], expected_header);
+        assert!(!repair_split_numeric_track(&mut grid, &words, &positions));
+        assert_eq!(grid, original);
     }
 
     #[test]
