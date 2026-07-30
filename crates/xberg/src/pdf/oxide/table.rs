@@ -44,9 +44,10 @@ const LABEL_HEAVY_FINANCIAL_MAX_SECTION_GAP_HEIGHTS: u32 = 4;
 const LABEL_HEAVY_FINANCIAL_MAX_LABEL_GAP_HEIGHTS: u32 = 2;
 const NUMERIC_HEADER_MIN_TRACK_PERCENT: usize = 60;
 const NUMERIC_HEADER_MIN_ALPHA_PERCENT: usize = 60;
-const ALIGNED_NUMERIC_HEADER_MAX_ROWS: usize = 3;
-const THREE_ROW_HEADER_MIN_TRACKS: usize = 12;
-const SPLIT_NUMERIC_TRACK_MAX_HEADER_ROWS: usize = 2;
+// TODO: Support a third header row after column detection can derive anchors
+// from recurring data tracks instead of header glyph positions.
+// ~keep Header glyphs can bridge adjacent numeric tracks and collapse columns.
+const NUMERIC_HEADER_MAX_ROWS: usize = 2;
 const DENSE_NUMERIC_COLUMN_GAP_CAP: u32 = 20;
 const SPLIT_NUMERIC_TRACK_MIN_ROWS_PER_SIDE: usize = 2;
 const SPLIT_NUMERIC_TRACK_MIN_TOTAL_ROWS: usize = 6;
@@ -1245,33 +1246,9 @@ fn is_aligned_numeric_header(
         return false;
     };
     let tracks = recurring_numeric_track_centers(recurring_rows, median_height);
-    let header_word_rows = numeric_rows(header, row_tolerance);
-    let header_rows = header_word_rows.len();
-    if tracks.len() < DENSE_NUMERIC_MIN_RECURRING_TRACKS
-        || !(1..=ALIGNED_NUMERIC_HEADER_MAX_ROWS).contains(&header_rows)
-    {
+    let header_rows = numeric_rows(header, row_tolerance).len();
+    if tracks.len() < DENSE_NUMERIC_MIN_RECURRING_TRACKS || !(1..=NUMERIC_HEADER_MAX_ROWS).contains(&header_rows) {
         return false;
-    }
-    // ~keep Three-line page titles can align by chance on compact grids. The
-    // third header row is only safe when the numeric body proves a wide table.
-    if header_rows == ALIGNED_NUMERIC_HEADER_MAX_ROWS && tracks.len() < THREE_ROW_HEADER_MIN_TRACKS {
-        return false;
-    }
-
-    let x_tolerance = median_height.saturating_mul(2).max(12);
-    if header_rows == ALIGNED_NUMERIC_HEADER_MAX_ROWS {
-        let extra_row_matched_tracks = tracks
-            .iter()
-            .filter(|track| {
-                header_word_rows[0]
-                    .iter()
-                    .any(|word| (word.left + word.width / 2).abs_diff(**track) <= x_tolerance)
-            })
-            .count();
-        if extra_row_matched_tracks.saturating_mul(100) < tracks.len().saturating_mul(NUMERIC_HEADER_MIN_TRACK_PERCENT)
-        {
-            return false;
-        }
     }
 
     let alpha_words = header
@@ -1288,6 +1265,7 @@ fn is_aligned_numeric_header(
         return false;
     }
 
+    let x_tolerance = median_height.saturating_mul(2).max(12);
     let matched_tracks = tracks
         .iter()
         .filter(|track| {
@@ -1544,16 +1522,13 @@ fn split_numeric_track_candidate(
         } else {
             continue;
         };
-        // TODO: Support a third header row only after the repair can prove
-        // header identity across both candidate tracks.
-        // ~keep The two-row cap prevents merging real adjacent numeric columns.
         if is_numeric_word(text) {
             if on_left {
                 left_numeric += 1;
             } else {
                 right_numeric += 1;
             }
-        } else if row_index >= SPLIT_NUMERIC_TRACK_MAX_HEADER_ROWS {
+        } else if row_index >= NUMERIC_HEADER_MAX_ROWS {
             return None;
         } else if on_left {
             left_header = true;
@@ -2829,76 +2804,6 @@ mod tests {
     }
 
     #[test]
-    fn aligned_three_row_header_attaches_to_wide_numeric_table() {
-        let mut header = Vec::new();
-        for col in 0..12 {
-            header.push(make_word("Heading", 20 + col * 60, 100, 30));
-            header.push(make_word("type", 20 + col * 60, 112, 24));
-            header.push(make_word("unit", 20 + col * 60, 124, 20));
-        }
-        let mut data = Vec::new();
-        for row in 0..6 {
-            for col in 0..12 {
-                data.push(make_word("1.000", 20 + col * 60, 142 + row * 12, 24));
-            }
-        }
-        let expected_words = header.len() + data.len();
-        let mut regions = vec![header, data];
-
-        attach_aligned_numeric_headers(&mut regions, 10, 5);
-
-        assert_eq!(regions.len(), 1);
-        assert_eq!(regions[0].len(), expected_words);
-    }
-
-    #[test]
-    fn aligned_three_row_prose_does_not_attach_to_numeric_table() {
-        let header = vec![
-            make_word("State", 20, 100, 30),
-            make_word("of", 100, 100, 20),
-            make_word("Arkansas", 180, 100, 45),
-            make_word("Private", 260, 112, 35),
-            make_word("Passenger", 340, 112, 45),
-            make_word("Annual", 420, 124, 35),
-            make_word("Mileage", 500, 124, 40),
-        ];
-        let mut data = Vec::new();
-        for row in 0..6 {
-            for col in 0..7 {
-                data.push(make_word("1.000", 20 + col * 80, 142 + row * 12, 30));
-            }
-        }
-        let mut regions = vec![header, data];
-
-        attach_aligned_numeric_headers(&mut regions, 10, 5);
-
-        assert_eq!(regions.len(), 2);
-    }
-
-    #[test]
-    fn half_width_title_above_dense_two_row_header_does_not_attach() {
-        let mut header = Vec::new();
-        for col in 0..12 {
-            header.push(make_word("Annual", 20 + col * 30, 100, 20));
-        }
-        for col in 0..24 {
-            header.push(make_word("Heading", 20 + col * 30, 112, 20));
-            header.push(make_word("unit", 20 + col * 30, 124, 18));
-        }
-        let mut data = Vec::new();
-        for row in 0..6 {
-            for col in 0..24 {
-                data.push(make_word("1.000", 20 + col * 30, 142 + row * 12, 18));
-            }
-        }
-        let mut regions = vec![header, data];
-
-        attach_aligned_numeric_headers(&mut regions, 10, 5);
-
-        assert_eq!(regions.len(), 2);
-    }
-
-    #[test]
     fn compact_numeric_table_reconstructs_end_to_end() {
         let mut words = Vec::new();
         for col in 0..7 {
@@ -2952,38 +2857,6 @@ mod tests {
         assert!(grid.iter().all(|row| row.len() == 2));
         assert_eq!(grid[0][1], "Polarization resistance");
         assert!(grid[1..].iter().all(|row| !row[1].is_empty()));
-    }
-
-    #[test]
-    fn preserves_distinct_numeric_tracks_after_dense_three_row_header() {
-        let labels: Vec<char> = ('A'..='K').collect();
-        let mut grid = Vec::new();
-        for prefix in ["Upper", "Field", "unit"] {
-            let mut row = vec![format!("{prefix} ID"), format!("{prefix} A"), String::new()];
-            row.extend(labels.iter().skip(1).map(|label| format!("{prefix} {label}")));
-            grid.push(row);
-        }
-
-        let mut words = Vec::new();
-        for row in 0..6 {
-            let mut cells = vec![format!("{}", row + 1), String::new(), String::new()];
-            let split_column = if row % 3 == 0 { 2 } else { 1 };
-            cells[split_column] = format!("{}.{row}", row + 1);
-            cells.extend((0..10).map(|column| format!("{}.{column}", row + 1)));
-            words.push(make_word(
-                &cells[split_column],
-                if split_column == 1 { 100 } else { 104 },
-                150 + row * 12,
-                20,
-            ));
-            grid.push(cells);
-        }
-        let mut positions = vec![20, 100, 104];
-        positions.extend((0..10).map(|column| 160 + column * 40));
-        let original = grid.clone();
-
-        assert!(!repair_split_numeric_track(&mut grid, &words, &positions));
-        assert_eq!(grid, original);
     }
 
     #[test]
