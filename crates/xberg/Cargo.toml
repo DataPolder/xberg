@@ -1120,7 +1120,7 @@ required-features = ["quality"]
 [[bench]]
 name = "pdf_layout_microbatch"
 harness = false
-required-features = ["pdf", "layout-detection", "profiling"]
+required-features = ["pdf", "layout-detection", "ocr", "profiling"]
 
 [lints]
 workspace = true
