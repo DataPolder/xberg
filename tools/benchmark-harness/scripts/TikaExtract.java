@@ -25,7 +25,6 @@ public final class TikaExtract {
 
   public static void main(String[] args) {
     boolean ocrEnabled = false;
-    // Tesseract language(s) for OCR, canonical form (e.g. "eng+kor",
     // "jpn_vert"). Tika's TesseractOCRConfig.setLanguage takes these codes
     // directly; the harness forwards the fixture's language via --ocr-lang,
     // defaulting to eng.

@@ -4,7 +4,6 @@ import importlib.util
 import unittest
 from pathlib import Path
 
-
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 VALIDATOR_PATH = Path(__file__).with_name("validate-workflow-matrix.py")
 SPEC = importlib.util.spec_from_file_location("validate_workflow_matrix", VALIDATOR_PATH)

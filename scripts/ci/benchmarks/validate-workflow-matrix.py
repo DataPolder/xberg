@@ -10,7 +10,6 @@ import re
 import subprocess
 from pathlib import Path
 
-
 COHORTS = ("native", "ocr", "office", "markup", "ebook", "email", "data", "images")
 COHORT_FILES = {
     "native": "native-pdf-fast-b8",
