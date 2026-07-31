@@ -53,7 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Capabilities
 
-- 98+ document format support** via Xberg:
+- **98+ document format support** via Xberg:
   - Office documents (PDF, DOCX, XLSX, PPTX, ODT, ODS, ODP)
   - Web formats (HTML, XML, XHTML)
   - Structured formats (JSON, YAML, CSV)
