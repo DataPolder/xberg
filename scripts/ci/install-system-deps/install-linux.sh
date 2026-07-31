@@ -18,6 +18,12 @@ packages=(
   tesseract-ocr-eng
   tesseract-ocr-tur
   tesseract-ocr-deu
+  # Korean and vertical-Japanese packs back the multilingual PNG (eng+kor) and
+  # vertical JPEG (jpn_vert) OCR benchmark fixtures. The harness OCR preflight
+  # fails fast unless these resolve on disk, so they must be installed here
+  # rather than downloaded inside the timed extraction. ~keep
+  tesseract-ocr-kor
+  tesseract-ocr-jpn-vert
   fonts-liberation
   fonts-dejavu-core
   fonts-noto-core

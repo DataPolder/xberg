@@ -9,6 +9,7 @@
 		"size_class": "small",
 		"requires_ocr": true,
 		"languages": ["ja"],
+		"ocr_language": "jpn_vert",
 		"text_orientation": "vertical"
 	},
 	"ground_truth": {
