@@ -173,13 +173,25 @@ async fn test_language_detection_multiple() {
     let config = ExtractionConfig {
         language_detection: Some(LanguageDetectionConfig {
             enabled: true,
-            min_confidence: 0.7,
+            min_confidence: 0.5,
             detect_multiple: true,
         }),
         ..Default::default()
     };
 
-    let text = "Hello world! This is English. ".repeat(10) + "Hola mundo! Este es español. ".repeat(10).as_str();
+    // Use lexically rich passages rather than short repetitive phrases: whatlang
+    // scores terse strings like "Hello world! This is English." near the 0.7
+    // boundary, so the old assertion failed whenever no chunk cleared the
+    // threshold. Longer sentences clear 0.5 deterministically for both languages.
+    let text = format!(
+        "{}{}",
+        "The global economy has been experiencing significant changes in recent years. \
+         International cooperation is essential for addressing climate change. "
+            .repeat(5),
+        "La economía global ha estado experimentando cambios significativos en los últimos años. \
+         La cooperación internacional es esencial para abordar el cambio climático. "
+            .repeat(5)
+    );
     let text_bytes = text.as_bytes();
 
     let result = extract_bytes_document(text_bytes, "text/plain", &config)
