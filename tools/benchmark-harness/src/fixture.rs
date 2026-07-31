@@ -245,8 +245,13 @@ impl Fixture {
                     ),
                 });
             }
+            return Ok(canonical);
         }
         Ok(resolved)
+    }
+
+    pub(crate) fn validated_document_path(&self, fixture_path: &Path) -> Result<PathBuf> {
+        Self::validate_fixture_relative_path(fixture_path, &self.document, "document")
     }
 
     fn validate_ground_truth_file(fixture_path: &Path, relative_path: Option<&Path>, kind: &str) -> Result<()> {

@@ -19,6 +19,7 @@ use crate::aggregate::{
     NewConsolidatedResults, PerFixtureRow, PerformancePercentiles, SCHEMA_VERSION, extract_framework_and_mode,
 };
 use crate::bench_matrix::{Cohort, CohortContract, ExecutionMode, MatrixEntry};
+use crate::fixture::Fixture;
 use crate::provenance::RunProvenance;
 use crate::types::{BenchmarkResult, ErrorKind, OcrStatus, OutputFormat};
 use crate::{Error, Result};
@@ -224,23 +225,17 @@ fn expected_fixtures(fixtures_root: &Path, contract: &CohortContract) -> Result<
     let mut expected = Vec::with_capacity(contract.fixtures.len());
     for fixture in contract.fixtures {
         let descriptor_path = fixtures_root.join(fixture);
-        let descriptor = load_json_value(&descriptor_path)?;
-        let document = descriptor
-            .as_object()
-            .and_then(|object| object.get("document"))
-            .and_then(serde_json::Value::as_str)
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| {
-                contract_error(format!(
-                    "{}: document must be a non-empty string",
-                    descriptor_path.display()
-                ))
-            })?;
-        let document_path = descriptor_path
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .join(document);
-        let document_name = posix_basename(document);
+        let descriptor = Fixture::from_file(&descriptor_path)?;
+        require(
+            !descriptor.document.as_os_str().is_empty(),
+            format!("{}: document must be a non-empty string", descriptor_path.display()),
+        )?;
+        let document_path = descriptor.validated_document_path(&descriptor_path)?;
+        let document_name = descriptor
+            .document
+            .to_str()
+            .map(posix_basename)
+            .ok_or_else(|| contract_error(format!("{}: document path is not UTF-8", descriptor_path.display())))?;
         expected.push(ExpectedFixture {
             fixture: (*fixture).to_string(),
             fixture_blake3: blake3_file(&descriptor_path)?,
@@ -943,4 +938,46 @@ fn validate_aggregate(path: &Path, cohort: Cohort, contract: &CohortContract) ->
         cohort.as_str(),
         rows.len()
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn expected_fixture_hashing_rejects_document_path_escape() {
+        const FIXTURES: &[&str] = &["escape.json"];
+        const STEMS: &[&str] = &["secret"];
+        const EXTENSIONS: &[&str] = &["txt"];
+
+        let root = tempfile::tempdir().unwrap();
+        let fixtures_root = root.path().join("fixtures");
+        std::fs::create_dir(&fixtures_root).unwrap();
+        std::fs::write(root.path().join("secret.txt"), "outside fixture boundary").unwrap();
+        std::fs::write(
+            fixtures_root.join("escape.json"),
+            serde_json::json!({
+                "document": "../secret.txt",
+                "file_type": "txt",
+                "file_size": 24,
+                "expected_frameworks": [],
+                "metadata": {}
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let contract = CohortContract {
+            manifest_name: "test",
+            manifest_blake3: "unused",
+            batch_size: 1,
+            fixtures: FIXTURES,
+            document_stems: STEMS,
+            document_extensions: EXTENSIONS,
+            matrix: Vec::new(),
+        };
+
+        let error = expected_fixtures(&fixtures_root, &contract).unwrap_err().to_string();
+
+        assert!(error.contains("document escapes the fixture trust boundary"), "{error}");
+    }
 }
