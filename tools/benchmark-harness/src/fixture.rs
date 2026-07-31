@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 
-fn is_split_sidecar(path: &Path) -> bool {
+pub(crate) fn is_split_sidecar(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
         .is_some_and(|name| name.ends_with(".split.json"))

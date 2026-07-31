@@ -269,7 +269,12 @@ fn collect_json_recursive(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
         let path = entry.path();
         if path.is_dir() {
             collect_json_recursive(&path, out)?;
-        } else if path.extension().is_some_and(|ext| ext == "json") {
+        } else if path.extension().is_some_and(|ext| ext == "json")
+            && !crate::fixture::is_split_sidecar(&path)
+        {
+            // `*.split.json` sidecars describe split_and_extract page boundaries, not extraction
+            // fixtures — they have no `file_type`/ground truth and must be skipped here, mirroring
+            // the loader in `fixture.rs`. Otherwise `--strict` treats them as GT load failures.
             out.push(path);
         }
     }
@@ -499,5 +504,36 @@ mod tests {
 
         assert!(report.load_failures.is_empty(), "present GT must not be a load failure");
         assert_eq!(report.with_text_gt, 1);
+    }
+
+    #[test]
+    fn test_split_sidecar_fixtures_are_skipped() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("gt.txt"), "some ground truth text").expect("write gt");
+        std::fs::write(
+            dir.path().join("ok.json"),
+            r#"{"document":"doc.pdf","file_type":"pdf","file_size":1,"ground_truth":{"text_file":"gt.txt","source":"readoc"}}"#,
+        )
+        .expect("write fixture");
+        // A split_and_extract sidecar (no `file_type`) must not be validated as an extraction fixture.
+        std::fs::write(
+            dir.path().join("single_paper.split.json"),
+            r#"{"document":"single_paper.pdf","boundaries":[{"start_page":1,"end_page":3}]}"#,
+        )
+        .expect("write split sidecar");
+
+        let report = validate_ground_truth(&ValidateGtConfig {
+            fixtures_dir: dir.path().to_path_buf(),
+            fix: false,
+            strict: true,
+        })
+        .expect("validation");
+
+        assert!(
+            report.load_failures.is_empty(),
+            "split sidecars must be skipped, not treated as load failures: {:?}",
+            report.load_failures
+        );
+        assert_eq!(report.total_fixtures, 1, "only the real fixture is validated");
     }
 }
