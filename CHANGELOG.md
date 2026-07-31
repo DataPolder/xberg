@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Benchmark CI validates ground truth for every format family plus the exact 101-cell workflow
+  matrix and harness contracts before expensive jobs, and the local benchmark task now delegates
+  to the same run wrapper.
 - Benchmark quality rankings and Pareto SF1 multiply reported medians by accountable extraction
   coverage, so partial framework failures cannot retain a perfect rank while harness and setup
   failures remain excluded.

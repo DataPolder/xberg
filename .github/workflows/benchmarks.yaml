@@ -122,10 +122,21 @@ jobs:
         run: scripts/benchmarks/restore-corpus-cache.sh
 
       - name: Validate ground truth
-        run: cargo run --locked --release -p benchmark-harness -- validate-gt --fixtures tools/benchmark-harness/fixtures/pdf/ --strict
+        run: >-
+          cargo run --locked --release -p benchmark-harness -- validate-gt
+          --fixtures tools/benchmark-harness/fixtures --strict
 
       - name: Validate benchmark cohorts
         run: cargo test --locked --release -p benchmark-harness 'cohort::tests::'
+
+      - name: Validate benchmark harness contracts
+        run: >-
+          cargo test --locked --release -p benchmark-harness
+          --test validate_artifacts --test lossless_aggregation
+          --test fixture_validation --test aggregate_schema
+
+      - name: Validate workflow matrix against harness contracts
+        run: scripts/ci/benchmarks/validate-workflow-matrix.py
 
       - name: Package reference corpus cache
         run: tar -C test_documents -cf corpus-cache.tar .corpus-cache/pdf .corpus-cache/ground_truth

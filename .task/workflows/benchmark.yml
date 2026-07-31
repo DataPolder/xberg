@@ -11,6 +11,7 @@ tasks:
     desc: "Validate benchmark workflow and local shell helpers"
     cmds:
       - scripts/ci/benchmarks/validate-workflow-build-config.sh
+      - python3 -m unittest scripts/ci/benchmarks/test_validate_workflow_matrix.py
       - tools/benchmark-harness/tests/test_benchmark_thread_budget.sh
       - tools/benchmark-harness/tests/test_bench_local_frameworks.sh
       - tools/benchmark-harness/tests/test_liteparse_extract.sh
@@ -20,29 +21,29 @@ tasks:
       - tools/benchmark-harness/tests/test_restore_corpus_cache.sh
 
   run:
-    desc: "Run benchmark harness with profiling support"
+    desc: "Run the benchmark through the CI-compatible wrapper"
     requires:
       vars:
         - FRAMEWORK
         - MODE
-    vars:
-      ITERATIONS: '{{ .ITERATIONS | default "1" }}'
-      TIMEOUT: '{{ .TIMEOUT | default "900" }}'
-      MAX_CONCURRENT: '{{ if eq .MODE "single-file" }}1{{ else }}4{{ end }}'
     env:
       RUST_BACKTRACE: short
+      FRAMEWORK: "{{.FRAMEWORK}}"
+      MODE: "{{.MODE}}"
+      ITERATIONS: '{{ .ITERATIONS | default "3" }}'
+      TIMEOUT: '{{ .TIMEOUT | default "900" }}'
+      FIXTURES_DIR: '{{ .FIXTURES_DIR }}'
+      HARNESS_PATH: '{{ .HARNESS_PATH }}'
+      OUTPUT_FORMAT: '{{ .OUTPUT_FORMAT | default "markdown" }}'
+      MEASURE_QUALITY: '{{ .MEASURE_QUALITY | default "false" }}'
+      OCR_ENABLED: '{{ .OCR_ENABLED | default "false" }}'
+      COHORT: '{{ .COHORT | default "" }}'
+      BATCH_SIZE: '{{ .BATCH_SIZE | default "" }}'
+      SHARD: '{{ .SHARD | default "" }}'
+      XBERG_MAX_THREADS: '{{ .XBERG_MAX_THREADS | default "4" }}'
+      MIN_SUCCESS_RATE: '{{ .MIN_SUCCESS_RATE | default "0.5" }}'
     cmds:
-      - mkdir -p "{{.BENCHMARK_RESULTS_DIR}}/{{.FRAMEWORK}}-{{.MODE}}"
-      - |
-        {{.HARNESS_PATH}} \
-          run \
-          --fixtures "{{.FIXTURES_DIR}}" \
-          --frameworks "{{.FRAMEWORK}}" \
-          --output "{{.BENCHMARK_RESULTS_DIR}}/{{.FRAMEWORK}}-{{.MODE}}" \
-          --iterations "{{.ITERATIONS}}" \
-          --timeout "{{.TIMEOUT}}" \
-          --mode "{{.MODE}}" \
-          --max-concurrent "{{.MAX_CONCURRENT}}"
+      - scripts/benchmarks/run-benchmark.sh
 
   profile:
     desc: "Run pipeline-benchmark with flamegraph profiling. Builds with --profile profiling so Rust symbols are resolved."
