@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Rotated PDF pages now receive the inverse `/Rotate` correction exactly once before shared layout
+  and OCR inference, keeping PaddleOCR text upright with or without layout detection.
 - Benchmark text F1 treats OCR-inserted line breaks within CJK text as layout whitespace,
   preventing semantically identical Chinese, Japanese, and Korean output from scoring zero.
 - Pipeline quality benchmarks allow forced OCR inference enough time to finish instead of

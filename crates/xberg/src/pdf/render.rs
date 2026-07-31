@@ -93,7 +93,7 @@ pub(crate) fn get_page_rotations(pdf_bytes: &[u8], page_count: usize) -> Vec<u32
 
 /// Rotate a decoded page image per the page's normalized /Rotate value.
 /// No-op for 0 or non-quarter-turn values.
-#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
 pub(crate) fn rotate_dynamic_image(img: image::DynamicImage, rotation_degrees: u32) -> image::DynamicImage {
     match rotation_degrees % 360 {
         90 => img.rotate90(),
@@ -103,13 +103,21 @@ pub(crate) fn rotate_dynamic_image(img: image::DynamicImage, rotation_degrees: u
     }
 }
 
+/// Return the correction needed to make a page raster upright after
+/// `pdf_oxide` has applied the PDF page's `/Rotate` value while rendering.
+/// ~keep
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
+pub(crate) fn ocr_page_correction_degrees(rotation_degrees: u32) -> u32 {
+    (360 - rotation_degrees % 360) % 360
+}
+
 /// Rotate PNG-encoded page bytes per the page's /Rotate value.
 ///
 /// Fast path: rotation 0 returns the input unchanged (no decode). Rotated
 /// pages pay one decode + re-encode, which only happens for documents that
 /// actually carry /Rotate. Returns the (possibly new) PNG bytes with the
 /// post-rotation width and height.
-#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
 pub(crate) fn rotate_png_page_if_needed(
     png_data: Vec<u8>,
     width: u32,
@@ -133,6 +141,21 @@ pub(crate) fn rotate_png_page_if_needed(
             source: None,
         })?;
     Ok((buf, w, h))
+}
+
+/// Normalize a `pdf_oxide` page raster for OCR.
+///
+/// `pdf_oxide` already applies `/Rotate` to the rendered page. OCR needs the
+/// inverse transform exactly once so text is upright before layout and OCR
+/// inference consume the shared raster. ~keep
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
+pub(crate) fn normalize_rendered_page_for_ocr(
+    png_data: Vec<u8>,
+    width: u32,
+    height: u32,
+    rotation_degrees: u32,
+) -> Result<(Vec<u8>, u32, u32)> {
+    rotate_png_page_if_needed(png_data, width, height, ocr_page_correction_degrees(rotation_degrees))
 }
 
 /// Render a page using safeguards for extreme dimensions (wide vector diagrams,
@@ -408,6 +431,51 @@ mod tests {
         let img = image::DynamicImage::new_rgb8(100, 150);
         let rotated = rotate_dynamic_image(img, 270);
         assert_eq!((rotated.width(), rotated.height()), (150, 100));
+    }
+
+    #[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
+    #[test]
+    fn ocr_page_correction_inverts_pdf_rotation() {
+        assert_eq!(ocr_page_correction_degrees(0), 0);
+        assert_eq!(ocr_page_correction_degrees(90), 270);
+        assert_eq!(ocr_page_correction_degrees(180), 180);
+        assert_eq!(ocr_page_correction_degrees(270), 90);
+        assert_eq!(ocr_page_correction_degrees(360), 0);
+    }
+
+    #[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
+    #[test]
+    fn rendered_page_ocr_normalization_applies_inverse_quarter_turns() {
+        let marker = image::Rgb([17, 31, 47]);
+        let mut source = image::RgbImage::new(3, 2);
+        source.put_pixel(0, 0, marker);
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        source
+            .write_to(&mut encoded, image::ImageFormat::Png)
+            .expect("test image should encode");
+        let encoded = encoded.into_inner();
+
+        let cases = [
+            (0, (3, 2), (0, 0)),
+            (90, (2, 3), (0, 2)),
+            (180, (3, 2), (2, 1)),
+            (270, (2, 3), (1, 0)),
+        ];
+        for (pdf_rotation, expected_dimensions, marker_position) in cases {
+            let (normalized, width, height) = normalize_rendered_page_for_ocr(encoded.clone(), 3, 2, pdf_rotation)
+                .expect("in-memory OCR normalization should succeed");
+            let image = image::load_from_memory(&normalized)
+                .expect("normalized PNG should decode")
+                .to_rgb8();
+
+            assert_eq!((width, height), expected_dimensions, "PDF rotation {pdf_rotation}");
+            assert_eq!(image.dimensions(), expected_dimensions, "PDF rotation {pdf_rotation}");
+            assert_eq!(
+                *image.get_pixel(marker_position.0, marker_position.1),
+                marker,
+                "PDF rotation {pdf_rotation}"
+            );
+        }
     }
 
     #[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]

@@ -543,8 +543,12 @@ fn render_full_pdf_ocr_batch(
             }
         })?;
         let rotation = page_rotations.get(page_idx).copied().unwrap_or(0);
-        let (data, width, height) =
-            crate::pdf::render::rotate_png_page_if_needed(rendered.data, rendered.width, rendered.height, rotation)?;
+        let (data, width, height) = crate::pdf::render::normalize_rendered_page_for_ocr(
+            rendered.data,
+            rendered.width,
+            rendered.height,
+            rotation,
+        )?;
         encoded.push((page_idx, std::sync::Arc::new(data), width, height));
     }
     Ok(encoded)
@@ -585,12 +589,17 @@ fn render_selected_pages_from_document(
                 message: format!("Failed to render PDF page {}: {}", idx + 1, e),
                 source: None,
             })?;
-        let img = image::load_from_memory(&rendered.data).map_err(|e| crate::XbergError::Parsing {
+        let rotation = page_rotations.get(idx).copied().unwrap_or(0);
+        let (data, _, _) = crate::pdf::render::normalize_rendered_page_for_ocr(
+            rendered.data,
+            rendered.width,
+            rendered.height,
+            rotation,
+        )?;
+        let img = image::load_from_memory(&data).map_err(|e| crate::XbergError::Parsing {
             message: format!("Failed to decode rendered page {}: {}", idx + 1, e),
             source: None,
         })?;
-        let rotation = page_rotations.get(idx).copied().unwrap_or(0);
-        let img = crate::pdf::render::rotate_dynamic_image(img, rotation);
         images.push((idx, img));
     }
 

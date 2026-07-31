@@ -323,13 +323,25 @@ fn render_layout_chunk(
                 .map(|(llx, lly, urx, ury)| ((urx - llx).abs(), (ury - lly).abs()))
                 .unwrap_or((612.0, 792.0));
             let rotation = page_rotations.get(page_index).copied().unwrap_or(0);
-            let (page_width_pts, page_height_pts) = displayed_page_dimensions(media_width, media_height, rotation);
+            let normalize_for_ocr = gated_handling == GatedPageHandling::RenderWithoutInference;
+            let (page_width_pts, page_height_pts) = if normalize_for_ocr {
+                (media_width, media_height)
+            } else {
+                displayed_page_dimensions(media_width, media_height, rotation)
+            };
             let run_inference = gate_selects_page(gate_decisions, page_index);
             let skip_render = !run_inference && gated_handling == GatedPageHandling::SkipRender;
             let image = if skip_render {
                 None
             } else {
-                render_layout_page(doc, page_index, page_width_pts, page_height_pts)
+                render_layout_page(
+                    doc,
+                    page_index,
+                    page_width_pts,
+                    page_height_pts,
+                    rotation,
+                    normalize_for_ocr,
+                )
             };
 
             RenderedLayoutPage {
@@ -350,6 +362,8 @@ fn render_layout_page(
     page_index: usize,
     page_width_pts: f32,
     page_height_pts: f32,
+    rotation: u32,
+    normalize_for_ocr: bool,
 ) -> Option<image::RgbImage> {
     let rendered = crate::pdf::render::render_page_with_safeguards(doc, page_index, 150).map_err(|error| {
         tracing::warn!(
@@ -362,7 +376,23 @@ fn render_layout_page(
     });
     let rendered = rendered.ok()?;
 
-    image::load_from_memory(&rendered.data)
+    let rendered_data = if normalize_for_ocr {
+        crate::pdf::render::normalize_rendered_page_for_ocr(rendered.data, rendered.width, rendered.height, rotation)
+            .map(|(data, _, _)| data)
+            .map_err(|error| {
+                tracing::warn!(
+                    page = page_index + 1,
+                    rotation,
+                    error = %error,
+                    "layout runner: skipping page (OCR rotation normalization failed), returning empty detections"
+                );
+            })
+            .ok()?
+    } else {
+        rendered.data
+    };
+
+    image::load_from_memory(&rendered_data)
         .map(image::DynamicImage::into_rgb8)
         .map_err(|error| {
             tracing::warn!(
@@ -960,7 +990,7 @@ mod tests {
         }
     }
 
-    fn rotated_pdf(inherited: bool) -> Vec<u8> {
+    fn rotated_pdf(inherited: bool, rotation: i64) -> Vec<u8> {
         use lopdf::{Document, Object, Stream, dictionary};
 
         let mut document = Document::with_version("1.5");
@@ -976,7 +1006,7 @@ mod tests {
             "Contents" => content_id,
         };
         if !inherited {
-            page.set("Rotate", 90);
+            page.set("Rotate", rotation);
         }
         document.objects.insert(page_id, Object::Dictionary(page));
 
@@ -986,7 +1016,7 @@ mod tests {
             "Count" => 1,
         };
         if inherited {
-            pages.set("Rotate", 90);
+            pages.set("Rotate", rotation);
         }
         document.objects.insert(pages_id, Object::Dictionary(pages));
 
@@ -1236,7 +1266,7 @@ mod tests {
     /// SkipRender must not rasterise gated pages; RenderWithoutInference must.
     #[test]
     fn gated_handling_controls_whether_gated_pages_render() {
-        let bytes = rotated_pdf(false);
+        let bytes = rotated_pdf(false, 90);
         let doc = pdf_oxide::PdfDocument::from_bytes(bytes).expect("fixture PDF must open");
         let decisions = vec![gate_decision(false)];
 
@@ -1256,13 +1286,43 @@ mod tests {
         assert!(!rendered[0].run_inference, "gated page must stay out of the ONNX batch");
     }
 
+    #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+    #[test]
+    fn layout_and_standalone_ocr_paths_share_rotation_normalization() {
+        for rotation in [0, 90, 180, 270] {
+            let bytes = rotated_pdf(false, rotation);
+            let standalone = crate::extractors::pdf::ocr::render_selected_pages_for_ocr(&bytes, &[0])
+                .expect("standalone OCR page should render")
+                .pop()
+                .expect("fixture should contain one page")
+                .1
+                .to_rgb8();
+            let document = pdf_oxide::PdfDocument::from_bytes(bytes).expect("layout OCR fixture PDF must open");
+            let mut layout_pages = render_layout_chunk(
+                &document,
+                &[rotation as u32],
+                0,
+                1,
+                None,
+                GatedPageHandling::RenderWithoutInference,
+            );
+            let layout = layout_pages
+                .pop()
+                .and_then(|page| page.image)
+                .expect("layout OCR page should render");
+
+            assert_eq!(layout.dimensions(), standalone.dimensions(), "PDF rotation {rotation}");
+            assert_eq!(layout.as_raw(), standalone.as_raw(), "PDF rotation {rotation}");
+        }
+    }
+
     #[test]
     fn pdf_oxide_applies_direct_page_rotation() {
-        assert_pdf_oxide_applies_rotation(rotated_pdf(false));
+        assert_pdf_oxide_applies_rotation(rotated_pdf(false, 90));
     }
 
     #[test]
     fn pdf_oxide_applies_inherited_page_rotation() {
-        assert_pdf_oxide_applies_rotation(rotated_pdf(true));
+        assert_pdf_oxide_applies_rotation(rotated_pdf(true, 90));
     }
 }
