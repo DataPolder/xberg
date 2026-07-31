@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Benchmark CI records declared per-framework format support, validates partial-run thresholds
+  before execution, evaluates them independently per framework, and excludes harness/setup errors
+  from framework success rates while retaining strict extraction coverage for every xberg pipeline.
 - Benchmark comparisons include formats with text-only ground truth, report structural scores as
   unavailable instead of zero when Markdown ground truth is absent, and identify guardrails by file
   type so same-named fixtures cannot be matched across formats. Guardrails are rebased against the

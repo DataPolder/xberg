@@ -931,7 +931,7 @@ rake = { version = "0.3.6", optional = true }
 rayon = { workspace = true }
 regex = "1.13.1"
 resvg = { workspace = true, optional = true }
-rmcp = { version = "3.1.0", features = [
+rmcp = { version = "3.0.1", features = [
     "server",
     "macros",
     "base64",
@@ -989,7 +989,7 @@ tracing-opentelemetry = { version = "0.33", optional = true }
 # Pure-Rust ONNX engine — the inference-seam backend on no-ORT targets (WASM,
 # Android x86_64). `tract-onnx` (not the `tract` facade) is CPU-only + wasm-safe.
 tract-onnx = { workspace = true, optional = true }
-unhwp = { version = "0.8.0", default-features = false, features = ["hwpx"], optional = true }
+unhwp = { version = "0.7.0", default-features = false, features = ["hwpx"], optional = true }
 unicode-normalization = { version = "0.1.25", optional = true }
 url = { workspace = true }
 urlencoding = "2"

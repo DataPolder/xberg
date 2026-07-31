@@ -71,7 +71,7 @@ pub struct NewConsolidatedResults {
     /// deserialize.
     #[serde(default)]
     pub failure_summary: FailureSummary,
-    /// Capability-aware format-support matrix: for every framework in the run and every corpus
+    /// Capability-aware format-support matrix: for every framework in the run and every observed
     /// file type, which pairs the framework declares no support for. Distinguishes "this
     /// framework structurally cannot read this format" from "absent" or "attempted and failed".
     /// `#[serde(default)]` so aggregates produced before this field existed still deserialize.
@@ -82,15 +82,15 @@ pub struct NewConsolidatedResults {
 /// Declared format-support coverage across the run.
 ///
 /// Sourced from each framework's declared capabilities (the same table the runner routes on),
-/// not from run outcomes, so a pair is marked unsupported even when the corpus happened to
-/// contain no document of that type for that framework. xberg is the subject under test and
-/// supports the full corpus, so it never appears in `unsupported`.
+/// not from per-framework outcomes. `file_types` contains formats observed anywhere in the
+/// consolidated results; normal release aggregates include xberg's full-corpus run, making that
+/// the complete corpus format set. xberg never appears in `unsupported`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FormatSupportMatrix {
-    /// Every corpus file type considered, sorted and de-duplicated.
+    /// Every file type observed in the consolidated results, sorted and de-duplicated.
     pub file_types: Vec<String>,
-    /// Per logical framework, the corpus file types it declares no support for, sorted. A
-    /// framework absent from this map supports every corpus file type.
+    /// Per logical framework, the observed file types it declares no support for, sorted. A
+    /// framework absent from this map supports every observed file type.
     pub unsupported: std::collections::BTreeMap<String, Vec<String>>,
 }
 
@@ -740,9 +740,9 @@ pub fn aggregate_new_format(results: &[BenchmarkResult]) -> NewConsolidatedResul
 /// Build the capability-aware format-support matrix (see [`FormatSupportMatrix`]).
 ///
 /// For every logical framework present in the run (xberg pipeline variants collapse to a single
-/// `xberg`) and every corpus file type, records the file types the framework declares no support
-/// for. xberg supports the full corpus by design and is never listed as unsupported; every other
-/// framework is checked against its declared capability table.
+/// `xberg`) and every file type observed in the consolidated results, records the file types the
+/// framework declares no support for. xberg supports the full corpus by design and is never listed
+/// as unsupported; every other framework is checked against its declared capability table.
 fn build_format_support_matrix(
     results: &[BenchmarkResult],
     file_types: &std::collections::HashSet<String>,

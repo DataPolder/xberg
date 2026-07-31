@@ -7,6 +7,7 @@
 #[global_allocator]
 static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
+use benchmark_harness::types::ErrorKind;
 use benchmark_harness::{BenchmarkConfig, BenchmarkMode, FixtureManager, OutputFormat, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use std::collections::HashSet;
@@ -88,6 +89,70 @@ fn normalize_run_frameworks(frameworks: &[String], batch_mode: bool) -> Vec<Stri
         }
     }
     normalized
+}
+
+fn parse_success_rate(value: &str) -> std::result::Result<f64, String> {
+    let rate = value
+        .parse::<f64>()
+        .map_err(|error| format!("invalid success rate {value:?}: {error}"))?;
+    if rate.is_finite() && (0.0..=1.0).contains(&rate) {
+        Ok(rate)
+    } else {
+        Err(format!("success rate must be within 0.0..=1.0, got {value}"))
+    }
+}
+
+#[derive(Debug, PartialEq)]
+struct FrameworkCoverage {
+    framework: String,
+    successful: usize,
+    framework_failures: usize,
+    infrastructure_failures: usize,
+    success_rate: f64,
+}
+
+fn evaluate_framework_coverage<'a>(
+    results: impl IntoIterator<Item = (&'a str, bool, ErrorKind)>,
+    min_success_rate: f64,
+) -> std::result::Result<Vec<FrameworkCoverage>, String> {
+    let mut counts = std::collections::BTreeMap::<String, (usize, usize, usize)>::new();
+    for (framework, success, error_kind) in results {
+        let entry = counts.entry(framework.to_string()).or_default();
+        if success {
+            entry.0 += 1;
+        } else if matches!(
+            error_kind,
+            ErrorKind::FrameworkError | ErrorKind::EmptyContent | ErrorKind::Timeout
+        ) {
+            entry.1 += 1;
+        } else {
+            entry.2 += 1;
+        }
+    }
+
+    let mut coverage = Vec::with_capacity(counts.len());
+    for (framework, (successful, framework_failures, infrastructure_failures)) in counts {
+        let accountable = successful + framework_failures;
+        if accountable == 0 {
+            return Err(format!(
+                "{framework} produced no accountable benchmark results; {infrastructure_failures} infrastructure failure(s) occurred"
+            ));
+        }
+        let success_rate = successful as f64 / accountable as f64;
+        if success_rate < min_success_rate {
+            return Err(format!(
+                "{framework} success rate {success_rate:.3} ({successful}/{accountable}) is below the required minimum {min_success_rate:.3}"
+            ));
+        }
+        coverage.push(FrameworkCoverage {
+            framework,
+            successful,
+            framework_failures,
+            infrastructure_failures,
+            success_rate,
+        });
+    }
+    Ok(coverage)
 }
 
 fn selected_frameworks_use_tesseract(frameworks: &[String]) -> bool {
@@ -237,13 +302,10 @@ enum Commands {
         #[arg(long = "model-id")]
         model_ids: Vec<String>,
 
-        /// Minimum fraction of documents (0.0..=1.0) that must extract successfully for
-        /// the run to be valid. Documents a framework cannot handle are skipped, not
-        /// fatal, as long as the surviving success rate meets this floor. Defaults to 1.0
-        /// (xberg, strict — any failure fails). Competitor cohorts pass a lower floor so a
-        /// few unsupported documents do not invalidate the ones the framework did handle,
-        /// while a zero-success or mostly-failed run is still rejected.
-        #[arg(long, default_value = "1.0")]
+        /// Minimum fraction of attempted, supported documents that must extract successfully.
+        /// Unsupported formats are filtered before execution. Infrastructure failures are
+        /// reported but excluded from this framework-quality rate. Defaults to 1.0.
+        #[arg(long, default_value = "1.0", value_parser = parse_success_rate)]
         min_success_rate: f64,
     },
 
@@ -896,43 +958,26 @@ async fn main() -> Result<()> {
                 ));
             }
 
-            if failure_count > 0 {
-                if !(0.0..=1.0).contains(&min_success_rate) {
-                    return Err(benchmark_harness::Error::Benchmark(format!(
-                        "--min-success-rate must be within 0.0..=1.0, got {min_success_rate}",
-                    )));
+            let coverage = evaluate_framework_coverage(
+                results
+                    .iter()
+                    .map(|result| (result.framework.as_str(), result.success, result.error_kind)),
+                min_success_rate,
+            )
+            .map_err(benchmark_harness::Error::Benchmark)?;
+            for framework in coverage {
+                if framework.framework_failures > 0 || framework.infrastructure_failures > 0 {
+                    println!(
+                        "  {}: {}/{} supported extractions succeeded ({:.1}% >= {:.1}% required); \
+                         {} infrastructure failure(s) excluded",
+                        framework.framework,
+                        framework.successful,
+                        framework.successful + framework.framework_failures,
+                        framework.success_rate * 100.0,
+                        min_success_rate * 100.0,
+                        framework.infrastructure_failures,
+                    );
                 }
-
-                // Frameworks are benchmarked over every cohort document, including formats
-                // and documents they do not support. A per-document failure is a skip, not
-                // a fatal error, provided the surviving success rate meets the required
-                // floor. A zero-success run, or one below the floor, is still rejected so a
-                // broken framework or a mostly-failed cohort cannot masquerade as valid.
-                let success_rate = success_count as f64 / results.len() as f64;
-                if success_count == 0 {
-                    return Err(benchmark_harness::Error::Benchmark(format!(
-                        "all {} extraction(s) failed; no supported documents for this framework",
-                        results.len(),
-                    )));
-                }
-                if success_rate < min_success_rate {
-                    return Err(benchmark_harness::Error::Benchmark(format!(
-                        "success rate {:.3} ({}/{}) is below the required minimum {:.3}; \
-                         too many documents failed to treat this as a valid run",
-                        success_rate,
-                        success_count,
-                        results.len(),
-                        min_success_rate,
-                    )));
-                }
-                println!(
-                    "  Skipped {} unsupported document(s); coverage {}/{} ({:.1}% >= {:.1}% required)",
-                    failure_count,
-                    success_count,
-                    results.len(),
-                    success_rate * 100.0,
-                    min_success_rate * 100.0,
-                );
             }
 
             Ok(())
@@ -1471,9 +1516,10 @@ fn format_size(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        Cli, Commands, normalize_run_frameworks, parse_model_provenance, selected_frameworks_use_tesseract,
-        tracing_filter,
+        Cli, Commands, evaluate_framework_coverage, normalize_run_frameworks, parse_model_provenance,
+        selected_frameworks_use_tesseract, tracing_filter,
     };
+    use benchmark_harness::types::ErrorKind;
     use clap::Parser;
 
     #[test]
@@ -1571,6 +1617,68 @@ mod tests {
             }
         ));
         assert!(parse_model_provenance(&["invalid".to_string()]).is_err());
+    }
+
+    #[test]
+    fn run_cli_rejects_success_rate_outside_unit_interval() {
+        for value in ["-0.1", "1.1", "NaN"] {
+            assert!(
+                Cli::try_parse_from(["benchmark-harness", "run", "--min-success-rate", value]).is_err(),
+                "{value} must be rejected before benchmark execution"
+            );
+        }
+    }
+
+    #[test]
+    fn coverage_is_checked_per_framework_at_the_inclusive_boundary() {
+        let coverage = evaluate_framework_coverage(
+            [
+                ("healthy", true, ErrorKind::None),
+                ("healthy", false, ErrorKind::FrameworkError),
+                ("broken", false, ErrorKind::FrameworkError),
+            ],
+            0.5,
+        );
+        assert_eq!(
+            coverage.unwrap_err(),
+            "broken success rate 0.000 (0/1) is below the required minimum 0.500"
+        );
+
+        let boundary = evaluate_framework_coverage(
+            [
+                ("healthy", true, ErrorKind::None),
+                ("healthy", false, ErrorKind::Timeout),
+            ],
+            0.5,
+        )
+        .unwrap();
+        assert_eq!(boundary[0].success_rate, 0.5);
+    }
+
+    #[test]
+    fn coverage_excludes_infrastructure_failures_from_the_rate() {
+        let coverage = evaluate_framework_coverage(
+            [
+                ("framework", true, ErrorKind::None),
+                ("framework", false, ErrorKind::HarnessError),
+                ("framework", false, ErrorKind::ConfigSetupError),
+            ],
+            1.0,
+        )
+        .unwrap();
+        assert_eq!(coverage[0].successful, 1);
+        assert_eq!(coverage[0].framework_failures, 0);
+        assert_eq!(coverage[0].infrastructure_failures, 2);
+        assert_eq!(coverage[0].success_rate, 1.0);
+    }
+
+    #[test]
+    fn coverage_rejects_runs_with_only_infrastructure_failures() {
+        let error = evaluate_framework_coverage([("framework", false, ErrorKind::HarnessError)], 0.0).unwrap_err();
+        assert_eq!(
+            error,
+            "framework produced no accountable benchmark results; 1 infrastructure failure(s) occurred"
+        );
     }
 
     #[test]

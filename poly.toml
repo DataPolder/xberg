@@ -201,6 +201,8 @@ PDFium = "PDFium"
 PyMuPDF = "PyMuPDF"
 SurrealDB = "SurrealDB"
 WebUI = "WebUI"
+# Exact upstream fixture identifier; correcting it would break guardrail lookup. ~keep
+pb_LTCprodkitLincolnStateAvailabilty0216_page2 = "pb_LTCprodkitLincolnStateAvailabilty0216_page2"
 traineddata = "traineddata"
 
 [lint.uncomment]

@@ -31,6 +31,9 @@ This document describes the structure of `aggregated.json` produced by `benchmar
   ],
   "failure_summary": {
     /* FailureSummary — v2.9.0+, see "FailureSummary" */
+  },
+  "format_support": {
+    /* FormatSupportMatrix — v2.9.0+, see "FormatSupportMatrix" */
   }
 }
 ```
@@ -251,6 +254,28 @@ declares support for and failed — and are scored as quality 0 in the percentil
 failures are our harness's fault and are excluded from both the quality percentiles and the
 success-rate denominator. `total` counts every document; `by_framework_mode` and `by_file_type`
 partition the same failures by aggregate key and by file extension respectively.
+
+## FormatSupportMatrix (v2.9.0+)
+
+Top-level `format_support` distinguishes formats a framework declares unsupported from formats it
+attempted and failed. It uses the same capability table that filters fixtures before execution.
+
+```json
+{
+  "file_types": ["docx", "pdf", "rtf"],
+  "unsupported": {
+    "docling": ["rtf"],
+    "liteparse": ["docx", "rtf"]
+  }
+}
+```
+
+`file_types` is the sorted set observed anywhere in the consolidated results. Release aggregates
+include xberg's full-corpus run, so this is the complete corpus format set there. A competitor-only
+aggregate cannot list a format that produced no result for any selected framework. `unsupported`
+maps each logical framework to observed file types absent from its declared capabilities; xberg is
+never listed because it is the full-corpus subject under test. Both fields default empty when older
+v2.9.0 aggregates are deserialized.
 
 ## Migration from v2.7.0 to v2.8.0
 

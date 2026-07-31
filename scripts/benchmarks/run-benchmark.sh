@@ -89,14 +89,13 @@ fi
 if [ "$OCR_ENABLED" = "true" ]; then
   EXTRA_ARGS+=("--ocr")
 fi
-# xberg is the subject under test and must extract every document, so it runs strict
-# (default min-success-rate 1.0). Competitor frameworks are benchmarked across every cohort
-# document, including ones they do not support; documents a competitor cannot handle are
-# skipped, not cohort failures, as long as most documents still extract. The floor rejects
-# a broken framework or a mostly-failed cohort while tolerating scattered unsupported docs.
-if [ "$FRAMEWORK" != "xberg" ]; then
-  EXTRA_ARGS+=("--min-success-rate" "${MIN_SUCCESS_RATE:-0.5}")
-fi
+# Xberg is the subject under test and stays strict (the CLI default of 1.0). ~keep
+# Competitor runs may retain useful measurements when isolated supported-document
+# extractions fail, but still reject a framework that fails most attempted documents.
+case "$FRAMEWORK" in
+  xberg | xberg-*) ;;
+  *) EXTRA_ARGS+=("--min-success-rate" "${MIN_SUCCESS_RATE:-0.5}") ;;
+esac
 if [ -n "$SHARD" ]; then
   EXTRA_ARGS+=("--shard" "${SHARD}")
 fi
