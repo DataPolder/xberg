@@ -29,7 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Subprocess benchmark results record the framework's declared supported extensions, preserving
   the capability context needed to interpret historical multi-format aggregates.
 - Benchmark quality guardrails fail on missing contracted documents or pipeline results instead
-  of reporting a vacuous pass.
+  of reporting a vacuous pass, and reject unknown pipelines, empty predicates, and invalid
+  thresholds before execution.
+- Unstructured benchmark cells advertise only their supported plaintext output, and pipeline
+  benchmarks reject unknown sort metrics instead of silently falling back to SF1.
 - Benchmark fixtures reject document and ground-truth paths that escape the repository or
   standalone fixture trust boundary, including symlink escapes, and derive repository boundaries
   from runtime fixture locations so cached binaries remain portable across CI runners. Artifact

@@ -165,6 +165,7 @@ pub fn create_unstructured_adapter(ocr_enabled: bool) -> Result<SubprocessAdapte
         SubprocessAdapter::new("unstructured", command, args, vec![], supported_formats)
             .with_configured_ocr(ocr_enabled)
             .with_format_aware(true)
+            .with_supported_output_formats(vec![crate::types::OutputFormat::Plaintext])
             // unstructured's partition(languages=[...]) forwards Tesseract codes directly; ~keep
             // so forward the fixture's OCR language instead of its hardcoded ["eng"].
             .with_ocr_language_arg("--ocr-lang")
@@ -714,7 +715,12 @@ exit 2
         if let Ok(mineru) = create_mineru_adapter(true) {
             assert_eq!(mineru.batch_capability(), Some(MINERU_BATCH_CAPABILITY));
         }
-        let _ = create_unstructured_adapter(true);
+        if let Ok(unstructured) = create_unstructured_adapter(true) {
+            assert_eq!(
+                unstructured.supported_output_formats(),
+                vec![crate::types::OutputFormat::Plaintext]
+            );
+        }
         let _ = create_markitdown_adapter(true);
         let _ = create_tika_adapter(true);
         let _ = create_pymupdf4llm_adapter(true);

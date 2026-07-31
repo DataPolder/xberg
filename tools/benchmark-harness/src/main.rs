@@ -206,6 +206,14 @@ fn parse_pipeline_names(names: &[String], argument: &str) -> Result<Vec<benchmar
         .collect()
 }
 
+fn parse_sort_metric(value: &str) -> Result<benchmark_harness::pipeline_benchmark::SortMetric> {
+    benchmark_harness::pipeline_benchmark::SortMetric::parse(value).ok_or_else(|| {
+        benchmark_harness::Error::Config(format!(
+            "unknown sort metric '{value}': expected one of: sf1, tf1, time"
+        ))
+    })
+}
+
 fn cohort_contract_summary(cohort: benchmark_harness::bench_matrix::Cohort) -> serde_json::Value {
     let contract = cohort.contract();
     let required = contract.matrix.iter().filter(|entry| !entry.optional).count();
@@ -1194,7 +1202,7 @@ async fn main() -> Result<()> {
             profile_dir,
         } => {
             use benchmark_harness::pipeline_benchmark::{
-                PipelineBenchmarkConfig, SortMetric, default_paths, print_pipeline_table, print_triage_blocks,
+                PipelineBenchmarkConfig, default_paths, print_pipeline_table, print_triage_blocks,
                 run_pipeline_benchmark, write_json_output_with_config,
             };
 
@@ -1203,7 +1211,7 @@ async fn main() -> Result<()> {
                 None => default_paths(),
             };
 
-            let sort_metric = SortMetric::parse(&sort_by).unwrap_or_default();
+            let sort_metric = parse_sort_metric(&sort_by)?;
 
             let (doc_filter, exact_doc_filter) = {
                 let patterns: Vec<String> = doc.unwrap_or_default();
@@ -1590,8 +1598,8 @@ fn format_size(bytes: u64) -> String {
 mod tests {
     use super::{
         Cli, Commands, cohort_contract_summary, evaluate_framework_coverage, normalize_run_frameworks,
-        parse_model_provenance, parse_pipeline_names, selected_frameworks_use_tesseract, tracing_filter,
-        validate_framework_result_cardinality,
+        parse_model_provenance, parse_pipeline_names, parse_sort_metric, selected_frameworks_use_tesseract,
+        tracing_filter, validate_framework_result_cardinality,
     };
     use benchmark_harness::types::ErrorKind;
     use clap::Parser;
@@ -1725,6 +1733,16 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "Configuration error: unknown pipeline 'unknown' supplied to pipeline-benchmark --paths"
+        );
+    }
+
+    #[test]
+    fn pipeline_benchmark_rejects_unknown_sort_metric() {
+        let error = parse_sort_metric("fastest").unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "Configuration error: unknown sort metric 'fastest': expected one of: sf1, tf1, time"
         );
     }
 

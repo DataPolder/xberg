@@ -1214,7 +1214,67 @@ pub fn load_guardrails(path: &Path) -> Result<GuardrailsConfig> {
     let mut config: GuardrailsConfig = serde_json::from_str(&data)
         .map_err(|e| crate::Error::Benchmark(format!("Failed to parse guardrails file: {}", e)))?;
     install_reading_order_guardrail(&mut config);
+    validate_guardrails_config(&config)?;
     Ok(config)
+}
+
+fn validate_guardrails_config(config: &GuardrailsConfig) -> Result<()> {
+    if !config.threshold_factor.is_finite() || !(0.0..=1.0).contains(&config.threshold_factor) {
+        return Err(crate::Error::Config(
+            "guardrail threshold_factor must be finite and within [0, 1]".to_string(),
+        ));
+    }
+
+    let mut identities = std::collections::HashSet::new();
+    for contract in &config.contracts {
+        if contract.doc.trim().is_empty() {
+            return Err(crate::Error::Config(
+                "guardrail document name must not be empty".to_string(),
+            ));
+        }
+        if !Pipeline::parse(&contract.pipeline).is_some_and(|pipeline| pipeline.name() == contract.pipeline) {
+            return Err(crate::Error::Config(format!(
+                "unknown guardrail pipeline '{}'",
+                contract.pipeline
+            )));
+        }
+        if contract.min_sf1.is_none() && contract.min_tf1.is_none() && contract.relative_order.is_empty() {
+            return Err(crate::Error::Config(format!(
+                "guardrail {} [{}] {} has no threshold or relative-order predicate",
+                contract.doc,
+                contract.file_type.as_deref().unwrap_or("any"),
+                contract.pipeline
+            )));
+        }
+        for (name, value) in [("min_sf1", contract.min_sf1), ("min_tf1", contract.min_tf1)] {
+            if value.is_some_and(|value| !value.is_finite() || !(0.0..=1.0).contains(&value)) {
+                return Err(crate::Error::Config(format!(
+                    "guardrail {} {} must be finite and within [0, 1]",
+                    contract.doc, name
+                )));
+            }
+        }
+        if contract.relative_order.iter().any(|anchor| anchor.trim().is_empty()) {
+            return Err(crate::Error::Config(format!(
+                "guardrail {} relative-order anchors must not be empty",
+                contract.doc
+            )));
+        }
+        let identity = (
+            contract.doc.as_str(),
+            contract.file_type.as_deref(),
+            contract.pipeline.as_str(),
+        );
+        if !identities.insert(identity) {
+            return Err(crate::Error::Config(format!(
+                "duplicate guardrail contract: {} [{}] {}",
+                contract.doc,
+                contract.file_type.as_deref().unwrap_or("any"),
+                contract.pipeline
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn reading_order_anchors(doc: &str, pipeline: &str) -> Vec<String> {
@@ -1999,6 +2059,52 @@ mod tests {
             reading_order_anchors(READING_ORDER_GUARDRAIL_DOC, READING_ORDER_GUARDRAIL_PIPELINE)
         );
         assert_eq!(active.file_type.as_deref(), Some("pdf"));
+    }
+
+    #[test]
+    fn guardrail_config_rejects_unknown_pipeline_among_valid_contracts() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("guardrails.json");
+        std::fs::write(
+            &path,
+            r#"{
+                "version": "1.0",
+                "generated_at": "",
+                "threshold_factor": 0.9,
+                "contracts": [
+                    {"doc": "valid", "pipeline": "baseline", "min_tf1": 0.5},
+                    {"doc": "typo", "pipeline": "basline", "min_tf1": 0.5}
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        let error = load_guardrails(&path).unwrap_err().to_string();
+
+        assert!(error.contains("unknown guardrail pipeline 'basline'"), "{error}");
+    }
+
+    #[test]
+    fn guardrail_config_rejects_contract_without_predicate() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("guardrails.json");
+        std::fs::write(
+            &path,
+            r#"{
+                "version": "1.0",
+                "generated_at": "",
+                "threshold_factor": 0.9,
+                "contracts": [{"doc": "empty", "pipeline": "baseline"}]
+            }"#,
+        )
+        .unwrap();
+
+        let error = load_guardrails(&path).unwrap_err().to_string();
+
+        assert!(
+            error.contains("has no threshold or relative-order predicate"),
+            "{error}"
+        );
     }
 
     #[test]
