@@ -1,7 +1,7 @@
 <!--
 AI-RULEZ :: GENERATED FILE — DO NOT EDIT
 Content-Hash: blake3:78f96ed59a738305ea8455fb716572f6a36d35302d26956d57d02eba192b0869
-Source-Hash: blake3:99eaa846435086c1ff05d166f982bb18611930ffddfcc8180d3d5ed38bca0ac2
+Source-Hash: blake3:82ab4189295849cf74b6118f718427aa9b35c0c9a43e5c9c19d7de5de9061464
 Schema-Version: v1
 -->
 
@@ -338,7 +338,7 @@ See the [Docker guide](https://docs.xberg.io/guides/docker/) for deployment deta
 
 ## Other Bindings
 
-Native bindings also ship for Dart/Flutter, Swift, Kotlin (Android), Zig, and C (FFI). They follow the same `ExtractInput` → `extract` → `results[0]` shape (Swift, Zig, and C use JSON-string config and, for some, JSON-string results). See the per-language package directories under [`packages/`](https://github.com/xberg-io/xberg/tree/main/packages) for details.
+Native bindings also ship for R, Dart/Flutter, Swift, Kotlin (Android), Zig, and C (FFI). They follow the same `ExtractInput` → `extract` → `results[0]` shape (R, Swift, Zig, and C use JSON-string config and, for some, JSON-string results). See the per-language package directories under [`packages/`](https://github.com/xberg-io/xberg/tree/main/packages) for details.
 
 ## Platform Support
 

@@ -1,7 +1,7 @@
 <!--
 AI-RULEZ :: GENERATED FILE — DO NOT EDIT
 Content-Hash: blake3:bda783bcb3934bcf2e64a597e307e0b59a9ba1c01c840a89b173f02eb9bab81d
-Source-Hash: blake3:99eaa846435086c1ff05d166f982bb18611930ffddfcc8180d3d5ed38bca0ac2
+Source-Hash: blake3:82ab4189295849cf74b6118f718427aa9b35c0c9a43e5c9c19d7de5de9061464
 Schema-Version: v1
 -->
 
@@ -473,4 +473,4 @@ console.log(listSupportedFormats());
 
 ## Supported Document Formats
 
-Xberg supports 101 file formats across 115 file extensions: PDF, Office (DOCX, PPTX, XLSX, …), eBooks, images (with OCR), HTML/XML/SVG, email (EML, MSG), archives, data (JSON/YAML/TOML/CSV), academic, and source code (306 languages). See [supported-formats.md](supported-formats.md) for the complete list.
+Xberg supports 96 file formats: PDF, Office (DOCX, PPTX, XLSX, …), eBooks, images (with OCR), HTML/XML/SVG, email (EML, MSG), archives, data (JSON/YAML/TOML/CSV), academic, and source code (306 languages). See [supported-formats.md](supported-formats.md) for the complete list.

@@ -97,13 +97,13 @@ Extract text, tables, images, metadata, and code intelligence from 101 file form
 Kotlin DSL (`build.gradle.kts`):
 
 ```kotlin
-implementation("io.xberg:xberg-android:1.0.6")
+implementation("io.xberg:xberg-android:1.0.7")
 ```
 
 Groovy DSL (`build.gradle`):
 
 ```groovy
-implementation 'io.xberg:xberg-android:1.0.6'
+implementation 'io.xberg:xberg-android:1.0.7'
 ```
 
 Add to your `pom.xml`:
@@ -112,7 +112,7 @@ Add to your `pom.xml`:
 <dependency>
     <groupId>io.xberg</groupId>
     <artifactId>xberg-android</artifactId>
-    <version>1.0.6</version>
+    <version>1.0.7</version>
 </dependency>
 ```
 

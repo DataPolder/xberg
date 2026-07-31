@@ -23,13 +23,13 @@ High-performance document intelligence library for Rust. Extract text, metadata,
 
 This is the core Rust library that powers the Python, TypeScript, and Ruby bindings.
 
-> **Version 1.0.6**
+> **Version 1.0.7**
 
 ## Installation
 
 ```toml
 [dependencies]
-xberg = "1.0.6"
+xberg = "1.0.7"
 tokio = { version = "1", features = ["rt", "macros"] }
 ```
 
@@ -233,7 +233,7 @@ The crate uses feature flags for optional functionality:
 
 ```toml
 [dependencies]
-xberg = { version = "1.0.6", features = ["pdf", "excel", "ocr"] }
+xberg = { version = "1.0.7", features = ["pdf", "excel", "ocr"] }
 ```
 
 ### Available Features
@@ -255,9 +255,9 @@ xberg = { version = "1.0.6", features = ["pdf", "excel", "ocr"] }
 ### Feature Bundles
 
 ```toml
-xberg = { version = "1.0.6", features = ["full"] }
-xberg = { version = "1.0.6", features = ["server"] }
-xberg = { version = "1.0.6", features = ["cli"] }
+xberg = { version = "1.0.7", features = ["full"] }
+xberg = { version = "1.0.7", features = ["server"] }
+xberg = { version = "1.0.7", features = ["cli"] }
 ```
 
 ## PDF Support
@@ -267,7 +267,7 @@ Enable PDF extraction with the `pdf` feature:
 
 ```toml
 [dependencies]
-xberg = { version = "1.0.6", features = ["pdf"] }
+xberg = { version = "1.0.7", features = ["pdf"] }
 ```
 
 No native libraries required. Works on all platforms including musl, Docker, and WASM.

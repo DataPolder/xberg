@@ -99,7 +99,7 @@ Add to your `mix.exs` dependencies:
 ```elixir
 def deps do
   [
-    {:xberg, "~> 1.0.6"}
+    {:xberg, "~> 1.0.7"}
   ]
 end
 ```
