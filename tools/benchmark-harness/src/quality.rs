@@ -31,8 +31,10 @@
 //! Tokenization is intentionally simple: lowercase, split on whitespace,
 //! strip non-alphanumeric characters except periods and commas embedded between
 //! alphanumeric characters (preserving decimal numbers like "3.14" and European
-//! format "3,14"). This preserves punctuation that is semantically meaningful
-//! while ignoring decorative punctuation.
+//! format "3,14"). CJK runs use character bigrams because Chinese, Japanese,
+//! and Korean OCR engines commonly insert or reorder layout-dependent line breaks.
+//! This preserves punctuation that is semantically meaningful while ignoring
+//! decorative punctuation.
 
 use crate::types::{OutputFormat, QualityMetrics};
 use regex::Regex;
@@ -146,7 +148,8 @@ pub fn compute_quality(extracted: &str, ground_truth: &str) -> QualityMetrics {
 /// (preserving `.` and `,` only when embedded between alphanumeric chars, e.g. "3.14", "3,14")
 pub fn tokenize(text: &str) -> Vec<String> {
     let text = strip_markdown_links(text);
-    text.to_lowercase()
+    let tokens = text
+        .to_lowercase()
         .split_whitespace()
         .map(|w| {
             let kept: String = w
@@ -176,7 +179,47 @@ pub fn tokenize(text: &str) -> Vec<String> {
                 token
             }
         })
+        .collect();
+    tokenize_cjk_bigrams(tokens)
+}
+
+/// Expand each CJK run into overlapping character bigrams. This keeps TF1
+/// insensitive to OCR line ordering without inflating overlap from common
+/// individual characters. A one-character run remains a unigram.
+fn tokenize_cjk_bigrams(tokens: Vec<String>) -> Vec<String> {
+    tokens
+        .into_iter()
+        .flat_map(|token| {
+            if !token.chars().all(is_cjk_character) {
+                return vec![token];
+            }
+            let characters: Vec<char> = token.chars().collect();
+            if characters.len() == 1 {
+                return vec![token];
+            }
+            characters.windows(2).map(|pair| pair.iter().collect()).collect()
+        })
         .collect()
+}
+
+/// Whether a character belongs to a Chinese, Japanese, or Korean script block.
+fn is_cjk_character(character: char) -> bool {
+    matches!(
+        character,
+        '\u{1100}'..='\u{11ff}'
+            | '\u{2e80}'..='\u{2eff}'
+            | '\u{3040}'..='\u{30ff}'
+            | '\u{3130}'..='\u{318f}'
+            | '\u{31f0}'..='\u{31ff}'
+            | '\u{3400}'..='\u{4dbf}'
+            | '\u{4e00}'..='\u{9fff}'
+            | '\u{a960}'..='\u{a97f}'
+            | '\u{ac00}'..='\u{d7af}'
+            | '\u{d7b0}'..='\u{d7ff}'
+            | '\u{f900}'..='\u{faff}'
+            | '\u{ff66}'..='\u{ff9f}'
+            | '\u{20000}'..='\u{2fa1f}'
+    )
 }
 
 /// Whether a numeric token uses `,` as a thousands separator in well-formed 3-digit groups
@@ -398,6 +441,46 @@ mod tests {
     fn test_case_insensitive() {
         let result = compute_quality("Hello World", "hello world");
         assert!((result.f1_score_text - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn should_score_reordered_japanese_ocr_lines_as_matching_text() {
+        let ground_truth = concat!(
+            "元来日本語は漢文に倣い、文字を上から下へ、また行を右から左へと進めて表記を行っていた。",
+            "漢字と仮名の筆順も縦書きを前提としており、横書き不能な書体も存在する。"
+        );
+        let extracted = concat!(
+            "から下へまた行を右から左へと進\n",
+            "の筆順も縦書きを前提としており、\n",
+            "めて表記を行っていた。漢字と仮名\n",
+            "横書き不能な書体も存在する。\n",
+            "元来日本語は漢文に倣い、文字を上"
+        );
+
+        let result = compute_quality(extracted, ground_truth);
+
+        assert_eq!(result.f1_score_text, 0.9714285714285714);
+        assert_eq!(result.quality_score, 0.9714285714285714);
+        assert_eq!(result.extra_tokens, Vec::new());
+        assert_eq!(result.correct, true);
+    }
+
+    #[test]
+    fn should_not_award_partial_credit_for_unrelated_cjk_strings() {
+        let result = compute_quality("日本語の文書", "本日の歴史");
+
+        assert_eq!(result.f1_score_text, 0.0);
+    }
+
+    #[test]
+    fn should_use_cjk_bigrams_with_single_character_fallback() {
+        assert_eq!(tokenize("日本語"), vec!["日本", "本語"]);
+        assert_eq!(tokenize("日"), vec!["日"]);
+    }
+
+    #[test]
+    fn should_preserve_latin_whitespace_tokenization() {
+        assert_eq!(tokenize("Hello, world! 15.0"), vec!["hello", "world", "15"]);
     }
 
     #[test]

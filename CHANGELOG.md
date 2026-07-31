@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Benchmark text F1 treats OCR-inserted line breaks within CJK text as layout whitespace,
+  preventing semantically identical Chinese, Japanese, and Korean output from scoring zero.
 - Pipeline quality benchmarks allow forced OCR inference enough time to finish instead of
   recording slow but valid OCR documents as zero-quality timeout failures.
 - Benchmark fixture validation now accepts descriptor filenames without an explicit parent path.
