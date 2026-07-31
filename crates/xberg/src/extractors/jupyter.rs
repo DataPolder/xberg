@@ -102,25 +102,7 @@ impl JupyterExtractor {
         if let Some(cells) = notebook.get("cells").and_then(|c| c.as_array()) {
             let mut cells_meta: Vec<Value> = Vec::with_capacity(cells.len());
             for (cell_idx, cell) in cells.iter().enumerate() {
-                let cell_type = cell.get("cell_type").and_then(|t| t.as_str()).unwrap_or("unknown");
-                let mut cell_entry = serde_json::Map::new();
-                cell_entry.insert("index".into(), json!(cell_idx));
-                cell_entry.insert("cell_type".into(), json!(cell_type));
-
-                if cell_type == "code"
-                    && let Some(exec_count) = cell.get("execution_count")
-                {
-                    cell_entry.insert("execution_count".into(), exec_count.clone());
-                }
-                if let Some(tags) = cell
-                    .get("metadata")
-                    .and_then(|m| m.get("tags"))
-                    .and_then(|t| t.as_array())
-                    && !tags.is_empty()
-                {
-                    cell_entry.insert("tags".into(), Value::Array(tags.clone()));
-                }
-                cells_meta.push(Value::Object(cell_entry));
+                cells_meta.push(Self::cell_metadata(cell, cell_idx));
 
                 Self::extract_cell(cell, cell_idx, &mut extracted_content, &mut images, plain)?;
             }
@@ -128,6 +110,59 @@ impl JupyterExtractor {
         }
 
         Ok((extracted_content, metadata, images, notebook))
+    }
+
+    fn cell_metadata(cell: &Value, cell_idx: usize) -> Value {
+        let cell_type = cell
+            .get("cell_type")
+            .and_then(|value| value.as_str())
+            .unwrap_or("unknown");
+        let mut metadata = serde_json::Map::new();
+        metadata.insert("index".into(), json!(cell_idx));
+        metadata.insert("cell_type".into(), json!(cell_type));
+
+        for key in ["id", "execution_count"] {
+            if let Some(value) = cell.get(key) {
+                metadata.insert(key.into(), value.clone());
+            }
+        }
+        if let Some(tags) = cell
+            .get("metadata")
+            .and_then(|value| value.get("tags"))
+            .and_then(|value| value.as_array())
+            && !tags.is_empty()
+        {
+            metadata.insert("tags".into(), Value::Array(tags.clone()));
+        }
+        if let Some(outputs) = cell.get("outputs").and_then(|value| value.as_array())
+            && !outputs.is_empty()
+        {
+            metadata.insert(
+                "outputs".into(),
+                Value::Array(outputs.iter().enumerate().map(Self::output_metadata).collect()),
+            );
+        }
+
+        Value::Object(metadata)
+    }
+
+    fn output_metadata((output_idx, output): (usize, &Value)) -> Value {
+        let mut metadata = serde_json::Map::new();
+        metadata.insert("index".into(), json!(output_idx));
+        if let Some(output_type) = output.get("output_type") {
+            metadata.insert("output_type".into(), output_type.clone());
+        }
+        for key in ["name", "execution_count", "ename", "evalue"] {
+            if let Some(value) = output.get(key) {
+                metadata.insert(key.into(), value.clone());
+            }
+        }
+        if let Some(data) = output.get("data").and_then(|value| value.as_object()) {
+            let mut mime_types: Vec<&str> = data.keys().map(String::as_str).collect();
+            mime_types.sort_unstable();
+            metadata.insert("mime_types".into(), json!(mime_types));
+        }
+        Value::Object(metadata)
     }
 
     /// Extract content from a single cell.
@@ -385,30 +420,10 @@ impl JupyterExtractor {
 
         let mut builder = InternalDocumentBuilder::new("jupyter");
 
-        if let Some(lang) = kernel_lang {
-            builder.push_paragraph(&format!("[kernel_language: {}]", lang), vec![], None, None);
-        }
-
         for cell in cells {
             let cell_type = cell.get("cell_type").and_then(|t| t.as_str()).unwrap_or("unknown");
             let source_text = Self::extract_source(cell.get("source").unwrap_or(&Value::Null));
             let trimmed = source_text.trim();
-
-            if let Some(cell_id) = cell.get("id").and_then(|id| id.as_str()) {
-                builder.push_paragraph(&format!("[cell_id: {}]", cell_id), vec![], None, None);
-            }
-
-            if let Some(tags) = cell
-                .get("metadata")
-                .and_then(|m| m.get("tags"))
-                .and_then(|t| t.as_array())
-                && !tags.is_empty()
-            {
-                let tag_strs: Vec<String> = tags.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect();
-                if !tag_strs.is_empty() {
-                    builder.push_paragraph(&format!("[tags: {}]", tag_strs.join(",")), vec![], None, None);
-                }
-            }
 
             if trimmed.is_empty() {
                 continue;
@@ -450,34 +465,12 @@ impl JupyterExtractor {
                         if !attrs.is_empty() {
                             builder.set_attributes(idx, attrs);
                         }
-
-                        if let Some(exec_count) = cell.get("execution_count") {
-                            match exec_count {
-                                Value::Number(n) => {
-                                    builder.push_paragraph(&format!("execution_count: {}", n), vec![], None, None);
-                                }
-                                Value::Null => {
-                                    builder.push_paragraph("execution_count: null", vec![], None, None);
-                                }
-                                _ => {}
-                            }
-                        }
                     }
 
                     if rendering.includes_outputs()
                         && let Some(outputs) = cell.get("outputs").and_then(|o| o.as_array())
                     {
                         for output in outputs {
-                            let output_type = output.get("output_type").and_then(|t| t.as_str()).unwrap_or("unknown");
-
-                            builder.push_paragraph(&format!("[output_type: {}]", output_type), vec![], None, None);
-
-                            if let Some(data) = output.get("data").and_then(|d| d.as_object()) {
-                                for mime_type in data.keys() {
-                                    builder.push_paragraph(&format!("[mime: {}]", mime_type), vec![], None, None);
-                                }
-                            }
-
                             let output_text = Self::collect_output_text(output);
                             let output_trimmed = output_text.trim();
                             if !output_trimmed.is_empty() {
@@ -636,9 +629,15 @@ mod tests {
             "cells": [
                 {
                     "cell_type": "code",
+                    "id": "code-cell",
                     "source": ["print('hello')"],
                     "execution_count": 5,
-                    "outputs": [],
+                    "outputs": [{
+                        "output_type": "execute_result",
+                        "execution_count": 5,
+                        "data": {"text/plain": ["hello"]},
+                        "metadata": {}
+                    }],
                     "metadata": {"tags": ["test-tag", "important"]}
                 }
             ],
@@ -659,8 +658,12 @@ mod tests {
         let cell0 = &cells_arr[0];
         assert_eq!(cell0["index"], json!(0));
         assert_eq!(cell0["cell_type"], json!("code"));
+        assert_eq!(cell0["id"], json!("code-cell"));
         assert_eq!(cell0["execution_count"], json!(5));
         assert_eq!(cell0["tags"], json!(["test-tag", "important"]));
+        assert_eq!(cell0["outputs"][0]["output_type"], json!("execute_result"));
+        assert_eq!(cell0["outputs"][0]["execution_count"], json!(5));
+        assert_eq!(cell0["outputs"][0]["mime_types"], json!(["text/plain"]));
 
         assert_eq!(metadata.get(&Cow::Borrowed("cell_count")), Some(&json!(1)));
 
@@ -757,6 +760,10 @@ mod tests {
             doc.elements.iter().any(|e| e.text.contains("hello world")),
             "outputs rendering keeps the saved output text"
         );
+        assert!(
+            !doc.elements.iter().any(|e| e.text.contains("[output_type:")),
+            "outputs rendering does not expose diagnostic markers"
+        );
     }
 
     #[test]
@@ -766,10 +773,8 @@ mod tests {
             doc.elements.iter().any(|e| matches!(e.kind, ElementKind::Code)),
             "both rendering keeps the code source"
         );
-        assert!(
-            doc.elements.iter().any(|e| e.text.contains("[output_type: stream")),
-            "both rendering keeps the saved outputs"
-        );
+        assert!(doc.elements.iter().any(|e| e.text.contains("hello world")));
+        assert!(!doc.elements.iter().any(|e| e.text.contains("[output_type:")));
     }
 
     #[test]

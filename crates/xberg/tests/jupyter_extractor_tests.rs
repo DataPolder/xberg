@@ -81,8 +81,10 @@ async fn test_jupyter_simple_notebook_extraction() {
     );
 
     assert!(
-        extraction.content.contains("execution_count"),
-        "Should preserve execution_count from code cells"
+        serde_json::to_string(&extraction.metadata.additional)
+            .expect("metadata should serialize")
+            .contains("execution_count"),
+        "Should preserve execution_count as structured metadata"
     );
 
     assert!(
@@ -101,8 +103,10 @@ async fn test_jupyter_simple_notebook_extraction() {
     );
 
     assert!(
-        extraction.content.contains("foo") || extraction.content.contains("bar") || extraction.content.contains("tags"),
-        "Should preserve or reference cell metadata tags"
+        serde_json::to_string(&extraction.metadata.additional)
+            .expect("metadata should serialize")
+            .contains("tags"),
+        "Should preserve cell tags as structured metadata"
     );
 
     println!(
@@ -171,11 +175,11 @@ async fn test_jupyter_mime_notebook_extraction() {
         "Should extract code cell with imports"
     );
 
+    let metadata_json =
+        serde_json::to_string(&extraction.metadata.additional).expect("notebook metadata should serialize");
     assert!(
-        extraction.content.contains(".stream")
-            || extraction.content.contains("stdout")
-            || extraction.content.contains("output"),
-        "Should preserve stream output type information"
+        metadata_json.contains("stream"),
+        "Should preserve stream output metadata"
     );
 
     let mime_types = vec![
@@ -191,10 +195,7 @@ async fn test_jupyter_mime_notebook_extraction() {
         "application/javascript",
     ];
 
-    let mime_count = mime_types
-        .iter()
-        .filter(|&&mime| extraction.content.contains(mime))
-        .count();
+    let mime_count = mime_types.iter().filter(|&&mime| metadata_json.contains(mime)).count();
     assert!(
         mime_count >= 3,
         "Should extract at least 3 MIME type references (found {})",
@@ -212,8 +213,8 @@ async fn test_jupyter_mime_notebook_extraction() {
     );
 
     assert!(
-        extraction.content.contains("execution_count"),
-        "Should preserve execution_count metadata from code outputs"
+        metadata_json.contains("execution_count"),
+        "Should preserve execution_count as structured metadata"
     );
 
     println!(
@@ -450,8 +451,8 @@ async fn test_jupyter_metadata_aggregation() {
         );
 
         assert!(
-            extraction.metadata.additional.is_empty() || !extraction.metadata.additional.is_empty(),
-            "{}: Metadata structure should be consistent",
+            extraction.metadata.additional.contains_key("cells"),
+            "{}: Cell metadata should be structured",
             name
         );
 
@@ -578,10 +579,10 @@ async fn test_jupyter_mime_output_handling() {
         "Should preserve HTML and text representations"
     );
 
-    let output_type_markers = ["display_data", "execute_result", "stream", "output"];
-    let has_output_types = output_type_markers
-        .iter()
-        .any(|&marker| extraction.content.contains(marker));
+    let metadata_json =
+        serde_json::to_string(&extraction.metadata.additional).expect("notebook metadata should serialize");
+    let output_type_markers = ["display_data", "execute_result", "stream"];
+    let has_output_types = output_type_markers.iter().any(|&marker| metadata_json.contains(marker));
     assert!(has_output_types, "Should preserve output type classifications");
 
     assert!(
@@ -622,22 +623,19 @@ async fn test_jupyter_notebook_structure_preservation() {
     }
 
     let extraction = result.expect("Operation failed");
+    let metadata_json =
+        serde_json::to_string(&extraction.metadata.additional).expect("notebook metadata should serialize");
 
     let cell_id_patterns = ["uid1", "uid2", "uid3", "uid4", "uid6"];
     let id_count = cell_id_patterns
         .iter()
-        .filter(|&&id| extraction.content.contains(id))
+        .filter(|&&id| metadata_json.contains(id))
         .count();
     assert!(id_count >= 1, "Should preserve cell IDs (found {} IDs)", id_count);
 
     assert!(
-        extraction.content.contains("uid") || extraction.content.contains("cell"),
-        "Should contain cell identity markers"
-    );
-
-    assert!(
-        extraction.content.contains("execution_count") || extraction.content.contains("count"),
-        "Should preserve execution count metadata"
+        metadata_json.contains("execution_count"),
+        "Should preserve execution count as structured metadata"
     );
 
     println!("✓ Structure preservation: Cell IDs and ordering maintained");
@@ -719,12 +717,18 @@ mod rendering_modes {
         "cells": [
             {
                 "cell_type": "code",
+                "id": "diagnostic-cell",
                 "source": ["compute_answer()"],
                 "execution_count": 1,
                 "outputs": [
-                    {"output_type": "stream", "name": "stdout", "text": ["42\n"]}
+                    {"output_type": "stream", "name": "stdout", "text": ["42\n"]},
+                    {
+                        "output_type": "display_data",
+                        "data": {"text/plain": ["formatted output"]},
+                        "metadata": {}
+                    }
                 ],
-                "metadata": {}
+                "metadata": {"tags": ["diagnostic-tag"]}
             }
         ],
         "metadata": {"kernelspec": {"name": "python3", "language": "python"}},
@@ -755,7 +759,10 @@ mod rendering_modes {
     async fn outputs_mode_renders_outputs_without_code() {
         let content = extract_with(JupyterCellRendering::Outputs).await;
         assert!(content.contains("42"), "output text is rendered");
-        assert!(content.contains("[output_type: stream"), "output markers are rendered");
+        assert!(
+            !content.contains("[output_type:"),
+            "diagnostic output markers are hidden"
+        );
         assert!(!content.contains("compute_answer"), "code source is suppressed");
     }
 
@@ -774,6 +781,38 @@ mod rendering_modes {
             default_content, both_content,
             "default rendering is Both (no behavior change)"
         );
+    }
+
+    #[tokio::test]
+    async fn default_output_hides_diagnostics_and_preserves_structured_metadata() {
+        let result = extract_bytes_document(NOTEBOOK, "application/x-ipynb+json", &ExtractionConfig::default())
+            .await
+            .expect("notebook extraction should succeed");
+
+        for diagnostic in [
+            "[kernel_language:",
+            "[cell_id:",
+            "[tags:",
+            "execution_count:",
+            "[output_type:",
+            "[mime:",
+        ] {
+            assert!(!result.content.contains(diagnostic), "content leaked {diagnostic}");
+        }
+        for metadata_value in ["diagnostic-cell", "diagnostic-tag", "text/plain", "stream"] {
+            assert!(
+                !result.content.contains(metadata_value),
+                "content leaked structured metadata value {metadata_value}"
+            );
+        }
+        let cells = result.metadata.additional["cells"]
+            .as_array()
+            .expect("cells metadata should be an array");
+        assert_eq!(cells[0]["execution_count"], 1);
+        assert_eq!(cells[0]["outputs"][0]["output_type"], "stream");
+        assert_eq!(cells[0]["id"], "diagnostic-cell");
+        assert_eq!(cells[0]["tags"], serde_json::json!(["diagnostic-tag"]));
+        assert_eq!(cells[0]["outputs"][1]["mime_types"], serde_json::json!(["text/plain"]));
     }
 
     const NOTEBOOK_WITH_IMAGE: &[u8] = br#"{

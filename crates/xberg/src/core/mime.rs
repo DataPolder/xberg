@@ -770,6 +770,9 @@ fn magic_override(path: &Path, extension_mime: &str) -> Option<String> {
     if is_generic_xml_mime(&from_magic) && is_specific_xml_mime(extension_mime) {
         return None;
     }
+    if from_magic == JSON_MIME_TYPE && is_specific_json_mime(extension_mime) {
+        return None;
+    }
     if from_magic != extension_mime && validate_mime_type(&from_magic).is_ok() {
         Some(from_magic)
     } else {
@@ -786,6 +789,17 @@ fn is_specific_xml_mime(mime_type: &str) -> bool {
 
 fn is_generic_xml_mime(mime_type: &str) -> bool {
     matches!(mime_type, XML_MIME_TYPE | "text/xml")
+}
+
+/// Generic JSON detection cannot distinguish JSON-based document formats.
+/// Preserve extension-specific routing for notebooks and line-delimited JSON. ~keep
+fn is_specific_json_mime(mime_type: &str) -> bool {
+    mime_type != JSON_MIME_TYPE
+        && (mime_type.ends_with("+json")
+            || matches!(
+                mime_type,
+                "application/x-ndjson" | "application/jsonl" | "application/x-jsonlines"
+            ))
 }
 
 /// Detect MIME type from raw file bytes.
@@ -1456,6 +1470,30 @@ mod tests {
             detected, "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             "DOCX content named .pdf must detect as DOCX, not PDF"
         );
+    }
+
+    #[test]
+    fn specialized_json_extensions_are_not_overridden_by_generic_json_detection() {
+        let dir = tempdir().unwrap();
+        let cases = [
+            ("document.json", br#"{"value":1}"#.as_slice(), JSON_MIME_TYPE),
+            ("records.jsonl", br#"{"value":1}"#.as_slice(), "application/x-ndjson"),
+            (
+                "notebook.ipynb",
+                br#"{"cells":[],"metadata":{},"nbformat":4,"nbformat_minor":5}"#.as_slice(),
+                "application/x-ipynb+json",
+            ),
+        ];
+
+        for (filename, content, expected_mime) in cases {
+            let path = dir.path().join(filename);
+            std::fs::write(&path, content).unwrap();
+            assert_eq!(
+                detect_or_validate(path.to_str(), None).unwrap(),
+                expected_mime,
+                "{filename} should retain its extension-specific JSON MIME type"
+            );
+        }
     }
 
     #[test]

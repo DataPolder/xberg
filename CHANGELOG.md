@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Jupyter notebook paths retain `application/x-ipynb+json` routing when generic JSON content
+  detection runs, and extracted notebook content no longer exposes diagnostic cell/output markers;
+  cell identity, execution, tag, output-type, and MIME details remain available as structured metadata.
+
 ## [1.0.7] - 2026-07-31
 
 ### Added
