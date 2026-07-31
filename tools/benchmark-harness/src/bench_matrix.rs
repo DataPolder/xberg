@@ -548,6 +548,10 @@ fn email_matrix() -> Vec<MatrixEntry> {
 fn images_matrix() -> Vec<MatrixEntry> {
     let mut matrix = xberg_entries(IMAGES_COHORT, true);
     matrix.extend(optional(grid_entries("docling", IMAGES_COHORT)));
+    // pymupdf4llm's adapter path is `pymupdf4llm.to_markdown`, which exposes no OCR
+    // configuration, so it is NOT treated as OCR-language-capable: its fixture OCR
+    // language is never forwarded (no `with_ocr_language_arg`) and its image cell
+    // measures text-layer extraction only. Kept best-effort for that signal.
     matrix.push(markdown_single_file_entry("pymupdf4llm", IMAGES_COHORT).into_optional());
     matrix.push(markdown_single_file_entry("mineru", IMAGES_COHORT).into_optional());
     // Tika and Unstructured are Tesseract-backed and now run the image OCR cohort too
