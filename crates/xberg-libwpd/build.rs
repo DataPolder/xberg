@@ -106,14 +106,20 @@ mod build_libwpd {
     /// a GNU-ld command line orders libz-sys's own directive before the references
     /// and discards the archive (`undefined reference to inflateInit2_`).
     ///
-    /// MSVC has no such ordering constraint, and libz-sys's own link directive
-    /// already pulls in the zlib it built. Re-emitting `static=z` there is not
-    /// harmless: libz-sys names its MSVC archive `zlib`/`libz`, not `z`, so a bare
-    /// `static=z` resolves against no library on the search path and fails the
-    /// link with `could not find native static library z`. So skip the re-emit on
-    /// Windows and rely on libz-sys's directive at the final binary link.
+    /// On MSVC, libz-sys's own directive does not satisfy librevenge's `inflate*`
+    /// references at the final binary link: a bare `static=z` re-emit fails with
+    /// `could not find native static library z` (rustc's `static=` lookup scans
+    /// only its own `-L` paths and the archive is not named `z.lib`), and dropping
+    /// the re-emit entirely leaves the symbols undefined (`inflate`, `inflateEnd`,
+    /// `inflateInit2_`). CI reliably installs a static zlib via vcpkg
+    /// (`x64-windows-static-md`, so the archive is `zlib.lib`) and puts its lib dir
+    /// on the link search path, so link it by that name with the default
+    /// (linker-resolved) kind — `link.exe` resolves `zlib.lib` from `LIB`/`LIBPATH`,
+    /// which rustc's `static=` lookup would not.
     fn link_zlib() {
-        if !targeting_windows() {
+        if targeting_windows() {
+            println!("cargo:rustc-link-lib=zlib");
+        } else {
             println!("cargo:rustc-link-lib=static=z");
         }
     }
