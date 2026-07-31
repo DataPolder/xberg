@@ -42,6 +42,26 @@ use parsing::{parse_container_xml, read_file_from_zip, resolve_path};
 pub struct EpubExtractor;
 
 impl EpubExtractor {
+    fn spine_references_asset(spine_documents: &[content::EpubSpineDocument], asset_path: &str) -> bool {
+        spine_documents.iter().any(|document| {
+            let Ok(parsed) = roxmltree::Document::parse(&document.xhtml) else {
+                return false;
+            };
+            let document_dir = document
+                .file_path
+                .rsplit_once('/')
+                .map(|(directory, _)| directory)
+                .unwrap_or("");
+
+            parsed.descendants().filter(|node| node.is_element()).any(|node| {
+                node.tag_name().name().eq_ignore_ascii_case("img")
+                    && node.attribute("src").is_some_and(|source| {
+                        resolve_path(document_dir, source).is_ok_and(|resolved| resolved.path == asset_path)
+                    })
+            })
+        })
+    }
+
     /// Create a new EPUB extractor.
     pub(crate) fn new() -> Self {
         Self
@@ -207,7 +227,9 @@ impl EpubExtractor {
         let mut pre_rendered_fragments = Vec::new();
         let mut all_converted_successfully = wants_markup;
 
-        if let Some(cover_path) = cover_image_path {
+        if let Some(cover_path) = cover_image_path
+            && !Self::spine_references_asset(spine_documents, cover_path)
+        {
             let mut buf = Vec::new();
             if let Ok(mut entry) = archive.by_name(cover_path) {
                 let _ = entry.read_to_end(&mut buf);
@@ -675,6 +697,23 @@ mod tests {
         assert!(supported.contains(&"application/epub+zip"));
         assert!(supported.contains(&"application/x-epub+zip"));
         assert!(supported.contains(&"application/vnd.epub+zip"));
+    }
+
+    #[test]
+    fn should_detect_cover_asset_already_rendered_by_spine() {
+        let documents = vec![content::EpubSpineDocument {
+            file_path: "OEBPS/text/cover.xhtml".to_string(),
+            xhtml: r#"<html><body><img src="../images/cover.jpg" alt="Cover"/></body></html>"#.to_string(),
+        }];
+
+        assert!(EpubExtractor::spine_references_asset(
+            &documents,
+            "OEBPS/images/cover.jpg"
+        ));
+        assert!(!EpubExtractor::spine_references_asset(
+            &documents,
+            "OEBPS/images/other.jpg"
+        ));
     }
 
     #[test]

@@ -85,7 +85,9 @@ pub(super) fn read_body_documents(
         match read_file_from_zip(archive, &file_path) {
             Ok(raw_xhtml) => {
                 let normalized_xhtml = normalize_xhtml(&raw_xhtml);
-                let render_xhtml = strip_specialized_navigation_sections(&strip_document_head(&normalized_xhtml));
+                let render_xhtml = strip_embedded_media_elements(&strip_specialized_navigation_sections(
+                    &strip_document_head(&normalized_xhtml),
+                ));
 
                 if guide_toc_candidate && looks_like_navigation_document(&render_xhtml) {
                     continue;
@@ -191,6 +193,15 @@ pub(super) fn strip_document_head(xhtml: &str) -> String {
 pub(super) fn strip_specialized_navigation_sections(xhtml: &str) -> String {
     strip_xml_elements(xhtml, |node| {
         node.tag_name().name().eq_ignore_ascii_case("nav") && is_specialized_navigation_node(node)
+    })
+}
+
+/// Audio and video elements are delivery controls rather than book text. HTML
+/// conversion otherwise emits their source URLs and serialized fallback markup
+/// in addition to the surrounding prose.
+pub(super) fn strip_embedded_media_elements(xhtml: &str) -> String {
+    strip_xml_elements(xhtml, |node| {
+        matches!(node.tag_name().name().to_ascii_lowercase().as_str(), "audio" | "video")
     })
 }
 
@@ -374,7 +385,34 @@ fn try_extract_via_roxmltree_budgeted(xhtml: &str, budget: &mut SecurityBudget) 
 /// This strips XML declarations and doctypes, which are valid in EPUB chapter
 /// files but should not surface in extracted Markdown or interfere with safe parsing.
 pub(super) fn normalize_xhtml(xml: &str) -> String {
-    strip_xml_prelude(xml)
+    strip_serialized_mathml_comments(&strip_xml_prelude(xml))
+}
+
+/// Some EPUB fixtures carry a readable MathML fallback immediately after a
+/// comment containing a serialized copy of the same equation. Keep the fallback
+/// while removing only the non-rendered serialization comment.
+fn strip_serialized_mathml_comments(xhtml: &str) -> String {
+    let mut output = String::with_capacity(xhtml.len());
+    let mut cursor = 0usize;
+
+    while let Some(relative_start) = xhtml[cursor..].find("<!--") {
+        let start = cursor + relative_start;
+        let comment_body_start = start + "<!--".len();
+        let Some(relative_end) = xhtml[comment_body_start..].find("-->") else {
+            break;
+        };
+        let end = comment_body_start + relative_end + "-->".len();
+        let comment_body = &xhtml[comment_body_start..comment_body_start + relative_end];
+
+        output.push_str(&xhtml[cursor..start]);
+        if !comment_body.trim_start().to_ascii_lowercase().starts_with("mathml:") {
+            output.push_str(&xhtml[start..end]);
+        }
+        cursor = end;
+    }
+
+    output.push_str(&xhtml[cursor..]);
+    output
 }
 
 /// Remove XML declarations and DOCTYPE declarations from XML/XHTML.
@@ -766,6 +804,39 @@ mod tests {
         let result = extract_text_from_xhtml(bad_xhtml);
         assert!(result.contains("Hello"), "got: {result}");
         assert!(result.contains("World"), "got: {result}");
+    }
+
+    #[test]
+    fn should_remove_serialized_mathml_comment_and_keep_readable_fallback() {
+        let xhtml = r#"<html><body>
+<!-- MathML: <math xmlns="http://www.w3.org/1998/Math/MathML"><mi>x</mi><mo>=</mo><mn>2</mn></math> -->
+<p>x = 2</p><!-- editorial note -->
+</body></html>"#;
+
+        let normalized = normalize_xhtml(xhtml);
+
+        assert!(!normalized.contains("MathML:"), "got: {normalized}");
+        assert!(!normalized.contains("<math"), "got: {normalized}");
+        assert!(normalized.contains("x = 2"), "got: {normalized}");
+        assert!(normalized.contains("<!-- editorial note -->"), "got: {normalized}");
+    }
+
+    #[test]
+    fn should_remove_embedded_media_without_losing_surrounding_prose() {
+        let xhtml = r#"<html><body>
+<p>Before</p>
+<video><source src="movie.mp4"/><div>Video fallback</div></video>
+<audio src="sound.mp3"><p>Audio fallback</p></audio>
+<p>After</p>
+</body></html>"#;
+
+        let stripped = strip_embedded_media_elements(xhtml);
+
+        assert!(stripped.contains("Before"), "got: {stripped}");
+        assert!(stripped.contains("After"), "got: {stripped}");
+        assert!(!stripped.contains("movie.mp4"), "got: {stripped}");
+        assert!(!stripped.contains("sound.mp3"), "got: {stripped}");
+        assert!(!stripped.contains("fallback"), "got: {stripped}");
     }
 
     #[test]

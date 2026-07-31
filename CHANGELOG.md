@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- EPUB extraction removes duplicated serialized MathML and embedded-media fallback content, and
+  avoids emitting a cover image twice when the spine already references it.
 - Email extraction preserves sender display names alongside addresses, and asynchronous attachment
   and nested-message extraction reuses the initial parse instead of parsing messages twice.
 - FB2 and DocBook files with generic XML signatures retain their extension-specific MIME types, so
