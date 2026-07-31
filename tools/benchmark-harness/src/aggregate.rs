@@ -755,12 +755,29 @@ fn aggregate_by_ocr_status(
     (no_ocr_stats, with_ocr_stats)
 }
 
+/// A failed result the framework itself is accountable for: it was handed a document in a format
+/// it declares support for and still failed to extract it (hard error, empty output, or timeout).
+/// These are scored as quality 0 so partial failures penalize the aggregate. Harness/config-setup
+/// failures are our own infrastructure's fault and are deliberately excluded — they neither
+/// penalize quality nor count against the success rate.
+fn is_framework_fault_failure(result: &BenchmarkResult) -> bool {
+    !result.success
+        && matches!(
+            result.error_kind,
+            ErrorKind::FrameworkError | ErrorKind::EmptyContent | ErrorKind::Timeout
+        )
+}
+
 /// Calculate percentiles for a group of results
 ///
-/// Only uses successful results for metric calculations.
-/// Success rate is calculated from all results.
+/// Performance metrics use only successful samples. Quality percentiles additionally include a 0.0
+/// sample for every framework-fault failure (see [`is_framework_fault_failure`]) so a framework
+/// that breaks on documents it claims to support is penalized rather than flattered. The success
+/// rate's denominator is successes + framework-fault failures; harness/config-setup (infrastructure)
+/// failures are excluded from both.
 fn calculate_percentiles(results: &[&BenchmarkResult]) -> PerformancePercentiles {
     let successful: Vec<&BenchmarkResult> = results.iter().filter(|r| r.success).copied().collect();
+    let framework_fault_failures = results.iter().filter(|r| is_framework_fault_failure(r)).count();
     let performance_samples = successful_performance_samples(results.iter().copied());
 
     let mut durations: Vec<f64> = performance_samples
@@ -872,8 +889,12 @@ fn calculate_percentiles(results: &[&BenchmarkResult]) -> PerformancePercentiles
 
     let system_load = aggregate_system_load(results);
 
-    let success_rate_percent = if !results.is_empty() {
-        (successful.len() as f64 / results.len() as f64) * 100.0
+    // Denominator excludes harness/config-setup (infra) failures: those are our fault, so they must
+    // not drag a framework's success rate down. Only successes and framework-fault failures are
+    // "accountable" samples.
+    let accountable_sample_count = successful.len() + framework_fault_failures;
+    let success_rate_percent = if accountable_sample_count > 0 {
+        (successful.len() as f64 / accountable_sample_count as f64) * 100.0
     } else {
         0.0
     };
@@ -924,6 +945,19 @@ fn calculate_percentiles(results: &[&BenchmarkResult]) -> PerformancePercentiles
             .filter_map(|r| r.quality.as_ref().map(|q| q.quality_score))
             .filter(|v| !v.is_nan() && v.is_finite())
             .collect();
+
+        // Penalize framework-fault failures as quality 0. Only do so when quality was actually
+        // measured for this group (some success carried a score) or when there were no successes at
+        // all (a fully-failed group scores 0 rather than "not measured") — this avoids fabricating
+        // zeros when quality measurement was disabled entirely. f1_layout is intentionally left to
+        // measured samples only, since layout is not a scored dimension for most formats.
+        if framework_fault_failures > 0 && (!quality_scores.is_empty() || successful.is_empty()) {
+            for _ in 0..framework_fault_failures {
+                f1_texts.push(0.0);
+                f1_numerics.push(0.0);
+                quality_scores.push(0.0);
+            }
+        }
 
         if !quality_scores.is_empty() {
             f1_texts.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
@@ -2167,7 +2201,10 @@ mod tests {
 
         assert_eq!(no_ocr.successful_sample_count, 1);
         assert_eq!(no_ocr.total_sample_count, 2);
-        assert_eq!(no_ocr.success_rate_percent, 50.0);
+        // The failed sample is a HarnessError (our infrastructure's fault), so it is excluded from
+        // the success-rate denominator: 1 success / 1 accountable sample = 100%. It still shows up
+        // in total_sample_count and is excluded from the performance percentiles (duration.p50).
+        assert_eq!(no_ocr.success_rate_percent, 100.0);
         assert_eq!(no_ocr.duration.p50, 100.0);
     }
 
@@ -2507,7 +2544,9 @@ mod tests {
         let percentiles = calculate_percentiles(&refs);
 
         assert!(percentiles.extraction_duration.is_none());
-        assert_eq!(percentiles.success_rate_percent, 50.0);
+        // The failed sample is a HarnessError (infrastructure fault) and so is excluded from the
+        // success-rate denominator: 1 success / 1 accountable sample = 100%.
+        assert_eq!(percentiles.success_rate_percent, 100.0);
     }
 
     fn result_with_quality(framework: &str, file_ext: &str, quality_score: f64, success: bool) -> BenchmarkResult {
@@ -2528,6 +2567,51 @@ mod tests {
             result.error_kind = ErrorKind::FrameworkError;
         }
         result
+    }
+
+    /// A framework-fault failure (it was handed a supported document and failed to extract it) must
+    /// penalize the aggregate: it is scored as quality 0 in the percentiles and counts against the
+    /// success rate. Here one success (0.9) plus one FrameworkError failure yields a 50% success
+    /// rate and a quality_score p50 pulled down between 0.0 and 0.9 (R7 midpoint 0.45).
+    #[test]
+    fn test_framework_fault_failure_penalizes_quality_and_success_rate() {
+        let success = result_with_quality("fw", "pdf", 0.9, true);
+        let failure = result_with_quality("fw", "pdf", 0.0, false); // helper sets FrameworkError
+        assert_eq!(failure.error_kind, ErrorKind::FrameworkError);
+
+        let refs = vec![&success, &failure];
+        let percentiles = calculate_percentiles(&refs);
+
+        assert_eq!(percentiles.success_rate_percent, 50.0);
+        assert_eq!(percentiles.framework_errors, 1);
+        let quality = percentiles.quality.expect("quality must be scored when failures are penalized");
+        assert!(
+            (quality.quality_score_p50 - 0.45).abs() < 1e-9,
+            "framework-fault failure should inject a 0.0 quality sample, pulling p50 to 0.45, got {}",
+            quality.quality_score_p50
+        );
+    }
+
+    /// An infrastructure failure (HarnessError / ConfigSetupError) must NOT penalize the framework:
+    /// it is excluded from both the success-rate denominator and the quality percentiles, so a
+    /// single success alongside one HarnessError still reads as 100% success and full quality.
+    #[test]
+    fn test_infra_failure_does_not_penalize_quality_or_success_rate() {
+        let success = result_with_quality("fw", "pdf", 0.9, true);
+        let mut infra_failure = result_with_quality("fw", "pdf", 0.0, false);
+        infra_failure.error_kind = ErrorKind::HarnessError;
+
+        let refs = vec![&success, &infra_failure];
+        let percentiles = calculate_percentiles(&refs);
+
+        assert_eq!(percentiles.success_rate_percent, 100.0);
+        assert_eq!(percentiles.harness_errors, 1);
+        let quality = percentiles.quality.expect("quality must reflect the successful sample");
+        assert!(
+            (quality.quality_score_p50 - 0.9).abs() < 1e-9,
+            "infra failure must not inject a 0.0 quality sample; p50 should stay 0.9, got {}",
+            quality.quality_score_p50
+        );
     }
 
     /// Regression test for Bug A: the overall quality ranking must only compare frameworks on
