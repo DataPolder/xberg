@@ -721,6 +721,7 @@ fn build_aggregate(contract: &CohortContract, cohort: Cohort) -> NewConsolidated
         },
         run_provenance: Vec::new(),
         failure_summary: FailureSummary::default(),
+        format_support: Default::default(),
     }
 }
 

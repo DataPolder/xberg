@@ -89,6 +89,14 @@ fi
 if [ "$OCR_ENABLED" = "true" ]; then
   EXTRA_ARGS+=("--ocr")
 fi
+# xberg is the subject under test and must extract every document, so it runs strict
+# (default min-success-rate 1.0). Competitor frameworks are benchmarked across every cohort
+# document, including ones they do not support; documents a competitor cannot handle are
+# skipped, not cohort failures, as long as most documents still extract. The floor rejects
+# a broken framework or a mostly-failed cohort while tolerating scattered unsupported docs.
+if [ "$FRAMEWORK" != "xberg" ]; then
+  EXTRA_ARGS+=("--min-success-rate" "${MIN_SUCCESS_RATE:-0.5}")
+fi
 if [ -n "$SHARD" ]; then
   EXTRA_ARGS+=("--shard" "${SHARD}")
 fi

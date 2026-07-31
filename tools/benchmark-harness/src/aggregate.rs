@@ -71,6 +71,27 @@ pub struct NewConsolidatedResults {
     /// deserialize.
     #[serde(default)]
     pub failure_summary: FailureSummary,
+    /// Capability-aware format-support matrix: for every framework in the run and every corpus
+    /// file type, which pairs the framework declares no support for. Distinguishes "this
+    /// framework structurally cannot read this format" from "absent" or "attempted and failed".
+    /// `#[serde(default)]` so aggregates produced before this field existed still deserialize.
+    #[serde(default)]
+    pub format_support: FormatSupportMatrix,
+}
+
+/// Declared format-support coverage across the run.
+///
+/// Sourced from each framework's declared capabilities (the same table the runner routes on),
+/// not from run outcomes, so a pair is marked unsupported even when the corpus happened to
+/// contain no document of that type for that framework. xberg is the subject under test and
+/// supports the full corpus, so it never appears in `unsupported`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FormatSupportMatrix {
+    /// Every corpus file type considered, sorted and de-duplicated.
+    pub file_types: Vec<String>,
+    /// Per logical framework, the corpus file types it declares no support for, sorted. A
+    /// framework absent from this map supports every corpus file type.
+    pub unsupported: std::collections::BTreeMap<String, Vec<String>>,
 }
 
 /// Per-fixture benchmark result row
@@ -593,6 +614,7 @@ pub fn aggregate_new_format(results: &[BenchmarkResult]) -> NewConsolidatedResul
             },
             run_provenance: Vec::new(),
             failure_summary: FailureSummary::default(),
+            format_support: FormatSupportMatrix::default(),
         };
     }
 
@@ -700,6 +722,7 @@ pub fn aggregate_new_format(results: &[BenchmarkResult]) -> NewConsolidatedResul
 
     let comparison = build_comparison(&aggregated_by_framework_mode);
     let failure_summary = build_failure_summary(results);
+    let format_support = build_format_support_matrix(results, &file_types);
 
     NewConsolidatedResults {
         schema_version: SCHEMA_VERSION.to_string(),
@@ -710,6 +733,51 @@ pub fn aggregate_new_format(results: &[BenchmarkResult]) -> NewConsolidatedResul
         metadata,
         run_provenance: Vec::new(),
         failure_summary,
+        format_support,
+    }
+}
+
+/// Build the capability-aware format-support matrix (see [`FormatSupportMatrix`]).
+///
+/// For every logical framework present in the run (xberg pipeline variants collapse to a single
+/// `xberg`) and every corpus file type, records the file types the framework declares no support
+/// for. xberg supports the full corpus by design and is never listed as unsupported; every other
+/// framework is checked against its declared capability table.
+fn build_format_support_matrix(
+    results: &[BenchmarkResult],
+    file_types: &std::collections::HashSet<String>,
+) -> FormatSupportMatrix {
+    let mut sorted_file_types: Vec<String> = file_types.iter().cloned().collect();
+    sorted_file_types.sort();
+
+    let mut frameworks: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for result in results {
+        let name = extract_framework_and_mode(&result.framework).0;
+        let logical = if name.starts_with("xberg") { "xberg" } else { name };
+        frameworks.insert(logical.to_string());
+    }
+
+    let mut unsupported = std::collections::BTreeMap::new();
+    for framework in &frameworks {
+        // xberg is the subject under test and supports every corpus format, so it is never
+        // "unsupported"; only competitors are checked against their declared capability table.
+        if framework == "xberg" {
+            continue;
+        }
+        let supported = crate::adapters::external::declared_supported_formats(framework);
+        let missing: Vec<String> = sorted_file_types
+            .iter()
+            .filter(|file_type| !supported.iter().any(|s| s == *file_type))
+            .cloned()
+            .collect();
+        if !missing.is_empty() {
+            unsupported.insert(framework.clone(), missing);
+        }
+    }
+
+    FormatSupportMatrix {
+        file_types: sorted_file_types,
+        unsupported,
     }
 }
 
@@ -1741,6 +1809,48 @@ mod tests {
             extracted_text: None,
             system_load: None,
         }
+    }
+
+    #[test]
+    fn format_support_matrix_marks_declared_unsupported_pairs() {
+        // Corpus spans pdf/docx/html/rtf; xberg reads all four, liteparse is pdf-only, and
+        // docling reads pdf/docx/html but not rtf.
+        let results = vec![
+            create_test_result("xberg-markdown-baseline", "pdf", OcrStatus::NotUsed, 10, 1.0, 1024),
+            create_test_result("xberg-markdown-baseline", "docx", OcrStatus::NotUsed, 10, 1.0, 1024),
+            create_test_result("xberg-markdown-baseline", "html", OcrStatus::NotUsed, 10, 1.0, 1024),
+            create_test_result("xberg-markdown-baseline", "rtf", OcrStatus::NotUsed, 10, 1.0, 1024),
+            create_test_result("liteparse", "pdf", OcrStatus::NotUsed, 10, 1.0, 1024),
+            create_test_result("docling", "pdf", OcrStatus::NotUsed, 10, 1.0, 1024),
+        ];
+
+        let aggregated = aggregate_new_format(&results);
+        let support = &aggregated.format_support;
+
+        assert_eq!(
+            support.file_types,
+            vec![
+                "docx".to_string(),
+                "html".to_string(),
+                "pdf".to_string(),
+                "rtf".to_string()
+            ],
+            "file_types must be the sorted, de-duplicated corpus extension set"
+        );
+        assert!(
+            !support.unsupported.contains_key("xberg"),
+            "xberg is the subject under test and supports the whole corpus; it must never be marked unsupported"
+        );
+        assert_eq!(
+            support.unsupported.get("liteparse"),
+            Some(&vec!["docx".to_string(), "html".to_string(), "rtf".to_string()]),
+            "liteparse is pdf-only, so every non-pdf corpus format is unsupported"
+        );
+        assert_eq!(
+            support.unsupported.get("docling"),
+            Some(&vec!["rtf".to_string()]),
+            "docling reads pdf/docx/html but not rtf"
+        );
     }
 
     #[test]

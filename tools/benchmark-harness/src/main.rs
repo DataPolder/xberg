@@ -236,6 +236,15 @@ enum Commands {
         /// Model identity as FRAMEWORK=OWNER/REPOSITORY@REVISION#DIGEST (repeatable)
         #[arg(long = "model-id")]
         model_ids: Vec<String>,
+
+        /// Minimum fraction of documents (0.0..=1.0) that must extract successfully for
+        /// the run to be valid. Documents a framework cannot handle are skipped, not
+        /// fatal, as long as the surviving success rate meets this floor. Defaults to 1.0
+        /// (xberg, strict — any failure fails). Competitor cohorts pass a lower floor so a
+        /// few unsupported documents do not invalidate the ones the framework did handle,
+        /// while a zero-success or mostly-failed run is still rejected.
+        #[arg(long, default_value = "1.0")]
+        min_success_rate: f64,
     },
 
     /// Consolidate multiple benchmark runs
@@ -553,6 +562,7 @@ async fn main() -> Result<()> {
             output_format,
             shard,
             model_ids,
+            min_success_rate,
         } => {
             use benchmark_harness::{AdapterRegistry, BenchmarkRunner};
             use std::sync::Arc;
@@ -887,11 +897,42 @@ async fn main() -> Result<()> {
             }
 
             if failure_count > 0 {
-                return Err(benchmark_harness::Error::Benchmark(format!(
-                    "{} of {} extraction(s) failed; partial benchmark runs are not valid headline results",
+                if !(0.0..=1.0).contains(&min_success_rate) {
+                    return Err(benchmark_harness::Error::Benchmark(format!(
+                        "--min-success-rate must be within 0.0..=1.0, got {min_success_rate}",
+                    )));
+                }
+
+                // Frameworks are benchmarked over every cohort document, including formats
+                // and documents they do not support. A per-document failure is a skip, not
+                // a fatal error, provided the surviving success rate meets the required
+                // floor. A zero-success run, or one below the floor, is still rejected so a
+                // broken framework or a mostly-failed cohort cannot masquerade as valid.
+                let success_rate = success_count as f64 / results.len() as f64;
+                if success_count == 0 {
+                    return Err(benchmark_harness::Error::Benchmark(format!(
+                        "all {} extraction(s) failed; no supported documents for this framework",
+                        results.len(),
+                    )));
+                }
+                if success_rate < min_success_rate {
+                    return Err(benchmark_harness::Error::Benchmark(format!(
+                        "success rate {:.3} ({}/{}) is below the required minimum {:.3}; \
+                         too many documents failed to treat this as a valid run",
+                        success_rate,
+                        success_count,
+                        results.len(),
+                        min_success_rate,
+                    )));
+                }
+                println!(
+                    "  Skipped {} unsupported document(s); coverage {}/{} ({:.1}% >= {:.1}% required)",
                     failure_count,
+                    success_count,
                     results.len(),
-                )));
+                    success_rate * 100.0,
+                    min_success_rate * 100.0,
+                );
             }
 
             Ok(())

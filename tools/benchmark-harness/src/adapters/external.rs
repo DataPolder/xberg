@@ -103,6 +103,17 @@ fn get_supported_formats(framework_name: &str) -> Vec<String> {
     }
 }
 
+/// Declared format support for a competitor framework, exposed for capability-aware aggregation.
+///
+/// This is the same authoritative capability table the runner uses to route fixtures
+/// ([`get_supported_formats`]); the aggregation layer consults it to mark a (framework, format)
+/// pair as structurally unsupported rather than merely absent or failed. xberg is the subject
+/// under test and supports the full corpus, so callers treat it as universal instead of calling
+/// this (its name has no arm here and would fall through to the generic default).
+pub(crate) fn declared_supported_formats(framework_name: &str) -> Vec<String> {
+    get_supported_formats(framework_name)
+}
+
 /// Creates a subprocess adapter for Docling.
 ///
 /// Uses wrapper script approach for extraction.
@@ -132,7 +143,6 @@ pub fn create_docling_adapter(ocr_enabled: bool) -> Result<SubprocessAdapter> {
     .with_configured_ocr(ocr_enabled)
     .with_format_aware(true)
     .with_single_file_args(single_file_args)
-    // Docling maps the forwarded Tesseract codes to EasyOCR (kor->ko, jpn->ja); the
     // ko/ja EasyOCR weights are prefetched and cached in the docling job.
     .with_ocr_language_arg("--ocr-lang")
     .with_max_timeout(Duration::from_secs(PERSISTENT_MAX_TIMEOUT_SECS)))
@@ -154,7 +164,6 @@ pub fn create_unstructured_adapter(ocr_enabled: bool) -> Result<SubprocessAdapte
         SubprocessAdapter::new("unstructured", command, args, vec![], supported_formats)
             .with_configured_ocr(ocr_enabled)
             .with_format_aware(true)
-            // unstructured's partition(languages=[...]) forwards Tesseract codes directly,
             // so forward the fixture's OCR language instead of its hardcoded ["eng"].
             .with_ocr_language_arg("--ocr-lang")
             .with_max_timeout(Duration::from_secs(PERSISTENT_MAX_TIMEOUT_SECS)),
@@ -585,7 +594,6 @@ pub fn create_mineru_adapter(ocr_enabled: bool) -> Result<SubprocessAdapter> {
     .with_configured_ocr(ocr_enabled)
     .with_format_aware(true)
     .with_single_file_args(single_file_args)
-    // MinerU maps the forwarded Tesseract codes to its PaddleOCR model (kor->korean,
     // jpn->japan); the Korean/Japanese weights are prefetched in the model-cache job.
     .with_ocr_language_arg("--ocr-lang")
     .with_max_timeout(Duration::from_secs(MINERU_MAX_TIMEOUT_SECS)))
