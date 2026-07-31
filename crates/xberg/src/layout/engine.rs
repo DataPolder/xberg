@@ -410,6 +410,16 @@ impl LayoutEngine {
 
         Ok(results)
     }
+
+    /// Benchmark-only access to the internal batched inference path.
+    #[cfg(feature = "profiling")]
+    #[doc(hidden)]
+    pub fn detect_batch_for_benchmark(
+        &mut self,
+        images: &[&RgbImage],
+    ) -> Result<Vec<(DetectionResult, DetectTimings)>, LayoutError> {
+        self.detect_batch(images)
+    }
 }
 
 #[cfg(test)]
