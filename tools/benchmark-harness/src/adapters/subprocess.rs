@@ -426,6 +426,12 @@ pub struct SubprocessAdapter {
     /// When unset, single-file mode preserves Xberg's automatic budget while
     /// native batch mode falls back to [`Self::batch_workers`].
     xberg_max_threads: Option<usize>,
+    /// CLI flag an external wrapper uses to receive the fixture's OCR language,
+    /// forwarded in canonical Tesseract form (e.g. `eng+kor`, `jpn_vert`). The
+    /// wrapper maps it onto its own engine's codes. `None` means the framework
+    /// exposes no explicit OCR-language selection, so the language is not
+    /// forwarded and parity is not assumed on its behalf.
+    ocr_language_arg: Option<String>,
 }
 
 impl SubprocessAdapter {
@@ -804,6 +810,7 @@ impl SubprocessAdapter {
             native_batch_command: None,
             batch_sequence: AtomicU64::new(0),
             xberg_max_threads: None,
+            ocr_language_arg: None,
         }
     }
 
@@ -844,6 +851,7 @@ impl SubprocessAdapter {
             native_batch_command: None,
             batch_sequence: AtomicU64::new(0),
             xberg_max_threads: None,
+            ocr_language_arg: None,
         }
     }
 
@@ -884,6 +892,26 @@ impl SubprocessAdapter {
     pub fn with_configured_ocr(mut self, enabled: bool) -> Self {
         self.configured_ocr_status = Some(if enabled { OcrStatus::Used } else { OcrStatus::NotUsed });
         self
+    }
+
+    /// Configure the CLI flag an external wrapper uses to receive the fixture's
+    /// OCR language. Set this only for frameworks that expose explicit
+    /// OCR-language selection; the forwarded value is the canonical Tesseract
+    /// form (`eng+kor`, `jpn_vert`) and the wrapper maps it to its own engine.
+    pub fn with_ocr_language_arg(mut self, flag: impl Into<String>) -> Self {
+        self.ocr_language_arg = Some(flag.into());
+        self
+    }
+
+    /// Build the single-token `--flag=<language>` argument that forwards a
+    /// fixture's OCR language to an external wrapper, or `None` when the adapter
+    /// forwards no language (flag unconfigured or fixture pins none). Emitted as
+    /// one token to match the wrappers' `--key=value` parsing and to avoid
+    /// collision with the positional file path.
+    fn ocr_language_forward_arg(&self, ocr_language: Option<&str>) -> Option<String> {
+        let flag = self.ocr_language_arg.as_deref()?;
+        let language = ocr_language.and_then(crate::adapter::canonical_ocr_language_arg)?;
+        Some(format!("{flag}={language}"))
     }
 
     /// Set the bounded worker count used by native batch implementations.
@@ -1015,6 +1043,9 @@ impl SubprocessAdapter {
             && let Some(language) = ocr_language.and_then(crate::adapter::canonical_ocr_language_arg)
         {
             cmd.arg("--ocr-language").arg(language);
+        }
+        if let Some(forward) = self.ocr_language_forward_arg(ocr_language) {
+            cmd.arg(forward);
         }
 
         if self.format_aware {
@@ -2132,6 +2163,28 @@ mod tests {
         assert!(adapter.supports_format("pdf"));
         assert!(adapter.supports_format("docx"));
         assert!(!adapter.supports_format("unknown"));
+    }
+
+    #[test]
+    fn ocr_language_forward_arg_only_when_flag_and_language_present() {
+        let base = || SubprocessAdapter::new("ext", "echo", vec![], vec![], vec!["png".to_string()]);
+
+        // No flag configured: never forwards, even with a fixture language.
+        assert_eq!(base().ocr_language_forward_arg(Some("eng+kor")), None);
+
+        let forwarding = base().with_ocr_language_arg("--ocr-lang");
+        // Flag configured but fixture pins no language: nothing forwarded.
+        assert_eq!(forwarding.ocr_language_forward_arg(None), None);
+        // Emitted as a single `--flag=value` token in canonical Tesseract form.
+        assert_eq!(
+            forwarding.ocr_language_forward_arg(Some("eng+kor")).as_deref(),
+            Some("--ocr-lang=eng+kor")
+        );
+        // Whitespace/formatting is canonicalized, matching the xberg path.
+        assert_eq!(
+            forwarding.ocr_language_forward_arg(Some(" jpn_vert ")).as_deref(),
+            Some("--ocr-lang=jpn_vert")
+        );
     }
 
     #[test]

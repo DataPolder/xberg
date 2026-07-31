@@ -495,6 +495,10 @@ fn ocr_matrix() -> Vec<MatrixEntry> {
     let mut matrix = xberg_entries(OCR_COHORT, true);
     matrix.extend(grid_entries("docling", OCR_COHORT));
     matrix.push(markdown_single_file_entry("mineru", OCR_COHORT).into_optional());
+    // Tika and Unstructured are Tesseract-backed and now run the OCR cohorts too
+    // (single-file, plaintext). Best-effort: absence never fails validation.
+    matrix.push(plaintext_single_file_entry("unstructured", OCR_COHORT).into_optional());
+    matrix.push(plaintext_single_file_entry("tika", OCR_COHORT).into_optional());
     matrix.extend(grid_entries("liteparse", OCR_COHORT));
     matrix
 }
@@ -546,6 +550,10 @@ fn images_matrix() -> Vec<MatrixEntry> {
     matrix.extend(optional(grid_entries("docling", IMAGES_COHORT)));
     matrix.push(markdown_single_file_entry("pymupdf4llm", IMAGES_COHORT).into_optional());
     matrix.push(markdown_single_file_entry("mineru", IMAGES_COHORT).into_optional());
+    // Tika and Unstructured are Tesseract-backed and now run the image OCR cohort too
+    // (single-file, plaintext). Best-effort: absence never fails validation.
+    matrix.push(plaintext_single_file_entry("unstructured", IMAGES_COHORT).into_optional());
+    matrix.push(plaintext_single_file_entry("tika", IMAGES_COHORT).into_optional());
     matrix
 }
 
@@ -655,13 +663,13 @@ mod tests {
     /// but never required for the per-format-family cohorts.
     const CONTRACT_CELL_COUNTS: [(Cohort, usize, usize); 8] = [
         (Cohort::Native, 21, 20),
-        (Cohort::Ocr, 17, 16),
+        (Cohort::Ocr, 19, 16),
         (Cohort::Office, 11, 4),
         (Cohort::Markup, 11, 4),
         (Cohort::Ebook, 6, 4),
         (Cohort::Email, 6, 4),
         (Cohort::Data, 11, 4),
-        (Cohort::Images, 14, 8),
+        (Cohort::Images, 16, 8),
     ];
 
     #[test]

@@ -448,7 +448,7 @@ jobs:
         mode: [single-file]
         output_format: [plaintext]
         # Unstructured emits plaintext; run it over PDF plus the office/markup/email/data families.
-        cohort: [native-pdf-fast-b8, native-office-fast, native-markup-fast, native-email-fast, native-data-fast]
+        cohort: [native-pdf-fast-b8, native-office-fast, native-markup-fast, native-email-fast, native-data-fast, ocr-pdf-fast-b4, ocr-images-fast]
     steps:
       - uses: actions/checkout@v6
         with:
@@ -540,6 +540,8 @@ jobs:
           - native-ebook-fast
           - native-email-fast
           - native-data-fast
+          - ocr-pdf-fast-b4
+          - ocr-images-fast
         exclude:
           - output_format: markdown
     steps:

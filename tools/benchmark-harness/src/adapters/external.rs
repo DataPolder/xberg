@@ -151,6 +151,9 @@ pub fn create_unstructured_adapter(ocr_enabled: bool) -> Result<SubprocessAdapte
         SubprocessAdapter::new("unstructured", command, args, vec![], supported_formats)
             .with_configured_ocr(ocr_enabled)
             .with_format_aware(true)
+            // unstructured's partition(languages=[...]) forwards Tesseract codes directly,
+            // so forward the fixture's OCR language instead of its hardcoded ["eng"].
+            .with_ocr_language_arg("--ocr-lang")
             .with_max_timeout(Duration::from_secs(PERSISTENT_MAX_TIMEOUT_SECS)),
     )
 }
@@ -530,6 +533,9 @@ pub fn create_tika_adapter(ocr_enabled: bool) -> Result<SubprocessAdapter> {
     Ok(SubprocessAdapter::new("tika", command, args, vec![], supported_formats)
         .with_configured_ocr(ocr_enabled)
         .with_supported_output_formats(vec![crate::types::OutputFormat::Plaintext])
+        // Tika's TesseractOCRConfig.setLanguage takes Tesseract codes directly,
+        // so forward the fixture's OCR language instead of its hardcoded "eng".
+        .with_ocr_language_arg("--ocr-lang")
         .with_max_timeout(Duration::from_secs(180)))
 }
 

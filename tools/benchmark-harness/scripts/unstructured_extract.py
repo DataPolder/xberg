@@ -22,11 +22,25 @@ def _get_peak_memory_bytes() -> int:
     return usage.ru_maxrss
 
 
-def extract_sync(file_path: str, ocr_enabled: bool, output_format: str = "plaintext") -> dict:
+def _tesseract_codes_to_languages(ocr_language: str | None) -> list[str]:
+    """Map a canonical Tesseract language string (``eng+kor``, ``jpn_vert``) to the
+    list Unstructured's ``partition(languages=...)`` expects. Unstructured forwards
+    these straight to Tesseract's ``-l`` flag, so the codes pass through unchanged;
+    an unset value falls back to English, matching the previous hardcoded default."""
+    if not ocr_language:
+        return ["eng"]
+    codes = [code.strip() for code in ocr_language.split("+") if code.strip()]
+    return codes or ["eng"]
+
+
+def extract_sync(
+    file_path: str, ocr_enabled: bool, output_format: str = "plaintext", ocr_language: str | None = None
+) -> dict:
     """Extract using Unstructured partition API."""
     strategy = "hi_res" if ocr_enabled else "fast"
+    languages = _tesseract_codes_to_languages(ocr_language)
     start = time.perf_counter()
-    elements = partition(filename=file_path, strategy=strategy, languages=["eng"])
+    elements = partition(filename=file_path, strategy=strategy, languages=languages)
     duration_ms = (time.perf_counter() - start) * 1000.0
 
     content = "\n\n".join(str(el) for el in elements)
@@ -107,7 +121,7 @@ def _parse_path(line: str) -> str:
     return stripped
 
 
-def run_server(ocr_enabled: bool, output_format: str, timeout=None) -> None:
+def run_server(ocr_enabled: bool, output_format: str, timeout=None, ocr_language: str | None = None) -> None:
     """Persistent server mode: read paths from stdin, write JSON to stdout."""
     print("READY", flush=True)
     for line in sys.stdin:
@@ -115,10 +129,10 @@ def run_server(ocr_enabled: bool, output_format: str, timeout=None) -> None:
         if not file_path:
             continue
         if timeout is not None:
-            result = _run_with_timeout(extract_sync, (file_path, ocr_enabled, output_format), timeout)
+            result = _run_with_timeout(extract_sync, (file_path, ocr_enabled, output_format, ocr_language), timeout)
         else:
             try:
-                result = extract_sync(file_path, ocr_enabled, output_format)
+                result = extract_sync(file_path, ocr_enabled, output_format, ocr_language)
             except Exception as e:
                 result = {"error": str(e), "_extraction_time_ms": 0}
         print(json.dumps(result), flush=True)
@@ -128,6 +142,7 @@ def main() -> None:
     ocr_enabled = False
     timeout = None
     output_format = "plaintext"
+    ocr_language = None
     args = []
     for arg in sys.argv[1:]:
         if arg == "--ocr":
@@ -138,6 +153,8 @@ def main() -> None:
             timeout = int(arg.split("=", 1)[1])
         elif arg.startswith("--format="):
             output_format = arg.split("=", 1)[1]
+        elif arg.startswith("--ocr-lang="):
+            ocr_language = arg.split("=", 1)[1]
         else:
             args.append(arg)
 
@@ -156,20 +173,20 @@ def main() -> None:
     mode = args[0]
 
     if mode == "server":
-        run_server(ocr_enabled, output_format, timeout=timeout)
+        run_server(ocr_enabled, output_format, timeout=timeout, ocr_language=ocr_language)
     elif mode == "sync":
         if len(args) < 2:
             print("Error: sync mode requires a file path", file=sys.stderr)
             sys.exit(1)
         try:
-            payload = extract_sync(args[1], ocr_enabled, output_format)
+            payload = extract_sync(args[1], ocr_enabled, output_format, ocr_language)
             print(json.dumps(payload), end="")
         except Exception as e:
             print(f"Error extracting with Unstructured: {e}", file=sys.stderr)
             sys.exit(1)
     else:
         try:
-            payload = extract_sync(args[0], ocr_enabled, output_format)
+            payload = extract_sync(args[0], ocr_enabled, output_format, ocr_language)
             print(json.dumps(payload), end="")
         except Exception as e:
             print(f"Error extracting with Unstructured: {e}", file=sys.stderr)

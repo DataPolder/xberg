@@ -25,6 +25,10 @@ public final class TikaExtract {
 
   public static void main(String[] args) {
     boolean ocrEnabled = false;
+    // Tesseract language(s) for OCR, canonical form (e.g. "eng+kor", "jpn_vert").
+    // Tika's TesseractOCRConfig.setLanguage takes these codes directly; the
+    // harness forwards the fixture's language via --ocr-lang, defaulting to eng.
+    String ocrLanguage = "eng";
     List<String> positionalArgs = new ArrayList<>();
 
     for (String arg : args) {
@@ -32,6 +36,11 @@ public final class TikaExtract {
         ocrEnabled = true;
       } else if ("--no-ocr".equals(arg)) {
         ocrEnabled = false;
+      } else if (arg.startsWith("--ocr-lang=")) {
+        String value = arg.substring("--ocr-lang=".length());
+        if (!value.isEmpty()) {
+          ocrLanguage = value;
+        }
       } else {
         positionalArgs.add(arg);
       }
@@ -70,11 +79,11 @@ public final class TikaExtract {
           System.err.println("Sync mode requires exactly one file");
           System.exit(1);
         }
-        processSyncMode(positionalArgs.get(1), ocrEnabled, debug);
+        processSyncMode(positionalArgs.get(1), ocrEnabled, ocrLanguage, debug);
       } else if ("batch".equals(mode)) {
-        processBatchMode(positionalArgs, ocrEnabled, debug);
+        processBatchMode(positionalArgs, ocrEnabled, ocrLanguage, debug);
       } else {
-        processServerMode(ocrEnabled);
+        processServerMode(ocrEnabled, ocrLanguage);
       }
     } catch (Exception e) {
       if (debug) {
@@ -88,7 +97,7 @@ public final class TikaExtract {
   }
 
   private static void processSyncMode(String filePath, boolean ocrEnabled,
-                                      boolean debug) throws Exception {
+                                      String ocrLanguage, boolean debug) throws Exception {
     if (debug) {
       debugLog("Input file", filePath);
     }
@@ -101,7 +110,7 @@ public final class TikaExtract {
       if (debug) {
         debugLog("Starting extraction", "");
       }
-      data = extractFile(path.toFile(), ocrEnabled);
+      data = extractFile(path.toFile(), ocrEnabled, ocrLanguage);
       if (debug) {
         debugLog("Extraction completed", "");
       }
@@ -119,7 +128,7 @@ public final class TikaExtract {
   }
 
   private static void processBatchMode(List<String> positionalArgs,
-                                       boolean ocrEnabled, boolean debug)
+                                       boolean ocrEnabled, String ocrLanguage, boolean debug)
       throws Exception {
     List<String> filePaths = new ArrayList<>();
     for (int i = 1; i < positionalArgs.size(); i++) {
@@ -139,7 +148,7 @@ public final class TikaExtract {
       try {
         Path path = Path.of(filePath);
         long start = System.nanoTime();
-        ExtractionData data = extractFile(path.toFile(), ocrEnabled);
+        ExtractionData data = extractFile(path.toFile(), ocrEnabled, ocrLanguage);
         double elapsedMs = (System.nanoTime() - start) / NANOS_IN_MILLISECOND;
 
         if (!first) {
@@ -178,13 +187,13 @@ public final class TikaExtract {
     System.out.print(jsonArray.toString());
   }
 
-  private static void processServerMode(boolean ocrEnabled) throws Exception {
+  private static void processServerMode(boolean ocrEnabled, String ocrLanguage) throws Exception {
     AutoDetectParser sharedParser = new AutoDetectParser();
     TesseractOCRConfig sharedOcrConfig = new TesseractOCRConfig();
     if (!ocrEnabled) {
       sharedOcrConfig.setSkipOcr(true);
     } else {
-      sharedOcrConfig.setLanguage("eng");
+      sharedOcrConfig.setLanguage(ocrLanguage);
     }
 
     System.out.println("READY");
@@ -248,7 +257,7 @@ public final class TikaExtract {
     return new ExtractionData(content, mimeType);
   }
 
-  private static ExtractionData extractFile(File file, boolean ocrEnabled)
+  private static ExtractionData extractFile(File file, boolean ocrEnabled, String ocrLanguage)
       throws Exception {
     if (!file.exists()) {
       throw new IllegalArgumentException("File does not exist: " +
@@ -266,7 +275,7 @@ public final class TikaExtract {
       context.set(TesseractOCRConfig.class, ocrConfig);
     } else {
       TesseractOCRConfig ocrConfig = new TesseractOCRConfig();
-      ocrConfig.setLanguage("eng");
+      ocrConfig.setLanguage(ocrLanguage);
       context.set(TesseractOCRConfig.class, ocrConfig);
     }
 
