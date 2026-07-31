@@ -1,6 +1,7 @@
 # Benchmark Harness
 
-Rust CLI tool for comparative benchmarking of document extraction across 13 Xberg language bindings and 7 reference frameworks. Measures performance (latency, throughput, memory) and quality (TF1, SF1) against ground truth.
+Rust CLI tool for comparative benchmarking of the Xberg CLI and 7 reference frameworks. Measures performance
+(latency, throughput, memory) and quality (TF1, SF1) against ground truth.
 
 ## Overview
 
@@ -23,6 +24,8 @@ CLI (clap)
  +-- compare          --> ComparisonConfig --> Pipeline extraction --> Quality scoring
  +-- pipeline-benchmark --> 6-path matrix --> TF1/SF1 scoring --> Triage tables
  +-- consolidate      --> Load multi-job results --> Aggregate percentiles
+ +-- validate-artifacts --> Enforce raw and aggregated release contracts
+ +-- cohort-contract  --> Print the pinned matrix contract for one cohort
  +-- validate-gt      --> Fixture scan --> HTML cleanup --> Integrity report
  +-- survey           --> Corpus-wide extraction stats
  +-- model-benchmark  --> Layout model A/B comparison
@@ -35,7 +38,7 @@ CLI (clap)
 | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `main.rs`                           | CLI entry point (clap subcommands)                                                                                         |
 | `adapter.rs`                        | `FrameworkAdapter` trait definition                                                                                        |
-| `adapters/`                         | Adapter implementations: subprocess (persistent/batch), native (in-process), xberg factory functions for all languages |
+| `adapters/`                         | Adapter implementations: subprocess (persistent/batch), native (in-process), and Xberg CLI factories                |
 | `runner.rs`                         | Benchmark orchestration, iteration control, resource monitoring                                                            |
 | `quality.rs`                        | Combined TF1/SF1 quality scoring                                                                                           |
 | `markdown_quality.rs`               | Markdown block parsing and reading-order helpers                                                                           |
@@ -44,6 +47,7 @@ CLI (clap)
 | `pipeline_benchmark.rs`             | 6-path extraction matrix benchmark                                                                                         |
 | `corpus.rs`, `fixture.rs`           | Fixture loading, filtering, validation                                                                                     |
 | `aggregate.rs`, `consolidate.rs`    | Multi-job result merging and percentile aggregation                                                                        |
+| `bench_matrix.rs`, `validate_artifacts.rs` | Pinned cohort matrices and release-contract validation                                                           |
 | `output.rs`, `stats.rs`             | Result serialization and statistical analysis                                                                              |
 | `validate_gt.rs`                    | Ground truth integrity checks and HTML-to-GFM cleanup                                                                      |
 | `monitoring.rs`                     | CPU and memory sampling during benchmarks                                                                                  |
@@ -187,7 +191,7 @@ benchmark-harness run \
 | ---------------------- | ---------------------------------------------- | ------------- |
 | `-f, --fixtures`       | Fixture directory or file                      | required      |
 | `--cohort`             | Exact ordered cohort manifest                  | none          |
-| `--batch-size`         | Require complete fixed-size native batches     | cohort value  |
+| `--batch-size`         | Set the maximum native batch size               | cohort value  |
 | `-F, --frameworks`     | Comma-separated framework names                | all available |
 | `-o, --output`         | Output directory                               | `results`     |
 | `-m, --mode`           | `single-file` or `batch`                       | `batch`       |
@@ -198,13 +202,20 @@ benchmark-harness run \
 | `-t, --timeout`        | Timeout in seconds                             | `1800`        |
 | `--ocr`                | Enable OCR                                     | `false`       |
 | `--measure-quality`    | Enable quality assessment                      | `false`       |
+| `--output-format`      | `markdown` or `plaintext`                        | `markdown`    |
 | `--shard`              | Run fixture subset (`INDEX/TOTAL`, e.g. `1/3`) | none          |
 | `--model-id`           | `FRAMEWORK=OWNER/REPOSITORY@REVISION#DIGEST`; repeatable | none       |
+| `--min-success-rate`   | Minimum success fraction for supported attempts | `1.0`       |
 
 An exact cohort preserves manifest order and rejects duplicates, parent paths, missing
-fixtures, and a fixture count that is not divisible by its batch size. In batch mode each
-framework's compatible fixture set must also divide evenly; the harness never emits a partial
-native batch. Sharding cannot be combined with exact cohorts or fixed batch sizing.
+fixtures, and a manifest fixture count that is not divisible by its batch size. Each adapter first
+filters unsupported fixtures; its final native batch may therefore contain fewer documents than
+the configured batch size. Sharding cannot be combined with exact cohorts or fixed batch sizing.
+
+`--min-success-rate` counts successful results over successful results plus framework-accountable
+failures (`FrameworkError`, `Timeout`, and `EmptyContent`). Unsupported fixtures are filtered before
+execution. Infrastructure failures are reported separately and do not enter this rate; a framework
+with no accountable results still fails validation.
 
 `--max-concurrent` and `--xberg-max-threads` can be varied independently for Xberg.
 An explicit thread budget applies to both single-file and native batch invocations.
@@ -216,19 +227,37 @@ repository state, ordered fixture/document digests, framework executable identit
 timing configuration, worker semantics, and the actual Xberg thread budget reported by the
 adapter. It deliberately stores no local absolute paths.
 
-The remote comparative workflow publishes native and forced-OCR cohorts independently. Native
-releases contain exactly 22 framework/format/mode keys; OCR releases contain exactly 18. Before a
-release is created, every raw artifact is matched to the expected matrix cell and checked against
-the pinned source revision, ordered cohort manifest and BLAKE3 digest, fixed batch size, output
-format, OCR mode, fixture cardinality, iteration count, and zero-error result contract. The
-release attaches separate `benchmarks-native-*` and `benchmarks-ocr-*` data/metadata assets plus
-`benchmarks-index.json`, so consumers cannot accidentally merge native-text and OCR measurements.
+The remote comparative workflow publishes eight independently validated cohorts. The pinned matrix
+contract contains these cell counts:
+
+| Cohort   | Required | Optional | Total |
+| -------- | -------: | -------: | ----: |
+| `native` |       20 |        1 |    21 |
+| `ocr`    |       16 |        3 |    19 |
+| `office` |        4 |        7 |    11 |
+| `markup` |        4 |        7 |    11 |
+| `ebook`  |        4 |        2 |     6 |
+| `email`  |        4 |        2 |     6 |
+| `data`   |        4 |        7 |    11 |
+| `images` |        8 |        8 |    16 |
+
+Before publication, `validate-artifacts` matches every present raw artifact to its matrix cell and
+checks the pinned source revision, ordered cohort manifest and BLAKE3 digest, batch size, output
+format, OCR mode, fixture cardinality, iteration count, and provenance. Required cells must be
+present and error-free. Optional cells may be absent; when present, they must satisfy the same
+integrity and cardinality checks and may contain only accountable framework failures with diagnostic
+messages. Infrastructure failures always fail validation. The command then validates each
+consolidated aggregate against the same required/optional contract.
+
+Each release attaches `benchmarks-<cohort>-aggregated.json` and
+`benchmarks-<cohort>-metadata.json` for every cohort, plus `benchmarks-index.json`. Use
+`cohort-contract --cohort <name>` to print the exact pinned matrix consumed by the workflow.
 
 The capability matrix never fabricates an unsupported format or batch mode. Docling and LiteParse
 have native Markdown/plaintext plus single/batch entry points. MarkItDown and PyMuPDF4LLM are
 Markdown-only single-file tools; Tika and Unstructured are plaintext-only single-file tools.
 MinerU's canonical output is Markdown, so only its
-single-document and native `do_parse` batch entries are included in native and forced-OCR cohorts.
+single-file entries are included as optional cells in the native, OCR, and image cohorts.
 
 Local profile runs also write `benchmark-profile.json`. Its `run_identity_sha256` binds the
 selected binary, profile configuration, and recursive Git worktree state at execution time,
@@ -237,6 +266,27 @@ repository `.gitignore` files only; global and repository-local exclusion config
 ignored. Hashing reads index and filesystem state directly without invoking configured Git
 filters, fsmonitor hooks, or external diff helpers. This identifies the binary and checkout used
 for a run; it does not claim that the binary was built from that checkout.
+
+### `validate-artifacts` and `cohort-contract` -- Release validation
+
+Validate raw artifacts before consolidation, then validate the consolidated aggregate:
+
+```bash
+benchmark-harness validate-artifacts \
+  --cohort native \
+  --artifacts-dir benchmark-artifacts/native \
+  --cohort-manifest cohorts/native-pdf-fast-b8.json \
+  --fixtures-root fixtures \
+  --source-sha "$SOURCE_SHA" \
+  --run-id "$RUN_ID" \
+  --iterations 3
+
+benchmark-harness validate-artifacts \
+  --cohort native \
+  --aggregated-file consolidated-output/native/aggregated.json
+
+benchmark-harness cohort-contract --cohort native
+```
 
 ### `consolidate` -- Merge multi-job results
 
@@ -358,32 +408,31 @@ The benchmark suite runs via `.github/workflows/benchmarks.yaml`, triggered by m
 
 ```text
 setup
-  Build harness + FFI library + validate ground truth
+  Build harness + Xberg CLI + validate ground truth
     |
     v
-bench-{language} x {single-file, batch}     (13 Xberg binding jobs)
+bench-rust x {pipeline, format, mode, cohort}  (all 8 cohorts)
     |
     v
-xberg-gate                                (wait for all Xberg benchmarks)
+bench-{external}                              (7 reference frameworks)
     |
     v
-bench-{external}                              (7 reference framework jobs, some sharded)
-    |
-    v
-aggregate-and-release                         (consolidate all results -> GitHub Release)
+aggregate-and-publish                         (validate -> consolidate -> release)
+
+prefetch-mineru-models runs alongside setup and gates the MinerU job and publication.
 ```
 
 ### Platform
 
-- Primary: `ubuntu-24.04-arm`
-- Exception: WASM uses `ubuntu-24.04` (x86) due to V8 ARM compatibility issues
+- Benchmark jobs: ARM64 hosted runners sized per framework and pipeline
+- Aggregation and publication: `ubuntu-24.04-arm`
 
 ### Timeouts and Artifacts
 
-- Per-job timeout: 6 hours (configurable per-document timeout)
+- Benchmark-job timeout: 6 hours; MinerU model prefetch timeout: 2 hours
 - Build artifacts retained: 7 days
 - Result artifacts retained: 30 days
-- Final output: aggregated JSON published as a GitHub Release
+- Final output: eight cohort-specific aggregates and metadata files published as a GitHub Release
 
 ## Vendored Baselines
 

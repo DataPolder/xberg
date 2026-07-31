@@ -589,7 +589,7 @@ enum Commands {
     /// artifacts, which requires `--artifacts-dir`, `--cohort-manifest`, `--fixtures-root`,
     /// `--source-sha`, and `--run-id`.
     ValidateArtifacts {
-        /// Which cohort's release contract to validate (native or ocr)
+        /// Which cohort's release contract to validate
         #[arg(long)]
         cohort: CliCohort,
 
