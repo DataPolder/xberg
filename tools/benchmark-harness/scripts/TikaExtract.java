@@ -97,7 +97,8 @@ public final class TikaExtract {
   }
 
   private static void processSyncMode(String filePath, boolean ocrEnabled,
-                                      String ocrLanguage, boolean debug) throws Exception {
+                                      String ocrLanguage, boolean debug)
+      throws Exception {
     if (debug) {
       debugLog("Input file", filePath);
     }
@@ -128,8 +129,8 @@ public final class TikaExtract {
   }
 
   private static void processBatchMode(List<String> positionalArgs,
-                                       boolean ocrEnabled, String ocrLanguage, boolean debug)
-      throws Exception {
+                                       boolean ocrEnabled, String ocrLanguage,
+                                       boolean debug) throws Exception {
     List<String> filePaths = new ArrayList<>();
     for (int i = 1; i < positionalArgs.size(); i++) {
       filePaths.add(positionalArgs.get(i));
@@ -148,7 +149,8 @@ public final class TikaExtract {
       try {
         Path path = Path.of(filePath);
         long start = System.nanoTime();
-        ExtractionData data = extractFile(path.toFile(), ocrEnabled, ocrLanguage);
+        ExtractionData data =
+            extractFile(path.toFile(), ocrEnabled, ocrLanguage);
         double elapsedMs = (System.nanoTime() - start) / NANOS_IN_MILLISECOND;
 
         if (!first) {
@@ -187,7 +189,8 @@ public final class TikaExtract {
     System.out.print(jsonArray.toString());
   }
 
-  private static void processServerMode(boolean ocrEnabled, String ocrLanguage) throws Exception {
+  private static void processServerMode(boolean ocrEnabled, String ocrLanguage)
+      throws Exception {
     AutoDetectParser sharedParser = new AutoDetectParser();
     TesseractOCRConfig sharedOcrConfig = new TesseractOCRConfig();
     if (!ocrEnabled) {
@@ -257,7 +260,8 @@ public final class TikaExtract {
     return new ExtractionData(content, mimeType);
   }
 
-  private static ExtractionData extractFile(File file, boolean ocrEnabled, String ocrLanguage)
+  private static ExtractionData extractFile(File file, boolean ocrEnabled,
+                                            String ocrLanguage)
       throws Exception {
     if (!file.exists()) {
       throw new IllegalArgumentException("File does not exist: " +
