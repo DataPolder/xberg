@@ -1319,6 +1319,23 @@ cfg = 'all(target_os = "macos", target_arch = "x86_64")'
 features = ["macos-intel-target"]
 default_features = false
 
+# NOTE (heic / xberg-ffi on the swift-bridge shim):
+# The swift-bridge backend injects an `xberg-ffi` path dependency (the C-ABI
+# shim) with Cargo-default features. That pulls xberg-ffi's default `heic`
+# feature -> `libheif-sys`, whose build script shells out to `pkg-config` and
+# cannot cross-compile, breaking every cross-compiled xberg-swift target
+# (x86_64-apple-darwin; Linux via zigbuild). alef hardcodes this injection
+# (src/backends/swift/gen_rust_crate/cargo.rs) with no `default-features`
+# control, and it is NOT covered by the swift crate's `excluded_default_features`
+# / `target_dep_overrides` (those govern only the primary `xberg` core dep). An
+# `extra_dependencies.xberg-ffi` entry does NOT override it — it emits a SECOND
+# `xberg-ffi` key, a duplicate-key manifest that poisons the workspace mid-regen.
+# So we do NOT declare it here. Instead `packages/swift/rust/Cargo.toml` carries
+# a committed post-regen normalization: its `xberg-ffi` line is set to
+# `default-features = false` + the full-minus-heic feature list. That edit is
+# stable for CI/publish (no CI job regenerates `packages/` + diffs), but a local
+# `alef all` reverts it — reapply it. Durable fix is upstream in alef.
+
 [crates.csharp]
 namespace = "Xberg"
 package_id = "XbergIo.Xberg"

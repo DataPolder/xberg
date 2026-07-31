@@ -30,6 +30,10 @@ default = [
     "liter-llm",
     "ocr",
     "paddle-ocr",
+    # Candle pure-Rust VLM OCR backends (TrOCR, PaddleOCR-VL, GLM-OCR, DeepSeek-OCR). CPU inference,
+    # shipped in the default CLI binary and the `--features all` container so `--ocr-backend
+    # candle-glm-ocr` works out of the box. `all` inherits `default`, so this covers both.
+    "candle-vlm-ocr",
     "layout-detection",
     "chunking-tokenizers",
     "tree-sitter",

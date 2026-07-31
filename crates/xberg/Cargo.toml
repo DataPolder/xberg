@@ -175,7 +175,11 @@ candle-paddleocr-vl = ["candle-ocr", "xberg-candle-ocr/paddleocr-vl"]
 candle-glm-ocr = ["candle-ocr", "xberg-candle-ocr/glm-ocr", "layout-detection"]
 # DeepSeek-OCR backend: aggregate feature enabling candle-ocr with deepseek-ocr sub-feature
 candle-deepseek-ocr = ["candle-ocr", "xberg-candle-ocr/deepseek-ocr"]
-# Umbrella aggregate for all candle VLM OCR backends (not in full/formats/wasm-target/android-target)
+# Umbrella aggregate for all candle VLM OCR backends. Included in `full` + `windows-target`
+# (and the xberg-cli default) so published packages ship these backends and `ocr.backend =
+# "candle-*"` resolves without a source rebuild. Excluded from `formats` (OCR, not a format),
+# `wasm-target` (no candle on wasm — the dep is cfg(not(wasm32))), and `android-target` (lean
+# mobile surface). candle-core is default-features=false so CPU candle links on every native target.
 candle-vlm-ocr = [
     "candle-deepseek-ocr",
     "candle-paddleocr-vl",
@@ -662,6 +666,13 @@ windows-target = [
     "html",
     "tree-sitter",
     "office",
+    # excel = [dep:calamine, tokio-runtime]: calamine is pure Rust (Windows-safe)
+    # and tokio-runtime is already enabled above. Without this, the static format
+    # registry still advertises XLSX (EXT_TO_MIME is ungated) but the excel
+    # extractor is #[cfg(feature = "excel")]-compiled-out, so extract() returns
+    # UnsupportedFormat on Windows for a format listSupportedFormats() reports as
+    # supported (the 1.0.4 Windows XLSX bug).
+    "excel",
     "email",
     "archives",
     "stopwords",
@@ -673,6 +684,9 @@ windows-target = [
     "auto-rotate",
     "layout-detection",
     "paddle-ocr",
+    # Candle VLM OCR backends. candle-core is default-features=false with GPU strictly opt-in, so
+    # CPU candle links cleanly on Windows MSVC (no cudarc/metal-kernels). Parity with other platforms.
+    "candle-vlm-ocr",
     "embeddings",
     "reranker",
     "sparse-embeddings",
@@ -736,9 +750,9 @@ windows-target = [
 # from a bundled libonnxruntime.dylib via ORT_DYLIB_PATH, so no build-time
 # prebuilt is needed. ort-sys `disable-linking` (pulled by load-dynamic) short-
 # circuits its build script before any download resolution, so pairing it with
-# `full` (whose ML features still name `ort-bundled`) is safe: dynamic wins
-# workspace-wide. Same combo CI already exercises in ci-gpu.yaml.
-macos-intel-target = ["full", "ort-dynamic"]
+# `full-no-heic` (whose ML features still name `ort-bundled`) is safe: dynamic
+# wins workspace-wide. Same combo CI already exercises in ci-gpu.yaml.
+macos-intel-target = ["full-no-heic", "ort-dynamic"]
 # Mobile deployment preset — formats + analysis + Tesseract OCR + code intelligence + API types.
 # Excludes ORT-dependent features (paddle-ocr, layout-detection, embeddings, reranker,
 # auto-rotate, transcription)
@@ -767,6 +781,26 @@ formats = [
     "heic",
     "wordperfect",
 ]
+# `formats` minus `heic`. Exists solely so `full-no-heic` (below) can express
+# "everything `full` has, except `heic`" without duplicating cargo's inability
+# to subtract a feature from an already-aggregated one. Keep in sync with
+# `formats` (same list, `heic` omitted).
+formats-no-heic = [
+    "pdf",
+    "excel",
+    "office",
+    "notebook",
+    "hwp",
+    "hwpx",
+    "iwork",
+    "email",
+    "html",
+    "xml",
+    "archives",
+    "mdx",
+    "svg",
+    "wordperfect",
+]
 # Text processing and analysis capabilities.
 analysis = [
     "language-detection",
@@ -787,6 +821,11 @@ full = [
     "ocr",
     "paddle-ocr",
     "layout-detection",
+    # Candle pure-Rust VLM OCR backends (TrOCR, PaddleOCR-VL, GLM-OCR, DeepSeek-OCR). CPU inference
+    # (candle-core is default-features=false; GPU is opt-in via candle-cuda/metal/mkl/accelerate),
+    # so this links on every native target. Shipped in published packages so `ocr.backend =
+    # "candle-glm-ocr"` (etc.) works out of the box without a source rebuild.
+    "candle-vlm-ocr",
     "embeddings",
     "static-embeddings",
     "reranker",
@@ -814,6 +853,49 @@ full = [
     "captioning",
     "qr-codes",
     "heic",
+    "wordperfect",
+]
+# `full` minus `heic` — for targets that must cross-compile (no pkg-config
+# support for `libheif-sys`) but otherwise want full feature parity. See
+# `macos-intel-target` for the canonical consumer and rationale. Keep in sync
+# with `full` (same list, `formats` swapped for `formats-no-heic`, `heic`
+# omitted). Candle is included here: candle-core is default-features=false and
+# cross-compiles fine, so no-heic targets still get the VLM OCR backends.
+full-no-heic = [
+    "formats-no-heic",
+    "analysis",
+    "services",
+    "url-ingestion",
+    "ocr",
+    "paddle-ocr",
+    "layout-detection",
+    "candle-vlm-ocr",
+    "embeddings",
+    "static-embeddings",
+    "reranker",
+    "sparse-embeddings",
+    "late-interaction",
+    "transcription",
+    "chunking-tokenizers",
+    "enrichment",
+    "heuristics",
+    "tree-sitter",
+    "liter-llm",
+    "tokio-runtime",
+    "diff",
+    "ner-llm",
+    "ner-onnx",
+    "presets",
+    "structured",
+    "redaction",
+    "redaction-ml",
+    "redaction-rehydrate",
+    "summarization",
+    "summarization-llm",
+    "translation",
+    "classification",
+    "captioning",
+    "qr-codes",
     "wordperfect",
 ]
 # Server deployment preset — formats + analysis + services + OCR.
@@ -1017,9 +1099,11 @@ pprof = { version = "0.15.0", features = ["flamegraph"], optional = true }
 # keep tokenizers' separate `http` client disabled to avoid a second cache stack.
 tokenizers = { version = "0.23", default-features = false, features = ["fancy-regex"], optional = true }
 # Candle-based VLM OCR backends - pure-Rust transformer inference, not on WASM yet.
-# Note: candle-core unconditionally links platform-specific deps (cudarc on Linux, metal-kernels on macOS).
-# To avoid conflicts during feature unification, GPU features (candle-cuda/metal/mkl/accelerate) should
-# only be explicitly enabled with platform awareness. CI uses `--features full` which excludes GPU accel.
+# candle-core is pinned default-features=false (workspace Cargo.toml), so it links NO GPU deps
+# by default — CPU inference links cleanly on every native target (Linux/macOS/Windows), which is
+# why `candle-vlm-ocr` is safe in `full`/`windows-target`. GPU acceleration (cudarc / metal) is
+# strictly opt-in via candle-cuda/metal/mkl/accelerate and must be enabled with platform awareness.
+# CI uses `--features full` which keeps GPU accel off.
 xberg-candle-ocr = { path = "../xberg-candle-ocr", version = "1.0.6", optional = true }
 # PaddleOCR via ONNX Runtime - not available on WASM (vendored from paddle-ocr-rs)
 xberg-paddle-ocr = { path = "../xberg-paddle-ocr", version = "1.0.6", optional = true }
