@@ -314,14 +314,12 @@ fn fixed_batch_ranges(item_count: usize, batch_size: Option<usize>) -> Result<Ve
     if batch_size == 0 {
         return Err(Error::Config("fixed batch size must be greater than zero".to_string()));
     }
-    if !item_count.is_multiple_of(batch_size) {
-        return Err(Error::Config(format!(
-            "{item_count} eligible documents cannot be partitioned into complete batches of {batch_size}"
-        )));
-    }
+    // Allow a smaller final batch. A framework benchmarks only the formats it declares support for,
+    // so its eligible-document count need not be an exact multiple of the cohort's fixed batch size
+    // (0 eligible → no batches). The last range is clamped to `item_count`.
     Ok((0..item_count)
         .step_by(batch_size)
-        .map(|start| start..start + batch_size)
+        .map(|start| start..(start + batch_size).min(item_count))
         .collect())
 }
 
@@ -1325,8 +1323,12 @@ mod tests {
     }
 
     #[test]
-    fn fixed_batch_ranges_reject_partial_batches() {
-        assert!(fixed_batch_ranges(5, Some(4)).is_err());
+    fn fixed_batch_ranges_allow_smaller_final_batch() {
+        // A non-multiple eligible count yields a smaller final batch rather than an error.
+        assert_eq!(fixed_batch_ranges(5, Some(4)).unwrap(), [0..4, 4..5]);
+        assert_eq!(fixed_batch_ranges(1, Some(4)).unwrap(), [0..1]);
+        // Zero documents -> no batches; a zero batch size is still rejected.
+        assert!(fixed_batch_ranges(0, Some(4)).unwrap().is_empty());
         assert!(fixed_batch_ranges(0, Some(0)).is_err());
     }
 
@@ -1652,7 +1654,7 @@ mod tests {
     #[test]
     fn cold_subprocess_batch_never_runs_discarded_warmup_iterations() {
         let cold = BatchCapability {
-            entry_point: crate::types::BatchEntryPoint::DoclingConvertAll,
+            entry_point: crate::types::BatchEntryPoint::DoclingJobkit,
             timing_scope: BatchTimingScope::ColdEndToEndSubprocess,
             per_item_timing: false,
         };
@@ -1977,7 +1979,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fixed_batches_reject_partial_adapter_filter_before_native_call() {
+    async fn fixed_batches_allow_partial_after_adapter_filter() {
         let temp = tempfile::tempdir().unwrap();
         let manifest = write_ordered_cohort(temp.path(), &["pdf", "txt", "pdf", "pdf"]);
         let batches = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -1997,10 +1999,18 @@ mod tests {
         runner.load_cohort(temp.path(), &manifest).unwrap();
         runner.set_fixed_batch_size(2).unwrap();
 
-        let error = runner.run(&["recording".to_string()]).await.unwrap_err();
+        runner.run(&["recording".to_string()]).await.unwrap();
 
-        assert!(error.to_string().contains("cannot be partitioned"));
-        assert!(batches.lock().unwrap().is_empty());
+        // The adapter supports only pdf, so the txt fixture (b.pdf) is filtered out before the
+        // native batch call. The 3 eligible pdfs partition into a full batch of 2 and a smaller
+        // final batch of 1 (manifest fixture order d, a, c) rather than aborting the run.
+        assert_eq!(
+            *batches.lock().unwrap(),
+            [
+                vec!["d.pdf".to_string(), "a.pdf".to_string()],
+                vec!["c.pdf".to_string()],
+            ]
+        );
     }
 
     #[tokio::test]

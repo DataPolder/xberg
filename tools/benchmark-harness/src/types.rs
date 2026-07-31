@@ -438,7 +438,7 @@ pub struct FrameworkCapabilities {
 #[serde(rename_all = "snake_case")]
 pub enum BatchEntryPoint {
     XbergCliExtractBatch,
-    DoclingConvertAll,
+    DoclingJobkit,
     LiteparseBatchParse,
     MineruDoParse,
 }

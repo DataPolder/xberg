@@ -1986,7 +1986,7 @@ mod tests {
     #[test]
     fn repeated_identical_semantic_batches_remain_independent_process_samples() {
         let capability = crate::types::BatchCapability {
-            entry_point: crate::types::BatchEntryPoint::DoclingConvertAll,
+            entry_point: crate::types::BatchEntryPoint::DoclingJobkit,
             timing_scope: crate::types::BatchTimingScope::ColdEndToEndSubprocess,
             per_item_timing: false,
         };
@@ -2023,7 +2023,7 @@ mod tests {
         let mut result = create_test_result("docling", "pdf", OcrStatus::NotUsed, 100, 0.0, 10_000_000);
         result.framework_capabilities.batch_support = true;
         result.framework_capabilities.batch_capability = Some(crate::types::BatchCapability {
-            entry_point: crate::types::BatchEntryPoint::DoclingConvertAll,
+            entry_point: crate::types::BatchEntryPoint::DoclingJobkit,
             timing_scope: crate::types::BatchTimingScope::ColdEndToEndSubprocess,
             per_item_timing: false,
         });
@@ -2039,7 +2039,7 @@ mod tests {
     #[test]
     fn legacy_batch_rows_fall_back_to_the_positive_throughput_anchor() {
         let capability = crate::types::BatchCapability {
-            entry_point: crate::types::BatchEntryPoint::DoclingConvertAll,
+            entry_point: crate::types::BatchEntryPoint::DoclingJobkit,
             timing_scope: crate::types::BatchTimingScope::ColdEndToEndSubprocess,
             per_item_timing: false,
         };

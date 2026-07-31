@@ -629,7 +629,7 @@ mod tests {
     #[test]
     fn test_framework_stats_does_not_divide_batch_throughput_anchor_by_cardinality() {
         let capability = crate::types::BatchCapability {
-            entry_point: crate::types::BatchEntryPoint::DoclingConvertAll,
+            entry_point: crate::types::BatchEntryPoint::DoclingJobkit,
             timing_scope: crate::types::BatchTimingScope::ColdEndToEndSubprocess,
             per_item_timing: false,
         };

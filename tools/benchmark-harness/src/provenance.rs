@@ -192,25 +192,16 @@ impl RunProvenance {
                             .is_none_or(|name| !adapter.should_skip_file(name))
                 })
                 .count();
+            // A framework only benchmarks the formats it declares support for, so its eligible-doc
+            // count need not be a multiple of the cohort's fixed batch size. Partition into batches
+            // of at most `size` with a smaller final batch when the count isn't an exact multiple
+            // (0 eligible -> 0 partitions), mirroring `fixed_batch_ranges` in the runner. This
+            // previously aborted the whole invocation, silently dropping e.g. docling batch on the
+            // family cohorts where it supports only a subset of the member formats.
             let batch_partitions = inputs
                 .fixed_batch_size
                 .filter(|_| capability.is_some())
-                .map(|size| {
-                    if eligible_documents == 0 {
-                        return Err(Error::Config(format!(
-                            "framework '{}' has no eligible documents in the fixed cohort",
-                            adapter.name()
-                        )));
-                    }
-                    if !eligible_documents.is_multiple_of(size) {
-                        return Err(Error::Config(format!(
-                            "framework '{}' has {eligible_documents} eligible documents, not a complete multiple of fixed batch size {size}",
-                            adapter.name()
-                        )));
-                    }
-                    Ok(eligible_documents / size)
-                })
-                .transpose()?;
+                .map(|size| if size == 0 { 0 } else { eligible_documents.div_ceil(size) });
             let batch_workers = capability.map(|_| adapter.worker_provenance(inputs.config.max_concurrent));
             let (requested_workers, effective_workers) = worker_counts(
                 inputs.config.benchmark_mode,
@@ -388,8 +379,8 @@ fn worker_semantics(mode: BenchmarkMode, capability: Option<BatchCapability>) ->
         (BenchmarkMode::Batch, Some(BatchEntryPoint::XbergCliExtractBatch)) => {
             "configured document concurrency cap; Xberg thread budget is recorded separately"
         }
-        (BenchmarkMode::Batch, Some(BatchEntryPoint::DoclingConvertAll)) => {
-            "convert_all document stream; adapter does not override Docling workers"
+        (BenchmarkMode::Batch, Some(BatchEntryPoint::DoclingJobkit)) => {
+            "docling-jobkit convert_documents in-process; single-process, jobkit multiprocessing disabled"
         }
         (BenchmarkMode::Batch, Some(BatchEntryPoint::LiteparseBatchParse)) => {
             "OCR page workers; not document-level concurrency"
@@ -714,7 +705,7 @@ mod tests {
         use crate::adapters::subprocess::SubprocessAdapter;
 
         let capability = BatchCapability {
-            entry_point: BatchEntryPoint::DoclingConvertAll,
+            entry_point: BatchEntryPoint::DoclingJobkit,
             timing_scope: crate::types::BatchTimingScope::ColdEndToEndSubprocess,
             per_item_timing: false,
         };

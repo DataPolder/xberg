@@ -310,6 +310,18 @@ fn required_count(contract: &CohortContract) -> usize {
     contract.matrix.iter().filter(|entry| !entry.optional).count()
 }
 
+/// Aggregate key of a required (non-optional) matrix entry. Validation skips optional groups, so a
+/// tamper test must target a required group to observe the rejection deterministically — picking an
+/// arbitrary group via HashMap iteration order is flaky, as it may land on a skipped optional group.
+fn required_group_key(contract: &CohortContract) -> String {
+    contract
+        .matrix
+        .iter()
+        .find(|entry| !entry.optional)
+        .expect("cohort has a required entry")
+        .aggregate_key()
+}
+
 fn optional_artifact_dir(scenario: &ArtifactScenario) -> PathBuf {
     let entry = scenario
         .contract
@@ -842,7 +854,8 @@ fn rejects_aggregate_group_without_file_type_metrics() {
     // A group with no file-type buckets can never account for the cohort's fixtures.
     let contract = Cohort::Native.contract();
     let mut aggregate = build_aggregate(&contract, Cohort::Native);
-    let first_group = aggregate.by_framework_mode.values_mut().next().unwrap();
+    let key = required_group_key(&contract);
+    let first_group = aggregate.by_framework_mode.get_mut(&key).unwrap();
     first_group.by_file_type.clear();
     let (_root, path) = write_aggregate(&aggregate);
     assert_err_contains(
@@ -866,7 +879,8 @@ fn rejects_aggregate_with_unexpected_file_type_bucket() {
     // A file-type bucket the cohort's fixtures don't contain must be rejected, even if counts sum.
     let contract = Cohort::Office.contract();
     let mut aggregate = build_aggregate(&contract, Cohort::Office);
-    let group = aggregate.by_framework_mode.values_mut().next().unwrap();
+    let key = required_group_key(&contract);
+    let group = aggregate.by_framework_mode.get_mut(&key).unwrap();
     // Move all `docx` samples (2) into a bogus `pdf` bucket: totals still sum to 8, but pdf is not
     // an office extension and docx is now missing.
     let docx = group.by_file_type.remove("docx").unwrap();
@@ -887,7 +901,8 @@ fn rejects_aggregate_with_wrong_file_type_sample_count() {
     // the per-extension check the sum-only check used to miss.
     let contract = Cohort::Office.contract();
     let mut aggregate = build_aggregate(&contract, Cohort::Office);
-    let group = aggregate.by_framework_mode.values_mut().next().unwrap();
+    let key = required_group_key(&contract);
+    let group = aggregate.by_framework_mode.get_mut(&key).unwrap();
     group
         .by_file_type
         .get_mut("docx")

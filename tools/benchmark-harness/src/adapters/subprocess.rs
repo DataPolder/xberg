@@ -956,7 +956,7 @@ impl SubprocessAdapter {
         };
         let entry_point: &[u8] = match self.batch_capability.map(|capability| capability.entry_point) {
             Some(BatchEntryPoint::XbergCliExtractBatch) => b"xberg-cli-extract-batch",
-            Some(BatchEntryPoint::DoclingConvertAll) => b"docling-convert-all",
+            Some(BatchEntryPoint::DoclingJobkit) => b"docling-jobkit",
             Some(BatchEntryPoint::LiteparseBatchParse) => b"liteparse-batch-parse",
             Some(BatchEntryPoint::MineruDoParse) => b"mineru-do-parse",
             None => b"unverified",
@@ -1499,7 +1499,7 @@ impl FrameworkAdapter for SubprocessAdapter {
 
     fn worker_provenance(&self, requested: usize) -> (Option<usize>, Option<usize>) {
         match self.batch_capability.map(|capability| capability.entry_point) {
-            Some(crate::types::BatchEntryPoint::DoclingConvertAll) => (None, None),
+            Some(crate::types::BatchEntryPoint::DoclingJobkit) => (None, None),
             Some(crate::types::BatchEntryPoint::MineruDoParse) => (None, None),
             Some(crate::types::BatchEntryPoint::XbergCliExtractBatch) => (Some(requested), None),
             Some(crate::types::BatchEntryPoint::LiteparseBatchParse) => (Some(requested), Some(self.batch_workers)),
@@ -1680,7 +1680,7 @@ impl FrameworkAdapter for SubprocessAdapter {
 
     fn version(&self) -> String {
         let output = match self.batch_capability.map(|capability| capability.entry_point) {
-            Some(crate::types::BatchEntryPoint::DoclingConvertAll) => std::process::Command::new(&self.command)
+            Some(crate::types::BatchEntryPoint::DoclingJobkit) => std::process::Command::new(&self.command)
                 .args(["-c", DOCLING_VERSION_PROBE])
                 .envs(self.env.iter().map(|(key, value)| (key, value)))
                 .output(),
@@ -2073,7 +2073,7 @@ mod tests {
             vec![("PYTHONPATH".to_string(), site.path().to_string_lossy().into_owned())],
             vec!["pdf".to_string()],
             BatchCapability {
-                entry_point: BatchEntryPoint::DoclingConvertAll,
+                entry_point: BatchEntryPoint::DoclingJobkit,
                 timing_scope: crate::types::BatchTimingScope::ColdEndToEndSubprocess,
                 per_item_timing: false,
             },
@@ -2401,7 +2401,7 @@ mod tests {
             vec![],
             vec!["pdf".to_string()],
             BatchCapability {
-                entry_point: BatchEntryPoint::DoclingConvertAll,
+                entry_point: BatchEntryPoint::DoclingJobkit,
                 timing_scope: crate::types::BatchTimingScope::ColdEndToEndSubprocess,
                 per_item_timing: false,
             },
@@ -2427,7 +2427,7 @@ mod tests {
             vec![],
             vec!["pdf".to_string()],
             BatchCapability {
-                entry_point: BatchEntryPoint::DoclingConvertAll,
+                entry_point: BatchEntryPoint::DoclingJobkit,
                 timing_scope: crate::types::BatchTimingScope::ColdEndToEndSubprocess,
                 per_item_timing: false,
             },
@@ -3060,7 +3060,7 @@ mod tests {
             vec![],
             vec!["pdf".to_string()],
             BatchCapability {
-                entry_point: BatchEntryPoint::DoclingConvertAll,
+                entry_point: BatchEntryPoint::DoclingJobkit,
                 timing_scope: crate::types::BatchTimingScope::ColdEndToEndSubprocess,
                 per_item_timing: false,
             },
@@ -3270,7 +3270,7 @@ mod tests {
     #[tokio::test]
     async fn batch_envelope_preserves_unavailable_per_item_timings() {
         let capability = BatchCapability {
-            entry_point: BatchEntryPoint::DoclingConvertAll,
+            entry_point: BatchEntryPoint::DoclingJobkit,
             timing_scope: crate::types::BatchTimingScope::ColdEndToEndSubprocess,
             per_item_timing: false,
         };
@@ -3322,7 +3322,7 @@ mod tests {
             vec![],
             vec!["pdf".to_string()],
             BatchCapability {
-                entry_point: BatchEntryPoint::DoclingConvertAll,
+                entry_point: BatchEntryPoint::DoclingJobkit,
                 timing_scope: crate::types::BatchTimingScope::ColdEndToEndSubprocess,
                 per_item_timing: false,
             },

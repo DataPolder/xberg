@@ -709,7 +709,7 @@ async fn main() -> Result<()> {
                     external_count
                 );
                 tracing::debug!(
-                    docling_api = "convert_all",
+                    docling_api = "docling_jobkit.convert_documents",
                     docling_execution = "cold end-to-end subprocess",
                     liteparse_api = "batch-parse",
                     "verified batch APIs"

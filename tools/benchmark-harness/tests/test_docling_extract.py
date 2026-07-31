@@ -1,4 +1,9 @@
-"""Conformance tests for the isolated Docling benchmark wrapper."""
+"""Conformance tests for the isolated Docling benchmark wrapper.
+
+The batch path is driven by docling-jobkit's ``DoclingConverterManager``; the sync path still
+uses docling's ``DocumentConverter``. These tests validate the wrapper's contract without
+importing the real docling or docling-jobkit packages, so they run under a plain ``cargo test``.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +11,6 @@ import importlib.util
 import sys
 import types
 import unittest
-from collections.abc import Iterator
 from pathlib import Path
 from unittest import mock
 
@@ -27,6 +31,16 @@ def _load_wrapper() -> types.ModuleType:
     return module
 
 
+class _Status:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
+# The wrapper compares by identity against ConversionStatus.SUCCESS.
+_SUCCESS = _Status("SUCCESS")
+_FAILURE = _Status("FAILURE")
+
+
 class _Document:
     def __init__(self, path: str, events: list[str]) -> None:
         self.path = path
@@ -36,37 +50,73 @@ class _Document:
         self.events.append(f"render:{self.path}")
         return f"markdown:{self.path}"
 
+    def export_to_text(self) -> str:
+        self.events.append(f"render_text:{self.path}")
+        return f"text:{self.path}"
+
 
 class _Result:
     def __init__(self, path: str, events: list[str], *, success: bool) -> None:
-        self.status = types.SimpleNamespace(name="SUCCESS" if success else "FAILURE")
+        self.status = _SUCCESS if success else _FAILURE
         self.document = _Document(path, events)
         self.errors = [] if success else [f"failed:{path}"]
 
 
-class _Converter:
-    def __init__(self, events: list[str]) -> None:
+class _Manager:
+    """Stand-in for docling-jobkit's ``DoclingConverterManager``."""
+
+    last: "_Manager | None" = None
+
+    def __init__(self, events: list[str], config: object) -> None:
         self.events = events
+        self.config = config
         self.calls = 0
+        self.sources: list[str] = []
+        _Manager.last = self
 
-    def convert_all(self, paths: list[str], *, raises_on_error: bool) -> Iterator[_Result]:
+    def convert_documents(self, *, sources, options):
         self.calls += 1
-        self.events.append("convert_all")
-        assert raises_on_error is False
+        self.sources = list(sources)
+        self.options = options
 
-        def results() -> Iterator[_Result]:
-            for index, path in enumerate(paths):
+        def stream():
+            self.events.append("convert_documents")
+            for index, path in enumerate(self.sources):
                 self.events.append(f"yield:{path}")
                 yield _Result(path, self.events, success=index == 0)
 
-        return results()
+        return stream()
+
+
+def _jobkit_modules(events: list[str]) -> dict[str, types.ModuleType]:
+    """Build the fake docling / docling-jobkit module tree the batch path imports lazily."""
+    base_models = types.ModuleType("docling.datamodel.base_models")
+    base_models.ConversionStatus = types.SimpleNamespace(SUCCESS=_SUCCESS)
+    base_models.OutputFormat = types.SimpleNamespace(MARKDOWN="md", TEXT="text")
+
+    manager_mod = types.ModuleType("docling_jobkit.convert.manager")
+    manager_mod.DoclingConverterManager = lambda config: _Manager(events, config)
+    manager_mod.DoclingConverterManagerConfig = lambda **kwargs: types.SimpleNamespace(**kwargs)
+
+    convert_mod = types.ModuleType("docling_jobkit.datamodel.convert")
+    convert_mod.ConvertDocumentsOptions = lambda **kwargs: types.SimpleNamespace(**kwargs)
+
+    return {
+        "docling.datamodel": types.ModuleType("docling.datamodel"),
+        "docling.datamodel.base_models": base_models,
+        "docling_jobkit": types.ModuleType("docling_jobkit"),
+        "docling_jobkit.convert": types.ModuleType("docling_jobkit.convert"),
+        "docling_jobkit.convert.manager": manager_mod,
+        "docling_jobkit.datamodel": types.ModuleType("docling_jobkit.datamodel"),
+        "docling_jobkit.datamodel.convert": convert_mod,
+    }
 
 
 class DoclingBatchConformanceTest(unittest.TestCase):
-    """Validate the wrapper contract without importing the real Docling package."""
+    """Validate the wrapper contract without importing the real packages."""
 
     def test_converter_configuration_fails_closed(self) -> None:
-        """Reject a run when the requested OCR mode cannot be configured."""
+        """Reject a sync run when the requested OCR mode cannot be configured."""
         wrapper = _load_wrapper()
         error: RuntimeError | None = None
 
@@ -81,33 +131,56 @@ class DoclingBatchConformanceTest(unittest.TestCase):
         assert str(error) == "failed to configure Docling with OCR explicitly enabled"
         assert isinstance(error.__cause__, ImportError)
 
-    def test_convert_all_is_single_lazy_ordered_timed_batch(self) -> None:
-        """The lazy iterator must be consumed once, in order, inside the timer."""
+    def test_batch_uses_jobkit_single_lazy_ordered_timed(self) -> None:
+        """The jobkit stream is consumed once, in order, inside the timer."""
         wrapper = _load_wrapper()
         events: list[str] = []
-        converter = _Converter(events)
 
         def perf_counter() -> float:
             events.append("clock")
             return 10.0 if events.count("clock") == 1 else 12.0
 
         with (
+            mock.patch.dict(sys.modules, _jobkit_modules(events)),
             mock.patch.object(wrapper.time, "perf_counter", side_effect=perf_counter),
             mock.patch.object(wrapper, "_get_peak_memory_bytes", return_value=123),
         ):
-            payload = wrapper.extract_batch(["first.pdf", "second.pdf"], converter)
+            payload = wrapper.extract_batch(["first.pdf", "second.pdf"], ocr_enabled=False)
 
-        assert converter.calls == 1
-        assert events[0:2] == ["clock", "convert_all"]
+        manager = _Manager.last
+        assert manager is not None
+        assert manager.calls == 1
+        assert manager.sources == ["first.pdf", "second.pdf"]
+        assert manager.options.do_ocr is False
+        assert manager.options.abort_on_error is False
+        # Timed around a single lazy pass: clock, then the batch call, ..., clock.
+        assert events[0:2] == ["clock", "convert_documents"]
         assert events[-1] == "clock"
+        # Lazy and ordered: each result is rendered before the next is pulled.
         assert events.index("yield:first.pdf") < events.index("render:first.pdf")
         assert events.index("render:first.pdf") < events.index("yield:second.pdf")
+        # Output contract, unchanged from the previous batch engine.
         assert len(payload["results"]) == 2
         assert payload["results"][0]["content"] == "markdown:first.pdf"
         assert payload["results"][1]["error"] == "['failed:second.pdf']"
         assert payload["total_ms"] == 2000.0
         assert payload["per_file_ms"] == [None, None]
+        assert payload["metadata"]["batch_api"] == "docling_jobkit.DoclingConverterManager.convert_documents"
         assert payload["metadata"]["benchmark_timing_scope"] == "cold_end_to_end_subprocess"
+
+    def test_batch_plaintext_renders_export_to_text(self) -> None:
+        """Plaintext output must render via ``export_to_text``, not markdown."""
+        wrapper = _load_wrapper()
+        events: list[str] = []
+
+        with (
+            mock.patch.dict(sys.modules, _jobkit_modules(events)),
+            mock.patch.object(wrapper, "_get_peak_memory_bytes", return_value=1),
+        ):
+            payload = wrapper.extract_batch(["only.pdf"], ocr_enabled=False, output_format="plaintext")
+
+        assert payload["results"][0]["content"] == "text:only.pdf"
+        assert "render_text:only.pdf" in events
 
 
 if __name__ == "__main__":

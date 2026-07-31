@@ -1,8 +1,8 @@
 """Docling extraction wrapper for benchmark harness.
 
-Supports two modes:
-- sync: convert() - synchronous single-file extraction
-- batch: convert_all() - batch extraction for multiple files
+Supports three modes:
+- sync: DocumentConverter.convert() - synchronous single-file extraction
+- batch: docling-jobkit DoclingConverterManager - in-process batch extraction
 - server: persistent mode reading paths from stdin
 """
 
@@ -78,15 +78,41 @@ def extract_sync(file_path: str, converter: DocumentConverter, output_format: st
 
 
 def extract_batch(
-    file_paths: list[str], converter: DocumentConverter, output_format: str = "markdown"
+    file_paths: list[str], ocr_enabled: bool, output_format: str = "markdown"
 ) -> dict[str, Any]:
-    """Extract multiple files using Docling's lazy ``convert_all`` API."""
+    """Extract multiple files using docling-jobkit's in-process converter manager.
+
+    docling-jobkit's ``DoclingConverterManager`` is the batch engine (it wraps docling's
+    ``convert_all`` with jobkit's option handling and the docling-slim pipeline). It is driven
+    in-process and single-process here: the harness times this whole subprocess as one cold batch,
+    so jobkit's own multiprocessing is intentionally not used. Unlike a fixed-partition batch it
+    accepts any number of eligible documents. Rendering is done locally (``_render``) so batch
+    output matches the single-file path exactly. ``convert_all`` preserves input order and count,
+    so ``results`` stays 1:1 with ``file_paths``.
+    """
+    from docling.datamodel.base_models import ConversionStatus, OutputFormat
+    from docling_jobkit.convert.manager import (
+        DoclingConverterManager,
+        DoclingConverterManagerConfig,
+    )
+    from docling_jobkit.datamodel.convert import ConvertDocumentsOptions
+
+    manager = DoclingConverterManager(config=DoclingConverterManagerConfig(options_cache_size=1))
+    # ``to_formats`` drives jobkit's own writer, which we bypass (we render from the
+    # DoclingDocument ourselves), so it only needs to be a valid default. ``do_ocr`` mirrors the
+    # harness OCR flag; ``abort_on_error`` stays False so one bad document does not sink the batch.
+    options = ConvertDocumentsOptions(
+        to_formats=[OutputFormat.MARKDOWN], do_ocr=ocr_enabled, abort_on_error=False
+    )
+
     start = time.perf_counter()
-    results = converter.convert_all(file_paths, raises_on_error=False)
     outputs: list[dict[str, Any]] = []
-    for result in results:
+    # Consume the conversion stream lazily in a single pass: render each document as it arrives
+    # (``convert_all`` under the hood preserves input order and count, so ``outputs`` stays 1:1
+    # with ``file_paths``).
+    for result in manager.convert_documents(sources=list(file_paths), options=options):
         item: dict[str, Any]
-        if result.status.name == "SUCCESS":
+        if result.status == ConversionStatus.SUCCESS:
             content = _render(result.document, output_format)
             item = {
                 "content": content,
@@ -114,8 +140,8 @@ def extract_batch(
         "per_file_ms": [None] * len(outputs),
         "metadata": {
             "framework": "docling",
-            "batch_api": "DocumentConverter.convert_all",
-            "reported_total_timing_scope": "convert_all_lazy_iteration_and_render",
+            "batch_api": "docling_jobkit.DoclingConverterManager.convert_documents",
+            "reported_total_timing_scope": "jobkit_convert_documents_iteration_and_render",
             "benchmark_timing_scope": "cold_end_to_end_subprocess",
             "per_item_timing": "unavailable",
         },
@@ -253,16 +279,16 @@ def main() -> None:
     mode = args[0]
     file_paths = args[1:]
 
-    converter = create_converter(ocr_enabled)
-
     try:
         if mode == "server":
+            converter = create_converter(ocr_enabled)
             run_server(converter, output_format, timeout=timeout)
 
         elif mode == "sync":
             if len(file_paths) != 1:
                 print("Error: sync mode requires exactly one file", file=sys.stderr)
                 sys.exit(1)
+            converter = create_converter(ocr_enabled)
             payload = extract_sync(file_paths[0], converter, output_format)
             print(json.dumps(payload), end="")
 
@@ -271,7 +297,8 @@ def main() -> None:
                 print("Error: batch mode requires at least one file", file=sys.stderr)
                 sys.exit(1)
 
-            payload = extract_batch(file_paths, converter, output_format)
+            # Batch uses docling-jobkit's converter manager, not the single-file DocumentConverter.
+            payload = extract_batch(file_paths, ocr_enabled, output_format)
             print(json.dumps(payload), end="")
 
         else:

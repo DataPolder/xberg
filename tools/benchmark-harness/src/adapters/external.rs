@@ -124,7 +124,7 @@ pub fn create_docling_adapter(ocr_enabled: bool) -> Result<SubprocessAdapter> {
         vec![],
         supported_formats,
         BatchCapability {
-            entry_point: BatchEntryPoint::DoclingConvertAll,
+            entry_point: BatchEntryPoint::DoclingJobkit,
             timing_scope: BatchTimingScope::ColdEndToEndSubprocess,
             per_item_timing: false,
         },
@@ -682,7 +682,7 @@ exit 2
             assert_eq!(
                 docling.batch_capability(),
                 Some(BatchCapability {
-                    entry_point: BatchEntryPoint::DoclingConvertAll,
+                    entry_point: BatchEntryPoint::DoclingJobkit,
                     timing_scope: BatchTimingScope::ColdEndToEndSubprocess,
                     per_item_timing: false,
                 })

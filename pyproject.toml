@@ -17,7 +17,9 @@ dev = [
   "types-psutil>=7.2.2.20260508",
   "validate-pyproject>=0.24.1",
 ]
-bench-docling = ["docling==2.113.0"]
+# docling-jobkit drives the batch path (in-process converter manager) and pulls
+# docling-slim>=2.117.0, which also serves the single-file path via the `docling` namespace.
+bench-docling = ["docling-jobkit==3.2.0"]
 bench-markitdown = ["markitdown[all]==0.1.6"]
 bench-mineru = ["mineru[pipeline]==3.4.4", "onnxruntime", "six"]
 bench-pymupdf4llm = ["pillow>=10.0.0", "pymupdf-layout==1.28.0", "pymupdf4llm==1.28.0"]
