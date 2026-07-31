@@ -86,7 +86,25 @@ def _get_peak_memory_bytes() -> int:
     return usage.ru_maxrss
 
 
-def _native_pipeline_markdown(file_paths: list[str], ocr_enabled: bool) -> tuple[list[str], float]:
+def _tesseract_to_paddle_lang(ocr_language: str | None) -> str:
+    """Map a canonical Tesseract language string (``eng+kor``, ``jpn_vert``) to the
+    single PaddleOCR model MinerU selects via ``p_lang_list``. MinerU takes one
+    model per document; the Korean and Japanese PP-OCR models both cover their
+    script plus Latin, so a mixed ``eng+kor`` request maps to ``korean``. An unset
+    or English-only request keeps the default (``en`` -> CN+EN model), unchanged."""
+    if not ocr_language:
+        return DEFAULT_OCR_LANGUAGE
+    codes = [code.strip().lower() for code in ocr_language.split("+") if code.strip()]
+    if any(code.startswith("kor") for code in codes):
+        return "korean"
+    if any(code.startswith("jpn") for code in codes):
+        return "japan"
+    return DEFAULT_OCR_LANGUAGE
+
+
+def _native_pipeline_markdown(
+    file_paths: list[str], ocr_enabled: bool, ocr_language: str | None = None
+) -> tuple[list[str], float]:
     """Run one MinerU 3.4.4 multi-document pipeline invocation."""
     if not file_paths:
         return [], 0.0
@@ -104,7 +122,7 @@ def _native_pipeline_markdown(file_paths: list[str], ocr_enabled: bool) -> tuple
             output_dir=output_dir,
             pdf_file_names=list(task_stems),
             pdf_bytes_list=list(document_bytes),
-            p_lang_list=[DEFAULT_OCR_LANGUAGE] * len(file_paths),
+            p_lang_list=[_tesseract_to_paddle_lang(ocr_language)] * len(file_paths),
             backend=PIPELINE_BACKEND,
             parse_method=parse_method,
             f_draw_layout_bbox=False,
@@ -165,9 +183,11 @@ def _strip_markdown(text: str) -> str:
     return out
 
 
-def extract_sync(file_path: str, ocr_enabled: bool, output_format: str = "markdown") -> dict[str, Any]:
+def extract_sync(
+    file_path: str, ocr_enabled: bool, output_format: str = "markdown", ocr_language: str | None = None
+) -> dict[str, Any]:
     """Extract one file using the pinned MinerU pipeline."""
-    markdown_outputs, duration_ms = _native_pipeline_markdown([file_path], ocr_enabled)
+    markdown_outputs, duration_ms = _native_pipeline_markdown([file_path], ocr_enabled, ocr_language)
     markdown = markdown_outputs[0]
     content = _strip_markdown(markdown) if output_format == "plaintext" else markdown
 
@@ -183,9 +203,11 @@ def extract_sync(file_path: str, ocr_enabled: bool, output_format: str = "markdo
     }
 
 
-def extract_batch(file_paths: list[str], ocr_enabled: bool, output_format: str = "markdown") -> dict[str, Any]:
+def extract_batch(
+    file_paths: list[str], ocr_enabled: bool, output_format: str = "markdown", ocr_language: str | None = None
+) -> dict[str, Any]:
     """Extract a strict ordered batch using MinerU's multi-document pipeline."""
-    markdown_outputs, total_duration_ms = _native_pipeline_markdown(file_paths, ocr_enabled)
+    markdown_outputs, total_duration_ms = _native_pipeline_markdown(file_paths, ocr_enabled, ocr_language)
     peak_memory = _get_peak_memory_bytes()
     results = [
         {
@@ -339,7 +361,7 @@ def _parse_path(line: str) -> str:
     return stripped
 
 
-def run_server(ocr_enabled: bool, output_format: str, timeout=None) -> None:
+def run_server(ocr_enabled: bool, output_format: str, timeout=None, ocr_language: str | None = None) -> None:
     """Persistent server mode: read paths from stdin, write JSON to stdout."""
     print("READY", flush=True)
     for line in sys.stdin:
@@ -347,10 +369,10 @@ def run_server(ocr_enabled: bool, output_format: str, timeout=None) -> None:
         if not file_path:
             continue
         if timeout is not None:
-            result = _run_with_timeout(extract_sync, (file_path, ocr_enabled, output_format), timeout)
+            result = _run_with_timeout(extract_sync, (file_path, ocr_enabled, output_format, ocr_language), timeout)
         else:
             try:
-                result = extract_sync(file_path, ocr_enabled, output_format)
+                result = extract_sync(file_path, ocr_enabled, output_format, ocr_language)
             except Exception as e:
                 result = {"error": str(e), "_extraction_time_ms": 0}
         print(json.dumps(result), flush=True)
@@ -360,6 +382,7 @@ def main() -> None:
     ocr_enabled = False
     timeout = None
     output_format = "markdown"
+    ocr_language = None
     args = []
     for arg in sys.argv[1:]:
         if arg == "--ocr":
@@ -370,6 +393,8 @@ def main() -> None:
             timeout = int(arg.split("=", 1)[1])
         elif arg.startswith("--format="):
             output_format = arg.split("=", 1)[1]
+        elif arg.startswith("--ocr-lang="):
+            ocr_language = arg.split("=", 1)[1]
         else:
             args.append(arg)
 
@@ -390,16 +415,18 @@ def main() -> None:
 
     try:
         if mode == "server":
-            run_server(ocr_enabled, output_format, timeout=timeout)
+            run_server(ocr_enabled, output_format, timeout=timeout, ocr_language=ocr_language)
 
         elif mode == "sync":
             if len(file_paths) != 1:
                 print("Error: sync mode requires exactly one file", file=sys.stderr)
                 sys.exit(1)
             if timeout is not None:
-                payload = _run_with_timeout(extract_sync, (file_paths[0], ocr_enabled, output_format), timeout)
+                payload = _run_with_timeout(
+                    extract_sync, (file_paths[0], ocr_enabled, output_format, ocr_language), timeout
+                )
             else:
-                payload = extract_sync(file_paths[0], ocr_enabled, output_format)
+                payload = extract_sync(file_paths[0], ocr_enabled, output_format, ocr_language)
             # Reap MinerU's orphaned render pool before emitting, so the harness sees stdout EOF.
             _terminate_lingering_group_processes()
             print(json.dumps(payload), end="")
@@ -409,7 +436,7 @@ def main() -> None:
                 print("Error: batch mode requires at least one file", file=sys.stderr)
                 sys.exit(1)
 
-            payload = extract_batch(file_paths, ocr_enabled, output_format)
+            payload = extract_batch(file_paths, ocr_enabled, output_format, ocr_language)
             # Reap MinerU's orphaned render pool before emitting, so the harness sees stdout EOF.
             _terminate_lingering_group_processes()
             print(json.dumps(payload), end="")

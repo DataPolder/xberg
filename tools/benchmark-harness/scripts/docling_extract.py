@@ -28,7 +28,24 @@ def _get_peak_memory_bytes() -> int:
     return usage.ru_maxrss
 
 
-def create_converter(ocr_enabled: bool) -> DocumentConverter:
+def _tesseract_to_easyocr_langs(ocr_language: str | None) -> list[str]:
+    """Map a canonical Tesseract language string (``eng+kor``, ``jpn_vert``) to the
+    EasyOCR language list Docling's default OCR engine expects. EasyOCR uses ISO-639-1
+    codes and combines one non-Latin script with English at a time, which matches how
+    the fixtures pin a single script. An unset value returns an empty list so EasyOCR's
+    default is left untouched."""
+    if not ocr_language:
+        return []
+    mapping = {"eng": "en", "kor": "ko", "jpn": "ja", "jpn_vert": "ja", "chi_sim": "ch_sim", "chi_tra": "ch_tra"}
+    langs: list[str] = []
+    for raw in ocr_language.split("+"):
+        mapped = mapping.get(raw.strip().lower())
+        if mapped and mapped not in langs:
+            langs.append(mapped)
+    return langs
+
+
+def create_converter(ocr_enabled: bool, ocr_language: str | None = None) -> DocumentConverter:
     """Create a DocumentConverter with OCR explicitly toggled.
 
     In docling 2.x, ``DocumentConverter`` does not accept a ``pipeline_options``
@@ -45,6 +62,11 @@ def create_converter(ocr_enabled: bool) -> DocumentConverter:
 
         pdf_options = PdfPipelineOptions()
         pdf_options.do_ocr = ocr_enabled
+        easyocr_langs = _tesseract_to_easyocr_langs(ocr_language)
+        if ocr_enabled and easyocr_langs:
+            # Docling's default OCR engine is EasyOCR; override its language list so the
+            # fixture's script (Korean/Japanese) is recognized instead of the eng default.
+            pdf_options.ocr_options.lang = easyocr_langs
         return DocumentConverter(
             format_options={
                 InputFormat.PDF: PdfFormatOption(pipeline_options=pdf_options),
@@ -77,7 +99,9 @@ def extract_sync(file_path: str, converter: DocumentConverter, output_format: st
     }
 
 
-def extract_batch(file_paths: list[str], ocr_enabled: bool, output_format: str = "markdown") -> dict[str, Any]:
+def extract_batch(
+    file_paths: list[str], ocr_enabled: bool, output_format: str = "markdown", ocr_language: str | None = None
+) -> dict[str, Any]:
     """Extract multiple files using docling-jobkit's in-process converter manager.
 
     docling-jobkit's ``DoclingConverterManager`` is the batch engine (it wraps docling's
@@ -99,7 +123,17 @@ def extract_batch(file_paths: list[str], ocr_enabled: bool, output_format: str =
     # ``to_formats`` drives jobkit's own writer, which we bypass (we render from the
     # DoclingDocument ourselves), so it only needs to be a valid default. ``do_ocr`` mirrors the
     # harness OCR flag; ``abort_on_error`` stays False so one bad document does not sink the batch.
-    options = ConvertDocumentsOptions(to_formats=[OutputFormat.MARKDOWN], do_ocr=ocr_enabled, abort_on_error=False)
+    option_kwargs: dict[str, Any] = {
+        "to_formats": [OutputFormat.MARKDOWN],
+        "do_ocr": ocr_enabled,
+        "abort_on_error": False,
+    }
+    easyocr_langs = _tesseract_to_easyocr_langs(ocr_language) if ocr_enabled else []
+    if easyocr_langs:
+        # jobkit's ConvertDocumentsOptions forwards ocr_lang to the same EasyOCR engine
+        # as the single-file path; only set it when the fixture pins a language.
+        option_kwargs["ocr_lang"] = easyocr_langs
+    options = ConvertDocumentsOptions(**option_kwargs)
 
     start = time.perf_counter()
     outputs: list[dict[str, Any]] = []
@@ -234,6 +268,7 @@ def main() -> None:
     ocr_enabled = False
     timeout = None
     output_format = "markdown"
+    ocr_language = None
     args = []
     for arg in sys.argv[1:]:
         if arg == "--ocr":
@@ -244,6 +279,8 @@ def main() -> None:
             timeout = int(arg.split("=", 1)[1])
         elif arg.startswith("--format="):
             output_format = arg.split("=", 1)[1]
+        elif arg.startswith("--ocr-lang="):
+            ocr_language = arg.split("=", 1)[1]
         elif arg == "--format":
             args.append(arg)
         else:
@@ -277,14 +314,14 @@ def main() -> None:
 
     try:
         if mode == "server":
-            converter = create_converter(ocr_enabled)
+            converter = create_converter(ocr_enabled, ocr_language)
             run_server(converter, output_format, timeout=timeout)
 
         elif mode == "sync":
             if len(file_paths) != 1:
                 print("Error: sync mode requires exactly one file", file=sys.stderr)
                 sys.exit(1)
-            converter = create_converter(ocr_enabled)
+            converter = create_converter(ocr_enabled, ocr_language)
             payload = extract_sync(file_paths[0], converter, output_format)
             print(json.dumps(payload), end="")
 
@@ -294,7 +331,7 @@ def main() -> None:
                 sys.exit(1)
 
             # Batch uses docling-jobkit's converter manager, not the single-file DocumentConverter.
-            payload = extract_batch(file_paths, ocr_enabled, output_format)
+            payload = extract_batch(file_paths, ocr_enabled, output_format, ocr_language)
             print(json.dumps(payload), end="")
 
         else:
