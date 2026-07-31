@@ -28,12 +28,8 @@ MATRIX_VALUE = re.compile(r"\$\{\{\s*matrix\.([a-z_]+)\s*\}\}")
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--workflow", type=Path, default=Path(".github/workflows/benchmarks.yaml")
-    )
-    parser.add_argument(
-        "--harness", type=Path, default=Path("target/release/benchmark-harness")
-    )
+    parser.add_argument("--workflow", type=Path, default=Path(".github/workflows/benchmarks.yaml"))
+    parser.add_argument("--harness", type=Path, default=Path("target/release/benchmark-harness"))
     return parser.parse_args()
 
 
@@ -52,31 +48,21 @@ def split_jobs(workflow: str) -> dict[str, list[str]]:
     return jobs
 
 
-def validate_aggregation_gate(
-    jobs: dict[str, list[str]], benchmark_jobs: set[str]
-) -> None:
+def validate_aggregation_gate(jobs: dict[str, list[str]], benchmark_jobs: set[str]) -> None:
     try:
         aggregate = jobs["aggregate-and-publish"]
     except KeyError as error:
         raise ValueError("workflow has no aggregate-and-publish job") from error
 
     aggregate_text = "\n".join(aggregate)
-    missing_needs = sorted(
-        job for job in benchmark_jobs if f"        {job}," not in aggregate
-    )
+    missing_needs = sorted(job for job in benchmark_jobs if f"        {job}," not in aggregate)
     if missing_needs:
-        raise ValueError(
-            f"aggregate-and-publish does not need jobs: {', '.join(missing_needs)}"
-        )
+        raise ValueError(f"aggregate-and-publish does not need jobs: {', '.join(missing_needs)}")
     # `always()` lets optional jobs fail; raw validation still rejects absent required cells. ~keep
     if "if: ${{ always()" not in aggregate_text:
-        raise ValueError(
-            "aggregate-and-publish must use always() so optional cells are best-effort"
-        )
+        raise ValueError("aggregate-and-publish must use always() so optional cells are best-effort")
     if "      - name: Validate benchmark artifacts (all cohorts)" not in aggregate:
-        raise ValueError(
-            "aggregate-and-publish must validate raw artifacts before publication"
-        )
+        raise ValueError("aggregate-and-publish must validate raw artifacts before publication")
     ordered_gates = [
         "      - name: Validate benchmark artifacts (all cohorts)",
         "      - name: Consolidate results (all cohorts)",
@@ -87,14 +73,10 @@ def validate_aggregation_gate(
     try:
         gate_indexes = [aggregate.index(step) for step in ordered_gates]
     except ValueError as error:
-        raise ValueError(
-            "aggregate-and-publish is missing a validation or publication gate"
-        ) from error
+        raise ValueError("aggregate-and-publish is missing a validation or publication gate") from error
     # Both raw and consolidated data must be validated before release assets can be prepared. ~keep
     if gate_indexes != sorted(gate_indexes):
-        raise ValueError(
-            "aggregate-and-publish validation gates must precede publication"
-        )
+        raise ValueError("aggregate-and-publish validation gates must precede publication")
 
 
 def strip_comment(value: str) -> str:
@@ -108,9 +90,7 @@ def parse_list(lines: list[str], start: int, initial: str) -> tuple[list[str], i
             start += 1
             chunks.append(strip_comment(lines[start]))
         raw = " ".join(chunks)[1:-1]
-        return [
-            item.strip().strip("'\"") for item in raw.split(",") if item.strip()
-        ], start
+        return [item.strip().strip("'\"") for item in raw.split(",") if item.strip()], start
 
     values: list[str] = []
     while start + 1 < len(lines):
@@ -143,14 +123,10 @@ def parse_excludes(lines: list[str], start: int) -> tuple[list[dict[str, str]], 
             entry = {block.group(1): strip_comment(block.group(2)).strip("'\"")}
             start += 1
             while start + 1 < len(lines):
-                continuation = re.match(
-                    r"^            ([a-z_]+):\s*(.+?)\s*$", lines[start + 1]
-                )
+                continuation = re.match(r"^            ([a-z_]+):\s*(.+?)\s*$", lines[start + 1])
                 if not continuation:
                     break
-                entry[continuation.group(1)] = strip_comment(
-                    continuation.group(2)
-                ).strip("'\"")
+                entry[continuation.group(1)] = strip_comment(continuation.group(2)).strip("'\"")
                 start += 1
             excludes.append(entry)
         else:
@@ -158,9 +134,7 @@ def parse_excludes(lines: list[str], start: int) -> tuple[list[dict[str, str]], 
     return excludes, start
 
 
-def parse_matrix(
-    job: str, lines: list[str]
-) -> tuple[dict[str, list[str]], list[dict[str, str]]]:
+def parse_matrix(job: str, lines: list[str]) -> tuple[dict[str, list[str]], list[dict[str, str]]]:
     try:
         start = lines.index("      matrix:") + 1
     except ValueError as error:
@@ -221,9 +195,7 @@ def artifact_template(job: str, step: list[str]) -> str:
         if match:
             matches.append(match.group(1))
     if len(matches) != 1:
-        raise ValueError(
-            f"{job}: expected one benchmark artifact upload name, found {len(matches)}"
-        )
+        raise ValueError(f"{job}: expected one benchmark artifact upload name, found {len(matches)}")
     return matches[0]
 
 
@@ -235,15 +207,9 @@ def step_environment(job: str, step: list[str]) -> dict[str, str]:
             environment[match.group(1)] = match.group(2).strip("'\"")
     required = {"FRAMEWORK", "MODE", "OUTPUT_FORMAT", "COHORT"}
     if missing := required - environment.keys():
-        raise ValueError(
-            f"{job}: Run benchmark is missing environment keys: {', '.join(sorted(missing))}"
-        )
-    if not any(
-        line.strip() == "run: scripts/benchmarks/run-benchmark.sh" for line in step
-    ):
-        raise ValueError(
-            f"{job}: Run benchmark must invoke scripts/benchmarks/run-benchmark.sh"
-        )
+        raise ValueError(f"{job}: Run benchmark is missing environment keys: {', '.join(sorted(missing))}")
+    if not any(line.strip() == "run: scripts/benchmarks/run-benchmark.sh" for line in step):
+        raise ValueError(f"{job}: Run benchmark must invoke scripts/benchmarks/run-benchmark.sh")
     return environment
 
 
@@ -251,9 +217,7 @@ def interpolate(job: str, template: str, cell: dict[str, str]) -> str:
     try:
         value = MATRIX_VALUE.sub(lambda match: cell[match.group(1)], template)
     except KeyError as error:
-        raise ValueError(
-            f"{job}: expression references missing matrix key {error.args[0]!r}"
-        ) from error
+        raise ValueError(f"{job}: expression references missing matrix key {error.args[0]!r}") from error
     if "${{" in value:
         raise ValueError(f"{job}: unresolved expression in {template!r}")
     return value
@@ -270,9 +234,7 @@ def is_optional_cell(framework: str, cohort: str) -> bool:
 def workflow_cells(workflow: str) -> list[dict[str, object]]:
     cells: list[dict[str, object]] = []
     jobs = split_jobs(workflow)
-    benchmark_jobs = {
-        job for job in jobs if job.startswith("bench-") and "      matrix:" in jobs[job]
-    }
+    benchmark_jobs = {job for job in jobs if job.startswith("bench-") and "      matrix:" in jobs[job]}
     validate_aggregation_gate(jobs, benchmark_jobs)
     for job in sorted(benchmark_jobs):
         lines = jobs[job]
@@ -286,10 +248,7 @@ def workflow_cells(workflow: str) -> list[dict[str, object]]:
         keys = tuple(dimensions)
         for values in itertools.product(*(dimensions[key] for key in keys)):
             cell = dict(zip(keys, values, strict=True))
-            if any(
-                all(cell.get(key) == value for key, value in exclusion.items())
-                for exclusion in excludes
-            ):
+            if any(all(cell.get(key) == value for key, value in exclusion.items()) for exclusion in excludes):
                 continue
 
             # Matrix interpolation is intentionally the only supported dynamic component. ~keep
@@ -300,9 +259,7 @@ def workflow_cells(workflow: str) -> list[dict[str, object]]:
                 {
                     "artifact": interpolate(job, template, cell),
                     "framework": framework,
-                    "output_format": interpolate(
-                        job, environment["OUTPUT_FORMAT"], cell
-                    ),
+                    "output_format": interpolate(job, environment["OUTPUT_FORMAT"], cell),
                     "mode": interpolate(job, environment["MODE"], cell),
                     "cohort": cohort,
                     "optional": is_optional_cell(framework, cohort),
@@ -343,9 +300,7 @@ def cell_key(cell: dict[str, object]) -> tuple[object, ...]:
     )
 
 
-def require_unique(
-    name: str, cells: list[dict[str, object]]
-) -> set[tuple[object, ...]]:
+def require_unique(name: str, cells: list[dict[str, object]]) -> set[tuple[object, ...]]:
     keys = [cell_key(cell) for cell in cells]
     unique = set(keys)
     if len(unique) != len(keys):
@@ -356,26 +311,17 @@ def require_unique(
 
 def main() -> None:
     args = parse_args()
-    actual = require_unique(
-        "benchmark workflow", workflow_cells(args.workflow.read_text())
-    )
+    actual = require_unique("benchmark workflow", workflow_cells(args.workflow.read_text()))
     expected = require_unique("Rust benchmark contracts", contract_cells(args.harness))
     if actual != expected:
         missing = sorted(expected - actual)
         unexpected = sorted(actual - expected)
         details = []
         if missing:
-            details.append(
-                "missing workflow cells:\n  " + "\n  ".join(map(str, missing))
-            )
+            details.append("missing workflow cells:\n  " + "\n  ".join(map(str, missing)))
         if unexpected:
-            details.append(
-                "unexpected workflow cells:\n  " + "\n  ".join(map(str, unexpected))
-            )
-        raise SystemExit(
-            "benchmark workflow matrix does not match Rust contracts\n"
-            + "\n".join(details)
-        )
+            details.append("unexpected workflow cells:\n  " + "\n  ".join(map(str, unexpected)))
+        raise SystemExit("benchmark workflow matrix does not match Rust contracts\n" + "\n".join(details))
     print(f"benchmark workflow matrix matches all {len(expected)} Rust contract cells")
 
 

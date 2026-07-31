@@ -2,7 +2,9 @@
 set -euo pipefail
 
 workflow="${1:-.github/workflows/benchmarks.yaml}"
+cache_action="${2:-.github/actions/cache-benchmark-harness/action.yml}"
 workflow_content="$(<"$workflow")"
+cache_action_content="$(<"$cache_action")"
 
 extract_job() {
   local job_name="$1"
@@ -112,5 +114,18 @@ require_step "$aggregate_job" '^[[:space:]]+- name: Download build artifacts \(h
   "aggregate must download the benchmarks-target artifact for size measurement"
 require_step "$aggregate_job" 'restore-binary-permissions\.sh' \
   "aggregate must restore benchmark binary permissions after downloading the artifact"
+
+app_token_step="$(extract_named_step "Create GitHub App token (if credentials available)" <<<"$aggregate_job")"
+if grep -qE '^[[:space:]]+owner:' <<<"$app_token_step"; then
+  echo "benchmark workflow validation failed: release token must default to the current repository"
+  exit 1
+fi
+
+for cache_input in 'BUILD_ENV_HASH=' 'RUSTFLAGS:-' 'CARGO_BUILD_TARGET:-' 'rustc -vV' 'uname -s'; do
+  if ! grep -Fq "$cache_input" <<<"$cache_action_content"; then
+    echo "benchmark workflow validation failed: harness cache key omits build input $cache_input"
+    exit 1
+  fi
+done
 
 echo "benchmark workflow build configuration is valid"

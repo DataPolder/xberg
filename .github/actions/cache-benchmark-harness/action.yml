@@ -132,9 +132,27 @@ runs:
 
         echo "=== Cache Key Generated ==="
 
+        # Exact hits skip compilation, so compiler identity and codegen-affecting environment
+        # values must participate alongside source hashes. NUL separators avoid ambiguity. ~keep
+        BUILD_ENV_HASH=$(
+          {
+            printf '%s\0' \
+              "$(uname -s)" \
+              "$(uname -m)" \
+              "${RUSTFLAGS:-}" \
+              "${CARGO_ENCODED_RUSTFLAGS:-}" \
+              "${CARGO_BUILD_TARGET:-}" \
+              "${CARGO_INCREMENTAL:-}" \
+              "${CARGO_PROFILE_RELEASE_DEBUG:-}" \
+              "${CARGO_PROFILE_RELEASE_LTO:-}" \
+              "${CARGO_PROFILE_RELEASE_CODEGEN_UNITS:-}"
+            rustc -vV
+          } | shasum -a 256 | awk '{print $1}'
+        )
+
         # Build cache key following format:
-        # harness-{profile}-{platform}-src-{harness-hash}-xberg-{xberg-hash}-cargo-{cargo-hash}-v{version}
-        CACHE_KEY="harness-${BUILD_PROFILE}-$(uname -m)-src-${HARNESS_HASH}-xberg-${XBERG_HASH}-cargo-${CARGO_HASH}-${CACHE_VERSION}"
+        # harness-{profile}-{platform}-env-{env-hash}-src-{harness-hash}-xberg-{xberg-hash}-cargo-{cargo-hash}-v{version}
+        CACHE_KEY="harness-${BUILD_PROFILE}-$(uname -s)-$(uname -m)-env-${BUILD_ENV_HASH}-src-${HARNESS_HASH}-xberg-${XBERG_HASH}-cargo-${CARGO_HASH}-${CACHE_VERSION}"
 
         echo "cache-key=$CACHE_KEY" >> "$GITHUB_OUTPUT"
 
@@ -143,6 +161,7 @@ runs:
         echo "Key components:"
         echo "  Profile:         $BUILD_PROFILE"
         echo "  Platform:        $(uname -m)"
+        echo "  Build env hash:  $BUILD_ENV_HASH"
         echo "  Harness hash:    $HARNESS_HASH"
         echo "  Xberg hash:  $XBERG_HASH"
         echo "  Cargo hash:      $CARGO_HASH"

@@ -22,7 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   names, and report extension success rates with the same accountable-failure semantics as the
   aggregate.
 - Benchmark CI invalidates its prebuilt harness cache for harness build scripts, workspace and
-  toolchain configuration, and every transitive workspace crate, preventing stale binaries.
+  toolchain configuration, compiler/codegen environment, and every transitive workspace crate,
+  preventing stale binaries. Release tokens now default to the current repository installation.
 - Present best-effort benchmark artifacts receive the same provenance, supported-format
   cardinality, failure-accounting, and aggregate integrity validation as required artifacts;
   only absence and framework-accountable extraction failures remain optional.

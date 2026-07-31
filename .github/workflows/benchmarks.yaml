@@ -1115,7 +1115,6 @@ jobs:
         with:
           app-id: ${{ secrets.BOT_APP_ID }}
           private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
-          owner: xberg-dev
 
       - uses: actions/checkout@v6
         with:

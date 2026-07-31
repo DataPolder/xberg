@@ -7,9 +7,7 @@ from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 VALIDATOR_PATH = Path(__file__).with_name("validate-workflow-matrix.py")
-SPEC = importlib.util.spec_from_file_location(
-    "validate_workflow_matrix", VALIDATOR_PATH
-)
+SPEC = importlib.util.spec_from_file_location("validate_workflow_matrix", VALIDATOR_PATH)
 assert SPEC is not None and SPEC.loader is not None
 VALIDATOR = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(VALIDATOR)
@@ -30,12 +28,8 @@ class WorkflowMatrixValidationTests(unittest.TestCase):
         mutated = WORKFLOW.replace("FRAMEWORK: docling", "FRAMEWORK: docling-wrong", 1)
         original_cells = VALIDATOR.workflow_cells(WORKFLOW)
         mutated_cells = VALIDATOR.workflow_cells(mutated)
-        original = next(
-            cell for cell in original_cells if cell["framework"] == "docling"
-        )
-        changed = next(
-            cell for cell in mutated_cells if cell["artifact"] == original["artifact"]
-        )
+        original = next(cell for cell in original_cells if cell["framework"] == "docling")
+        changed = next(cell for cell in mutated_cells if cell["artifact"] == original["artifact"])
 
         self.assertEqual(changed["artifact"], original["artifact"])
         self.assertEqual(changed["framework"], "docling-wrong")
@@ -52,18 +46,22 @@ class WorkflowMatrixValidationTests(unittest.TestCase):
             VALIDATOR.workflow_cells(mutated)
 
     def test_artifacts_must_be_validated_before_consolidation(self) -> None:
-        mutated = WORKFLOW.replace(
-            "      - name: Validate benchmark artifacts (all cohorts)",
-            "      - name: TEMP validation gate",
-            1,
-        ).replace(
-            "      - name: Consolidate results (all cohorts)",
-            "      - name: Validate benchmark artifacts (all cohorts)",
-            1,
-        ).replace(
-            "      - name: TEMP validation gate",
-            "      - name: Consolidate results (all cohorts)",
-            1,
+        mutated = (
+            WORKFLOW.replace(
+                "      - name: Validate benchmark artifacts (all cohorts)",
+                "      - name: TEMP validation gate",
+                1,
+            )
+            .replace(
+                "      - name: Consolidate results (all cohorts)",
+                "      - name: Validate benchmark artifacts (all cohorts)",
+                1,
+            )
+            .replace(
+                "      - name: TEMP validation gate",
+                "      - name: Consolidate results (all cohorts)",
+                1,
+            )
         )
 
         with self.assertRaisesRegex(ValueError, "validation gates must precede publication"):
