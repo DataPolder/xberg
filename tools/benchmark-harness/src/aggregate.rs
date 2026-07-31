@@ -1030,7 +1030,7 @@ fn calculate_percentiles(results: &[&BenchmarkResult]) -> PerformancePercentiles
         // never-scored (no-ground-truth) buckets as 0.0 and silently drop the bucket from the SF1
         // ranking (whose `None`-means-failure gate keys off `quality.is_none()`). f1_layout is
         // intentionally left to measured samples only, since layout is not a scored dimension for
-        // most formats.
+        // most formats. ~keep
         if framework_fault_failures > 0 && !quality_scores.is_empty() {
             for _ in 0..framework_fault_failures {
                 f1_texts.push(0.0);
@@ -2664,7 +2664,9 @@ mod tests {
 
         assert_eq!(percentiles.success_rate_percent, 50.0);
         assert_eq!(percentiles.framework_errors, 1);
-        let quality = percentiles.quality.expect("quality must be scored when failures are penalized");
+        let quality = percentiles
+            .quality
+            .expect("quality must be scored when failures are penalized");
         assert!(
             (quality.quality_score_p50 - 0.45).abs() < 1e-9,
             "framework-fault failure should inject a 0.0 quality sample, pulling p50 to 0.45, got {}",

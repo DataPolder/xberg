@@ -77,9 +77,7 @@ def extract_sync(file_path: str, converter: DocumentConverter, output_format: st
     }
 
 
-def extract_batch(
-    file_paths: list[str], ocr_enabled: bool, output_format: str = "markdown"
-) -> dict[str, Any]:
+def extract_batch(file_paths: list[str], ocr_enabled: bool, output_format: str = "markdown") -> dict[str, Any]:
     """Extract multiple files using docling-jobkit's in-process converter manager.
 
     docling-jobkit's ``DoclingConverterManager`` is the batch engine (it wraps docling's
@@ -101,15 +99,13 @@ def extract_batch(
     # ``to_formats`` drives jobkit's own writer, which we bypass (we render from the
     # DoclingDocument ourselves), so it only needs to be a valid default. ``do_ocr`` mirrors the
     # harness OCR flag; ``abort_on_error`` stays False so one bad document does not sink the batch.
-    options = ConvertDocumentsOptions(
-        to_formats=[OutputFormat.MARKDOWN], do_ocr=ocr_enabled, abort_on_error=False
-    )
+    options = ConvertDocumentsOptions(to_formats=[OutputFormat.MARKDOWN], do_ocr=ocr_enabled, abort_on_error=False)
 
     start = time.perf_counter()
     outputs: list[dict[str, Any]] = []
     # Consume the conversion stream lazily in a single pass: render each document as it arrives
     # (``convert_all`` under the hood preserves input order and count, so ``outputs`` stays 1:1
-    # with ``file_paths``).
+    # with ``file_paths``). ~keep
     for result in manager.convert_documents(sources=list(file_paths), options=options):
         item: dict[str, Any]
         if result.status == ConversionStatus.SUCCESS:

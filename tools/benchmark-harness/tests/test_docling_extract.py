@@ -65,7 +65,7 @@ class _Result:
 class _Manager:
     """Stand-in for docling-jobkit's ``DoclingConverterManager``."""
 
-    last: "_Manager | None" = None
+    last: _Manager | None = None
 
     def __init__(self, events: list[str], config: object) -> None:
         self.events = events
@@ -96,10 +96,10 @@ def _jobkit_modules(events: list[str]) -> dict[str, types.ModuleType]:
 
     manager_mod = types.ModuleType("docling_jobkit.convert.manager")
     manager_mod.DoclingConverterManager = lambda config: _Manager(events, config)
-    manager_mod.DoclingConverterManagerConfig = lambda **kwargs: types.SimpleNamespace(**kwargs)
+    manager_mod.DoclingConverterManagerConfig = types.SimpleNamespace
 
     convert_mod = types.ModuleType("docling_jobkit.datamodel.convert")
-    convert_mod.ConvertDocumentsOptions = lambda **kwargs: types.SimpleNamespace(**kwargs)
+    convert_mod.ConvertDocumentsOptions = types.SimpleNamespace
 
     return {
         "docling.datamodel": types.ModuleType("docling.datamodel"),

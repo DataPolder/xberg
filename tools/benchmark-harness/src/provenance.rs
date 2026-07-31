@@ -197,11 +197,14 @@ impl RunProvenance {
             // of at most `size` with a smaller final batch when the count isn't an exact multiple
             // (0 eligible -> 0 partitions), mirroring `fixed_batch_ranges` in the runner. This
             // previously aborted the whole invocation, silently dropping e.g. docling batch on the
-            // family cohorts where it supports only a subset of the member formats.
-            let batch_partitions = inputs
-                .fixed_batch_size
-                .filter(|_| capability.is_some())
-                .map(|size| if size == 0 { 0 } else { eligible_documents.div_ceil(size) });
+            // family cohorts where it supports only a subset of the member formats. ~keep
+            let batch_partitions = inputs.fixed_batch_size.filter(|_| capability.is_some()).map(|size| {
+                if size == 0 {
+                    0
+                } else {
+                    eligible_documents.div_ceil(size)
+                }
+            });
             let batch_workers = capability.map(|_| adapter.worker_provenance(inputs.config.max_concurrent));
             let (requested_workers, effective_workers) = worker_counts(
                 inputs.config.benchmark_mode,
