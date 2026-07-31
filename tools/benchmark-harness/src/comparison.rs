@@ -1257,13 +1257,25 @@ pub fn check_guardrails(results: &[DocResult], config: &GuardrailsConfig) -> Vec
     for contract in &config.contracts {
         let doc = match resolve_guardrail_document(results, contract) {
             Ok(Some(doc)) => doc,
-            Ok(None) => continue,
+            Ok(None) => {
+                failures.push(format!(
+                    "missing guardrail document: {} [{}] {}",
+                    contract.doc,
+                    contract.file_type.as_deref().unwrap_or("any"),
+                    contract.pipeline
+                ));
+                continue;
+            }
             Err(failure) => {
                 failures.push(failure);
                 continue;
             }
         };
         let Some(pr) = doc.results.iter().find(|pr| pr.pipeline.name() == contract.pipeline) else {
+            failures.push(format!(
+                "missing guardrail pipeline result: {} [{}] {}",
+                contract.doc, doc.file_type, contract.pipeline
+            ));
             continue;
         };
         let target = format!("{} [{}] {}", contract.doc, doc.file_type, contract.pipeline);
@@ -1374,7 +1386,18 @@ pub async fn run_with_guardrails(config: &ComparisonConfig) -> Result<i32> {
             .guardrails_file
             .as_deref()
             .unwrap_or_else(|| Path::new("guardrails.json"));
-        let guardrails_config = load_guardrails(guardrails_path)?;
+        let mut guardrails_config = load_guardrails(guardrails_path)?;
+        guardrails_config.contracts.retain(|contract| {
+            let pipeline_selected = config
+                .pipelines
+                .iter()
+                .any(|pipeline| pipeline.name() == contract.pipeline);
+            let document_selected = config
+                .name_filter
+                .as_deref()
+                .is_none_or(|filter| contract.doc.contains(filter));
+            pipeline_selected && document_selected
+        });
         eprintln!(
             "Loaded {} guardrail contracts from {} (v{}, factor {})",
             guardrails_config.contracts.len(),
@@ -1382,6 +1405,10 @@ pub async fn run_with_guardrails(config: &ComparisonConfig) -> Result<i32> {
             guardrails_config.version,
             guardrails_config.threshold_factor,
         );
+        if guardrails_config.contracts.is_empty() {
+            eprintln!("\nGUARDRAIL FAILURE: no contracts apply to the selected pipelines and document filter");
+            return Ok(1);
+        }
         let failures = check_guardrails(&results, &guardrails_config);
         if !failures.is_empty() {
             eprintln!("\nGUARDRAIL FAILURES:");
@@ -1830,6 +1857,59 @@ mod tests {
         assert_eq!(failures.len(), 2);
         assert!(failures.iter().any(|failure| failure.starts_with("SF1 unavailable:")));
         assert!(failures.iter().any(|failure| failure.starts_with("TF1 unavailable:")));
+    }
+
+    #[test]
+    fn guardrails_fail_when_contracted_document_is_missing() {
+        let config = GuardrailsConfig {
+            version: "1.0".to_string(),
+            generated_at: String::new(),
+            threshold_factor: 0.9,
+            contracts: vec![GuardrailContract {
+                doc: "missing".to_string(),
+                file_type: Some("pdf".to_string()),
+                pipeline: "baseline".to_string(),
+                min_sf1: Some(0.5),
+                min_tf1: None,
+                relative_order: Vec::new(),
+            }],
+        };
+
+        let failures = check_guardrails(&[], &config);
+
+        assert_eq!(
+            failures,
+            vec!["missing guardrail document: missing [pdf] baseline".to_string()]
+        );
+    }
+
+    #[test]
+    fn guardrails_fail_when_contracted_pipeline_result_is_missing() {
+        let results = vec![DocResult {
+            name: "example".to_string(),
+            file_type: "pdf".to_string(),
+            results: Vec::new(),
+        }];
+        let config = GuardrailsConfig {
+            version: "1.0".to_string(),
+            generated_at: String::new(),
+            threshold_factor: 0.9,
+            contracts: vec![GuardrailContract {
+                doc: "example".to_string(),
+                file_type: Some("pdf".to_string()),
+                pipeline: "baseline".to_string(),
+                min_sf1: Some(0.5),
+                min_tf1: None,
+                relative_order: Vec::new(),
+            }],
+        };
+
+        let failures = check_guardrails(&results, &config);
+
+        assert_eq!(
+            failures,
+            vec!["missing guardrail pipeline result: example [pdf] baseline".to_string()]
+        );
     }
 
     #[test]
