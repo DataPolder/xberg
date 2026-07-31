@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Benchmark runs abort instead of dropping task errors, verify exact eligible-document
+  cardinality before writing artifacts, reject contradictory failure states and unknown pipeline
+  names, and report extension success rates with the same accountable-failure semantics as the
+  aggregate.
 - Benchmark CI invalidates its prebuilt harness cache for harness build scripts, workspace and
   toolchain configuration, and every transitive workspace crate, preventing stale binaries.
 - Present best-effort benchmark artifacts receive the same provenance, supported-format

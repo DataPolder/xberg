@@ -155,11 +155,84 @@ fn evaluate_framework_coverage<'a>(
     Ok(coverage)
 }
 
+fn validate_framework_result_cardinality<'a, 'b>(
+    result_frameworks: impl IntoIterator<Item = &'a str>,
+    expected_frameworks: impl IntoIterator<Item = (&'b str, usize)>,
+) -> std::result::Result<(), String> {
+    let mut expected = std::collections::BTreeMap::new();
+    for (framework, eligible_documents) in expected_frameworks {
+        if expected.insert(framework.to_string(), eligible_documents).is_some() {
+            return Err(format!("duplicate eligible provenance entry for {framework}"));
+        }
+    }
+
+    let mut actual = std::collections::BTreeMap::<String, usize>::new();
+    for framework in result_frameworks {
+        if !expected.contains_key(framework) {
+            return Err(format!(
+                "{framework} produced results without an eligible provenance entry"
+            ));
+        }
+        *actual.entry(framework.to_string()).or_default() += 1;
+    }
+
+    for (framework, eligible_documents) in expected {
+        let produced = actual.get(&framework).copied().unwrap_or(0);
+        if produced != eligible_documents {
+            return Err(format!(
+                "{framework} produced {produced} result(s), expected {eligible_documents} eligible document result(s)"
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn selected_frameworks_use_tesseract(frameworks: &[String]) -> bool {
     frameworks.is_empty()
         || frameworks.iter().any(|framework| {
             framework.starts_with("xberg-") && (framework.contains("-baseline") || framework.contains("-layout"))
         })
+}
+
+fn parse_pipeline_names(names: &[String], argument: &str) -> Result<Vec<benchmark_harness::comparison::Pipeline>> {
+    names
+        .iter()
+        .map(|name| {
+            // Silently dropping a typo can turn a requested comparison into a successful no-op. ~keep
+            benchmark_harness::comparison::Pipeline::parse(name).ok_or_else(|| {
+                benchmark_harness::Error::Config(format!("unknown pipeline '{name}' supplied to {argument}"))
+            })
+        })
+        .collect()
+}
+
+fn cohort_contract_summary(cohort: benchmark_harness::bench_matrix::Cohort) -> serde_json::Value {
+    let contract = cohort.contract();
+    let required = contract.matrix.iter().filter(|entry| !entry.optional).count();
+    let optional = contract.matrix.iter().filter(|entry| entry.optional).count();
+    let matrix = contract
+        .matrix
+        .iter()
+        .map(|entry| {
+            serde_json::json!({
+                "artifact": entry.artifact,
+                "framework": entry.framework,
+                "output_format": entry.output_format.to_string(),
+                "mode": entry.mode.artifact_slug(),
+                "optional": entry.optional,
+            })
+        })
+        .collect::<Vec<_>>();
+    serde_json::json!({
+        "cohort": cohort.as_str(),
+        "manifest_name": contract.manifest_name,
+        "manifest_blake3": contract.manifest_blake3,
+        "batch_size": contract.batch_size,
+        "expects_ocr": cohort.expects_ocr(),
+        "expected_matrix_keys": required,
+        "optional_matrix_keys": optional,
+        "matrix": matrix,
+    })
 }
 
 fn parse_model_provenance(values: &[String]) -> Result<Vec<benchmark_harness::ModelProvenance>> {
@@ -550,9 +623,9 @@ enum Commands {
         iterations: usize,
     },
 
-    /// Print one cohort's pinned release-contract summary (manifest name, BLAKE3, batch size,
-    /// required/optional matrix cell counts, OCR flag) as a single JSON line. The release
-    /// workflow consumes this so cohort metadata has a single source of truth in bench_matrix.
+    /// Print one cohort's pinned release contract, including its exact matrix cells, as a single
+    /// JSON line. The release workflow consumes this so cohort metadata and workflow coverage have
+    /// a single source of truth in bench_matrix.
     CohortContract {
         /// Which cohort's contract to print
         #[arg(long)]
@@ -931,20 +1004,6 @@ async fn main() -> Result<()> {
             println!("  Failed: {}", failure_count);
             println!("  Total: {}", results.len());
 
-            use benchmark_harness::{write_by_extension_analysis, write_json};
-
-            let output_file = output.join("results.json");
-            write_json(&results, &output_file)?;
-            println!("\nResults written to: {}", output_file.display());
-
-            let by_ext_file = output.join("by-extension.json");
-            write_by_extension_analysis(&results, &by_ext_file)?;
-            println!("Per-extension analysis written to: {}", by_ext_file.display());
-
-            let provenance_file = output.join("provenance.json");
-            benchmark_harness::write_run_provenance(&provenance, &provenance_file)?;
-            println!("Run provenance written to: {}", provenance_file.display());
-
             if !failed_frameworks.is_empty() {
                 return Err(benchmark_harness::Error::Benchmark(format!(
                     "Requested framework(s) failed to initialize: {}",
@@ -957,6 +1016,18 @@ async fn main() -> Result<()> {
                     "No benchmark results were produced".to_string(),
                 ));
             }
+
+            // Provenance records the exact supported-document count before execution. Comparing
+            // it before publication prevents an omitted task from becoming a valid-looking
+            // partial artifact. ~keep
+            validate_framework_result_cardinality(
+                results.iter().map(|result| result.framework.as_str()),
+                provenance
+                    .frameworks
+                    .iter()
+                    .map(|framework| (framework.name.as_str(), framework.eligible_documents)),
+            )
+            .map_err(benchmark_harness::Error::Benchmark)?;
 
             let coverage = evaluate_framework_coverage(
                 results
@@ -979,6 +1050,20 @@ async fn main() -> Result<()> {
                     );
                 }
             }
+
+            use benchmark_harness::{write_by_extension_analysis, write_json};
+
+            let output_file = output.join("results.json");
+            write_json(&results, &output_file)?;
+            println!("\nResults written to: {}", output_file.display());
+
+            let by_ext_file = output.join("by-extension.json");
+            write_by_extension_analysis(&results, &by_ext_file)?;
+            println!("Per-extension analysis written to: {}", by_ext_file.display());
+
+            let provenance_file = output.join("provenance.json");
+            benchmark_harness::write_run_provenance(&provenance, &provenance_file)?;
+            println!("Run provenance written to: {}", provenance_file.display());
 
             Ok(())
         }
@@ -1072,7 +1157,7 @@ async fn main() -> Result<()> {
             use benchmark_harness::comparison::{ComparisonConfig, Pipeline, run_with_guardrails};
 
             let selected_pipelines = match pipelines {
-                Some(names) => names.iter().filter_map(|n| Pipeline::parse(n)).collect(),
+                Some(names) => parse_pipeline_names(&names, "compare --pipelines")?,
                 None => vec![Pipeline::Baseline, Pipeline::Layout],
             };
 
@@ -1108,14 +1193,13 @@ async fn main() -> Result<()> {
             triage_blocks,
             profile_dir,
         } => {
-            use benchmark_harness::comparison::Pipeline;
             use benchmark_harness::pipeline_benchmark::{
                 PipelineBenchmarkConfig, SortMetric, default_paths, print_pipeline_table, print_triage_blocks,
                 run_pipeline_benchmark, write_json_output_with_config,
             };
 
             let selected_paths = match paths {
-                Some(names) => names.iter().filter_map(|n| Pipeline::parse(n)).collect(),
+                Some(names) => parse_pipeline_names(&names, "pipeline-benchmark --paths")?,
                 None => default_paths(),
             };
 
@@ -1409,18 +1493,7 @@ async fn main() -> Result<()> {
 
         Commands::CohortContract { cohort } => {
             let cohort: benchmark_harness::bench_matrix::Cohort = cohort.into();
-            let contract = cohort.contract();
-            let required = contract.matrix.iter().filter(|entry| !entry.optional).count();
-            let optional = contract.matrix.iter().filter(|entry| entry.optional).count();
-            let summary = serde_json::json!({
-                "cohort": cohort.as_str(),
-                "manifest_name": contract.manifest_name,
-                "manifest_blake3": contract.manifest_blake3,
-                "batch_size": contract.batch_size,
-                "expects_ocr": cohort.expects_ocr(),
-                "expected_matrix_keys": required,
-                "optional_matrix_keys": optional,
-            });
+            let summary = cohort_contract_summary(cohort);
             let json = serde_json::to_string(&summary)
                 .map_err(|error| benchmark_harness::Error::Benchmark(format!("serialize cohort contract: {error}")))?;
             println!("{json}");
@@ -1516,8 +1589,9 @@ fn format_size(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        Cli, Commands, evaluate_framework_coverage, normalize_run_frameworks, parse_model_provenance,
-        selected_frameworks_use_tesseract, tracing_filter,
+        Cli, Commands, cohort_contract_summary, evaluate_framework_coverage, normalize_run_frameworks,
+        parse_model_provenance, parse_pipeline_names, selected_frameworks_use_tesseract, tracing_filter,
+        validate_framework_result_cardinality,
     };
     use benchmark_harness::types::ErrorKind;
     use clap::Parser;
@@ -1630,6 +1704,47 @@ mod tests {
     }
 
     #[test]
+    fn compare_rejects_unknown_pipeline_names() {
+        let error =
+            parse_pipeline_names(&["baseline".to_string(), "typo".to_string()], "compare --pipelines").unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "Configuration error: unknown pipeline 'typo' supplied to compare --pipelines"
+        );
+    }
+
+    #[test]
+    fn pipeline_benchmark_rejects_unknown_pipeline_names() {
+        let error = parse_pipeline_names(
+            &["layout".to_string(), "unknown".to_string()],
+            "pipeline-benchmark --paths",
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "Configuration error: unknown pipeline 'unknown' supplied to pipeline-benchmark --paths"
+        );
+    }
+
+    #[test]
+    fn cohort_contract_summary_includes_exact_matrix_cells() {
+        let summary = cohort_contract_summary(benchmark_harness::bench_matrix::Cohort::Native);
+        let matrix = summary["matrix"].as_array().expect("matrix array");
+
+        assert_eq!(matrix.len(), 21);
+        assert_eq!(summary["expected_matrix_keys"], 20);
+        assert_eq!(summary["optional_matrix_keys"], 1);
+        assert_eq!(
+            matrix[0]["artifact"],
+            "benchmarks-rust-baseline-markdown-single-file-native-pdf-fast-b8"
+        );
+        assert_eq!(matrix[0]["mode"], "single-file");
+        assert_eq!(matrix[0]["optional"], false);
+    }
+
+    #[test]
     fn coverage_is_checked_per_framework_at_the_inclusive_boundary() {
         let coverage = evaluate_framework_coverage(
             [
@@ -1678,6 +1793,30 @@ mod tests {
         assert_eq!(
             error,
             "framework produced no accountable benchmark results; 1 infrastructure failure(s) occurred"
+        );
+    }
+
+    #[test]
+    fn cardinality_rejects_missing_framework_results() {
+        let error = validate_framework_result_cardinality(
+            ["xberg-markdown-baseline", "xberg-markdown-baseline"],
+            [("xberg-markdown-baseline", 3)],
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            error,
+            "xberg-markdown-baseline produced 2 result(s), expected 3 eligible document result(s)"
+        );
+    }
+
+    #[test]
+    fn cardinality_rejects_unexpected_framework_results() {
+        let error = validate_framework_result_cardinality(["unexpected"], [("expected", 1)]).unwrap_err();
+
+        assert_eq!(
+            error,
+            "unexpected produced results without an eligible provenance entry"
         );
     }
 

@@ -1274,8 +1274,18 @@ impl BenchmarkRunner {
                         self.enrich_with_framework_size(&mut result);
                         results.push(result);
                     }
-                    Err(e) => {
-                        eprintln!("Benchmark task failed: {}", e);
+                    Err(task_error) => {
+                        // A missing row would make downstream coverage look better than the
+                        // eligible corpus actually was, so task-level harness errors abort the
+                        // run instead of being silently omitted. ~keep
+                        let teardown_error = Self::teardown_frameworks(&frameworks).await.err();
+                        let teardown_context = teardown_error
+                            .map(|error| format!("; teardown also failed: {error}"))
+                            .unwrap_or_default();
+                        return Err(Error::Benchmark(format!(
+                            "benchmark task failed for '{framework_name}' on {}: {task_error}{teardown_context}",
+                            file_path.display()
+                        )));
                     }
                 }
             }
@@ -1311,6 +1321,7 @@ impl BenchmarkRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Fixture;
     use crate::types::{FrameworkCapabilities, OcrStatus};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -1359,6 +1370,10 @@ mod tests {
 
     struct FailedWarmupAdapter {
         teardown_calls: Arc<AtomicUsize>,
+    }
+
+    struct TaskErrorAdapter {
+        calls: AtomicUsize,
     }
 
     struct RecordingBatchAdapter {
@@ -1619,6 +1634,36 @@ mod tests {
         async fn teardown(&self) -> Result<()> {
             self.teardown_calls.fetch_add(1, Ordering::SeqCst);
             Ok(())
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl FrameworkAdapter for TaskErrorAdapter {
+        fn name(&self) -> &str {
+            "task-error"
+        }
+
+        fn supports_format(&self, file_type: &str) -> bool {
+            file_type == "pdf"
+        }
+
+        fn supported_output_formats(&self) -> Vec<OutputFormat> {
+            vec![OutputFormat::Markdown]
+        }
+
+        async fn extract(
+            &self,
+            file_path: &Path,
+            _timeout: Duration,
+            _force_ocr: bool,
+            _ocr_language: Option<&str>,
+            output_format: OutputFormat,
+        ) -> Result<BenchmarkResult> {
+            if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                Ok(RecordingBatchAdapter::success(file_path, output_format))
+            } else {
+                Err(Error::Benchmark("intentional task error".to_string()))
+            }
         }
     }
 
@@ -2137,6 +2182,42 @@ mod tests {
         assert!(!result.success);
         assert_eq!(result.error_kind, ErrorKind::FrameworkError);
         assert_eq!(result.extracted_text.as_deref(), Some("successful payload"));
+    }
+
+    #[tokio::test]
+    async fn single_file_task_error_fails_run_instead_of_dropping_result() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let fixture_path = temp_dir.path().join("fixture.json");
+        std::fs::write(temp_dir.path().join("document.pdf"), b"pdf").unwrap();
+        let fixture = Fixture {
+            document: PathBuf::from("document.pdf"),
+            file_type: "pdf".to_string(),
+            file_size: 3,
+            expected_frameworks: vec!["task-error".to_string()],
+            metadata: HashMap::new(),
+            ground_truth: None,
+        };
+        std::fs::write(&fixture_path, serde_json::to_string(&fixture).unwrap()).unwrap();
+
+        let mut registry = AdapterRegistry::new();
+        registry
+            .register(Arc::new(TaskErrorAdapter {
+                calls: AtomicUsize::new(0),
+            }))
+            .unwrap();
+        let config = BenchmarkConfig {
+            benchmark_mode: BenchmarkMode::SingleFile,
+            warmup_iterations: 0,
+            benchmark_iterations: 1,
+            ..Default::default()
+        };
+        let mut runner = BenchmarkRunner::new(config, registry);
+        runner.load_fixtures(&fixture_path).unwrap();
+
+        let error = runner.run(&["task-error".to_string()]).await.unwrap_err();
+
+        assert!(error.to_string().contains("task-error"));
+        assert!(error.to_string().contains("intentional task error"));
     }
 
     #[tokio::test]

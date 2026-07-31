@@ -44,6 +44,14 @@ pub fn validate_result(result: &BenchmarkResult) -> Result<()> {
         )));
     }
 
+    if !result.success && result.error_kind == ErrorKind::None {
+        return Err(Error::Benchmark(format!(
+            "Invalid result state for {}/{}: success=false but error_kind is None",
+            result.framework,
+            result.file_path.display()
+        )));
+    }
+
     Ok(())
 }
 
@@ -83,6 +91,9 @@ pub struct FrameworkExtensionStats {
     pub framework_errors: usize,
     /// Number of harness-side errors (potentially our fault)
     pub harness_errors: usize,
+    /// Number of configuration/setup failures (infrastructure, not framework fault)
+    #[serde(default)]
+    pub config_setup_errors: usize,
     /// Number of extractions that timed out
     pub timeouts: usize,
     /// Number of extractions that returned empty content
@@ -90,7 +101,7 @@ pub struct FrameworkExtensionStats {
     /// Unique framework error messages with occurrence counts
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub error_details: HashMap<String, usize>,
-    /// Success rate (0.0-1.0)
+    /// Success rate (0.0-1.0) over accountable samples; infrastructure failures are excluded.
     pub success_rate: f64,
     /// Average wall-clock duration in milliseconds (includes subprocess overhead)
     pub avg_duration_ms: f64,
@@ -193,11 +204,6 @@ pub fn analyze_by_extension(results: &[BenchmarkResult]) -> ByExtensionReport {
 fn calculate_framework_stats(results: &[&BenchmarkResult]) -> FrameworkExtensionStats {
     let count = results.len();
     let successful = results.iter().filter(|r| r.success).count();
-    let success_rate = if count > 0 {
-        successful as f64 / count as f64
-    } else {
-        0.0
-    };
 
     let framework_errors = results
         .iter()
@@ -207,11 +213,24 @@ fn calculate_framework_stats(results: &[&BenchmarkResult]) -> FrameworkExtension
         .iter()
         .filter(|r| r.error_kind == ErrorKind::HarnessError)
         .count();
+    let config_setup_errors = results
+        .iter()
+        .filter(|r| r.error_kind == ErrorKind::ConfigSetupError)
+        .count();
     let timeouts = results.iter().filter(|r| r.error_kind == ErrorKind::Timeout).count();
     let empty_content = results
         .iter()
         .filter(|r| r.error_kind == ErrorKind::EmptyContent)
         .count();
+
+    // Match aggregate/CLI semantics: only successful rows and framework-accountable failures
+    // participate in the rate; harness and setup failures remain visible in their counters. ~keep
+    let accountable = successful + framework_errors + timeouts + empty_content;
+    let success_rate = if accountable > 0 {
+        successful as f64 / accountable as f64
+    } else {
+        0.0
+    };
 
     let mut error_details: HashMap<String, usize> = HashMap::new();
     for result in results.iter().filter(|r| !r.success) {
@@ -340,6 +359,7 @@ fn calculate_framework_stats(results: &[&BenchmarkResult]) -> FrameworkExtension
         performance_samples: performance_results.len(),
         framework_errors,
         harness_errors,
+        config_setup_errors,
         timeouts,
         empty_content,
         error_details,
@@ -497,6 +517,19 @@ mod tests {
     }
 
     #[test]
+    fn write_json_rejects_failed_result_without_error_kind() {
+        let temp_dir = TempDir::new().unwrap();
+        let output_path = temp_dir.path().join("results.json");
+        let mut result = create_benchmark_result("framework1", false, 0, None, 0.0, 0);
+        result.error_kind = ErrorKind::None;
+
+        let error = write_json(&[result], &output_path).unwrap_err();
+
+        assert!(error.to_string().contains("success=false but error_kind is None"));
+        assert!(!output_path.exists());
+    }
+
+    #[test]
     fn test_framework_stats_extraction_duration_all_present() {
         let result1 = create_benchmark_result("framework1", true, 100, Some(80), 1_000_000.0, 10_000_000);
         let result2 = create_benchmark_result("framework1", true, 150, Some(120), 1_000_000.0, 10_000_000);
@@ -620,10 +653,27 @@ mod tests {
 
         assert_eq!(stats.count, 3);
         assert_eq!(stats.successful, 2);
-        assert_eq!(stats.success_rate, 2.0 / 3.0);
+        assert_eq!(stats.success_rate, 1.0);
 
         assert!(stats.avg_extraction_duration_ms.is_some());
         assert!((stats.avg_extraction_duration_ms.unwrap() - 100.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn framework_stats_success_rate_excludes_infrastructure_failures() {
+        let success = create_benchmark_result("framework1", true, 100, None, 1_000_000.0, 10_000_000);
+        let infrastructure_failure = create_benchmark_result("framework1", false, 0, None, 0.0, 0);
+        let mut framework_failure = create_benchmark_result("framework1", false, 0, None, 0.0, 0);
+        framework_failure.error_kind = ErrorKind::FrameworkError;
+        let results = vec![&success, &infrastructure_failure, &framework_failure];
+
+        let stats = calculate_framework_stats(&results);
+
+        assert_eq!(stats.count, 3);
+        assert_eq!(stats.successful, 1);
+        assert_eq!(stats.harness_errors, 1);
+        assert_eq!(stats.framework_errors, 1);
+        assert_eq!(stats.success_rate, 0.5);
     }
 
     #[test]
