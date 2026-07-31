@@ -12,6 +12,29 @@ use std::sync::Once;
 #[cfg(not(feature = "ort-bundled"))]
 static ORT_INIT: Once = Once::new();
 
+const XBERG_ORT_EP_ENV_VAR: &str = "XBERG_ORT_EP";
+
+pub(crate) fn parse_execution_provider_override(
+    value: &str,
+) -> Option<crate::core::config::acceleration::ExecutionProviderType> {
+    use crate::core::config::acceleration::ExecutionProviderType;
+
+    match value.trim().to_ascii_lowercase().as_str() {
+        "cpu" => Some(ExecutionProviderType::Cpu),
+        "coreml" => Some(ExecutionProviderType::CoreMl),
+        "cuda" => Some(ExecutionProviderType::Cuda),
+        "tensorrt" => Some(ExecutionProviderType::TensorRt),
+        "auto" => Some(ExecutionProviderType::Auto),
+        _ => None,
+    }
+}
+
+pub(crate) fn execution_provider_override() -> Option<crate::core::config::acceleration::ExecutionProviderType> {
+    std::env::var(XBERG_ORT_EP_ENV_VAR)
+        .ok()
+        .and_then(|value| parse_execution_provider_override(&value))
+}
+
 /// Ensure ONNX Runtime is discoverable. Safe to call multiple times (no-op after first).
 ///
 /// When the `ort-bundled` feature is enabled the ORT binaries are embedded via the
@@ -115,16 +138,7 @@ pub(crate) fn apply_execution_providers(
     #[cfg(any(target_os = "macos", feature = "cuda", feature = "tensorrt"))]
     use ort::ep::ExecutionProvider;
 
-    let provider = std::env::var("XBERG_ORT_EP")
-        .ok()
-        .and_then(|e| match e.trim().to_ascii_lowercase().as_str() {
-            "cpu" => Some(ExecutionProviderType::Cpu),
-            "coreml" => Some(ExecutionProviderType::CoreMl),
-            "cuda" => Some(ExecutionProviderType::Cuda),
-            "tensorrt" => Some(ExecutionProviderType::TensorRt),
-            "auto" => Some(ExecutionProviderType::Auto),
-            _ => None,
-        })
+    let provider = execution_provider_override()
         .unwrap_or_else(|| accel.map(|a| a.provider.clone()).unwrap_or(ExecutionProviderType::Auto));
     // Only read by the CUDA/TensorRT EP arms, which are cfg-gated behind their respective
     // Cargo features; unused without at least one of them enabled.
@@ -278,4 +292,41 @@ pub(crate) fn apply_execution_providers(
     };
 
     Ok(builder)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_execution_provider_override;
+    use crate::core::config::acceleration::ExecutionProviderType;
+
+    #[test]
+    fn blank_execution_provider_overrides_are_absent() {
+        for value in ["", " ", "\t\r\n"] {
+            assert_eq!(parse_execution_provider_override(value), None, "value: {value:?}");
+        }
+    }
+
+    #[test]
+    fn unrecognized_execution_provider_overrides_are_absent() {
+        for value in ["invalid", "gpu", "core-ml", "cpu,cuda"] {
+            assert_eq!(parse_execution_provider_override(value), None, "value: {value:?}");
+        }
+    }
+
+    #[test]
+    fn recognized_execution_provider_overrides_are_parsed() {
+        for (value, expected) in [
+            ("cpu", ExecutionProviderType::Cpu),
+            (" COREML ", ExecutionProviderType::CoreMl),
+            ("cuda", ExecutionProviderType::Cuda),
+            ("TensorRT", ExecutionProviderType::TensorRt),
+            ("auto", ExecutionProviderType::Auto),
+        ] {
+            assert_eq!(
+                parse_execution_provider_override(value),
+                Some(expected),
+                "value: {value:?}"
+            );
+        }
+    }
 }

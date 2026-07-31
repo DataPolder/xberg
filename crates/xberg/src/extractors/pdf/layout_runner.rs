@@ -218,7 +218,7 @@ async fn run_layout_for_pdf_pages_async(
         let owned_content = content.to_vec();
         let owned_config = layout_config.clone();
         tokio::task::spawn_blocking(move || {
-            let execution_provider_overridden = std::env::var_os("XBERG_ORT_EP").is_some();
+            let execution_provider_overridden = crate::ort_discovery::execution_provider_override().is_some();
             let acceleration_override = rtdetr_acceleration_override(&owned_config, execution_provider_overridden);
             run_layout_with_auto_cpu_retry(
                 &owned_config,
@@ -235,7 +235,7 @@ async fn run_layout_for_pdf_pages_async(
 
     #[cfg(not(feature = "tokio-runtime"))]
     {
-        let execution_provider_overridden = std::env::var_os("XBERG_ORT_EP").is_some();
+        let execution_provider_overridden = crate::ort_discovery::execution_provider_override().is_some();
         let acceleration_override = rtdetr_acceleration_override(layout_config, execution_provider_overridden);
         run_layout_with_auto_cpu_retry(
             layout_config,
@@ -713,6 +713,7 @@ mod tests {
     use crate::XbergError;
     use crate::core::config::acceleration::{AccelerationConfig, ExecutionProviderType};
     use crate::core::config::layout::LayoutDetectionConfig;
+    use crate::ort_discovery::parse_execution_provider_override;
     use crate::pdf::layout_gate::PageGateDecision;
 
     fn provider(config: &LayoutDetectionConfig) -> ExecutionProviderType {
@@ -789,13 +790,23 @@ mod tests {
     #[test]
     fn should_propagate_rtdetr_auto_cpu_resolution_without_retry() {
         let config = LayoutDetectionConfig::default();
+        for value in ["", " \t", "invalid"] {
+            let execution_provider_overridden = parse_execution_provider_override(value).is_some();
+            let override_for_value = rtdetr_acceleration_override(&config, execution_provider_overridden)
+                .expect("blank or invalid environment values must not suppress macOS RT-DETR CPU resolution");
+            assert_eq!(override_for_value.provider, ExecutionProviderType::Cpu);
+        }
+        for value in ["cpu", "coreml", "cuda", "tensorrt", "auto"] {
+            let execution_provider_overridden = parse_execution_provider_override(value).is_some();
+            assert!(
+                rtdetr_acceleration_override(&config, execution_provider_overridden).is_none(),
+                "recognized environment provider must remain authoritative: {value:?}"
+            );
+        }
+
         let acceleration_override =
             rtdetr_acceleration_override(&config, false).expect("macOS RT-DETR Auto should resolve to CPU");
         assert_eq!(acceleration_override.provider, ExecutionProviderType::Cpu);
-        assert!(
-            rtdetr_acceleration_override(&config, true).is_none(),
-            "an environment provider must remain authoritative"
-        );
         let mut attempts = Vec::new();
 
         let attempt = run_layout_with_auto_cpu_retry(&config, false, Some(acceleration_override), |attempt_config| {
@@ -887,19 +898,55 @@ mod tests {
     #[test]
     fn should_not_retry_when_execution_provider_environment_override_is_set() {
         let config = LayoutDetectionConfig::default();
-        let mut attempts = Vec::new();
+        for value in ["cpu", "coreml", "cuda", "tensorrt", "auto"] {
+            let mut attempts = Vec::new();
+            let execution_provider_overridden = parse_execution_provider_override(value).is_some();
 
-        let error = run_layout_with_auto_cpu_retry(&config, true, None, |attempt_config| {
-            attempts.push(provider(attempt_config));
-            Err::<(), _>(inference_run_error("explicit environment provider failed"))
-        })
-        .expect_err("an environment provider override must not retry");
+            let error =
+                run_layout_with_auto_cpu_retry(&config, execution_provider_overridden, None, |attempt_config| {
+                    attempts.push(provider(attempt_config));
+                    Err::<(), _>(inference_run_error("explicit environment provider failed"))
+                })
+                .expect_err("a recognized environment provider override must not retry");
 
-        assert_eq!(
-            error.to_string(),
-            inference_run_error("explicit environment provider failed").to_string()
-        );
-        assert_eq!(attempts, [ExecutionProviderType::Auto]);
+            assert_eq!(
+                error.to_string(),
+                inference_run_error("explicit environment provider failed").to_string()
+            );
+            assert_eq!(attempts, [ExecutionProviderType::Auto], "value: {value:?}");
+        }
+    }
+
+    #[test]
+    fn should_retry_when_execution_provider_environment_override_is_blank_or_invalid() {
+        let config = LayoutDetectionConfig::default();
+
+        for value in ["", " \t", "invalid"] {
+            let mut attempts = Vec::new();
+            let execution_provider_overridden = parse_execution_provider_override(value).is_some();
+
+            let attempt =
+                run_layout_with_auto_cpu_retry(&config, execution_provider_overridden, None, |attempt_config| {
+                    attempts.push(provider(attempt_config));
+                    if attempts.len() == 1 {
+                        Err(inference_run_error("automatic provider failed"))
+                    } else {
+                        Ok(42)
+                    }
+                })
+                .expect("a blank or invalid environment provider value must not suppress CPU retry");
+
+            assert_eq!(attempt.output, 42);
+            assert_eq!(
+                attempt.acceleration_override.map(|acceleration| acceleration.provider),
+                Some(ExecutionProviderType::Cpu)
+            );
+            assert_eq!(
+                attempts,
+                [ExecutionProviderType::Auto, ExecutionProviderType::Cpu],
+                "value: {value:?}"
+            );
+        }
     }
 
     fn rendered_page(page_index: usize, width: u32, page_width_pts: f32) -> RenderedLayoutPage {

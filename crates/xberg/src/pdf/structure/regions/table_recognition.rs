@@ -42,6 +42,10 @@ const SPLIT_MIN_CHILD_WIDTH_FRACTION: f32 = 0.3;
 const SPLIT_TRANSLATION_MIN_FRACTION: f32 = 0.4;
 #[cfg(feature = "layout-detection")]
 const SPLIT_TRANSLATION_MAX_FRACTION: f32 = 0.6;
+#[cfg(feature = "layout-detection")]
+/// Layout detector boxes can clip the first or last word by a few points.
+/// Outermost TATR cells may match words crossing the detector edge by this amount.
+const TATR_OUTER_EDGE_PADDING_MAX_PTS: f32 = 4.0;
 
 #[cfg(feature = "layout-detection")]
 struct RecognizedTatrTable {
@@ -371,6 +375,7 @@ fn assemble_tatr_table(
         crop.px_top as f32,
         crop.sx,
         crop.sy,
+        allowed_word_ids.map(|_| (hint.left, hint.right)),
     );
     if !tatr_grid_is_credible(&grid_output, context.page_index, context.allow_single_column) {
         return None;
@@ -785,6 +790,7 @@ fn build_tatr_grid_table(
     crop_offset_px_y: f32,
     sx: f32,
     sy: f32,
+    split_outer_edges: Option<(f32, f32)>,
 ) -> TatrGridOutput {
     if cell_grid.is_empty() {
         return TatrGridOutput {
@@ -834,7 +840,7 @@ fn build_tatr_grid_table(
 
         for (ri, conv_row) in converted_cells.iter().enumerate() {
             for (ci, &(cl, ct, cr, cb)) in conv_row.iter().enumerate() {
-                let iow = word_hint_iow(word, cl, ct, cr, cb);
+                let iow = tatr_cell_word_iow(word, (cl, ct, cr, cb), ci, conv_row.len(), split_outer_edges);
                 if iow > best_iow {
                     best_iow = iow;
                     best_row = ri;
@@ -888,6 +894,35 @@ fn build_tatr_grid_table(
         consumed_word_indices,
         model_grid_cell_count: num_rows * num_cols,
     }
+}
+
+#[cfg(feature = "layout-detection")]
+fn tatr_cell_word_iow(
+    word: &crate::pdf::table_reconstruct::HocrWord,
+    (mut cell_left, cell_top, mut cell_right, cell_bottom): (f32, f32, f32, f32),
+    column: usize,
+    column_count: usize,
+    split_outer_edges: Option<(f32, f32)>,
+) -> f32 {
+    if let Some((table_left, table_right)) = split_outer_edges {
+        let word_left = word.left as f32;
+        let word_right = word.left.saturating_add(word.width) as f32;
+        if column == 0
+            && word_left < table_left
+            && word_right > table_left
+            && table_left - word_left <= TATR_OUTER_EDGE_PADDING_MAX_PTS
+        {
+            cell_left = cell_left.min(word_left);
+        }
+        if column + 1 == column_count
+            && word_right > table_right
+            && word_left < table_right
+            && word_right - table_right <= TATR_OUTER_EDGE_PADDING_MAX_PTS
+        {
+            cell_right = cell_right.max(word_right);
+        }
+    }
+    word_hint_iow(word, cell_left, cell_top, cell_right, cell_bottom)
 }
 
 /// Append word rows the recognizer failed to consume below the grid.
@@ -1688,8 +1723,9 @@ fn tighten_table_bbox_top(
 mod tests {
     use super::{
         RecognizedTatrTable, TatrGridOutput, collect_tatr_words, compute_col_gap_for_word_refs,
-        extend_table_bottom_rows, recognize_hint_with_optional_split, side_by_side_table_plans,
-        split_child_is_credible, table_bbox_bottom_from_consumed, tatr_grid_is_credible, tighten_table_bbox_top,
+        extend_table_bottom_rows, ranked_split_candidates, recognize_hint_with_optional_split, recurring_tracks,
+        side_by_side_table_plans, split_child_is_credible, table_bbox_bottom_from_consumed, tatr_cell_word_iow,
+        tatr_grid_is_credible, tighten_table_bbox_top,
     };
     use crate::pdf::structure::types::{LayoutHint, LayoutHintClass};
     use crate::pdf::table_reconstruct::HocrWord;
@@ -1731,6 +1767,23 @@ mod tests {
         words
     }
 
+    fn unpadded_split_seam(hint: &LayoutHint, words: &[HocrWord]) -> f32 {
+        let table_words: Vec<_> = words.iter().collect();
+        let semantic_tracks = recurring_tracks(&table_words, |word| {
+            word.text.chars().any(char::is_alphabetic).then_some(word.left as f32)
+        });
+        let numeric_tracks = recurring_tracks(&table_words, |word| {
+            word.text
+                .chars()
+                .any(|character| character.is_ascii_digit())
+                .then_some((word.left + word.width) as f32)
+        });
+        ranked_split_candidates(&semantic_tracks, &numeric_tracks, &table_words, hint)
+            .first()
+            .expect("unmodified hint should have a split candidate")
+            .seam
+    }
+
     fn recognized_table(hint: &LayoutHint, allowed: Option<&std::collections::BTreeSet<usize>>) -> RecognizedTatrTable {
         let eligible_word_ids = allowed
             .cloned()
@@ -1764,6 +1817,97 @@ mod tests {
         assert!(plan.children[0].right > 80.0 && plan.children[0].right < 110.0);
         assert_eq!(plan.children[0].right, plan.children[1].left);
         assert!(plan.children[0].left < plan.children[1].left);
+    }
+
+    #[test]
+    fn split_outer_cell_matching_does_not_move_crop_or_center_seam() {
+        let mut words = side_by_side_words();
+        words[0].text = "Sixth".to_string();
+        let mut hint = table_hint();
+        hint.left = 12.0;
+        hint.right = 188.0;
+        let original_seam = unpadded_split_seam(&hint, &words);
+
+        let mut attempts = Vec::new();
+        let tables = recognize_hint_with_optional_split(&hint, &words, 100.0, |candidate, allowed| {
+            attempts.push((candidate.left, candidate.right, allowed.cloned()));
+            Some(recognized_table(candidate, allowed))
+        });
+
+        assert_eq!(tables.len(), 2, "outer matching must preserve atomic split recognition");
+        assert_eq!(attempts.len(), 2, "credible children should avoid parent fallback");
+        assert_eq!(attempts[0].0, hint.left, "left inference crop must remain unchanged");
+        assert_eq!(
+            attempts[0].1, original_seam,
+            "outer cell matching must not move the center seam"
+        );
+        assert_eq!(
+            attempts[1].0, original_seam,
+            "right child must still begin at the center seam"
+        );
+        assert_eq!(attempts[1].1, hint.right, "right inference crop must remain unchanged");
+    }
+
+    #[test]
+    fn split_outer_cell_matching_retains_crossing_left_prefix() {
+        let prefix = make_word("Sixth", 10, 20, 5, 10);
+        let cell = (20.0, 15.0, 80.0, 35.0);
+
+        assert_eq!(
+            tatr_cell_word_iow(&prefix, cell, 0, 3, None),
+            0.0,
+            "the unchanged TATR cell must not already match the clipped prefix"
+        );
+        assert!(
+            tatr_cell_word_iow(&prefix, cell, 0, 3, Some((12.0, 188.0))) >= 0.2,
+            "a prefix crossing the left detector edge by two points should match the outermost cell"
+        );
+    }
+
+    #[test]
+    fn split_outer_cell_matching_is_bounded_and_requires_edge_crossing() {
+        let cell = (20.0, 15.0, 80.0, 35.0);
+        let too_far = make_word("far", 7, 20, 8, 10);
+        let wholly_outside = make_word("outside", 9, 20, 2, 10);
+        let touching_left_edge = make_word("touching", 9, 20, 3, 10);
+
+        assert_eq!(
+            tatr_cell_word_iow(&too_far, cell, 0, 3, Some((12.0, 188.0))),
+            0.0,
+            "matching must not expand more than four points"
+        );
+        assert_eq!(
+            tatr_cell_word_iow(&wholly_outside, cell, 0, 3, Some((12.0, 188.0))),
+            0.0,
+            "words that do not cross the detector edge must remain excluded"
+        );
+        assert_eq!(
+            tatr_cell_word_iow(&touching_left_edge, cell, 0, 3, Some((12.0, 188.0))),
+            0.0,
+            "words that only touch the detector edge must remain excluded"
+        );
+    }
+
+    #[test]
+    fn split_outer_cell_matching_handles_right_edge_symmetrically() {
+        let suffix = make_word("suffix", 187, 20, 4, 10);
+        let touching_right_edge = make_word("touching", 188, 20, 3, 10);
+        let cell = (120.0, 15.0, 180.0, 35.0);
+
+        assert_eq!(
+            tatr_cell_word_iow(&suffix, cell, 2, 3, None),
+            0.0,
+            "the unchanged TATR cell must not already match the clipped suffix"
+        );
+        assert!(
+            tatr_cell_word_iow(&suffix, cell, 2, 3, Some((12.0, 188.0))) >= 0.2,
+            "a suffix crossing the right detector edge by three points should match the outermost cell"
+        );
+        assert_eq!(
+            tatr_cell_word_iow(&touching_right_edge, cell, 2, 3, Some((12.0, 188.0))),
+            0.0,
+            "words that only touch the right detector edge must remain excluded"
+        );
     }
 
     #[test]
