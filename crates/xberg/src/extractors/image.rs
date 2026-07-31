@@ -18,6 +18,9 @@ const LAYOUT_READING_ORDER_ROW_HEIGHT_RATIO: f32 = 0.05;
 #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
 const MIN_LAYOUT_CROP_DIMENSION: u32 = 4;
 
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+const MIN_LAYOUT_OCR_ELEMENT_INTERSECTION_OVER_WORD_AREA: f32 = 0.2;
+
 #[cfg(all(feature = "layout-detection", feature = "ocr"))]
 const MAX_OCR_COORDINATE_SCALE_RELATIVE_DIFFERENCE: f64 = 0.01;
 
@@ -231,6 +234,34 @@ fn transformed_ocr_bounds(
 }
 
 #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn transformed_ocr_elements(
+    elements: &[crate::types::OcrElement],
+    transform: OcrCoordinateTransform,
+) -> Option<Vec<crate::types::OcrElement>> {
+    let has_word_elements = elements
+        .iter()
+        .any(|element| element.level == crate::types::OcrElementLevel::Word && !element.text.trim().is_empty());
+    elements
+        .iter()
+        .filter(|element| {
+            !element.text.trim().is_empty()
+                && (!has_word_elements || element.level == crate::types::OcrElementLevel::Word)
+        })
+        .map(|element| {
+            let (left, top, right, bottom) = transformed_ocr_bounds(&element.geometry, transform)?;
+            let mut transformed = element.clone();
+            transformed.geometry = crate::types::OcrBoundingGeometry::Rectangle {
+                left: left.round() as u32,
+                top: top.round() as u32,
+                width: (right - left).round() as u32,
+                height: (bottom - top).round() as u32,
+            };
+            Some(transformed)
+        })
+        .collect()
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
 fn ocr_element_has_unique_full_containment(
     element: &crate::types::OcrElement,
     detections: &[crate::layout::LayoutDetection],
@@ -346,6 +377,193 @@ fn push_mapped_layout_text(
         }
     }
     true
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn bbox_contains_element(bbox: crate::layout::BBox, element: &crate::types::OcrElement) -> bool {
+    let (left, top, width, height) = ocr_geometry_bounds(&element.geometry);
+    let element_left = left as f32;
+    let element_top = top as f32;
+    let element_right = element_left + width as f32;
+    let element_bottom = element_top + height as f32;
+    let element_area = width as f32 * height as f32;
+    if element_area <= 0.0 {
+        let center_x = element_left + width as f32 / 2.0;
+        let center_y = element_top + height as f32 / 2.0;
+        return center_x >= bbox.x1 && center_x <= bbox.x2 && center_y >= bbox.y1 && center_y <= bbox.y2;
+    }
+    let intersection_width = (element_right.min(bbox.x2) - element_left.max(bbox.x1)).max(0.0);
+    let intersection_height = (element_bottom.min(bbox.y2) - element_top.max(bbox.y1)).max(0.0);
+    intersection_width * intersection_height / element_area >= MIN_LAYOUT_OCR_ELEMENT_INTERSECTION_OVER_WORD_AREA
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn text_from_positioned_elements(elements: &[&crate::types::OcrElement]) -> String {
+    let mut positioned = elements
+        .iter()
+        .map(|element| {
+            let (left, top, _, height) = ocr_geometry_bounds(&element.geometry);
+            (*element, left, top, height)
+        })
+        .collect::<Vec<_>>();
+    positioned.sort_by(|left, right| left.2.cmp(&right.2).then_with(|| left.1.cmp(&right.1)));
+
+    let mut text = String::new();
+    let mut previous_line: Option<(u32, u32)> = None;
+    for (element, _, top, height) in positioned {
+        if !text.is_empty() {
+            let is_new_line = previous_line.is_some_and(|(previous_top, previous_height)| {
+                top.abs_diff(previous_top) > previous_height.max(height) / 2
+            });
+            text.push(if is_new_line { '\n' } else { ' ' });
+        }
+        text.push_str(element.text.trim());
+        previous_line = Some((top, height));
+    }
+    text
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn push_cached_layout_region(
+    builder: &mut InternalDocumentBuilder,
+    formulas: &mut Vec<crate::types::Formula>,
+    detection: &crate::layout::LayoutDetection,
+    recognized_tables: &[crate::RecognizedTable],
+    elements: &[crate::types::OcrElement],
+    assigned: &mut [bool],
+) {
+    if let Some(recognized) = recognized_tables
+        .iter()
+        .find(|table| table.detection_bbox == detection.bbox)
+    {
+        builder.push_table(
+            crate::types::Table {
+                cells: recognized.cells.clone(),
+                markdown: recognized.markdown.clone(),
+                page_number: 1,
+                ..Default::default()
+            },
+            Some(1),
+            None,
+        );
+        return;
+    }
+
+    let region_elements = elements
+        .iter()
+        .enumerate()
+        .filter_map(|(index, element)| {
+            (!assigned[index] && bbox_contains_element(detection.bbox, element)).then_some((index, element))
+        })
+        .collect::<Vec<_>>();
+    let positioned = region_elements.iter().map(|(_, element)| *element).collect::<Vec<_>>();
+    let text = text_from_positioned_elements(&positioned);
+    if text.trim().is_empty() {
+        return;
+    }
+    if push_mapped_layout_text(builder, formulas, detection, &text) {
+        for (index, _) in region_elements {
+            assigned[index] = true;
+        }
+    }
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn finish_cached_layout_document(
+    builder: InternalDocumentBuilder,
+    whole_image_doc: &InternalDocument,
+    detections: &[crate::layout::LayoutDetection],
+    formulas: Vec<crate::types::Formula>,
+    image_width: u32,
+    image_height: u32,
+) -> InternalDocument {
+    let mut assembled = builder.build();
+    assembled.metadata = whole_image_doc.metadata.clone();
+    assembled.processing_warnings = whole_image_doc.processing_warnings.clone();
+    assembled.prebuilt_ocr_elements = whole_image_doc.prebuilt_ocr_elements.clone();
+    assembled.formulas = if formulas.is_empty() {
+        whole_image_doc.formulas.clone()
+    } else {
+        formulas
+    };
+    let page_content = crate::rendering::render_plain(&assembled);
+    assembled.prebuilt_pages = Some(vec![crate::types::PageContent {
+        page_number: 1,
+        content: page_content,
+        tables: assembled.tables.iter().cloned().map(std::sync::Arc::new).collect(),
+        image_indices: vec![],
+        hierarchy: None,
+        is_blank: None,
+        layout_regions: Some(layout_regions_from_detections(detections, image_width, image_height)),
+        speaker_notes: None,
+        section_name: None,
+        sheet_name: None,
+    }]);
+    ImageExtractor::mark_ocr_extraction(&mut assembled);
+    assembled
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn try_assemble_cached_layout_tables(
+    whole_image_doc: &InternalDocument,
+    detections: &[crate::layout::LayoutDetection],
+    recognized_tables: &[crate::RecognizedTable],
+    image_width: u32,
+    image_height: u32,
+) -> Option<InternalDocument> {
+    if recognized_tables.is_empty() {
+        return None;
+    }
+    let pages = whole_image_doc.prebuilt_pages.as_ref()?;
+    if pages.len() != 1 || pages[0].page_number != 1 {
+        return None;
+    }
+    let source_elements = whole_image_doc.prebuilt_ocr_elements.as_ref()?;
+    let transform = whole_image_ocr_coordinate_transform(whole_image_doc, image_width, image_height)?;
+    let elements = transformed_ocr_elements(source_elements, transform)?;
+    if elements.iter().any(|element| element.page_number != 1) {
+        return None;
+    }
+
+    let mut assigned = elements
+        .iter()
+        .map(|element| {
+            recognized_tables
+                .iter()
+                .any(|table| bbox_contains_element(table.detection_bbox, element))
+        })
+        .collect::<Vec<_>>();
+    let mut builder = InternalDocumentBuilder::new("image");
+    let mut formulas = Vec::new();
+    for detection in detections {
+        push_cached_layout_region(
+            &mut builder,
+            &mut formulas,
+            detection,
+            recognized_tables,
+            &elements,
+            &mut assigned,
+        );
+    }
+
+    let unmatched = elements
+        .iter()
+        .enumerate()
+        .filter_map(|(index, element)| (!assigned[index]).then_some(element))
+        .collect::<Vec<_>>();
+    let unmatched_text = text_from_positioned_elements(&unmatched);
+    if !unmatched_text.trim().is_empty() {
+        builder.push_paragraph(unmatched_text.trim(), vec![], Some(1), None);
+    }
+
+    Some(finish_cached_layout_document(
+        builder,
+        whole_image_doc,
+        detections,
+        formulas,
+        image_width,
+        image_height,
+    ))
 }
 
 #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
@@ -643,6 +861,68 @@ fn configured_region_ocr(
     Ok((backend, region_config))
 }
 
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn uses_tatr_image_table_recognition(table_model: crate::core::config::layout::TableModel) -> bool {
+    use crate::core::config::layout::TableModel;
+
+    match table_model {
+        TableModel::Tatr => true,
+        TableModel::Disabled => false,
+        // TODO: SLANeXT image integration needs the same model routing and cell-assignment
+        // contract as the PDF structure pipeline. Preserve the existing OCR fallback
+        // until that can be shared without duplicating model orchestration. ~keep
+        TableModel::SlanetWired | TableModel::SlanetWireless | TableModel::SlanetPlus | TableModel::SlanetAuto => false,
+    }
+}
+
+#[cfg(all(
+    feature = "layout-detection",
+    feature = "pdf",
+    any(feature = "ocr", feature = "ocr-wasm")
+))]
+async fn recognize_cached_image_tables(
+    whole_image_doc: &InternalDocument,
+    rgb: &image::RgbImage,
+    detections: &[crate::layout::LayoutDetection],
+    config: &ExtractionConfig,
+) -> Vec<crate::RecognizedTable> {
+    let Some(layout_config) = config.layout.as_ref() else {
+        return Vec::new();
+    };
+    if !uses_tatr_image_table_recognition(layout_config.table_model) {
+        return Vec::new();
+    }
+    let Some(source_elements) = whole_image_doc.prebuilt_ocr_elements.as_ref() else {
+        return Vec::new();
+    };
+    let Some(transform) = whole_image_ocr_coordinate_transform(whole_image_doc, rgb.width(), rgb.height()) else {
+        return Vec::new();
+    };
+    let Some(elements) = transformed_ocr_elements(source_elements, transform) else {
+        return Vec::new();
+    };
+
+    let page_image = rgb.clone();
+    let detection = crate::layout::DetectionResult {
+        page_width: rgb.width(),
+        page_height: rgb.height(),
+        detections: detections.to_vec(),
+    };
+    let acceleration = config.resolved_layout_acceleration().cloned();
+    let thread_budget = crate::core::config::concurrency::resolve_thread_budget(config.concurrency.as_ref());
+    tokio::task::spawn_blocking(move || {
+        let Some(mut model) = crate::layout::take_or_create_tatr(acceleration.as_ref(), thread_budget) else {
+            return Vec::new();
+        };
+        crate::ocr::layout_assembly::recognize_page_tables(&page_image, &detection, &elements, &mut model)
+    })
+    .await
+    .unwrap_or_else(|error| {
+        tracing::warn!(%error, "Image table recognition worker failed; retaining OCR fallback");
+        Vec::new()
+    })
+}
+
 /// Returns `true` when the OCR backend configured in `config` self-declares that it
 /// emits structured markdown directly. End-to-end VLM backends (PaddleOCR-VL,
 /// future GOT-OCR / GLM-OCR) emit markdown in one forward pass and should
@@ -924,6 +1204,30 @@ impl ImageExtractor {
                 detections,
             } => (whole_image_result, rgb, detections),
         };
+        #[cfg(feature = "pdf")]
+        let recognized_tables = match &whole_image_result {
+            Ok(whole_image_doc) => recognize_cached_image_tables(whole_image_doc, &rgb, &detections, config).await,
+            Err(_) => Vec::new(),
+        };
+        #[cfg(not(feature = "pdf"))]
+        let recognized_tables = Vec::new();
+
+        if let Ok(whole_image_doc) = &whole_image_result
+            && source_image_is_proven_single_frame(content, mime_type)
+            && let Some(structured) = try_assemble_cached_layout_tables(
+                whole_image_doc,
+                &detections,
+                &recognized_tables,
+                rgb.width(),
+                rgb.height(),
+            )
+        {
+            tracing::debug!(
+                tables = structured.tables.len(),
+                "Assembled image OCR with recognized layout tables"
+            );
+            return Ok(structured);
+        }
         if let Ok(whole_image_doc) = &whole_image_result
             && let Some(structured) = try_retain_canonical_whole_image_ocr(
                 whole_image_doc,
@@ -1303,6 +1607,83 @@ mod tests {
         let whole = whole_image_doc_with_elements("inside", elements, 200, 100);
 
         assert!(try_retain_canonical_whole_image_ocr(&whole, &detections, 200, 100, true).is_none());
+    }
+
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    #[test]
+    fn should_assemble_recognized_table_without_duplicate_fallback_text() {
+        let table_bbox = crate::layout::BBox::new(0.0, 0.0, 100.0, 100.0);
+        let detections = vec![
+            crate::layout::LayoutDetection::new(crate::layout::LayoutClass::Table, 0.98, table_bbox),
+            crate::layout::LayoutDetection::new(
+                crate::layout::LayoutClass::Text,
+                0.95,
+                crate::layout::BBox::new(100.0, 0.0, 200.0, 100.0),
+            ),
+        ];
+        let elements = vec![
+            positioned_word_box("Header", 90, 10, 20, 20),
+            positioned_word_box("Value", 50, 10, 30, 20),
+            positioned_word_box("Total", 120, 10, 40, 20),
+        ];
+        let whole = whole_image_doc_with_elements("Header Value Total", elements, 200, 100);
+        let recognized = vec![crate::RecognizedTable {
+            detection_bbox: table_bbox,
+            cells: vec![
+                vec!["Header".to_string(), "Value".to_string()],
+                vec!["A".to_string(), "1".to_string()],
+            ],
+            markdown: "| Header | Value |\n| --- | --- |\n| A | 1 |".to_string(),
+        }];
+
+        let assembled = try_assemble_cached_layout_tables(&whole, &detections, &recognized, 200, 100)
+            .expect("successful recognition must assemble a structured image table");
+        let markdown = crate::rendering::render_markdown(&assembled);
+
+        assert_eq!(assembled.tables.len(), 1);
+        assert_eq!(assembled.tables[0].cells[1], vec!["A".to_string(), "1".to_string()]);
+        assert_eq!(
+            markdown.matches("Header").count(),
+            1,
+            "table OCR text must not be duplicated"
+        );
+        assert!(markdown.contains("Total"), "non-table OCR text must be retained");
+        assert_eq!(
+            serde_json::to_value(&assembled.prebuilt_ocr_elements).unwrap(),
+            serde_json::to_value(&whole.prebuilt_ocr_elements).unwrap()
+        );
+        assert_eq!(assembled.prebuilt_pages.as_ref().unwrap()[0].tables.len(), 1);
+    }
+
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    #[test]
+    fn should_preserve_existing_fallback_when_no_table_was_recognized() {
+        let detections = vec![crate::layout::LayoutDetection::new(
+            crate::layout::LayoutClass::Table,
+            0.98,
+            crate::layout::BBox::new(0.0, 0.0, 100.0, 100.0),
+        )];
+        let whole = whole_image_doc_with_elements(
+            "unstructured fallback",
+            vec![positioned_word("unstructured", 10, 10)],
+            100,
+            100,
+        );
+
+        assert!(try_assemble_cached_layout_tables(&whole, &detections, &[], 100, 100).is_none());
+    }
+
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    #[test]
+    fn should_respect_disabled_and_preserve_slanet_fallback_for_image_tables() {
+        use crate::core::config::layout::TableModel;
+
+        assert!(uses_tatr_image_table_recognition(TableModel::Tatr));
+        assert!(!uses_tatr_image_table_recognition(TableModel::Disabled));
+        assert!(!uses_tatr_image_table_recognition(TableModel::SlanetWired));
+        assert!(!uses_tatr_image_table_recognition(TableModel::SlanetWireless));
+        assert!(!uses_tatr_image_table_recognition(TableModel::SlanetPlus));
+        assert!(!uses_tatr_image_table_recognition(TableModel::SlanetAuto));
     }
 
     #[cfg(all(feature = "layout-detection", feature = "ocr"))]

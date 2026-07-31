@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Layout-enabled image extraction now recognizes TATR table structure from cached OCR elements
+  while preserving non-table text and unstructured fallback output.
 - Rotated PDF pages now receive the inverse `/Rotate` correction exactly once before shared layout
   and OCR inference, keeping PaddleOCR text upright with or without layout detection.
 - Benchmark text F1 treats OCR-inserted line breaks within CJK text as layout whitespace,
