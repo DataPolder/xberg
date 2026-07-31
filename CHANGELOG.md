@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Present best-effort benchmark artifacts receive the same provenance, supported-format
+  cardinality, failure-accounting, and aggregate integrity validation as required artifacts;
+  only absence and framework-accountable extraction failures remain optional.
 - Subprocess benchmark results record the framework's declared supported extensions, preserving
   the capability context needed to interpret historical multi-format aggregates.
 - Benchmark quality guardrails fail on missing contracted documents or pipeline results instead

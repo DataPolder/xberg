@@ -7,8 +7,9 @@
 //! BLAKE3 digest and byte length, which the synthetic bytes provide consistently.
 
 use benchmark_harness::aggregate::{
-    ComparisonData, ConsolidationMetadata, FailureSummary, FileTypeAggregation, FrameworkModeAggregation,
-    NewConsolidatedResults, PerFixtureRow, Percentiles, PerformancePercentiles, SCHEMA_VERSION,
+    ComparisonData, ConsolidationMetadata, FailureSummary, FileTypeAggregation, FormatSupportMatrix,
+    FrameworkModeAggregation, NewConsolidatedResults, PerFixtureRow, Percentiles, PerformancePercentiles,
+    SCHEMA_VERSION,
 };
 use benchmark_harness::bench_matrix::{Cohort, CohortContract};
 use benchmark_harness::provenance::{
@@ -138,6 +139,34 @@ fn runtime_framework_name(entry: &benchmark_harness::bench_matrix::MatrixEntry) 
     }
 }
 
+fn supports_extension(framework: &str, extension: &str) -> bool {
+    if framework.starts_with("xberg-") {
+        return true;
+    }
+    let supported: &[&str] = match framework {
+        "liteparse" => &["pdf"],
+        "pymupdf4llm" => &["pdf", "epub", "fb2", "png", "jpg", "jpeg", "bmp", "tiff", "tif"],
+        "docling" => &[
+            "pdf", "docx", "pptx", "xlsx", "html", "md", "csv", "png", "jpg", "jpeg", "tiff", "tif", "bmp",
+        ],
+        "tika" => &[
+            "pdf", "docx", "doc", "pptx", "ppt", "xlsx", "odt", "rtf", "epub", "html", "md", "csv", "tsv", "json",
+            "yaml", "eml", "msg", "tex", "rst", "org", "png", "jpg", "jpeg", "tiff", "tif",
+        ],
+        "markitdown" => &[
+            "pdf", "docx", "pptx", "xlsx", "html", "md", "csv", "json", "epub", "msg", "png", "jpg", "jpeg", "bmp",
+            "tiff", "tif",
+        ],
+        "unstructured" => &[
+            "pdf", "docx", "doc", "pptx", "ppt", "xlsx", "odt", "rtf", "epub", "html", "md", "rst", "org", "csv",
+            "tsv", "eml", "msg", "png", "jpg", "jpeg", "tiff", "tif", "bmp",
+        ],
+        "mineru" => &["pdf", "png", "jpg", "jpeg", "bmp", "tiff", "tif"],
+        _ => &[],
+    };
+    supported.contains(&extension)
+}
+
 fn build_provenance(
     entry: &benchmark_harness::bench_matrix::MatrixEntry,
     contract: &CohortContract,
@@ -147,6 +176,11 @@ fn build_provenance(
     use benchmark_harness::bench_matrix::ExecutionMode;
 
     let batch = matches!(entry.mode, ExecutionMode::Batch);
+    let eligible_documents = contract
+        .document_extensions
+        .iter()
+        .filter(|extension| supports_extension(&entry.framework, extension))
+        .count();
     RunProvenance {
         schema_version: 2,
         harness_version: "test".to_string(),
@@ -170,8 +204,8 @@ fn build_provenance(
             configured_thread_budget: None,
             worker_semantics: "test".to_string(),
             effective_warmup_iterations: 0,
-            eligible_documents: contract.fixtures.len(),
-            batch_partitions: batch.then(|| contract.fixtures.len() / contract.batch_size),
+            eligible_documents,
+            batch_partitions: batch.then(|| eligible_documents.div_ceil(contract.batch_size)),
         }],
         timing: TimingProvenance {
             mode: entry.mode.benchmark_mode(),
@@ -192,10 +226,12 @@ fn build_results(
     contract
         .document_stems
         .iter()
-        .map(|stem| BenchmarkResult {
+        .zip(contract.document_extensions.iter())
+        .filter(|(_, extension)| supports_extension(&entry.framework, extension))
+        .map(|(stem, extension)| BenchmarkResult {
             framework: runtime_framework_name(entry),
             output_format: entry.output_format,
-            file_path: PathBuf::from(format!("/workspace/test_documents/{stem}.pdf")),
+            file_path: PathBuf::from(format!("/workspace/test_documents/{stem}.{extension}")),
             file_size: 1,
             success: true,
             error_message: None,
@@ -216,7 +252,7 @@ fn build_results(
                 .collect(),
             statistics: None,
             cold_start_duration: None,
-            file_extension: "pdf".to_string(),
+            file_extension: (*extension).to_string(),
             framework_capabilities: FrameworkCapabilities::default(),
             pdf_metadata: None,
             ocr_status: if cohort.expects_ocr() {
@@ -337,6 +373,14 @@ fn optional_artifact_dir(scenario: &ArtifactScenario) -> PathBuf {
         .join(format!("{}-{RUN_ID}", entry.artifact))
 }
 
+fn optional_matrix_index(contract: &CohortContract) -> usize {
+    contract
+        .matrix
+        .iter()
+        .position(|entry| entry.optional)
+        .expect("cohort has an optional (best-effort) entry")
+}
+
 #[test]
 fn accepts_exact_native_contract() {
     let scenario = artifact_scenario(Cohort::Native);
@@ -351,6 +395,16 @@ fn accepts_exact_ocr_contract() {
     let required = required_count(&scenario.contract);
     let message = validate(&scenario.args).expect("ocr contract should validate");
     assert_eq!(message, format!("validated {required} ocr benchmark artifacts"));
+}
+
+#[test]
+fn accepts_exact_raw_contract_for_every_format_cohort() {
+    // ~keep Every cohort exercises the same optional-present validation path, including family
+    // cohorts where competitors intentionally cover only a supported subset of extensions.
+    for cohort in Cohort::ALL {
+        let scenario = artifact_scenario(cohort);
+        validate(&scenario.args).unwrap_or_else(|error| panic!("{} raw contract failed: {error}", cohort.as_str()));
+    }
 }
 
 /// Index of a batch-mode xberg cell in the native matrix — the case that carries the runner's
@@ -402,15 +456,68 @@ fn accepts_native_contract_when_optional_mineru_absent() {
 }
 
 #[test]
-fn accepts_native_contract_when_optional_mineru_failed() {
-    // A present-but-failed best-effort artifact is ignored, not rejected.
+fn should_reject_optional_raw_failure_without_diagnostic_when_present() {
+    // ~keep Best-effort failures remain publishable only when their failure category and diagnostic
+    // are complete; otherwise consumers cannot distinguish framework behavior from corrupt data.
     let scenario = artifact_scenario(Cohort::Native);
     let results = optional_artifact_dir(&scenario).join("run/results.json");
     tamper_json(&results, |value| {
         value[0]["success"] = serde_json::Value::Bool(false);
         value[0]["error_kind"] = serde_json::Value::String("timeout".to_string());
     });
-    validate(&scenario.args).expect("a failed optional framework must not fail validation");
+    assert_err_contains(validate(&scenario.args), "failed");
+}
+
+#[test]
+fn should_accept_well_categorized_optional_raw_failure_when_present() {
+    // ~keep Optional producer failures are useful comparison data when the artifact remains
+    // structurally complete and carries an explicit category and diagnostic.
+    let scenario = artifact_scenario(Cohort::Native);
+    let results = optional_artifact_dir(&scenario).join("run/results.json");
+    tamper_json(&results, |value| {
+        value[0]["success"] = serde_json::Value::Bool(false);
+        value[0]["error_kind"] = serde_json::Value::String("timeout".to_string());
+        value[0]["error_message"] = serde_json::Value::String("timed out after 900 seconds".to_string());
+    });
+    validate(&scenario.args).expect("well-categorized optional failure should remain publishable");
+}
+
+#[test]
+fn should_reject_optional_raw_infrastructure_failure_when_present() {
+    // ~keep Best-effort applies only to framework-accountable failures; harness/config failures
+    // invalidate the benchmark environment and must never flow into release data.
+    let scenario = artifact_scenario(Cohort::Native);
+    let results = optional_artifact_dir(&scenario).join("run/results.json");
+    tamper_json(&results, |value| {
+        value[0]["success"] = serde_json::Value::Bool(false);
+        value[0]["error_kind"] = serde_json::Value::String("harness_error".to_string());
+        value[0]["error_message"] = serde_json::Value::String("subprocess protocol failed".to_string());
+    });
+    assert_err_contains(validate(&scenario.args), "infrastructure error");
+}
+
+#[test]
+fn should_reject_optional_raw_artifact_with_wrong_provenance_when_present() {
+    // ~keep A present best-effort artifact has the same provenance trust boundary as every
+    // required artifact; optionality must never bypass source-commit verification.
+    let scenario = artifact_scenario(Cohort::Native);
+    let index = optional_matrix_index(&scenario.contract);
+    tamper_json(&provenance_path(&scenario, index), |value| {
+        value["repository"]["commit"] = serde_json::Value::String("d".repeat(40));
+    });
+    assert_err_contains(validate(&scenario.args), "source SHA mismatch");
+}
+
+#[test]
+fn should_reject_optional_raw_artifact_with_missing_fixture_when_present() {
+    // ~keep Optional artifacts may be wholly absent, but a present artifact must cover the full
+    // cohort; accepting a partial result would silently bias the published comparison.
+    let scenario = artifact_scenario(Cohort::Native);
+    let index = optional_matrix_index(&scenario.contract);
+    tamper_json(&results_path(&scenario, index), |value| {
+        value.as_array_mut().unwrap().pop();
+    });
+    assert_err_contains(validate(&scenario.args), "result fixture count mismatch");
 }
 
 #[test]
@@ -616,6 +723,9 @@ fn build_aggregate(contract: &CohortContract, cohort: Cohort) -> NewConsolidated
     for entry in &contract.matrix {
         let mut by_file_type = HashMap::new();
         for (extension, count) in &ext_counts {
+            if !supports_extension(&entry.framework, extension) {
+                continue;
+            }
             let bucket = zero_bucket(*count);
             by_file_type.insert(
                 (*extension).to_string(),
@@ -651,6 +761,7 @@ fn build_aggregate(contract: &CohortContract, cohort: Cohort) -> NewConsolidated
                 .document_stems
                 .iter()
                 .zip(contract.document_extensions.iter())
+                .filter(|(_, extension)| supports_extension(&entry.framework, extension))
                 .map(move |(stem, extension)| PerFixtureRow {
                     framework: entry.framework.clone(),
                     output_format: entry.output_format,
@@ -690,6 +801,39 @@ fn build_aggregate(contract: &CohortContract, cohort: Cohort) -> NewConsolidated
         })
         .collect();
 
+    let mut file_types: Vec<String> = contract
+        .document_extensions
+        .iter()
+        .map(|extension| (*extension).to_string())
+        .collect();
+    file_types.sort();
+    file_types.dedup();
+    let frameworks: std::collections::BTreeSet<&str> = contract
+        .matrix
+        .iter()
+        .map(|entry| {
+            if entry.framework.starts_with("xberg-") {
+                "xberg"
+            } else {
+                entry.framework.as_str()
+            }
+        })
+        .collect();
+    let mut unsupported = std::collections::BTreeMap::new();
+    for framework in frameworks {
+        if framework == "xberg" {
+            continue;
+        }
+        let missing: Vec<String> = file_types
+            .iter()
+            .filter(|extension| !supports_extension(framework, extension))
+            .cloned()
+            .collect();
+        if !missing.is_empty() {
+            unsupported.insert(framework.to_string(), missing);
+        }
+    }
+
     NewConsolidatedResults {
         schema_version: SCHEMA_VERSION.to_string(),
         by_framework_mode,
@@ -721,7 +865,10 @@ fn build_aggregate(contract: &CohortContract, cohort: Cohort) -> NewConsolidated
         },
         run_provenance: Vec::new(),
         failure_summary: FailureSummary::default(),
-        format_support: Default::default(),
+        format_support: FormatSupportMatrix {
+            file_types,
+            unsupported,
+        },
     }
 }
 
@@ -778,6 +925,19 @@ fn accepts_exact_ocr_aggregate_contract() {
 }
 
 #[test]
+fn accepts_exact_aggregate_contract_for_every_format_cohort() {
+    // ~keep This guards supported-subset cardinality and format-support validation across all
+    // rendered-page and heterogeneous format families, not only the PDF release cohorts.
+    for cohort in Cohort::ALL {
+        let contract = cohort.contract();
+        let aggregate = build_aggregate(&contract, cohort);
+        let (_root, path) = write_aggregate(&aggregate);
+        validate(&aggregate_args(cohort, path))
+            .unwrap_or_else(|error| panic!("{} aggregate contract failed: {error}", cohort.as_str()));
+    }
+}
+
+#[test]
 fn accepts_native_aggregate_when_optional_mineru_absent() {
     // validation must still pass on the required frameworks.
     let contract = Cohort::Native.contract();
@@ -806,6 +966,179 @@ fn accepts_native_aggregate_when_optional_mineru_absent() {
             required * contract.fixtures.len()
         )
     );
+}
+
+#[test]
+fn should_reject_invalid_optional_aggregate_group_when_present() {
+    // ~keep Absence is the only relaxation for an optional aggregate group. A present group is
+    // release data and must retain the same file-type and sample-count integrity checks.
+    let contract = Cohort::Native.contract();
+    let optional_key = contract
+        .matrix
+        .iter()
+        .find(|entry| entry.optional)
+        .expect("native cohort has an optional entry")
+        .aggregate_key();
+    let mut aggregate = build_aggregate(&contract, Cohort::Native);
+    aggregate
+        .by_framework_mode
+        .get_mut(&optional_key)
+        .expect("aggregate contains optional group")
+        .by_file_type
+        .clear();
+    let (_root, path) = write_aggregate(&aggregate);
+    assert_err_contains(
+        validate(&aggregate_args(Cohort::Native, path)),
+        "has no file-type metrics",
+    );
+}
+
+#[test]
+fn should_reject_failed_optional_aggregate_row_when_present() {
+    // ~keep Present optional rows must be validated rather than filtered out; otherwise failed
+    // executions can be published even when the optional group itself appears structurally valid.
+    let contract = Cohort::Native.contract();
+    let optional_framework = contract
+        .matrix
+        .iter()
+        .find(|entry| entry.optional)
+        .expect("native cohort has an optional entry")
+        .framework
+        .clone();
+    let mut aggregate = build_aggregate(&contract, Cohort::Native);
+    aggregate
+        .per_fixture_results
+        .iter_mut()
+        .find(|row| row.framework == optional_framework)
+        .expect("aggregate contains optional row")
+        .success = false;
+    let (_root, path) = write_aggregate(&aggregate);
+    assert_err_contains(validate(&aggregate_args(Cohort::Native, path)), "failed fixture rows");
+}
+
+#[test]
+fn should_accept_well_categorized_optional_aggregate_failure_when_present() {
+    // ~keep A best-effort framework may publish partial failures when group accounting and row
+    // diagnostics agree, preserving useful measurements without weakening structural validation.
+    let contract = Cohort::Native.contract();
+    let optional_entry = contract
+        .matrix
+        .iter()
+        .find(|entry| entry.optional)
+        .expect("native cohort has an optional entry");
+    let mut aggregate = build_aggregate(&contract, Cohort::Native);
+    let bucket = aggregate
+        .by_framework_mode
+        .get_mut(&optional_entry.aggregate_key())
+        .expect("aggregate contains optional group")
+        .by_file_type
+        .get_mut("pdf")
+        .expect("native group contains pdf")
+        .no_ocr
+        .as_mut()
+        .expect("native group uses no_ocr");
+    bucket.successful_sample_count -= 1;
+    bucket.timeouts = 1;
+    let row = aggregate
+        .per_fixture_results
+        .iter_mut()
+        .find(|row| row.framework == optional_entry.framework)
+        .expect("aggregate contains optional row");
+    row.success = false;
+    row.error_kind = Some("Timeout".to_string());
+    row.error_message = Some("timed out after 900 seconds".to_string());
+    let (_root, path) = write_aggregate(&aggregate);
+    validate(&aggregate_args(Cohort::Native, path)).expect("categorized optional aggregate failure should validate");
+}
+
+#[test]
+fn should_reject_optional_aggregate_infrastructure_failure_when_present() {
+    // ~keep Optional aggregate groups cannot convert runner infrastructure faults into
+    // best-effort framework data, even when their total cardinality remains internally consistent.
+    let contract = Cohort::Native.contract();
+    let optional_entry = contract
+        .matrix
+        .iter()
+        .find(|entry| entry.optional)
+        .expect("native cohort has an optional entry");
+    let mut aggregate = build_aggregate(&contract, Cohort::Native);
+    let bucket = aggregate
+        .by_framework_mode
+        .get_mut(&optional_entry.aggregate_key())
+        .expect("aggregate contains optional group")
+        .by_file_type
+        .get_mut("pdf")
+        .expect("native group contains pdf")
+        .no_ocr
+        .as_mut()
+        .expect("native group uses no_ocr");
+    bucket.successful_sample_count -= 1;
+    bucket.harness_errors = 1;
+    let (_root, path) = write_aggregate(&aggregate);
+    assert_err_contains(
+        validate(&aggregate_args(Cohort::Native, path)),
+        "infrastructure failures",
+    );
+}
+
+#[test]
+fn should_reject_optional_aggregate_row_with_infrastructure_error_kind() {
+    // ~keep Row diagnostics must agree with the accountable bucket categories; a valid total alone
+    // cannot disguise a harness fault as a framework-level best-effort failure.
+    let contract = Cohort::Native.contract();
+    let optional_entry = contract
+        .matrix
+        .iter()
+        .find(|entry| entry.optional)
+        .expect("native cohort has an optional entry");
+    let mut aggregate = build_aggregate(&contract, Cohort::Native);
+    let bucket = aggregate
+        .by_framework_mode
+        .get_mut(&optional_entry.aggregate_key())
+        .expect("aggregate contains optional group")
+        .by_file_type
+        .get_mut("pdf")
+        .expect("native group contains pdf")
+        .no_ocr
+        .as_mut()
+        .expect("native group uses no_ocr");
+    bucket.successful_sample_count -= 1;
+    bucket.timeouts = 1;
+    let row = aggregate
+        .per_fixture_results
+        .iter_mut()
+        .find(|row| row.framework == optional_entry.framework)
+        .expect("aggregate contains optional row");
+    row.success = false;
+    row.error_kind = Some("HarnessError".to_string());
+    row.error_message = Some("subprocess protocol failed".to_string());
+    let (_root, path) = write_aggregate(&aggregate);
+    assert_err_contains(
+        validate(&aggregate_args(Cohort::Native, path)),
+        "accountable error kind",
+    );
+}
+
+#[test]
+fn should_reject_invalid_optional_framework_format_support_when_present() {
+    // ~keep The format-support matrix is a published explanation for absent framework/format
+    // pairs. Every present entry, including an optional framework, must reference a cohort format.
+    let contract = Cohort::Native.contract();
+    let optional_framework = contract
+        .matrix
+        .iter()
+        .find(|entry| entry.optional)
+        .expect("native cohort has an optional entry")
+        .framework
+        .clone();
+    let mut aggregate = build_aggregate(&contract, Cohort::Native);
+    aggregate.format_support.file_types = vec!["pdf".to_string()];
+    aggregate
+        .format_support
+        .unsupported
+        .insert(optional_framework, vec!["exe".to_string()]);
+    let (_root, path) = write_aggregate(&aggregate);
+    assert_err_contains(validate(&aggregate_args(Cohort::Native, path)), "format support");
 }
 
 #[test]
@@ -916,7 +1249,7 @@ fn rejects_aggregate_with_wrong_file_type_sample_count() {
     let (_root, path) = write_aggregate(&aggregate);
     assert_err_contains(
         validate(&aggregate_args(Cohort::Office, path)),
-        "file type docx covers 1 samples, expected 2",
+        "success/error counts do not match total_sample_count",
     );
 }
 

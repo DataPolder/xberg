@@ -9,7 +9,7 @@
 //! - **aggregate mode** (`aggregated_file` is `Some`): validates one consolidated
 //!   `aggregated.json` (as produced by the `consolidate` subcommand) against the same contract.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
@@ -343,6 +343,7 @@ fn validate_provenance(
     expected: &[ExpectedFixture],
     source_sha: &str,
     iterations: usize,
+    eligible_documents: usize,
 ) -> Result<()> {
     require(
         provenance.schema_version == EXPECTED_PROVENANCE_SCHEMA_VERSION,
@@ -422,11 +423,11 @@ fn validate_provenance(
         format!("{}: framework mismatch", path.display()),
     )?;
     require(
-        framework.eligible_documents == contract.fixtures.len(),
+        framework.eligible_documents == eligible_documents,
         format!("{}: fixture count mismatch", path.display()),
     )?;
     let expected_partitions =
-        matches!(entry.mode, ExecutionMode::Batch).then(|| contract.fixtures.len() / contract.batch_size);
+        matches!(entry.mode, ExecutionMode::Batch).then(|| eligible_documents.div_ceil(contract.batch_size));
     require(
         framework.batch_partitions == expected_partitions,
         format!("{}: batch partition mismatch", path.display()),
@@ -439,13 +440,13 @@ fn validate_results(
     results: &[BenchmarkResult],
     path: &Path,
     entry: &MatrixEntry,
-    contract: &CohortContract,
     document_names: &[String],
     iterations: usize,
     cohort: Cohort,
+    allow_failures: bool,
 ) -> Result<()> {
     require(
-        results.len() == contract.fixtures.len(),
+        results.len() == document_names.len(),
         format!("{}: result fixture count mismatch", path.display()),
     )?;
 
@@ -477,15 +478,39 @@ fn validate_results(
             result.output_format == entry.output_format,
             format!("{}: result {index} format mismatch", path.display()),
         )?;
-        require(result.success, format!("{}: result {index} failed", path.display()))?;
-        require(
-            result.error_kind == ErrorKind::None,
-            format!("{}: result {index} has an error", path.display()),
-        )?;
-        require(
-            result.error_message.is_none(),
-            format!("{}: result {index} has an error message", path.display()),
-        )?;
+        if result.success {
+            require(
+                result.error_kind == ErrorKind::None,
+                format!("{}: result {index} has an error", path.display()),
+            )?;
+            require(
+                result.error_message.is_none(),
+                format!("{}: result {index} has an error message", path.display()),
+            )?;
+        } else {
+            require(allow_failures, format!("{}: result {index} failed", path.display()))?;
+            require(
+                result.error_kind != ErrorKind::None,
+                format!("{}: failed result {index} has no error kind", path.display()),
+            )?;
+            require(
+                matches!(
+                    result.error_kind,
+                    ErrorKind::FrameworkError | ErrorKind::Timeout | ErrorKind::EmptyContent
+                ),
+                format!(
+                    "{}: optional result {index} has an infrastructure error",
+                    path.display()
+                ),
+            )?;
+            require(
+                result
+                    .error_message
+                    .as_deref()
+                    .is_some_and(|message| !message.is_empty()),
+                format!("{}: failed result {index} has no error message", path.display()),
+            )?;
+        }
         require(
             result.ocr_status == expected_ocr,
             format!("{}: result {index} OCR status mismatch", path.display()),
@@ -507,6 +532,19 @@ fn validate_results(
     Ok(())
 }
 
+fn supported_fixture_indexes(entry: &MatrixEntry, contract: &CohortContract) -> Vec<usize> {
+    if entry.framework.starts_with("xberg-") {
+        return (0..contract.fixtures.len()).collect();
+    }
+    let supported = crate::adapters::external::declared_supported_formats(&entry.framework);
+    contract
+        .document_extensions
+        .iter()
+        .enumerate()
+        .filter_map(|(index, extension)| supported.iter().any(|item| item == extension).then_some(index))
+        .collect()
+}
+
 #[allow(clippy::too_many_arguments)]
 fn validate_raw_artifacts(
     artifacts_dir: &Path,
@@ -520,43 +558,52 @@ fn validate_raw_artifacts(
 ) -> Result<String> {
     let manifest_blake3 = validate_manifest(cohort_manifest, contract)?;
     let fixtures = expected_fixtures(fixtures_root, contract)?;
-    let documents: Vec<String> = fixtures.iter().map(|item| item.document_name.clone()).collect();
-
-    let expected_names: std::collections::HashMap<String, &MatrixEntry> = contract
+    let allowed_names: HashMap<String, &MatrixEntry> = contract
+        .matrix
+        .iter()
+        .map(|entry| (format!("{}-{run_id}", entry.artifact), entry))
+        .collect();
+    let required_names: HashSet<String> = contract
         .matrix
         .iter()
         .filter(|entry| !entry.optional)
-        .map(|entry| (format!("{}-{run_id}", entry.artifact), entry))
-        .collect();
-    // Best-effort (optional) frameworks are not part of the required contract: their
-    // artifact directories are neither required to be present nor rejected as unexpected.
-    let optional_names: HashSet<String> = contract
-        .matrix
-        .iter()
-        .filter(|entry| entry.optional)
         .map(|entry| format!("{}-{run_id}", entry.artifact))
         .collect();
     let actual_dirs = read_artifact_dirs(artifacts_dir)?;
 
-    let expected_key_set: HashSet<&str> = expected_names.keys().map(String::as_str).collect();
-    let actual_key_set: HashSet<&str> = actual_dirs
-        .keys()
-        .map(String::as_str)
-        .filter(|name| !optional_names.contains(*name))
-        .collect();
+    let allowed_key_set: HashSet<&str> = allowed_names.keys().map(String::as_str).collect();
+    let actual_key_set: HashSet<&str> = actual_dirs.keys().map(String::as_str).collect();
+    let required_key_set: HashSet<&str> = required_names.iter().map(String::as_str).collect();
+    let present_required: HashSet<&str> = actual_key_set.intersection(&required_key_set).copied().collect();
     require(
-        expected_key_set == actual_key_set,
+        required_key_set == present_required,
         describe_set_mismatch(
             "artifacts",
-            expected_key_set.iter().copied(),
+            required_key_set.iter().copied(),
+            present_required.iter().copied(),
+        ),
+    )?;
+    require(
+        actual_key_set.is_subset(&allowed_key_set),
+        describe_set_mismatch(
+            "allowed artifacts",
+            allowed_key_set.iter().copied(),
             actual_key_set.iter().copied(),
         ),
     )?;
 
-    for (artifact_name, entry) in &expected_names {
-        let artifact_dir = &actual_dirs[artifact_name];
+    // Optional means absence is permitted, never that present bytes are trusted. Validate every
+    // downloaded optional artifact exactly like a required one, while allowing its recorded
+    // extraction failures to remain useful best-effort data. ~keep
+    for (artifact_name, artifact_dir) in &actual_dirs {
+        let entry = allowed_names[artifact_name];
         let results_path = only_file(artifact_dir, "results.json")?;
         let provenance_path = only_file(artifact_dir, "provenance.json")?;
+        let supported_indexes = supported_fixture_indexes(entry, contract);
+        let documents: Vec<String> = supported_indexes
+            .iter()
+            .map(|index| fixtures[*index].document_name.clone())
+            .collect();
 
         let provenance: RunProvenance = load_typed_json(&provenance_path)?;
         validate_provenance(
@@ -568,32 +615,48 @@ fn validate_raw_artifacts(
             &fixtures,
             source_sha,
             iterations,
+            supported_indexes.len(),
         )?;
 
         let results: Vec<BenchmarkResult> = load_typed_json(&results_path)?;
-        validate_results(&results, &results_path, entry, contract, &documents, iterations, cohort)?;
+        validate_results(
+            &results,
+            &results_path,
+            entry,
+            &documents,
+            iterations,
+            cohort,
+            entry.optional,
+        )?;
     }
 
     Ok(format!(
         "validated {} {} benchmark artifacts",
-        expected_names.len(),
+        actual_dirs.len(),
         cohort.as_str()
     ))
 }
 
-/// Validate one file-type bucket has no errors and report its sample count. Cohorts can span
-/// several file types (e.g. the office family: docx, pptx, xlsx), so each fixture lands in its own
-/// file-type bucket; the caller checks each bucket's count against the cohort's expected
-/// per-extension fixture counts.
-fn validate_bucket(bucket: &PerformancePercentiles, key: &str) -> Result<usize> {
-    require(bucket.framework_errors == 0, format!("{key}: nonzero framework_errors"))?;
-    require(bucket.harness_errors == 0, format!("{key}: nonzero harness_errors"))?;
+/// Validate one file-type bucket's failure accounting and report its sample count. Required cells
+/// must have no errors; optional cells may contain only framework-accountable failures. Cohorts
+/// can span several file types, so the caller also checks each bucket against the cohort's exact
+/// per-extension fixture counts. ~keep
+fn validate_bucket(bucket: &PerformancePercentiles, key: &str, allow_failures: bool) -> Result<usize> {
+    let accountable_failures = bucket.framework_errors + bucket.timeouts + bucket.empty_content;
+    let infrastructure_failures = bucket.harness_errors + bucket.config_setup_errors;
+    let failures = accountable_failures + infrastructure_failures;
     require(
-        bucket.config_setup_errors == 0,
-        format!("{key}: nonzero config_setup_errors"),
+        bucket.successful_sample_count + failures == bucket.total_sample_count,
+        format!("{key}: success/error counts do not match total_sample_count"),
     )?;
-    require(bucket.timeouts == 0, format!("{key}: nonzero timeouts"))?;
-    require(bucket.empty_content == 0, format!("{key}: nonzero empty_content"))?;
+    require(
+        allow_failures || failures == 0,
+        format!("{key}: required aggregate contains failures"),
+    )?;
+    require(
+        infrastructure_failures == 0,
+        format!("{key}: aggregate contains infrastructure failures"),
+    )?;
     Ok(bucket.total_sample_count)
 }
 
@@ -607,6 +670,57 @@ fn identity_string(
     format!("{framework}:{output_format}:{mode}:{fixture_id}:ocr={ocr:?}")
 }
 
+fn logical_framework(framework: &str) -> &str {
+    if framework.starts_with("xberg-") {
+        "xberg"
+    } else {
+        framework
+    }
+}
+
+fn validate_format_support(
+    aggregate: &NewConsolidatedResults,
+    present_entries: &[&MatrixEntry],
+    contract: &CohortContract,
+    path: &Path,
+) -> Result<()> {
+    let mut expected_file_types: Vec<String> = contract
+        .document_extensions
+        .iter()
+        .map(|extension| (*extension).to_string())
+        .collect();
+    expected_file_types.sort();
+    expected_file_types.dedup();
+    require(
+        aggregate.format_support.file_types == expected_file_types,
+        format!("{}: format support file types mismatch", path.display()),
+    )?;
+
+    let frameworks: std::collections::BTreeSet<&str> = present_entries
+        .iter()
+        .map(|entry| logical_framework(&entry.framework))
+        .collect();
+    let mut expected_unsupported = std::collections::BTreeMap::new();
+    for framework in frameworks {
+        if framework == "xberg" {
+            continue;
+        }
+        let supported = crate::adapters::external::declared_supported_formats(framework);
+        let missing: Vec<String> = expected_file_types
+            .iter()
+            .filter(|extension| !supported.iter().any(|item| item == *extension))
+            .cloned()
+            .collect();
+        if !missing.is_empty() {
+            expected_unsupported.insert(framework.to_string(), missing);
+        }
+    }
+    require(
+        aggregate.format_support.unsupported == expected_unsupported,
+        format!("{}: format support unsupported pairs mismatch", path.display()),
+    )
+}
+
 fn validate_aggregate(path: &Path, cohort: Cohort, contract: &CohortContract) -> Result<String> {
     let aggregate: NewConsolidatedResults = load_typed_json(path)?;
     require(
@@ -614,57 +728,50 @@ fn validate_aggregate(path: &Path, cohort: Cohort, contract: &CohortContract) ->
         format!("{}: unexpected schema", path.display()),
     )?;
 
-    // Best-effort (optional) frameworks are excluded from the required contract on both
-    // sides of every comparison: they may be absent, and if present they still ship in the
-    // aggregate but do not gate validation (e.g. a failed/hung MinerU run).
     let required_entries: Vec<&MatrixEntry> = contract.matrix.iter().filter(|entry| !entry.optional).collect();
-    let optional_agg_keys: HashSet<String> = contract
+    let allowed_entries: HashMap<String, &MatrixEntry> = contract
         .matrix
         .iter()
-        .filter(|entry| entry.optional)
-        .map(MatrixEntry::aggregate_key)
-        .collect();
-    let optional_frameworks: HashSet<&str> = contract
-        .matrix
-        .iter()
-        .filter(|entry| entry.optional)
-        .map(|entry| entry.framework.as_str())
+        .map(|entry| (entry.aggregate_key(), entry))
         .collect();
 
     let expected_keys: HashSet<String> = required_entries.iter().map(|entry| entry.aggregate_key()).collect();
-    let actual_keys: HashSet<String> = aggregate
-        .by_framework_mode
-        .keys()
-        .filter(|key| !optional_agg_keys.contains(*key))
-        .cloned()
-        .collect();
+    let allowed_keys: HashSet<&str> = allowed_entries.keys().map(String::as_str).collect();
+    let actual_keys: HashSet<&str> = aggregate.by_framework_mode.keys().map(String::as_str).collect();
+    let required_keys: HashSet<&str> = expected_keys.iter().map(String::as_str).collect();
+    let present_required: HashSet<&str> = actual_keys.intersection(&required_keys).copied().collect();
     require(
-        expected_keys == actual_keys,
+        required_keys == present_required,
         describe_set_mismatch(
             "aggregate keys",
-            expected_keys.iter().map(String::as_str),
-            actual_keys.iter().map(String::as_str),
+            required_keys.iter().copied(),
+            present_required.iter().copied(),
+        ),
+    )?;
+    require(
+        actual_keys.is_subset(&allowed_keys),
+        describe_set_mismatch(
+            "allowed aggregate keys",
+            allowed_keys.iter().copied(),
+            actual_keys.iter().copied(),
         ),
     )?;
 
+    let present_entries: Vec<&MatrixEntry> = actual_keys.iter().map(|key| allowed_entries[*key]).collect();
+    validate_format_support(&aggregate, &present_entries, contract, path)?;
+
     let expects_ocr = cohort.expects_ocr();
-    // Expected per-extension sample counts, so validation catches a consolidation bug that
-    // mis-buckets samples across file types (which would still sum to fixtures.len()).
-    let mut expected_ext_counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
-    for extension in contract.document_extensions {
-        *expected_ext_counts.entry(*extension).or_insert(0) += 1;
-    }
+    // A present best-effort group must retain exact supported-format cardinality and valid failure
+    // accounting; only its absence and well-categorized extraction failures are optional. ~keep
     for (key, group) in &aggregate.by_framework_mode {
-        if optional_agg_keys.contains(key) {
-            continue;
-        }
+        let entry = allowed_entries[key];
         require(
             !group.by_file_type.is_empty(),
             format!("{}: group {key} has no file-type metrics", path.display()),
         )?;
         // A cohort's OCR expectation is uniform, so every fixture in every file-type bucket must
         // sit on the same OCR side; the opposite side must be empty.
-        let mut actual_ext_counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+        let mut actual_ext_counts: HashMap<&str, usize> = HashMap::new();
         for (file_type, file_group) in &group.by_file_type {
             let (present, absent) = if expects_ocr {
                 (&file_group.with_ocr, &file_group.no_ocr)
@@ -684,9 +791,14 @@ fn validate_aggregate(path: &Path, cohort: Cohort, contract: &CohortContract) ->
                     path.display()
                 ))
             })?;
-            actual_ext_counts.insert(file_type.as_str(), validate_bucket(bucket, key)?);
+            actual_ext_counts.insert(file_type.as_str(), validate_bucket(bucket, key, entry.optional)?);
         }
-        let expected_set: HashSet<&str> = expected_ext_counts.keys().copied().collect();
+        let supported_indexes = supported_fixture_indexes(entry, contract);
+        let mut entry_ext_counts: HashMap<&str, usize> = HashMap::new();
+        for index in supported_indexes {
+            *entry_ext_counts.entry(contract.document_extensions[index]).or_insert(0) += 1;
+        }
+        let expected_set: HashSet<&str> = entry_ext_counts.keys().copied().collect();
         let actual_set: HashSet<&str> = actual_ext_counts.keys().copied().collect();
         require(
             expected_set == actual_set,
@@ -700,7 +812,7 @@ fn validate_aggregate(path: &Path, cohort: Cohort, contract: &CohortContract) ->
                 )
             ),
         )?;
-        for (extension, expected_count) in &expected_ext_counts {
+        for (extension, expected_count) in &entry_ext_counts {
             let actual = actual_ext_counts.get(extension).copied().unwrap_or(0);
             require(
                 actual == *expected_count,
@@ -712,12 +824,24 @@ fn validate_aggregate(path: &Path, cohort: Cohort, contract: &CohortContract) ->
         }
     }
 
-    let rows: Vec<&PerFixtureRow> = aggregate
-        .per_fixture_results
+    let rows: Vec<&PerFixtureRow> = aggregate.per_fixture_results.iter().collect();
+    let expected_identities: HashSet<String> = present_entries
         .iter()
-        .filter(|row| !optional_frameworks.contains(row.framework.as_str()))
+        .flat_map(|entry| {
+            supported_fixture_indexes(entry, contract)
+                .into_iter()
+                .map(move |index| {
+                    identity_string(
+                        &entry.framework,
+                        entry.output_format,
+                        entry.mode.aggregate_slug(),
+                        contract.document_stems[index],
+                        Some(expects_ocr),
+                    )
+                })
+        })
         .collect();
-    let expected_row_count = required_entries.len() * contract.fixtures.len();
+    let expected_row_count = expected_identities.len();
     require(
         rows.len() == expected_row_count,
         format!("{}: expected {expected_row_count} fixture rows", path.display()),
@@ -735,20 +859,6 @@ fn validate_aggregate(path: &Path, cohort: Cohort, contract: &CohortContract) ->
             )
         })
         .collect();
-    let expected_identities: HashSet<String> = required_entries
-        .iter()
-        .flat_map(|entry| {
-            contract.document_stems.iter().map(move |stem| {
-                identity_string(
-                    &entry.framework,
-                    entry.output_format,
-                    entry.mode.aggregate_slug(),
-                    stem,
-                    Some(expects_ocr),
-                )
-            })
-        })
-        .collect();
     require(
         identities == expected_identities,
         describe_set_mismatch(
@@ -758,14 +868,78 @@ fn validate_aggregate(path: &Path, cohort: Cohort, contract: &CohortContract) ->
         ),
     )?;
 
-    require(
-        rows.iter().all(|row| row.success),
-        format!("{}: failed fixture rows", path.display()),
-    )?;
+    for row in &rows {
+        let key = crate::aggregate::make_aggregate_key(&row.framework, row.output_format, &row.execution_mode);
+        let entry = allowed_entries
+            .get(&key)
+            .ok_or_else(|| contract_error(format!("{}: row has no matching aggregate key", path.display())))?;
+        if row.success {
+            require(
+                row.error_kind.is_none() && row.error_message.is_none(),
+                format!("{}: successful fixture row contains an error", path.display()),
+            )?;
+        } else {
+            require(
+                entry.optional,
+                format!("{}: failed required fixture row", path.display()),
+            )?;
+            require(
+                row.error_kind
+                    .as_deref()
+                    .is_some_and(|kind| matches!(kind, "FrameworkError" | "Timeout" | "EmptyContent")),
+                format!(
+                    "{}: failed fixture rows: optional row has no accountable error kind",
+                    path.display()
+                ),
+            )?;
+            require(
+                row.error_message.as_deref().is_some_and(|message| !message.is_empty()),
+                format!(
+                    "{}: failed fixture rows: optional row has no error message",
+                    path.display()
+                ),
+            )?;
+        }
+    }
+
+    // The group counters and per-fixture rows are two published views of the same failures. Check
+    // them against each other so a well-typed but internally inconsistent aggregate cannot pass. ~keep
+    for (key, group) in &aggregate.by_framework_mode {
+        for (file_type, file_group) in &group.by_file_type {
+            let bucket = if expects_ocr {
+                file_group.with_ocr.as_ref()
+            } else {
+                file_group.no_ocr.as_ref()
+            }
+            .ok_or_else(|| contract_error(format!("{}: missing validated OCR bucket", path.display())))?;
+            let bucket_rows: Vec<&&PerFixtureRow> = rows
+                .iter()
+                .filter(|row| {
+                    crate::aggregate::make_aggregate_key(&row.framework, row.output_format, &row.execution_mode) == *key
+                        && row.file_type == *file_type
+                })
+                .collect();
+            let count_kind = |kind: &str| {
+                bucket_rows
+                    .iter()
+                    .filter(|row| !row.success && row.error_kind.as_deref() == Some(kind))
+                    .count()
+            };
+            require(
+                bucket.successful_sample_count == bucket_rows.iter().filter(|row| row.success).count()
+                    && bucket.framework_errors == count_kind("FrameworkError")
+                    && bucket.harness_errors == count_kind("HarnessError")
+                    && bucket.config_setup_errors == count_kind("ConfigSetupError")
+                    && bucket.timeouts == count_kind("Timeout")
+                    && bucket.empty_content == count_kind("EmptyContent"),
+                format!("{key}: group failure counts do not match fixture rows for {file_type}"),
+            )?;
+        }
+    }
 
     Ok(format!(
         "validated {} {} aggregate keys and {} fixture rows",
-        expected_keys.len(),
+        actual_keys.len(),
         cohort.as_str(),
         rows.len()
     ))
