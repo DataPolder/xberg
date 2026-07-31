@@ -14,6 +14,22 @@ use async_trait::async_trait;
 use std::borrow::Cow;
 #[cfg(feature = "tokio-runtime")]
 use std::path::Path;
+
+const EMAIL_STRUCT_KEYS: &[&str] = &[
+    "from_email",
+    "from_name",
+    "to_emails",
+    "cc_emails",
+    "bcc_emails",
+    "message_id",
+    "attachments",
+    "subject",
+    "date",
+    "email_from",
+    "email_to",
+    "email_cc",
+    "email_bcc",
+];
 #[cfg_attr(alef, alef(skip))]
 /// Email message extractor.
 ///
@@ -43,8 +59,8 @@ impl EmailExtractor {
         if let Some(ref subject) = email_result.subject {
             header_entries.push(("Subject".to_string(), subject.clone()));
         }
-        if let Some(ref from) = email_result.from_email {
-            header_entries.push(("From".to_string(), from.clone()));
+        if let Some(from) = Self::format_sender(email_result) {
+            header_entries.push(("From".to_string(), from));
         }
         if !email_result.to_emails.is_empty() {
             header_entries.push(("To".to_string(), email_result.to_emails.join(", ")));
@@ -86,6 +102,73 @@ impl EmailExtractor {
         }
 
         builder.build()
+    }
+
+    /// Preserve both parts of a mailbox while avoiding `address <address>`.
+    fn format_sender(email_result: &crate::types::EmailExtractionResult) -> Option<String> {
+        let name = email_result
+            .metadata
+            .get("from_name")
+            .filter(|name| !name.trim().is_empty());
+        match (name, email_result.from_email.as_ref()) {
+            (Some(name), Some(address)) if !name.eq_ignore_ascii_case(address) => Some(format!("{name} <{address}>")),
+            (_, Some(address)) => Some(address.clone()),
+            (Some(name), None) => Some(name.clone()),
+            (None, None) => None,
+        }
+    }
+
+    /// Convert one parsed email into the internal representation.
+    fn build_extracted_document(
+        email_result: &crate::types::EmailExtractionResult,
+        mime_type: &str,
+        config: &ExtractionConfig,
+    ) -> Result<InternalDocument> {
+        let mut doc = Self::build_internal_document(email_result);
+        doc.mime_type = mime_type.to_string();
+        doc.metadata = Self::build_document_metadata(email_result);
+
+        let mut budget = SecurityBudget::from_config(config);
+        for elem in &doc.elements {
+            budget.account_text(elem.text.len())?;
+        }
+
+        Ok(doc)
+    }
+
+    fn build_document_metadata(email_result: &crate::types::EmailExtractionResult) -> Metadata {
+        let attachment_names = email_result
+            .attachments
+            .iter()
+            .filter_map(|attachment| attachment.filename.clone().or_else(|| attachment.name.clone()))
+            .collect();
+        let additional = email_result
+            .metadata
+            .iter()
+            .filter(|(key, _)| !EMAIL_STRUCT_KEYS.contains(&key.as_str()))
+            .map(|(key, value)| (Cow::Owned(key.clone()), serde_json::json!(value)))
+            .collect::<AHashMap<_, _>>();
+        let from_name = email_result.metadata.get("from_name").cloned();
+        let email_metadata = EmailMetadata {
+            from_email: email_result.from_email.clone(),
+            from_name: from_name.clone(),
+            to_emails: email_result.to_emails.clone(),
+            cc_emails: email_result.cc_emails.clone(),
+            bcc_emails: email_result.bcc_emails.clone(),
+            message_id: email_result.message_id.clone(),
+            attachments: attachment_names,
+        };
+
+        let authors = from_name.filter(|name| !name.is_empty()).map(|name| vec![name]);
+
+        Metadata {
+            format: Some(crate::types::FormatMetadata::Email(email_metadata)),
+            subject: email_result.subject.clone(),
+            authors,
+            created_at: email_result.date.clone(),
+            additional,
+            ..Default::default()
+        }
     }
 }
 
@@ -207,68 +290,7 @@ impl SyncExtractor for EmailExtractor {
     fn extract_sync(&self, content: &[u8], mime_type: &str, config: &ExtractionConfig) -> Result<InternalDocument> {
         let fallback_codepage = config.email.as_ref().and_then(|e| e.msg_fallback_codepage);
         let email_result = crate::extraction::email::extract_email_content(content, mime_type, fallback_codepage)?;
-
-        let attachment_names: Vec<String> = email_result
-            .attachments
-            .iter()
-            .filter_map(|att| att.filename.clone().or_else(|| att.name.clone()))
-            .collect();
-
-        const EMAIL_STRUCT_KEYS: &[&str] = &[
-            "from_email",
-            "from_name",
-            "to_emails",
-            "cc_emails",
-            "bcc_emails",
-            "message_id",
-            "attachments",
-            "subject",
-            "date",
-            "email_from",
-            "email_to",
-            "email_cc",
-            "email_bcc",
-        ];
-        let mut additional = AHashMap::new();
-        for (key, value) in &email_result.metadata {
-            if !EMAIL_STRUCT_KEYS.contains(&key.as_str()) {
-                additional.insert(Cow::Owned(key.clone()), serde_json::json!(value));
-            }
-        }
-
-        let mut doc = Self::build_internal_document(&email_result);
-        doc.mime_type = mime_type.to_string();
-
-        let subject = email_result.subject;
-        let created_at = email_result.date;
-        let from_name = email_result.metadata.get("from_name").cloned();
-        let email_metadata = EmailMetadata {
-            from_email: email_result.from_email,
-            from_name: from_name.clone(),
-            to_emails: email_result.to_emails,
-            cc_emails: email_result.cc_emails,
-            bcc_emails: email_result.bcc_emails,
-            message_id: email_result.message_id,
-            attachments: attachment_names,
-        };
-
-        let authors = from_name.filter(|n| !n.is_empty()).map(|n| vec![n]);
-
-        doc.metadata = Metadata {
-            format: Some(crate::types::FormatMetadata::Email(email_metadata)),
-            subject,
-            authors,
-            created_at,
-            additional,
-            ..Default::default()
-        };
-
-        let mut budget = SecurityBudget::from_config(config);
-        for elem in &doc.elements {
-            budget.account_text(elem.text.len())?;
-        }
-
-        Ok(doc)
+        Self::build_extracted_document(&email_result, mime_type, config)
     }
 }
 
@@ -282,27 +304,28 @@ impl InternalDocumentExtractor for EmailExtractor {
         config: &ExtractionConfig,
     ) -> Result<InternalDocument> {
         tracing::debug!(format = "email", size_bytes = content.len(), "extraction starting");
-        let mut doc = self.extract_sync(content, mime_type, config)?;
+        let fallback_codepage = config.email.as_ref().and_then(|email| email.msg_fallback_codepage);
+        let parsed =
+            crate::extraction::email::extract_email_content_with_nested(content, mime_type, fallback_codepage)?;
+        let mut doc = Self::build_extracted_document(&parsed.result, mime_type, config)?;
+        let mut children = Vec::new();
+        let mut warnings = Vec::new();
 
         if config.max_archive_depth > 0 {
-            let fallback_codepage = config.email.as_ref().and_then(|e| e.msg_fallback_codepage);
-            if let Ok(email_result) =
-                crate::extraction::email::extract_email_content(content, mime_type, fallback_codepage)
-            {
-                let (mut children, warnings) = extract_attachment_children(&email_result.attachments, config).await;
+            (children, warnings) = extract_attachment_children(&parsed.result.attachments, config).await;
 
-                if mime_type == "message/rfc822" {
-                    let (nested_children, nested_warnings) = extract_nested_message_children(content, config).await;
-                    children.extend(nested_children);
-                    doc.processing_warnings.extend(nested_warnings);
-                }
-
-                if !children.is_empty() {
-                    doc.children = Some(children);
-                }
-                doc.processing_warnings.extend(warnings);
+            if mime_type == "message/rfc822" {
+                let (nested_children, nested_warnings) =
+                    extract_nested_message_children(&parsed.nested_messages, config).await;
+                children.extend(nested_children);
+                warnings.extend(nested_warnings);
             }
         }
+
+        if !children.is_empty() {
+            doc.children = Some(children);
+        }
+        doc.processing_warnings.extend(warnings);
 
         tracing::debug!(
             element_count = doc.elements.len(),
@@ -416,54 +439,55 @@ pub(crate) async fn extract_attachment_children(
 
 /// Extract nested `message/rfc822` sub-messages as `ArchiveEntry` children.
 ///
-/// Parses the top-level EML to find `PartType::Message` parts (e.g. in
-/// `multipart/digest` emails) and recursively extracts each one via
+/// Recursively extracts `PartType::Message` payloads retained by the initial
+/// top-level EML parse via
 /// `extract_bytes` with `message/rfc822` MIME type. This makes nested
 /// messages available as separate children for recursive processing,
 /// complementing the existing text-merging in `collect_nested_message_text`
 /// / `collect_nested_message_html`.
 async fn extract_nested_message_children(
-    content: &[u8],
+    nested_messages: &[bytes::Bytes],
     config: &ExtractionConfig,
 ) -> (Vec<ArchiveEntry>, Vec<ProcessingWarning>) {
-    use mail_parser::PartType;
-
     let mut children = Vec::new();
     let mut warnings = Vec::new();
 
-    let message = match mail_parser::MessageParser::default().parse(content) {
-        Some(msg) => msg,
-        None => return (children, warnings),
-    };
+    for (nested_idx, raw_bytes) in nested_messages.iter().enumerate() {
+        let filename = format!("nested_message_{nested_idx}.eml");
 
-    let mut nested_idx: usize = 0;
-    for part in &message.parts {
-        if let PartType::Message(sub_msg) = &part.body {
-            let raw_bytes = sub_msg.raw_message();
-            if raw_bytes.is_empty() {
-                continue;
+        if config
+            .max_embedded_file_bytes
+            .is_some_and(|cap| raw_bytes.len() as u64 > cap)
+        {
+            let cap = config.max_embedded_file_bytes.unwrap_or(0);
+            warnings.push(ProcessingWarning {
+                source: Cow::Borrowed("nested_message_extraction"),
+                message: Cow::Owned(format!(
+                    "Skipped '{}': size {} bytes exceeds cap {} bytes",
+                    filename,
+                    raw_bytes.len(),
+                    cap
+                )),
+            });
+            continue;
+        }
+
+        let mut child_config = config.clone();
+        child_config.max_archive_depth = config.max_archive_depth.saturating_sub(1);
+
+        match crate::core::extractor::extract_bytes(raw_bytes, "message/rfc822", &child_config).await {
+            Ok(result) => {
+                children.push(ArchiveEntry {
+                    path: filename,
+                    mime_type: "message/rfc822".to_string(),
+                    result: Box::new(result),
+                });
             }
-
-            let filename = format!("nested_message_{nested_idx}.eml");
-            nested_idx += 1;
-
-            let mut child_config = config.clone();
-            child_config.max_archive_depth = config.max_archive_depth.saturating_sub(1);
-
-            match crate::core::extractor::extract_bytes(raw_bytes, "message/rfc822", &child_config).await {
-                Ok(result) => {
-                    children.push(ArchiveEntry {
-                        path: filename,
-                        mime_type: "message/rfc822".to_string(),
-                        result: Box::new(result),
-                    });
-                }
-                Err(e) => {
-                    warnings.push(ProcessingWarning {
-                        source: Cow::Borrowed("nested_message_extraction"),
-                        message: Cow::Owned(format!("Failed to extract '{}': {}", filename, e)),
-                    });
-                }
+            Err(e) => {
+                warnings.push(ProcessingWarning {
+                    source: Cow::Borrowed("nested_message_extraction"),
+                    message: Cow::Owned(format!("Failed to extract '{}': {}", filename, e)),
+                });
             }
         }
     }
@@ -505,6 +529,124 @@ mod tests {
         let extractor = EmailExtractor::new();
         let result = extractor.extract_sync(b"", "application/vnd.ms-outlook", &config);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sender_name_and_address_are_rendered_once() {
+        let eml = b"From: Alice Example <alice@example.com>\r\nSubject: Sender\r\n\r\nBody";
+        let doc = EmailExtractor::new()
+            .extract_sync(eml, "message/rfc822", &ExtractionConfig::default())
+            .unwrap();
+        let from_values: Vec<&str> = doc
+            .elements
+            .iter()
+            .filter(|element| matches!(element.kind, crate::types::internal::ElementKind::MetadataBlock))
+            .flat_map(|element| element.attributes.iter())
+            .flat_map(|attributes| attributes.values())
+            .map(String::as_str)
+            .filter(|value| value.contains("alice@example.com"))
+            .collect();
+
+        assert_eq!(from_values, vec!["Alice Example <alice@example.com>"]);
+        let crate::types::FormatMetadata::Email(email) = doc.metadata.format.unwrap() else {
+            panic!("expected email metadata");
+        };
+        assert_eq!(email.from_name.as_deref(), Some("Alice Example"));
+        assert_eq!(email.from_email.as_deref(), Some("alice@example.com"));
+    }
+
+    #[cfg(feature = "tokio-runtime")]
+    #[tokio::test]
+    async fn test_async_msg_keeps_sync_output_when_extracting_attachments() {
+        let data = include_bytes!("../../../../test_documents/email/attachment.msg");
+        let config = ExtractionConfig {
+            max_archive_depth: 1,
+            ..Default::default()
+        };
+        let extractor = EmailExtractor::new();
+
+        let sync_doc = extractor
+            .extract_sync(data, "application/vnd.ms-outlook", &config)
+            .unwrap();
+        let async_doc = extractor
+            .extract_content(data, "application/vnd.ms-outlook", &config)
+            .await
+            .unwrap();
+
+        assert_eq!(async_doc.elements, sync_doc.elements);
+        assert_eq!(
+            serde_json::to_value(&async_doc.metadata).unwrap(),
+            serde_json::to_value(&sync_doc.metadata).unwrap()
+        );
+    }
+
+    #[cfg(feature = "tokio-runtime")]
+    #[tokio::test]
+    async fn test_async_email_preserves_extractable_attachment_children() {
+        let eml = b"From: Alice <alice@example.com>\r\n\
+Subject: Attachment\r\n\
+MIME-Version: 1.0\r\n\
+Content-Type: multipart/mixed; boundary=part\r\n\
+\r\n\
+--part\r\n\
+Content-Type: text/plain\r\n\
+\r\n\
+Parent body\r\n\
+--part\r\n\
+Content-Type: text/plain\r\n\
+Content-Disposition: attachment; filename=note.txt\r\n\
+\r\n\
+Attachment body\r\n\
+--part--\r\n";
+        let config = ExtractionConfig {
+            max_archive_depth: 1,
+            ..Default::default()
+        };
+
+        let doc = EmailExtractor::new()
+            .extract_content(eml, "message/rfc822", &config)
+            .await
+            .unwrap();
+        let children = doc.children.expect("text attachment should be extracted");
+
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].path, "note.txt");
+        assert!(children[0].result.content.contains("Attachment body"));
+    }
+
+    #[cfg(feature = "tokio-runtime")]
+    #[tokio::test]
+    async fn test_async_email_preserves_nested_message_child() {
+        let eml = b"From: digest@example.com\r\n\
+Subject: Digest\r\n\
+MIME-Version: 1.0\r\n\
+Content-Type: multipart/digest; boundary=digest\r\n\
+\r\n\
+--digest\r\n\
+Content-Type: message/rfc822\r\n\
+\r\n\
+From: child@example.com\r\n\
+Subject: Nested\r\n\
+\r\n\
+Nested body\r\n\
+--digest--\r\n";
+        let config = ExtractionConfig {
+            max_archive_depth: 1,
+            ..Default::default()
+        };
+
+        let doc = EmailExtractor::new()
+            .extract_content(eml, "message/rfc822", &config)
+            .await
+            .unwrap();
+        let children = doc.children.expect("nested message should be extracted");
+
+        let nested = children
+            .iter()
+            .find(|child| child.path == "nested_message_0.eml")
+            .expect("dedicated nested message child should be present");
+        assert_eq!(nested.mime_type, "message/rfc822");
+        assert!(nested.result.content.contains("Nested body"));
     }
 
     #[test]

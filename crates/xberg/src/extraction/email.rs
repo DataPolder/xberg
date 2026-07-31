@@ -39,6 +39,11 @@ static SCRIPT_RE: OnceLock<Regex> = OnceLock::new();
 static STYLE_RE: OnceLock<Regex> = OnceLock::new();
 static WHITESPACE_RE: OnceLock<Regex> = OnceLock::new();
 
+pub(crate) struct ParsedEmailContent {
+    pub(crate) result: EmailExtractionResult,
+    pub(crate) nested_messages: Vec<Bytes>,
+}
+
 fn html_tag_regex() -> &'static Regex {
     HTML_TAG_RE.get_or_init(|| Regex::new(r"<[^>]+>").unwrap())
 }
@@ -111,6 +116,10 @@ fn maybe_transcode_utf16(data: &[u8]) -> Option<Vec<u8>> {
 
 /// Parse .eml file content (RFC822 format)
 pub(crate) fn parse_eml_content(data: &[u8]) -> Result<EmailExtractionResult> {
+    Ok(parse_eml_content_internal(data, false)?.result)
+}
+
+fn parse_eml_content_internal(data: &[u8], include_nested_messages: bool) -> Result<ParsedEmailContent> {
     let data = if let Some(transcoded) = maybe_transcode_utf16(data) {
         std::borrow::Cow::Owned(transcoded)
     } else {
@@ -123,10 +132,12 @@ pub(crate) fn parse_eml_content(data: &[u8]) -> Result<EmailExtractionResult> {
 
     let subject = message.subject().map(|s| s.to_string());
 
-    let from_email = message
-        .from()
-        .and_then(|from| from.first())
-        .and_then(|addr| addr.address().map(|email| email.to_string()));
+    let sender = message.from().and_then(|from| from.first());
+    let from_email = sender.and_then(|address| address.address().map(str::to_string));
+    let from_name = sender
+        .and_then(|address| address.name().map(str::trim))
+        .filter(|name| !name.is_empty())
+        .map(str::to_string);
 
     let to_emails: Vec<String> = message
         .to()
@@ -286,6 +297,10 @@ pub(crate) fn parse_eml_content(data: &[u8]) -> Result<EmailExtractionResult> {
         &attachments,
     );
 
+    if let Some(from_name) = from_name {
+        metadata.insert("from_name".to_string(), from_name);
+    }
+
     if !reply_to.is_empty() {
         metadata.insert("reply_to".to_string(), reply_to.join(", "));
     }
@@ -313,20 +328,44 @@ pub(crate) fn parse_eml_content(data: &[u8]) -> Result<EmailExtractionResult> {
         metadata.insert("attachment_details".to_string(), attachment_details.join("; "));
     }
 
-    Ok(EmailExtractionResult {
-        subject,
-        from_email,
-        to_emails,
-        cc_emails,
-        bcc_emails,
-        date,
-        message_id,
-        plain_text,
-        html_content,
-        content,
-        attachments,
-        metadata,
+    let nested_messages = if include_nested_messages {
+        collect_nested_message_payloads(&message)
+    } else {
+        Vec::new()
+    };
+
+    Ok(ParsedEmailContent {
+        result: EmailExtractionResult {
+            subject,
+            from_email,
+            to_emails,
+            cc_emails,
+            bcc_emails,
+            date,
+            message_id,
+            plain_text,
+            html_content,
+            content,
+            attachments,
+            metadata,
+        },
+        nested_messages,
     })
+}
+
+fn collect_nested_message_payloads(message: &mail_parser::Message<'_>) -> Vec<Bytes> {
+    use mail_parser::PartType;
+
+    message
+        .parts
+        .iter()
+        .filter_map(|part| match &part.body {
+            PartType::Message(nested) if !nested.raw_message().is_empty() => {
+                Some(Bytes::copy_from_slice(nested.raw_message()))
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 /// Check whether a message has at least one genuine `text/plain` body part.
@@ -1162,6 +1201,28 @@ pub(crate) fn extract_email_content(
     }
 }
 
+pub(crate) fn extract_email_content_with_nested(
+    data: &[u8],
+    mime_type: &str,
+    fallback_codepage: Option<u32>,
+) -> Result<ParsedEmailContent> {
+    if data.is_empty() {
+        return Err(XbergError::validation("Email content is empty".to_string()));
+    }
+
+    match mime_type {
+        "message/rfc822" | "text/plain" => parse_eml_content_internal(data, true),
+        "application/vnd.ms-outlook" => Ok(ParsedEmailContent {
+            result: parse_msg_content(data, fallback_codepage)?,
+            nested_messages: Vec::new(),
+        }),
+        _ => Err(XbergError::validation(format!(
+            "Unsupported email MIME type: {}",
+            mime_type
+        ))),
+    }
+}
+
 /// Build text output from email extraction result
 pub(crate) fn build_email_text_output(result: &EmailExtractionResult) -> String {
     let mut text_parts = Vec::with_capacity(10);
@@ -1385,6 +1446,19 @@ mod tests {
         assert_eq!(result.from_email, Some("test@example.com".to_string()));
         assert_eq!(result.to_emails, vec!["recipient@example.com".to_string()]);
         assert_eq!(result.content, "This is a test email body.");
+    }
+
+    #[test]
+    fn test_eml_sender_display_name_is_preserved_separately() {
+        let eml_content = b"From: Alice Example <alice@example.com>\r\nSubject: Sender\r\n\r\nBody";
+
+        let result = parse_eml_content(eml_content).unwrap();
+
+        assert_eq!(result.from_email.as_deref(), Some("alice@example.com"));
+        assert_eq!(
+            result.metadata.get("from_name").map(String::as_str),
+            Some("Alice Example")
+        );
     }
 
     #[test]
