@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Pipeline quality benchmarks allow forced OCR inference enough time to finish instead of
+  recording slow but valid OCR documents as zero-quality timeout failures.
 - Benchmark fixture validation now accepts descriptor filenames without an explicit parent path.
 - Pipeline benchmarks now preserve exact ordered cohort fixture paths, use explicit PP-OCR model
   identities and fixture OCR languages, and score structural image ground truth.

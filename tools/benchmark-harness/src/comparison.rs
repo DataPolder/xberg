@@ -41,6 +41,9 @@ use std::time::Instant;
 /// This is the minimum timeout applied to all documents, regardless of size.
 const EXTRACTION_TIMEOUT_BASE_SECS: u64 = 60;
 
+/// Minimum timeout for forced OCR pipelines, whose inference cost is substantially higher. ~keep
+const FORCED_OCR_TIMEOUT_BASE_SECS: u64 = 180;
+
 /// Per-page timeout for PDF documents in milliseconds.
 ///
 /// For layout-heavy PDFs (which require layout detection with ONNX inference),
@@ -334,9 +337,14 @@ fn estimate_pdf_page_count_from_size(file_size: u64) -> u64 {
 /// Returns timeout in seconds. For PDFs, applies per-page scaling to accommodate
 /// layout detection inference on large documents. Uses the real page count when
 /// the document parses; falls back to a size-based estimate otherwise.
-fn compute_extraction_timeout_secs(path: &Path, file_type: &str) -> u64 {
+fn compute_extraction_timeout_secs(path: &Path, file_type: &str, force_ocr: bool) -> u64 {
+    let base_timeout_secs = if force_ocr {
+        FORCED_OCR_TIMEOUT_BASE_SECS
+    } else {
+        EXTRACTION_TIMEOUT_BASE_SECS
+    };
     if file_type.to_lowercase() != "pdf" {
-        return EXTRACTION_TIMEOUT_BASE_SECS;
+        return base_timeout_secs;
     }
 
     let page_count = std::fs::read(path)
@@ -351,11 +359,11 @@ fn compute_extraction_timeout_secs(path: &Path, file_type: &str) -> u64 {
 
     let Some(page_count) = page_count else {
         tracing::warn!("Could not size PDF file, using base timeout: {}", path.display());
-        return EXTRACTION_TIMEOUT_BASE_SECS;
+        return base_timeout_secs;
     };
 
     let per_page_secs = EXTRACTION_TIMEOUT_PER_PAGE_MS as f64 / 1000.0;
-    let scaled_timeout = EXTRACTION_TIMEOUT_BASE_SECS as f64 + (page_count as f64 * per_page_secs);
+    let scaled_timeout = base_timeout_secs as f64 + (page_count as f64 * per_page_secs);
 
     scaled_timeout.ceil() as u64
 }
@@ -758,7 +766,7 @@ pub async fn extract_pipeline(
             let doc_name = doc.name.clone();
             let pipeline_name = pipeline.name().to_string();
 
-            let extraction_timeout_secs = compute_extraction_timeout_secs(&doc_path, &doc.file_type);
+            let extraction_timeout_secs = compute_extraction_timeout_secs(&doc_path, &doc.file_type, config.force_ocr);
             config.extraction_timeout_secs = Some(extraction_timeout_secs);
 
             let outer_timeout_secs = ((extraction_timeout_secs as f64 * 1.5).ceil() as u64).max(180);
@@ -1698,6 +1706,20 @@ fn print_noise_summary(results: &[DocResult]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn forced_ocr_uses_inference_appropriate_timeout() {
+        let path = Path::new("fixture.png");
+
+        assert_eq!(
+            compute_extraction_timeout_secs(path, "png", false),
+            EXTRACTION_TIMEOUT_BASE_SECS
+        );
+        assert_eq!(
+            compute_extraction_timeout_secs(path, "png", true),
+            FORCED_OCR_TIMEOUT_BASE_SECS
+        );
+    }
 
     #[test]
     fn test_score_document_identical() {
