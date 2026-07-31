@@ -119,6 +119,82 @@ fn raw_pixels_to_png(w: u32, h: u32, format: &pdf_oxide::extractors::PixelFormat
     Ok(Bytes::from(png_bytes))
 }
 
+/// Collect OCR-ready image bytes for every image XObject on `page_idx`, for use as a
+/// `force_ocr` fallback when whole-page rasterization silently dropped an undecodable
+/// image (issue #1355).
+///
+/// `page_image_handles` is a cheap content-stream/CTM pass that succeeds even when the
+/// renderer could not paint an image (e.g. an unsupported codec that pdf_oxide's page
+/// renderer silently substitutes with a blank page). For each handle:
+/// - `decode()` success → re-encode raw pixels to PNG, or pass the embedded JPEG through
+///   as-is.
+/// - `decode()` failure on a DCTDecode/JPXDecode stream → hand back the raw compressed
+///   bytes, which are a valid standalone JPEG/JP2 file the OCR backend can decode itself.
+/// - Any other failure → skip the image; there is no way to recover pixel data from it.
+///
+/// Returned in content-stream paint order; empty when the page has no image XObjects or
+/// none of them yielded usable bytes.
+pub(crate) fn page_ocr_fallback_image_bytes(doc: &pdf_oxide::PdfDocument, page_idx: usize) -> Vec<Bytes> {
+    let handles = match doc.page_image_handles(page_idx) {
+        Ok(h) => h,
+        Err(error) => {
+            tracing::debug!(
+                page = page_idx,
+                "force_ocr fallback: enumerating image handles failed: {error}"
+            );
+            return Vec::new();
+        }
+    };
+
+    let mut out = Vec::with_capacity(handles.len());
+    for handle in &handles {
+        match handle.decode() {
+            Ok(img) => match img.data() {
+                pdf_oxide::extractors::ImageData::Jpeg(jpeg_bytes) => out.push(Bytes::copy_from_slice(jpeg_bytes)),
+                pdf_oxide::extractors::ImageData::Raw { pixels, format } => {
+                    match raw_pixels_to_png(img.width(), img.height(), format, pixels) {
+                        Ok(bytes) => out.push(bytes),
+                        Err(error) => {
+                            tracing::debug!(page = page_idx, "force_ocr fallback: raw re-encode failed: {error}");
+                        }
+                    }
+                }
+            },
+            Err(decode_err) => {
+                let passthrough = matches!(
+                    handle.filter_chain.last(),
+                    Some(pdf_oxide::PdfFilter::DCTDecode) | Some(pdf_oxide::PdfFilter::JPXDecode)
+                );
+                if passthrough {
+                    match handle.raw_compressed_bytes() {
+                        Ok(raw) if matches!(detect_image_format_from_bytes(&raw), "jpeg" | "jpeg2000") => {
+                            out.push(Bytes::from(raw));
+                        }
+                        Ok(_) => {
+                            tracing::debug!(
+                                page = page_idx,
+                                "force_ocr fallback: raw bytes not a recognizable JPEG/JP2"
+                            );
+                        }
+                        Err(error) => {
+                            tracing::debug!(
+                                page = page_idx,
+                                "force_ocr fallback: raw_compressed_bytes failed: {error}"
+                            );
+                        }
+                    }
+                } else {
+                    tracing::debug!(
+                        page = page_idx,
+                        "force_ocr fallback: undecodable image, non-JPEG codec: {decode_err}"
+                    );
+                }
+            }
+        }
+    }
+    out
+}
+
 /// Extract full image data from all pages of a PDF.
 ///
 /// Returns a `Vec<ExtractedImage>` with complete image data and metadata.
@@ -540,5 +616,52 @@ mod tests {
 
         let incomplete = b"\xff\xd8";
         assert_eq!(detect_image_format_from_bytes(incomplete), "raw");
+    }
+
+    /// `page_ocr_fallback_image_bytes` must recover usable image bytes for a page whose
+    /// content is real, decodable image XObjects — the fixture used elsewhere in this
+    /// file for image extraction (issue #1355 force_ocr fallback).
+    #[test]
+    fn test_page_ocr_fallback_image_bytes_recovers_real_image() {
+        let pdf_path = test_documents_dir().join("pdf/embedded_images_tables.pdf");
+        assert!(
+            pdf_path.exists(),
+            "missing fixture: test PDF not found at {}",
+            pdf_path.display()
+        );
+
+        let bytes = std::fs::read(&pdf_path).expect("failed to read test PDF");
+        let doc = crate::pdf::oxide::OxideDocument::open_bytes(&bytes).expect("failed to open PDF");
+
+        let fallback_images = page_ocr_fallback_image_bytes(&doc.doc, 0);
+
+        assert!(
+            !fallback_images.is_empty(),
+            "fixture page 0 must contain at least one recoverable image XObject"
+        );
+        for image_bytes in &fallback_images {
+            let format = detect_image_format_from_bytes(image_bytes);
+            assert!(
+                matches!(format, "jpeg" | "png" | "jpeg2000"),
+                "fallback image bytes must carry a recognizable magic (jpeg/png/jpeg2000); got {:02x?}",
+                &image_bytes[..8.min(image_bytes.len())]
+            );
+        }
+    }
+
+    /// A page index past the end of the document must not panic; `page_image_handles`
+    /// returns an `Err` that the fallback helper degrades to an empty vec.
+    #[test]
+    fn test_page_ocr_fallback_image_bytes_out_of_range_page_returns_empty() {
+        let pdf_path = test_documents_dir().join("pdf/embedded_images_tables.pdf");
+        let bytes = std::fs::read(&pdf_path).expect("failed to read test PDF");
+        let doc = crate::pdf::oxide::OxideDocument::open_bytes(&bytes).expect("failed to open PDF");
+
+        let fallback_images = page_ocr_fallback_image_bytes(&doc.doc, 9999);
+
+        assert!(
+            fallback_images.is_empty(),
+            "out-of-range page must degrade to an empty vec, not panic or error"
+        );
     }
 }

@@ -3249,6 +3249,192 @@ mod tests {
         );
     }
 
+    /// Regression for #1355: when `force_ocr` renders a page blank (as pdf_oxide does
+    /// for a page whose only visible content is an image XObject it silently failed to
+    /// decode) but the page actually carries image XObjects, OCR must be retried on the
+    /// embedded image bytes and the recovery must be surfaced as a `ProcessingWarning`.
+    ///
+    /// The mock backend returns an empty string for its first invocation (standing in
+    /// for the blank whole-page render) and real text for every subsequent call. Because
+    /// `embedded_images_tables.pdf` has exactly one page, the whole-page OCR call is
+    /// always the first call the backend receives, so the fallback calls that follow in
+    /// the same per-page loop deterministically observe call index >= 1.
+    #[tokio::test]
+    #[cfg(all(feature = "pdf", feature = "ocr"))]
+    #[serial]
+    async fn test_force_ocr_image_xobject_fallback_recovers_blank_page_and_warns() {
+        use crate::core::config::OcrConfig;
+        use crate::plugins::{OcrBackend, OcrBackendType, Plugin};
+        use crate::types::ExtractedDocument;
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        const BACKEND_NAME: &str = "blank-then-image-fallback-mock-1355";
+
+        struct BlankThenImageMockBackend {
+            call_count: AtomicUsize,
+        }
+
+        #[async_trait::async_trait]
+        impl OcrBackend for BlankThenImageMockBackend {
+            fn backend_type(&self) -> OcrBackendType {
+                OcrBackendType::Custom
+            }
+            fn supports_language(&self, _lang: &str) -> bool {
+                true
+            }
+            async fn process_image(
+                &self,
+                _image_bytes: &[u8],
+                _config: &OcrConfig,
+            ) -> crate::Result<ExtractedDocument> {
+                let call_index = self.call_count.fetch_add(1, Ordering::SeqCst);
+                let content = if call_index == 0 {
+                    String::new()
+                } else {
+                    "IMG_TEXT".to_string()
+                };
+                Ok(ExtractedDocument {
+                    content,
+                    ..Default::default()
+                })
+            }
+            fn supports_document_processing(&self) -> bool {
+                false
+            }
+        }
+
+        impl Plugin for BlankThenImageMockBackend {
+            fn name(&self) -> &str {
+                BACKEND_NAME
+            }
+            fn version(&self) -> String {
+                "1.0.0".to_string()
+            }
+            fn initialize(&self) -> crate::Result<()> {
+                Ok(())
+            }
+            fn shutdown(&self) -> crate::Result<()> {
+                Ok(())
+            }
+        }
+
+        crate::plugins::register_ocr_backend(Arc::new(BlankThenImageMockBackend {
+            call_count: AtomicUsize::new(0),
+        }))
+        .unwrap();
+        let _guard = RegisteredOcrBackendGuard { name: BACKEND_NAME };
+
+        let extractor = PdfExtractor::new();
+        let pdf_path = pdf_test_document("embedded_images_tables.pdf");
+        assert!(
+            pdf_path.exists(),
+            "missing test fixture: {pdf_path:?} — add embedded_images_tables.pdf to test_documents/pdf/"
+        );
+        let content = std::fs::read(&pdf_path).expect("failed to read embedded_images_tables.pdf");
+
+        let config = crate::core::config::ExtractionConfig {
+            force_ocr: true,
+            ocr: Some(OcrConfig {
+                backend: BACKEND_NAME.to_string(),
+                language: vec!["eng".to_string()],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let result = extractor
+            .extract_content(&content, "application/pdf", &config)
+            .await
+            .expect("force_ocr extraction should succeed");
+        let result = crate::extraction::derive::derive_extraction_result(
+            result,
+            false,
+            crate::core::config::OutputFormat::Plain,
+        );
+
+        assert!(
+            !crate::extraction::blank_detection::is_page_text_blank(&result.content),
+            "page content must be recovered from the embedded-image OCR fallback, not left blank; got {:?}",
+            result.content
+        );
+        assert!(
+            result.content.contains("IMG_TEXT"),
+            "recovered content must come from the per-image fallback OCR call; got {:?}",
+            result.content
+        );
+        assert!(
+            result
+                .processing_warnings
+                .iter()
+                .any(|w| w.source == "ocr" && w.message.contains("image XObject")),
+            "expected a ProcessingWarning with source 'ocr' mentioning 'image XObject'; got: {:?}",
+            result.processing_warnings
+        );
+    }
+
+    /// False-positive guard for #1355: when the whole-page OCR result is not blank, the
+    /// image-XObject fallback must never fire, even on a page that has real embedded
+    /// images (`embedded_images_tables.pdf`) — no fallback warning, and page text
+    /// unchanged from whatever the (mock) OCR backend returned.
+    #[tokio::test]
+    #[cfg(all(feature = "pdf", feature = "ocr"))]
+    #[serial]
+    async fn test_force_ocr_image_xobject_fallback_does_not_fire_on_non_blank_page() {
+        use crate::core::config::OcrConfig;
+
+        const BACKEND_NAME: &str = "non-blank-no-fallback-mock-1355";
+        const SENTINEL: &str = "genuine OCR text, not blank";
+
+        let _backend = register_mock_ocr_backend(BACKEND_NAME, SENTINEL);
+
+        let extractor = PdfExtractor::new();
+        let pdf_path = pdf_test_document("embedded_images_tables.pdf");
+        let content = std::fs::read(&pdf_path).expect("failed to read embedded_images_tables.pdf");
+
+        let config = crate::core::config::ExtractionConfig {
+            force_ocr: true,
+            ocr: Some(OcrConfig {
+                backend: BACKEND_NAME.to_string(),
+                language: vec!["eng".to_string()],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let result = extractor
+            .extract_content(&content, "application/pdf", &config)
+            .await
+            .expect("force_ocr extraction should succeed");
+        let result = crate::extraction::derive::derive_extraction_result(
+            result,
+            false,
+            crate::core::config::OutputFormat::Plain,
+        );
+
+        // The fixture also carries real tables that get merged into the final content
+        // independently of OCR (unrelated to this fix), so assert the OCR-produced text
+        // is present unchanged rather than an exact match on the whole document body.
+        assert!(
+            result.content.starts_with(SENTINEL),
+            "non-blank OCR output must pass through unchanged when the fallback never fires; got {:?}",
+            result.content
+        );
+        assert!(
+            !result.content.contains("IMG_TEXT"),
+            "the image fallback must never run when the whole-page OCR result was not blank; got {:?}",
+            result.content
+        );
+        assert!(
+            !result
+                .processing_warnings
+                .iter()
+                .any(|w| w.message.contains("image XObject")),
+            "no image-fallback warning must be added when the whole-page OCR result was not blank; got: {:?}",
+            result.processing_warnings
+        );
+    }
+
     /// Non-textual content (charts, diagrams) with a pre-rendered structured doc
     /// present should skip OCR regardless of the per-page fallback flag — OCR
     /// won't improve extraction quality for non-textual pages.

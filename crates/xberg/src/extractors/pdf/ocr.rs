@@ -1723,6 +1723,10 @@ pub(crate) async fn extract_with_ocr(
     let mut accumulated_formulas: Vec<crate::types::Formula> = Vec::new();
     let mut conf_sum: f64 = 0.0;
     let mut conf_count: usize = 0;
+    // Warnings from the force_ocr image-XObject fallback (#1355): a page rendered
+    // blank by pdf_oxide but carrying image XObjects the renderer couldn't paint.
+    #[cfg(feature = "pdf")]
+    let mut image_fallback_warnings: Vec<crate::types::ProcessingWarning> = Vec::new();
 
     #[cfg(feature = "layout-detection")]
     let mut tatr_model = if layout_detections.is_some() {
@@ -1861,6 +1865,53 @@ pub(crate) async fn extract_with_ocr(
             for mut formula in ocr_result.formulas {
                 formula.page = (page_idx + 1) as u32;
                 accumulated_formulas.push(formula);
+            }
+
+            // force_ocr image-XObject fallback (#1355): pdf_oxide can catch an
+            // image-decode error internally and substitute a blank white bitmap for
+            // the whole-page render, so the page comes back from OCR as blank with no
+            // indication anything was wrong. When that happens and the page actually
+            // carries image XObjects, retry OCR directly on the embedded image bytes
+            // (decoded pixels re-encoded to PNG, or the raw JPEG/JP2 stream) and always
+            // surface a warning so the silent drop becomes visible.
+            #[cfg(feature = "pdf")]
+            if images.is_none()
+                && crate::extraction::blank_detection::is_page_text_blank(&ocr_result.content)
+                && let Some((render_doc, _, _)) = lazy_pdf_render_state.as_ref()
+            {
+                let fallback_images = crate::pdf::oxide::images::page_ocr_fallback_image_bytes(render_doc, page_idx);
+                if !fallback_images.is_empty() {
+                    let mut recovered = String::new();
+                    for image_bytes in &fallback_images {
+                        match backend.process_image(image_bytes, &ocr_config_owned).await {
+                            Ok(fallback_result) if !fallback_result.content.trim().is_empty() => {
+                                if !recovered.is_empty() {
+                                    recovered.push_str("\n\n");
+                                }
+                                recovered.push_str(&fallback_result.content);
+                            }
+                            Ok(_) => {}
+                            Err(error) => {
+                                tracing::debug!(
+                                    page = page_idx,
+                                    "force_ocr fallback: OCR of embedded image bytes failed: {error}"
+                                );
+                            }
+                        }
+                    }
+                    if !recovered.is_empty() {
+                        ocr_result.content = recovered;
+                    }
+                    image_fallback_warnings.push(crate::types::ProcessingWarning {
+                        source: std::borrow::Cow::Borrowed("ocr"),
+                        message: std::borrow::Cow::Owned(format!(
+                            "Page {} rendered blank but contains {} image XObject(s) the PDF rasterizer \
+                             could not draw; OCR was retried on the embedded image bytes.",
+                            page_idx + 1,
+                            fallback_images.len()
+                        )),
+                    });
+                }
             }
 
             #[cfg(feature = "layout-detection")]
@@ -2025,6 +2076,9 @@ pub(crate) async fn extract_with_ocr(
         doc.tables = collected_tables.clone();
         Some(doc)
     };
+
+    #[cfg(feature = "pdf")]
+    let ocr_doc = attach_ocr_fallback_warnings(ocr_doc, &result, image_fallback_warnings);
 
     Ok((
         result,
@@ -2265,6 +2319,36 @@ fn attach_ocr_pipeline_stage_warnings(
             )),
         });
     }
+
+    doc
+}
+
+/// Attach force_ocr image-XObject fallback warnings (#1355) to the OCR-produced
+/// document, mirroring [`attach_ocr_pipeline_stage_warnings`]'s `get_or_insert_with`
+/// shape so the warning always survives even when no structured document was built.
+#[cfg(feature = "pdf")]
+fn attach_ocr_fallback_warnings(
+    mut doc: Option<crate::types::internal::InternalDocument>,
+    text: &str,
+    warnings: Vec<crate::types::ProcessingWarning>,
+) -> Option<crate::types::internal::InternalDocument> {
+    if warnings.is_empty() {
+        return doc;
+    }
+
+    let retained_doc = doc.get_or_insert_with(|| {
+        let mut doc = crate::types::internal::InternalDocument::new("pdf");
+        for paragraph in text.split("\n\n").map(str::trim).filter(|text| !text.is_empty()) {
+            doc.push_element(crate::types::internal::InternalElement::text(
+                crate::types::internal::ElementKind::Paragraph,
+                paragraph,
+                0,
+            ));
+        }
+        doc
+    });
+
+    retained_doc.processing_warnings.extend(warnings);
 
     doc
 }
