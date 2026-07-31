@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Subprocess benchmark results record the framework's declared supported extensions, preserving
+  the capability context needed to interpret historical multi-format aggregates.
 - Benchmark quality guardrails fail on missing contracted documents or pipeline results instead
   of reporting a vacuous pass.
 - Benchmark fixtures reject document and ground-truth paths that escape the repository or

@@ -1345,6 +1345,7 @@ impl SubprocessAdapter {
         output_format: OutputFormat,
     ) -> BenchmarkResult {
         let framework_capabilities = FrameworkCapabilities {
+            supported_extensions: self.supported_formats.clone(),
             ocr_support: Self::framework_supports_ocr(&self.name),
             batch_support: self.batch_capability.is_some(),
             batch_capability: self.batch_capability,
@@ -1661,6 +1662,7 @@ impl FrameworkAdapter for SubprocessAdapter {
         let ocr_status = self.resolve_ocr_status(parsed.get("_ocr_used"), force_ocr);
 
         let framework_capabilities = FrameworkCapabilities {
+            supported_extensions: self.supported_formats.clone(),
             ocr_support: Self::framework_supports_ocr(&self.name),
             batch_support: self.batch_capability.is_some(),
             batch_capability: self.batch_capability,
@@ -1925,6 +1927,7 @@ impl FrameworkAdapter for SubprocessAdapter {
         let batch_throughput = bytes_per_second(successful_bytes, batch_makespan);
 
         let framework_capabilities = FrameworkCapabilities {
+            supported_extensions: self.supported_formats.clone(),
             ocr_support: Self::framework_supports_ocr(&self.name),
             batch_support: self.batch_capability.is_some(),
             batch_capability: self.batch_capability,
@@ -3101,6 +3104,10 @@ mod tests {
         let expected = bytes_per_second(result.file_size, result.duration);
         assert!((result.metrics.throughput_bytes_per_sec - expected).abs() < f64::EPSILON);
         assert_eq!(result.extraction_duration, Some(Duration::from_millis(1)));
+        assert_eq!(
+            result.framework_capabilities.supported_extensions,
+            vec!["pdf".to_string()]
+        );
     }
 
     #[cfg(unix)]
@@ -3242,6 +3249,11 @@ mod tests {
         assert_eq!(results[1].extracted_text.as_deref(), Some("two"));
         assert_eq!(results[0].metrics.throughput_bytes_per_sec, 200.0);
         assert_eq!(results[1].metrics.throughput_bytes_per_sec, 200.0);
+        assert!(
+            results
+                .iter()
+                .all(|result| result.framework_capabilities.supported_extensions == ["pdf".to_string()])
+        );
         assert_eq!(results[0].framework_capabilities.batch_performance_sample, Some(true));
         assert_eq!(results[1].framework_capabilities.batch_performance_sample, Some(false));
         assert_eq!(
