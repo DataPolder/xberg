@@ -41,7 +41,13 @@ static WHITESPACE_RE: OnceLock<Regex> = OnceLock::new();
 
 pub(crate) struct ParsedEmailContent {
     pub(crate) result: EmailExtractionResult,
-    pub(crate) nested_messages: Vec<Bytes>,
+    pub(crate) nested_messages: Vec<NestedMessagePayload>,
+}
+
+pub(crate) struct NestedMessagePayload {
+    part_id: usize,
+    pub(crate) data: Option<Bytes>,
+    pub(crate) size: usize,
 }
 
 fn html_tag_regex() -> &'static Regex {
@@ -116,10 +122,14 @@ fn maybe_transcode_utf16(data: &[u8]) -> Option<Vec<u8>> {
 
 /// Parse .eml file content (RFC822 format)
 pub(crate) fn parse_eml_content(data: &[u8]) -> Result<EmailExtractionResult> {
-    Ok(parse_eml_content_internal(data, false)?.result)
+    Ok(parse_eml_content_internal(data, false, None)?.result)
 }
 
-fn parse_eml_content_internal(data: &[u8], include_nested_messages: bool) -> Result<ParsedEmailContent> {
+fn parse_eml_content_internal(
+    data: &[u8],
+    include_nested_messages: bool,
+    max_nested_message_bytes: Option<u64>,
+) -> Result<ParsedEmailContent> {
     let data = if let Some(transcoded) = maybe_transcode_utf16(data) {
         std::borrow::Cow::Owned(transcoded)
     } else {
@@ -259,20 +269,49 @@ fn parse_eml_content_internal(data: &[u8], include_nested_messages: bool) -> Res
         String::new()
     };
 
+    let nested_messages = if include_nested_messages {
+        collect_nested_message_payloads(&message, max_nested_message_bytes)
+    } else {
+        Vec::new()
+    };
+
     let mut attachments = Vec::with_capacity(message.attachments().count().min(20));
-    for attachment in message.attachments() {
+    for &part_id in &message.attachments {
+        let Some(attachment) = message.parts.get(part_id as usize) else {
+            continue;
+        };
         let filename = attachment.attachment_name().map(|s| s.to_string());
 
-        let mime_type = attachment
-            .content_type()
-            .map(|ct| {
-                let content_type_str = format!("{}/{}", ct.ctype(), ct.subtype().unwrap_or("octet-stream"));
-                parse_content_type(&content_type_str)
-            })
-            .unwrap_or_else(|| "application/octet-stream".to_string());
+        let mime_type = if matches!(&attachment.body, mail_parser::PartType::Message(_)) {
+            "message/rfc822".to_string()
+        } else {
+            attachment
+                .content_type()
+                .map(|ct| {
+                    let content_type_str = format!("{}/{}", ct.ctype(), ct.subtype().unwrap_or("octet-stream"));
+                    parse_content_type(&content_type_str)
+                })
+                .unwrap_or_else(|| "application/octet-stream".to_string())
+        };
 
-        let data = attachment.contents();
-        let size = data.len();
+        let (data, size) = match &attachment.body {
+            mail_parser::PartType::Message(nested) => {
+                let raw_message = nested.raw_message();
+                let data = if include_nested_messages {
+                    nested_messages
+                        .iter()
+                        .find(|payload| payload.part_id == part_id as usize)
+                        .and_then(|payload| payload.data.clone())
+                } else {
+                    Some(Bytes::copy_from_slice(raw_message))
+                };
+                (data, raw_message.len())
+            }
+            _ => {
+                let contents = attachment.contents();
+                (Some(Bytes::copy_from_slice(contents)), contents.len())
+            }
+        };
 
         let is_image = is_image_mime_type(&mime_type);
 
@@ -282,7 +321,7 @@ fn parse_eml_content_internal(data: &[u8], include_nested_messages: bool) -> Res
             mime_type: Some(mime_type),
             size: Some(size),
             is_image,
-            data: Some(Bytes::copy_from_slice(data)),
+            data,
         });
     }
 
@@ -328,12 +367,6 @@ fn parse_eml_content_internal(data: &[u8], include_nested_messages: bool) -> Res
         metadata.insert("attachment_details".to_string(), attachment_details.join("; "));
     }
 
-    let nested_messages = if include_nested_messages {
-        collect_nested_message_payloads(&message)
-    } else {
-        Vec::new()
-    };
-
     Ok(ParsedEmailContent {
         result: EmailExtractionResult {
             subject,
@@ -353,15 +386,27 @@ fn parse_eml_content_internal(data: &[u8], include_nested_messages: bool) -> Res
     })
 }
 
-fn collect_nested_message_payloads(message: &mail_parser::Message<'_>) -> Vec<Bytes> {
+fn collect_nested_message_payloads(
+    message: &mail_parser::Message<'_>,
+    max_nested_message_bytes: Option<u64>,
+) -> Vec<NestedMessagePayload> {
     use mail_parser::PartType;
 
     message
         .parts
         .iter()
-        .filter_map(|part| match &part.body {
+        .enumerate()
+        .filter_map(|(part_id, part)| match &part.body {
             PartType::Message(nested) if !nested.raw_message().is_empty() => {
-                Some(Bytes::copy_from_slice(nested.raw_message()))
+                let raw_message = nested.raw_message();
+                let data = max_nested_message_bytes
+                    .is_none_or(|cap| raw_message.len() as u64 <= cap)
+                    .then(|| Bytes::copy_from_slice(raw_message));
+                Some(NestedMessagePayload {
+                    part_id,
+                    data,
+                    size: raw_message.len(),
+                })
             }
             _ => None,
         })
@@ -1205,13 +1250,14 @@ pub(crate) fn extract_email_content_with_nested(
     data: &[u8],
     mime_type: &str,
     fallback_codepage: Option<u32>,
+    max_nested_message_bytes: Option<u64>,
 ) -> Result<ParsedEmailContent> {
     if data.is_empty() {
         return Err(XbergError::validation("Email content is empty".to_string()));
     }
 
     match mime_type {
-        "message/rfc822" | "text/plain" => parse_eml_content_internal(data, true),
+        "message/rfc822" | "text/plain" => parse_eml_content_internal(data, true, max_nested_message_bytes),
         "application/vnd.ms-outlook" => Ok(ParsedEmailContent {
             result: parse_msg_content(data, fallback_codepage)?,
             nested_messages: Vec::new(),

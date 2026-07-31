@@ -305,8 +305,19 @@ impl InternalDocumentExtractor for EmailExtractor {
     ) -> Result<InternalDocument> {
         tracing::debug!(format = "email", size_bytes = content.len(), "extraction starting");
         let fallback_codepage = config.email.as_ref().and_then(|email| email.msg_fallback_codepage);
-        let parsed =
-            crate::extraction::email::extract_email_content_with_nested(content, mime_type, fallback_codepage)?;
+        let parsed = if config.max_archive_depth > 0 {
+            crate::extraction::email::extract_email_content_with_nested(
+                content,
+                mime_type,
+                fallback_codepage,
+                config.max_embedded_file_bytes,
+            )?
+        } else {
+            crate::extraction::email::ParsedEmailContent {
+                result: crate::extraction::email::extract_email_content(content, mime_type, fallback_codepage)?,
+                nested_messages: Vec::new(),
+            }
+        };
         let mut doc = Self::build_extracted_document(&parsed.result, mime_type, config)?;
         let mut children = Vec::new();
         let mut warnings = Vec::new();
@@ -370,6 +381,14 @@ pub(crate) async fn extract_attachment_children(
     let mut warnings = Vec::new();
 
     for (idx, attachment) in attachments.iter().enumerate() {
+        if attachment
+            .mime_type
+            .as_deref()
+            .is_some_and(|mime_type| mime_type.eq_ignore_ascii_case("message/rfc822"))
+        {
+            continue;
+        }
+
         let bytes = match &attachment.data {
             Some(data) if !data.is_empty() => data,
             _ => continue,
@@ -446,31 +465,26 @@ pub(crate) async fn extract_attachment_children(
 /// complementing the existing text-merging in `collect_nested_message_text`
 /// / `collect_nested_message_html`.
 async fn extract_nested_message_children(
-    nested_messages: &[bytes::Bytes],
+    nested_messages: &[crate::extraction::email::NestedMessagePayload],
     config: &ExtractionConfig,
 ) -> (Vec<ArchiveEntry>, Vec<ProcessingWarning>) {
     let mut children = Vec::new();
     let mut warnings = Vec::new();
 
-    for (nested_idx, raw_bytes) in nested_messages.iter().enumerate() {
+    for (nested_idx, payload) in nested_messages.iter().enumerate() {
         let filename = format!("nested_message_{nested_idx}.eml");
 
-        if config
-            .max_embedded_file_bytes
-            .is_some_and(|cap| raw_bytes.len() as u64 > cap)
-        {
+        let Some(raw_bytes) = payload.data.as_ref() else {
             let cap = config.max_embedded_file_bytes.unwrap_or(0);
             warnings.push(ProcessingWarning {
                 source: Cow::Borrowed("nested_message_extraction"),
                 message: Cow::Owned(format!(
                     "Skipped '{}': size {} bytes exceeds cap {} bytes",
-                    filename,
-                    raw_bytes.len(),
-                    cap
+                    filename, payload.size, cap
                 )),
             });
             continue;
-        }
+        };
 
         let mut child_config = config.clone();
         child_config.max_archive_depth = config.max_archive_depth.saturating_sub(1);
@@ -498,6 +512,33 @@ async fn extract_nested_message_children(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const NESTED_MESSAGE_EML: &[u8] = b"From: digest@example.com\r\n\
+Subject: Digest\r\n\
+MIME-Version: 1.0\r\n\
+Content-Type: multipart/digest; boundary=digest\r\n\
+\r\n\
+--digest\r\n\
+Content-Type: message/rfc822\r\n\
+\r\n\
+From: child@example.com\r\n\
+Subject: Nested\r\n\
+\r\n\
+Nested body\r\n\
+--digest--\r\n";
+
+    const IMPLICIT_NESTED_MESSAGE_EML: &[u8] = b"From: digest@example.com\r\n\
+Subject: Digest\r\n\
+MIME-Version: 1.0\r\n\
+Content-Type: multipart/digest; boundary=digest\r\n\
+\r\n\
+--digest\r\n\
+\r\n\
+From: child@example.com\r\n\
+Subject: Implicit Nested\r\n\
+\r\n\
+Implicit nested body\r\n\
+--digest--\r\n";
 
     #[test]
     fn test_email_extractor_plugin_interface() {
@@ -617,36 +658,113 @@ Attachment body\r\n\
     #[cfg(feature = "tokio-runtime")]
     #[tokio::test]
     async fn test_async_email_preserves_nested_message_child() {
-        let eml = b"From: digest@example.com\r\n\
-Subject: Digest\r\n\
-MIME-Version: 1.0\r\n\
-Content-Type: multipart/digest; boundary=digest\r\n\
-\r\n\
---digest\r\n\
-Content-Type: message/rfc822\r\n\
-\r\n\
-From: child@example.com\r\n\
-Subject: Nested\r\n\
-\r\n\
-Nested body\r\n\
---digest--\r\n";
         let config = ExtractionConfig {
             max_archive_depth: 1,
             ..Default::default()
         };
 
         let doc = EmailExtractor::new()
-            .extract_content(eml, "message/rfc822", &config)
+            .extract_content(NESTED_MESSAGE_EML, "message/rfc822", &config)
             .await
             .unwrap();
         let children = doc.children.expect("nested message should be extracted");
 
-        let nested = children
-            .iter()
-            .find(|child| child.path == "nested_message_0.eml")
-            .expect("dedicated nested message child should be present");
+        assert_eq!(children.len(), 1, "nested message must be emitted exactly once");
+        let nested = &children[0];
+        assert_eq!(nested.path, "nested_message_0.eml");
         assert_eq!(nested.mime_type, "message/rfc822");
         assert!(nested.result.content.contains("Nested body"));
+    }
+
+    #[cfg(feature = "tokio-runtime")]
+    #[tokio::test]
+    async fn test_async_digest_emits_implicit_nested_message_once() {
+        let config = ExtractionConfig {
+            max_archive_depth: 1,
+            ..Default::default()
+        };
+        let parsed = crate::extraction::email::parse_eml_content(IMPLICIT_NESTED_MESSAGE_EML).unwrap();
+
+        assert_eq!(parsed.attachments.len(), 1);
+        assert_eq!(parsed.attachments[0].mime_type.as_deref(), Some("message/rfc822"));
+
+        let doc = EmailExtractor::new()
+            .extract_content(IMPLICIT_NESTED_MESSAGE_EML, "message/rfc822", &config)
+            .await
+            .unwrap();
+        let children = doc.children.expect("implicit nested message should be extracted");
+
+        assert_eq!(
+            children.len(),
+            1,
+            "implicit nested message must be emitted exactly once"
+        );
+        assert_eq!(children[0].path, "nested_message_0.eml");
+        assert_eq!(children[0].mime_type, "message/rfc822");
+        assert!(children[0].result.content.contains("Implicit nested body"));
+    }
+
+    #[test]
+    fn test_sync_email_preserves_nested_attachment_payload() {
+        let parsed = crate::extraction::email::parse_eml_content(NESTED_MESSAGE_EML).unwrap();
+
+        assert_eq!(parsed.attachments.len(), 1);
+        assert_eq!(parsed.attachments[0].mime_type.as_deref(), Some("message/rfc822"));
+        let data = parsed.attachments[0]
+            .data
+            .as_deref()
+            .expect("sync extraction must retain nested attachment bytes");
+        assert!(String::from_utf8_lossy(data).contains("Nested body"));
+    }
+
+    #[cfg(feature = "tokio-runtime")]
+    #[tokio::test]
+    async fn test_async_email_skips_nested_payloads_at_depth_zero() {
+        let config = ExtractionConfig {
+            max_archive_depth: 0,
+            ..Default::default()
+        };
+
+        let doc = EmailExtractor::new()
+            .extract_content(NESTED_MESSAGE_EML, "message/rfc822", &config)
+            .await
+            .unwrap();
+
+        assert!(doc.children.is_none(), "depth zero must not emit nested children");
+        assert!(
+            doc.processing_warnings.is_empty(),
+            "depth zero is an intentional recursion limit"
+        );
+    }
+
+    #[cfg(feature = "tokio-runtime")]
+    #[tokio::test]
+    async fn test_async_email_rejects_nested_payload_before_copying_over_cap() {
+        let config = ExtractionConfig {
+            max_archive_depth: 1,
+            max_embedded_file_bytes: Some(8),
+            ..Default::default()
+        };
+        let parsed = crate::extraction::email::extract_email_content_with_nested(
+            NESTED_MESSAGE_EML,
+            "message/rfc822",
+            None,
+            config.max_embedded_file_bytes,
+        )
+        .unwrap();
+
+        assert!(parsed.result.attachments[0].data.is_none());
+        assert!(parsed.nested_messages[0].data.is_none());
+
+        let doc = EmailExtractor::new()
+            .extract_content(NESTED_MESSAGE_EML, "message/rfc822", &config)
+            .await
+            .unwrap();
+
+        assert!(doc.children.is_none(), "over-cap nested messages must not be extracted");
+        assert_eq!(doc.processing_warnings.len(), 1);
+        assert_eq!(doc.processing_warnings[0].source, "nested_message_extraction");
+        assert!(doc.processing_warnings[0].message.contains("exceeds cap 8 bytes"));
     }
 
     #[test]
