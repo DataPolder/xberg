@@ -99,14 +99,23 @@ mod build_libwpd {
     /// `libz-sys` (a build-time dep on every desktop target) compiles zlib with
     /// `cc` — matching this crate's own `-MD`/release-CRT C++ build, so there is
     /// no LNK2038 CRT mismatch on MSVC — puts the archive on the link search path,
-    /// and exports its headers via `DEP_Z_INCLUDE` (consumed in `build`). We
-    /// re-emit the link here, AFTER this crate's objects (librevenge's
-    /// `RVNGZipStream.o` calls `inflate*`), because a GNU-ld command line orders
-    /// libz-sys's own directive before the references and discards the archive
-    /// (`undefined reference to inflateInit2_`). MSVC's linker has no such
-    /// ordering constraint, so re-emitting is harmless there.
+    /// and exports its headers via `DEP_Z_INCLUDE` (consumed in `build`).
+    ///
+    /// On GNU-ld targets (Linux/macOS) we re-emit the link here, AFTER this
+    /// crate's objects (librevenge's `RVNGZipStream.o` calls `inflate*`), because
+    /// a GNU-ld command line orders libz-sys's own directive before the references
+    /// and discards the archive (`undefined reference to inflateInit2_`).
+    ///
+    /// MSVC has no such ordering constraint, and libz-sys's own link directive
+    /// already pulls in the zlib it built. Re-emitting `static=z` there is not
+    /// harmless: libz-sys names its MSVC archive `zlib`/`libz`, not `z`, so a bare
+    /// `static=z` resolves against no library on the search path and fails the
+    /// link with `could not find native static library z`. So skip the re-emit on
+    /// Windows and rely on libz-sys's directive at the final binary link.
     fn link_zlib() {
-        println!("cargo:rustc-link-lib=static=z");
+        if !targeting_windows() {
+            println!("cargo:rustc-link-lib=static=z");
+        }
     }
 
     fn cpp_files(dir: &Path) -> Vec<PathBuf> {

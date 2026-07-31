@@ -39,9 +39,16 @@
 //! ```
 mod backends;
 
+// Written by the OCR processor (`feature = "ocr"`) and read back by the PDF
+// layout OCR path (`feature = "pdf"` + `feature = "layout-detection"`); dead
+// under OCR-less feature sets such as the WASM `ocr-wasm` backend.
+#[cfg(any(feature = "ocr", all(feature = "pdf", feature = "layout-detection")))]
 pub(crate) const OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY: &str = "ocr_processed_image_width";
+#[cfg(any(feature = "ocr", all(feature = "pdf", feature = "layout-detection")))]
 pub(crate) const OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY: &str = "ocr_processed_image_height";
+#[cfg(any(feature = "ocr", all(feature = "pdf", feature = "layout-detection")))]
 pub(crate) const OCR_ORIENTATION_DEGREES_METADATA_KEY: &str = "orientation_degrees";
+#[cfg(any(feature = "ocr", all(feature = "pdf", feature = "layout-detection")))]
 pub(crate) const OCR_AUTO_ROTATED_METADATA_KEY: &str = "auto_rotated";
 
 #[cfg(feature = "ocr")]
