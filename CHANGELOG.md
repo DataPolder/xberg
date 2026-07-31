@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- FB2 and DocBook files with generic XML signatures retain their extension-specific MIME types, so
+  they route through the semantic FictionBook and DocBook extractors instead of the generic XML
+  fallback.
 - Nested objects and arrays in JSON documents render as structured Markdown headings and lists
   instead of opaque compact-JSON strings, preserving readable nested keys and values.
 

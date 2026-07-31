@@ -767,11 +767,25 @@ fn magic_override(path: &Path, extension_mime: &str) -> Option<String> {
     if from_magic == PLAIN_TEXT_MIME_TYPE {
         return None;
     }
+    if is_generic_xml_mime(&from_magic) && is_specific_xml_mime(extension_mime) {
+        return None;
+    }
     if from_magic != extension_mime && validate_mime_type(&from_magic).is_ok() {
         Some(from_magic)
     } else {
         None
     }
+}
+
+/// Generic XML signatures cannot distinguish specialized XML vocabularies.
+/// Preserve a supported extension-specific XML MIME so extractor selection can
+/// route formats such as FictionBook and DocBook to their semantic parsers.
+fn is_specific_xml_mime(mime_type: &str) -> bool {
+    mime_type != XML_MIME_TYPE && (mime_type.ends_with("+xml") || mime_type.contains("xml+"))
+}
+
+fn is_generic_xml_mime(mime_type: &str) -> bool {
+    matches!(mime_type, XML_MIME_TYPE | "text/xml")
 }
 
 /// Detect MIME type from raw file bytes.
@@ -1165,6 +1179,75 @@ mod tests {
             archive.write_all(content).unwrap();
         }
         archive.finish().unwrap().into_inner()
+    }
+
+    #[cfg(all(feature = "office", feature = "xml", feature = "tokio-runtime"))]
+    async fn assert_specialized_xml_routes_through_real_extractor(
+        extension: &str,
+        content: &str,
+        expected_mime: &str,
+        expected_text: &str,
+    ) {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join(format!("routing.{extension}"));
+        std::fs::write(&file_path, content).unwrap();
+
+        let config = crate::core::config::ExtractionConfig {
+            use_cache: false,
+            ..Default::default()
+        };
+        let result = crate::core::extractor::extract_file(&file_path, None, &config)
+            .await
+            .unwrap();
+
+        assert_eq!(result.mime_type, expected_mime);
+        assert!(
+            result.content.contains(expected_text),
+            "specialized extractor lost expected text: {}",
+            result.content
+        );
+        assert!(
+            !result.content.contains("<article") && !result.content.contains("<FictionBook"),
+            "generic XML markup leaked into extracted content: {}",
+            result.content
+        );
+    }
+
+    #[cfg(all(feature = "office", feature = "xml", feature = "tokio-runtime"))]
+    #[tokio::test]
+    async fn should_route_fb2_extension_to_fictionbook_extractor() {
+        let content = r#"<?xml version="1.0" encoding="utf-8"?>
+<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0">
+  <description><title-info><book-title>Routing Test</book-title></title-info></description>
+  <body><section><title><p>First Chapter</p></title><p>FictionBook semantic text.</p></section></body>
+</FictionBook>"#;
+
+        assert_specialized_xml_routes_through_real_extractor(
+            "fb2",
+            content,
+            "application/x-fictionbook+xml",
+            "FictionBook semantic text.",
+        )
+        .await;
+    }
+
+    #[cfg(all(feature = "office", feature = "xml", feature = "tokio-runtime"))]
+    #[tokio::test]
+    async fn should_route_docbook_extensions_to_docbook_extractor() {
+        let content = r#"<?xml version="1.0" encoding="utf-8"?>
+<article xmlns="http://docbook.org/ns/docbook" version="5.0">
+  <title>Routing Test</title><para>DocBook semantic text.</para>
+</article>"#;
+
+        for extension in ["docbook", "dbk"] {
+            assert_specialized_xml_routes_through_real_extractor(
+                extension,
+                content,
+                "application/docbook+xml",
+                "DocBook semantic text.",
+            )
+            .await;
+        }
     }
 
     #[test]
