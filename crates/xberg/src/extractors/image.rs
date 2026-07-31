@@ -8,6 +8,104 @@ use crate::types::internal::InternalDocument;
 use crate::types::internal_builder::InternalDocumentBuilder;
 use crate::types::metadata::Metadata;
 use async_trait::async_trait;
+
+#[cfg(any(test, all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm"))))]
+const MIN_LAYOUT_OCR_ALPHANUMERIC_TOKEN_RETENTION: f64 = 0.80;
+
+#[cfg(any(test, all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm"))))]
+fn internal_document_text(doc: &InternalDocument) -> String {
+    doc.elements
+        .iter()
+        .filter_map(|element| {
+            let text = element.text.trim();
+            (!text.is_empty()).then_some(text)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[cfg(any(test, all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm"))))]
+fn alphanumeric_tokens(text: &str) -> Vec<String> {
+    text.split(|character: char| !character.is_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .map(|token| token.to_lowercase())
+        .collect()
+}
+
+#[cfg(any(test, all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm"))))]
+fn alphanumeric_token_retention(layout_text: &str, whole_image_text: &str) -> f64 {
+    let whole_image_tokens = alphanumeric_tokens(whole_image_text);
+    if whole_image_tokens.is_empty() {
+        return 1.0;
+    }
+
+    let mut layout_token_counts = std::collections::HashMap::<String, usize>::new();
+    for token in alphanumeric_tokens(layout_text) {
+        *layout_token_counts.entry(token).or_default() += 1;
+    }
+
+    let retained = whole_image_tokens
+        .iter()
+        .filter(|token| {
+            let Some(count) = layout_token_counts.get_mut(*token) else {
+                return false;
+            };
+            if *count == 0 {
+                return false;
+            }
+            *count -= 1;
+            true
+        })
+        .count();
+
+    retained as f64 / whole_image_tokens.len() as f64
+}
+
+#[cfg(any(test, all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm"))))]
+fn image_ocr_quality_score(text: &str) -> f64 {
+    #[cfg(feature = "quality")]
+    {
+        crate::text::quality::calculate_quality_score(text, None)
+    }
+
+    #[cfg(not(feature = "quality"))]
+    {
+        let _ = text;
+        0.0
+    }
+}
+
+#[cfg(any(test, all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm"))))]
+fn select_image_ocr_result(
+    layout_doc: InternalDocument,
+    whole_image_result: Result<InternalDocument>,
+) -> InternalDocument {
+    let whole_image_doc = match whole_image_result {
+        Ok(doc) => doc,
+        Err(error) => {
+            tracing::warn!(%error, "Whole-image OCR quality comparison failed; retaining layout-region OCR");
+            return layout_doc;
+        }
+    };
+    let layout_text = internal_document_text(&layout_doc);
+    let whole_image_text = internal_document_text(&whole_image_doc);
+    let layout_score = image_ocr_quality_score(&layout_text);
+    let whole_image_score = image_ocr_quality_score(&whole_image_text);
+    let token_retention = alphanumeric_token_retention(&layout_text, &whole_image_text);
+
+    if layout_score < whole_image_score || token_retention < MIN_LAYOUT_OCR_ALPHANUMERIC_TOKEN_RETENTION {
+        tracing::debug!(
+            layout_score,
+            whole_image_score,
+            token_retention,
+            "Whole-image OCR retained because layout-region OCR reduced text quality"
+        );
+        whole_image_doc
+    } else {
+        layout_doc
+    }
+}
+
 /// Returns `true` when the OCR backend configured in `config` self-declares that it
 /// emits structured markdown directly. End-to-end VLM backends (PaddleOCR-VL,
 /// future GOT-OCR / GLM-OCR) emit markdown in one forward pass and should
@@ -114,6 +212,7 @@ impl ImageExtractor {
         let ocr_metadata = ocr_result.metadata;
         let ocr_elements = ocr_result.ocr_elements;
         let ocr_formulas = ocr_result.formulas;
+        let processing_warnings = ocr_result.processing_warnings;
 
         #[cfg(feature = "ocr")]
         {
@@ -127,6 +226,7 @@ impl ImageExtractor {
             let mut doc = build_image_internal_document(Some(&ocr_extraction_result.content), None);
             doc.metadata = ocr_metadata;
             doc.formulas = ocr_formulas;
+            doc.processing_warnings = processing_warnings;
             Self::mark_ocr_extraction(&mut doc);
 
             doc.prebuilt_ocr_elements = ocr_elements;
@@ -160,6 +260,7 @@ impl ImageExtractor {
             let mut doc = build_image_internal_document(Some(&ocr_content), None);
             doc.metadata = ocr_metadata;
             doc.formulas = ocr_formulas;
+            doc.processing_warnings = processing_warnings;
             Self::mark_ocr_extraction(&mut doc);
             doc.prebuilt_ocr_elements = ocr_elements;
             let text = ocr_content.trim().to_string();
@@ -256,7 +357,12 @@ impl ImageExtractor {
     /// code, formulas, etc.), then OCRs each region individually and
     /// assembles the results into structured markdown.
     #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
-    async fn extract_with_layout_ocr(&self, content: &[u8], config: &ExtractionConfig) -> Result<InternalDocument> {
+    async fn extract_with_layout_ocr(
+        &self,
+        content: &[u8],
+        mime_type: &str,
+        config: &ExtractionConfig,
+    ) -> Result<InternalDocument> {
         use crate::layout::LayoutClass;
         use crate::plugins::registry::get_ocr_backend_registry;
         use crate::types::internal::{ElementKind, InternalElement};
@@ -303,7 +409,7 @@ impl ImageExtractor {
 
         if detection.detections.is_empty() {
             tracing::debug!("No layout regions detected, falling back to whole-image OCR");
-            return self.extract_with_ocr(content, "image/png", config).await;
+            return self.extract_with_ocr(content, mime_type, config).await;
         }
 
         let mut detections = detection.detections;
@@ -335,6 +441,7 @@ impl ImageExtractor {
 
         let mut builder = InternalDocumentBuilder::new("image");
         let mut formulas: Vec<crate::types::Formula> = Vec::new();
+        let mut processing_warnings = Vec::new();
         let img_width = rgb.width();
         let img_height = rgb.height();
 
@@ -368,6 +475,7 @@ impl ImageExtractor {
             let crop_bytes = png_buf.into_inner();
 
             let ocr_result = backend.process_image(&crop_bytes, &region_ocr_config).await?;
+            processing_warnings.extend(ocr_result.processing_warnings);
             let text = ocr_result.content.trim().to_string();
             if text.is_empty() {
                 continue;
@@ -426,9 +534,11 @@ impl ImageExtractor {
             ..Default::default()
         };
         doc.formulas = formulas;
+        doc.processing_warnings = processing_warnings;
         Self::mark_ocr_extraction(&mut doc);
 
-        Ok(doc)
+        let whole_image_result = self.extract_with_ocr(content, mime_type, config).await;
+        Ok(select_image_ocr_result(doc, whole_image_result))
     }
 }
 
@@ -591,7 +701,7 @@ impl InternalDocumentExtractor for ImageExtractor {
         {
             #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
             if config.layout.is_some() && !ocr_backend_emits_structured_markdown(config) {
-                match self.extract_with_layout_ocr(content, config).await {
+                match self.extract_with_layout_ocr(content, mime_type, config).await {
                     Ok(mut doc) => {
                         doc.metadata.format = Some(crate::types::FormatMetadata::Image(image_metadata));
                         doc.mime_type = mime_type.to_string();
@@ -675,6 +785,112 @@ impl InternalDocumentExtractor for ImageExtractor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn image_ocr_document(text: &str) -> InternalDocument {
+        build_image_internal_document(Some(text), None)
+    }
+
+    #[test]
+    fn should_use_whole_image_ocr_when_invoice_regions_drop_fields() {
+        let layout = image_ocr_document("Invoice 1042 Acme Total 1250 USD");
+        let mut whole = image_ocr_document("Invoice 1042 Acme Corporation Date July 31 Total 1250 USD");
+        whole.metadata.additional.insert(
+            std::borrow::Cow::Borrowed("ocr_candidate"),
+            serde_json::Value::String("whole-image".to_string()),
+        );
+        whole.processing_warnings.push(crate::types::ProcessingWarning {
+            source: std::borrow::Cow::Borrowed("ocr"),
+            message: std::borrow::Cow::Borrowed("whole-image warning"),
+        });
+
+        let selected = select_image_ocr_result(layout, Ok(whole));
+
+        assert_eq!(
+            internal_document_text(&selected),
+            "Invoice 1042 Acme Corporation Date July 31 Total 1250 USD"
+        );
+        assert_eq!(
+            selected.metadata.additional.get("ocr_candidate"),
+            Some(&serde_json::Value::String("whole-image".to_string()))
+        );
+        assert_eq!(selected.processing_warnings.len(), 1);
+        assert_eq!(selected.processing_warnings[0].message, "whole-image warning");
+    }
+
+    #[test]
+    fn should_keep_layout_ocr_for_complete_simple_line() {
+        let mut layout = image_ocr_document("The quick brown fox jumps over the lazy dog");
+        layout.metadata.additional.insert(
+            std::borrow::Cow::Borrowed("ocr_candidate"),
+            serde_json::Value::String("layout".to_string()),
+        );
+        let whole = image_ocr_document("The quick brown fox jumps over the lazy dog");
+
+        let selected = select_image_ocr_result(layout, Ok(whole));
+
+        assert_eq!(
+            selected.metadata.additional.get("ocr_candidate"),
+            Some(&serde_json::Value::String("layout".to_string()))
+        );
+    }
+
+    #[cfg(feature = "quality")]
+    #[test]
+    fn should_use_whole_image_ocr_when_complex_layout_text_scores_lower() {
+        let layout =
+            image_ocr_document("Quarterly   revenue   increased   while   operating   expenses   remained   stable.");
+        let whole = image_ocr_document("Quarterly revenue increased while operating expenses remained stable.");
+
+        assert_eq!(
+            alphanumeric_token_retention(&internal_document_text(&layout), &internal_document_text(&whole)),
+            1.0
+        );
+        let selected = select_image_ocr_result(layout, Ok(whole));
+
+        assert_eq!(
+            internal_document_text(&selected),
+            "Quarterly revenue increased while operating expenses remained stable."
+        );
+    }
+
+    #[test]
+    fn should_count_duplicate_alphanumeric_tokens_individually() {
+        let retention = alphanumeric_token_retention("invoice total", "invoice invoice total");
+
+        assert!((retention - (2.0 / 3.0)).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn should_accept_exact_minimum_alphanumeric_token_retention() {
+        let retention = alphanumeric_token_retention("one two three four", "one two three four five");
+
+        assert!((retention - MIN_LAYOUT_OCR_ALPHANUMERIC_TOKEN_RETENTION).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn should_keep_layout_ocr_when_whole_image_comparison_fails() {
+        let mut layout = image_ocr_document("Invoice 1042 Total 1250 USD");
+        layout.metadata.additional.insert(
+            std::borrow::Cow::Borrowed("ocr_candidate"),
+            serde_json::Value::String("layout".to_string()),
+        );
+        layout.processing_warnings.push(crate::types::ProcessingWarning {
+            source: std::borrow::Cow::Borrowed("layout-ocr"),
+            message: std::borrow::Cow::Borrowed("layout warning"),
+        });
+
+        let selected = select_image_ocr_result(
+            layout,
+            Err(crate::XbergError::Other("comparison OCR failed".to_string())),
+        );
+
+        assert_eq!(
+            selected.metadata.additional.get("ocr_candidate"),
+            Some(&serde_json::Value::String("layout".to_string()))
+        );
+        assert_eq!(selected.processing_warnings.len(), 1);
+        assert_eq!(selected.processing_warnings[0].message, "layout warning");
+    }
 
     /// Regression test for #705: a backend that gates ocr_elements on include_elements
     /// (e.g. paddle-ocr) must still produce non-empty pages[].
