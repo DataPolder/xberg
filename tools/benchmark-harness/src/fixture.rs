@@ -210,7 +210,12 @@ impl Fixture {
             });
         }
 
-        let fixture_dir = fixture_path.parent().unwrap_or_else(|| Path::new("."));
+        // A bare filename has an empty parent path, which must resolve relative to the current
+        // directory just like a missing parent. Keep the canonical trust boundary check below. ~keep
+        let fixture_dir = fixture_path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
         let canonical_fixture_dir = fixture_dir.canonicalize().map_err(|error| Error::InvalidFixture {
             path: fixture_path.to_path_buf(),
             reason: format!("unable to resolve fixture directory {}: {error}", fixture_dir.display()),

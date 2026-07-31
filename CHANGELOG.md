@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Benchmark fixture validation now accepts descriptor filenames without an explicit parent path.
 - Pipeline benchmarks now preserve exact ordered cohort fixture paths, use explicit PP-OCR model
   identities and fixture OCR languages, and score structural image ground truth.
 - PaddleOCR now reports processed image dimensions and applied orientation corrections, keeping
