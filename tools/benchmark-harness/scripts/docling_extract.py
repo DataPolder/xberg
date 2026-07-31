@@ -33,7 +33,8 @@ def _tesseract_to_easyocr_langs(ocr_language: str | None) -> list[str]:
     EasyOCR language list Docling's default OCR engine expects. EasyOCR uses ISO-639-1
     codes and combines one non-Latin script with English at a time, which matches how
     the fixtures pin a single script. An unset value returns an empty list so EasyOCR's
-    default is left untouched."""
+    default is left untouched.
+    """
     if not ocr_language:
         return []
     mapping = {"eng": "en", "kor": "ko", "jpn": "ja", "jpn_vert": "ja", "chi_sim": "ch_sim", "chi_tra": "ch_tra"}

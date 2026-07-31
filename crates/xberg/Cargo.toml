@@ -15,19 +15,19 @@ readme = "README.md"
 
 [package.metadata.cargo-machete]
 ignored = [
-  "liter-llm",
-  "opentelemetry_sdk",
-  "tracing-opentelemetry",
-  "nom-exif",
-  # icu_provider is feature-gated and consumed transitively by language-detection;
-  # cargo-machete cannot resolve `dep:icu_provider` references in feature flag chains.
-  "icu_provider",
-  "serde_toon_format",
-  # symphonia is optional behind the `transcription` feature; cargo-machete cannot
-  # resolve optional dep usage through feature-gated cfg blocks.
-  "symphonia",
-  # mel_spec is optional behind the `transcription` feature; same constraint.
-  "mel_spec",
+    "liter-llm",
+    "opentelemetry_sdk",
+    "tracing-opentelemetry",
+    "nom-exif",
+    # icu_provider is feature-gated and consumed transitively by language-detection;
+    # cargo-machete cannot resolve `dep:icu_provider` references in feature flag chains.
+    "icu_provider",
+    "serde_toon_format",
+    # symphonia is optional behind the `transcription` feature; cargo-machete cannot
+    # resolve optional dep usage through feature-gated cfg blocks.
+    "symphonia",
+    # mel_spec is optional behind the `transcription` feature; same constraint.
+    "mel_spec",
 ]
 
 [lib]
@@ -48,20 +48,27 @@ tokio-runtime = ["dep:tokio", "dep:futures"]
 
 # PDF extraction is currently backed by pdf_oxide. Keep this as the canonical
 # `pdf` feature until/unless a second PDF backend is introduced.
-pdf = ["dep:pdf_oxide", "dep:lopdf", "dep:image", "dep:flate2", "html", "image-encode"]
+pdf = [
+    "dep:pdf_oxide",
+    "dep:lopdf",
+    "dep:image",
+    "dep:flate2",
+    "html",
+    "image-encode",
+]
 excel = ["dep:calamine", "tokio-runtime"]
 excel-wasm = ["dep:calamine"]
 office = [
-  "dep:cfb",
-  "dep:roxmltree",
-  "dep:zip",
-  "dep:quick-xml",
-  "dep:biblatex",
-  "dep:biblib",
-  "dep:org",
-  "dep:dbase",
-  "html",
-  "notebook",
+    "dep:cfb",
+    "dep:roxmltree",
+    "dep:zip",
+    "dep:quick-xml",
+    "dep:biblatex",
+    "dep:biblib",
+    "dep:org",
+    "dep:dbase",
+    "html",
+    "notebook",
 ]
 # Jupyter notebook (.ipynb) extraction. Pure-Rust JSON parsing; needs the light
 # `html` dep for markdown/HTML cell output rendering. Split out of `office` so it
@@ -70,7 +77,15 @@ notebook = ["html"]
 hwp = ["dep:cfb", "dep:flate2"]
 hwpx = ["dep:unhwp", "dep:zip"]
 iwork = ["dep:zip", "dep:snap"]
-email = ["dep:mail-parser", "dep:cfb", "dep:outlook-pst", "dep:tempfile", "dep:chrono", "dep:chardetng", "html"]
+email = [
+    "dep:mail-parser",
+    "dep:cfb",
+    "dep:outlook-pst",
+    "dep:tempfile",
+    "dep:chrono",
+    "dep:chardetng",
+    "html",
+]
 html = ["dep:html-to-markdown-rs", "dep:v_htmlescape"]
 xml = ["dep:quick-xml", "dep:roxmltree"]
 archives = ["dep:zip", "dep:tar", "dep:sevenz-rust2", "dep:flate2"]
@@ -94,17 +109,17 @@ tree-sitter = ["dep:tree-sitter-language-pack"]
 tree-sitter-wasm = ["tree-sitter"]
 
 ocr = [
-  "ocr-pipeline",
-  "tokio-runtime",
-  "dep:xberg-tesseract",
-  "dep:image",
-  "dep:tiff",
-  "dep:fast_image_resize",
-  "dep:nom-exif",
-  "dep:hayro-jpeg2000",
-  "dep:hayro-jbig2",
-  "dep:ureq",
-  "html",
+    "ocr-pipeline",
+    "tokio-runtime",
+    "dep:xberg-tesseract",
+    "dep:image",
+    "dep:tiff",
+    "dep:fast_image_resize",
+    "dep:nom-exif",
+    "dep:hayro-jpeg2000",
+    "dep:hayro-jbig2",
+    "dep:ureq",
+    "html",
 ]
 # Embed the English `eng.traineddata` blob (tessdata_fast, ~4 MB) at compile time
 # so the runtime tessdata resolver can materialize English OCR offline without a
@@ -112,7 +127,14 @@ ocr = [
 bundle-tessdata-eng = ["xberg-tesseract/bundle-tessdata-eng"]
 # WASM OCR: Minimal Tesseract backend without html-to-markdown (which has WASI imports)
 # Includes only the core OCR processing dependencies needed for Tesseract on WASM
-ocr-wasm = ["ocr-pipeline", "dep:xberg-tesseract", "dep:image", "dep:nom-exif", "dep:hayro-jpeg2000", "dep:hayro-jbig2"]
+ocr-wasm = [
+    "ocr-pipeline",
+    "dep:xberg-tesseract",
+    "dep:image",
+    "dep:nom-exif",
+    "dep:hayro-jpeg2000",
+    "dep:hayro-jbig2",
+]
 # HEIF / HEIC / AVIF / HEICS / AVCS decoding via vendored libheif bindings.
 # Native-only — libheif is a C library with no working WASM/Android story.
 # Pulls in `nom-exif` so HEIC EXIF blocks are readable even without the full `ocr` feature.
@@ -136,14 +158,14 @@ paddle-ocr-types = []
 # `--features candle-ocr,xberg-candle-ocr/trocr` or by depending on
 # xberg-candle-ocr directly with the sub-feature.
 candle-ocr = [
-  "dep:xberg-candle-ocr",
-  "dep:image",
-  "dep:hf-hub",
-  "dep:reqwest",
-  "dep:sha2",
-  "dep:fs2",
-  "ocr-pipeline",
-  "tokio-runtime",
+    "dep:xberg-candle-ocr",
+    "dep:image",
+    "dep:hf-hub",
+    "dep:reqwest",
+    "dep:sha2",
+    "dep:fs2",
+    "ocr-pipeline",
+    "tokio-runtime",
 ]
 # TrOCR backend: aggregate feature enabling candle-ocr with trocr sub-feature
 candle-trocr = ["candle-ocr", "xberg-candle-ocr/trocr"]
@@ -154,7 +176,12 @@ candle-glm-ocr = ["candle-ocr", "xberg-candle-ocr/glm-ocr", "layout-detection"]
 # DeepSeek-OCR backend: aggregate feature enabling candle-ocr with deepseek-ocr sub-feature
 candle-deepseek-ocr = ["candle-ocr", "xberg-candle-ocr/deepseek-ocr"]
 # Umbrella aggregate for all candle VLM OCR backends (not in full/formats/wasm-target/android-target)
-candle-vlm-ocr = ["candle-deepseek-ocr", "candle-paddleocr-vl", "candle-glm-ocr", "candle-trocr"]
+candle-vlm-ocr = [
+    "candle-deepseek-ocr",
+    "candle-paddleocr-vl",
+    "candle-glm-ocr",
+    "candle-trocr",
+]
 # Candle GPU acceleration pass-throughs. Enable alongside any candle-* backend
 # to compile the corresponding candle backend (CUDA / Metal / Accelerate /
 # MKL) — CPU decode of the larger VLM backends is impractically slow.
@@ -165,20 +192,20 @@ candle-mkl = ["candle-ocr", "xberg-candle-ocr/mkl"]
 # PaddleOCR via ONNX Runtime
 # Requires 'ocr' feature for shared conversion utilities and table reconstruction
 paddle-ocr = [
-  "paddle-ocr-types",
-  "dep:xberg-paddle-ocr",
-  "dep:sha2",
-  "dep:image",
-  "dep:hf-hub",
-  "dep:reqwest",
-  "dep:ureq",
-  "dep:ort",
-  "image-encode",
-  "dep:ndarray",
-  "html",
-  "tokio-runtime",
-  "ocr",
-  "auto-rotate",
+    "paddle-ocr-types",
+    "dep:xberg-paddle-ocr",
+    "dep:sha2",
+    "dep:image",
+    "dep:hf-hub",
+    "dep:reqwest",
+    "dep:ureq",
+    "dep:ort",
+    "image-encode",
+    "dep:ndarray",
+    "html",
+    "tokio-runtime",
+    "ocr",
+    "auto-rotate",
 ]
 # Dev default: downloads the pyke prebuilt ONNX Runtime (needs glibc >= 2.38 to run).
 # Release links Microsoft's runtime instead (system strategy) — see publish.yaml (#1284).
@@ -207,29 +234,29 @@ tensorrt = ["ort?/tensorrt"]
 # Layout detection via ONNX Runtime (YOLO + RT-DETR)
 # Document orientation detection using PP-LCNet for auto_rotate
 auto-rotate = [
-  "auto-rotate-types",
-  "tokio-runtime",
-  "dep:ort",
-  "dep:ndarray",
-  "dep:hf-hub",
-  "dep:reqwest",
-  "dep:sha2",
-  "dep:fs2",
-  "dep:image",
-  "dep:ureq",
-  "ort-bundled",
+    "auto-rotate-types",
+    "tokio-runtime",
+    "dep:ort",
+    "dep:ndarray",
+    "dep:hf-hub",
+    "dep:reqwest",
+    "dep:sha2",
+    "dep:fs2",
+    "dep:image",
+    "dep:ureq",
+    "ort-bundled",
 ]
 layout-detection = [
-  "layout-types",
-  "dep:fs2",
-  "dep:ort",
-  "dep:ndarray",
-  "dep:hf-hub",
-  "dep:reqwest",
-  "dep:sha2",
-  "dep:image",
-  "tokio-runtime",
-  "ort-bundled",
+    "layout-types",
+    "dep:fs2",
+    "dep:ort",
+    "dep:ndarray",
+    "dep:hf-hub",
+    "dep:reqwest",
+    "dep:sha2",
+    "dep:image",
+    "tokio-runtime",
+    "ort-bundled",
 ]
 # layout-tract: no-ORT sibling of `layout-detection` (issue #1275, Phase 5). Runs RT-DETR
 # layout detection and the PP-LCNet table (wired/wireless) classifier through the pure-Rust
@@ -241,15 +268,15 @@ layout-detection = [
 # Deliberately omits `dep:ort`/`ort-bundled`. `layout-detection` (ORT) stays the native
 # default — never enable both in one build.
 layout-tract = [
-  "layout-types",
-  "tract",
-  "dep:fs2",
-  "dep:ndarray",
-  "dep:hf-hub",
-  "dep:reqwest",
-  "dep:sha2",
-  "dep:image",
-  "tokio-runtime",
+    "layout-types",
+    "tract",
+    "dep:fs2",
+    "dep:ndarray",
+    "dep:hf-hub",
+    "dep:reqwest",
+    "dep:sha2",
+    "dep:image",
+    "tokio-runtime",
 ]
 # auto-rotate-tract: no-ORT sibling of `auto-rotate` (issue #1275). Same PP-LCNet
 # document-orientation capability, run through the pure-Rust `tract` engine instead
@@ -258,19 +285,19 @@ layout-tract = [
 # it deliberately omits `dep:ort`/`ort-bundled`. `auto-rotate` (ORT) stays the
 # native default — never enable both in one build.
 auto-rotate-tract = [
-  "auto-rotate-types",
-  "tract",
-  "dep:ndarray",
-  "dep:hf-hub",
-  "dep:reqwest",
-  "dep:sha2",
-  "dep:fs2",
-  "dep:image",
-  "dep:ureq",
-  # model_download's resilient hf-hub client (Ipv4FirstResolver) uses
-  # tokio::spawn_blocking on non-wasm targets; layout-detection pulls this for
-  # the same reason. Gated out on wasm32, where the embedded-weight path lands.
-  "tokio-runtime",
+    "auto-rotate-types",
+    "tract",
+    "dep:ndarray",
+    "dep:hf-hub",
+    "dep:reqwest",
+    "dep:sha2",
+    "dep:fs2",
+    "dep:image",
+    "dep:ureq",
+    # model_download's resilient hf-hub client (Ipv4FirstResolver) uses
+    # tokio::spawn_blocking on non-wasm targets; layout-detection pulls this for
+    # the same reason. Gated out on wasm32, where the embedded-weight path lands.
+    "tokio-runtime",
 ]
 # tract: pure-Rust ONNX inference engine for the `crate::inference` seam. Additive
 # on native (both engines compile together for cross-engine parity tests); the sole
@@ -293,63 +320,76 @@ auto-rotate-types = []
 # Excluded from no-ort-target, wasm-target, android-target (x86_64 emulator) exactly like other ORT ML.
 transcription-types = []
 transcription = [
-  "transcription-types",
-  "dep:mel_spec",
-  "dep:ndarray",
-  "dep:ort",
-  "dep:hf-hub",
-  "dep:reqwest",
-  "dep:sha2",
-  "dep:fs2",
-  "dep:symphonia",
-  "dep:lofty",
-  "dep:tokenizers",
-  "ort-bundled",
-  "tokio-runtime",
+    "transcription-types",
+    "dep:mel_spec",
+    "dep:ndarray",
+    "dep:ort",
+    "dep:hf-hub",
+    "dep:reqwest",
+    "dep:sha2",
+    "dep:fs2",
+    "dep:symphonia",
+    "dep:lofty",
+    "dep:tokenizers",
+    "ort-bundled",
+    "tokio-runtime",
 ]
 
-chunking = ["dep:auto_enums", "dep:either", "dep:icu_provider", "dep:icu_segmenter", "dep:itertools", "dep:strum"]
+chunking = [
+    "dep:auto_enums",
+    "dep:either",
+    "dep:icu_provider",
+    "dep:icu_segmenter",
+    "dep:itertools",
+    "dep:strum",
+]
 chunking-tokenizers = [
-  "chunking",
-  "tokio-runtime",
-  "dep:tokenizers",
-  "dep:hf-hub",
-  "dep:reqwest",
-  "dep:sha2",
-  "dep:fs2",
+    "chunking",
+    "tokio-runtime",
+    "dep:tokenizers",
+    "dep:hf-hub",
+    "dep:reqwest",
+    "dep:sha2",
+    "dep:fs2",
 ]
 # onnx-runtime: shared ONNX model-loading helpers (crate::onnx) — HF download,
 # cross-process lock, tokenizer load, ORT session build. Marker feature enabled
 # by every ORT-backed embedding and reranking capability that builds on the
 # shared helper.
 onnx-runtime = [
-  "tokio-runtime",
-  "dep:hf-hub",
-  "dep:reqwest",
-  "dep:ort",
-  "dep:tokenizers",
-  "dep:sha2",
-  "dep:fs2",
-  "ort-bundled",
+    "tokio-runtime",
+    "dep:hf-hub",
+    "dep:reqwest",
+    "dep:ort",
+    "dep:tokenizers",
+    "dep:sha2",
+    "dep:fs2",
+    "ort-bundled",
 ]
 # embedding-presets: static preset metadata (WASM-safe, no ORT)
 embedding-presets = []
 # embeddings: full embedding generation with ONNX Runtime (ORT-dependent, WASM-incompatible)
 # NOTE: embedding-presets is a subset of embeddings (no ORT); always implied by embeddings.
-embeddings = ["onnx-runtime", "dep:ndarray", "chunking", "tokio-runtime", "embedding-presets"]
+embeddings = [
+    "onnx-runtime",
+    "dep:ndarray",
+    "chunking",
+    "tokio-runtime",
+    "embedding-presets",
+]
 # static-embeddings: pure-Rust static (model2vec) embedding inference — no ONNX Runtime.
 # The only dense embedder available on `no-ort-target` (WASM/Android). Model download is
 # native-only (hf-hub); WASM/Android load model bytes via `StaticEmbeddingEngine::from_bytes`.
 static-embeddings = [
-  "embedding-presets",
-  "tokio-runtime",
-  "dep:model2vec-rs",
-  "dep:tokenizers",
-  "dep:ndarray",
-  "dep:hf-hub",
-  "dep:reqwest",
-  "dep:sha2",
-  "dep:fs2",
+    "embedding-presets",
+    "tokio-runtime",
+    "dep:model2vec-rs",
+    "dep:tokenizers",
+    "dep:ndarray",
+    "dep:hf-hub",
+    "dep:reqwest",
+    "dep:sha2",
+    "dep:fs2",
 ]
 # v5.0.0: cross-encoder reranking.
 # reranker-presets: static preset metadata (WASM/Android-safe, no ORT).
@@ -401,31 +441,42 @@ ner-candle = ["ner-candle-backend", "tokio-runtime"]
 # natively too, for callers wanting candle NER without a runtime dependency.
 ner-candle-wasm = ["ner-candle-backend"]
 ner = [] # NER result types only; safe on every target.
-ner-llm-types = ["ner"] # LlmBackend stub for targets without full ner-llm (Windows, Android x86_64, WASM).
+ner-llm-types = [
+    "ner",
+] # LlmBackend stub for targets without full ner-llm (Windows, Android x86_64, WASM).
 ner-llm = ["ner", "liter-llm"] # LLM-driven zero-shot NER (no ORT).
 ner-onnx = [
-  # xberg-gliner ONNX backend with Hugging Face model download.
-  "ner",
-  "dep:xberg-gliner",
-  "dep:hf-hub",
-  "dep:reqwest",
-  "dep:sha2",
-  "dep:fs2",
-  "ort-bundled",
-  "tokio-runtime",
+    # xberg-gliner ONNX backend with Hugging Face model download.
+    "ner",
+    "dep:xberg-gliner",
+    "dep:hf-hub",
+    "dep:reqwest",
+    "dep:sha2",
+    "dep:fs2",
+    "ort-bundled",
+    "tokio-runtime",
 ]
 
-presets = ["dep:include_dir", "dep:jsonschema", "dep:sha2"] # Preset format + registry + loader + resolver; pure-Rust.
+presets = [
+    "dep:include_dir",
+    "dep:jsonschema",
+    "dep:sha2",
+] # Preset format + registry + loader + resolver; pure-Rust.
 
 # Compatibility feature for public LLM structured extraction through
 # `ExtractionConfig::structured_extraction`.
 structured = ["liter-llm", "tokio-runtime"]
 
-redaction = ["dep:sha2"]                                                        # Pattern-based PII engine; pure-Rust.
-redaction-rehydrate = ["redaction", "dep:aes-gcm", "dep:scrypt", "dep:zeroize"] # Encrypted rehydration map capture.
-redaction-ml = ["redaction", "ner"]                                             # Couple in NER for PERSON/ORG/LOC redaction.
+redaction = ["dep:sha2"] # Pattern-based PII engine; pure-Rust.
+redaction-rehydrate = [
+    "redaction",
+    "dep:aes-gcm",
+    "dep:scrypt",
+    "dep:zeroize",
+] # Encrypted rehydration map capture.
+redaction-ml = ["redaction", "ner"] # Couple in NER for PERSON/ORG/LOC redaction.
 
-summarization = ["stopwords"]                      # TextRank extractive only; pure-Rust (uses stopword tables).
+summarization = ["stopwords"] # TextRank extractive only; pure-Rust (uses stopword tables).
 summarization-llm = ["summarization", "liter-llm"]
 
 translation = ["liter-llm"]
@@ -433,7 +484,7 @@ translation = ["liter-llm"]
 # (tokio::sync::Semaphore / tokio::task::JoinSet).
 classification = ["liter-llm", "tokio-runtime"]
 captioning = ["liter-llm"]
-qr-codes = ["dep:rqrr", "dep:image"]            # Pure-Rust QR decoding via rqrr.
+qr-codes = ["dep:rqrr", "dep:image"] # Pure-Rust QR decoding via rqrr.
 
 # SVG support: parse, sanitize (strip external hrefs/JS/foreignObject), re-serialize,
 # and rasterize SVG → PNG/JPEG/WebP via resvg + tiny-skia. Pure-Rust, WASM-safe.
@@ -448,18 +499,18 @@ url-ingestion-browser = ["url-ingestion", "crawlberg/browser"]
 
 api-types = []
 api = [
-  "api-types",
-  "tower-service",
-  "dep:axum",
-  "dep:chrono",
-  "dep:moka",
-  "dep:tower-http",
-  "dep:utoipa",
-  "dep:uuid",
-  "tokio-runtime",
-  # SIGTERM/SIGINT graceful shutdown for the api + mcp-http servers (#1147).
-  "tokio?/signal",
-  "chunking",
+    "api-types",
+    "tower-service",
+    "dep:axum",
+    "dep:chrono",
+    "dep:moka",
+    "dep:tower-http",
+    "dep:utoipa",
+    "dep:uuid",
+    "tokio-runtime",
+    # SIGTERM/SIGINT graceful shutdown for the api + mcp-http servers (#1147).
+    "tokio?/signal",
+    "chunking",
 ]
 mcp = ["tower-service", "dep:rmcp", "tokio-runtime"]
 mcp-http = ["mcp", "api"]
@@ -468,7 +519,13 @@ mcp-http = ["mcp", "api"]
 # ~keep never force-activates the optional dep). html-to-markdown-rs and
 # ~keep tree-sitter-language-pack are pure emitters with no otel feature — their spans
 # ~keep reach the collector through the consumer's tracing-opentelemetry layer.
-otel = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:tracing-opentelemetry", "crawlberg?/otel", "liter-llm?/otel"]
+otel = [
+    "dep:opentelemetry",
+    "dep:opentelemetry_sdk",
+    "dep:tracing-opentelemetry",
+    "crawlberg?/otel",
+    "liter-llm?/otel",
+]
 
 # no-ort-target: shared base for targets that cannot use ONNX Runtime (Android x86_64 emulator,
 # WASM). Pure-Rust only — no ORT, no native-only C++ deps. Used as a foundation for both
@@ -480,39 +537,39 @@ otel = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:tracing-opentelemetry
 # - hwpx: unhwp → zip → xz2 → lzma-sys (native C, missing wasm stdlib). Native-only;
 #   re-enabled in android-target.
 no-ort-target = [
-  "pdf",
-  "html",
-  "xml",
-  "email",
-  "language-detection",
-  "chunking",
-  "chunking-tokenizers",
-  "quality",
-  "keywords",
-  "markdown-footnotes",
-  "enrichment",
-  "heuristics",
-  "office",
-  "iwork",
-  "hwp",
-  "mdx",
-  "archives",
-  "stopwords",
-  "embedding-presets",
-  "static-embeddings",
-  "reranker-presets",
-  "sparse-embedding-presets",
-  "late-interaction-presets",
-  "layout-types",
-  "auto-rotate-types",
-  "paddle-ocr-types",
-  "ner",
-  "presets",
-  "redaction",
-  "summarization",
-  "qr-codes",
-  "svg",
-  "transcription-types",
+    "pdf",
+    "html",
+    "xml",
+    "email",
+    "language-detection",
+    "chunking",
+    "chunking-tokenizers",
+    "quality",
+    "keywords",
+    "markdown-footnotes",
+    "enrichment",
+    "heuristics",
+    "office",
+    "iwork",
+    "hwp",
+    "mdx",
+    "archives",
+    "stopwords",
+    "embedding-presets",
+    "static-embeddings",
+    "reranker-presets",
+    "sparse-embedding-presets",
+    "late-interaction-presets",
+    "layout-types",
+    "auto-rotate-types",
+    "paddle-ocr-types",
+    "ner",
+    "presets",
+    "redaction",
+    "summarization",
+    "qr-codes",
+    "svg",
+    "transcription-types",
 ]
 # wasm-target: no-ort-target plus WASM-specific overrides (excel-wasm, tree-sitter-wasm, ocr-wasm),
 # plus the pure-Rust `layout-tract` (RT-DETR + table classifier) and `auto-rotate-tract`
@@ -539,7 +596,14 @@ no-ort-target = [
 # past ~100 MB, over jsDelivr's 50 MB per-file limit, which broke the live demo
 # (the CDN 403s the oversized .wasm). Code intelligence is therefore unavailable
 # in the WASM build; native targets keep `tree-sitter`. See docs (WASM limitations).
-wasm-target = ["no-ort-target", "excel-wasm", "ocr-wasm", "layout-tract", "auto-rotate-tract", "ner-candle-wasm"]
+wasm-target = [
+    "no-ort-target",
+    "excel-wasm",
+    "ocr-wasm",
+    "layout-tract",
+    "auto-rotate-tract",
+    "ner-candle-wasm",
+]
 # android-target: no-ort-target plus native-Linux variants that work on Android ABI
 # (excel with tokio, native tree-sitter, Tesseract OCR, and API/MCP transport).
 # Excludes ORT-dependent ML (paddle-ocr, embeddings, reranker, transcription); document
@@ -548,34 +612,34 @@ wasm-target = ["no-ort-target", "excel-wasm", "ocr-wasm", "layout-tract", "auto-
 # only — table structure recognition stays ORT-only, see `layout-tract`) by the
 # pure-Rust `layout-tract` variant instead of the ORT-backed `layout-detection`.
 android-target = [
-  "no-ort-target",
-  "excel",
-  "tree-sitter",
-  "ocr",
-  "auto-rotate-tract",
-  "layout-tract",
-  "api",
-  "mcp",
-  "liter-llm",
-  "structured",
-  "hwpx",
-  "diff",
-  # LLM-driven features that depend only on liter-llm (HTTP), not ORT — safe on
-  # the no-ORT android emulator surface, and required so the Dart FRB dispatch
-  # (`frb_generated.rs`, not feature-aware) resolves `classify_document`,
-  # `caption_image`, and `LlmBackend` instead of referencing configured-out items.
-  "classification",
-  "captioning",
-  "ner-llm",
-  # Same not-feature-aware-binding reason: the Dart FRB dispatch
-  # (`frb_generated.rs`) references `crate::map_url` unconditionally, and the
-  # Dart/Kotlin bindings reference `UrlExtractionConfig.crawl`. `map_url` is
-  # gated on `#[cfg(url-ingestion)]`, so `url-config-types` alone leaves it
-  # configured out → E0425. `url-ingestion` adds `crawlberg/native-runtime`,
-  # which is a zero-dependency flag (`native-runtime = []`) over pure-Rust
-  # crawlberg — no ORT, no new native deps — so it is safe on the no-ORT
-  # Android surface and supersedes the type-only `url-config-types`.
-  "url-ingestion",
+    "no-ort-target",
+    "excel",
+    "tree-sitter",
+    "ocr",
+    "auto-rotate-tract",
+    "layout-tract",
+    "api",
+    "mcp",
+    "liter-llm",
+    "structured",
+    "hwpx",
+    "diff",
+    # LLM-driven features that depend only on liter-llm (HTTP), not ORT — safe on
+    # the no-ORT android emulator surface, and required so the Dart FRB dispatch
+    # (`frb_generated.rs`, not feature-aware) resolves `classify_document`,
+    # `caption_image`, and `LlmBackend` instead of referencing configured-out items.
+    "classification",
+    "captioning",
+    "ner-llm",
+    # Same not-feature-aware-binding reason: the Dart FRB dispatch
+    # (`frb_generated.rs`) references `crate::map_url` unconditionally, and the
+    # Dart/Kotlin bindings reference `UrlExtractionConfig.crawl`. `map_url` is
+    # gated on `#[cfg(url-ingestion)]`, so `url-config-types` alone leaves it
+    # configured out → E0425. `url-ingestion` adds `crawlberg/native-runtime`,
+    # which is a zero-dependency flag (`native-runtime = []`) over pure-Rust
+    # crawlberg — no ORT, no new native deps — so it is safe on the no-ORT
+    # Android surface and supersedes the type-only `url-config-types`.
+    "url-ingestion",
 ]
 # windows-target: curated feature set for Windows host builds across every
 # binding crate. Native libheif/libheif-sys is not installed on the standard
@@ -590,76 +654,76 @@ android-target = [
 # crates reach it via per-crate `[[crates.<x>.target_dep_overrides]]` blocks
 # in `alef.toml`.
 windows-target = [
-  "pdf",
-  "ocr",
-  "chunking",
-  "keywords",
-  "language-detection",
-  "html",
-  "tree-sitter",
-  "office",
-  "email",
-  "archives",
-  "stopwords",
-  # ORT-dependent ML features. Each implies its corresponding *-types /
-  # *-presets marker feature, so the standalone type-only entries that used
-  # to sit here (auto-rotate-types, layout-types, paddle-ocr-types,
-  # embedding-presets, reranker-presets, transcription-types) are now
-  # redundant and have been folded into the full features below.
-  "auto-rotate",
-  "layout-detection",
-  "paddle-ocr",
-  "embeddings",
-  "reranker",
-  "sparse-embeddings",
-  "late-interaction",
-  "transcription",
-  "ner-onnx",
-  "ner",
-  "ner-llm-types",
-  "presets",
-  "redaction",
-  "diff",
-  "qr-codes",
-  "summarization",
-  "tokio-runtime",
-  "api",
-  "mcp",
-  "liter-llm",
-  # classification = [liter-llm, tokio-runtime], both already enabled above, so
-  # this adds no new deps (Windows-safe). Required because the generated bindings
-  # reference enrich::ChunkClassificationEnrichmentConfig (and the sibling
-  # ClassificationEnrichmentConfig) unconditionally; without it those types are
-  # #[cfg]-compiled-out on Windows and the bindings fail with E0425.
-  "classification",
-  "structured",
-  "quality",
-  # Pure-Rust features missing from the original list whose public types the
-  # generated bindings reference unconditionally.  Each is verified Windows-safe:
-  # heuristics = [] (no deps), xml = [quick-xml, roxmltree] (pure Rust),
-  # svg = [resvg, image-encode] (pure Rust, WASM-safe per Cargo.toml comment),
-  # chunking-tokenizers = [chunking, tokenizers] (tokenizers is pure Rust on
-  # Windows via the target-specific dep block at line ~788), url-ingestion =
-  # [crawlberg + native-runtime] (pure-Rust crawlberg; native-runtime = [] is a
-  # zero-dep flag). url-ingestion (not just url-config-types) is required so the
-  # non-feature-aware Dart FRB dispatch resolves `crate::map_url` on Windows.
-  "heuristics",
-  "xml",
-  "svg",
-  "chunking-tokenizers",
-  "url-ingestion",
-  # markdown-footnotes = [] (pure Rust, no deps). The generated bindings
-  # re-export FootnoteConfig/FootnoteAnchor/FootnoteDefinition/Citation
-  # unconditionally, so the defining feature must be enabled on Windows too.
-  # late-interaction-presets is implied by "late-interaction" above (the ORT
-  # ML feature added for full Windows ONNX Runtime parity).
-  "markdown-footnotes",
-  # wordperfect = [dep:xberg-libwpd]: xberg-libwpd vendors its boost header
-  # subset (no vcpkg boost needed, unlike `heic`'s libheif), but its build.rs
-  # still links vcpkg-provided `zlib` on Windows. That zlib install and the
-  # `-v4` dep cache are already wired into
-  # scripts/ci/install-system-deps/install-windows.ps1 — do not remove them.
-  "wordperfect",
+    "pdf",
+    "ocr",
+    "chunking",
+    "keywords",
+    "language-detection",
+    "html",
+    "tree-sitter",
+    "office",
+    "email",
+    "archives",
+    "stopwords",
+    # ORT-dependent ML features. Each implies its corresponding *-types /
+    # *-presets marker feature, so the standalone type-only entries that used
+    # to sit here (auto-rotate-types, layout-types, paddle-ocr-types,
+    # embedding-presets, reranker-presets, transcription-types) are now
+    # redundant and have been folded into the full features below.
+    "auto-rotate",
+    "layout-detection",
+    "paddle-ocr",
+    "embeddings",
+    "reranker",
+    "sparse-embeddings",
+    "late-interaction",
+    "transcription",
+    "ner-onnx",
+    "ner",
+    "ner-llm-types",
+    "presets",
+    "redaction",
+    "diff",
+    "qr-codes",
+    "summarization",
+    "tokio-runtime",
+    "api",
+    "mcp",
+    "liter-llm",
+    # classification = [liter-llm, tokio-runtime], both already enabled above, so
+    # this adds no new deps (Windows-safe). Required because the generated bindings
+    # reference enrich::ChunkClassificationEnrichmentConfig (and the sibling
+    # ClassificationEnrichmentConfig) unconditionally; without it those types are
+    # #[cfg]-compiled-out on Windows and the bindings fail with E0425.
+    "classification",
+    "structured",
+    "quality",
+    # Pure-Rust features missing from the original list whose public types the
+    # generated bindings reference unconditionally.  Each is verified Windows-safe:
+    # heuristics = [] (no deps), xml = [quick-xml, roxmltree] (pure Rust),
+    # svg = [resvg, image-encode] (pure Rust, WASM-safe per Cargo.toml comment),
+    # chunking-tokenizers = [chunking, tokenizers] (tokenizers is pure Rust on
+    # Windows via the target-specific dep block at line ~788), url-ingestion =
+    # [crawlberg + native-runtime] (pure-Rust crawlberg; native-runtime = [] is a
+    # zero-dep flag). url-ingestion (not just url-config-types) is required so the
+    # non-feature-aware Dart FRB dispatch resolves `crate::map_url` on Windows.
+    "heuristics",
+    "xml",
+    "svg",
+    "chunking-tokenizers",
+    "url-ingestion",
+    # markdown-footnotes = [] (pure Rust, no deps). The generated bindings
+    # re-export FootnoteConfig/FootnoteAnchor/FootnoteDefinition/Citation
+    # unconditionally, so the defining feature must be enabled on Windows too.
+    # late-interaction-presets is implied by "late-interaction" above (the ORT
+    # ML feature added for full Windows ONNX Runtime parity).
+    "markdown-footnotes",
+    # wordperfect = [dep:xberg-libwpd]: xberg-libwpd vendors its boost header
+    # subset (no vcpkg boost needed, unlike `heic`'s libheif), but its build.rs
+    # still links vcpkg-provided `zlib` on Windows. That zlib install and the
+    # `-v4` dep cache are already wired into
+    # scripts/ci/install-system-deps/install-windows.ps1 — do not remove them.
+    "wordperfect",
 ]
 # macos-intel-target: native Intel macOS (x86_64-apple-darwin). FULL feature
 # parity with every other platform — including all ONNX Runtime ML (paddle-ocr,
@@ -687,66 +751,81 @@ wasm-threads = ["dep:wasm-bindgen-rayon"]
 
 # Document format extractors only — no infrastructure or text analysis.
 formats = [
-  "pdf",
-  "excel",
-  "office",
-  "notebook",
-  "hwp",
-  "hwpx",
-  "iwork",
-  "email",
-  "html",
-  "xml",
-  "archives",
-  "mdx",
-  "svg",
-  "heic",
-  "wordperfect",
+    "pdf",
+    "excel",
+    "office",
+    "notebook",
+    "hwp",
+    "hwpx",
+    "iwork",
+    "email",
+    "html",
+    "xml",
+    "archives",
+    "mdx",
+    "svg",
+    "heic",
+    "wordperfect",
 ]
 # Text processing and analysis capabilities.
-analysis = ["language-detection", "chunking", "quality", "keywords", "markdown-footnotes", "diff"]
+analysis = [
+    "language-detection",
+    "chunking",
+    "quality",
+    "keywords",
+    "markdown-footnotes",
+    "diff",
+]
 # Network services and observability infrastructure.
 services = ["api", "mcp", "otel"]
 # Everything — all formats, analysis, services, OCR, ML, and code intelligence.
 full = [
-  "formats",
-  "analysis",
-  "services",
-  "url-ingestion",
-  "ocr",
-  "paddle-ocr",
-  "layout-detection",
-  "embeddings",
-  "static-embeddings",
-  "reranker",
-  "sparse-embeddings",
-  "late-interaction",
-  "transcription",
-  "chunking-tokenizers",
-  "enrichment",
-  "heuristics",
-  "tree-sitter",
-  "liter-llm",
-  "tokio-runtime",
-  "diff",
-  "ner-llm",
-  "ner-onnx",
-  "presets",
-  "structured",
-  "redaction",
-  "redaction-ml",
-  "redaction-rehydrate",
-  "summarization",
-  "summarization-llm",
-  "translation",
-  "classification",
-  "captioning",
-  "qr-codes",
-  "heic",
-  "wordperfect",
+    "formats",
+    "analysis",
+    "services",
+    "url-ingestion",
+    "ocr",
+    "paddle-ocr",
+    "layout-detection",
+    "embeddings",
+    "static-embeddings",
+    "reranker",
+    "sparse-embeddings",
+    "late-interaction",
+    "transcription",
+    "chunking-tokenizers",
+    "enrichment",
+    "heuristics",
+    "tree-sitter",
+    "liter-llm",
+    "tokio-runtime",
+    "diff",
+    "ner-llm",
+    "ner-onnx",
+    "presets",
+    "structured",
+    "redaction",
+    "redaction-ml",
+    "redaction-rehydrate",
+    "summarization",
+    "summarization-llm",
+    "translation",
+    "classification",
+    "captioning",
+    "qr-codes",
+    "heic",
+    "wordperfect",
 ]
 # Server deployment preset — formats + analysis + services + OCR.
-server = ["formats", "analysis", "services", "url-ingestion", "ocr", "paddle-ocr", "layout-detection"]
+server = [
+    "formats",
+    "analysis",
+    "services",
+    "url-ingestion",
+    "ocr",
+    "paddle-ocr",
+    "layout-detection",
+]
 # CLI-only features (thin gate for xberg-cli).
 cli = ["services", "chunking", "url-ingestion"]
 
@@ -792,14 +871,14 @@ html-to-markdown-rs = { workspace = true, features = ["inline-images", "metadata
 icu_provider = { version = "2", features = ["sync"], optional = true }
 icu_segmenter = { version = "2", optional = true }
 image = { workspace = true, default-features = false, features = [
-  "png",
-  "jpeg",
-  "webp",
-  "bmp",
-  "tiff",
-  "gif",
-  "pnm",
-  "rayon",
+    "png",
+    "jpeg",
+    "webp",
+    "bmp",
+    "tiff",
+    "gif",
+    "pnm",
+    "rayon",
 ], optional = true }
 include_dir = { version = "0.7", optional = true }
 indexmap = "2.14.0"
@@ -853,12 +932,12 @@ rayon = { workspace = true }
 regex = "1.13.1"
 resvg = { workspace = true, optional = true }
 rmcp = { version = "3.0.1", features = [
-  "server",
-  "macros",
-  "base64",
-  "transport-io",
-  "transport-streamable-http-server",
-  "server-side-http",
+    "server",
+    "macros",
+    "base64",
+    "transport-io",
+    "transport-streamable-http-server",
+    "server-side-http",
 ], optional = true }
 rmp-serde = "1.3"
 
@@ -878,13 +957,13 @@ strum = { version = "0.28", features = ["derive"], optional = true }
 # Symphonia: pure-Rust audio decoder for mp3, wav, m4a/mp4, webm etc.
 # MPL-2.0 (file-scoped copyleft, safe for our use). Exception granted in deny.toml.
 symphonia = { version = "0.6", optional = true, default-features = false, features = [
-  "aac",
-  "adpcm",
-  "isomp4",
-  "mkv",
-  "mp3",
-  "pcm",
-  "wav",
+    "aac",
+    "adpcm",
+    "isomp4",
+    "mkv",
+    "mp3",
+    "pcm",
+    "wav",
 ] }
 tar = { version = "^0.4", optional = true }
 tempfile = { workspace = true, optional = true }
@@ -895,15 +974,15 @@ tokio = { workspace = true, optional = true }
 toml = { workspace = true }
 tower = { version = "0.5", features = ["timeout", "limit", "util"], optional = true }
 tower-http = { version = "0.7", features = [
-  "cors",
-  "trace",
-  "limit",
-  "catch-panic",
-  "request-id",
-  "sensitive-headers",
-  "compression-gzip",
-  "compression-deflate",
-  "compression-zstd",
+    "cors",
+    "trace",
+    "limit",
+    "catch-panic",
+    "request-id",
+    "sensitive-headers",
+    "compression-gzip",
+    "compression-deflate",
+    "compression-zstd",
 ], optional = true }
 tracing = { workspace = true }
 tracing-opentelemetry = { version = "0.33", optional = true }
@@ -952,9 +1031,9 @@ xberg-paddle-ocr = { path = "../xberg-paddle-ocr", version = "1.0.6", optional =
 # target-independent `not(wasm32)` block below (1.0 uses its own reqwest/rustls stack).
 [target.'cfg(all(not(target_os = "windows"), not(target_arch = "wasm32"), not(target_os = "android")))'.dependencies]
 ureq = { version = "3.3", default-features = false, features = [
-  "rustls",
-  "platform-verifier",
-  "json",
+    "rustls",
+    "platform-verifier",
+    "json",
 ], optional = true }
 
 # Windows: xberg's direct `ureq` client uses ring-backed rustls + `platform-verifier`, which
@@ -967,9 +1046,9 @@ liter-llm = { workspace = true, optional = true, features = ["native-http"] }
 tokenizers = { version = "0.23", default-features = false, features = ["fancy-regex"], optional = true }
 # ureq on Windows: ring-backed rustls + platform-verifier (WinCrypt OS trust store, no openssl).
 ureq = { version = "3.3", default-features = false, features = [
-  "rustls",
-  "platform-verifier",
-  "json",
+    "rustls",
+    "platform-verifier",
+    "json",
 ], optional = true }
 # Candle-based VLM OCR backends - pure-Rust transformer inference, not on WASM yet.
 xberg-candle-ocr = { path = "../xberg-candle-ocr", version = "1.0.6", optional = true }
@@ -1052,8 +1131,8 @@ wasm-bindgen-rayon = { version = "1.3", optional = true }
 # Version-less for the same links-collision reason as the desktop path-dep above
 # (publish-crates injects the version at publish time).
 xberg-tesseract = { path = "../xberg-tesseract", default-features = false, features = [
-  "build-tesseract-wasm",
-  "bundle-tessdata-eng",
+    "build-tesseract-wasm",
+    "bundle-tessdata-eng",
 ], optional = true }
 
 # Android: xberg's direct `ureq` client avoids native-tls (openssl-sys has no working NDK

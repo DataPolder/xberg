@@ -91,7 +91,8 @@ def _tesseract_to_paddle_lang(ocr_language: str | None) -> str:
     single PaddleOCR model MinerU selects via ``p_lang_list``. MinerU takes one
     model per document; the Korean and Japanese PP-OCR models both cover their
     script plus Latin, so a mixed ``eng+kor`` request maps to ``korean``. An unset
-    or English-only request keeps the default (``en`` -> CN+EN model), unchanged."""
+    or English-only request keeps the default (``en`` -> CN+EN model), unchanged.
+    """
     if not ocr_language:
         return DEFAULT_OCR_LANGUAGE
     codes = [code.strip().lower() for code in ocr_language.split("+") if code.strip()]

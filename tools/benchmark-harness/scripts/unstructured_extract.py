@@ -26,7 +26,8 @@ def _tesseract_codes_to_languages(ocr_language: str | None) -> list[str]:
     """Map a canonical Tesseract language string (``eng+kor``, ``jpn_vert``) to the
     list Unstructured's ``partition(languages=...)`` expects. Unstructured forwards
     these straight to Tesseract's ``-l`` flag, so the codes pass through unchanged;
-    an unset value falls back to English, matching the previous hardcoded default."""
+    an unset value falls back to English, matching the previous hardcoded default.
+    """
     if not ocr_language:
         return ["eng"]
     codes = [code.strip() for code in ocr_language.split("+") if code.strip()]
