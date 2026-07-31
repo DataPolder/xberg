@@ -45,12 +45,16 @@ See the [OcrConfig reference](/reference/configuration/#ocrconfig) for all confi
 
 Seven OCR backends — pick based on platform, accuracy needs, and language coverage.
 
+:::note[Candle backend availability]
+The Candle backends (GLM-OCR, TrOCR, DeepSeek-OCR, PaddleOCR-VL) ship compiled in by default in the published packages for Python, Node, Go, Java, C#, Ruby, PHP, Elixir, Kotlin (JVM), Zig, and the CLI/Docker image on Linux, macOS, and Windows — no custom build or feature flag required. Model weights download automatically from Hugging Face on first use and are cached at `~/.cache/huggingface/`. They are **not** available on WebAssembly, Android, iOS, Dart, or Swift.
+:::
+
 |                  | **Tesseract**        | **PaddleOCR**                       | **Candle GLM-OCR** | **Candle TrOCR** | **Candle DeepSeek-OCR** | **Candle PaddleOCR-VL** | **VLM**                  |
 | ---------------- | -------------------- | ----------------------------------- | ------------------ | ---------------- | ----------------------- | ----------------------- | ------------------------ |
 | **Speed**        | Fast                 | Very fast                           | Moderate           | Moderate         | Moderate                | Moderate                | Slow (API latency)       |
 | **Accuracy**     | Good                 | Excellent                           | Excellent          | Good             | Excellent               | Excellent               | Highest                  |
 | **Languages**    | 100+                 | 80+ (11 script families)            | All                | 100+             | 20+ (CJK + Latin)       | 20+ (CJK + Latin)       | All (provider-dependent) |
-| **Installation** | System package       | Built-in (native) or Python package | Cargo feature      | Cargo feature    | Cargo feature           | Cargo feature           | API key only             |
+| **Installation** | System package       | Built-in (native) or Python package | Built-in           | Built-in         | Built-in                | Built-in                | API key only             |
 | **Model size**   | ~10 MB               | Mobile ~8 MB, Server ~120 MB        | ~3 GB              | ~250 MB          | ~4 GB                   | ~2.5 GB                 | None (cloud-hosted)      |
 | **GPU support**  | No                   | Yes                                 | Yes (Metal/CUDA)   | Yes (Metal/CUDA) | Yes (Metal/CUDA)        | Yes (Metal/CUDA)        | N/A (server-side)        |
 | **Platform**     | All (including Wasm) | All except Wasm                     | Native only        | Native only      | Native only             | Native only             | All                      |
@@ -122,7 +126,7 @@ Built in via the `paddle-ocr` feature flag. Models download automatically on fir
 
 ```toml title="Cargo.toml (Rust example)"
 [dependencies]
-xberg = { version = "5", features = ["paddle-ocr"] }
+xberg = { version = "1", features = ["paddle-ocr"] }
 ```
 
 </TabItem>
@@ -365,11 +369,13 @@ let result = &output.results[0];
 <Tabs syncKey="lang">
 <TabItem label="Native bindings (Rust, Go, TypeScript, Node.js, Java, C#, Ruby, PHP, Elixir)">
 
-Built in via the `candle-glm-ocr` feature flag. The GLM-OCR model downloads automatically on first use (~3 GB) and is cached at `~/.cache/huggingface/`.
+Ships in the published package by default on native desktop/server platforms — no feature flag or custom build needed. Set `ocr.backend = "candle-glm-ocr"` and the GLM-OCR model downloads automatically on first use (~3 GB), cached at `~/.cache/huggingface/`. Not available on WebAssembly, Android, iOS, Dart, or Swift.
+
+For a custom Rust crate build, the model is gated behind the `candle-glm-ocr` feature (or the `candle-vlm-ocr` umbrella feature):
 
 ```toml title="Cargo.toml (Rust example)"
 [dependencies]
-xberg = { version = "5", features = ["candle-glm-ocr"] }
+xberg = { version = "1", features = ["candle-glm-ocr"] }
 ```
 
 **GPU support:**
@@ -511,11 +517,13 @@ DeepSeek-OCR — combination of SAM + CLIP encoder fused with Qwen2 decoder and 
 <Tabs syncKey="lang">
 <TabItem label="Native bindings (Rust, Go, TypeScript, Node.js, Java, C#, Ruby, PHP, Elixir)">
 
-Built in via the `candle-deepseek-ocr` feature flag or the `candle-vlm-ocr` umbrella feature. The model downloads automatically on first use (~4 GB) and is cached at `~/.cache/huggingface/`.
+Ships in the published package by default on native desktop/server platforms — no feature flag or custom build needed. Set `ocr.backend = "candle-deepseek-ocr"` and the model downloads automatically on first use (~4 GB), cached at `~/.cache/huggingface/`. Not available on WebAssembly, Android, iOS, Dart, or Swift.
+
+For a custom Rust crate build, the model is gated behind the `candle-deepseek-ocr` feature (or the `candle-vlm-ocr` umbrella feature):
 
 ```toml title="Cargo.toml (Rust example)"
 [dependencies]
-xberg = { version = "5", features = ["candle-deepseek-ocr"] }
+xberg = { version = "1", features = ["candle-deepseek-ocr"] }
 ```
 
 **GPU support:**
@@ -612,11 +620,13 @@ PaddleOCR-VL 1.5 — SigLIP vision encoder + Ernie-4.5 text decoder for lightwei
 <Tabs syncKey="lang">
 <TabItem label="Native bindings (Rust, Go, TypeScript, Node.js, Java, C#, Ruby, PHP, Elixir)">
 
-Built in via the `candle-paddleocr-vl` feature flag or the `candle-vlm-ocr` umbrella feature. The model downloads automatically on first use (~2.5 GB) and is cached at `~/.cache/huggingface/`.
+Ships in the published package by default on native desktop/server platforms — no feature flag or custom build needed. Set `ocr.backend = "candle-paddleocr-vl"` and the model downloads automatically on first use (~2.5 GB), cached at `~/.cache/huggingface/`. Not available on WebAssembly, Android, iOS, Dart, or Swift.
+
+For a custom Rust crate build, the model is gated behind the `candle-paddleocr-vl` feature (or the `candle-vlm-ocr` umbrella feature):
 
 ```toml title="Cargo.toml (Rust example)"
 [dependencies]
-xberg = { version = "5", features = ["candle-paddleocr-vl"] }
+xberg = { version = "1", features = ["candle-paddleocr-vl"] }
 ```
 
 **GPU support:**

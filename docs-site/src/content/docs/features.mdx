@@ -230,9 +230,9 @@ For backend configuration, language selection, and PSM/OEM modes, see the [OCR G
 
 ### Candle GLM-OCR
 
-Pure-Rust VLM OCR via the `candle-glm-ocr` feature. Wraps the zai-org/GLM-OCR 0.9B-param vision-language model running natively through the candle transformer framework. No ONNX Runtime dependency.
+Pure-Rust VLM OCR wrapping the zai-org/GLM-OCR 0.9B-param vision-language model running natively through the candle transformer framework. No ONNX Runtime dependency. Ships compiled in by default in the published packages (Python, Node, Go, Java, C#, Ruby, PHP, Elixir, Kotlin/JVM, Zig, CLI/Docker) on Linux, macOS, and Windows — no feature flag needed.
 
-**Feature flag:** `candle-glm-ocr`
+**Rust crate feature flag (for custom builds):** `candle-glm-ocr`
 
 **Implies:** `candle-ocr`, `xberg-candle-ocr/glm-ocr`, `layout-detection`
 
@@ -240,8 +240,7 @@ Pure-Rust VLM OCR via the `candle-glm-ocr` feature. Wraps the zai-org/GLM-OCR 0.
 
 - **CPU & Metal (macOS)** — Full support
 - **CUDA (Linux/Windows with NVIDIA GPU)** — Full support
-- **WASM** — Excluded (candle not available on WASM)
-- **Android x86_64 emulator** — Excluded (no prebuilt candle targets)
+- **WASM, Android, iOS, Dart, Swift** — Excluded (candle not available on these targets)
 
 **Model & performance:**
 
@@ -254,9 +253,9 @@ Configure via `--ocr-backend candle-glm-ocr` or `ocr.backend = "candle-glm-ocr"`
 
 ### Candle DeepSeek-OCR
 
-Pure-Rust VLM OCR via the `candle-deepseek-ocr` feature. DeepSeek-OCR vision-language model combining SAM, CLIP, Qwen2, and DeepSeek-V2 MoE architecture. Advanced document understanding with multilingual support. No ONNX Runtime dependency.
+Pure-Rust VLM OCR combining SAM, CLIP, Qwen2, and DeepSeek-V2 MoE architecture. Advanced document understanding with multilingual support. No ONNX Runtime dependency. Ships compiled in by default in the published packages (Python, Node, Go, Java, C#, Ruby, PHP, Elixir, Kotlin/JVM, Zig, CLI/Docker) on Linux, macOS, and Windows — no feature flag needed.
 
-**Feature flag:** `candle-deepseek-ocr`
+**Rust crate feature flag (for custom builds):** `candle-deepseek-ocr`
 
 **Implies:** `candle-ocr`, `xberg-candle-ocr/deepseek-ocr`
 
@@ -264,8 +263,7 @@ Pure-Rust VLM OCR via the `candle-deepseek-ocr` feature. DeepSeek-OCR vision-lan
 
 - **CPU & Metal (macOS)** — Full support
 - **CUDA (Linux/Windows with NVIDIA GPU)** — Full support
-- **WASM** — Excluded (candle not available on WASM)
-- **Android x86_64 emulator** — Excluded (no prebuilt candle targets)
+- **WASM, Android, iOS, Dart, Swift** — Excluded (candle not available on these targets)
 
 **Model & performance:**
 
@@ -279,9 +277,9 @@ Configure via `--ocr-backend candle-deepseek-ocr` or `ocr.backend = "candle-deep
 
 ### Candle PaddleOCR-VL 1.5
 
-Pure-Rust VLM OCR via the `candle-paddleocr-vl-15` feature. PaddleOCR-VL 1.5 vision-language model with SigLIP+Ernie integration. Fast multilingual document OCR with strong CJK support. No ONNX Runtime dependency.
+Pure-Rust VLM OCR. PaddleOCR-VL 1.5 vision-language model with SigLIP+Ernie integration. Fast multilingual document OCR with strong CJK support. No ONNX Runtime dependency. Ships compiled in by default in the published packages (Python, Node, Go, Java, C#, Ruby, PHP, Elixir, Kotlin/JVM, Zig, CLI/Docker) on Linux, macOS, and Windows — no feature flag needed.
 
-**Feature flag:** `candle-paddleocr-vl-15`
+**Rust crate feature flag (for custom builds):** `candle-paddleocr-vl-15`
 
 **Implies:** `candle-ocr`, `xberg-candle-ocr/paddleocr-vl-15`
 
@@ -289,8 +287,7 @@ Pure-Rust VLM OCR via the `candle-paddleocr-vl-15` feature. PaddleOCR-VL 1.5 vis
 
 - **CPU & Metal (macOS)** — Full support
 - **CUDA (Linux/Windows with NVIDIA GPU)** — Full support
-- **WASM** — Excluded (candle not available on WASM)
-- **Android x86_64 emulator** — Excluded (no prebuilt candle targets)
+- **WASM, Android, iOS, Dart, Swift** — Excluded (candle not available on these targets)
 
 **Model & performance:**
 

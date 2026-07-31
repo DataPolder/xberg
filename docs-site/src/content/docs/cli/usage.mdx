@@ -416,7 +416,7 @@ xberg cache stats
 | `--ocr-auto-rotate <true\|false>` | Automatically rotate images before OCR based on detected orientation.                                                        |
 | `--disable-ocr <true\|false>` | Disable OCR entirely, even for images. |
 
-Candle-based backends (`candle-trocr`, `candle-paddleocr-vl`, `candle-paddleocr-vl-15`, `candle-glm-ocr`, `candle-deepseek-ocr`) are pure-Rust VLM and vision-transformer OCR engines. No ONNX Runtime required; GPU-accelerated on Metal (macOS) and CUDA (Linux).
+Candle-based backends (`candle-trocr`, `candle-paddleocr-vl`, `candle-paddleocr-vl-15`, `candle-glm-ocr`, `candle-deepseek-ocr`) are pure-Rust VLM and vision-transformer OCR engines. No ONNX Runtime required; GPU-accelerated on Metal (macOS) and CUDA (Linux). They ship compiled into the CLI/Docker image by default — no extra install or feature flag needed. Model weights download automatically from Hugging Face on first use.
 
 ```bash title="Terminal"
 xberg extract scanned.pdf --ocr true --ocr-backend paddle-ocr --ocr-language ch
