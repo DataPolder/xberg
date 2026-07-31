@@ -1326,7 +1326,9 @@ mod tests {
     fn fixed_batch_ranges_allow_smaller_final_batch() {
         // A non-multiple eligible count yields a smaller final batch rather than an error.
         assert_eq!(fixed_batch_ranges(5, Some(4)).unwrap(), [0..4, 4..5]);
-        assert_eq!(fixed_batch_ranges(1, Some(4)).unwrap(), [0..1]);
+        let single = fixed_batch_ranges(1, Some(4)).unwrap();
+        assert_eq!(single.len(), 1);
+        assert_eq!(single[0], 0..1);
         // Zero documents -> no batches; a zero batch size is still rejected.
         assert!(fixed_batch_ranges(0, Some(4)).unwrap().is_empty());
         assert!(fixed_batch_ranges(0, Some(0)).is_err());

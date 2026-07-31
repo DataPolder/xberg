@@ -7,8 +7,8 @@
 //! BLAKE3 digest and byte length, which the synthetic bytes provide consistently.
 
 use benchmark_harness::aggregate::{
-    ComparisonData, ConsolidationMetadata, FileTypeAggregation, FrameworkModeAggregation, NewConsolidatedResults,
-    PerFixtureRow, Percentiles, PerformancePercentiles, SCHEMA_VERSION,
+    ComparisonData, ConsolidationMetadata, FailureSummary, FileTypeAggregation, FrameworkModeAggregation,
+    NewConsolidatedResults, PerFixtureRow, Percentiles, PerformancePercentiles, SCHEMA_VERSION,
 };
 use benchmark_harness::bench_matrix::{Cohort, CohortContract};
 use benchmark_harness::provenance::{
@@ -720,6 +720,7 @@ fn build_aggregate(contract: &CohortContract, cohort: Cohort) -> NewConsolidated
             disk_size_conflicts: Vec::new(),
         },
         run_provenance: Vec::new(),
+        failure_summary: FailureSummary::default(),
     }
 }
 

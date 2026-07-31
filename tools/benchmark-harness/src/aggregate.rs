@@ -1,9 +1,10 @@
-//! Aggregation module for benchmark results (v2.8.0 output schema).
+//! Aggregation module for benchmark results (v2.9.0 output schema).
 //!
 //! Groups [`BenchmarkResult`] records by framework-and-mode, output format, file type, and
 //! OCR usage (yes/no), then computes percentile-based statistics for each
-//! group. The output schema (`schema_version: "2.8.0"`) surfaces TF1 and SF1 separately
-//! with per-fixture rows preserved and split rankings by output format.
+//! group. The output schema (`schema_version: "2.9.0"`) surfaces TF1 and SF1 separately
+//! with per-fixture rows preserved and split rankings by output format, plus a cohort-wide
+//! [`FailureSummary`] rolling up framework-fault vs infrastructure failures (v2.9.0+).
 //!
 //! # Percentile methodology
 //!
@@ -39,7 +40,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Schema version for the aggregated output format.
-pub const SCHEMA_VERSION: &str = "2.8.0";
+pub const SCHEMA_VERSION: &str = "2.9.0";
 
 /// Consolidated results using aggregation format v2.8.0.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,6 +66,11 @@ pub struct NewConsolidatedResults {
     /// so aggregates produced before this field existed still deserialize.
     #[serde(default)]
     pub run_provenance: Vec<crate::consolidate::RunProvenanceRecord>,
+    /// Cohort-wide failure roll-up (framework-fault vs infrastructure), broken out per
+    /// framework-mode and per file type. `#[serde(default)]` so pre-2.9.0 aggregates still
+    /// deserialize.
+    #[serde(default)]
+    pub failure_summary: FailureSummary,
 }
 
 /// Per-fixture benchmark result row
@@ -304,6 +310,72 @@ pub struct ConsolidationMetadata {
     pub disk_size_conflicts: Vec<String>,
 }
 
+/// Failure counts split by cause. Framework-fault kinds ([`ErrorKind::FrameworkError`],
+/// [`ErrorKind::EmptyContent`], [`ErrorKind::Timeout`]) are the framework's own fault — it was
+/// handed a supported document and failed — and penalize its quality/success rate (see
+/// [`is_framework_fault_failure`]). Infrastructure kinds ([`ErrorKind::HarnessError`],
+/// [`ErrorKind::ConfigSetupError`]) are our own harness's fault and never penalize a framework.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FailureCounts {
+    pub framework_errors: usize,
+    pub empty_content: usize,
+    pub timeouts: usize,
+    /// Sum of the framework-fault kinds above (these penalize the score).
+    pub framework_fault_total: usize,
+    pub harness_errors: usize,
+    pub config_setup_errors: usize,
+    /// Sum of the infrastructure kinds above (these never penalize the score).
+    pub infra_total: usize,
+}
+
+impl FailureCounts {
+    /// Fold one result's error into the counts (a successful result contributes nothing) and keep
+    /// the framework-fault / infra totals in sync.
+    fn record(&mut self, result: &BenchmarkResult) {
+        match result.error_kind {
+            ErrorKind::FrameworkError => self.framework_errors += 1,
+            ErrorKind::EmptyContent => self.empty_content += 1,
+            ErrorKind::Timeout => self.timeouts += 1,
+            ErrorKind::HarnessError => self.harness_errors += 1,
+            ErrorKind::ConfigSetupError => self.config_setup_errors += 1,
+            ErrorKind::None => {}
+        }
+        self.framework_fault_total = self.framework_errors + self.empty_content + self.timeouts;
+        self.infra_total = self.harness_errors + self.config_setup_errors;
+    }
+}
+
+/// Cohort-wide failure roll-up: the same per-framework-mode error counts that live on each
+/// [`PerformancePercentiles`], summed to the cohort level and broken out per framework-mode and per
+/// file type, with the framework-fault vs infrastructure split preserved throughout.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FailureSummary {
+    /// Every failure in the cohort, across all frameworks and documents.
+    pub total: FailureCounts,
+    /// Failures keyed by aggregate framework-mode key (as in `by_framework_mode`).
+    pub by_framework_mode: std::collections::BTreeMap<String, FailureCounts>,
+    /// Failures keyed by document file extension, summed across frameworks.
+    pub by_file_type: std::collections::BTreeMap<String, FailureCounts>,
+}
+
+/// Roll every result's error up to the cohort total plus per-framework-mode and per-file-type
+/// breakdowns, mirroring the keys used by [`aggregate_new_format`].
+fn build_failure_summary(results: &[BenchmarkResult]) -> FailureSummary {
+    let mut summary = FailureSummary::default();
+    for result in results {
+        summary.total.record(result);
+        let (framework, mode) = extract_framework_and_mode(&result.framework);
+        let key = make_aggregate_key(framework, result.output_format, mode);
+        summary.by_framework_mode.entry(key).or_default().record(result);
+        summary
+            .by_file_type
+            .entry(result.file_extension.clone())
+            .or_default()
+            .record(result);
+    }
+    summary
+}
+
 /// Aggregated results for a specific framework, output format, and mode combination
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FrameworkModeAggregation {
@@ -520,6 +592,7 @@ pub fn aggregate_new_format(results: &[BenchmarkResult]) -> NewConsolidatedResul
                 disk_size_conflicts: Vec::new(),
             },
             run_provenance: Vec::new(),
+            failure_summary: FailureSummary::default(),
         };
     }
 
@@ -626,6 +699,7 @@ pub fn aggregate_new_format(results: &[BenchmarkResult]) -> NewConsolidatedResul
     };
 
     let comparison = build_comparison(&aggregated_by_framework_mode);
+    let failure_summary = build_failure_summary(results);
 
     NewConsolidatedResults {
         schema_version: SCHEMA_VERSION.to_string(),
@@ -635,6 +709,7 @@ pub fn aggregate_new_format(results: &[BenchmarkResult]) -> NewConsolidatedResul
         per_fixture_results,
         metadata,
         run_provenance: Vec::new(),
+        failure_summary,
     }
 }
 
@@ -946,12 +1021,17 @@ fn calculate_percentiles(results: &[&BenchmarkResult]) -> PerformancePercentiles
             .filter(|v| !v.is_nan() && v.is_finite())
             .collect();
 
-        // Penalize framework-fault failures as quality 0. Only do so when quality was actually
-        // measured for this group (some success carried a score) or when there were no successes at
-        // all (a fully-failed group scores 0 rather than "not measured") — this avoids fabricating
-        // zeros when quality measurement was disabled entirely. f1_layout is intentionally left to
-        // measured samples only, since layout is not a scored dimension for most formats.
-        if framework_fault_failures > 0 && (!quality_scores.is_empty() || successful.is_empty()) {
+        // Penalize framework-fault failures as quality 0, but only when quality was actually
+        // measured for this group (at least one success carried a score). A fully-failed group is
+        // deliberately left as "not measured" (`quality` stays `None`) here: the ranking consumers
+        // already treat an attempted-but-`None`-quality bucket as a 0.0 contribution weighted by
+        // `total_sample_count` (see `build_shared_corpus_quality_ranking` and the PDF comparison),
+        // so it is penalized without us fabricating a `Some` percentile — which would both mask
+        // never-scored (no-ground-truth) buckets as 0.0 and silently drop the bucket from the SF1
+        // ranking (whose `None`-means-failure gate keys off `quality.is_none()`). f1_layout is
+        // intentionally left to measured samples only, since layout is not a scored dimension for
+        // most formats.
+        if framework_fault_failures > 0 && !quality_scores.is_empty() {
             for _ in 0..framework_fault_failures {
                 f1_texts.push(0.0);
                 f1_numerics.push(0.0);
@@ -2612,6 +2692,44 @@ mod tests {
             "infra failure must not inject a 0.0 quality sample; p50 should stay 0.9, got {}",
             quality.quality_score_p50
         );
+    }
+
+    /// The cohort failure roll-up must sum errors to the cohort total and break them out per
+    /// framework-mode and per file type, keeping the framework-fault vs infrastructure split.
+    #[test]
+    fn failure_summary_rolls_up_by_cause_framework_mode_and_file_type() {
+        let docling_docx_fail = result_with_quality("docling", "docx", 0.0, false); // FrameworkError
+        let docling_docx_ok = result_with_quality("docling", "docx", 0.9, true);
+        let mut xberg_pdf_timeout = result_with_quality("xberg-markdown-baseline", "pdf", 0.0, false);
+        xberg_pdf_timeout.error_kind = ErrorKind::Timeout;
+        let mut xberg_pdf_infra = result_with_quality("xberg-markdown-baseline", "pdf", 0.0, false);
+        xberg_pdf_infra.error_kind = ErrorKind::HarnessError;
+
+        let results = vec![docling_docx_fail, docling_docx_ok, xberg_pdf_timeout, xberg_pdf_infra];
+        let summary = build_failure_summary(&results);
+
+        // Cohort total: 1 framework error + 1 timeout (fault), 1 harness error (infra).
+        assert_eq!(summary.total.framework_errors, 1);
+        assert_eq!(summary.total.timeouts, 1);
+        assert_eq!(summary.total.harness_errors, 1);
+        assert_eq!(summary.total.framework_fault_total, 2);
+        assert_eq!(summary.total.infra_total, 1);
+
+        // Per framework-mode: docling's single FrameworkError, xberg's timeout + harness error.
+        let docling = summary.by_framework_mode.get("docling:markdown:single").unwrap();
+        assert_eq!(docling.framework_fault_total, 1);
+        assert_eq!(docling.infra_total, 0);
+        let xberg = summary.by_framework_mode.get("xberg-markdown-baseline:single").unwrap();
+        assert_eq!(xberg.timeouts, 1);
+        assert_eq!(xberg.harness_errors, 1);
+        assert_eq!(xberg.framework_fault_total, 1);
+        assert_eq!(xberg.infra_total, 1);
+
+        // Per file type: docx one fault, pdf one fault + one infra.
+        assert_eq!(summary.by_file_type.get("docx").unwrap().framework_fault_total, 1);
+        let pdf = summary.by_file_type.get("pdf").unwrap();
+        assert_eq!(pdf.framework_fault_total, 1);
+        assert_eq!(pdf.infra_total, 1);
     }
 
     /// Regression test for Bug A: the overall quality ranking must only compare frameworks on

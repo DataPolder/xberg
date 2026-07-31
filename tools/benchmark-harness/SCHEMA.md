@@ -1,4 +1,4 @@
-# Aggregation Schema v2.8.0
+# Aggregation Schema v2.9.0
 
 This document describes the structure of `aggregated.json` produced by `benchmark-harness consolidate`.
 
@@ -6,7 +6,7 @@ This document describes the structure of `aggregated.json` produced by `benchmar
 
 ```json
 {
-  "schema_version": "2.8.0",
+  "schema_version": "2.9.0",
   "by_framework_mode": {
     "<aggregate_key>": {
       /* FrameworkModeAggregation */
@@ -28,7 +28,10 @@ This document describes the structure of `aggregated.json` produced by `benchmar
   },
   "run_provenance": [
     /* RunProvenanceRecord[] — v2.8.0+, see "Migration from v2.7.0 to v2.8.0" */
-  ]
+  ],
+  "failure_summary": {
+    /* FailureSummary — v2.9.0+, see "FailureSummary" */
+  }
 }
 ```
 
@@ -214,6 +217,40 @@ v2.3.0 convenience projection and remain unchanged. The v2.8.0 fields above make
 losslessly carry every measured field from its source `BenchmarkResult` — including ones with no
 earlier scalar equivalent, like the free-text `error_message` or the token-level
 `quality.missing_tokens`/`extra_tokens` lists.
+
+## FailureSummary (v2.9.0+)
+
+Top-level `failure_summary` rolls the per-framework-mode error counts (which also live on each
+[`PerformancePercentiles`](#performancepercentiles)) up to the cohort level, preserving the
+framework-fault vs infrastructure split throughout:
+
+```json
+{
+  "total": { /* FailureCounts */ },
+  "by_framework_mode": { "<aggregate_key>": { /* FailureCounts */ } },
+  "by_file_type": { "docx": { /* FailureCounts */ } }
+}
+```
+
+Each `FailureCounts` object:
+
+```json
+{
+  "framework_errors": 0,     // framework hit a hard error on a supported document
+  "empty_content": 0,        // framework produced empty output for a supported document
+  "timeouts": 0,             // framework exceeded the timeout on a supported document
+  "framework_fault_total": 0, // sum of the three above; these penalize quality + success rate
+  "harness_errors": 0,       // our harness failed (process crash, bad JSON): never penalizes
+  "config_setup_errors": 0,  // our config/setup failed (missing deps): never penalizes
+  "infra_total": 0           // sum of the two infrastructure kinds above
+}
+```
+
+Framework-fault failures are the framework's own fault — it was handed a document in a format it
+declares support for and failed — and are scored as quality 0 in the percentiles. Infrastructure
+failures are our harness's fault and are excluded from both the quality percentiles and the
+success-rate denominator. `total` counts every document; `by_framework_mode` and `by_file_type`
+partition the same failures by aggregate key and by file extension respectively.
 
 ## Migration from v2.7.0 to v2.8.0
 
