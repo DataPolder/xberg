@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Nested objects and arrays in JSON documents render as structured Markdown headings and lists
+  instead of opaque compact-JSON strings, preserving readable nested keys and values.
+
 ## [1.0.6] - 2026-07-31
 
 ### Fixed
