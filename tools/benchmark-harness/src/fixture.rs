@@ -26,7 +26,7 @@
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 fn is_split_sidecar(path: &Path) -> bool {
     path.file_name()
@@ -109,12 +109,7 @@ impl Fixture {
     ///   - Valid source type
     ///   - File existence check (relative to fixture directory)
     fn validate(&self, fixture_path: &Path) -> Result<()> {
-        if self.document.is_absolute() {
-            return Err(Error::InvalidFixture {
-                path: fixture_path.to_path_buf(),
-                reason: "document path must be relative".to_string(),
-            });
-        }
+        Self::validate_fixture_relative_path(fixture_path, &self.document, "document")?;
 
         if self.file_type.is_empty() {
             return Err(Error::InvalidFixture {
@@ -144,22 +139,15 @@ impl Fixture {
         }
 
         if let Some(gt) = &self.ground_truth {
-            if let Some(ref tf) = gt.text_file
-                && tf.is_absolute()
-            {
-                return Err(Error::InvalidFixture {
-                    path: fixture_path.to_path_buf(),
-                    reason: "ground_truth.text_file must be relative".to_string(),
-                });
-            }
-
-            if let Some(ref markdown_file) = gt.markdown_file
-                && markdown_file.is_absolute()
-            {
-                return Err(Error::InvalidFixture {
-                    path: fixture_path.to_path_buf(),
-                    reason: "ground_truth.markdown_file must be relative".to_string(),
-                });
+            for (field, relative_path) in [
+                ("ground_truth.text_file", gt.text_file.as_deref()),
+                ("ground_truth.markdown_file", gt.markdown_file.as_deref()),
+                ("ground_truth.fields_json", gt.fields_json.as_deref()),
+                ("ground_truth.formulas_json", gt.formulas_json.as_deref()),
+            ] {
+                if let Some(relative_path) = relative_path {
+                    Self::validate_fixture_relative_path(fixture_path, relative_path, field)?;
+                }
             }
 
             if !matches!(
@@ -201,25 +189,75 @@ impl Fixture {
                 });
             }
 
-            if let Some(fixture_dir) = fixture_path.parent() {
-                Self::validate_ground_truth_file(fixture_path, fixture_dir, gt.text_file.as_deref(), "text")?;
-                Self::validate_ground_truth_file(fixture_path, fixture_dir, gt.markdown_file.as_deref(), "markdown")?;
-            }
+            Self::validate_ground_truth_file(fixture_path, gt.text_file.as_deref(), "text")?;
+            Self::validate_ground_truth_file(fixture_path, gt.markdown_file.as_deref(), "markdown")?;
         }
 
         Ok(())
     }
 
-    fn validate_ground_truth_file(
-        fixture_path: &Path,
-        fixture_dir: &Path,
-        relative_path: Option<&Path>,
-        kind: &str,
-    ) -> Result<()> {
+    /// Resolve a fixture-owned relative path without allowing it to escape its trust boundary.
+    ///
+    /// Repository fixtures intentionally use `../../../test_documents/...`, so their boundary is
+    /// the repository root. Standalone fixture trees use the fixture file's directory. Existing
+    /// paths are canonicalized as well, preventing a symlink inside either boundary from escaping.
+    /// ~keep
+    fn validate_fixture_relative_path(fixture_path: &Path, relative_path: &Path, field: &str) -> Result<PathBuf> {
+        if relative_path.is_absolute() {
+            return Err(Error::InvalidFixture {
+                path: fixture_path.to_path_buf(),
+                reason: format!("{field} must be relative"),
+            });
+        }
+
+        let fixture_dir = fixture_path.parent().unwrap_or_else(|| Path::new("."));
+        let canonical_fixture_dir = fixture_dir.canonicalize().map_err(|error| Error::InvalidFixture {
+            path: fixture_path.to_path_buf(),
+            reason: format!("unable to resolve fixture directory {}: {error}", fixture_dir.display()),
+        })?;
+        let repository_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .map_err(Error::Io)?;
+        let allowed_root = if canonical_fixture_dir.starts_with(&repository_root) {
+            &repository_root
+        } else {
+            &canonical_fixture_dir
+        };
+        let resolved = normalize_path(&canonical_fixture_dir.join(relative_path));
+        if !resolved.starts_with(allowed_root) {
+            return Err(Error::InvalidFixture {
+                path: fixture_path.to_path_buf(),
+                reason: format!(
+                    "{field} escapes the fixture trust boundary: {}",
+                    relative_path.display()
+                ),
+            });
+        }
+
+        if resolved.exists() {
+            let canonical = resolved.canonicalize().map_err(|error| Error::InvalidFixture {
+                path: fixture_path.to_path_buf(),
+                reason: format!("unable to resolve {field} {}: {error}", relative_path.display()),
+            })?;
+            if !canonical.starts_with(allowed_root) {
+                return Err(Error::InvalidFixture {
+                    path: fixture_path.to_path_buf(),
+                    reason: format!(
+                        "{field} resolves outside the fixture trust boundary: {}",
+                        relative_path.display()
+                    ),
+                });
+            }
+        }
+        Ok(resolved)
+    }
+
+    fn validate_ground_truth_file(fixture_path: &Path, relative_path: Option<&Path>, kind: &str) -> Result<()> {
         let Some(relative_path) = relative_path else {
             return Ok(());
         };
-        let resolved_path = fixture_dir.join(relative_path);
+        let resolved_path = Self::validate_fixture_relative_path(fixture_path, relative_path, kind)?;
         std::fs::read_to_string(&resolved_path).map_err(|error| Error::InvalidFixture {
             path: fixture_path.to_path_buf(),
             reason: format!(
@@ -266,6 +304,20 @@ impl Fixture {
     pub fn ocr_language(&self) -> Option<&str> {
         self.metadata.get("ocr_language").and_then(|value| value.as_str())
     }
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::Prefix(_) | Component::RootDir | Component::Normal(_) => normalized.push(component.as_os_str()),
+        }
+    }
+    normalized
 }
 
 /// Manages loading and accessing fixtures
@@ -546,6 +598,82 @@ mod tests {
         };
 
         assert!(fixture.validate(Path::new("fixture.json")).is_err());
+    }
+
+    #[test]
+    fn fixture_paths_cannot_escape_a_standalone_fixture_tree() {
+        let root = TempDir::new().unwrap();
+        let fixture_dir = root.path().join("fixtures");
+        std::fs::create_dir(&fixture_dir).unwrap();
+        std::fs::write(root.path().join("secret.txt"), "not fixture data").unwrap();
+        let fixture_path = fixture_dir.join("escape.json");
+        let fixture = Fixture {
+            document: PathBuf::from("../secret.txt"),
+            file_type: "txt".to_string(),
+            file_size: 16,
+            expected_frameworks: vec![],
+            metadata: HashMap::new(),
+            ground_truth: None,
+        };
+
+        let error = fixture.validate(&fixture_path).unwrap_err().to_string();
+        assert!(error.contains("document escapes the fixture trust boundary"), "{error}");
+    }
+
+    #[test]
+    fn ground_truth_paths_cannot_escape_a_standalone_fixture_tree() {
+        let root = TempDir::new().unwrap();
+        let fixture_dir = root.path().join("fixtures");
+        std::fs::create_dir(&fixture_dir).unwrap();
+        std::fs::write(root.path().join("secret.txt"), "not fixture data").unwrap();
+        let fixture_path = fixture_dir.join("escape.json");
+        let fixture = Fixture {
+            document: PathBuf::from("document.txt"),
+            file_type: "txt".to_string(),
+            file_size: 16,
+            expected_frameworks: vec![],
+            metadata: HashMap::new(),
+            ground_truth: Some(GroundTruth {
+                text_file: Some(PathBuf::from("../secret.txt")),
+                markdown_file: None,
+                fields_json: None,
+                formulas_json: None,
+                source: "manual".to_string(),
+            }),
+        };
+
+        let error = fixture.validate(&fixture_path).unwrap_err().to_string();
+        assert!(
+            error.contains("ground_truth.text_file escapes the fixture trust boundary"),
+            "{error}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fixture_paths_cannot_escape_through_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let root = TempDir::new().unwrap();
+        let fixture_dir = root.path().join("fixtures");
+        std::fs::create_dir(&fixture_dir).unwrap();
+        std::fs::write(root.path().join("secret.txt"), "not fixture data").unwrap();
+        symlink(root.path().join("secret.txt"), fixture_dir.join("document.txt")).unwrap();
+        let fixture_path = fixture_dir.join("escape.json");
+        let fixture = Fixture {
+            document: PathBuf::from("document.txt"),
+            file_type: "txt".to_string(),
+            file_size: 16,
+            expected_frameworks: vec![],
+            metadata: HashMap::new(),
+            ground_truth: None,
+        };
+
+        let error = fixture.validate(&fixture_path).unwrap_err().to_string();
+        assert!(
+            error.contains("document resolves outside the fixture trust boundary"),
+            "{error}"
+        );
     }
 
     #[test]
