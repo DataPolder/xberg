@@ -9,8 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.6] - 2026-07-31
+
 ### Fixed
 
+- **libwpd (Windows/MSVC)**: link the vcpkg-provided static zlib so librevenge's `inflate*` symbols
+  resolve at the final link. Windows binding builds previously failed with `undefined symbol:
+  inflate` because the MSVC path emitted no usable zlib link directive.
 - **#1344 follow-up**: Automatic PDF layout inference retries once on CPU only for runtime inference
   failures, keeps explicitly selected non-Auto providers and recognized `XBERG_ORT_EP` values
   authoritative, ignores blank or unrecognized environment values, and propagates the effective or
