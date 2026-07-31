@@ -12,8 +12,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **#1344 follow-up**: Automatic PDF layout inference retries once on CPU only for runtime inference
-  failures, keeps explicitly selected non-Auto providers and `XBERG_ORT_EP` authoritative, and
-  propagates the effective or recovered CPU provider to downstream TATR and OCR table reconstruction.
+  failures, keeps explicitly selected non-Auto providers and recognized `XBERG_ORT_EP` values
+  authoritative, ignores blank or unrecognized environment values, and propagates the effective or
+  recovered CPU provider to downstream TATR and OCR table reconstruction.
+- Side-by-side PDF TATR tables match source words that narrowly cross a detected outer edge to the
+  outermost cell without changing the inference crop or center seam, preserving financial-table row
+  prefixes that previously fell just outside the recognized cell bounds.
+
+### Changed
+
+- Upgrade sibling dependencies: `crawlberg` 1.0.11 → 1.1.0, `html-to-markdown-rs` 3.9 → 3.10,
+  `liter-llm` 1.11 → 1.12. `liter-llm` 1.12 makes `tracing` an always-on dependency and removed its
+  `tracing` Cargo feature, so it is dropped from the dependency declaration (no behavior change —
+  liter-llm spans are always emitted now).
+- The `otel` feature now forwards to `crawlberg` and `liter-llm` (weak, `crawlberg?/otel` /
+  `liter-llm?/otel`), so enabling `xberg/otel` compiles those siblings' direct OpenTelemetry
+  integration (crawlberg's semconv/propagation, liter-llm's `gen_ai.*` metrics); their spans and
+  metrics are exported by the host's provider (e.g. xberg-enterprise). `html-to-markdown-rs` and
+  `tree-sitter-language-pack` are pure `tracing` emitters with no `otel` feature — their spans reach
+  the collector through the consumer's `tracing-opentelemetry` layer, so nothing is forwarded to them.
 
 ## [1.0.5] - 2026-07-30
 

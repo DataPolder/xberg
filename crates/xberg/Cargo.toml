@@ -515,7 +515,17 @@ api = [
 mcp = ["tower-service", "dep:rmcp", "tokio-runtime"]
 mcp-http = ["mcp", "api"]
 
-otel = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:tracing-opentelemetry"]
+# ~keep Forward otel to optional sibling libs that expose it (weak `?` so enabling otel
+# ~keep never force-activates the optional dep). html-to-markdown-rs and
+# ~keep tree-sitter-language-pack are pure emitters with no otel feature — their spans
+# ~keep reach the collector through the consumer's tracing-opentelemetry layer.
+otel = [
+    "dep:opentelemetry",
+    "dep:opentelemetry_sdk",
+    "dep:tracing-opentelemetry",
+    "crawlberg?/otel",
+    "liter-llm?/otel",
+]
 
 # no-ort-target: shared base for targets that cannot use ONNX Runtime (Android x86_64 emulator,
 # WASM). Pure-Rust only — no ORT, no native-only C++ deps. Used as a foundation for both
@@ -983,7 +993,7 @@ tracing-opentelemetry = { version = "0.33", optional = true }
 # Pure-Rust ONNX engine — the inference-seam backend on no-ORT targets (WASM,
 # Android x86_64). `tract-onnx` (not the `tract` facade) is CPU-only + wasm-safe.
 tract-onnx = { workspace = true, optional = true }
-unhwp = { version = "0.6.0", default-features = false, features = ["hwpx"], optional = true }
+unhwp = { version = "0.7.0", default-features = false, features = ["hwpx"], optional = true }
 unicode-normalization = { version = "0.1.25", optional = true }
 url = { workspace = true }
 urlencoding = "2"
@@ -1189,6 +1199,11 @@ required-features = ["structured", "pdf"]
 name = "text_quality"
 harness = false
 required-features = ["quality"]
+
+[[bench]]
+name = "pdf_layout_microbatch"
+harness = false
+required-features = ["pdf", "layout-detection", "profiling"]
 
 [lints]
 workspace = true

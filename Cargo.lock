@@ -1457,9 +1457,9 @@ dependencies = [
 
 [[package]]
 name = "clang-sys"
-version = "1.8.1"
+version = "1.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b023947811758c97c59bf9d1c188fd619ad4718dcaa767947df1cadb14f39f4"
+checksum = "157a8ba7b480713b56f4c09fd13fc3e0a22a5dfab8097ba61cbc5feef950788a"
 dependencies = [
  "glob",
  "libc",
@@ -1836,9 +1836,9 @@ dependencies = [
 
 [[package]]
 name = "crawlberg"
-version = "1.0.11"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "acaacdc892a142b88d37caca4d682c5fd67f4408bc17798ec4cc2b461b7ad741"
+checksum = "fad20a8cbaf622455f025ccabec52e08a2b1b1396e7bb18420aebeafa1bffdee"
 dependencies = [
  "ahash 0.8.12",
  "aho-corasick",
@@ -1857,6 +1857,7 @@ dependencies = [
  "getrandom 0.4.3",
  "html-to-markdown-rs",
  "ipnet",
+ "liter-llm",
  "memchr",
  "notify",
  "opentelemetry",
@@ -2034,9 +2035,9 @@ dependencies = [
 
 [[package]]
 name = "ctor"
-version = "1.0.11"
+version = "1.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9bb72bb94fdc1bd619f4c18cc91ecf6302aeb333d31b3c6ec0bb841cd920209"
+checksum = "2d83cb7e7a873830708d6b02a78cd36a592c6fa14bf267b68725103b85c0d77f"
 dependencies = [
  "link-section",
  "linktime-proc-macro",
@@ -4050,9 +4051,9 @@ checksum = "46c1ff2d1cbf39efe5af0900ced8a069b5e61557a17544eb0c4a50239937389e"
 
 [[package]]
 name = "html-to-markdown-rs"
-version = "3.9.2"
+version = "3.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac9408651be7d7f6a6f51d7bebe5f30815ef2fe620314ad5713f989cee7d70d0"
+checksum = "9de16fbeb15a99cb3c38fc55603d110a090210125437f67dd7384f5bbd26ceb8"
 dependencies = [
  "ahash 0.8.12",
  "astral-tl",
@@ -4134,9 +4135,9 @@ checksum = "15cdd26707701c53297e2fa6afb323d55fbc1d0810c3aec078ae3ef0424c3c15"
 
 [[package]]
 name = "hybrid-array"
-version = "0.4.13"
+version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "818356c5132c1fede50f837ca96afbe78ff42413047f4abb886217845e1b6c8c"
+checksum = "707114b52a152fa7bdb290cd7cd5912d9467273b6d74e21b8d81aca1f8533f6b"
 dependencies = [
  "typenum",
 ]
@@ -5073,15 +5074,15 @@ dependencies = [
 
 [[package]]
 name = "link-section"
-version = "0.19.1"
+version = "0.19.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8dc98458dfe90986c5e2f6ddcf68360c7e5c4252600153e06aa4ee8176c0f8d1"
+checksum = "5ee1a0d6e252afe82e7bc2db42fba60e02ddf3b1accaf8cb21d96e34ba61f3d4"
 
 [[package]]
 name = "linktime-proc-macro"
-version = "0.2.0"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c7b0a3383c2a1002d11349c92c85a666a5fb679e96c79d782cf0dbe557fd6ee"
+checksum = "348d0075b1fc163b26d72a7f75fc5141daf2fd1bdf128d873cbaf6785d495bdf"
 
 [[package]]
 name = "linux-raw-sys"
@@ -5097,9 +5098,9 @@ checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 
 [[package]]
 name = "liter-llm"
-version = "1.11.4"
+version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad4b9444111f9f4ad9855cb0e72f6c440b2d1bb3b3d9f857925b3bd8f4af003e"
+checksum = "d32cfd03cd3faa64d25c43fcc1c1a92d550bca276aa958da36844fc8a2a058fd"
 dependencies = [
  "ahash 0.8.12",
  "arc-swap",
@@ -5111,6 +5112,7 @@ dependencies = [
  "gcp_auth",
  "gloo-timers",
  "memchr",
+ "opentelemetry",
  "pin-project-lite",
  "regex",
  "reqwest",
@@ -5124,6 +5126,7 @@ dependencies = [
  "tokio-util",
  "toml 1.1.4+spec-1.1.0",
  "tracing",
+ "tracing-opentelemetry",
  "url",
  "web-time",
 ]
@@ -5281,19 +5284,19 @@ dependencies = [
 
 [[package]]
 name = "macro_rules_attribute"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "65049d7923698040cd0b1ddcced9b0eb14dd22c5f86ae59c3740eab64a676520"
+checksum = "b3ae8f6d608c795738406608304d30a2dfbdc8e58e44f7ba43236da5208ded3c"
 dependencies = [
  "macro_rules_attribute-proc_macro",
- "paste",
+ "pastey 0.2.3",
 ]
 
 [[package]]
 name = "macro_rules_attribute-proc_macro"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "670fdfda89751bc4a84ac13eaa63e205cf0fd22b4c9a5fbfa085b63c1f1d3a30"
+checksum = "fc04a4c58212d57930a24bf47d3fa87485264a3a054e9c10e042eb373573ad3c"
 
 [[package]]
 name = "mail-parser"
@@ -5801,9 +5804,9 @@ dependencies = [
 
 [[package]]
 name = "nom-exif"
-version = "3.6.1"
+version = "3.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55d41fe63e6184159b55a57cc73651ec8dc60e5ce2d647cd16f373a27b82ff33"
+checksum = "b7626860345adaf20c0d82b185ec8fc6285707c9fad9b4299c5ffa1581f6b009"
 dependencies = [
  "bytes",
  "chrono",
@@ -10440,10 +10443,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "unhwp"
-version = "0.6.0"
+name = "uncore"
+version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a9cdee1f69dfbc8f20bfd4028c5653c8769183f73be170341bd9a1568a74899"
+checksum = "f92176b7addb1e89c8eb8a18dd775e337a2e1058e8c3e88bfbd24cabed5e8afb"
+
+[[package]]
+name = "unhwp"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a3511b46fc5005c29922443250a97ddbfae492672379e97f295d53a39e16403c"
 dependencies = [
  "cfb 0.10.0",
  "flate2",
@@ -10455,6 +10464,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.19",
+ "uncore",
  "unicode-normalization",
  "zip 2.4.2",
 ]
@@ -11078,9 +11088,9 @@ dependencies = [
 
 [[package]]
 name = "wide"
-version = "1.5.0"
+version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dfdfe6a32973f2d1b268b8895845a8a96cac2f0191e72c27cc929036060dbf89"
+checksum = "be99e8317aa9f08e7d16e13033ca43faab59ab582b1d0feab7b385424c42f8b1"
 dependencies = [
  "bytemuck",
  "safe_arch",
@@ -11865,7 +11875,7 @@ name = "xberg-jni"
 version = "1.0.5"
 dependencies = [
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.0",
  "futures-util",
  "jni 0.22.4",
  "serde_json",
