@@ -2702,6 +2702,7 @@ mod tests {
                 esac
             done
             [ "$threads" = "7" ] || exit 64
+            sleep 0.02
             printf '{"content":"ok"}'
         "#;
         let adapter = SubprocessAdapter::new(
