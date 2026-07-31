@@ -58,10 +58,15 @@ runs:
 
         echo "=== Computing Benchmark Harness Source Hash ==="
 
-        # Compute hash for harness source files and Cargo.toml
+        # Keep every workspace/toolchain input that can change the compiled harness in the exact
+        # cache key; an exact hit skips compilation entirely, so omitting one can run stale code. ~keep
         HARNESS_HASH=$(scripts/ci/cache/compute-hash.sh \
-          "tools/benchmark-harness/src/**" \
+          "tools/benchmark-harness/src/**/*" \
+          "tools/benchmark-harness/build.rs" \
           "tools/benchmark-harness/Cargo.toml" \
+          "Cargo.toml" \
+          "rust-toolchain.toml" \
+          ".cargo/config.toml" \
           2>&1 | grep "^[a-f0-9]*$")
 
         if [[ -z "$HARNESS_HASH" ]]; then
@@ -80,9 +85,10 @@ runs:
 
         echo "=== Computing Xberg Dependency Hash ==="
 
-        # Compute hash for xberg crate (dependency)
+        # Hash every workspace crate because xberg reaches sibling path crates transitively; an
+        # exact dependency subset would be easy to under-approximate as workspace edges evolve. ~keep
         XBERG_HASH=$(scripts/ci/cache/compute-hash.sh --dirs \
-          "crates/xberg" \
+          "crates" \
           2>&1 | grep "^[a-f0-9]*$")
 
         if [[ -z "$XBERG_HASH" ]]; then

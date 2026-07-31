@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Benchmark CI invalidates its prebuilt harness cache for harness build scripts, workspace and
+  toolchain configuration, and every transitive workspace crate, preventing stale binaries.
 - Present best-effort benchmark artifacts receive the same provenance, supported-format
   cardinality, failure-accounting, and aggregate integrity validation as required artifacts;
   only absence and framework-accountable extraction failures remain optional.
