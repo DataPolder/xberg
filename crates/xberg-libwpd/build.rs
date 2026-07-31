@@ -39,6 +39,11 @@ mod build_libwpd {
     // (see vendor/PROVENANCE.md). ~keep
     const BOOST_SUBSET_SHA256: &str = "802ee17c5e380efbcbb696468ee3c7090aa409db89c2063b4c9b8d3e3aff1e08";
 
+    /// vcpkg triplet used for Windows native deps across this workspace's CI
+    /// (see `scripts/ci/install-system-deps/install-windows.ps1`, which installs
+    /// `libheif`/`zlib` the same way). Only used for zlib on Windows.
+    const VCPKG_TRIPLET: &str = "x64-windows-static-md";
+
     /// The OS we are building *for*, per Cargo. See the module docs for why this
     /// is not `cfg!(target_os)`.
     pub fn target_os() -> String {
@@ -47,6 +52,20 @@ mod build_libwpd {
 
     fn targeting_windows() -> bool {
         target_os() == "windows"
+    }
+
+    /// Root of a vcpkg installation, honoring `VCPKG_ROOT`/
+    /// `VCPKG_INSTALLATION_ROOT` (both set by CI), falling back to the default
+    /// `C:\vcpkg` install location.
+    fn vcpkg_root() -> PathBuf {
+        env::var("VCPKG_ROOT")
+            .or_else(|_| env::var("VCPKG_INSTALLATION_ROOT"))
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from(r"C:\vcpkg"))
+    }
+
+    fn vcpkg_triplet_dir() -> PathBuf {
+        vcpkg_root().join("installed").join(VCPKG_TRIPLET)
     }
 
     fn verify_sha256(bytes: &[u8], expected: &str) {
@@ -94,33 +113,68 @@ mod build_libwpd {
         root
     }
 
-    /// Link the static zlib that `libz-sys` built from source for the target.
+    /// zlib on the `x64-windows-static-md` triplet is a static library, but its
+    /// file name is not stable across vcpkg/zlib versions: classic zlib CMake
+    /// emits `zlibstatic.lib` (debug `zlibstaticd.lib`), newer ports emit
+    /// `zs.lib`/`zsd.lib` (see the `-lzs`/`-lzsd`/`-lzd` pkgconfig rewrites in
+    /// vcpkg's zlib portfile), and some renamed variants ship
+    /// `zlib.lib`/`zlibd.lib`. We probe the disk for whichever the installed
+    /// cache actually produced instead of hard-coding one name. Release libs
+    /// live in `<triplet>/lib`; debug libs (trailing `d`) in `<triplet>/debug/lib`.
+    const ZLIB_RELEASE_STEMS: &[&str] = &["zlibstatic", "zlib", "zs", "z"];
+    const ZLIB_DEBUG_STEMS: &[&str] = &["zlibstaticd", "zlibd", "zsd", "zd"];
+
+    /// First `<stem>.lib` present in `dir`, returned as a `rustc-link-lib` stem
+    /// (no `.lib` extension), trying `stems` in order.
+    fn find_zlib_lib(dir: &Path, stems: &[&str]) -> Option<String> {
+        stems
+            .iter()
+            .find(|stem| dir.join(format!("{stem}.lib")).is_file())
+            .map(|stem| (*stem).to_string())
+    }
+
+    /// Re-emit the zlib link AFTER this crate's objects so librevenge's
+    /// `RVNGZipStream.o` (`inflate*`) resolves against it.
     ///
-    /// `libz-sys` (a build-time dep on every desktop target) compiles zlib with
-    /// `cc` — matching this crate's own `-MD`/release-CRT C++ build, so there is
-    /// no LNK2038 CRT mismatch on MSVC — puts the archive on the link search path,
-    /// and exports its headers via `DEP_Z_INCLUDE` (consumed in `build`).
+    /// On GNU-ld targets (Linux/macOS), `libz-sys` (static feature) builds a
+    /// `libz.a` for the target and puts it on the link search path; `static=z`
+    /// picks it up. Relying on libz-sys's own directive alone ordered the archive
+    /// before the references, so ld discarded it and the final binary failed with
+    /// `undefined reference to inflateInit2_`.
     ///
-    /// On GNU-ld targets (Linux/macOS) we re-emit the link here, AFTER this
-    /// crate's objects (librevenge's `RVNGZipStream.o` calls `inflate*`), because
-    /// a GNU-ld command line orders libz-sys's own directive before the references
-    /// and discards the archive (`undefined reference to inflateInit2_`).
-    ///
-    /// On MSVC, libz-sys's own directive does not satisfy librevenge's `inflate*`
-    /// references at the final binary link: a bare `static=z` re-emit fails with
-    /// `could not find native static library z` (rustc's `static=` lookup scans
-    /// only its own `-L` paths and the archive is not named `z.lib`), and dropping
-    /// the re-emit entirely leaves the symbols undefined (`inflate`, `inflateEnd`,
-    /// `inflateInit2_`). CI reliably installs a static zlib via vcpkg
-    /// (`x64-windows-static-md`, so the archive is `zlib.lib`) and puts its lib dir
-    /// on the link search path, so link it by that name with the default
-    /// (linker-resolved) kind — `link.exe` resolves `zlib.lib` from `LIB`/`LIBPATH`,
-    /// which rustc's `static=` lookup would not.
+    /// On Windows the static zlib comes from vcpkg (`x64-windows-static-md`),
+    /// whose archive name is not stable (see `ZLIB_RELEASE_STEMS`), so we probe
+    /// the triplet lib dir for the actual file and emit its search path + stem.
+    /// We link the RELEASE zlib (`<triplet>/lib`) in both profiles — `cc` compiles
+    /// the C++ with `-MD` and rustc's MSVC target links the release CRT even for
+    /// dev builds, so the debug zlib (`-MDd`) would trip LNK2038 RuntimeLibrary
+    /// mismatches; the debug dir is only a last-resort fallback.
     fn link_zlib() {
-        if targeting_windows() {
-            println!("cargo:rustc-link-lib=zlib");
-        } else {
+        if !targeting_windows() {
             println!("cargo:rustc-link-lib=static=z");
+            return;
+        }
+
+        let triplet = vcpkg_triplet_dir();
+        let release_lib = triplet.join("lib");
+        let debug_lib = triplet.join("debug").join("lib");
+
+        let resolved = find_zlib_lib(&release_lib, ZLIB_RELEASE_STEMS)
+            .map(|stem| (release_lib.clone(), stem))
+            .or_else(|| find_zlib_lib(&debug_lib, ZLIB_DEBUG_STEMS).map(|stem| (debug_lib.clone(), stem)));
+
+        match resolved {
+            Some((dir, stem)) => {
+                println!("cargo:rustc-link-search=native={}", dir.display());
+                println!("cargo:rustc-link-lib={stem}");
+            }
+            None => {
+                // Nothing on disk (missing/broken vcpkg cache). Emit the
+                // most-likely release name so the linker fails loudly with a
+                // clear "could not open" error against the release lib dir.
+                println!("cargo:rustc-link-search=native={}", release_lib.display());
+                println!("cargo:rustc-link-lib=zlibstatic");
+            }
         }
     }
 
@@ -246,6 +300,11 @@ mod build_libwpd {
         println!("cargo:rerun-if-changed=vendor/librevenge-0.0.6.tar.gz");
         println!("cargo:rerun-if-changed=vendor/libwpd-0.10.3.tar.gz");
         println!("cargo:rerun-if-changed=vendor/boost-subset.tar.gz");
+
+        if targeting_windows() {
+            println!("cargo:rerun-if-env-changed=VCPKG_ROOT");
+            println!("cargo:rerun-if-env-changed=VCPKG_INSTALLATION_ROOT");
+        }
     }
 }
 
