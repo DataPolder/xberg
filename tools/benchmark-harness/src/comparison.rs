@@ -583,6 +583,14 @@ pub struct StructuralBreakdown {
 }
 
 impl StructuralBreakdown {
+    fn unavailable() -> Self {
+        Self {
+            sf1: f64::NAN,
+            order_score: f64::NAN,
+            ..Default::default()
+        }
+    }
+
     /// Explode a canonical [`StructuralScore`] into per-dimension maps.
     pub fn from_score(score: &structural_sidecar::StructuralScore) -> Self {
         let mut per_type_sf1 = HashMap::new();
@@ -613,7 +621,7 @@ pub fn score_document(content: &str, gt_text: &str, gt_markdown: Option<&str>) -
     };
     let breakdown = match gt_markdown {
         Some(md) => StructuralBreakdown::from_score(&structural_sidecar::score_markdown(content, md)),
-        None => StructuralBreakdown::default(),
+        None => StructuralBreakdown::unavailable(),
     };
     (tf1, breakdown)
 }
@@ -803,7 +811,7 @@ pub async fn run_comparison(config: &ComparisonConfig) -> Result<Vec<DocResult>>
     let filter = CorpusFilter {
         file_types: None,
         require_ground_truth: true,
-        require_markdown_ground_truth: true,
+        require_markdown_ground_truth: false,
         name_patterns: config.name_filter.clone().into_iter().collect(),
         ..Default::default()
     };
@@ -883,12 +891,17 @@ pub fn print_comparison_table(results: &[DocResult]) {
     for doc in results {
         eprint!("{:<25}", doc.name);
         for pr in &doc.results {
-            let time_str = if pr.time_ms.is_nan() || pr.time_ms <= 0.0 {
+            let time_str = if !pr.time_ms.is_finite() || pr.time_ms <= 0.0 {
                 "---".to_string()
             } else {
                 format!("{:.0}", pr.time_ms)
             };
-            eprint!(" {:>9.1}% {:>9.1}% {:>8}", pr.sf1 * 100.0, pr.tf1 * 100.0, time_str);
+            eprint!(
+                " {:>10} {:>10} {:>8}",
+                format_percentage(pr.sf1),
+                format_percentage(pr.tf1),
+                time_str
+            );
         }
         eprintln!();
     }
@@ -926,20 +939,33 @@ pub fn print_comparison_table(results: &[DocResult]) {
         } else {
             times.iter().sum::<f64>() / times.len() as f64
         };
-        let time_str = if avg_time.is_nan() {
+        let time_str = if !avg_time.is_finite() {
             "---".to_string()
         } else {
             format!("{:.0}", avg_time)
         };
-        eprint!(" {:>9.1}% {:>9.1}% {:>8}", avg_sf1 * 100.0, avg_tf1 * 100.0, time_str);
+        eprint!(
+            " {:>10} {:>10} {:>8}",
+            format_percentage(avg_sf1),
+            format_percentage(avg_tf1),
+            time_str
+        );
     }
     eprintln!();
 
     for (i, name) in pipeline_names.iter().enumerate() {
-        let failed = results.iter().filter(|r| !r.results[i].sf1.is_finite()).count();
+        let failed = results.iter().filter(|r| !r.results[i].tf1.is_finite()).count();
         if failed > 0 {
             eprintln!("  {}: {} timeouts/errors (excluded from averages)", name, failed);
         }
+    }
+}
+
+fn format_percentage(value: f64) -> String {
+    if value.is_finite() {
+        format!("{:.1}%", value * 100.0)
+    } else {
+        "---".to_string()
     }
 }
 
@@ -992,7 +1018,11 @@ pub fn print_per_format_summary(results: &[DocResult]) {
             } else {
                 tf1_vals.iter().sum::<f64>() / tf1_vals.len() as f64
             };
-            eprint!("  {:>9.1}% {:>9.1}%", avg_sf1 * 100.0, avg_tf1 * 100.0);
+            eprint!(
+                "  {:>10} {:>10}",
+                format_percentage(avg_sf1),
+                format_percentage(avg_tf1)
+            );
         }
         eprintln!();
     }
@@ -1011,6 +1041,8 @@ struct FormatPipelineSummary {
     pipeline: String,
     avg_sf1: f64,
     avg_tf1: f64,
+    sf1_count: usize,
+    tf1_count: usize,
 }
 
 /// Overall summary for JSON output.
@@ -1043,7 +1075,6 @@ pub fn write_comparison_json(results: &[DocResult], path: &std::path::Path) -> R
     let by_format: std::collections::BTreeMap<String, FormatSummary> = by_format_map
         .iter()
         .map(|(format, docs)| {
-            let _n = docs.len() as f64;
             let pipelines = pipeline_names
                 .iter()
                 .enumerate()
@@ -1072,6 +1103,8 @@ pub fn write_comparison_json(results: &[DocResult], path: &std::path::Path) -> R
                         pipeline: name.clone(),
                         avg_sf1,
                         avg_tf1,
+                        sf1_count: sf1_vals.len(),
+                        tf1_count: tf1_vals.len(),
                     }
                 })
                 .collect();
@@ -1085,7 +1118,6 @@ pub fn write_comparison_json(results: &[DocResult], path: &std::path::Path) -> R
         })
         .collect();
 
-    let _n = results.len() as f64;
     let overall_pipelines = pipeline_names
         .iter()
         .enumerate()
@@ -1114,6 +1146,8 @@ pub fn write_comparison_json(results: &[DocResult], path: &std::path::Path) -> R
                 pipeline: name.clone(),
                 avg_sf1,
                 avg_tf1,
+                sf1_count: sf1_vals.len(),
+                tf1_count: tf1_vals.len(),
             }
         })
         .collect();
@@ -1147,9 +1181,12 @@ pub struct GuardrailsConfig {
 }
 
 /// A single guardrail contract: minimum threshold for a specific document + pipeline.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GuardrailContract {
     pub doc: String,
+    /// Fixture file type used to disambiguate identical document names.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_type: Option<String>,
     pub pipeline: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min_sf1: Option<f64>,
@@ -1192,8 +1229,11 @@ fn reading_order_anchors(doc: &str, pipeline: &str) -> Vec<String> {
 
 fn install_reading_order_guardrail(config: &mut GuardrailsConfig) {
     if let Some(contract) = config.contracts.iter_mut().find(|contract| {
-        contract.doc == READING_ORDER_GUARDRAIL_DOC && contract.pipeline == READING_ORDER_GUARDRAIL_PIPELINE
+        contract.doc == READING_ORDER_GUARDRAIL_DOC
+            && contract.pipeline == READING_ORDER_GUARDRAIL_PIPELINE
+            && contract.file_type.as_deref().is_none_or(|file_type| file_type == "pdf")
     }) {
+        contract.file_type.get_or_insert_with(|| "pdf".to_string());
         if contract.relative_order.is_empty() {
             contract.relative_order =
                 reading_order_anchors(READING_ORDER_GUARDRAIL_DOC, READING_ORDER_GUARDRAIL_PIPELINE);
@@ -1202,6 +1242,7 @@ fn install_reading_order_guardrail(config: &mut GuardrailsConfig) {
     }
     config.contracts.push(GuardrailContract {
         doc: READING_ORDER_GUARDRAIL_DOC.to_string(),
+        file_type: Some("pdf".to_string()),
         pipeline: READING_ORDER_GUARDRAIL_PIPELINE.to_string(),
         min_sf1: None,
         min_tf1: None,
@@ -1214,57 +1255,71 @@ pub fn check_guardrails(results: &[DocResult], config: &GuardrailsConfig) -> Vec
     let mut failures = Vec::new();
 
     for contract in &config.contracts {
-        let Some(doc) = results.iter().find(|r| r.name == contract.doc) else {
-            continue;
+        let doc = match resolve_guardrail_document(results, contract) {
+            Ok(Some(doc)) => doc,
+            Ok(None) => continue,
+            Err(failure) => {
+                failures.push(failure);
+                continue;
+            }
         };
-
         let Some(pr) = doc.results.iter().find(|pr| pr.pipeline.name() == contract.pipeline) else {
             continue;
         };
+        let target = format!("{} [{}] {}", contract.doc, doc.file_type, contract.pipeline);
 
-        if let Some(min_sf1) = contract.min_sf1 {
-            if !pr.sf1.is_finite() {
-                failures.push(format!(
-                    "SF1 unavailable: {} {} has no finite score",
-                    contract.doc, contract.pipeline
-                ));
-            } else if pr.sf1 < min_sf1 {
-                failures.push(format!(
-                    "SF1 regression: {} {} SF1 {:.1}% < minimum {:.1}%",
-                    contract.doc,
-                    contract.pipeline,
-                    pr.sf1 * 100.0,
-                    min_sf1 * 100.0,
-                ));
-            }
-        }
-
-        if let Some(min_tf1) = contract.min_tf1 {
-            if !pr.tf1.is_finite() {
-                failures.push(format!(
-                    "TF1 unavailable: {} {} has no finite score",
-                    contract.doc, contract.pipeline
-                ));
-            } else if pr.tf1 < min_tf1 {
-                failures.push(format!(
-                    "TF1 regression: {} {} TF1 {:.1}% < minimum {:.1}%",
-                    contract.doc,
-                    contract.pipeline,
-                    pr.tf1 * 100.0,
-                    min_tf1 * 100.0,
-                ));
-            }
-        }
+        failures.extend(check_guardrail_score("SF1", pr.sf1, contract.min_sf1, &target));
+        failures.extend(check_guardrail_score("TF1", pr.tf1, contract.min_tf1, &target));
 
         if let Err(reason) = check_relative_order(&pr.content, &contract.relative_order) {
-            failures.push(format!(
-                "relative-order regression: {} {} {reason}",
-                contract.doc, contract.pipeline
-            ));
+            failures.push(format!("relative-order regression: {target} {reason}"));
         }
     }
 
     failures
+}
+
+fn resolve_guardrail_document<'a>(
+    results: &'a [DocResult],
+    contract: &GuardrailContract,
+) -> std::result::Result<Option<&'a DocResult>, String> {
+    let matching_docs: Vec<&DocResult> = results
+        .iter()
+        .filter(|result| {
+            result.name == contract.doc
+                && contract
+                    .file_type
+                    .as_deref()
+                    .is_none_or(|file_type| result.file_type == file_type)
+        })
+        .collect();
+    if matching_docs.len() <= 1 {
+        return Ok(matching_docs.first().copied());
+    }
+
+    let mut file_types: Vec<&str> = matching_docs.iter().map(|doc| doc.file_type.as_str()).collect();
+    file_types.sort_unstable();
+    file_types.dedup();
+    Err(format!(
+        "ambiguous legacy guardrail target: {} {} matches file types {}",
+        contract.doc,
+        contract.pipeline,
+        file_types.join(", ")
+    ))
+}
+
+fn check_guardrail_score(metric: &str, value: f64, minimum: Option<f64>, target: &str) -> Option<String> {
+    let minimum = minimum?;
+    if !value.is_finite() {
+        return Some(format!("{metric} unavailable: {target} has no finite score"));
+    }
+    (value < minimum).then(|| {
+        format!(
+            "{metric} regression: {target} {metric} {:.1}% < minimum {:.1}%",
+            value * 100.0,
+            minimum * 100.0
+        )
+    })
 }
 
 fn check_relative_order(content: &str, anchors: &[String]) -> std::result::Result<(), String> {
@@ -1508,13 +1563,10 @@ mod tests {
             (tf1 - 1.0).abs() < f64::EPSILON,
             "TF1 should be 1.0 for identical text, got {tf1}"
         );
+        assert!(structural.sf1.is_nan(), "SF1 should be unavailable when no markdown GT");
         assert!(
-            (structural.sf1 - 0.0).abs() < f64::EPSILON,
-            "SF1 should be 0.0 when no markdown GT"
-        );
-        assert!(
-            (structural.order_score - 0.0).abs() < f64::EPSILON,
-            "order_score should be 0.0 when no markdown GT"
+            structural.order_score.is_nan(),
+            "order_score should be unavailable when no markdown GT"
         );
         assert!(
             structural.per_type_sf1.is_empty(),
@@ -1531,11 +1583,8 @@ mod tests {
             tf1 > 0.0 && tf1 < 1.0,
             "TF1 should be between 0 and 1 for partially matching text, got {tf1}"
         );
-        assert!(
-            (structural.sf1 - 0.0).abs() < f64::EPSILON,
-            "SF1 should be 0.0 when no markdown GT"
-        );
-        assert!((structural.order_score - 0.0).abs() < f64::EPSILON);
+        assert!(structural.sf1.is_nan(), "SF1 should be unavailable when no markdown GT");
+        assert!(structural.order_score.is_nan());
         assert!(structural.per_type_sf1.is_empty());
     }
 
@@ -1543,8 +1592,8 @@ mod tests {
     fn test_score_document_empty() {
         let (tf1, structural) = score_document("", "", None);
         let _ = tf1;
-        assert!((structural.sf1 - 0.0).abs() < f64::EPSILON);
-        assert!((structural.order_score - 0.0).abs() < f64::EPSILON);
+        assert!(structural.sf1.is_nan());
+        assert!(structural.order_score.is_nan());
         assert!(structural.per_type_sf1.is_empty());
     }
 
@@ -1610,6 +1659,47 @@ mod tests {
 
         assert_eq!(content, "cached markdown");
         assert_eq!(time_ms, 12.5);
+    }
+
+    #[tokio::test]
+    async fn comparison_includes_text_only_ground_truth() {
+        let temp = tempfile::tempdir().unwrap();
+        let (fixtures_dir, fixture_path) = create_vendored_fixture(temp.path(), "ground truth text");
+        std::fs::write(fixtures_dir.join("document.txt"), "source document").unwrap();
+        std::fs::write(fixtures_dir.join("ground-truth.txt"), "ground truth text").unwrap();
+        std::fs::write(
+            fixture_path,
+            serde_json::json!({
+                "document": "document.txt",
+                "file_type": "txt",
+                "file_size": 15,
+                "ground_truth": {
+                    "text_file": "ground-truth.txt",
+                    "source": "manual"
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let config = ComparisonConfig {
+            fixtures_dir,
+            pipelines: vec![Pipeline::Docling],
+            dump_outputs: false,
+            guardrails: false,
+            guardrails_file: None,
+            name_filter: None,
+            json_output: None,
+            noise: false,
+            diagnose: false,
+            diagnose_threshold: 0.0,
+        };
+
+        let results = run_comparison(&config).await.unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert!((results[0].results[0].tf1 - 1.0).abs() < f64::EPSILON);
+        assert!(results[0].results[0].sf1.is_nan());
+        assert!(results[0].results[0].order_score.is_nan());
     }
 
     #[test]
@@ -1727,6 +1817,7 @@ mod tests {
             threshold_factor: 0.9,
             contracts: vec![GuardrailContract {
                 doc: "missing".to_string(),
+                file_type: Some("pdf".to_string()),
                 pipeline: "docling".to_string(),
                 min_sf1: Some(0.5),
                 min_tf1: Some(0.5),
@@ -1749,6 +1840,7 @@ mod tests {
             threshold_factor: 0.9,
             contracts: vec![GuardrailContract {
                 doc: "681693".to_string(),
+                file_type: Some("pdf".to_string()),
                 pipeline: "pdf-oxide+layout+reading-order".to_string(),
                 min_sf1: Some(0.8),
                 min_tf1: None,
@@ -1785,7 +1877,7 @@ mod tests {
         let failures = check_guardrails(&make_results(out_of_order), &config);
 
         assert_eq!(failures.len(), 1);
-        assert!(failures[0].starts_with("relative-order regression: 681693 pdf-oxide+layout+reading-order"));
+        assert!(failures[0].starts_with("relative-order regression: 681693 [pdf] pdf-oxide+layout+reading-order"));
     }
 
     #[test]
@@ -1814,6 +1906,7 @@ mod tests {
             .find(|contract| contract.doc == "legacy")
             .unwrap();
         assert!(legacy.relative_order.is_empty());
+        assert!(legacy.file_type.is_none());
         let active = config
             .contracts
             .iter()
@@ -1825,6 +1918,52 @@ mod tests {
             active.relative_order,
             reading_order_anchors(READING_ORDER_GUARDRAIL_DOC, READING_ORDER_GUARDRAIL_PIPELINE)
         );
+        assert_eq!(active.file_type.as_deref(), Some("pdf"));
+    }
+
+    #[test]
+    fn guardrails_require_file_type_for_duplicate_document_names() {
+        let result_for = |file_type: &str, sf1: f64| DocResult {
+            name: "shared".to_string(),
+            file_type: file_type.to_string(),
+            results: vec![PipelineResult {
+                pipeline: Pipeline::Baseline,
+                sf1,
+                tf1: 1.0,
+                char_similarity: 1.0,
+                order_score: sf1,
+                per_type_sf1: HashMap::new(),
+                per_type_precision: HashMap::new(),
+                per_type_recall: HashMap::new(),
+                time_ms: 1.0,
+                missing_tokens: Vec::new(),
+                extra_tokens: Vec::new(),
+                content: String::new(),
+            }],
+        };
+        let results = vec![result_for("json", f64::NAN), result_for("pdf", 0.9)];
+        let mut contract = GuardrailContract {
+            doc: "shared".to_string(),
+            file_type: None,
+            pipeline: "baseline".to_string(),
+            min_sf1: Some(0.8),
+            min_tf1: None,
+            relative_order: Vec::new(),
+        };
+        let config_for = |contract| GuardrailsConfig {
+            version: "1.0".to_string(),
+            generated_at: String::new(),
+            threshold_factor: 0.9,
+            contracts: vec![contract],
+        };
+
+        let failures = check_guardrails(&results, &config_for(contract.clone()));
+        assert_eq!(failures.len(), 1);
+        assert!(failures[0].contains("ambiguous legacy guardrail target"));
+        assert!(failures[0].contains("json, pdf"));
+
+        contract.file_type = Some("pdf".to_string());
+        assert!(check_guardrails(&results, &config_for(contract)).is_empty());
     }
 
     #[test]
@@ -1896,8 +2035,48 @@ mod tests {
 
         assert!(output["by_format"]["pdf"]["pipelines"][0]["avg_sf1"].is_null());
         assert!(output["by_format"]["pdf"]["pipelines"][0]["avg_tf1"].is_null());
+        assert_eq!(output["by_format"]["pdf"]["pipelines"][0]["sf1_count"], 0);
+        assert_eq!(output["by_format"]["pdf"]["pipelines"][0]["tf1_count"], 0);
         assert!(output["overall"]["pipelines"][0]["avg_sf1"].is_null());
         assert!(output["overall"]["pipelines"][0]["avg_tf1"].is_null());
+        assert_eq!(output["overall"]["pipelines"][0]["sf1_count"], 0);
+        assert_eq!(output["overall"]["pipelines"][0]["tf1_count"], 0);
+    }
+
+    #[test]
+    fn comparison_json_counts_metric_samples_independently() {
+        let temp = tempfile::tempdir().unwrap();
+        let output_path = temp.path().join("comparison.json");
+        let result = |name: &str, sf1: f64, tf1: f64| DocResult {
+            name: name.to_string(),
+            file_type: "txt".to_string(),
+            results: vec![PipelineResult {
+                pipeline: Pipeline::Docling,
+                sf1,
+                tf1,
+                char_similarity: tf1,
+                order_score: sf1,
+                per_type_sf1: HashMap::new(),
+                per_type_precision: HashMap::new(),
+                per_type_recall: HashMap::new(),
+                time_ms: 1.0,
+                missing_tokens: Vec::new(),
+                extra_tokens: Vec::new(),
+                content: String::new(),
+            }],
+        };
+        let results = vec![result("markdown", 0.6, 0.5), result("text-only", f64::NAN, 0.9)];
+
+        write_comparison_json(&results, &output_path).unwrap();
+        let output: serde_json::Value = serde_json::from_slice(&std::fs::read(output_path).unwrap()).unwrap();
+        let summary = &output["by_format"]["txt"]["pipelines"][0];
+
+        assert_eq!(summary["sf1_count"], 1);
+        assert_eq!(summary["tf1_count"], 2);
+        assert!((summary["avg_sf1"].as_f64().unwrap() - 0.6).abs() < f64::EPSILON);
+        assert!((summary["avg_tf1"].as_f64().unwrap() - 0.7).abs() < f64::EPSILON);
+        assert_eq!(output["overall"]["pipelines"][0]["sf1_count"], 1);
+        assert_eq!(output["overall"]["pipelines"][0]["tf1_count"], 2);
     }
 
     #[test]

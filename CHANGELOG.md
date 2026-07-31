@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Benchmark comparisons include formats with text-only ground truth, report structural scores as
+  unavailable instead of zero when Markdown ground truth is absent, and identify guardrails by file
+  type so same-named fixtures cannot be matched across formats. Guardrails are rebased against the
+  active corpus, removing retired PDF contracts and covering every actionable current result.
 - Image layout extraction reuses safely positioned whole-image OCR elements, falls back when
   region-based OCR drops substantial text or quality, and preserves warnings without redundant OCR
   retries.
