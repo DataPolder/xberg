@@ -215,15 +215,11 @@ impl Fixture {
             path: fixture_path.to_path_buf(),
             reason: format!("unable to resolve fixture directory {}: {error}", fixture_dir.display()),
         })?;
-        let repository_root = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../..")
-            .canonicalize()
-            .map_err(Error::Io)?;
-        let allowed_root = if canonical_fixture_dir.starts_with(&repository_root) {
-            &repository_root
-        } else {
-            &canonical_fixture_dir
-        };
+        // Resolve the checked-out repository from the runtime fixture location. The harness
+        // binary is cached and executed by separate CI jobs, so its build-time source path may
+        // not exist on the runner that validates fixtures. ~keep
+        let repository_root = repository_fixture_root(&canonical_fixture_dir);
+        let allowed_root = repository_root.as_deref().unwrap_or(&canonical_fixture_dir);
         let resolved = normalize_path(&canonical_fixture_dir.join(relative_path));
         if !resolved.starts_with(allowed_root) {
             return Err(Error::InvalidFixture {
@@ -318,6 +314,16 @@ fn normalize_path(path: &Path) -> PathBuf {
         }
     }
     normalized
+}
+
+fn repository_fixture_root(fixture_dir: &Path) -> Option<PathBuf> {
+    fixture_dir
+        .ancestors()
+        .find(|ancestor| {
+            let harness_root = ancestor.join("tools/benchmark-harness");
+            harness_root.join("Cargo.toml").is_file() && fixture_dir.starts_with(harness_root.join("fixtures"))
+        })
+        .map(Path::to_path_buf)
 }
 
 /// Manages loading and accessing fixtures
@@ -618,6 +624,15 @@ mod tests {
 
         let error = fixture.validate(&fixture_path).unwrap_err().to_string();
         assert!(error.contains("document escapes the fixture trust boundary"), "{error}");
+    }
+
+    #[test]
+    fn repository_fixture_boundary_is_derived_from_the_runtime_path() {
+        let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let fixture_dir = manifest_dir.join("fixtures/pdf").canonicalize().unwrap();
+        let expected_root = manifest_dir.join("../..").canonicalize().unwrap();
+
+        assert_eq!(repository_fixture_root(&fixture_dir), Some(expected_root));
     }
 
     #[test]

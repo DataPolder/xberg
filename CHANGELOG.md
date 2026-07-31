@@ -31,7 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Benchmark quality guardrails fail on missing contracted documents or pipeline results instead
   of reporting a vacuous pass.
 - Benchmark fixtures reject document and ground-truth paths that escape the repository or
-  standalone fixture trust boundary, including symlink escapes.
+  standalone fixture trust boundary, including symlink escapes, and derive repository boundaries
+  from runtime fixture locations so cached binaries remain portable across CI runners.
 - Benchmark CI records declared per-framework format support, validates partial-run thresholds
   before execution, evaluates them independently per framework, and excludes harness/setup errors
   from framework success rates while retaining strict extraction coverage for every xberg pipeline.
