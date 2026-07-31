@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Benchmark quality rankings and Pareto SF1 multiply reported medians by accountable extraction
+  coverage, so partial framework failures cannot retain a perfect rank while harness and setup
+  failures remain excluded.
 - Benchmark runs abort instead of dropping task errors, verify exact eligible-document
   cardinality before writing artifacts, reject contradictory failure states and unknown pipeline
   names, and report extension success rates with the same accountable-failure semantics as the

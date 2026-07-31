@@ -202,7 +202,11 @@ pub struct PerFixtureRow {
     pub statistics: Option<crate::types::DurationStatistics>,
 }
 
-/// Cross-framework comparison rankings and deltas
+/// Cross-framework comparison rankings and deltas.
+///
+/// Quality-based ranking values, including Pareto SF1, are the reported median multiplied by
+/// accountable success coverage. Raw quality percentiles remain available in
+/// [`PerformancePercentiles::quality`]. ~keep
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComparisonData {
     /// Frameworks ranked by median throughput (highest first)
@@ -260,7 +264,7 @@ pub struct ParetoPoint {
     pub framework_mode: String,
     /// Median pages/sec (higher is better).
     pub pages_per_sec: f64,
-    /// Median structural F1 / SF1 (higher is better).
+    /// Coverage-adjusted median structural F1 / SF1 (higher is better).
     pub sf1: f64,
     /// Median peak RSS in MB (lower is better).
     pub peak_memory_mb: f64,
@@ -1328,6 +1332,27 @@ fn weighted_avg(items: &[(f64, usize)]) -> f64 {
     }
 }
 
+/// Samples for which extraction quality is attributable to the framework. Infrastructure errors
+/// are excluded because they provide no evidence about framework quality. ~keep
+fn accountable_sample_count(performance: &PerformancePercentiles) -> usize {
+    performance.successful_sample_count
+        + performance.framework_errors
+        + performance.timeouts
+        + performance.empty_content
+}
+
+/// Convert a reported quality percentile into a ranking value that also reflects extraction
+/// coverage. Percentiles remain unchanged in the aggregate schema; rankings multiply them by the
+/// fraction of accountable samples that succeeded so a meaningful minority of failures cannot be
+/// hidden above the median. Infrastructure failures are absent from that fraction. ~keep
+fn coverage_adjusted_quality(value: f64, performance: &PerformancePercentiles) -> f64 {
+    let accountable = accountable_sample_count(performance);
+    if accountable == 0 {
+        return f64::NAN;
+    }
+    value * performance.successful_sample_count as f64 / accountable as f64
+}
+
 /// Build the overall (all-file-types) quality ranking for one output format, restricted to a
 /// **shared corpus** and counting fully-failed buckets against the framework.
 ///
@@ -1340,9 +1365,9 @@ fn weighted_avg(items: &[(f64, usize)]) -> f64 {
 /// that only ever attempted its best file type would look artificially strong.
 ///
 /// The fix: restrict the overall ranking to the **intersection of file types every candidate
-/// framework (of this output format) attempted** — "attempted" meaning `total_sample_count > 0`
-/// in at least one of `no_ocr`/`with_ocr` for that file type, regardless of success. Only that
-/// shared set feeds the weighted mean, so every ranked framework is scored on the same corpus.
+/// framework (of this output format) attempted** — "attempted" meaning at least one accountable
+/// sample in at least one of `no_ocr`/`with_ocr` for that file type, regardless of success. Only
+/// that shared set feeds the weighted mean, so every ranked framework is scored on the same corpus.
 ///
 /// With a single candidate framework for a format, the "intersection" is trivially that
 /// framework's own attempted file types — there is nothing to restrict against, so it is ranked
@@ -1358,14 +1383,15 @@ fn weighted_avg(items: &[(f64, usize)]) -> f64 {
 /// # Semantics (Bug B: 0-success buckets silently dropped)
 ///
 /// Within the shared file-type set, a bucket a framework *attempted but completely failed*
-/// (`successful_sample_count == 0`, `total_sample_count > 0`) must drag its mean down — it is
+/// (`successful_sample_count == 0`, accountable failures > 0) must drag its mean down — it is
 /// not neutral, it is a failure. Such buckets contribute a quality value of `0.0`, weighted by
-/// the bucket's `total_sample_count` (samples attempted, not just those that happened to
-/// succeed). This is distinct from a file type the framework never attempted at all, which is
-/// excluded entirely by the shared-corpus restriction above (that's not a failure, it's missing
-/// data, and including it would penalize frameworks for corpora they were never run against).
+/// the bucket's accountable sample count (successful samples plus framework-fault failures).
+/// Infrastructure failures carry no weight. This is distinct from a file type the framework never
+/// attempted at all, which is excluded entirely by the shared-corpus restriction above (that's not
+/// a failure, it's missing data, and including it would penalize frameworks for corpora they were
+/// never run against).
 /// Resolve the shared corpus for a format: the file types every candidate framework of that
-/// format actually attempted (any `total_sample_count > 0` in either OCR bucket), intersected
+/// format actually attempted (any accountable samples in either OCR bucket), intersected
 /// across all candidates. This is the exact basis on which the "overall" quality ranking for
 /// the format is computed; a single-format framework in the pool collapses it to that one type.
 /// Returned sorted for stable metadata output.
@@ -1382,7 +1408,7 @@ fn resolve_shared_corpus_file_types(
                 [&ft.no_ocr, &ft.with_ocr]
                     .into_iter()
                     .flatten()
-                    .any(|perf| perf.total_sample_count > 0)
+                    .any(|perf| accountable_sample_count(perf) > 0)
             })
             .map(|(file_type, _)| file_type.as_str())
             .collect();
@@ -1428,11 +1454,15 @@ fn build_shared_corpus_quality_ranking(
                 continue;
             };
             for perf in [&ft.no_ocr, &ft.with_ocr].into_iter().flatten() {
-                if perf.total_sample_count == 0 {
+                let weight = accountable_sample_count(perf);
+                if weight == 0 {
                     continue;
                 }
-                let weight = perf.total_sample_count;
-                let value = perf.quality.as_ref().map(|q| q.quality_score_p50).unwrap_or(0.0);
+                let value = perf
+                    .quality
+                    .as_ref()
+                    .map(|q| coverage_adjusted_quality(q.quality_score_p50, perf))
+                    .unwrap_or(0.0);
                 contributions.push((value, weight));
             }
         }
@@ -1567,8 +1597,8 @@ fn build_comparison(by_framework_mode: &HashMap<String, FrameworkModeAggregation
     }
 
     // Bug B: a PDF bucket a framework *attempted but completely failed*
-    // (`successful_sample_count == 0`, `total_sample_count > 0`) must count against it — quality
-    // contribution 0.0, weighted by samples attempted (not just those that succeeded) — instead
+    // (`successful_sample_count == 0`, accountable failures > 0) must count against it — quality
+    // contribution 0.0, weighted by accountable samples — instead
     // of being silently dropped (which let e.g. a framework failing 100% of PDFs escape any
     // quality penalty). TF1/SF1 use the same 0.0-on-full-failure treatment for consistency. ~keep
     let mut pdf_metrics: Vec<(String, f64, f64, f64, OutputFormat)> = Vec::new();
@@ -1578,23 +1608,27 @@ fn build_comparison(by_framework_mode: &HashMap<String, FrameworkModeAggregation
             let mut tf1s: Vec<(f64, usize)> = Vec::new();
             let mut sf1s: Vec<(f64, usize)> = Vec::new();
             for perf in [&pdf_ft.no_ocr, &pdf_ft.with_ocr].into_iter().flatten() {
-                if perf.total_sample_count == 0 {
+                let weight = accountable_sample_count(perf);
+                if weight == 0 {
                     continue;
                 }
-                let w = perf.total_sample_count;
                 let (quality_value, tf1_value, sf1_value) = match &perf.quality {
-                    Some(q) => (q.quality_score_p50, q.f1_text_p50, q.f1_layout_p50),
+                    Some(q) => (
+                        coverage_adjusted_quality(q.quality_score_p50, perf),
+                        coverage_adjusted_quality(q.f1_text_p50, perf),
+                        q.f1_layout_p50.map(|value| coverage_adjusted_quality(value, perf)),
+                    ),
                     None => (0.0, 0.0, None),
                 };
-                qualities.push((quality_value, w));
-                tf1s.push((tf1_value, w));
+                qualities.push((quality_value, weight));
+                tf1s.push((tf1_value, weight));
                 // SF1 has no defined "failure" value for plaintext-only frameworks (they never
                 // carry a layout term at all), so a missing layout score only contributes 0.0
                 // when the bucket was a genuine failure (no quality at all), not when the
                 // framework is plaintext-only and layout is simply not applicable. ~keep
                 match sf1_value {
-                    Some(layout) => sf1s.push((layout, w)),
-                    None if perf.quality.is_none() => sf1s.push((0.0, w)),
+                    Some(layout) => sf1s.push((layout, weight)),
+                    None if perf.quality.is_none() => sf1s.push((0.0, weight)),
                     None => {}
                 }
             }
@@ -1729,7 +1763,7 @@ fn build_pareto_frontier(by_framework_mode: &HashMap<String, FrameworkModeAggreg
                 .as_ref()
                 .filter(|performance| performance.performance_sample_count > 0)?;
             let pages_per_sec = performance.pages_per_sec.as_ref()?.p50;
-            let sf1 = performance.quality.as_ref()?.f1_layout_p50?;
+            let sf1 = coverage_adjusted_quality(performance.quality.as_ref()?.f1_layout_p50?, performance);
             let peak_memory_mb = performance.memory.p50;
             if !pages_per_sec.is_finite() || !sf1.is_finite() || !peak_memory_mb.is_finite() {
                 return None;
@@ -3216,7 +3250,7 @@ mod tests {
         duration_ms: u64,
         memory_bytes: u64,
         page_count: u32,
-        f1_layout: f64,
+        quality_score: f64,
     ) -> BenchmarkResult {
         let mut result = create_test_result(
             framework,
@@ -3228,15 +3262,92 @@ mod tests {
         );
         result.pdf_metadata = Some(pdf_metadata_with_page_count(page_count));
         result.quality = Some(QualityMetrics {
-            f1_score_text: 0.9,
-            f1_score_numeric: 0.9,
-            f1_score_layout: Some(f1_layout),
-            quality_score: 0.9,
+            f1_score_text: quality_score,
+            f1_score_numeric: quality_score,
+            f1_score_layout: Some(quality_score),
+            quality_score,
             missing_tokens: vec![],
             extra_tokens: vec![],
             correct: false,
         });
         result
+    }
+
+    fn ranking_value(ranking: &[RankedFramework], framework: &str) -> f64 {
+        ranking
+            .iter()
+            .find(|entry| entry.framework_mode.contains(framework))
+            .unwrap_or_else(|| panic!("missing ranking entry for {framework}"))
+            .value
+    }
+
+    #[test]
+    fn quality_rankings_penalize_minority_framework_failures_without_changing_percentiles() {
+        const SUCCESS_COUNT: usize = 51;
+        const FAILURE_COUNT: usize = 49;
+        const EXPECTED_ADJUSTED_SCORE: f64 = SUCCESS_COUNT as f64 / (SUCCESS_COUNT + FAILURE_COUNT) as f64;
+
+        let mut results = Vec::new();
+        results.extend(
+            (0..SUCCESS_COUNT).map(|_| markdown_pdf_result("framework-incomplete", 1_000, 100_000_000, 100, 1.0)),
+        );
+        results.extend((0..FAILURE_COUNT).map(|_| {
+            let mut failure = markdown_pdf_result("framework-incomplete", 1_000, 100_000_000, 100, 1.0);
+            failure.success = false;
+            failure.quality = None;
+            failure.error_kind = ErrorKind::FrameworkError;
+            failure
+        }));
+        results.push(markdown_pdf_result("framework-complete", 1_000, 100_000_000, 100, 0.8));
+
+        let aggregated = aggregate_new_format(&results);
+        let incomplete = &aggregated.by_framework_mode["framework-incomplete:markdown:single"]
+            .overall_performance
+            .as_ref()
+            .expect("overall performance");
+        let raw_quality = incomplete.quality.as_ref().expect("raw quality percentiles");
+        assert_eq!(raw_quality.quality_score_p50, 1.0);
+        assert_eq!(raw_quality.f1_layout_p50, Some(1.0));
+
+        let comparison = &aggregated.comparison;
+        for ranking in [
+            &comparison.quality_ranking_markdown,
+            &comparison.pdf_quality_ranking_markdown,
+            &comparison.pdf_tf1_ranking_markdown,
+            &comparison.pdf_sf1_ranking_markdown,
+        ] {
+            assert!((ranking_value(ranking, "framework-incomplete") - EXPECTED_ADJUSTED_SCORE).abs() < 1e-9);
+            assert!(ranking_value(ranking, "framework-incomplete") < ranking_value(ranking, "framework-complete"));
+        }
+        assert!(
+            comparison
+                .pareto_frontier
+                .iter()
+                .all(|point| !point.framework_mode.contains("framework-incomplete")),
+            "coverage-adjusted SF1 must keep the dominated incomplete framework off the frontier"
+        );
+    }
+
+    #[test]
+    fn quality_ranking_values_preserve_full_success_scores_and_ignore_infrastructure_failures() {
+        const SCORE: f64 = 0.73;
+        let success = markdown_pdf_result("framework-complete", 1_000, 100_000_000, 100, SCORE);
+        let mut infrastructure_failure = success.clone();
+        infrastructure_failure.success = false;
+        infrastructure_failure.quality = None;
+        infrastructure_failure.error_kind = ErrorKind::HarnessError;
+
+        let aggregated = aggregate_new_format(&[success, infrastructure_failure]);
+        let comparison = &aggregated.comparison;
+        for ranking in [
+            &comparison.quality_ranking_markdown,
+            &comparison.pdf_quality_ranking_markdown,
+            &comparison.pdf_tf1_ranking_markdown,
+            &comparison.pdf_sf1_ranking_markdown,
+        ] {
+            assert_eq!(ranking_value(ranking, "framework-complete"), SCORE);
+        }
+        assert_eq!(comparison.pareto_frontier[0].sf1, SCORE);
     }
 
     /// `framework-fast` dominates `framework-dominated` on all three Pareto axes (higher
