@@ -124,6 +124,7 @@ fn contract_error(message: impl Into<String>) -> Error {
 
 /// One fixture's expected identity, derived from the real fixture descriptor and document bytes
 /// referenced by the pinned cohort contract.
+#[derive(Debug)]
 struct ExpectedFixture {
     fixture: String,
     fixture_blake3: String,
