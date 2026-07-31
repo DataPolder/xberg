@@ -12,8 +12,8 @@
 //!   detection for heading/table identification without OCR.
 //! - **Tesseract / TesseractLayout**: Tesseract OCR with `force_ocr`; the
 //!   `Layout` suffix adds layout detection on top.
-//! - **Paddle / PaddleLayout / PaddleServer / PaddleServerLayout**: PaddleOCR
-//!   at mobile or server model tier, with optional layout detection.
+//! - **Paddle***: explicitly pinned PaddleOCR model version and tier, with
+//!   optional layout detection; the label-to-model mapping is benchmark identity. ~keep
 //! - **Docling / PaddleOcrPython / RapidOcr**: vendored pipelines whose
 //!   outputs are pre-computed and read from disk (no live extraction).
 //! - **LayoutSlanet***: layout detection with explicit SLANeXT table model
@@ -50,6 +50,15 @@ const EXTRACTION_TIMEOUT_BASE_SECS: u64 = 60;
 /// Example: 214-page PDF = 60s base + (214 * 400ms) = 60s + 85.6s = 145.6s total
 const EXTRACTION_TIMEOUT_PER_PAGE_MS: u64 = 400;
 
+const PP_OCR_V5: &str = "pp-ocrv5";
+const PP_OCR_V6: &str = "pp-ocrv6";
+
+#[derive(Debug, Clone, Copy)]
+enum AutoRotate {
+    Enabled,
+    Disabled,
+}
+
 /// Extraction pipeline identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -62,13 +71,33 @@ pub enum Pipeline {
     Tesseract,
     /// Tesseract OCR + layout detection
     TesseractLayout,
-    /// PaddleOCR mobile tier (force_ocr) — default model tier
+    /// PP-OCRv6 medium tier (force_ocr)
+    #[serde(rename = "paddle-v6-medium", alias = "paddle", alias = "paddle-mobile")]
     Paddle,
-    /// PaddleOCR mobile tier + layout detection — default model tier
+    /// PP-OCRv6 medium tier + layout detection
+    #[serde(
+        rename = "paddle-v6-medium+layout",
+        alias = "paddle-layout",
+        alias = "paddle-mobile-layout"
+    )]
     PaddleLayout,
-    /// PaddleOCR server tier (force_ocr, explicit server models)
+    /// PP-OCRv6 small tier (force_ocr)
+    #[serde(rename = "paddle-v6-small")]
+    PaddleV6Small,
+    /// PP-OCRv6 small tier + layout detection
+    #[serde(rename = "paddle-v6-small+layout", alias = "paddle-v6-small-layout")]
+    PaddleV6SmallLayout,
+    /// PP-OCRv6 tiny tier (force_ocr)
+    #[serde(rename = "paddle-v6-tiny")]
+    PaddleV6Tiny,
+    /// PP-OCRv6 tiny tier + layout detection
+    #[serde(rename = "paddle-v6-tiny+layout", alias = "paddle-v6-tiny-layout")]
+    PaddleV6TinyLayout,
+    /// Legacy PP-OCRv5 server tier (force_ocr)
+    #[serde(rename = "paddle-v5-server", alias = "paddle-server")]
     PaddleServer,
-    /// PaddleOCR server tier + layout detection
+    /// Legacy PP-OCRv5 server tier + layout detection
+    #[serde(rename = "paddle-v5-server+layout", alias = "paddle-server-layout")]
     PaddleServerLayout,
     /// Tesseract OCR with auto_rotate enabled
     TesseractAutoRotate,
@@ -117,10 +146,14 @@ impl Pipeline {
             Pipeline::Layout => "layout",
             Pipeline::Tesseract => "tesseract",
             Pipeline::TesseractLayout => "tesseract+layout",
-            Pipeline::Paddle => "paddle",
-            Pipeline::PaddleLayout => "paddle+layout",
-            Pipeline::PaddleServer => "paddle-server",
-            Pipeline::PaddleServerLayout => "paddle-server+layout",
+            Pipeline::Paddle => "paddle-v6-medium",
+            Pipeline::PaddleLayout => "paddle-v6-medium+layout",
+            Pipeline::PaddleV6Small => "paddle-v6-small",
+            Pipeline::PaddleV6SmallLayout => "paddle-v6-small+layout",
+            Pipeline::PaddleV6Tiny => "paddle-v6-tiny",
+            Pipeline::PaddleV6TinyLayout => "paddle-v6-tiny+layout",
+            Pipeline::PaddleServer => "paddle-v5-server",
+            Pipeline::PaddleServerLayout => "paddle-v5-server+layout",
             Pipeline::TesseractAutoRotate => "tesseract-autorotate",
             Pipeline::PaddleNoRotate => "paddle-norotate",
             Pipeline::Docling => "docling",
@@ -149,12 +182,21 @@ impl Pipeline {
             "layout" => Some(Pipeline::Layout),
             "tesseract" => Some(Pipeline::Tesseract),
             "tesseract+layout" | "tesseract-layout" => Some(Pipeline::TesseractLayout),
-            "paddle" | "paddle-mobile" => Some(Pipeline::Paddle),
-            "paddle+layout" | "paddle-layout" | "paddle-mobile+layout" | "paddle-mobile-layout" => {
-                Some(Pipeline::PaddleLayout)
+            "paddle" | "paddle-mobile" | "paddle-v6-medium" => Some(Pipeline::Paddle),
+            "paddle+layout"
+            | "paddle-layout"
+            | "paddle-mobile+layout"
+            | "paddle-mobile-layout"
+            | "paddle-v6-medium+layout"
+            | "paddle-v6-medium-layout" => Some(Pipeline::PaddleLayout),
+            "paddle-v6-small" => Some(Pipeline::PaddleV6Small),
+            "paddle-v6-small+layout" | "paddle-v6-small-layout" => Some(Pipeline::PaddleV6SmallLayout),
+            "paddle-v6-tiny" => Some(Pipeline::PaddleV6Tiny),
+            "paddle-v6-tiny+layout" | "paddle-v6-tiny-layout" => Some(Pipeline::PaddleV6TinyLayout),
+            "paddle-server" | "paddle-v5-server" => Some(Pipeline::PaddleServer),
+            "paddle-server+layout" | "paddle-server-layout" | "paddle-v5-server+layout" | "paddle-v5-server-layout" => {
+                Some(Pipeline::PaddleServerLayout)
             }
-            "paddle-server" => Some(Pipeline::PaddleServer),
-            "paddle-server+layout" | "paddle-server-layout" => Some(Pipeline::PaddleServerLayout),
             "tesseract-autorotate" => Some(Pipeline::TesseractAutoRotate),
             "paddle-norotate" => Some(Pipeline::PaddleNoRotate),
             "docling" => Some(Pipeline::Docling),
@@ -207,8 +249,10 @@ impl Pipeline {
             Pipeline::TesseractLayout,
             Pipeline::Paddle,
             Pipeline::PaddleLayout,
-            Pipeline::PaddleServer,
-            Pipeline::PaddleServerLayout,
+            Pipeline::PaddleV6Small,
+            Pipeline::PaddleV6SmallLayout,
+            Pipeline::PaddleV6Tiny,
+            Pipeline::PaddleV6TinyLayout,
             Pipeline::PdfOxide,
             Pipeline::PdfOxideLayout,
             Pipeline::CandleGlmOcr,
@@ -316,6 +360,30 @@ fn compute_extraction_timeout_secs(path: &Path, file_type: &str) -> u64 {
     scaled_timeout.ceil() as u64
 }
 
+fn build_paddle_extraction_config(
+    model_version: &str,
+    model_tier: &str,
+    layout: Option<xberg::core::config::layout::LayoutDetectionConfig>,
+    auto_rotate: AutoRotate,
+) -> xberg::ExtractionConfig {
+    xberg::ExtractionConfig {
+        output_format: xberg::core::config::OutputFormat::Markdown,
+        force_ocr: true,
+        ocr: Some(xberg::core::config::OcrConfig {
+            backend: "paddleocr".to_string(),
+            language: vec!["eng".to_string()],
+            auto_rotate: matches!(auto_rotate, AutoRotate::Enabled),
+            paddle_ocr_config: Some(serde_json::json!({
+                "model_version": model_version,
+                "model_tier": model_tier
+            })),
+            ..Default::default()
+        }),
+        layout,
+        ..Default::default()
+    }
+}
+
 /// Build a xberg ExtractionConfig for the given pipeline.
 pub fn build_extraction_config(pipeline: Pipeline) -> xberg::ExtractionConfig {
     use xberg::core::config::{OutputFormat, layout::LayoutDetectionConfig};
@@ -357,50 +425,34 @@ pub fn build_extraction_config(pipeline: Pipeline) -> xberg::ExtractionConfig {
             layout: Some(LayoutDetectionConfig::default()),
             ..base
         },
-        Pipeline::Paddle => xberg::ExtractionConfig {
-            force_ocr: true,
-            ocr: Some(xberg::core::config::OcrConfig {
-                backend: "paddleocr".to_string(),
-                language: vec!["eng".to_string()],
-                auto_rotate: true,
-                ..Default::default()
-            }),
-            ..base
-        },
-        Pipeline::PaddleLayout => xberg::ExtractionConfig {
-            force_ocr: true,
-            ocr: Some(xberg::core::config::OcrConfig {
-                backend: "paddleocr".to_string(),
-                language: vec!["eng".to_string()],
-                auto_rotate: true,
-                ..Default::default()
-            }),
-            layout: Some(LayoutDetectionConfig::default()),
-            ..base
-        },
-        Pipeline::PaddleServer => xberg::ExtractionConfig {
-            force_ocr: true,
-            ocr: Some(xberg::core::config::OcrConfig {
-                backend: "paddleocr".to_string(),
-                language: vec!["eng".to_string()],
-                auto_rotate: true,
-                paddle_ocr_config: Some(serde_json::json!({"model_tier": "server"})),
-                ..Default::default()
-            }),
-            ..base
-        },
-        Pipeline::PaddleServerLayout => xberg::ExtractionConfig {
-            force_ocr: true,
-            ocr: Some(xberg::core::config::OcrConfig {
-                backend: "paddleocr".to_string(),
-                language: vec!["eng".to_string()],
-                auto_rotate: true,
-                paddle_ocr_config: Some(serde_json::json!({"model_tier": "server"})),
-                ..Default::default()
-            }),
-            layout: Some(LayoutDetectionConfig::default()),
-            ..base
-        },
+        Pipeline::Paddle => build_paddle_extraction_config(PP_OCR_V6, "medium", None, AutoRotate::Enabled),
+        Pipeline::PaddleLayout => build_paddle_extraction_config(
+            PP_OCR_V6,
+            "medium",
+            Some(LayoutDetectionConfig::default()),
+            AutoRotate::Enabled,
+        ),
+        Pipeline::PaddleV6Small => build_paddle_extraction_config(PP_OCR_V6, "small", None, AutoRotate::Enabled),
+        Pipeline::PaddleV6SmallLayout => build_paddle_extraction_config(
+            PP_OCR_V6,
+            "small",
+            Some(LayoutDetectionConfig::default()),
+            AutoRotate::Enabled,
+        ),
+        Pipeline::PaddleV6Tiny => build_paddle_extraction_config(PP_OCR_V6, "tiny", None, AutoRotate::Enabled),
+        Pipeline::PaddleV6TinyLayout => build_paddle_extraction_config(
+            PP_OCR_V6,
+            "tiny",
+            Some(LayoutDetectionConfig::default()),
+            AutoRotate::Enabled,
+        ),
+        Pipeline::PaddleServer => build_paddle_extraction_config(PP_OCR_V5, "server", None, AutoRotate::Enabled),
+        Pipeline::PaddleServerLayout => build_paddle_extraction_config(
+            PP_OCR_V5,
+            "server",
+            Some(LayoutDetectionConfig::default()),
+            AutoRotate::Enabled,
+        ),
         Pipeline::TesseractAutoRotate => xberg::ExtractionConfig {
             force_ocr: true,
             ocr: Some(xberg::core::config::OcrConfig {
@@ -411,16 +463,7 @@ pub fn build_extraction_config(pipeline: Pipeline) -> xberg::ExtractionConfig {
             }),
             ..base
         },
-        Pipeline::PaddleNoRotate => xberg::ExtractionConfig {
-            force_ocr: true,
-            ocr: Some(xberg::core::config::OcrConfig {
-                backend: "paddleocr".to_string(),
-                language: vec!["eng".to_string()],
-                auto_rotate: false,
-                ..Default::default()
-            }),
-            ..base
-        },
+        Pipeline::PaddleNoRotate => build_paddle_extraction_config(PP_OCR_V6, "medium", None, AutoRotate::Disabled),
         Pipeline::LayoutSlanetAuto => xberg::ExtractionConfig {
             layout: Some(LayoutDetectionConfig {
                 table_model: xberg::core::config::layout::TableModel::SlanetAuto,
@@ -672,6 +715,19 @@ pub fn read_vendored_cached(doc_name: &str, fixtures_path: &Path, vendored_name:
     Ok((md, cached_ms))
 }
 
+fn apply_fixture_ocr_language(config: &mut xberg::ExtractionConfig, doc: &CorpusDocument) {
+    let Some(language) = doc.metadata.get("ocr_language").and_then(serde_json::Value::as_str) else {
+        return;
+    };
+    let languages = crate::adapter::canonicalize_ocr_languages(language);
+    if languages.is_empty() {
+        return;
+    }
+    if let Some(ocr) = config.ocr.as_mut() {
+        ocr.language = languages;
+    }
+}
+
 /// Extract content from a document using the given pipeline.
 /// Returns (content, time_ms).
 pub async fn extract_pipeline(
@@ -697,6 +753,7 @@ pub async fn extract_pipeline(
         _ => {
             let t = Instant::now();
             let mut config = build_extraction_config(pipeline);
+            apply_fixture_ocr_language(&mut config, doc);
             let doc_path = doc.document_path.clone();
             let doc_name = doc.name.clone();
             let pipeline_name = pipeline.name().to_string();
@@ -1232,7 +1289,7 @@ fn validate_guardrails_config(config: &GuardrailsConfig) -> Result<()> {
                 "guardrail document name must not be empty".to_string(),
             ));
         }
-        if !Pipeline::parse(&contract.pipeline).is_some_and(|pipeline| pipeline.name() == contract.pipeline) {
+        if Pipeline::parse(&contract.pipeline).is_none_or(|pipeline| pipeline.name() != contract.pipeline) {
             return Err(crate::Error::Config(format!(
                 "unknown guardrail pipeline '{}'",
                 contract.pipeline
@@ -1724,6 +1781,93 @@ mod tests {
         }
     }
 
+    #[test]
+    fn paddle_v6_presets_pin_model_tier_and_layout() {
+        let presets = [
+            (Pipeline::Paddle, "medium", false),
+            (Pipeline::PaddleLayout, "medium", true),
+            (Pipeline::PaddleV6Small, "small", false),
+            (Pipeline::PaddleV6SmallLayout, "small", true),
+            (Pipeline::PaddleV6Tiny, "tiny", false),
+            (Pipeline::PaddleV6TinyLayout, "tiny", true),
+        ];
+
+        for (pipeline, expected_tier, expected_layout) in presets {
+            let config = build_extraction_config(pipeline);
+            let ocr = config.ocr.as_ref().expect("Paddle preset must configure OCR");
+            let paddle = ocr
+                .paddle_ocr_config
+                .as_ref()
+                .expect("Paddle preset must pin model identity");
+
+            assert_eq!(ocr.backend, "paddleocr", "unexpected backend for {}", pipeline.name());
+            assert_eq!(
+                paddle["model_version"],
+                PP_OCR_V6,
+                "unexpected version for {}",
+                pipeline.name()
+            );
+            assert_eq!(
+                paddle["model_tier"],
+                expected_tier,
+                "unexpected tier for {}",
+                pipeline.name()
+            );
+            assert_eq!(
+                config.layout.is_some(),
+                expected_layout,
+                "unexpected layout for {}",
+                pipeline.name()
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_paddle_server_presets_pin_v5_server_models() {
+        for pipeline in [Pipeline::PaddleServer, Pipeline::PaddleServerLayout] {
+            let config = build_extraction_config(pipeline);
+            let paddle = config
+                .ocr
+                .as_ref()
+                .and_then(|ocr| ocr.paddle_ocr_config.as_ref())
+                .expect("legacy server preset must pin model identity");
+
+            assert_eq!(paddle["model_version"], PP_OCR_V5);
+            assert_eq!(paddle["model_tier"], "server");
+        }
+    }
+
+    #[test]
+    fn fixture_language_overrides_only_configured_ocr_language() {
+        let mut metadata = HashMap::new();
+        metadata.insert("ocr_language".to_string(), serde_json::json!(" deu + eng "));
+        let doc = CorpusDocument {
+            name: "multilingual".to_string(),
+            document_path: std::path::PathBuf::new(),
+            file_type: "png".to_string(),
+            file_size: 0,
+            ground_truth_text: None,
+            ground_truth_markdown: None,
+            metadata,
+            fixture_path: std::path::PathBuf::new(),
+        };
+        let mut config = build_extraction_config(Pipeline::PaddleV6SmallLayout);
+
+        apply_fixture_ocr_language(&mut config, &doc);
+
+        let ocr = config.ocr.expect("Paddle preset must configure OCR");
+        assert_eq!(ocr.language, ["deu", "eng"]);
+        assert_eq!(ocr.backend, "paddleocr");
+        assert_eq!(ocr.paddle_ocr_config.expect("model identity")["model_tier"], "small");
+
+        let mut baseline = build_extraction_config(Pipeline::Baseline);
+        apply_fixture_ocr_language(&mut baseline, &doc);
+        assert!(
+            baseline.ocr.is_none(),
+            "fixture metadata must not enable OCR for baseline"
+        );
+    }
+
     fn create_vendored_fixture(root: &Path, content: &str) -> (std::path::PathBuf, std::path::PathBuf) {
         let fixtures_dir = root.join("fixtures");
         let fixture_path = fixtures_dir.join("example.json");
@@ -2073,7 +2217,7 @@ mod tests {
                 "threshold_factor": 0.9,
                 "contracts": [
                     {"doc": "valid", "pipeline": "baseline", "min_tf1": 0.5},
-                    {"doc": "typo", "pipeline": "basline", "min_tf1": 0.5}
+                    {"doc": "invalid", "pipeline": "unknown-pipeline", "min_tf1": 0.5}
                 ]
             }"#,
         )
@@ -2081,7 +2225,10 @@ mod tests {
 
         let error = load_guardrails(&path).unwrap_err().to_string();
 
-        assert!(error.contains("unknown guardrail pipeline 'basline'"), "{error}");
+        assert!(
+            error.contains("unknown guardrail pipeline 'unknown-pipeline'"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -2272,10 +2419,14 @@ mod tests {
             "layout",
             "tesseract",
             "tesseract+layout",
-            "paddle",
-            "paddle+layout",
-            "paddle-server",
-            "paddle-server+layout",
+            "paddle-v6-medium",
+            "paddle-v6-medium+layout",
+            "paddle-v6-small",
+            "paddle-v6-small+layout",
+            "paddle-v6-tiny",
+            "paddle-v6-tiny+layout",
+            "paddle-v5-server",
+            "paddle-v5-server+layout",
             "tesseract-autorotate",
             "paddle-norotate",
             "docling",
@@ -2300,5 +2451,41 @@ mod tests {
                 Pipeline::parse(roundtrip).unwrap_or_else(|| panic!("Failed to reparse pipeline '{roundtrip}'"));
             assert_eq!(pipeline, reparsed, "Roundtrip failed for '{name}' -> '{roundtrip}'");
         }
+    }
+
+    #[test]
+    fn legacy_paddle_names_parse_to_canonical_presets() {
+        let aliases = [
+            ("paddle", Pipeline::Paddle),
+            ("paddle-mobile", Pipeline::Paddle),
+            ("paddle+layout", Pipeline::PaddleLayout),
+            ("paddle-layout", Pipeline::PaddleLayout),
+            ("paddle-mobile+layout", Pipeline::PaddleLayout),
+            ("paddle-server", Pipeline::PaddleServer),
+            ("paddle-server+layout", Pipeline::PaddleServerLayout),
+        ];
+
+        for (alias, expected) in aliases {
+            assert_eq!(
+                Pipeline::parse(alias),
+                Some(expected),
+                "failed to preserve alias '{alias}'"
+            );
+        }
+        assert_eq!(Pipeline::parse("paddle").expect("alias").name(), "paddle-v6-medium");
+        assert_eq!(
+            Pipeline::parse("paddle+layout").expect("alias").name(),
+            "paddle-v6-medium+layout"
+        );
+    }
+
+    #[test]
+    fn paddle_v6_serialization_uses_canonical_names() {
+        let serialized = serde_json::to_string(&Pipeline::PaddleLayout).expect("serialize pipeline");
+        assert_eq!(serialized, r#""paddle-v6-medium+layout""#);
+        assert_eq!(
+            serde_json::from_str::<Pipeline>(r#""paddle-layout""#).expect("deserialize legacy name"),
+            Pipeline::PaddleLayout
+        );
     }
 }

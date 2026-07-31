@@ -493,7 +493,8 @@ enum Commands {
         #[arg(long, conflicts_with_all = ["doc", "group"])]
         cohort: Option<PathBuf>,
 
-        /// Pipeline paths to run (comma-separated: baseline,layout,tesseract,tesseract+layout,paddle,paddle+layout)
+        /// Pipeline paths to run (comma-separated; use canonical names such as
+        /// baseline, layout, paddle-v6-medium, or paddle-v6-medium+layout). ~keep
         #[arg(long, value_delimiter = ',')]
         paths: Option<Vec<String>>,
 

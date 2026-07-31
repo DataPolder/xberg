@@ -162,9 +162,11 @@ The `compare` and `pipeline-benchmark` commands support these extraction paths:
 | `layout`           | Native PDF with layout detection               |
 | `tesseract`        | Tesseract OCR with force_ocr                   |
 | `tesseract+layout` | Tesseract OCR with layout detection            |
-| `paddle`           | PaddleOCR mobile tier with force_ocr           |
-| `paddle+layout`    | PaddleOCR mobile tier with layout detection    |
-| `paddle-server`    | PaddleOCR server tier                          |
+| `paddle-v6-medium` | PP-OCRv6 medium tier with force_ocr            |
+| `paddle-v6-medium+layout` | PP-OCRv6 medium tier with layout detection |
+| `paddle-v6-small[+layout]` | PP-OCRv6 small tier, optionally with layout |
+| `paddle-v6-tiny[+layout]` | PP-OCRv6 tiny tier, optionally with layout |
+| `paddle-v5-server[+layout]` | Explicit legacy PP-OCRv5 server tier       |
 | `docling`          | Vendored Docling reference extraction          |
 | `paddleocr-python` | Vendored PaddleOCR Python extraction           |
 | `rapidocr`         | Vendored RapidOCR extraction                   |

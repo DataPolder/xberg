@@ -260,6 +260,7 @@ mod tests {
             ("native-email-fast", "native-email-fast-v1", 6, false),
             ("native-data-fast", "native-data-fast-v1", 6, false),
             ("ocr-images-fast", "ocr-images-fast-v1", 6, true),
+            ("paddle-layout-quality-b4", "paddle-layout-quality-b4-v1", 12, true),
         ];
         for (stem, name, count, ocr_enabled) in cohorts {
             let manifest_path = crate_root.join(format!("cohorts/{stem}.json"));
