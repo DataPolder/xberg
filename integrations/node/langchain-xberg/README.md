@@ -11,7 +11,7 @@
 
 A [LangChain.js](https://js.langchain.com) document loader for [Xberg](https://github.com/xberg-io/xberg).
 Point it at a file, a directory, or raw bytes and it returns LangChain `Document`s with the extracted
-text, tables, and rich metadata from 90+ document formats — with optional OCR for scans and images.
+text, tables, and rich metadata from 98+ document formats — with optional OCR for scans and images.
 
 Extraction runs locally in-process through the `@xberg-io/xberg` native binding. No API key, no cloud
 call, no data leaves your machine.

@@ -51,7 +51,7 @@ sudo apt install tesseract-ocr-*   # Debian/Ubuntu
 
 | Skill | Trigger |
 |-------|---------|
-| **xberg** | Extract text, tables, metadata, and images from 91+ document formats (PDF, Office, images, HTML, email, archives, academic) using Xberg. Use when writing code that calls Xberg APIs in Python, Node.js/TypeScript, Rust, or CLI. Covers installation, extraction (sync/async), configuration (OCR, chunking, output format), batch processing, error handling, and plugins. |
+| **xberg** | Extract text, tables, metadata, and images from 98+ document formats (PDF, Office, images, HTML, email, archives, academic) using Xberg. Use when writing code that calls Xberg APIs in Python, Node.js/TypeScript, Rust, or CLI. Covers installation, extraction (sync/async), configuration (OCR, chunking, output format), batch processing, error handling, and plugins. |
 | **extracting-with-ocr** | Use when extracting text from scanned PDFs, photographed pages, or images that have no embedded text layer. Covers OCR backends, language packs, force-OCR, and performance tuning. |
 | **extracting-tables** | Use when extracting tabular data from PDFs, spreadsheets, or images. Covers layout-aware table detection, table model selection, output formats (markdown / JSON cells), and known limits. |
 | **chunking** | Use when splitting extracted text into chunks for LLM context windows or RAG ingestion. Covers chunk size, overlap, markdown/yaml/semantic chunkers, tokenizer-based sizing, and the standalone `chunk` command. |
@@ -65,7 +65,7 @@ sudo apt install tesseract-ocr-*   # Debian/Ubuntu
 |-----------|---------|
 | **CLI Reference** | All commands, flags, config precedence, exit codes |
 | **Configuration Reference** | TOML/YAML/JSON formats, auto-discovery, env vars, full schema |
-| **Supported Formats** | All 91+ formats with file extensions and MIME types |
+| **Supported Formats** | All 98+ formats with file extensions and MIME types |
 | **Python API Reference** | All functions, config classes, plugin protocols, exact signatures |
 | **Node.js API Reference** | All functions, TypeScript interfaces, worker pool APIs |
 | **Rust API Reference** | All functions with feature gates, structs, Cargo.toml examples |

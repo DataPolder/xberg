@@ -2,7 +2,7 @@
 
 Gem::Specification.new do |spec|
   spec.name = "xberg"
-  spec.version = "1.0.5"
+  spec.version = "1.0.6"
   spec.authors       = ["Na'aman Hirschfeld <naaman@xberg.io>"]
   spec.summary       = "High-performance document intelligence library"
   spec.description   = "High-performance document intelligence library"

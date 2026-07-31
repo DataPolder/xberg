@@ -80,49 +80,44 @@
   </a>
 </div>
 
-Extract clean text, tables, and structured data from documents and code — no format detection, no OCR setup, no stitched-together libraries. **One engine, 15 language bindings, runs anywhere.**
-
-> **Xberg is the next iteration of [Kreuzberg](https://github.com/kreuzberg-dev/kreuzberg-v4-lts).** Same document-intelligence engine, rebuilt and rebranded under a fresh v1 line.
-
 <div align="center">
 
-**Feed documents → get clean text, tables, metadata, transcripts, code intelligence · Run it library, CLI, REST API, or MCP server · No GPU needed · Stream multi-GB files · Cache results.**
+**The fast, precise document-intelligence engine — for every language.**
 
-Documents · Images · Spreadsheets · Email · Archives · Code · Audio · Video
+Point Xberg at anything — a PDF, a scanned image, a spreadsheet, an audio file, a URL, a whole archive, or a source tree — and get back clean text, tables, metadata, and structured data. One engine handles format detection, reading, OCR, and extraction, so you never stitch a pipeline together from a dozen libraries.
 
-[![crates.io](https://img.shields.io/crates/v/xberg?style=flat-square)](https://crates.io/crates/xberg)
-[![npm](https://img.shields.io/npm/v/@xberg-io/xberg?style=flat-square)](https://www.npmjs.com/package/@xberg-io/xberg)
-[![PyPI](https://img.shields.io/pypi/v/xberg?style=flat-square)](https://pypi.org/project/xberg/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
+**98+ formats** · **306 code languages** · **15 language bindings** · **6 output formats** · OCR · transcription · embeddings
 
-[Quick start](#installation) · [What you get](#what-you-get) · [Capabilities](#capabilities) · [CLI](#cli-reference) · [Docs](https://docs.xberg.io)
+The fastest, most precise open-source document and PDF-to-Markdown engine — [see the benchmarks](https://xberg.io/benchmarks).
+
+[Install](#installation) · [What you get](#what-you-get) · [Capabilities](#capabilities) · [CLI](#cli-reference) · [Docs](https://docs.xberg.io)
 
 </div>
 
----
-
-<p align="center"><em>Feed any document—get structured text. Extract, batch, stream, or crawl.</em></p>
+> **Xberg is the next iteration of [Kreuzberg](https://github.com/kreuzberg-dev/kreuzberg-v4-lts).** Same document-intelligence engine, rebuilt and rebranded under a fresh v1 line.
 
 ---
 
 ## What you get
 
-Point Xberg at anything — a PDF, a spreadsheet, a scanned image, an audio file, a source tree — and get back clean, structured content you can use right away. One core does the format detection, reading, and extraction, so you don't assemble a pipeline yourself. Call it from Rust, Python, Node.js, Go, Java, C#, Ruby, PHP, Elixir, Dart, Swift, Zig, WASM, Kotlin, or C FFI, and run it as a library, CLI tool, REST API, or MCP server.
+Point Xberg at anything — a PDF, a spreadsheet, a scanned image, an audio file, a URL, an archive, a source tree — and get back clean, structured content you can use right away. One core does the format detection, reading, and extraction, so you don't assemble a pipeline yourself. Call it from Rust, Python, Node.js, Go, Java, C#, Ruby, PHP, Elixir, Dart, Swift, Zig, WASM, Kotlin, or C FFI, and run it as a library, CLI tool, REST API, or MCP server.
 
-| What it does | How |
+| Capability | What you get |
 |---|---|
-| **Extract from 98 formats** | PDFs, Office, images, HTML, email, archives, scientific publications, and code — intelligent MIME detection, streaming for large files. |
-| **6 output formats** | Plain text, Markdown, Djot, HTML, JSON tree structure, or Structured (JSON with OCR metadata and bounding boxes). |
+| **98+ document formats** | PDFs, Office, images, HTML, email, e-books, scientific publications, structured data — intelligent MIME detection, streaming for multi-GB files. |
+| **URLs & the web** | Point Xberg at an `http(s)` URL — it fetches and extracts a single document, or crawls and follows links (Auto / Document / Crawl modes via the [crawlberg](https://github.com/xberg-io/crawlberg) engine). *Requires the `url-ingestion` feature.* |
+| **Audio & video transcription** | Speech-to-text from MP3, M4A, WAV, WebM, and MP4 tracks via Whisper ONNX (tiny → large-v3). *Requires the `transcription` feature.* |
+| **Archives, traversed** | List and **recursively** extract nested `.zip`, `.tar`, `.gz`, `.7z` — documents inside documents — guarded by zip-bomb, compression-ratio, and nesting-depth limits. |
+| **OCR on demand** | Tesseract, PaddleOCR, Candle, or VLM backends — fallback chains, confidence scores, language auto-detection, extensible via plugins. |
+| **Layout & tables** | ML layout models (PP-DocLayout-V3, RT-DETR) and table structure (TATR, SLANet) reconstruct reading order and cell grids for clean Markdown. |
 | **Code intelligence** | Functions, classes, imports, symbols, docstrings from 306 programming languages. Syntax-aware chunking for RAG pipelines. |
-| **Crawl & recurse** | Follow URLs, extract documents from within documents (nested archives, embedded PDFs). Auto/Document/Crawl modes. |
-| **OCR on demand** | Tesseract, PaddleOCR, Candle, or VLM backends — fallback chains, extensible via plugins. Confidence scores. Language auto-detection. |
-| **Transcription** | Whisper ONNX for audio/video tracks (MP3, M4A, WAV, WebM, MP4). |
-| **Embeddings & search** | Local (ONNX models) or provider-hosted (OpenAI, Anthropic, Google, 143 providers via liter-llm). Reranking. |
-| **Structured outputs** | LLM-powered extraction — local (Ollama, LM Studio, vLLM) or remote (OpenAI, Anthropic, Google). |
-| **Enrichment** | NER, redaction, summarization, translation, QR code detection, page classification, keyword extraction (YAKE/RAKE), language detection, layout detection, table extraction, token reduction (TOON). |
-| **Batch & parallel** | Process 100s of documents in parallel. Per-file timeouts. Configurable batch concurrency (`max_concurrent_extractions`). |
-| **Caching** | Content-hash cache keys — skip re-extraction when the file and config are unchanged. |
-| **Deployment** | Library, CLI (12 commands), REST API (`xberg serve`), MCP server (9 tools, 3 prompts, 4 resources), Docker. |
+| **Embeddings & search** | Local (ONNX) or provider-hosted embeddings (143 providers via liter-llm), sparse and late-interaction, cross-encoder reranking. |
+| **Enrichment** | NER, keyword extraction (YAKE/RAKE), summarization, translation, redaction, page classification, QR detection, language detection, token reduction (TOON). |
+| **Structured extraction** | Schema-driven JSON straight from any document via local (Ollama, LM Studio, vLLM) or hosted LLMs — no prompt engineering. |
+| **6 output formats** | Plain text, Markdown, Djot, HTML, JSON tree, or Structured (JSON with OCR metadata and bounding boxes). |
+| **Runs anywhere** | Library, CLI (12 commands), REST API (`xberg serve`), MCP server, Docker, Helm — no GPU needed. Content-hash caching, parallel batch, per-file timeouts. |
+
+> Capabilities marked *requires a feature* are Cargo feature flags on the core crate (`url-ingestion`, `transcription`, `reranker`, layout/ORT). Prebuilt language packages and the Docker image bundle the common set; a from-source build enables only what you select.
 
 ---
 
@@ -440,9 +435,9 @@ Common use cases — see [Quick start guide](https://docs.xberg.io/getting-start
 <details>
 <summary><strong>Full feature list</strong></summary>
 
-### Supported File Formats (98)
+### Supported File Formats (98+)
 
-98 file formats across 8 major categories with intelligent format detection and comprehensive metadata extraction.
+98+ file formats across 8 major categories with intelligent format detection and comprehensive metadata extraction.
 
 #### Office Documents
 
@@ -593,7 +588,7 @@ Schema validation. Temperature, top-p, frequency penalty tuning.
 | `extract` | — | Extract text from a single document (path, URL, or stdin) |
 | `batch` | — | Extract from multiple documents in parallel |
 | `detect` | — | Identify MIME type of a file |
-| `formats` | — | List all 98 supported formats and MIME types |
+| `formats` | — | List all supported formats and MIME types |
 | `version` | — | Show Xberg version |
 | `cache` | `stats`, `clear`, `manifest`, `warm` | Manage extraction cache and models |
 | `serve` | — | Start REST API server (default: <http://127.0.0.1:8000>) |

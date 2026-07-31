@@ -1,7 +1,7 @@
 ---
 title: Xberg
 description: >-
-  Full content intelligence engine: extract text, tables, entities, and embeddings from 96+
+  Full content intelligence engine: extract text, tables, entities, and embeddings from 98+
   formats with OCR, transcription, code intelligence, and LLM integration. Native bindings for
   15 languages.
 template: splash
@@ -37,18 +37,30 @@ import { Card, CardGrid, LinkCard, Tabs, TabItem } from "@astrojs/starlight/comp
 
 <CardGrid>
     <Card title="One engine for everything" icon="random">
-        Feed documents, URLs, code, images, and audio into one API and get clean Markdown, entities, code
-        structure, and embeddings back — no stitching libraries together.
+        Feed documents, URLs, code, images, audio, and archives into one API and get clean Markdown,
+        entities, code structure, and embeddings back — no stitching libraries together.
     </Card>
-    <Card title="Extract from any document type" icon="document">
-        PDFs, Office files, images, email, archives, and academic papers all come out as clean Markdown or
+    <Card title="Fastest, most precise — open source" icon="rocket">
+        Native-Rust extraction and PDF-to-Markdown, benchmarked against Docling, MinerU, Unstructured,
+        and more on both quality and speed. [See the benchmarks](https://xberg.io/benchmarks).
+    </Card>
+    <Card title="Any document type — 98+ formats" icon="document">
+        PDFs, Office files, images, email, e-books, and academic papers all come out as clean Markdown or
         one of five other formats, with no per-format setup.
     </Card>
     <Card title="Text from images and audio, automatically" icon="magnifier">
-        Scanned pages and spoken audio become searchable text with confidence scores and language
-        detection, falling back across OCR and transcription backends when one struggles.
+        Scanned pages become searchable text via OCR, and audio and video tracks are transcribed with
+        Whisper — both with confidence scores, language detection, and backend fallback.
     </Card>
-    <Card title="Get structured data without custom prompting" icon="laptop">
+    <Card title="Fetch and crawl the web" icon="external">
+        Point Xberg at an `http(s)` URL and it fetches and extracts the document, or crawls and follows
+        links — Auto, Document, and Crawl modes via the crawlberg engine.
+    </Card>
+    <Card title="Traverse nested archives" icon="puzzle">
+        Recursively extract documents from inside `.zip`, `.tar`, `.gz`, and `.7z` archives, guarded by
+        zip-bomb, compression-ratio, and nesting-depth limits.
+    </Card>
+    <Card title="Structured data without custom prompting" icon="laptop">
         Pull entities and JSON that matches your schema straight from any document, using a local or
         hosted LLM — no prompt engineering.
     </Card>

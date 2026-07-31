@@ -100,20 +100,20 @@ Add to your `pom.xml`:
 <dependency>
     <groupId>io.xberg</groupId>
     <artifactId>xberg</artifactId>
-    <version>1.0.5</version>
+    <version>1.0.6</version>
 </dependency>
 ```
 
 Kotlin DSL (`build.gradle.kts`):
 
 ```kotlin
-implementation("io.xberg:xberg:1.0.5")
+implementation("io.xberg:xberg:1.0.6")
 ```
 
 Groovy DSL (`build.gradle`):
 
 ```groovy
-implementation 'io.xberg:xberg:1.0.5'
+implementation 'io.xberg:xberg:1.0.6'
 ```
 
 ### System Requirements
@@ -271,9 +271,9 @@ System.out.println(output.results().get(0).content());
 
 ## Features
 
-### Supported File Formats (98)
+### Supported File Formats (98+)
 
-98 file formats across 8 major categories with intelligent format detection and comprehensive metadata extraction.
+98+ file formats across 8 major categories with intelligent format detection and comprehensive metadata extraction.
 
 #### Office Documents
 
@@ -316,7 +316,7 @@ System.out.println(output.results().get(0).content());
 | Category | Formats | Features |
 |----------|---------|----------|
 | **Email** | `.eml`, `.msg`, `.pst` | Headers, body (HTML/plain), attachments, threading |
-| **Archives** | `.zip`, `.tar`, `.tgz`, `.gz`, `.7z` | File listing, nested archives, metadata |
+| **Archives** | `.zip`, `.tar`, `.tgz`, `.gz`, `.7z` | Recursive extraction of nested archives, file listing, metadata, zip-bomb protection |
 
 #### Academic & Scientific
 

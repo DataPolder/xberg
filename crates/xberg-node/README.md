@@ -279,9 +279,9 @@ This binding uses NAPI-RS to provide native Node.js bindings with:
 
 ## Features
 
-### Supported File Formats (98)
+### Supported File Formats (98+)
 
-98 file formats across 8 major categories with intelligent format detection and comprehensive metadata extraction.
+98+ file formats across 8 major categories with intelligent format detection and comprehensive metadata extraction.
 
 #### Office Documents
 
@@ -324,7 +324,7 @@ This binding uses NAPI-RS to provide native Node.js bindings with:
 | Category | Formats | Features |
 |----------|---------|----------|
 | **Email** | `.eml`, `.msg`, `.pst` | Headers, body (HTML/plain), attachments, threading |
-| **Archives** | `.zip`, `.tar`, `.tgz`, `.gz`, `.7z` | File listing, nested archives, metadata |
+| **Archives** | `.zip`, `.tar`, `.tgz`, `.gz`, `.7z` | Recursive extraction of nested archives, file listing, metadata, zip-bomb protection |
 
 #### Academic & Scientific
 

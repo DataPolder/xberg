@@ -1,4 +1,4 @@
-"""XbergReader — LlamaIndex reader for 91+ document formats.
+"""XbergReader — LlamaIndex reader for 98+ document formats.
 
 Wraps xberg's async, Rust-core extraction engine (``extract`` /
 ``extract_batch``) with true async support, maximalist metadata, and
@@ -64,7 +64,7 @@ _DocSource = tuple[ExtractedDocument, _Source]
 
 
 class XbergReader(BasePydanticReader):
-    """Reader for 91+ document formats powered by xberg's Rust extraction engine.
+    """Reader for 98+ document formats powered by xberg's Rust extraction engine.
 
     Supports file paths, raw bytes, batch input, per-page splitting, and true
     async via xberg's native async ``extract`` / ``extract_batch`` functions.

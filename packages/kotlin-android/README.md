@@ -97,13 +97,13 @@ Extract text, tables, images, metadata, and code intelligence from 98 file forma
 Kotlin DSL (`build.gradle.kts`):
 
 ```kotlin
-implementation("io.xberg:xberg-android:1.0.5")
+implementation("io.xberg:xberg-android:1.0.6")
 ```
 
 Groovy DSL (`build.gradle`):
 
 ```groovy
-implementation 'io.xberg:xberg-android:1.0.5'
+implementation 'io.xberg:xberg-android:1.0.6'
 ```
 
 Add to your `pom.xml`:
@@ -112,7 +112,7 @@ Add to your `pom.xml`:
 <dependency>
     <groupId>io.xberg</groupId>
     <artifactId>xberg-android</artifactId>
-    <version>1.0.5</version>
+    <version>1.0.6</version>
 </dependency>
 ```
 
@@ -161,9 +161,9 @@ For non-blocking document processing:
 
 ## Features
 
-### Supported File Formats (98)
+### Supported File Formats (98+)
 
-98 file formats across 8 major categories with intelligent format detection and comprehensive metadata extraction.
+98+ file formats across 8 major categories with intelligent format detection and comprehensive metadata extraction.
 
 #### Office Documents
 
@@ -206,7 +206,7 @@ For non-blocking document processing:
 | Category | Formats | Features |
 |----------|---------|----------|
 | **Email** | `.eml`, `.msg`, `.pst` | Headers, body (HTML/plain), attachments, threading |
-| **Archives** | `.zip`, `.tar`, `.tgz`, `.gz`, `.7z` | File listing, nested archives, metadata |
+| **Archives** | `.zip`, `.tar`, `.tgz`, `.gz`, `.7z` | Recursive extraction of nested archives, file listing, metadata, zip-bomb protection |
 
 #### Academic & Scientific
 

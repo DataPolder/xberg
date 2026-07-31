@@ -6,13 +6,13 @@ import { Tabs, TabItem } from "@astrojs/starlight/components";
 
 A map of what Xberg can do. Each section links to the guide or reference page with configuration details and code examples.
 
-![Xberg features overview -- 96 input formats flow through extraction, OCR, and processing to produce text, tables, chunks, and metadata](../../assets/feature-overview.png)
+![Xberg features overview -- 98+ input formats flow through extraction, OCR, and processing to produce text, tables, chunks, and metadata](../../assets/feature-overview.png)
 
 ---
 
 ## Format Support
 
-98 file formats handled by native Rust extractors — no LibreOffice or other external tools required.
+98+ file formats handled by native Rust extractors — no LibreOffice or other external tools required.
 
 <Tabs syncKey="lang">
 <TabItem label="Documents">
@@ -136,6 +136,8 @@ Enable the `transcription` feature and set a `transcription` config block to ext
 <span class="format-chip">GZIP <code>.gz</code></span>
 <span class="format-chip">7-Zip <code>.7z</code></span>
 </div>
+
+Archives are traversed recursively — Xberg extracts every document inside, including archives nested within archives, and extracts each with the appropriate format extractor. Traversal is bounded by configurable security limits (archive size, compression ratio, file count, and nesting depth) with zip-bomb detection. See [Extraction Basics](/guides/extraction/) and the [security limits reference](/reference/configuration/).
 
 </TabItem>
 <TabItem label="Academic">

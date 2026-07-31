@@ -154,7 +154,7 @@ def test_extract_tool_name() -> None:
 def test_extract_tool_description() -> None:
     """Tool has a description mentioning format support."""
     tool = XbergExtractTool()
-    assert "98 file formats" in tool.description
+    assert "98+ file formats" in tool.description
 
 
 def test_extract_tool_args_schema() -> None:
