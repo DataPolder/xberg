@@ -5,6 +5,7 @@ use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::corpus::{CorpusDocument, corpus_from_fixture_manager};
 use crate::fixture::FixtureManager;
 use crate::{Error, Result};
 
@@ -56,6 +57,12 @@ impl CohortManifest {
             })?;
         }
         Ok(manager)
+    }
+
+    /// Load the manifest's fixtures as corpus documents in exactly the declared order.
+    pub fn load_corpus(&self, fixture_root: &Path, manifest_path: &Path) -> Result<Vec<CorpusDocument>> {
+        let manager = self.load_fixtures(fixture_root, manifest_path)?;
+        Ok(corpus_from_fixture_manager(&manager))
     }
 
     fn validate(&self, path: &Path) -> Result<()> {
@@ -176,6 +183,15 @@ mod tests {
         assert_eq!(manifest.batch_size, BATCH_SIZE);
         assert_eq!(manifest.fixtures, expected_fixtures);
         assert_eq!(fixtures.len(), BATCH_SIZE);
+        let corpus = manifest
+            .load_corpus(&crate_root.join("fixtures"), &manifest_path)
+            .unwrap();
+        let corpus_fixtures: Vec<_> = corpus
+            .iter()
+            .map(|doc| doc.fixture_path.strip_prefix(crate_root.join("fixtures")).unwrap())
+            .collect();
+        let expected_corpus_fixtures: Vec<_> = expected_fixtures.iter().map(PathBuf::as_path).collect();
+        assert_eq!(corpus_fixtures, expected_corpus_fixtures);
         for (fixture_path, fixture) in fixtures.fixtures() {
             assert_eq!(fixture.file_type, "pdf");
             assert!(!fixture.requires_ocr());

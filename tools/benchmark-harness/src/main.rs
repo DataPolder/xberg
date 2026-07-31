@@ -488,6 +488,11 @@ enum Commands {
         #[arg(short, long)]
         fixtures: PathBuf,
 
+        /// Exact ordered cohort manifest. Relative paths are resolved from the current
+        /// directory when present, otherwise from the fixture directory. ~keep
+        #[arg(long, conflicts_with_all = ["doc", "group"])]
+        cohort: Option<PathBuf>,
+
         /// Pipeline paths to run (comma-separated: baseline,layout,tesseract,tesseract+layout,paddle,paddle+layout)
         #[arg(long, value_delimiter = ',')]
         paths: Option<Vec<String>>,
@@ -1192,6 +1197,7 @@ async fn main() -> Result<()> {
 
         Commands::PipelineBenchmark {
             fixtures,
+            cohort,
             paths,
             doc,
             group,
@@ -1217,7 +1223,30 @@ async fn main() -> Result<()> {
             let (doc_filter, exact_doc_filter) = {
                 let patterns: Vec<String> = doc.unwrap_or_default();
                 let mut exact_names = Vec::new();
-                if let Some(ref group_name) = group {
+                if let Some(manifest_path) = cohort {
+                    let resolved_manifest_path = if manifest_path.is_absolute() || manifest_path.exists() {
+                        manifest_path
+                    } else {
+                        fixtures.join(manifest_path)
+                    };
+                    let manifest = benchmark_harness::CohortManifest::from_file(&resolved_manifest_path)?;
+                    let docs = manifest.load_corpus(&fixtures, &resolved_manifest_path)?;
+                    exact_names = docs
+                        .iter()
+                        .map(|doc| {
+                            doc.fixture_path
+                                .strip_prefix(&fixtures)
+                                .unwrap_or(&doc.fixture_path)
+                                .to_string_lossy()
+                                .into_owned()
+                        })
+                        .collect();
+                    tracing::info!(
+                        cohort = manifest.name,
+                        matched_document_count = exact_names.len(),
+                        "benchmark cohort resolved"
+                    );
+                } else if let Some(ref group_name) = group {
                     use benchmark_harness::groups::{find_group, group_names, resolve_group_docs};
                     let g = find_group(group_name).ok_or_else(|| {
                         benchmark_harness::Error::Config(format!(
@@ -1735,6 +1764,39 @@ mod tests {
             error.to_string(),
             "Configuration error: unknown pipeline 'unknown' supplied to pipeline-benchmark --paths"
         );
+    }
+
+    #[test]
+    fn pipeline_benchmark_accepts_exact_cohort_and_rejects_ambiguous_filters() {
+        let cli = Cli::try_parse_from([
+            "benchmark-harness",
+            "pipeline-benchmark",
+            "--fixtures",
+            "fixtures",
+            "--cohort",
+            "cohorts/ocr-images-fast.json",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::PipelineBenchmark { cohort: Some(_), .. }
+        ));
+
+        for conflicting_filter in ["--doc", "--group"] {
+            assert!(
+                Cli::try_parse_from([
+                    "benchmark-harness",
+                    "pipeline-benchmark",
+                    "--fixtures",
+                    "fixtures",
+                    "--cohort",
+                    "cohort.json",
+                    conflicting_filter,
+                    "sample",
+                ])
+                .is_err()
+            );
+        }
     }
 
     #[test]

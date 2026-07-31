@@ -25,7 +25,7 @@ pub struct PipelineBenchmarkConfig {
     pub fixtures_dir: PathBuf,
     pub paths: Vec<Pipeline>,
     pub doc_filter: Vec<String>,
-    /// Exact fixture stems resolved from a maintained benchmark group.
+    /// Exact fixture stems or fixture-root-relative JSON paths from a benchmark group/cohort. ~keep
     pub exact_doc_filter: Vec<String>,
     pub dump_outputs: bool,
     pub json_output: Option<PathBuf>,
