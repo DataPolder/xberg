@@ -917,11 +917,10 @@ fn is_framework_fault_failure(result: &BenchmarkResult) -> bool {
 
 /// Calculate percentiles for a group of results
 ///
-/// Performance metrics use only successful samples. Quality percentiles additionally include a 0.0
-/// sample for every framework-fault failure (see [`is_framework_fault_failure`]) so a framework
-/// that breaks on documents it claims to support is penalized rather than flattered. The success
-/// rate's denominator is successes + framework-fault failures; harness/config-setup (infrastructure)
-/// failures are excluded from both.
+/// Performance and raw quality percentiles use only successful samples. Quality rankings apply
+/// accountable success coverage separately, avoiding a nonlinear double penalty from both zero
+/// injection and coverage adjustment. The success-rate denominator is successes plus
+/// framework-fault failures; harness/config-setup failures are excluded. ~keep
 fn calculate_percentiles(results: &[&BenchmarkResult]) -> PerformancePercentiles {
     let successful: Vec<&BenchmarkResult> = results.iter().filter(|r| r.success).copied().collect();
     let framework_fault_failures = results.iter().filter(|r| is_framework_fault_failure(r)).count();
@@ -1092,24 +1091,6 @@ fn calculate_percentiles(results: &[&BenchmarkResult]) -> PerformancePercentiles
             .filter_map(|r| r.quality.as_ref().map(|q| q.quality_score))
             .filter(|v| !v.is_nan() && v.is_finite())
             .collect();
-
-        // Penalize framework-fault failures as quality 0, but only when quality was actually
-        // measured for this group (at least one success carried a score). A fully-failed group is
-        // deliberately left as "not measured" (`quality` stays `None`) here: the ranking consumers
-        // already treat an attempted-but-`None`-quality bucket as a 0.0 contribution weighted by
-        // `total_sample_count` (see `build_shared_corpus_quality_ranking` and the PDF comparison),
-        // so it is penalized without us fabricating a `Some` percentile — which would both mask
-        // never-scored (no-ground-truth) buckets as 0.0 and silently drop the bucket from the SF1
-        // ranking (whose `None`-means-failure gate keys off `quality.is_none()`). f1_layout is
-        // intentionally left to measured samples only, since layout is not a scored dimension for
-        // most formats. ~keep
-        if framework_fault_failures > 0 && !quality_scores.is_empty() {
-            for _ in 0..framework_fault_failures {
-                f1_texts.push(0.0);
-                f1_numerics.push(0.0);
-                quality_scores.push(0.0);
-            }
-        }
 
         if !quality_scores.is_empty() {
             f1_texts.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
@@ -2793,10 +2774,9 @@ mod tests {
         result
     }
 
-    /// A framework-fault failure (it was handed a supported document and failed to extract it) must
-    /// penalize the aggregate: it is scored as quality 0 in the percentiles and counts against the
-    /// success rate. Here one success (0.9) plus one FrameworkError failure yields a 50% success
-    /// rate and a quality_score p50 pulled down between 0.0 and 0.9 (R7 midpoint 0.45).
+    /// Raw percentiles describe successful extractions; coverage-adjusted rankings apply the
+    /// framework-fault penalty exactly once. Here one 0.9 success plus one framework failure keeps
+    /// raw p50 at 0.9, has a 50% success rate, and ranks at 0.45.
     #[test]
     fn test_framework_fault_failure_penalizes_quality_and_success_rate() {
         let success = result_with_quality("fw", "pdf", 0.9, true);
@@ -2808,14 +2788,11 @@ mod tests {
 
         assert_eq!(percentiles.success_rate_percent, 50.0);
         assert_eq!(percentiles.framework_errors, 1);
-        let quality = percentiles
-            .quality
-            .expect("quality must be scored when failures are penalized");
-        assert!(
-            (quality.quality_score_p50 - 0.45).abs() < 1e-9,
-            "framework-fault failure should inject a 0.0 quality sample, pulling p50 to 0.45, got {}",
-            quality.quality_score_p50
-        );
+        let quality = percentiles.quality.expect("successful quality must be reported");
+        assert_eq!(quality.quality_score_p50, 0.9);
+
+        let aggregated = aggregate_new_format(&[success, failure]);
+        assert!((ranking_value(&aggregated.comparison.quality_ranking_markdown, "fw") - 0.45).abs() < 1e-9);
     }
 
     /// An infrastructure failure (HarnessError / ConfigSetupError) must NOT penalize the framework:
