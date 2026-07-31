@@ -23,6 +23,14 @@ pub(crate) type PdfExtractionPhaseResult = (
     Vec<crate::types::PdfFormField>,
 );
 
+#[cfg(feature = "layout-detection")]
+fn effective_layout_acceleration<'a>(
+    config: &'a ExtractionConfig,
+    acceleration_override: Option<&'a crate::core::config::acceleration::AccelerationConfig>,
+) -> Option<&'a crate::core::config::acceleration::AccelerationConfig> {
+    acceleration_override.or_else(|| config.resolved_layout_acceleration())
+}
+
 /// Extract text, metadata, tables, and annotations from a PDF document using the pdf_oxide backend.
 ///
 /// Accepts an authenticated `OxideDocument`, then delegates to each oxide extraction module.
@@ -45,6 +53,9 @@ pub(crate) fn extract_all_from_oxide_document(
     #[cfg(not(feature = "layout-detection"))] _layout_images: Option<()>,
     #[cfg(feature = "layout-detection")] layout_results: Option<&[crate::pdf::structure::types::PageLayoutResult]>,
     #[cfg(not(feature = "layout-detection"))] _layout_results: Option<()>,
+    #[cfg(feature = "layout-detection")] layout_acceleration_override: Option<
+        &crate::core::config::acceleration::AccelerationConfig,
+    >,
 ) -> Result<PdfExtractionPhaseResult> {
     let _span = tracing::debug_span!("extract_pdf_oxide").entered();
 
@@ -256,7 +267,7 @@ pub(crate) fn extract_all_from_oxide_document(
                     .map(|l| l.table_overlap_preference)
                     .unwrap_or_default(),
                 #[cfg(feature = "layout-detection")]
-                acceleration: config.resolved_layout_acceleration(),
+                acceleration: effective_layout_acceleration(config, layout_acceleration_override),
                 #[cfg(feature = "layout-detection")]
                 session_thread_budget: crate::core::config::concurrency::resolve_thread_budget(
                     config.concurrency.as_ref(),
@@ -414,6 +425,39 @@ fn join_pages_with_boundaries(
 
 #[cfg(test)]
 mod tests {
+
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn cpu_layout_retry_override_controls_native_table_model() {
+        use crate::core::config::{
+            acceleration::{AccelerationConfig, ExecutionProviderType},
+            layout::LayoutDetectionConfig,
+        };
+
+        let config = crate::ExtractionConfig {
+            layout: Some(LayoutDetectionConfig {
+                acceleration: Some(AccelerationConfig {
+                    provider: ExecutionProviderType::CoreMl,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let cpu = AccelerationConfig {
+            provider: ExecutionProviderType::Cpu,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            super::effective_layout_acceleration(&config, Some(&cpu)).map(|acceleration| &acceleration.provider),
+            Some(&ExecutionProviderType::Cpu)
+        );
+        assert_eq!(
+            super::effective_layout_acceleration(&config, None).map(|acceleration| &acceleration.provider),
+            Some(&ExecutionProviderType::CoreMl)
+        );
+    }
 
     /// Boundaries produced alongside reordered text must index it exactly:
     /// char-boundary-valid offsets whose slice is the page's text, with the

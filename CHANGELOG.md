@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **#1344 follow-up**: Automatic PDF layout inference retries once on CPU only for runtime inference
+  failures, keeps explicitly selected non-Auto providers and `XBERG_ORT_EP` authoritative, and
+  propagates the effective or recovered CPU provider to downstream TATR and OCR table reconstruction.
+
 ## [1.0.5] - 2026-07-30
 
 ### Fixed

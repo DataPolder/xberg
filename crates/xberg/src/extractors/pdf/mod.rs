@@ -306,6 +306,24 @@ fn layout_gate_metadata(decisions: Option<&[crate::pdf::layout_gate::PageGateDec
     (Some(gated), Some(reasons))
 }
 
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-pipeline")))]
+fn config_with_layout_acceleration_override(
+    config: &ExtractionConfig,
+    acceleration_override: Option<crate::core::config::acceleration::AccelerationConfig>,
+) -> std::borrow::Cow<'_, ExtractionConfig> {
+    let Some(acceleration) = acceleration_override else {
+        return std::borrow::Cow::Borrowed(config);
+    };
+
+    let mut effective = config.clone();
+    if let Some(layout) = effective.layout.as_mut() {
+        layout.acceleration = Some(acceleration);
+    } else {
+        effective.acceleration = Some(acceleration);
+    }
+    std::borrow::Cow::Owned(effective)
+}
+
 /// Run OCR with optional layout detection on PDF bytes.
 ///
 /// Reuses detections from native extraction when available. Otherwise, when
@@ -318,6 +336,9 @@ async fn run_ocr_with_layout(
     path: Option<&std::path::Path>,
     #[cfg(feature = "layout-detection")] precomputed_layout_images: Option<Vec<image::RgbImage>>,
     #[cfg(feature = "layout-detection")] precomputed_layout_detections: Option<Vec<crate::layout::DetectionResult>>,
+    #[cfg(feature = "layout-detection")] precomputed_layout_acceleration_override: Option<
+        crate::core::config::acceleration::AccelerationConfig,
+    >,
 ) -> crate::Result<(
     String,
     Vec<crate::types::Table>,
@@ -330,8 +351,6 @@ async fn run_ocr_with_layout(
     OcrLayoutGateDecisions,
     Option<crate::types::ProcessingWarning>,
 )> {
-    let default_ocr_config = crate::core::config::OcrConfig::default();
-    let ocr_config = config.ocr.as_ref().unwrap_or(&default_ocr_config);
     #[cfg(all(feature = "pdf", feature = "layout-detection"))]
     let mut layout_warning = None;
     #[cfg(not(all(feature = "pdf", feature = "layout-detection")))]
@@ -342,29 +361,50 @@ async fn run_ocr_with_layout(
     #[cfg(not(all(feature = "pdf", feature = "layout-detection")))]
     let ocr_layout_gate_decisions: OcrLayoutGateDecisions = (None, None);
 
+    #[cfg(feature = "layout-detection")]
+    let mut layout_acceleration_override = precomputed_layout_acceleration_override;
+
     #[cfg(all(feature = "pdf", feature = "layout-detection"))]
     let owned_layout = if precomputed_layout_detections.is_none() || precomputed_layout_images.is_none() {
         if let Some(layout_config) = config.resolved_layout_config() {
             let thread_budget = crate::core::config::concurrency::resolve_thread_budget(config.concurrency.as_ref());
-            let outcome = layout_runner::run_layout_for_ocr(content, layout_config.as_ref(), thread_budget).await;
-            layout_warning = outcome.warning;
-            match outcome.result {
-                Ok(layout_runner::LayoutRunOutput {
-                    data: Some(layout),
-                    gate_decisions,
+            match layout_runner::run_layout_for_ocr(content, layout_config.as_ref(), thread_budget).await {
+                Ok(layout_runner::LayoutAttempt {
+                    output:
+                        layout_runner::LayoutRunOutput {
+                            data: Some(layout),
+                            gate_decisions,
+                        },
+                    acceleration_override,
+                    warning,
                 }) => {
+                    layout_acceleration_override = acceleration_override;
+                    layout_warning = warning;
                     ocr_layout_gate_decisions = layout_gate_metadata(gate_decisions.as_deref());
                     Some(layout)
                 }
-                Ok(layout_runner::LayoutRunOutput {
-                    data: None,
-                    gate_decisions,
+                Ok(layout_runner::LayoutAttempt {
+                    output:
+                        layout_runner::LayoutRunOutput {
+                            data: None,
+                            gate_decisions,
+                        },
+                    acceleration_override: _,
+                    warning,
                 }) => {
+                    layout_warning = warning;
                     tracing::info!("OCR layout: auto gate skipped every page, continuing without layout assembly");
                     ocr_layout_gate_decisions = layout_gate_metadata(gate_decisions.as_deref());
                     None
                 }
-                Err(_) => None,
+                Err(error) => {
+                    tracing::warn!(
+                        error = %error,
+                        "OCR layout detection failed; continuing without layout assembly"
+                    );
+                    layout_warning = Some(layout_runner::layout_failure_warning(&error));
+                    None
+                }
             }
         } else {
             None
@@ -390,6 +430,14 @@ async fn run_ocr_with_layout(
     let layout_detections = prepared_layout_inputs
         .as_ref()
         .map(|(_, detections)| detections.as_slice());
+
+    #[cfg(feature = "layout-detection")]
+    let effective_config = config_with_layout_acceleration_override(config, layout_acceleration_override);
+    #[cfg(feature = "layout-detection")]
+    let config = effective_config.as_ref();
+
+    let default_ocr_config = crate::core::config::OcrConfig::default();
+    let ocr_config = config.ocr.as_ref().unwrap_or(&default_ocr_config);
 
     if let Some(pipeline) = ocr_config.effective_pipeline() {
         let (text, ocr_tables, ocr_elements, pipeline_doc, llm_usage, ocr_pts, pipeline_rasters, pipeline_formulas) =
@@ -551,6 +599,7 @@ impl PdfExtractor {
             mut markdown_layout_detections,
             markdown_layout_gate_decisions,
             markdown_layout_warning,
+            mut markdown_layout_acceleration_override,
         ) = layout_runner::maybe_run_layout_for_markdown(content, config).await;
 
         #[cfg(all(feature = "pdf", feature = "layout-detection"))]
@@ -606,6 +655,8 @@ impl PdfExtractor {
             markdown_layout_results.as_deref(),
             #[cfg(not(feature = "layout-detection"))]
             None,
+            #[cfg(feature = "layout-detection")]
+            markdown_layout_acceleration_override.as_ref(),
         )?;
 
         #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
@@ -678,6 +729,7 @@ impl PdfExtractor {
         if !markdown_layout_reusable_for_ocr(markdown_layout_gate_decisions.as_deref()) {
             markdown_layout_images = None;
             markdown_layout_detections = None;
+            markdown_layout_acceleration_override = None;
         }
 
         #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
@@ -703,6 +755,8 @@ impl PdfExtractor {
                 markdown_layout_images.take(),
                 #[cfg(feature = "layout-detection")]
                 markdown_layout_detections.take(),
+                #[cfg(feature = "layout-detection")]
+                markdown_layout_acceleration_override.take(),
             )
             .await?;
             if let Some(warning) = layout_warning {
@@ -849,6 +903,8 @@ impl PdfExtractor {
                             markdown_layout_images.take(),
                             #[cfg(feature = "layout-detection")]
                             markdown_layout_detections.take(),
+                            #[cfg(feature = "layout-detection")]
+                            markdown_layout_acceleration_override.take(),
                         )
                         .await
                         {
@@ -1421,6 +1477,50 @@ mod tests {
             gate_decision(true),
             gate_decision(false)
         ])));
+    }
+
+    #[cfg(all(
+        feature = "pdf",
+        feature = "layout-detection",
+        any(feature = "ocr", feature = "ocr-pipeline")
+    ))]
+    #[test]
+    fn cpu_layout_retry_override_controls_downstream_ocr_models() {
+        use crate::core::config::{
+            acceleration::{AccelerationConfig, ExecutionProviderType},
+            layout::LayoutDetectionConfig,
+        };
+
+        let config = ExtractionConfig {
+            layout: Some(LayoutDetectionConfig {
+                acceleration: Some(AccelerationConfig {
+                    provider: ExecutionProviderType::CoreMl,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let effective = config_with_layout_acceleration_override(
+            &config,
+            Some(AccelerationConfig {
+                provider: ExecutionProviderType::Cpu,
+                ..Default::default()
+            }),
+        );
+
+        assert_eq!(
+            effective
+                .resolved_layout_acceleration()
+                .map(|acceleration| acceleration.provider.clone()),
+            Some(ExecutionProviderType::Cpu)
+        );
+        assert_eq!(
+            config
+                .resolved_layout_acceleration()
+                .map(|acceleration| acceleration.provider.clone()),
+            Some(ExecutionProviderType::CoreMl)
+        );
     }
 
     #[cfg(all(feature = "pdf", feature = "layout-detection"))]

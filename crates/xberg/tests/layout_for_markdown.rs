@@ -31,12 +31,18 @@ fn accelerated_layout(provider: ExecutionProviderType) -> LayoutDetectionConfig 
     }
 }
 
-/// True when any warning came from the layout stage — either a total failure
-/// ("layout detection failed …") or an accelerated failure recovered on CPU
-/// ("layout acceleration failed …; recovered on CPU") (#1344).
+/// True when any warning came from the layout stage.
 #[cfg(target_os = "macos")]
-fn has_layout_warning(warnings: &[xberg::types::ProcessingWarning]) -> bool {
+fn has_any_layout_warning(warnings: &[xberg::types::ProcessingWarning]) -> bool {
     warnings.iter().any(|warning| warning.source == "layout")
+}
+
+/// True when a warning reports that layout detection failed entirely.
+#[cfg(target_os = "macos")]
+fn has_layout_failure_warning(warnings: &[xberg::types::ProcessingWarning]) -> bool {
+    warnings
+        .iter()
+        .any(|warning| warning.source == "layout" && warning.message.contains("layout detection failed"))
 }
 
 /// Extract `relative_path` (from `test_documents/`) with the given config.
@@ -185,7 +191,7 @@ fn test_auto_layout_avoids_coreml_failure() {
 
     assert!(!result.content.trim().is_empty());
     assert!(
-        !has_layout_warning(&result.processing_warnings),
+        !has_any_layout_warning(&result.processing_warnings),
         "auto layout unexpectedly degraded: {:?}",
         result.processing_warnings
     );
@@ -194,7 +200,7 @@ fn test_auto_layout_avoids_coreml_failure() {
 #[cfg(target_os = "macos")]
 #[test]
 #[ignore = "requires layout model files and CoreML"]
-fn test_coreml_layout_failure_recovers_on_cpu_and_warns() {
+fn test_explicit_coreml_layout_failure_emits_processing_warning() {
     if !test_documents_available() {
         return;
     }
@@ -207,13 +213,12 @@ fn test_coreml_layout_failure_recovers_on_cpu_and_warns() {
         ..Default::default()
     };
     let path = get_test_file_path("pdf/tiny.pdf");
-    let result = extract_uri_document_blocking(&path, None, &config)
-        .expect("extraction should recover layout on the CPU fallback");
+    let result =
+        extract_uri_document_blocking(&path, None, &config).expect("extraction should soft-fail to native text");
 
-    assert!(!result.content.trim().is_empty());
     assert!(
-        has_layout_warning(&result.processing_warnings),
-        "expected a caller-visible layout warning after the CoreML->CPU fallback, got {:?}",
+        has_layout_failure_warning(&result.processing_warnings),
+        "expected a caller-visible layout warning, got {:?}",
         result.processing_warnings
     );
 }
@@ -221,7 +226,7 @@ fn test_coreml_layout_failure_recovers_on_cpu_and_warns() {
 #[cfg(all(target_os = "macos", feature = "ocr"))]
 #[test]
 #[ignore = "requires layout model files, CoreML, and Tesseract"]
-fn test_coreml_ocr_layout_failure_recovers_on_cpu_and_warns() {
+fn test_explicit_coreml_ocr_layout_failure_emits_processing_warning() {
     if !test_documents_available() {
         return;
     }
@@ -232,12 +237,11 @@ fn test_coreml_ocr_layout_failure_recovers_on_cpu_and_warns() {
         ..Default::default()
     };
     let path = get_test_file_path("pdf/tiny.pdf");
-    let result =
-        extract_uri_document_blocking(&path, None, &config).expect("OCR should recover layout on the CPU fallback");
+    let result = extract_uri_document_blocking(&path, None, &config).expect("OCR should continue without layout");
 
     assert!(
-        has_layout_warning(&result.processing_warnings),
-        "expected a caller-visible OCR layout warning after the CoreML->CPU fallback, got {:?}",
+        has_layout_failure_warning(&result.processing_warnings),
+        "expected a caller-visible OCR layout warning, got {:?}",
         result.processing_warnings
     );
 }

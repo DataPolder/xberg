@@ -32,6 +32,7 @@ use crate::{
     Result, XbergError,
     core::config::{
         ExtractionConfig,
+        acceleration::{AccelerationConfig, ExecutionProviderType},
         layout::{LayoutDetectionConfig, LayoutStrategy},
     },
     extractors::pdf::layout_hints::pixel_detection_to_layout_hints_pdf_space,
@@ -115,25 +116,134 @@ struct AssembledLayoutPage {
 }
 
 #[cfg(all(feature = "pdf", feature = "layout-detection"))]
+const LAYOUT_INFERENCE_RUN_ERROR_PREFIX: &str =
+    "layout runner: batch detection failed: inference error: inference run failed:";
+
+/// A successful layout pass and the effective execution provider used for
+/// downstream layout-aware models.
+#[cfg(all(feature = "pdf", feature = "layout-detection"))]
+#[derive(Debug)]
+pub(super) struct LayoutAttempt<T> {
+    pub(super) output: T,
+    pub(super) acceleration_override: Option<AccelerationConfig>,
+    pub(super) warning: Option<crate::types::ProcessingWarning>,
+}
+
+#[cfg(all(feature = "pdf", feature = "layout-detection"))]
+fn run_layout_with_auto_cpu_retry<T>(
+    layout_config: &LayoutDetectionConfig,
+    execution_provider_overridden: bool,
+    initial_acceleration_override: Option<AccelerationConfig>,
+    mut run_once: impl FnMut(&LayoutDetectionConfig) -> Result<T>,
+) -> Result<LayoutAttempt<T>> {
+    let mut initial_config = layout_config.clone();
+    if let Some(acceleration) = initial_acceleration_override.clone() {
+        initial_config.acceleration = Some(acceleration);
+    }
+    let initial_error = match run_once(&initial_config) {
+        Ok(output) => {
+            return Ok(LayoutAttempt {
+                output,
+                acceleration_override: initial_acceleration_override,
+                warning: None,
+            });
+        }
+        Err(error) => error,
+    };
+    let uses_auto_provider = !execution_provider_overridden
+        && layout_config
+            .acceleration
+            .as_ref()
+            .is_none_or(|acceleration| acceleration.provider == ExecutionProviderType::Auto);
+    let inference_run_failed = matches!(
+        &initial_error,
+        XbergError::Other(message) if message.starts_with(LAYOUT_INFERENCE_RUN_ERROR_PREFIX)
+    );
+    let already_uses_cpu = initial_acceleration_override
+        .as_ref()
+        .is_some_and(|acceleration| acceleration.provider == ExecutionProviderType::Cpu);
+    if !uses_auto_provider || !inference_run_failed || already_uses_cpu {
+        return Err(initial_error);
+    }
+
+    tracing::warn!(
+        error = %initial_error,
+        "layout runner: automatic execution provider failed during inference, retrying once with CPU"
+    );
+    let warning = layout_cpu_fallback_warning(&initial_error);
+    let mut cpu_config = layout_config.clone();
+    cpu_config.acceleration = Some(AccelerationConfig {
+        provider: ExecutionProviderType::Cpu,
+        ..Default::default()
+    });
+    run_once(&cpu_config)
+        .map(|output| LayoutAttempt {
+            output,
+            acceleration_override: cpu_config.acceleration,
+            warning: Some(warning),
+        })
+        .map_err(|cpu_error| {
+            XbergError::Other(format!(
+                "layout runner: CPU retry failed after automatic-provider inference run failure; \
+                 initial error: {initial_error}; CPU retry error: {cpu_error}"
+            ))
+        })
+}
+
+#[cfg(all(feature = "pdf", feature = "layout-detection"))]
+fn rtdetr_acceleration_override(
+    layout_config: &LayoutDetectionConfig,
+    execution_provider_overridden: bool,
+) -> Option<AccelerationConfig> {
+    if execution_provider_overridden {
+        return None;
+    }
+    let effective = crate::layout::models::rtdetr::effective_acceleration(layout_config.acceleration.as_ref());
+    if effective.as_ref() == layout_config.acceleration.as_ref() {
+        None
+    } else {
+        effective
+    }
+}
+
+#[cfg(all(feature = "pdf", feature = "layout-detection"))]
 async fn run_layout_for_pdf_pages_async(
     content: &[u8],
     layout_config: &LayoutDetectionConfig,
     thread_budget: usize,
     gated_handling: GatedPageHandling,
-) -> Result<LayoutRunOutput> {
+) -> Result<LayoutAttempt<LayoutRunOutput>> {
     #[cfg(feature = "tokio-runtime")]
     {
         let owned_content = content.to_vec();
         let owned_config = layout_config.clone();
         tokio::task::spawn_blocking(move || {
-            run_layout_for_pdf_pages(&owned_content, &owned_config, thread_budget, gated_handling)
+            let execution_provider_overridden = std::env::var_os("XBERG_ORT_EP").is_some();
+            let acceleration_override = rtdetr_acceleration_override(&owned_config, execution_provider_overridden);
+            run_layout_with_auto_cpu_retry(
+                &owned_config,
+                execution_provider_overridden,
+                acceleration_override,
+                |attempt_config| {
+                    run_layout_for_pdf_pages(&owned_content, attempt_config, thread_budget, gated_handling)
+                },
+            )
         })
         .await
         .map_err(|error| XbergError::Other(format!("layout runner task failed: {error}")))?
     }
 
     #[cfg(not(feature = "tokio-runtime"))]
-    run_layout_for_pdf_pages(content, layout_config, thread_budget, gated_handling)
+    {
+        let execution_provider_overridden = std::env::var_os("XBERG_ORT_EP").is_some();
+        let acceleration_override = rtdetr_acceleration_override(layout_config, execution_provider_overridden);
+        run_layout_with_auto_cpu_retry(
+            layout_config,
+            execution_provider_overridden,
+            acceleration_override,
+            |attempt_config| run_layout_for_pdf_pages(content, attempt_config, thread_budget, gated_handling),
+        )
+    }
 }
 
 #[cfg(all(feature = "pdf", feature = "layout-detection"))]
@@ -359,49 +469,6 @@ fn assemble_layout_page(
     }
 }
 
-#[cfg(all(feature = "pdf", feature = "layout-detection"))]
-/// Whether the layout config would run inference on a hardware-accelerated
-/// execution provider rather than plain CPU.
-///
-/// An explicit `Cpu` is never accelerated; `CoreMl`/`Cuda`/`TensorRt` always
-/// are. `Auto` is accelerated only on platforms whose auto-selection picks a GPU
-/// EP — macOS (CoreML) and Linux built with `cuda` — mirroring the selection in
-/// [`crate::ort_discovery`]. Used to decide whether a failed inference is worth
-/// retrying on CPU (#1344).
-#[cfg(all(feature = "pdf", feature = "layout-detection"))]
-fn layout_provider_is_accelerated(config: &LayoutDetectionConfig) -> bool {
-    use crate::core::config::acceleration::ExecutionProviderType;
-    let provider = config
-        .acceleration
-        .as_ref()
-        .map(|acceleration| &acceleration.provider)
-        .unwrap_or(&ExecutionProviderType::Auto);
-    match provider {
-        ExecutionProviderType::Cpu => false,
-        ExecutionProviderType::CoreMl | ExecutionProviderType::Cuda | ExecutionProviderType::TensorRt => true,
-        ExecutionProviderType::Auto => cfg!(target_os = "macos") || cfg!(all(target_os = "linux", feature = "cuda")),
-    }
-}
-
-/// Clone `config` with its execution provider forced to CPU, preserving every
-/// other layout setting. The distinct acceleration key routes the retry to a
-/// separate CPU engine, leaving the accelerated engine pool untouched (#1344).
-#[cfg(all(feature = "pdf", feature = "layout-detection"))]
-fn layout_config_forced_to_cpu(config: &LayoutDetectionConfig) -> LayoutDetectionConfig {
-    use crate::core::config::acceleration::{AccelerationConfig, ExecutionProviderType};
-    let device_id = config
-        .acceleration
-        .as_ref()
-        .map(|acceleration| acceleration.device_id)
-        .unwrap_or(0);
-    let mut cpu_config = config.clone();
-    cpu_config.acceleration = Some(AccelerationConfig {
-        provider: ExecutionProviderType::Cpu,
-        device_id,
-    });
-    cpu_config
-}
-
 pub(super) fn run_layout_for_pdf_pages(
     content: &[u8],
     layout_config: &LayoutDetectionConfig,
@@ -501,12 +568,11 @@ pub(super) fn run_layout_for_pdf_pages(
 /// the `Auto` gate skipped every page, or on soft failure (logged so the
 /// markdown path continues without layout hints). The fifth value carries the
 /// `Auto` gate's per-page decisions whenever the gate ran, including the
-/// all-gated case. The sixth value is `Some` whenever an accelerated execution
-/// provider failed at inference (e.g. a CoreML `ExecuteKernel` runtime error): it
-/// carries a `ProcessingWarning` so the caller can surface the degradation —
-/// whether layout was recovered on the CPU fallback or lost entirely — instead of
-/// returning no-layout output with no signal (#1344). Rendering and inference run
-/// off the async executor when a Tokio runtime is enabled.
+/// all-gated case. The sixth value carries a `ProcessingWarning` when automatic
+/// inference recovers on CPU or layout fails entirely. The seventh value carries
+/// the proactively resolved or recovered CPU acceleration config so downstream
+/// TATR/OCR models use the same provider. Rendering and inference run off the
+/// async executor when a Tokio runtime is enabled.
 #[cfg(all(feature = "pdf", feature = "layout-detection"))]
 type LayoutForMarkdownOptional = (
     Option<Vec<image::RgbImage>>,
@@ -515,6 +581,7 @@ type LayoutForMarkdownOptional = (
     Option<Vec<crate::layout::DetectionResult>>,
     Option<Vec<PageGateDecision>>,
     Option<crate::types::ProcessingWarning>,
+    Option<AccelerationConfig>,
 );
 
 pub(super) fn layout_failure_warning(error: &crate::XbergError) -> crate::types::ProcessingWarning {
@@ -526,87 +593,14 @@ pub(super) fn layout_failure_warning(error: &crate::XbergError) -> crate::types:
     }
 }
 
-/// Warning emitted when an accelerated execution provider failed at inference but
-/// the always-available CPU provider recovered the layout pass. The document keeps
-/// its layout; the warning records that the requested acceleration was unusable so
-/// callers still surface it instead of the failure silently costing performance (#1344).
+/// Warning emitted when automatic layout inference failed but the CPU provider
+/// recovered the layout pass. The document keeps its layout while callers still
+/// receive a signal that recovery occurred (#1344).
 #[cfg(all(feature = "pdf", feature = "layout-detection"))]
 pub(super) fn layout_cpu_fallback_warning(error: &crate::XbergError) -> crate::types::ProcessingWarning {
     crate::types::ProcessingWarning {
         source: std::borrow::Cow::Borrowed("layout"),
-        message: std::borrow::Cow::Owned(format!("layout acceleration failed ({error}); recovered on CPU")),
-    }
-}
-
-/// Result of a layout pass that may have fallen back to CPU after an accelerated
-/// inference failure.
-///
-/// `result` is `Ok` when layout ran — possibly on the CPU fallback engine — and
-/// `Err` when even CPU failed (the caller then continues without layout hints).
-/// `warning` is `Some` whenever a fallback or failure occurred: a recovered pass
-/// carries [`layout_cpu_fallback_warning`], a total failure carries
-/// [`layout_failure_warning`]. It is `None` only when the first attempt succeeded.
-#[cfg(all(feature = "pdf", feature = "layout-detection"))]
-pub(super) struct LayoutFallbackOutcome {
-    pub(super) result: Result<LayoutRunOutput>,
-    pub(super) warning: Option<crate::types::ProcessingWarning>,
-}
-
-/// Run the layout pass and, when an accelerated execution provider fails at
-/// inference (for example a CoreML `ExecuteKernel` runtime error), retry once on
-/// the always-available CPU provider before giving up. Shared by the markdown and
-/// OCR layout paths so both recover identically and surface the same warning (#1344).
-#[cfg(all(feature = "pdf", feature = "layout-detection"))]
-pub(super) async fn run_layout_with_cpu_fallback(
-    content: &[u8],
-    layout_config: &LayoutDetectionConfig,
-    thread_budget: usize,
-    gated_handling: GatedPageHandling,
-) -> LayoutFallbackOutcome {
-    let first = run_layout_for_pdf_pages_async(content, layout_config, thread_budget, gated_handling).await;
-    let Err(accelerated_error) = &first else {
-        return LayoutFallbackOutcome {
-            result: first,
-            warning: None,
-        };
-    };
-
-    // A non-accelerated provider (explicit CPU, or an `Auto` that resolves to CPU
-    // on this platform) has nowhere to fall back to: surface the failure as-is.
-    if !layout_provider_is_accelerated(layout_config) {
-        let warning = layout_failure_warning(accelerated_error);
-        return LayoutFallbackOutcome {
-            result: first,
-            warning: Some(warning),
-        };
-    }
-
-    tracing::warn!(
-        error = %accelerated_error,
-        "layout: accelerated inference failed, retrying on CPU"
-    );
-    let fallback_warning = layout_cpu_fallback_warning(accelerated_error);
-    let cpu_config = layout_config_forced_to_cpu(layout_config);
-    let cpu_result = run_layout_for_pdf_pages_async(content, &cpu_config, thread_budget, gated_handling).await;
-    match &cpu_result {
-        Ok(_) => {
-            tracing::info!("layout: CPU retry recovered layout after accelerated inference failure");
-            LayoutFallbackOutcome {
-                result: cpu_result,
-                warning: Some(fallback_warning),
-            }
-        }
-        Err(cpu_error) => {
-            tracing::warn!(
-                error = %cpu_error,
-                "layout: CPU retry also failed, continuing without layout hints"
-            );
-            let warning = layout_failure_warning(cpu_error);
-            LayoutFallbackOutcome {
-                result: cpu_result,
-                warning: Some(warning),
-            }
-        }
+        message: std::borrow::Cow::Owned(format!("automatic layout inference failed ({error}); recovered on CPU")),
     }
 }
 
@@ -616,16 +610,16 @@ pub(super) async fn maybe_run_layout_for_markdown(
     config: &ExtractionConfig,
 ) -> LayoutForMarkdownOptional {
     if !config.use_layout_for_markdown {
-        return (None, None, None, None, None, None);
+        return (None, None, None, None, None, None, None);
     }
     let Some(layout_config) = config.resolved_layout_config() else {
-        return (None, None, None, None, None, None);
+        return (None, None, None, None, None, None, None);
     };
     if config.force_ocr {
-        return (None, None, None, None, None, None);
+        return (None, None, None, None, None, None, None);
     }
     let thread_budget = crate::core::config::concurrency::resolve_thread_budget(config.concurrency.as_ref());
-    let outcome = run_layout_with_cpu_fallback(
+    let outcome = run_layout_for_pdf_pages_async(
         content,
         layout_config.as_ref(),
         thread_budget,
@@ -633,10 +627,15 @@ pub(super) async fn maybe_run_layout_for_markdown(
     )
     .await;
 
-    match outcome.result {
-        Ok(LayoutRunOutput {
-            data: Some((images, results, hints, detections)),
-            gate_decisions,
+    match outcome {
+        Ok(LayoutAttempt {
+            output:
+                LayoutRunOutput {
+                    data: Some((images, results, hints, detections)),
+                    gate_decisions,
+                },
+            acceleration_override,
+            warning,
         }) => {
             let total_hints: usize = hints.iter().map(|h| h.len()).sum();
             tracing::info!(
@@ -650,17 +649,29 @@ pub(super) async fn maybe_run_layout_for_markdown(
                 Some(hints),
                 Some(detections),
                 gate_decisions,
-                outcome.warning,
+                warning,
+                acceleration_override,
             )
         }
-        Ok(LayoutRunOutput {
-            data: None,
-            gate_decisions,
+        Ok(LayoutAttempt {
+            output: LayoutRunOutput {
+                data: None,
+                gate_decisions,
+            },
+            acceleration_override: _,
+            warning,
         }) => {
             tracing::info!("layout-for-markdown: auto gate skipped every page, continuing without layout hints");
-            (None, None, None, None, gate_decisions, outcome.warning)
+            (None, None, None, None, gate_decisions, warning, None)
         }
-        Err(_) => (None, None, None, None, None, outcome.warning),
+        Err(error) => {
+            tracing::warn!(
+                error = %error,
+                "layout-for-markdown: detection failed, continuing without layout hints"
+            );
+            let warning = layout_failure_warning(&error);
+            (None, None, None, None, None, Some(warning), None)
+        }
     }
 }
 
@@ -678,10 +689,10 @@ pub(super) async fn run_layout_for_ocr(
     content: &[u8],
     layout_config: &LayoutDetectionConfig,
     thread_budget: usize,
-) -> LayoutFallbackOutcome {
+) -> Result<LayoutAttempt<LayoutRunOutput>> {
     // OCR consumes the layout pass's rasters as its input images, so gated
     // pages still render; only model inference is skipped for them.
-    run_layout_with_cpu_fallback(
+    run_layout_for_pdf_pages_async(
         content,
         layout_config,
         thread_budget,
@@ -692,60 +703,203 @@ pub(super) async fn run_layout_for_ocr(
 
 #[cfg(all(test, feature = "pdf", feature = "layout-detection"))]
 mod tests {
+    #[cfg(target_os = "macos")]
+    use super::rtdetr_acceleration_override;
     use super::{
         FAILED_RENDER_PLACEHOLDER_SIDE, GatedPageHandling, RenderedLayoutPage, assemble_layout_chunk,
-        displayed_page_dimensions, gate_selects_page, layout_config_forced_to_cpu, layout_provider_is_accelerated,
-        render_failure_placeholder, render_layout_chunk, validate_batch_cardinality,
+        displayed_page_dimensions, gate_selects_page, render_failure_placeholder, render_layout_chunk,
+        run_layout_with_auto_cpu_retry, validate_batch_cardinality,
     };
+    use crate::XbergError;
     use crate::core::config::acceleration::{AccelerationConfig, ExecutionProviderType};
     use crate::core::config::layout::LayoutDetectionConfig;
     use crate::pdf::layout_gate::PageGateDecision;
 
-    fn layout_config_with_provider(provider: ExecutionProviderType, device_id: u32) -> LayoutDetectionConfig {
-        LayoutDetectionConfig {
-            acceleration: Some(AccelerationConfig { provider, device_id }),
-            ..LayoutDetectionConfig::default()
+    fn provider(config: &LayoutDetectionConfig) -> ExecutionProviderType {
+        config
+            .acceleration
+            .as_ref()
+            .map_or(ExecutionProviderType::Auto, |acceleration| {
+                acceleration.provider.clone()
+            })
+    }
+
+    fn inference_run_error(message: &str) -> XbergError {
+        XbergError::Other(format!(
+            "layout runner: batch detection failed: inference error: inference run failed: {message}"
+        ))
+    }
+
+    #[test]
+    fn should_retry_once_on_cpu_when_auto_provider_inference_run_fails() {
+        for config in [
+            LayoutDetectionConfig::default(),
+            LayoutDetectionConfig {
+                acceleration: Some(AccelerationConfig {
+                    provider: ExecutionProviderType::Auto,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        ] {
+            let mut attempts = Vec::new();
+
+            let result = run_layout_with_auto_cpu_retry(&config, false, None, |attempt_config| {
+                attempts.push(provider(attempt_config));
+                if attempts.len() == 1 {
+                    Err(inference_run_error("CoreML ExecuteKernel failed"))
+                } else {
+                    Ok(42)
+                }
+            });
+
+            let attempt = result.expect("CPU retry should succeed");
+            assert_eq!(attempt.output, 42);
+            assert_eq!(
+                attempt.acceleration_override.map(|acceleration| acceleration.provider),
+                Some(ExecutionProviderType::Cpu)
+            );
+            let warning = attempt.warning.expect("CPU recovery should be caller-visible");
+            assert_eq!(warning.source, "layout");
+            assert!(warning.message.contains("automatic layout inference failed"));
+            assert!(warning.message.contains("CoreML ExecuteKernel failed"));
+            assert!(warning.message.contains("recovered on CPU"));
+            assert_eq!(attempts, [ExecutionProviderType::Auto, ExecutionProviderType::Cpu]);
         }
     }
 
     #[test]
-    fn explicit_cpu_provider_is_not_accelerated() {
-        let config = layout_config_with_provider(ExecutionProviderType::Cpu, 0);
-        assert!(!layout_provider_is_accelerated(&config));
+    fn should_return_first_success_without_override_or_warning() {
+        let config = LayoutDetectionConfig::default();
+        let mut attempts = Vec::new();
+
+        let attempt = run_layout_with_auto_cpu_retry(&config, false, None, |attempt_config| {
+            attempts.push(provider(attempt_config));
+            Ok(42)
+        })
+        .expect("first attempt should succeed");
+
+        assert_eq!(attempt.output, 42);
+        assert!(attempt.acceleration_override.is_none());
+        assert!(attempt.warning.is_none());
+        assert_eq!(attempts, [ExecutionProviderType::Auto]);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn should_propagate_rtdetr_auto_cpu_resolution_without_retry() {
+        let config = LayoutDetectionConfig::default();
+        let acceleration_override =
+            rtdetr_acceleration_override(&config, false).expect("macOS RT-DETR Auto should resolve to CPU");
+        assert_eq!(acceleration_override.provider, ExecutionProviderType::Cpu);
+        assert!(
+            rtdetr_acceleration_override(&config, true).is_none(),
+            "an environment provider must remain authoritative"
+        );
+        let mut attempts = Vec::new();
+
+        let attempt = run_layout_with_auto_cpu_retry(&config, false, Some(acceleration_override), |attempt_config| {
+            attempts.push(provider(attempt_config));
+            Ok(42)
+        })
+        .expect("CPU-normalized first attempt should succeed");
+
+        assert_eq!(attempt.output, 42);
+        assert_eq!(
+            attempt.acceleration_override.map(|acceleration| acceleration.provider),
+            Some(ExecutionProviderType::Cpu)
+        );
+        assert!(attempt.warning.is_none());
+        assert_eq!(attempts, [ExecutionProviderType::Cpu]);
     }
 
     #[test]
-    fn gpu_providers_are_accelerated() {
-        for provider in [
+    fn should_not_retry_when_inference_run_fails_for_explicit_provider() {
+        for explicit_provider in [
+            ExecutionProviderType::Cpu,
             ExecutionProviderType::CoreMl,
             ExecutionProviderType::Cuda,
             ExecutionProviderType::TensorRt,
         ] {
-            let config = layout_config_with_provider(provider, 0);
-            assert!(
-                layout_provider_is_accelerated(&config),
-                "GPU provider must be accelerated"
+            let config = LayoutDetectionConfig {
+                acceleration: Some(AccelerationConfig {
+                    provider: explicit_provider.clone(),
+                    device_id: 0,
+                }),
+                ..Default::default()
+            };
+            let mut attempts = Vec::new();
+
+            let error = run_layout_with_auto_cpu_retry(&config, false, None, |attempt_config| {
+                attempts.push(provider(attempt_config));
+                Err::<(), _>(inference_run_error("explicit provider failed"))
+            })
+            .expect_err("explicit providers must not retry");
+
+            assert_eq!(
+                error.to_string(),
+                inference_run_error("explicit provider failed").to_string()
             );
+            assert_eq!(attempts, [explicit_provider]);
         }
     }
 
     #[test]
-    fn forcing_cpu_preserves_device_id_and_sets_cpu_provider() {
-        let config = layout_config_with_provider(ExecutionProviderType::Cuda, 3);
-        let cpu_config = layout_config_forced_to_cpu(&config);
-        assert!(
-            !layout_provider_is_accelerated(&cpu_config),
-            "a CPU-forced config must not be treated as accelerated (no retry loop)"
-        );
-        let acceleration = cpu_config
-            .acceleration
-            .as_ref()
-            .expect("forced config carries acceleration");
-        assert_eq!(acceleration.provider, ExecutionProviderType::Cpu);
+    fn should_not_retry_when_auto_provider_failure_is_not_inference_run() {
+        let config = LayoutDetectionConfig::default();
+        let mut attempts = Vec::new();
+        let expected = "layout runner: engine init failed: inference error: failed to load inference model";
+
+        let error = run_layout_with_auto_cpu_retry(&config, false, None, |attempt_config| {
+            attempts.push(provider(attempt_config));
+            Err::<(), _>(XbergError::Other(expected.to_string()))
+        })
+        .expect_err("model-load failures must not retry");
+
+        assert_eq!(error.to_string(), XbergError::Other(expected.to_string()).to_string());
+        assert_eq!(attempts, [ExecutionProviderType::Auto]);
+    }
+
+    #[test]
+    fn should_return_context_when_cpu_retry_fails() {
+        let config = LayoutDetectionConfig::default();
+        let mut attempts = Vec::new();
+
+        let error = run_layout_with_auto_cpu_retry(&config, false, None, |attempt_config| {
+            attempts.push(provider(attempt_config));
+            let message = if attempts.len() == 1 {
+                "CoreML ExecuteKernel failed"
+            } else {
+                "CPU kernel failed"
+            };
+            Err::<(), _>(inference_run_error(message))
+        })
+        .expect_err("both attempts should fail");
+
+        assert_eq!(attempts, [ExecutionProviderType::Auto, ExecutionProviderType::Cpu]);
+        let message = error.to_string();
+        assert!(message.contains("initial error:"));
+        assert!(message.contains("CoreML ExecuteKernel failed"));
+        assert!(message.contains("CPU retry error:"));
+        assert!(message.contains("CPU kernel failed"));
+    }
+
+    #[test]
+    fn should_not_retry_when_execution_provider_environment_override_is_set() {
+        let config = LayoutDetectionConfig::default();
+        let mut attempts = Vec::new();
+
+        let error = run_layout_with_auto_cpu_retry(&config, true, None, |attempt_config| {
+            attempts.push(provider(attempt_config));
+            Err::<(), _>(inference_run_error("explicit environment provider failed"))
+        })
+        .expect_err("an environment provider override must not retry");
+
         assert_eq!(
-            acceleration.device_id, 3,
-            "device id must be preserved across the CPU fallback"
+            error.to_string(),
+            inference_run_error("explicit environment provider failed").to_string()
         );
+        assert_eq!(attempts, [ExecutionProviderType::Auto]);
     }
 
     fn rendered_page(page_index: usize, width: u32, page_width_pts: f32) -> RenderedLayoutPage {

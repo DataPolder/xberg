@@ -18,7 +18,7 @@ const DEFAULT_THRESHOLD: f32 = 0.3;
 /// RT-DETR input resolution.
 const INPUT_SIZE: u32 = 640;
 
-fn effective_acceleration(accel: Option<&AccelerationConfig>) -> Option<AccelerationConfig> {
+pub(crate) fn effective_acceleration(accel: Option<&AccelerationConfig>) -> Option<AccelerationConfig> {
     // The current RT-DETR export fails under CoreML; keep auto reliable while preserving explicit CoreML.
     #[cfg(target_os = "macos")]
     if accel.is_none_or(|config| config.provider == ExecutionProviderType::Auto) {
