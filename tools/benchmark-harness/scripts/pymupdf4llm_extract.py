@@ -25,10 +25,24 @@ def _get_peak_memory_bytes() -> int:
     return usage.ru_maxrss
 
 
+_IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif", ".webp"})
+
+
 def extract_sync(file_path: str) -> dict:
     """Extract using PyMuPDF4LLM."""
     start = time.perf_counter()
-    markdown = pymupdf4llm.to_markdown(file_path, show_progress=False, write_images=False)
+    try:
+        markdown = pymupdf4llm.to_markdown(file_path, show_progress=False, write_images=False)
+    except Exception:
+        # pymupdf4llm exposes no OCR, so image inputs only ever yield an (often empty)
+        # text layer. Some formats (e.g. certain TIFFs) cannot be opened at all and raise.
+        # Degrade those to an empty text-layer result — consistent with the empty output
+        # produced for images it can open — so a non-OCR baseline never fails the whole
+        # image cohort. Non-image inputs still propagate the error for real regressions.
+        if os.path.splitext(file_path)[1].lower() in _IMAGE_EXTENSIONS:
+            markdown = ""
+        else:
+            raise
     duration_ms = (time.perf_counter() - start) * 1000.0
 
     return {
