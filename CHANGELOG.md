@@ -9,8 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.7] - 2026-07-31
+
+### Added
+
+- **Candle VLM OCR backends now ship in the published packages.** The pure-Rust Candle OCR
+  backends — TrOCR, PaddleOCR-VL, GLM-OCR, and DeepSeek-OCR — are compiled into the published
+  packages by default (Python, Node, Go, Java, C#, Ruby, PHP, Elixir, Kotlin/JVM, Zig, and the
+  CLI / Docker image) on Linux, macOS, and Windows. Select one with `ocr.backend =
+  "candle-glm-ocr"` (or `candle-trocr` / `candle-paddleocr-vl` / `candle-deepseek-ocr`); model
+  weights download from Hugging Face on first use. Previously these backends were excluded from
+  the `full` feature and reachable only via a custom source build. Not available on WebAssembly,
+  Android, iOS, Dart, or Swift.
+
 ### Fixed
 
+- **#1355 — `force_ocr` no longer emits a silently blank page** when the PDF rasterizer cannot
+  draw an image XObject. When a `force_ocr` page renders blank but carries image XObjects, OCR is
+  retried directly on the embedded image bytes (decoded pixels, or the raw JPEG/JP2 stream) and a
+  processing warning is recorded, so the page content is recovered instead of dropped without
+  notice.
+- **Swift artifact-bundle cross-compile**: the cross-compiled Swift binary bundle builds again —
+  the HEIC path (which shells out to `pkg-config` and cannot cross-compile) is dropped from the
+  Swift / Intel-macOS cross-build feature set (`full-no-heic`), restoring the `x86_64-apple-darwin`
+  and Linux Swift builds. The native C FFI distribution keeps HEIC.
+- **XLSX extraction on Windows**: the `excel` feature is enabled in the Windows feature set, so
+  `.xlsx` files extract on Windows instead of returning `UnsupportedFormat` for a format the
+  registry advertises as supported.
 - Benchmark CI validates ground truth for every format family plus the exact 101-cell workflow
   matrix and harness contracts before expensive jobs, and the local benchmark task now delegates
   to the same run wrapper.
