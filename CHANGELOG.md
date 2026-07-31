@@ -11,8 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Image layout extraction falls back to whole-image OCR when region-based OCR drops substantial
-  text or reduces output quality, while preserving OCR warnings from the selected result.
+- Image layout extraction reuses safely positioned whole-image OCR elements, falls back when
+  region-based OCR drops substantial text or quality, and preserves warnings without redundant OCR
+  retries.
 - EPUB extraction removes duplicated serialized MathML and embedded-media fallback content, and
   avoids emitting a cover image twice when the spine already references it.
 - Email extraction preserves sender display names alongside addresses, and asynchronous attachment

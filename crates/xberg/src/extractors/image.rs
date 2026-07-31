@@ -12,6 +12,15 @@ use async_trait::async_trait;
 #[cfg(any(test, all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm"))))]
 const MIN_LAYOUT_OCR_ALPHANUMERIC_TOKEN_RETENTION: f64 = 0.80;
 
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+const LAYOUT_READING_ORDER_ROW_HEIGHT_RATIO: f32 = 0.05;
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+const MIN_LAYOUT_CROP_DIMENSION: u32 = 4;
+
+#[cfg(all(feature = "layout-detection", feature = "ocr"))]
+const MAX_OCR_COORDINATE_SCALE_RELATIVE_DIFFERENCE: f64 = 0.01;
+
 #[cfg(any(test, all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm"))))]
 fn internal_document_text(doc: &InternalDocument) -> String {
     doc.elements
@@ -106,6 +115,534 @@ fn select_image_ocr_result(
     }
 }
 
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn cached_whole_image_after_layout_error(
+    whole_image_result: &Result<InternalDocument>,
+    error: crate::XbergError,
+) -> Result<InternalDocument> {
+    let whole_image_doc = match whole_image_result {
+        Ok(doc) => doc,
+        Err(whole_image_error) => {
+            return Err(crate::XbergError::Other(format!(
+                "Image OCR failed in both paths; whole-image OCR: {whole_image_error}; layout-region OCR: {error}"
+            )));
+        }
+    };
+    tracing::warn!(
+        %error,
+        "Layout-region OCR failed after whole-image OCR succeeded; retaining whole-image output"
+    );
+    let mut retained = whole_image_doc.clone();
+    retained.processing_warnings.push(crate::types::ProcessingWarning {
+        source: std::borrow::Cow::Borrowed("layout-ocr"),
+        message: std::borrow::Cow::Borrowed(
+            "Layout-region OCR failed after whole-image OCR succeeded; retained whole-image output",
+        ),
+    });
+    Ok(retained)
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn ocr_geometry_bounds(geometry: &crate::types::OcrBoundingGeometry) -> (u32, u32, u32, u32) {
+    match geometry {
+        crate::types::OcrBoundingGeometry::Rectangle {
+            left,
+            top,
+            width,
+            height,
+        } => (*left, *top, *width, *height),
+        crate::types::OcrBoundingGeometry::Quadrilateral { points } => {
+            let min_x = points.iter().map(|(x, _)| *x).min().unwrap_or(0);
+            let max_x = points.iter().map(|(x, _)| *x).max().unwrap_or(0);
+            let min_y = points.iter().map(|(_, y)| *y).min().unwrap_or(0);
+            let max_y = points.iter().map(|(_, y)| *y).max().unwrap_or(0);
+            (min_x, min_y, max_x.saturating_sub(min_x), max_y.saturating_sub(min_y))
+        }
+    }
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+#[derive(Clone, Copy)]
+struct OcrCoordinateTransform {
+    processed_width: u64,
+    processed_height: u64,
+    scale_x: f64,
+    scale_y: f64,
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn whole_image_ocr_coordinate_transform(
+    doc: &InternalDocument,
+    image_width: u32,
+    image_height: u32,
+) -> Option<OcrCoordinateTransform> {
+    #[cfg(feature = "ocr")]
+    {
+        let additional = &doc.metadata.additional;
+        let processed_width = additional
+            .get(crate::ocr::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY)
+            .and_then(serde_json::Value::as_u64);
+        let processed_height = additional
+            .get(crate::ocr::OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY)
+            .and_then(serde_json::Value::as_u64);
+        let auto_rotated = additional
+            .get(crate::ocr::OCR_AUTO_ROTATED_METADATA_KEY)
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let (processed_width, processed_height) = (processed_width?, processed_height?);
+        if auto_rotated || processed_width == 0 || processed_height == 0 || image_width == 0 || image_height == 0 {
+            return None;
+        }
+        let scale_x = f64::from(image_width) / processed_width as f64;
+        let scale_y = f64::from(image_height) / processed_height as f64;
+        let relative_difference = (scale_x - scale_y).abs() / scale_x.max(scale_y);
+        (relative_difference <= MAX_OCR_COORDINATE_SCALE_RELATIVE_DIFFERENCE).then_some(OcrCoordinateTransform {
+            processed_width,
+            processed_height,
+            scale_x,
+            scale_y,
+        })
+    }
+
+    #[cfg(not(feature = "ocr"))]
+    {
+        let _ = (doc, image_width, image_height);
+        None
+    }
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn transformed_ocr_bounds(
+    geometry: &crate::types::OcrBoundingGeometry,
+    transform: OcrCoordinateTransform,
+) -> Option<(f32, f32, f32, f32)> {
+    let (left, top, width, height) = ocr_geometry_bounds(geometry);
+    let right = u64::from(left) + u64::from(width);
+    let bottom = u64::from(top) + u64::from(height);
+    if width == 0 || height == 0 || right > transform.processed_width || bottom > transform.processed_height {
+        return None;
+    }
+    Some((
+        (f64::from(left) * transform.scale_x) as f32,
+        (f64::from(top) * transform.scale_y) as f32,
+        (right as f64 * transform.scale_x) as f32,
+        (bottom as f64 * transform.scale_y) as f32,
+    ))
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn ocr_element_has_unique_full_containment(
+    element: &crate::types::OcrElement,
+    detections: &[crate::layout::LayoutDetection],
+    transform: OcrCoordinateTransform,
+) -> bool {
+    let Some((left, top, right, bottom)) = transformed_ocr_bounds(&element.geometry, transform) else {
+        return false;
+    };
+    let mut matches = detections.iter().filter(|detection| {
+        left >= detection.bbox.x1
+            && right <= detection.bbox.x2
+            && top >= detection.bbox.y1
+            && bottom <= detection.bbox.y2
+    });
+    matches.next().is_some() && matches.next().is_none()
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn whole_image_layout_mapping_retention(
+    doc: &InternalDocument,
+    detections: &[crate::layout::LayoutDetection],
+    image_width: u32,
+    image_height: u32,
+) -> Option<f64> {
+    let pages = doc.prebuilt_pages.as_ref()?;
+    if pages.len() != 1 || pages[0].page_number != 1 {
+        return None;
+    }
+    let elements = doc.prebuilt_ocr_elements.as_ref()?;
+    let meaningful: Vec<_> = elements
+        .iter()
+        .filter(|element| !element.text.trim().is_empty())
+        .collect();
+    if meaningful.is_empty() || meaningful.iter().any(|element| element.page_number != 1) {
+        return None;
+    }
+    let transform = whole_image_ocr_coordinate_transform(doc, image_width, image_height)?;
+    let mut total_tokens = 0;
+    let mut mapped_tokens = 0;
+    for element in meaningful {
+        let token_count = alphanumeric_tokens(&element.text).len();
+        total_tokens += token_count;
+        if ocr_element_has_unique_full_containment(element, detections, transform) {
+            mapped_tokens += token_count;
+        }
+    }
+    (total_tokens > 0).then_some(mapped_tokens as f64 / total_tokens as f64)
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn source_image_is_proven_single_frame(content: &[u8], mime_type: &str) -> bool {
+    let cursor = std::io::Cursor::new(content);
+    match mime_type {
+        "image/png" => image::codecs::png::PngDecoder::new(cursor)
+            .and_then(|decoder| decoder.is_apng())
+            .is_ok_and(|is_animated| !is_animated),
+        "image/webp" => image::codecs::webp::WebPDecoder::new(cursor).is_ok_and(|decoder| !decoder.has_animation()),
+        "image/jpeg" | "image/jpg" | "image/pjpeg" => !content.windows(4).any(|window| window == b"MPF\0"),
+        "image/bmp"
+        | "image/x-bmp"
+        | "image/x-ms-bmp"
+        | "image/x-portable-anymap"
+        | "image/x-portable-bitmap"
+        | "image/x-portable-graymap"
+        | "image/x-portable-pixmap" => true,
+        #[cfg(feature = "ocr")]
+        "image/tiff" | "image/x-tiff" => {
+            tiff::decoder::Decoder::new(cursor).is_ok_and(|decoder| !decoder.more_images())
+        }
+        _ => false,
+    }
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn push_mapped_layout_text(
+    builder: &mut InternalDocumentBuilder,
+    formulas: &mut Vec<crate::types::Formula>,
+    detection: &crate::layout::LayoutDetection,
+    text: &str,
+) -> bool {
+    use crate::layout::LayoutClass;
+    use crate::types::internal::{ElementKind, InternalElement};
+
+    match detection.class_name {
+        LayoutClass::Title => {
+            builder.push_heading(1, text, None, None);
+        }
+        LayoutClass::SectionHeader => {
+            builder.push_heading(2, text, None, None);
+        }
+        LayoutClass::Code => {
+            builder.push_code(text, None, None, None);
+        }
+        LayoutClass::Formula => {
+            formulas.push(crate::types::Formula {
+                latex: text.to_string(),
+                bbox: crate::types::BoundingBox {
+                    x0: detection.bbox.x1 as f64,
+                    y0: detection.bbox.y1 as f64,
+                    x1: detection.bbox.x2 as f64,
+                    y1: detection.bbox.y2 as f64,
+                },
+                page: 1,
+            });
+            builder.push_element(InternalElement::text(ElementKind::Formula, text, 0));
+        }
+        LayoutClass::ListItem | LayoutClass::CheckboxSelected | LayoutClass::CheckboxUnselected => {
+            builder.push_list_item(text, false, vec![], None, None);
+        }
+        LayoutClass::PageHeader | LayoutClass::PageFooter | LayoutClass::Picture | LayoutClass::Chart => return false,
+        _ => {
+            builder.push_paragraph(text, vec![], None, None);
+        }
+    }
+    true
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn layout_regions_from_detections(
+    detections: &[crate::layout::LayoutDetection],
+    image_width: u32,
+    image_height: u32,
+) -> Vec<crate::types::LayoutRegion> {
+    let page_area = f64::from(image_width) * f64::from(image_height);
+    if page_area == 0.0 {
+        return Vec::new();
+    }
+    detections
+        .iter()
+        .filter_map(|detection| {
+            let bbox = clipped_layout_bbox(detection.bbox, image_width, image_height)?;
+            Some(crate::types::LayoutRegion {
+                class_name: detection.class_name.to_string(),
+                confidence: f64::from(detection.confidence),
+                bounding_box: crate::types::BoundingBox {
+                    x0: f64::from(bbox.x1),
+                    y0: f64::from(bbox.y1),
+                    x1: f64::from(bbox.x2),
+                    y1: f64::from(bbox.y2),
+                },
+                area_fraction: f64::from(bbox.area()) / page_area,
+            })
+        })
+        .collect()
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn clipped_layout_bbox(bbox: crate::layout::BBox, image_width: u32, image_height: u32) -> Option<crate::layout::BBox> {
+    if ![bbox.x1, bbox.y1, bbox.x2, bbox.y2]
+        .iter()
+        .all(|value| value.is_finite())
+    {
+        return None;
+    }
+    let max_x = image_width as f32;
+    let max_y = image_height as f32;
+    let clipped = crate::layout::BBox::new(
+        bbox.x1.clamp(0.0, max_x),
+        bbox.y1.clamp(0.0, max_y),
+        bbox.x2.clamp(0.0, max_x),
+        bbox.y2.clamp(0.0, max_y),
+    );
+    (clipped.x2 > clipped.x1 && clipped.y2 > clipped.y1).then_some(clipped)
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn sanitize_layout_detections(
+    detections: &mut Vec<crate::layout::LayoutDetection>,
+    image_width: u32,
+    image_height: u32,
+) {
+    detections.retain_mut(|detection| {
+        let Some(bbox) = clipped_layout_bbox(detection.bbox, image_width, image_height) else {
+            return false;
+        };
+        detection.bbox = bbox;
+        true
+    });
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn try_retain_canonical_whole_image_ocr(
+    whole_image_doc: &InternalDocument,
+    detections: &[crate::layout::LayoutDetection],
+    image_width: u32,
+    image_height: u32,
+    source_is_single_frame: bool,
+) -> Option<InternalDocument> {
+    if !source_is_single_frame {
+        return None;
+    }
+    let retention = whole_image_layout_mapping_retention(whole_image_doc, detections, image_width, image_height)?;
+    if retention >= MIN_LAYOUT_OCR_ALPHANUMERIC_TOKEN_RETENTION {
+        return None;
+    }
+    let mut retained = whole_image_doc.clone();
+    retained.prebuilt_pages.as_mut()?[0].layout_regions =
+        Some(layout_regions_from_detections(detections, image_width, image_height));
+    tracing::debug!(
+        retention,
+        "Retained canonical whole-image OCR because layout coverage was incomplete"
+    );
+    Some(retained)
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+async fn detect_image_layout(
+    content: &[u8],
+    layout_config: crate::core::config::LayoutDetectionConfig,
+    thread_budget: usize,
+) -> Result<(image::RgbImage, crate::layout::DetectionResult)> {
+    let layout_content = content.to_vec();
+    tokio::task::spawn_blocking(move || -> Result<_> {
+        let image = image::load_from_memory(&layout_content).map_err(|error| crate::XbergError::Parsing {
+            message: format!("Failed to decode image for layout detection: {error}"),
+            source: None,
+        })?;
+        drop(layout_content);
+        let rgb = image.to_rgb8();
+        let mut engine = crate::layout::take_or_create_engine(&layout_config, thread_budget)
+            .map_err(|error| crate::XbergError::Other(format!("Layout engine init failed: {error}")))?;
+        let detection = engine.detect(&rgb);
+        crate::layout::return_engine(engine);
+        let detection =
+            detection.map_err(|error| crate::XbergError::Other(format!("Layout detection failed: {error}")))?;
+        Ok((rgb, detection))
+    })
+    .await
+    .map_err(|error| crate::XbergError::Other(format!("Image layout worker failed: {error}")))?
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn sort_layout_detections(detections: &mut [crate::layout::LayoutDetection], image_height: u32) {
+    let row_threshold = (image_height as f32 * LAYOUT_READING_ORDER_ROW_HEIGHT_RATIO).max(1.0);
+    detections.sort_by(|left, right| {
+        let left_y = (left.bbox.y1 + left.bbox.y2) / 2.0;
+        let right_y = (right.bbox.y1 + right.bbox.y2) / 2.0;
+        let left_row = (left_y / row_threshold) as i64;
+        let right_row = (right_y / row_threshold) as i64;
+        left_row.cmp(&right_row).then_with(|| {
+            let left_x = (left.bbox.x1 + left.bbox.x2) / 2.0;
+            let right_x = (right.bbox.x1 + right.bbox.x2) / 2.0;
+            left_x.total_cmp(&right_x)
+        })
+    });
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn encode_layout_region(rgb: &image::RgbImage, detection: &crate::layout::LayoutDetection) -> Result<Option<Vec<u8>>> {
+    use image::ImageEncoder;
+
+    if matches!(
+        detection.class_name,
+        crate::layout::LayoutClass::Picture | crate::layout::LayoutClass::Chart
+    ) {
+        return Ok(None);
+    }
+    let x1 = (detection.bbox.x1.max(0.0) as u32).min(rgb.width().saturating_sub(1));
+    let y1 = (detection.bbox.y1.max(0.0) as u32).min(rgb.height().saturating_sub(1));
+    let x2 = (detection.bbox.x2.max(0.0).ceil() as u32).min(rgb.width());
+    let y2 = (detection.bbox.y2.max(0.0).ceil() as u32).min(rgb.height());
+    let crop_width = x2.saturating_sub(x1);
+    let crop_height = y2.saturating_sub(y1);
+    if crop_width < MIN_LAYOUT_CROP_DIMENSION || crop_height < MIN_LAYOUT_CROP_DIMENSION {
+        return Ok(None);
+    }
+    let crop = image::imageops::crop_imm(rgb, x1, y1, crop_width, crop_height).to_image();
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::codecs::png::PngEncoder::new(&mut png)
+        .write_image(
+            crop.as_raw(),
+            crop.width(),
+            crop.height(),
+            image::ExtendedColorType::Rgb8,
+        )
+        .map_err(|error| crate::XbergError::Other(format!("Failed to encode crop as PNG: {error}")))?;
+    Ok(Some(png.into_inner()))
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn build_region_ocr_document(
+    builder: InternalDocumentBuilder,
+    formulas: Vec<crate::types::Formula>,
+    processing_warnings: Vec<crate::types::ProcessingWarning>,
+) -> InternalDocument {
+    let mut doc = builder.build();
+    doc.metadata = Metadata {
+        output_format: Some("markdown".to_string()),
+        ..Default::default()
+    };
+    doc.formulas = formulas;
+    doc.processing_warnings = processing_warnings;
+    ImageExtractor::mark_ocr_extraction(&mut doc);
+    doc
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+async fn extract_layout_regions(
+    backend: std::sync::Arc<dyn crate::plugins::OcrBackend>,
+    rgb: &image::RgbImage,
+    detections: &[crate::layout::LayoutDetection],
+    ocr_config: &crate::core::config::OcrConfig,
+) -> Result<InternalDocument> {
+    let mut builder = InternalDocumentBuilder::new("image");
+    let mut formulas = Vec::new();
+    let mut processing_warnings = Vec::new();
+    for detection in detections {
+        let Some(crop_bytes) = encode_layout_region(rgb, detection)? else {
+            continue;
+        };
+        let ocr_result = backend.process_image(&crop_bytes, ocr_config).await?;
+        processing_warnings.extend(ocr_result.processing_warnings);
+        let text = ocr_result.content.trim();
+        if text.is_empty() {
+            continue;
+        }
+        tracing::trace!(
+            class = ?detection.class_name,
+            confidence = detection.confidence,
+            text_len = text.len(),
+            "OCR result for layout region"
+        );
+        push_mapped_layout_text(&mut builder, &mut formulas, detection, text);
+    }
+    Ok(build_region_ocr_document(builder, formulas, processing_warnings))
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+async fn extract_selected_image_ocr_path<Layout, LayoutFuture, Whole, WholeFuture>(
+    use_layout: bool,
+    layout: Layout,
+    whole: Whole,
+) -> Result<InternalDocument>
+where
+    Layout: FnOnce() -> LayoutFuture,
+    LayoutFuture: std::future::Future<Output = Result<InternalDocument>>,
+    Whole: FnOnce() -> WholeFuture,
+    WholeFuture: std::future::Future<Output = Result<InternalDocument>>,
+{
+    if use_layout { layout().await } else { whole().await }
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+enum LayoutOcrPreparation {
+    Complete(InternalDocument),
+    Detected {
+        whole_image_result: Result<InternalDocument>,
+        rgb: image::RgbImage,
+        detections: Vec<crate::layout::LayoutDetection>,
+    },
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+async fn prepare_layout_ocr(
+    extractor: &ImageExtractor,
+    content: &[u8],
+    mime_type: &str,
+    config: &ExtractionConfig,
+    layout_config: crate::core::config::LayoutDetectionConfig,
+) -> Result<LayoutOcrPreparation> {
+    let whole_image_result = extractor.extract_with_ocr(content, mime_type, config).await;
+    let thread_budget = crate::core::config::concurrency::resolve_thread_budget(config.concurrency.as_ref());
+    let (rgb, detection) = match detect_image_layout(content, layout_config, thread_budget).await {
+        Ok(result) => result,
+        Err(error) => {
+            return cached_whole_image_after_layout_error(&whole_image_result, error)
+                .map(LayoutOcrPreparation::Complete);
+        }
+    };
+    tracing::info!(
+        detections = detection.detections.len(),
+        img_width = rgb.width(),
+        img_height = rgb.height(),
+        "Layout detection completed for image"
+    );
+    if detection.detections.is_empty() {
+        tracing::debug!("No layout regions detected, retaining whole-image OCR");
+        return whole_image_result.map(LayoutOcrPreparation::Complete);
+    }
+    let mut detections = detection.detections;
+    sanitize_layout_detections(&mut detections, rgb.width(), rgb.height());
+    if detections.is_empty() {
+        tracing::debug!("No valid layout regions detected, retaining whole-image OCR");
+        return whole_image_result.map(LayoutOcrPreparation::Complete);
+    }
+    sort_layout_detections(&mut detections, rgb.height());
+    Ok(LayoutOcrPreparation::Detected {
+        whole_image_result,
+        rgb,
+        detections,
+    })
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn configured_region_ocr(
+    config: &ExtractionConfig,
+    ocr_config: &crate::core::config::OcrConfig,
+) -> Result<(
+    std::sync::Arc<dyn crate::plugins::OcrBackend>,
+    crate::core::config::OcrConfig,
+)> {
+    crate::plugins::ensure_ocr_backends_initialized();
+    let registry = crate::plugins::registry::get_ocr_backend_registry();
+    let backend = registry.read().get(&ocr_config.backend)?;
+    let mut region_config = ocr_config.clone();
+    region_config.output_format = Some(crate::core::config::OutputFormat::Plain);
+    if region_config.acceleration.is_none() {
+        region_config.acceleration = config.acceleration.clone();
+    }
+    Ok((backend, region_config))
+}
+
 /// Returns `true` when the OCR backend configured in `config` self-declares that it
 /// emits structured markdown directly. End-to-end VLM backends (PaddleOCR-VL,
 /// future GOT-OCR / GLM-OCR) emit markdown in one forward pass and should
@@ -125,6 +662,11 @@ fn ocr_backend_emits_structured_markdown(config: &ExtractionConfig) -> bool {
         .get(&ocr.backend)
         .map(|b| b.emits_structured_markdown())
         .unwrap_or(false)
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn should_use_layout_ocr(config: &ExtractionConfig) -> bool {
+    config.layout.is_some() && config.ocr.is_some() && !ocr_backend_emits_structured_markdown(config)
 }
 
 #[cfg_attr(alef, alef(skip))]
@@ -363,12 +905,6 @@ impl ImageExtractor {
         mime_type: &str,
         config: &ExtractionConfig,
     ) -> Result<InternalDocument> {
-        use crate::layout::LayoutClass;
-        use crate::plugins::registry::get_ocr_backend_registry;
-        use crate::types::internal::{ElementKind, InternalElement};
-        use image::ImageEncoder;
-        use std::io::Cursor;
-
         let layout_config = config.layout.as_ref().ok_or_else(|| crate::XbergError::Parsing {
             message: "Layout config required for layout-enhanced OCR".to_string(),
             source: None,
@@ -379,166 +915,40 @@ impl ImageExtractor {
             source: None,
         })?;
 
-        let layout_content = content.to_vec();
-        let layout_config = layout_config.clone();
-        let thread_budget = crate::core::config::concurrency::resolve_thread_budget(config.concurrency.as_ref());
-        let (rgb, detection) = tokio::task::spawn_blocking(move || -> Result<_> {
-            let img = image::load_from_memory(&layout_content).map_err(|e| crate::XbergError::Parsing {
-                message: format!("Failed to decode image for layout detection: {e}"),
-                source: None,
-            })?;
-            drop(layout_content);
-            let rgb = img.to_rgb8();
-            let mut engine = crate::layout::take_or_create_engine(&layout_config, thread_budget)
-                .map_err(|e| crate::XbergError::Other(format!("Layout engine init failed: {e}")))?;
-            let detection = engine
-                .detect(&rgb)
-                .map_err(|e| crate::XbergError::Other(format!("Layout detection failed: {e}")))?;
-            crate::layout::return_engine(engine);
-            Ok((rgb, detection))
-        })
-        .await
-        .map_err(|e| crate::XbergError::Other(format!("Image layout worker failed: {e}")))??;
-
-        tracing::info!(
-            detections = detection.detections.len(),
-            img_width = rgb.width(),
-            img_height = rgb.height(),
-            "Layout detection completed for image"
-        );
-
-        if detection.detections.is_empty() {
-            tracing::debug!("No layout regions detected, falling back to whole-image OCR");
-            return self.extract_with_ocr(content, mime_type, config).await;
-        }
-
-        let mut detections = detection.detections;
-        let row_threshold = (rgb.height() as f32 * 0.05).max(1.0);
-        detections.sort_by(|a, b| {
-            let ay = (a.bbox.y1 + a.bbox.y2) / 2.0;
-            let by = (b.bbox.y1 + b.bbox.y2) / 2.0;
-            let a_row = (ay / row_threshold) as i64;
-            let b_row = (by / row_threshold) as i64;
-            a_row.cmp(&b_row).then_with(|| {
-                let ax = (a.bbox.x1 + a.bbox.x2) / 2.0;
-                let bx = (b.bbox.x1 + b.bbox.x2) / 2.0;
-                ax.total_cmp(&bx)
-            })
-        });
-
-        let backend = {
-            crate::plugins::ensure_ocr_backends_initialized();
-            let registry = get_ocr_backend_registry();
-            let registry = registry.read();
-            registry.get(&ocr_config.backend)?
+        let preparation = prepare_layout_ocr(self, content, mime_type, config, layout_config.clone()).await?;
+        let (whole_image_result, rgb, detections) = match preparation {
+            LayoutOcrPreparation::Complete(doc) => return Ok(doc),
+            LayoutOcrPreparation::Detected {
+                whole_image_result,
+                rgb,
+                detections,
+            } => (whole_image_result, rgb, detections),
         };
-
-        let mut region_ocr_config = ocr_config.clone();
-        region_ocr_config.output_format = Some(crate::core::config::OutputFormat::Plain);
-        if region_ocr_config.acceleration.is_none() {
-            region_ocr_config.acceleration = config.acceleration.clone();
-        }
-
-        let mut builder = InternalDocumentBuilder::new("image");
-        let mut formulas: Vec<crate::types::Formula> = Vec::new();
-        let mut processing_warnings = Vec::new();
-        let img_width = rgb.width();
-        let img_height = rgb.height();
-
-        for det in &detections {
-            if matches!(det.class_name, LayoutClass::Picture | LayoutClass::Chart) {
-                continue;
-            }
-
-            let x1 = (det.bbox.x1.max(0.0) as u32).min(img_width.saturating_sub(1));
-            let y1 = (det.bbox.y1.max(0.0) as u32).min(img_height.saturating_sub(1));
-            let x2 = (det.bbox.x2.max(0.0).ceil() as u32).min(img_width);
-            let y2 = (det.bbox.y2.max(0.0).ceil() as u32).min(img_height);
-
-            let crop_w = x2.saturating_sub(x1);
-            let crop_h = y2.saturating_sub(y1);
-            if crop_w < 4 || crop_h < 4 {
-                continue;
-            }
-
-            let crop = image::imageops::crop_imm(&rgb, x1, y1, crop_w, crop_h).to_image();
-
-            let mut png_buf = Cursor::new(Vec::new());
-            image::codecs::png::PngEncoder::new(&mut png_buf)
-                .write_image(
-                    crop.as_raw(),
-                    crop.width(),
-                    crop.height(),
-                    image::ExtendedColorType::Rgb8,
-                )
-                .map_err(|e| crate::XbergError::Other(format!("Failed to encode crop as PNG: {e}")))?;
-            let crop_bytes = png_buf.into_inner();
-
-            let ocr_result = backend.process_image(&crop_bytes, &region_ocr_config).await?;
-            processing_warnings.extend(ocr_result.processing_warnings);
-            let text = ocr_result.content.trim().to_string();
-            if text.is_empty() {
-                continue;
-            }
-
-            tracing::trace!(
-                class = ?det.class_name,
-                confidence = det.confidence,
-                text_len = text.len(),
-                "OCR result for layout region"
+        if let Ok(whole_image_doc) = &whole_image_result
+            && let Some(structured) = try_retain_canonical_whole_image_ocr(
+                whole_image_doc,
+                &detections,
+                rgb.width(),
+                rgb.height(),
+                source_image_is_proven_single_frame(content, mime_type),
+            )
+        {
+            tracing::debug!(
+                elements = whole_image_doc.prebuilt_ocr_elements.as_ref().map_or(0, Vec::len),
+                "Retained canonical whole-image OCR without per-region OCR"
             );
-
-            match det.class_name {
-                LayoutClass::Title => {
-                    builder.push_heading(1, &text, None, None);
-                }
-                LayoutClass::SectionHeader => {
-                    builder.push_heading(2, &text, None, None);
-                }
-                LayoutClass::Code => {
-                    builder.push_code(&text, None, None, None);
-                }
-                LayoutClass::Formula => {
-                    formulas.push(crate::types::Formula {
-                        latex: text.clone(),
-                        bbox: crate::types::BoundingBox {
-                            x0: det.bbox.x1 as f64,
-                            y0: det.bbox.y1 as f64,
-                            x1: det.bbox.x2 as f64,
-                            y1: det.bbox.y2 as f64,
-                        },
-                        page: 1,
-                    });
-                    let elem = InternalElement::text(ElementKind::Formula, &text, 0);
-                    builder.push_element(elem);
-                }
-                LayoutClass::ListItem | LayoutClass::CheckboxSelected | LayoutClass::CheckboxUnselected => {
-                    builder.push_list_item(&text, false, vec![], None, None);
-                }
-                LayoutClass::Caption | LayoutClass::Footnote => {
-                    builder.push_paragraph(&text, vec![], None, None);
-                }
-                LayoutClass::Table => {
-                    builder.push_paragraph(&text, vec![], None, None);
-                }
-                LayoutClass::PageHeader | LayoutClass::PageFooter => continue,
-                _ => {
-                    builder.push_paragraph(&text, vec![], None, None);
-                }
-            };
+            return Ok(structured);
         }
 
-        let mut doc = builder.build();
-        doc.metadata = Metadata {
-            output_format: Some("markdown".to_string()),
-            ..Default::default()
+        let (backend, region_ocr_config) = match configured_region_ocr(config, ocr_config) {
+            Ok(configured) => configured,
+            Err(error) => return cached_whole_image_after_layout_error(&whole_image_result, error),
         };
-        doc.formulas = formulas;
-        doc.processing_warnings = processing_warnings;
-        Self::mark_ocr_extraction(&mut doc);
-
-        let whole_image_result = self.extract_with_ocr(content, mime_type, config).await;
-        Ok(select_image_ocr_result(doc, whole_image_result))
+        let region_doc = match extract_layout_regions(backend, &rgb, &detections, &region_ocr_config).await {
+            Ok(doc) => doc,
+            Err(error) => return cached_whole_image_after_layout_error(&whole_image_result, error),
+        };
+        Ok(select_image_ocr_result(region_doc, whole_image_result))
     }
 }
 
@@ -700,23 +1110,26 @@ impl InternalDocumentExtractor for ImageExtractor {
 
         {
             #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
-            if config.layout.is_some() && !ocr_backend_emits_structured_markdown(config) {
-                match self.extract_with_layout_ocr(content, mime_type, config).await {
-                    Ok(mut doc) => {
-                        doc.metadata.format = Some(crate::types::FormatMetadata::Image(image_metadata));
-                        doc.mime_type = mime_type.to_string();
-                        if config.needs_image_data() {
-                            doc.images.push(extracted_image.clone());
-                        }
-                        return Ok(doc);
-                    }
-                    Err(e) => {
-                        tracing::warn!("Layout-enhanced OCR failed, falling back to regular OCR: {e}");
-                    }
+            {
+                let use_layout = should_use_layout_ocr(config);
+                let mut doc = extract_selected_image_ocr_path(
+                    use_layout,
+                    || self.extract_with_layout_ocr(content, mime_type, config),
+                    || self.extract_with_ocr(content, mime_type, config),
+                )
+                .await?;
+                doc.metadata.format = Some(crate::types::FormatMetadata::Image(image_metadata));
+                doc.mime_type = mime_type.to_string();
+                if config.needs_image_data() {
+                    doc.images.push(extracted_image);
                 }
+                return Ok(doc);
             }
 
-            #[cfg(any(feature = "ocr", feature = "ocr-wasm", feature = "ocr-pipeline"))]
+            #[cfg(all(
+                any(feature = "ocr", feature = "ocr-wasm", feature = "ocr-pipeline"),
+                not(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))
+            ))]
             {
                 let mut doc = self.extract_with_ocr(content, mime_type, config).await?;
                 doc.metadata.format = Some(crate::types::FormatMetadata::Image(image_metadata));
@@ -788,6 +1201,282 @@ mod tests {
 
     fn image_ocr_document(text: &str) -> InternalDocument {
         build_image_internal_document(Some(text), None)
+    }
+
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    fn positioned_word(text: &str, left: u32, top: u32) -> crate::types::OcrElement {
+        positioned_word_box(text, left, top, 40, 20)
+    }
+
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    fn positioned_word_box(text: &str, left: u32, top: u32, width: u32, height: u32) -> crate::types::OcrElement {
+        crate::types::OcrElement::new(
+            text,
+            crate::types::OcrBoundingGeometry::Rectangle {
+                left,
+                top,
+                width,
+                height,
+            },
+            crate::types::OcrConfidence::from_tesseract(95.0),
+        )
+        .with_level(crate::types::OcrElementLevel::Word)
+    }
+
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    fn whole_image_doc_with_elements(
+        text: &str,
+        elements: Vec<crate::types::OcrElement>,
+        width: u32,
+        height: u32,
+    ) -> InternalDocument {
+        let mut doc = image_ocr_document(text);
+        doc.prebuilt_ocr_elements = Some(elements);
+        doc.prebuilt_pages = Some(vec![crate::types::PageContent {
+            page_number: 1,
+            content: text.to_string(),
+            tables: vec![],
+            image_indices: vec![],
+            hierarchy: None,
+            is_blank: None,
+            layout_regions: None,
+            speaker_notes: None,
+            section_name: None,
+            sheet_name: None,
+        }]);
+        doc.metadata.additional.insert(
+            std::borrow::Cow::Borrowed(crate::ocr::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY),
+            serde_json::json!(width),
+        );
+        doc.metadata.additional.insert(
+            std::borrow::Cow::Borrowed(crate::ocr::OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY),
+            serde_json::json!(height),
+        );
+        doc
+    }
+
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    #[test]
+    fn should_retain_canonical_whole_image_when_layout_coverage_is_low() {
+        let detections = vec![crate::layout::LayoutDetection::new(
+            crate::layout::LayoutClass::Title,
+            0.96,
+            crate::layout::BBox::new(0.0, 0.0, 60.0, 60.0),
+        )];
+        let elements = vec![positioned_word("inside", 10, 20), positioned_word("outside", 100, 20)];
+        let mut whole = whole_image_doc_with_elements("Inside, outside!", elements, 200, 100);
+        whole.relationships.push(crate::types::internal::Relationship {
+            source: 0,
+            target: crate::types::internal::RelationshipTarget::Index(0),
+            kind: crate::types::document_structure::RelationshipKind::CrossReference,
+        });
+        let original = whole.clone();
+
+        let retained = try_retain_canonical_whole_image_ocr(&whole, &detections, 200, 100, true)
+            .expect("50% layout coverage must retain canonical whole-image OCR");
+
+        assert_eq!(retained.elements, original.elements);
+        assert_eq!(retained.relationships, original.relationships);
+        assert_eq!(
+            serde_json::to_value(&retained.prebuilt_ocr_elements).unwrap(),
+            serde_json::to_value(&original.prebuilt_ocr_elements).unwrap()
+        );
+        assert_eq!(retained.prebuilt_pages.as_ref().unwrap()[0].content, "Inside, outside!");
+        assert_eq!(
+            retained.prebuilt_pages.as_ref().unwrap()[0]
+                .layout_regions
+                .as_ref()
+                .map(Vec::len),
+            Some(1)
+        );
+    }
+
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    #[test]
+    fn should_use_region_ocr_when_layout_coverage_is_sufficient() {
+        let detections = vec![crate::layout::LayoutDetection::new(
+            crate::layout::LayoutClass::Text,
+            0.96,
+            crate::layout::BBox::new(0.0, 0.0, 200.0, 100.0),
+        )];
+        let elements = vec![positioned_word("inside", 10, 20)];
+        let whole = whole_image_doc_with_elements("inside", elements, 200, 100);
+
+        assert!(try_retain_canonical_whole_image_ocr(&whole, &detections, 200, 100, true).is_none());
+    }
+
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    #[test]
+    fn should_reject_multiframe_whole_image_fast_path() {
+        let detections = vec![crate::layout::LayoutDetection::new(
+            crate::layout::LayoutClass::Text,
+            0.96,
+            crate::layout::BBox::new(0.0, 0.0, 20.0, 20.0),
+        )];
+        let elements = vec![positioned_word("outside", 100, 20)];
+        let mut whole = whole_image_doc_with_elements("outside", elements, 200, 100);
+        let mut second_page = whole.prebuilt_pages.as_ref().unwrap()[0].clone();
+        second_page.page_number = 2;
+        whole.prebuilt_pages.as_mut().unwrap().push(second_page);
+
+        assert!(try_retain_canonical_whole_image_ocr(&whole, &detections, 200, 100, true).is_none());
+    }
+
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    #[test]
+    fn should_reject_real_multiframe_tiff_when_ocr_synthesizes_one_page() {
+        let mut cursor = std::io::Cursor::new(Vec::new());
+        {
+            let mut encoder = tiff::encoder::TiffEncoder::new(&mut cursor).unwrap();
+            encoder
+                .write_image::<tiff::encoder::colortype::Gray8>(1, 1, &[0])
+                .unwrap();
+            encoder
+                .write_image::<tiff::encoder::colortype::Gray8>(1, 1, &[255])
+                .unwrap();
+        }
+        let source = cursor.into_inner();
+        let decoder = tiff::decoder::Decoder::new(std::io::Cursor::new(&source)).unwrap();
+        assert!(decoder.more_images(), "test input must contain multiple TIFF frames");
+
+        let detections = vec![crate::layout::LayoutDetection::new(
+            crate::layout::LayoutClass::Text,
+            0.96,
+            crate::layout::BBox::new(0.0, 0.0, 20.0, 20.0),
+        )];
+        let elements = vec![positioned_word("outside", 100, 20)];
+        let whole = whole_image_doc_with_elements("outside", elements, 200, 100);
+        let source_is_single_frame = source_image_is_proven_single_frame(&source, "image/tiff");
+
+        assert!(!source_is_single_frame);
+        assert!(try_retain_canonical_whole_image_ocr(&whole, &detections, 200, 100, source_is_single_frame).is_none());
+    }
+
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    #[test]
+    fn should_clip_layout_regions_to_image_bounds_and_drop_invalid_boxes() {
+        let detections = vec![
+            crate::layout::LayoutDetection::new(
+                crate::layout::LayoutClass::Text,
+                0.96,
+                crate::layout::BBox::new(-20.0, -10.0, 220.0, 110.0),
+            ),
+            crate::layout::LayoutDetection::new(
+                crate::layout::LayoutClass::Text,
+                0.80,
+                crate::layout::BBox::new(f32::NAN, 0.0, 10.0, 10.0),
+            ),
+            crate::layout::LayoutDetection::new(
+                crate::layout::LayoutClass::Text,
+                0.70,
+                crate::layout::BBox::new(30.0, 30.0, 20.0, 20.0),
+            ),
+        ];
+
+        let regions = layout_regions_from_detections(&detections, 200, 100);
+
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].bounding_box.x0, 0.0);
+        assert_eq!(regions[0].bounding_box.y0, 0.0);
+        assert_eq!(regions[0].bounding_box.x1, 200.0);
+        assert_eq!(regions[0].bounding_box.y1, 100.0);
+        assert_eq!(regions[0].area_fraction, 1.0);
+    }
+
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    #[test]
+    fn should_retain_cached_whole_image_when_region_ocr_fails() {
+        let mut whole = image_ocr_document("cached whole-image text");
+        whole.metadata.additional.insert(
+            std::borrow::Cow::Borrowed("ocr_candidate"),
+            serde_json::json!("whole-image"),
+        );
+
+        let retained = cached_whole_image_after_layout_error(
+            &Ok(whole),
+            crate::XbergError::Other("region backend failed".to_string()),
+        )
+        .expect("cached whole-image OCR must remain usable");
+
+        assert_eq!(internal_document_text(&retained), "cached whole-image text");
+        assert_eq!(
+            retained.metadata.additional.get("ocr_candidate"),
+            Some(&serde_json::json!("whole-image"))
+        );
+        assert_eq!(retained.processing_warnings.len(), 1);
+        assert_eq!(
+            retained.processing_warnings[0].message,
+            "Layout-region OCR failed after whole-image OCR succeeded; retained whole-image output"
+        );
+    }
+
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    #[test]
+    fn should_report_both_ocr_failures() {
+        let result = cached_whole_image_after_layout_error(
+            &Err(crate::XbergError::Other("whole backend failed".to_string())),
+            crate::XbergError::Other("region backend failed".to_string()),
+        );
+
+        let message = result
+            .expect_err("both failed OCR paths must return an error")
+            .to_string();
+        assert!(message.contains("whole-image OCR: whole backend failed"));
+        assert!(message.contains("layout-region OCR: region backend failed"));
+    }
+
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    #[tokio::test]
+    async fn should_not_retry_whole_image_ocr_after_layout_path_failure() {
+        let layout_calls = std::cell::Cell::new(0);
+        let whole_calls = std::cell::Cell::new(0);
+
+        let result = extract_selected_image_ocr_path(
+            true,
+            || {
+                layout_calls.set(layout_calls.get() + 1);
+                std::future::ready(Err(crate::XbergError::Other("layout path failed".to_string())))
+            },
+            || {
+                whole_calls.set(whole_calls.get() + 1);
+                std::future::ready(Ok(image_ocr_document("unexpected retry")))
+            },
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert_eq!(layout_calls.get(), 1);
+        assert_eq!(whole_calls.get(), 0);
+    }
+
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    #[tokio::test]
+    async fn should_use_default_whole_image_ocr_when_layout_has_no_ocr_config() {
+        let config = ExtractionConfig {
+            layout: Some(crate::core::config::LayoutDetectionConfig::default()),
+            ocr: None,
+            ..Default::default()
+        };
+        let layout_calls = std::cell::Cell::new(0);
+        let whole_calls = std::cell::Cell::new(0);
+
+        let result = extract_selected_image_ocr_path(
+            should_use_layout_ocr(&config),
+            || {
+                layout_calls.set(layout_calls.get() + 1);
+                std::future::ready(Err(crate::XbergError::Other("unexpected layout path".to_string())))
+            },
+            || {
+                whole_calls.set(whole_calls.get() + 1);
+                std::future::ready(Ok(image_ocr_document("default whole-image OCR")))
+            },
+        )
+        .await
+        .expect("missing explicit OCR config must retain the default whole-image path");
+
+        assert_eq!(internal_document_text(&result), "default whole-image OCR");
+        assert_eq!(layout_calls.get(), 0);
+        assert_eq!(whole_calls.get(), 1);
     }
 
     #[test]
