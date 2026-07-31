@@ -41,6 +41,104 @@ use super::{is_language_supported, language_to_script_family, map_language_code}
 
 use xberg_paddle_ocr::OcrLite;
 
+const ORIENTATION_CONFIDENCE_METADATA_KEY: &str = "orientation_confidence";
+
+#[derive(Debug)]
+struct RotationOutcome {
+    rotated_bytes: Option<Vec<u8>>,
+    processed_width: u32,
+    processed_height: u32,
+    orientation: Option<crate::doc_orientation::OrientationResult>,
+}
+
+impl RotationOutcome {
+    fn unrotated(width: u32, height: u32) -> Self {
+        Self {
+            rotated_bytes: None,
+            processed_width: width,
+            processed_height: height,
+            orientation: None,
+        }
+    }
+
+    fn auto_rotated(&self) -> bool {
+        self.rotated_bytes.is_some()
+    }
+}
+
+fn rotate_for_detected_orientation(
+    image: &image::RgbImage,
+    orientation: crate::doc_orientation::OrientationResult,
+) -> Result<RotationOutcome> {
+    if orientation.degrees == 0 || orientation.confidence < crate::doc_orientation::MIN_CONFIDENCE {
+        return Ok(RotationOutcome {
+            rotated_bytes: None,
+            processed_width: image.width(),
+            processed_height: image.height(),
+            orientation: Some(orientation),
+        });
+    }
+
+    let rotated = match orientation.degrees {
+        90 => image::imageops::rotate270(image),
+        180 => image::imageops::rotate180(image),
+        270 => image::imageops::rotate90(image),
+        _ => {
+            return Ok(RotationOutcome {
+                rotated_bytes: None,
+                processed_width: image.width(),
+                processed_height: image.height(),
+                orientation: Some(orientation),
+            });
+        }
+    };
+    let processed_width = rotated.width();
+    let processed_height = rotated.height();
+    let mut encoded = std::io::Cursor::new(Vec::new());
+    rotated
+        .write_to(&mut encoded, image::ImageFormat::Png)
+        .map_err(|error| crate::XbergError::Ocr {
+            message: format!("Failed to encode rotated PaddleOCR image: {error}"),
+            source: None,
+        })?;
+
+    Ok(RotationOutcome {
+        rotated_bytes: Some(encoded.into_inner()),
+        processed_width,
+        processed_height,
+        orientation: Some(orientation),
+    })
+}
+
+fn image_metadata(outcome: &RotationOutcome) -> AHashMap<Cow<'static, str>, serde_json::Value> {
+    let mut additional = AHashMap::new();
+    additional.insert(
+        Cow::Borrowed(crate::ocr::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY),
+        serde_json::Value::Number(outcome.processed_width.into()),
+    );
+    additional.insert(
+        Cow::Borrowed(crate::ocr::OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY),
+        serde_json::Value::Number(outcome.processed_height.into()),
+    );
+    if let Some(orientation) = outcome.orientation {
+        additional.insert(
+            Cow::Borrowed(crate::ocr::OCR_ORIENTATION_DEGREES_METADATA_KEY),
+            serde_json::Value::Number(orientation.degrees.into()),
+        );
+        additional.insert(
+            Cow::Borrowed(ORIENTATION_CONFIDENCE_METADATA_KEY),
+            serde_json::json!(orientation.confidence),
+        );
+    }
+    if outcome.auto_rotated() {
+        additional.insert(
+            Cow::Borrowed(crate::ocr::OCR_AUTO_ROTATED_METADATA_KEY),
+            serde_json::Value::Bool(true),
+        );
+    }
+    additional
+}
+
 /// PaddleOCR backend using ONNX Runtime.
 ///
 /// Maintains a pool of OCR engines keyed by script family. Each family has its own
@@ -285,9 +383,7 @@ impl PaddleOcrBackend {
 
     /// Detect document orientation and rotate if needed.
     ///
-    /// Returns `Ok(Some(rotated_bytes))` if rotation was applied,
-    /// `Ok(None)` if no rotation needed (0° or low confidence).
-    fn detect_and_rotate(&self, image_bytes: &[u8]) -> Result<Option<Vec<u8>>> {
+    fn detect_and_rotate(&self, image: &image::RgbImage) -> Result<RotationOutcome> {
         let detector = self.doc_ori_detector.get_or_try_init(|| {
             let cache_dir = self.config.resolve_cache_dir();
             Ok::<_, crate::XbergError>(crate::doc_orientation::DocOrientationDetector::with_acceleration(
@@ -296,7 +392,13 @@ impl PaddleOcrBackend {
             ))
         })?;
 
-        crate::doc_orientation::detect_and_rotate(detector, image_bytes)
+        let orientation = detector.detect(image)?;
+        tracing::debug!(
+            degrees = orientation.degrees,
+            confidence = orientation.confidence,
+            "Document orientation detected for PaddleOCR"
+        );
+        rotate_for_detected_orientation(image, orientation)
     }
 
     /// Perform OCR on image bytes using the appropriate script family engine.
@@ -306,14 +408,14 @@ impl PaddleOcrBackend {
         language: &str,
         effective_config: Arc<PaddleOcrConfig>,
         accel: Option<&crate::core::config::acceleration::AccelerationConfig>,
-    ) -> Result<(String, Vec<OcrElement>)> {
+    ) -> Result<(String, Vec<OcrElement>, u32, u32)> {
         let family = language_to_script_family(language);
         let engine = self.get_or_init_engine_for_family(family, &effective_config, accel)?;
 
         let image_bytes_owned = image_bytes.to_vec();
         let config = effective_config;
 
-        let text_blocks = tokio::task::spawn_blocking(move || {
+        let (text_blocks, processed_width, processed_height) = tokio::task::spawn_blocking(move || {
             catch_unwind(std::panic::AssertUnwindSafe(|| {
                 Self::perform_ocr(&image_bytes_owned, &engine, &config)
             }))
@@ -343,7 +445,7 @@ impl PaddleOcrBackend {
             .collect::<Vec<_>>()
             .join("\n\n");
 
-        Ok((text, ocr_elements))
+        Ok((text, ocr_elements, processed_width, processed_height))
     }
 
     /// Perform actual OCR inference (runs in blocking context).
@@ -358,13 +460,15 @@ impl PaddleOcrBackend {
         image_bytes: &[u8],
         ocr_engine: &Arc<OcrLite>,
         config: &PaddleOcrConfig,
-    ) -> Result<Vec<xberg_paddle_ocr::TextBlock>> {
+    ) -> Result<(Vec<xberg_paddle_ocr::TextBlock>, u32, u32)> {
         let img = crate::extraction::image::load_image_for_ocr(image_bytes)
             .map_err(|e| crate::XbergError::Ocr {
                 message: e.to_string(),
                 source: None,
             })?
             .to_rgb8();
+        let processed_width = img.width();
+        let processed_height = img.height();
 
         let padding = config.padding;
         let max_side_len = config.det_limit_side_len;
@@ -401,7 +505,7 @@ impl PaddleOcrBackend {
 
         tracing::debug!(text_block_count = text_blocks.len(), "PaddleOCR detection completed");
 
-        Ok(text_blocks)
+        Ok((text_blocks, processed_width, processed_height))
     }
 }
 
@@ -452,22 +556,40 @@ impl OcrBackend for PaddleOcrBackend {
         let languages = config.effective_languages();
         let (paddle_lang, language_warnings) = super::select_paddle_language(&languages);
 
-        let ocr_image_bytes: std::borrow::Cow<'_, [u8]> = if config.auto_rotate {
-            match self.detect_and_rotate(image_bytes) {
-                Ok(Some(rotated)) => std::borrow::Cow::Owned(rotated),
-                Ok(None) => std::borrow::Cow::Borrowed(image_bytes),
+        let mut rotation_outcome = None;
+        let ocr_image_bytes: Cow<'_, [u8]> = if config.auto_rotate {
+            let decoded_image = crate::extraction::image::load_image_for_ocr(image_bytes)
+                .map_err(|error| crate::XbergError::Ocr {
+                    message: format!("Failed to decode PaddleOCR image for orientation detection: {error}"),
+                    source: None,
+                })?
+                .to_rgb8();
+            match self.detect_and_rotate(&decoded_image) {
+                Ok(outcome) => {
+                    rotation_outcome = Some(outcome);
+                }
                 Err(e) => {
                     tracing::warn!("Doc orientation detection failed, proceeding without rotation: {e}");
-                    std::borrow::Cow::Borrowed(image_bytes)
+                    rotation_outcome = Some(RotationOutcome::unrotated(
+                        decoded_image.width(),
+                        decoded_image.height(),
+                    ));
                 }
             }
+            match rotation_outcome
+                .as_ref()
+                .and_then(|outcome| outcome.rotated_bytes.as_deref())
+            {
+                Some(rotated) => Cow::Borrowed(rotated),
+                None => Cow::Borrowed(image_bytes),
+            }
         } else {
-            std::borrow::Cow::Borrowed(image_bytes)
+            Cow::Borrowed(image_bytes)
         };
 
         let effective_accel = self.resolve_acceleration(config.acceleration.as_ref());
 
-        let (text, ocr_elements) = self
+        let (text, ocr_elements, processed_width, processed_height) = self
             .do_ocr(
                 &ocr_image_bytes,
                 paddle_lang,
@@ -475,6 +597,8 @@ impl OcrBackend for PaddleOcrBackend {
                 effective_accel.as_ref(),
             )
             .await?;
+        let rotation_outcome =
+            rotation_outcome.unwrap_or_else(|| RotationOutcome::unrotated(processed_width, processed_height));
 
         let text_blocks_count = ocr_elements.len();
 
@@ -553,6 +677,7 @@ impl OcrBackend for PaddleOcrBackend {
                 table_rows,
                 table_cols,
             })),
+            additional: image_metadata(&rotation_outcome),
             ..Default::default()
         };
 
@@ -644,6 +769,78 @@ mod tests {
                 "unexpected effective recognition batch size for configured value {configured}"
             );
         }
+    }
+
+    #[test]
+    fn test_unrotated_image_metadata_uses_original_dimensions() {
+        let image = image::RgbImage::new(3, 2);
+        let outcome = rotate_for_detected_orientation(
+            &image,
+            crate::doc_orientation::OrientationResult {
+                degrees: 0,
+                confidence: 1.0,
+            },
+        )
+        .expect("zero-degree orientation should not require a model or fail");
+
+        assert!(outcome.rotated_bytes.is_none());
+        assert_eq!((outcome.processed_width, outcome.processed_height), (3, 2));
+
+        let metadata = image_metadata(&outcome);
+        assert_eq!(
+            metadata.get(crate::ocr::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY),
+            Some(&serde_json::json!(3))
+        );
+        assert_eq!(
+            metadata.get(crate::ocr::OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY),
+            Some(&serde_json::json!(2))
+        );
+        assert_eq!(
+            metadata.get(crate::ocr::OCR_ORIENTATION_DEGREES_METADATA_KEY),
+            Some(&serde_json::json!(0))
+        );
+        assert!(!metadata.contains_key(crate::ocr::OCR_AUTO_ROTATED_METADATA_KEY));
+    }
+
+    #[test]
+    fn test_rotated_image_metadata_and_geometry_use_corrected_space() {
+        let mut image = image::RgbImage::new(3, 2);
+        let marker = image::Rgb([17, 31, 47]);
+        image.put_pixel(0, 0, marker);
+
+        let outcome = rotate_for_detected_orientation(
+            &image,
+            crate::doc_orientation::OrientationResult {
+                degrees: 90,
+                confidence: 1.0,
+            },
+        )
+        .expect("in-memory rotation should succeed");
+
+        assert_eq!((outcome.processed_width, outcome.processed_height), (2, 3));
+        let rotated = image::load_from_memory(outcome.rotated_bytes.as_deref().expect("rotation should produce bytes"))
+            .expect("rotated PNG should decode")
+            .to_rgb8();
+        assert_eq!(rotated.dimensions(), (2, 3));
+        assert_eq!(*rotated.get_pixel(0, 2), marker);
+
+        let metadata = image_metadata(&outcome);
+        assert_eq!(
+            metadata.get(crate::ocr::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY),
+            Some(&serde_json::json!(2))
+        );
+        assert_eq!(
+            metadata.get(crate::ocr::OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY),
+            Some(&serde_json::json!(3))
+        );
+        assert_eq!(
+            metadata.get(crate::ocr::OCR_ORIENTATION_DEGREES_METADATA_KEY),
+            Some(&serde_json::json!(90))
+        );
+        assert_eq!(
+            metadata.get(crate::ocr::OCR_AUTO_ROTATED_METADATA_KEY),
+            Some(&serde_json::json!(true))
+        );
     }
 
     #[test]

@@ -247,56 +247,6 @@ pub(crate) fn resolve_cache_dir() -> PathBuf {
     hf_hub::resolve_cache_dir()
 }
 
-/// Detect orientation and return a corrected image if rotation is needed.
-///
-/// Returns `Ok(Some(rotated_bytes))` if rotation was applied,
-/// `Ok(None)` if no rotation needed (0° or low confidence).
-#[cfg_attr(alef, alef(skip))]
-#[cfg(feature = "paddle-ocr")]
-pub(crate) fn detect_and_rotate(detector: &DocOrientationDetector, image_bytes: &[u8]) -> Result<Option<Vec<u8>>> {
-    let img = image::load_from_memory(image_bytes)
-        .map_err(|e| XbergError::Ocr {
-            message: format!("Failed to load image for orientation detection: {e}"),
-            source: None,
-        })?
-        .to_rgb8();
-
-    let result = detector.detect(&img)?;
-
-    tracing::debug!(
-        degrees = result.degrees,
-        confidence = result.confidence,
-        "Document orientation detected"
-    );
-
-    if result.degrees == 0 || result.confidence < MIN_CONFIDENCE {
-        return Ok(None);
-    }
-
-    let rotated = match result.degrees {
-        90 => image::imageops::rotate270(&img),
-        180 => image::imageops::rotate180(&img),
-        270 => image::imageops::rotate90(&img),
-        _ => return Ok(None),
-    };
-
-    let mut buf = std::io::Cursor::new(Vec::new());
-    rotated
-        .write_to(&mut buf, image::ImageFormat::Png)
-        .map_err(|e| XbergError::Ocr {
-            message: format!("Failed to encode rotated image: {e}"),
-            source: None,
-        })?;
-
-    tracing::info!(
-        degrees = result.degrees,
-        confidence = result.confidence,
-        "Auto-rotated document page"
-    );
-
-    Ok(Some(buf.into_inner()))
-}
-
 /// Resize short side to 256, then center crop to 224×224.
 fn preprocess(image: &RgbImage) -> RgbImage {
     let (w, h) = (image.width(), image.height());

@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- PaddleOCR now reports processed image dimensions and applied orientation corrections, keeping
+  OCR geometry aligned with optional layout detection on rotated documents.
 - Jupyter notebook paths retain `application/x-ipynb+json` routing when generic JSON content
   detection runs, and extracted notebook content no longer exposes diagnostic cell/output markers;
   cell identity, execution, tag, output-type, and MIME details remain available as structured metadata.
