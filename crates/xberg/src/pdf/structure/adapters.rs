@@ -1,7 +1,6 @@
 //! OCR-to-structure adapters: convert xberg internal types into the PDF
 //! structure pipeline's paragraph representation.
 // `types` is used by the OCR conversion helpers (`feature = "ocr"`) and by the
-// layout-driven promotion helpers (`ocr`/`ocr-pipeline` + `layout-detection`);
 // unused when only `ocr-pipeline` is on without `layout-detection`, as in the
 // WASM `ocr-wasm` feature set.
 #[cfg(any(feature = "ocr", all(feature = "ocr-pipeline", feature = "layout-detection")))]

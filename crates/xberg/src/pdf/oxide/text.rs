@@ -676,11 +676,7 @@ fn sparse_columns_continue_one_sentence(
             .find(|character| character.is_alphabetic())
             .is_some_and(char::is_uppercase)
     };
-    let has_terminal = |span: &&pdf_oxide::layout::TextSpan| {
-        span.text
-            .trim_end()
-            .ends_with(['.', '!', '?'])
-    };
+    let has_terminal = |span: &&pdf_oxide::layout::TextSpan| span.text.trim_end().ends_with(['.', '!', '?']);
     let continuations = [&left_by_y[1], &right_by_y[0], &right_by_y[1]];
     let all_spans = left_by_y.iter().chain(&right_by_y);
 
