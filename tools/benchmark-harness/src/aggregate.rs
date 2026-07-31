@@ -724,7 +724,7 @@ pub fn aggregate_new_format(results: &[BenchmarkResult]) -> NewConsolidatedResul
         disk_size_conflicts,
     };
 
-    let comparison = build_comparison(&aggregated_by_framework_mode);
+    let comparison = build_comparison(&aggregated_by_framework_mode, None);
     let failure_summary = build_failure_summary(results);
     let format_support = build_format_support_matrix(results, &file_types);
 
@@ -1376,7 +1376,7 @@ fn coverage_adjusted_quality(value: f64, performance: &PerformancePercentiles) -
 /// across all candidates. This is the exact basis on which the "overall" quality ranking for
 /// the format is computed; a single-format framework in the pool collapses it to that one type.
 /// Returned sorted for stable metadata output.
-fn resolve_shared_corpus_file_types(
+pub(crate) fn resolve_shared_corpus_file_types(
     by_framework_mode: &HashMap<String, FrameworkModeAggregation>,
     format: OutputFormat,
 ) -> Vec<String> {
@@ -1453,7 +1453,7 @@ fn build_shared_corpus_quality_ranking(
         }
     }
 
-    qual.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    qual.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     let baseline_qual = qual.first().map(|r| r.1).unwrap_or(1.0);
     qual.iter()
         .enumerate()
@@ -1471,8 +1471,8 @@ fn build_shared_corpus_quality_ranking(
 /// contract marks `optional` (best-effort, e.g. MinerU). Used to flag [`RankedFramework::optional`]
 /// so a ranking consumer can tell a contract-verified entry apart from a best-effort one that may
 /// be partially failed or under-sampled relative to the pinned corpus.
-fn optional_aggregate_keys() -> std::collections::HashSet<String> {
-    [crate::bench_matrix::Cohort::Native, crate::bench_matrix::Cohort::Ocr]
+fn optional_aggregate_keys(cohort: Option<crate::bench_matrix::Cohort>) -> std::collections::HashSet<String> {
+    cohort
         .into_iter()
         .flat_map(|cohort| cohort.contract().matrix)
         .filter(|entry| entry.optional)
@@ -1480,12 +1480,59 @@ fn optional_aggregate_keys() -> std::collections::HashSet<String> {
         .collect()
 }
 
+pub(crate) fn comparison_for_cohort(
+    by_framework_mode: &HashMap<String, FrameworkModeAggregation>,
+    cohort: crate::bench_matrix::Cohort,
+) -> ComparisonData {
+    build_comparison(by_framework_mode, Some(cohort))
+}
+
+/// Apply cohort-specific optional flags after filesystem provenance has been folded into an
+/// aggregate. Optionality cannot be inferred from aggregate keys alone because the same framework
+/// cell can be required in one cohort and best-effort in another. ~keep
+pub fn apply_pinned_cohort_comparison(aggregate: &mut NewConsolidatedResults) -> crate::Result<()> {
+    let scoped_records: Vec<Option<&str>> = aggregate
+        .run_provenance
+        .iter()
+        .map(|record| {
+            record
+                .provenance
+                .as_ref()
+                .and_then(|provenance| provenance.corpus.cohort.as_deref())
+        })
+        .collect();
+    let cohort_names: std::collections::BTreeSet<&str> = scoped_records.iter().flatten().copied().collect();
+    if cohort_names.is_empty() {
+        return Ok(());
+    }
+    if cohort_names.len() != 1 || scoped_records.iter().any(Option::is_none) {
+        return Err(crate::Error::Benchmark(format!(
+            "cannot apply one benchmark contract to mixed or incomplete cohorts: {}",
+            cohort_names.into_iter().collect::<Vec<_>>().join(", ")
+        )));
+    }
+    let cohort_name = *cohort_names.first().expect("one cohort name");
+    let Some(cohort) = crate::bench_matrix::Cohort::ALL
+        .into_iter()
+        .find(|cohort| cohort.contract().manifest_name == cohort_name)
+    else {
+        return Err(crate::Error::Benchmark(format!(
+            "cannot apply unknown benchmark cohort contract: {cohort_name}"
+        )));
+    };
+    aggregate.comparison = comparison_for_cohort(&aggregate.by_framework_mode, cohort);
+    Ok(())
+}
+
 /// Build cross-framework comparison rankings from aggregated data
 ///
 /// Uses the framework-mode-wide process aggregation so a native batch contributes
 /// once even when its document rows span several file-type or OCR buckets.
-fn build_comparison(by_framework_mode: &HashMap<String, FrameworkModeAggregation>) -> ComparisonData {
-    let optional_keys = optional_aggregate_keys();
+fn build_comparison(
+    by_framework_mode: &HashMap<String, FrameworkModeAggregation>,
+    cohort: Option<crate::bench_matrix::Cohort>,
+) -> ComparisonData {
+    let optional_keys = optional_aggregate_keys(cohort);
     let mut metrics: Vec<(String, f64, f64, OutputFormat)> = Vec::new();
     let mut cpu_seconds_metrics: Vec<(String, f64)> = Vec::new();
     let mut pages_per_sec_metrics: Vec<(String, f64)> = Vec::new();
@@ -1513,7 +1560,7 @@ fn build_comparison(by_framework_mode: &HashMap<String, FrameworkModeAggregation
 
     let mut thr = metrics.clone();
     thr.retain(|m| m.1.is_finite());
-    thr.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    thr.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     let baseline_thr = thr.first().map(|r| r.1).unwrap_or(1.0);
     let throughput_ranking: Vec<RankedFramework> = thr
         .iter()
@@ -1529,7 +1576,7 @@ fn build_comparison(by_framework_mode: &HashMap<String, FrameworkModeAggregation
 
     let mut mem = metrics.clone();
     mem.retain(|m| m.2.is_finite());
-    mem.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
+    mem.sort_by(|a, b| a.2.total_cmp(&b.2).then_with(|| a.0.cmp(&b.0)));
     let baseline_mem = mem.first().map(|r| r.2).unwrap_or(1.0);
     let memory_ranking: Vec<RankedFramework> = mem
         .iter()
@@ -1549,11 +1596,7 @@ fn build_comparison(by_framework_mode: &HashMap<String, FrameworkModeAggregation
         build_shared_corpus_quality_ranking(by_framework_mode, OutputFormat::Plaintext, &optional_keys);
 
     let mut deltas_vs_baseline = HashMap::new();
-    if let Some(baseline) = metrics
-        .iter()
-        .filter(|(_, thr, _, _)| thr.is_finite())
-        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
-    {
+    if let Some(baseline) = thr.first() {
         for (k, thr, mem_val, _) in &metrics {
             if k != &baseline.0 {
                 deltas_vs_baseline.insert(
@@ -1624,7 +1667,7 @@ fn build_comparison(by_framework_mode: &HashMap<String, FrameworkModeAggregation
 
     let build_ranking = |items: &mut Vec<(String, f64)>| -> Vec<RankedFramework> {
         items.retain(|(_, v)| v.is_finite());
-        items.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        items.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
         let best = items.first().map(|r| r.1).unwrap_or(1.0);
         items
             .iter()
@@ -1677,7 +1720,7 @@ fn build_comparison(by_framework_mode: &HashMap<String, FrameworkModeAggregation
     let pages_per_sec_ranking = build_ranking(&mut pages_per_sec_metrics);
 
     cpu_seconds_metrics.retain(|(_, v)| v.is_finite());
-    cpu_seconds_metrics.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+    cpu_seconds_metrics.sort_by(|a, b| a.1.total_cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
     // cpu_seconds is lower-is-better, so the natural baseline is the smallest value. But native
     // single-file frameworks (e.g. liteparse/xberg) routinely report exactly 0.0 core-seconds, and
     // a 0.0 baseline is undefined, and the old `if baseline > 0.0 { .. } else { 1.0 }` guard used to
@@ -1758,7 +1801,7 @@ fn build_pareto_frontier(by_framework_mode: &HashMap<String, FrameworkModeAggreg
         })
         .collect();
 
-    candidates
+    let mut frontier: Vec<ParetoPoint> = candidates
         .iter()
         .filter(|candidate| {
             !candidates.iter().any(|other| {
@@ -1772,7 +1815,9 @@ fn build_pareto_frontier(by_framework_mode: &HashMap<String, FrameworkModeAggreg
             })
         })
         .cloned()
-        .collect()
+        .collect();
+    frontier.sort_by(|a, b| a.framework_mode.cmp(&b.framework_mode));
+    frontier
 }
 
 #[cfg(test)]
@@ -3553,7 +3598,9 @@ mod tests {
         let mineru = create_test_result("mineru", "pdf", OcrStatus::NotUsed, 1_000, 1_000_000.0, 10_000_000);
         let docling = create_test_result("docling", "pdf", OcrStatus::NotUsed, 2_000, 500_000.0, 20_000_000);
 
-        let aggregated = aggregate_new_format(&[mineru, docling]);
+        let mut aggregated = aggregate_new_format(&[mineru, docling]);
+        aggregated.comparison =
+            comparison_for_cohort(&aggregated.by_framework_mode, crate::bench_matrix::Cohort::Native);
 
         let find = |ranking: &[RankedFramework], needle: &str| -> RankedFramework {
             ranking
@@ -3576,6 +3623,32 @@ mod tests {
 
         let cpu_mineru = find(&aggregated.comparison.cpu_seconds_ranking, "mineru");
         assert!(cpu_mineru.optional);
+    }
+
+    #[test]
+    fn ranking_optionality_is_specific_to_the_active_cohort() {
+        let tika = create_test_result("tika", "pdf", OcrStatus::NotUsed, 1_000, 1_000_000.0, 10_000_000);
+        let aggregated = aggregate_new_format(&[tika]);
+
+        let native = comparison_for_cohort(&aggregated.by_framework_mode, crate::bench_matrix::Cohort::Native);
+        let ocr = comparison_for_cohort(&aggregated.by_framework_mode, crate::bench_matrix::Cohort::Ocr);
+
+        assert!(!native.throughput_ranking[0].optional, "Tika is required in native PDF");
+        assert!(ocr.throughput_ranking[0].optional, "Tika is best-effort in OCR PDF");
+    }
+
+    #[test]
+    fn comparison_order_is_deterministic_when_metrics_tie() {
+        let docling = create_test_result("docling", "pdf", OcrStatus::NotUsed, 1_000, 1_000_000.0, 10_000_000);
+        let tika = create_test_result("tika", "pdf", OcrStatus::NotUsed, 1_000, 1_000_000.0, 10_000_000);
+
+        let forward = aggregate_new_format(&[docling.clone(), tika.clone()]);
+        let reverse = aggregate_new_format(&[tika, docling]);
+
+        assert_eq!(
+            serde_json::to_value(forward.comparison).unwrap(),
+            serde_json::to_value(reverse.comparison).unwrap()
+        );
     }
 
     /// A successful sample with zero throughput is dropped from the `throughput` percentile

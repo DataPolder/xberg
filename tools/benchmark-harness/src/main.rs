@@ -1109,6 +1109,7 @@ async fn main() -> Result<()> {
             println!("\nAggregating {} results...", all_results.len());
             let mut aggregated = benchmark_harness::aggregate_new_format(&all_results);
             aggregated.run_provenance = all_provenance;
+            benchmark_harness::aggregate::apply_pinned_cohort_comparison(&mut aggregated)?;
             println!(
                 "  Aggregated {} frameworks across {} file types",
                 aggregated.by_framework_mode.len(),

@@ -6,12 +6,9 @@
 //! referenced documents are synthetic — the validator never reads document content, only its
 //! BLAKE3 digest and byte length, which the synthetic bytes provide consistently.
 
-use benchmark_harness::aggregate::{
-    ComparisonData, ConsolidationMetadata, FailureSummary, FileTypeAggregation, FormatSupportMatrix,
-    FrameworkModeAggregation, NewConsolidatedResults, PerFixtureRow, Percentiles, PerformancePercentiles,
-    SCHEMA_VERSION,
-};
+use benchmark_harness::aggregate::{FileTypeAggregation, NewConsolidatedResults, RankedFramework};
 use benchmark_harness::bench_matrix::{Cohort, CohortContract};
+use benchmark_harness::consolidate::RunProvenanceRecord;
 use benchmark_harness::provenance::{
     CorpusProvenance, FixtureProvenance, FrameworkProvenance, RepositoryProvenance, RunProvenance, TimingProvenance,
 };
@@ -21,7 +18,6 @@ use benchmark_harness::types::{
 use benchmark_harness::validate_artifacts::{ValidateArtifactsArgs, validate};
 use benchmark_harness::{Error, write_json, write_run_provenance};
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tempfile::TempDir;
@@ -679,197 +675,40 @@ fn rejects_iteration_count_mismatch() {
     assert_err_contains(validate(&scenario.args), "iteration count mismatch");
 }
 
-fn zero_percentiles() -> Percentiles {
-    Percentiles {
-        p50: 0.0,
-        p95: 0.0,
-        p99: 0.0,
-    }
-}
-
-fn zero_bucket(total_sample_count: usize) -> PerformancePercentiles {
-    PerformancePercentiles {
-        successful_sample_count: total_sample_count,
-        performance_sample_count: total_sample_count,
-        total_sample_count,
-        framework_errors: 0,
-        harness_errors: 0,
-        config_setup_errors: 0,
-        timeouts: 0,
-        empty_content: 0,
-        error_details: HashMap::new(),
-        throughput: zero_percentiles(),
-        memory: zero_percentiles(),
-        duration: zero_percentiles(),
-        success_rate_percent: 100.0,
-        extraction_duration: None,
-        quality: None,
-        pages_per_sec: None,
-        cpu_seconds: Percentiles::default(),
-        batch_size: None,
-        system_load: None,
-        throughput_excluded_sample_count: 0,
-    }
-}
-
 fn build_aggregate(contract: &CohortContract, cohort: Cohort) -> NewConsolidatedResults {
-    // Real per-extension buckets derived from the contract, so family cohorts (office, images, …)
-    // produce the multi-file-type shape the validator now checks — not a single fake "pdf" bucket.
-    let mut ext_counts: HashMap<&str, usize> = HashMap::new();
-    for extension in contract.document_extensions {
-        *ext_counts.entry(*extension).or_insert(0) += 1;
-    }
-    let mut by_framework_mode = HashMap::new();
-    for entry in &contract.matrix {
-        let mut by_file_type = HashMap::new();
-        for (extension, count) in &ext_counts {
-            if !supports_extension(&entry.framework, extension) {
-                continue;
-            }
-            let bucket = zero_bucket(*count);
-            by_file_type.insert(
-                (*extension).to_string(),
-                FileTypeAggregation {
-                    file_type: (*extension).to_string(),
-                    no_ocr: if cohort.expects_ocr() {
-                        None
-                    } else {
-                        Some(bucket.clone())
-                    },
-                    with_ocr: if cohort.expects_ocr() { Some(bucket) } else { None },
-                },
-            );
-        }
-        by_framework_mode.insert(
-            entry.aggregate_key(),
-            FrameworkModeAggregation {
-                framework: entry.framework.clone(),
-                output_format: entry.output_format,
-                mode: entry.mode.aggregate_slug().to_string(),
-                cold_start: None,
-                overall_performance: None,
-                by_file_type,
-            },
-        );
-    }
-
-    let per_fixture_results = contract
-        .matrix
+    let fixture_provenance: Vec<FixtureProvenance> = contract
+        .fixtures
         .iter()
-        .flat_map(|entry| {
-            contract
-                .document_stems
-                .iter()
-                .zip(contract.document_extensions.iter())
-                .filter(|(_, extension)| supports_extension(&entry.framework, extension))
-                .map(move |(stem, extension)| PerFixtureRow {
-                    framework: entry.framework.clone(),
-                    output_format: entry.output_format,
-                    execution_mode: entry.mode.aggregate_slug().to_string(),
-                    ocr: Some(cohort.expects_ocr()),
-                    fixture_id: (*stem).to_string(),
-                    file_type: (*extension).to_string(),
-                    duration_ms: 0.0,
-                    peak_memory_mb: 0.0,
-                    f1_text: None,
-                    f1_layout: None,
-                    f1_numeric: None,
-                    quality_score: None,
-                    correct: None,
-                    success: true,
-                    error_kind: None,
-                    file_size: 1,
-                    throughput_bytes_per_sec: 0.0,
-                    avg_cpu_percent: 0.0,
-                    cpu_seconds: 0.0,
-                    baseline_memory_bytes: 0,
-                    peak_memory_delta_bytes: 0,
-                    p50_memory_bytes: 0,
-                    p95_memory_bytes: 0,
-                    p99_memory_bytes: 0,
-                    extraction_duration_ms: None,
-                    subprocess_overhead_ms: None,
-                    cold_start_duration_ms: None,
-                    error_message: None,
-                    quality: None,
-                    pdf_metadata: None,
-                    framework_capabilities: FrameworkCapabilities::default(),
-                    system_load: None,
-                    iterations: Vec::new(),
-                    statistics: None,
-                })
+        .map(|fixture| FixtureProvenance {
+            fixture: (*fixture).to_string(),
+            fixture_blake3: "b".repeat(64),
+            document_blake3: "c".repeat(64),
+            document_bytes: 1,
         })
         .collect();
-
-    let mut file_types: Vec<String> = contract
-        .document_extensions
-        .iter()
-        .map(|extension| (*extension).to_string())
-        .collect();
-    file_types.sort();
-    file_types.dedup();
-    let frameworks: std::collections::BTreeSet<&str> = contract
+    let run_provenance: Vec<RunProvenanceRecord> = contract
         .matrix
         .iter()
-        .map(|entry| {
-            if entry.framework.starts_with("xberg-") {
-                "xberg"
-            } else {
-                entry.framework.as_str()
-            }
+        .map(|entry| RunProvenanceRecord {
+            source_dir: entry.artifact.clone(),
+            provenance: Some(build_provenance(
+                entry,
+                contract,
+                contract.manifest_blake3,
+                &fixture_provenance,
+            )),
+            missing_reason: None,
         })
         .collect();
-    let mut unsupported = std::collections::BTreeMap::new();
-    for framework in frameworks {
-        if framework == "xberg" {
-            continue;
-        }
-        let missing: Vec<String> = file_types
-            .iter()
-            .filter(|extension| !supports_extension(framework, extension))
-            .cloned()
-            .collect();
-        if !missing.is_empty() {
-            unsupported.insert(framework.to_string(), missing);
-        }
-    }
-
-    NewConsolidatedResults {
-        schema_version: SCHEMA_VERSION.to_string(),
-        by_framework_mode,
-        disk_sizes: HashMap::new(),
-        comparison: ComparisonData {
-            throughput_ranking: Vec::new(),
-            memory_ranking: Vec::new(),
-            quality_ranking_markdown: Vec::new(),
-            quality_ranking_plaintext: Vec::new(),
-            pdf_quality_ranking_markdown: Vec::new(),
-            pdf_quality_ranking_plaintext: Vec::new(),
-            pdf_tf1_ranking_markdown: Vec::new(),
-            pdf_tf1_ranking_plaintext: Vec::new(),
-            pdf_sf1_ranking_markdown: Vec::new(),
-            pages_per_sec_ranking: Vec::new(),
-            cpu_seconds_ranking: Vec::new(),
-            pareto_frontier: Vec::new(),
-            deltas_vs_baseline: HashMap::new(),
-        },
-        per_fixture_results,
-        metadata: ConsolidationMetadata {
-            total_results: contract.matrix.len() * contract.fixtures.len(),
-            framework_count: contract.matrix.len(),
-            file_type_count: 1,
-            shared_corpus_markdown: Vec::new(),
-            shared_corpus_plaintext: Vec::new(),
-            timestamp: "2026-01-01T00:00:00Z".to_string(),
-            disk_size_conflicts: Vec::new(),
-        },
-        run_provenance: Vec::new(),
-        failure_summary: FailureSummary::default(),
-        format_support: FormatSupportMatrix {
-            file_types,
-            unsupported,
-        },
-    }
+    let results: Vec<BenchmarkResult> = contract
+        .matrix
+        .iter()
+        .flat_map(|entry| build_results(entry, contract, cohort))
+        .collect();
+    let mut aggregate = benchmark_harness::aggregate_new_format(&results);
+    aggregate.run_provenance = run_provenance;
+    benchmark_harness::aggregate::apply_pinned_cohort_comparison(&mut aggregate).expect("apply cohort comparison");
+    aggregate
 }
 
 fn write_aggregate(aggregate: &NewConsolidatedResults) -> (TempDir, PathBuf) {
@@ -938,6 +777,92 @@ fn accepts_exact_aggregate_contract_for_every_format_cohort() {
 }
 
 #[test]
+fn rejects_fabricated_aggregate_comparison() {
+    let contract = Cohort::Native.contract();
+    let mut aggregate = build_aggregate(&contract, Cohort::Native);
+    aggregate.comparison.throughput_ranking.push(RankedFramework {
+        framework_mode: "fabricated:markdown:single".to_string(),
+        rank: 1,
+        value: 999.0,
+        relative: 1.0,
+        optional: false,
+    });
+    let (_root, path) = write_aggregate(&aggregate);
+
+    assert_err_contains(
+        validate(&aggregate_args(Cohort::Native, path)),
+        "comparison rankings mismatch",
+    );
+}
+
+#[test]
+fn rejects_missing_aggregate_provenance() {
+    let contract = Cohort::Native.contract();
+    let mut aggregate = build_aggregate(&contract, Cohort::Native);
+    aggregate.run_provenance.clear();
+    let (_root, path) = write_aggregate(&aggregate);
+
+    assert_err_contains(
+        validate(&aggregate_args(Cohort::Native, path)),
+        "aggregate provenance count mismatch",
+    );
+}
+
+#[test]
+fn rejects_fabricated_aggregate_provenance_settings() {
+    let contract = Cohort::Native.contract();
+    let mut aggregate = build_aggregate(&contract, Cohort::Native);
+    let batch = aggregate
+        .run_provenance
+        .iter_mut()
+        .find(|record| {
+            record
+                .provenance
+                .as_ref()
+                .is_some_and(|provenance| provenance.fixed_batch_size.is_some())
+        })
+        .expect("batch provenance");
+    batch.provenance.as_mut().unwrap().fixed_batch_size = None;
+    let (_root, path) = write_aggregate(&aggregate);
+
+    assert_err_contains(
+        validate(&aggregate_args(Cohort::Native, path)),
+        "aggregate provenance settings mismatch",
+    );
+}
+
+#[test]
+fn rejects_fabricated_aggregate_metadata_counts() {
+    let contract = Cohort::Native.contract();
+    let mut aggregate = build_aggregate(&contract, Cohort::Native);
+    aggregate.metadata.total_results += 1;
+    let (_root, path) = write_aggregate(&aggregate);
+
+    assert_err_contains(
+        validate(&aggregate_args(Cohort::Native, path)),
+        "consolidation metadata mismatch",
+    );
+}
+
+#[test]
+fn rejects_aggregate_metrics_fabricated_independently_of_fixture_rows() {
+    let contract = Cohort::Native.contract();
+    let mut aggregate = build_aggregate(&contract, Cohort::Native);
+    let group = aggregate
+        .by_framework_mode
+        .values_mut()
+        .next()
+        .expect("aggregate group");
+    group.overall_performance.as_mut().unwrap().throughput.p50 = 999.0;
+    let (_root, path) = write_aggregate(&aggregate);
+
+    assert_err_contains(
+        validate(&aggregate_args(Cohort::Native, path)),
+        "aggregate metrics mismatch",
+    );
+}
+
+#[test]
 fn accepts_native_aggregate_when_optional_mineru_absent() {
     // validation must still pass on the required frameworks.
     let contract = Cohort::Native.contract();
@@ -954,6 +879,16 @@ fn accepts_native_aggregate_when_optional_mineru_absent() {
     aggregate
         .per_fixture_results
         .retain(|row| row.framework != optional_framework);
+    aggregate.run_provenance.retain(|record| {
+        record
+            .provenance
+            .as_ref()
+            .and_then(|provenance| provenance.frameworks.first())
+            .is_none_or(|framework| framework.name != optional_framework)
+    });
+    aggregate.metadata.total_results = aggregate.per_fixture_results.len();
+    aggregate.metadata.framework_count -= 1;
+    benchmark_harness::aggregate::apply_pinned_cohort_comparison(&mut aggregate).expect("refresh comparison");
 
     let (_root, path) = write_aggregate(&aggregate);
     let required = required_count(&contract);

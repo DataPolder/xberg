@@ -12,16 +12,19 @@
 use std::collections::{HashMap, HashSet};
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
+use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::aggregate::{
-    NewConsolidatedResults, PerFixtureRow, PerformancePercentiles, SCHEMA_VERSION, extract_framework_and_mode,
+    NewConsolidatedResults, PerFixtureRow, PerformancePercentiles, SCHEMA_VERSION, comparison_for_cohort,
+    extract_framework_and_mode,
 };
 use crate::bench_matrix::{Cohort, CohortContract, ExecutionMode, MatrixEntry};
 use crate::fixture::Fixture;
 use crate::provenance::RunProvenance;
-use crate::types::{BenchmarkResult, ErrorKind, OcrStatus, OutputFormat};
+use crate::types::{BenchmarkResult, ErrorKind, OcrStatus, OutputFormat, PerformanceMetrics};
 use crate::{Error, Result};
 
 /// Provenance schema version every `provenance.json` must record.
@@ -58,7 +61,7 @@ pub struct ValidateArtifactsArgs {
 pub fn validate(args: &ValidateArtifactsArgs) -> Result<String> {
     let contract = args.cohort.contract();
     match &args.aggregated_file {
-        Some(aggregated_file) => validate_aggregate(aggregated_file, args.cohort, &contract),
+        Some(aggregated_file) => validate_aggregate(aggregated_file, args.cohort, &contract, args.iterations),
         None => {
             let (artifacts_dir, cohort_manifest, fixtures_root, source_sha, run_id) = require_artifact_args(args)?;
             validate_raw_artifacts(
@@ -716,7 +719,314 @@ fn validate_format_support(
     )
 }
 
-fn validate_aggregate(path: &Path, cohort: Cohort, contract: &CohortContract) -> Result<String> {
+fn validate_aggregate_provenance(
+    aggregate: &NewConsolidatedResults,
+    present_entries: &[&MatrixEntry],
+    contract: &CohortContract,
+    iterations: usize,
+    path: &Path,
+) -> Result<()> {
+    require(
+        aggregate.run_provenance.len() == present_entries.len(),
+        format!("{}: aggregate provenance count mismatch", path.display()),
+    )?;
+    let expected_entries: HashMap<String, &MatrixEntry> = present_entries
+        .iter()
+        .map(|entry| {
+            (
+                format!(
+                    "{}:{}:{}",
+                    entry.framework,
+                    entry.output_format,
+                    entry.mode.aggregate_slug()
+                ),
+                *entry,
+            )
+        })
+        .collect();
+    let expected_cells: HashSet<String> = expected_entries.keys().cloned().collect();
+    let mut actual_cells = HashSet::new();
+    let mut source_sha: Option<&str> = None;
+    let mut fixture_signature: Option<Vec<(&str, &str, &str, u64)>> = None;
+    for record in &aggregate.run_provenance {
+        require(
+            record.missing_reason.is_none(),
+            format!("{}: aggregate provenance contains a missing reason", path.display()),
+        )?;
+        let provenance = record.provenance.as_ref().ok_or_else(|| {
+            contract_error(format!(
+                "{}: aggregate provenance missing for {}",
+                path.display(),
+                record.source_dir
+            ))
+        })?;
+        require(
+            provenance.schema_version == EXPECTED_PROVENANCE_SCHEMA_VERSION,
+            format!("{}: aggregate provenance schema mismatch", path.display()),
+        )?;
+        require(
+            provenance.repository.dirty == Some(false),
+            format!("{}: aggregate provenance records a dirty checkout", path.display()),
+        )?;
+        let commit =
+            provenance.repository.commit.as_deref().ok_or_else(|| {
+                contract_error(format!("{}: aggregate provenance has no source commit", path.display()))
+            })?;
+        require(
+            commit.len() == 40 && commit.bytes().all(|byte| byte.is_ascii_hexdigit()),
+            format!("{}: aggregate provenance has an invalid source commit", path.display()),
+        )?;
+        require(
+            source_sha.is_none_or(|expected| expected == commit),
+            format!("{}: aggregate provenance mixes source commits", path.display()),
+        )?;
+        source_sha.get_or_insert(commit);
+        require(
+            provenance.corpus.cohort.as_deref() == Some(contract.manifest_name)
+                && provenance.corpus.cohort_manifest_blake3.as_deref() == Some(contract.manifest_blake3),
+            format!("{}: aggregate provenance cohort mismatch", path.display()),
+        )?;
+        let signature: Vec<(&str, &str, &str, u64)> = provenance
+            .corpus
+            .ordered_fixtures
+            .iter()
+            .map(|fixture| {
+                (
+                    fixture.fixture.as_str(),
+                    fixture.fixture_blake3.as_str(),
+                    fixture.document_blake3.as_str(),
+                    fixture.document_bytes,
+                )
+            })
+            .collect();
+        require(
+            signature.len() == contract.fixtures.len()
+                && signature
+                    .iter()
+                    .zip(contract.fixtures)
+                    .all(|((fixture, _, _, _), expected)| fixture == expected)
+                && fixture_signature.as_ref().is_none_or(|expected| expected == &signature),
+            format!("{}: aggregate provenance fixture identity mismatch", path.display()),
+        )?;
+        fixture_signature.get_or_insert(signature);
+        require(
+            provenance.frameworks.len() == 1,
+            format!("{}: aggregate provenance must contain one framework", path.display()),
+        )?;
+        let framework = &provenance.frameworks[0];
+        let mode = match provenance.timing.mode {
+            crate::config::BenchmarkMode::SingleFile => "single",
+            crate::config::BenchmarkMode::Batch => "batch",
+        };
+        let cell = format!(
+            "{}:{}:{}",
+            extract_framework_and_mode(&framework.name).0,
+            provenance.timing.output_format,
+            mode
+        );
+        let entry = expected_entries.get(&cell).ok_or_else(|| {
+            contract_error(format!(
+                "{}: unexpected aggregate provenance cell {cell}",
+                path.display()
+            ))
+        })?;
+        let expected_eligible = contract
+            .document_extensions
+            .iter()
+            .filter(|extension| {
+                entry.framework.starts_with("xberg-")
+                    || crate::adapters::external::declared_supported_formats(&entry.framework)
+                        .iter()
+                        .any(|supported| supported == *extension)
+            })
+            .count();
+        let is_batch = entry.mode == ExecutionMode::Batch;
+        require(
+            provenance.timing.mode == entry.mode.benchmark_mode()
+                && provenance.timing.benchmark_iterations == iterations
+                && provenance.fixed_batch_size == is_batch.then_some(contract.batch_size)
+                && framework.eligible_documents == expected_eligible
+                && framework.batch_partitions == is_batch.then(|| expected_eligible.div_ceil(contract.batch_size)),
+            format!("{}: aggregate provenance settings mismatch for {cell}", path.display()),
+        )?;
+        actual_cells.insert(cell);
+    }
+    require(
+        actual_cells == expected_cells,
+        describe_set_mismatch(
+            "aggregate provenance cells",
+            expected_cells.iter().map(String::as_str),
+            actual_cells.iter().map(String::as_str),
+        ),
+    )
+}
+
+fn error_kind_from_row(row: &PerFixtureRow, path: &Path) -> Result<ErrorKind> {
+    match row.error_kind.as_deref() {
+        None if row.success => Ok(ErrorKind::None),
+        Some("FrameworkError") => Ok(ErrorKind::FrameworkError),
+        Some("EmptyContent") => Ok(ErrorKind::EmptyContent),
+        Some("Timeout") => Ok(ErrorKind::Timeout),
+        Some("HarnessError") => Ok(ErrorKind::HarnessError),
+        Some("ConfigSetupError") => Ok(ErrorKind::ConfigSetupError),
+        kind => Err(contract_error(format!(
+            "{}: invalid fixture-row error kind {kind:?}",
+            path.display()
+        ))),
+    }
+}
+
+fn duration_from_millis(value: f64, field: &str, path: &Path) -> Result<Duration> {
+    require(
+        value.is_finite() && value >= 0.0,
+        format!("{}: invalid fixture-row {field}", path.display()),
+    )?;
+    Ok(Duration::from_secs_f64(value / 1_000.0))
+}
+
+fn performance_metrics_from_row(row: &PerFixtureRow, path: &Path) -> Result<PerformanceMetrics> {
+    let peak_memory_bytes = row.peak_memory_mb * 1_000_000.0;
+    require(
+        peak_memory_bytes.is_finite() && peak_memory_bytes >= 0.0 && peak_memory_bytes <= u64::MAX as f64,
+        format!("{}: invalid fixture-row peak memory", path.display()),
+    )?;
+    Ok(PerformanceMetrics {
+        baseline_memory_bytes: row.baseline_memory_bytes,
+        peak_memory_bytes: peak_memory_bytes.round() as u64,
+        peak_memory_delta_bytes: row.peak_memory_delta_bytes,
+        avg_cpu_percent: row.avg_cpu_percent,
+        cpu_seconds: row.cpu_seconds,
+        throughput_bytes_per_sec: row.throughput_bytes_per_sec,
+        p50_memory_bytes: row.p50_memory_bytes,
+        p95_memory_bytes: row.p95_memory_bytes,
+        p99_memory_bytes: row.p99_memory_bytes,
+    })
+}
+
+fn validate_quality_projection(row: &PerFixtureRow, path: &Path) -> Result<()> {
+    let quality_projection = row.quality.as_ref().map(|quality| {
+        (
+            Some(quality.f1_score_text),
+            quality.f1_score_layout,
+            Some(quality.f1_score_numeric),
+            Some(quality.quality_score),
+            Some(quality.correct),
+        )
+    });
+    require(
+        quality_projection.unwrap_or((None, None, None, None, None))
+            == (
+                row.f1_text,
+                row.f1_layout,
+                row.f1_numeric,
+                row.quality_score,
+                row.correct,
+            ),
+        format!("{}: fixture-row quality projection mismatch", path.display()),
+    )
+}
+
+fn benchmark_result_from_row(row: &PerFixtureRow, path: &Path) -> Result<BenchmarkResult> {
+    validate_quality_projection(row, path)?;
+    let framework = match row.execution_mode.as_str() {
+        "batch" => format!("{}-batch", row.framework),
+        _ => row.framework.clone(),
+    };
+    let ocr_status = match row.ocr {
+        Some(true) => OcrStatus::Used,
+        Some(false) => OcrStatus::NotUsed,
+        None => OcrStatus::Unknown,
+    };
+    let extraction_duration = row
+        .extraction_duration_ms
+        .map(|value| duration_from_millis(value, "extraction duration", path))
+        .transpose()?;
+    let subprocess_overhead = row
+        .subprocess_overhead_ms
+        .map(|value| duration_from_millis(value, "subprocess overhead", path))
+        .transpose()?;
+    let cold_start_duration = row
+        .cold_start_duration_ms
+        .map(|value| duration_from_millis(value, "cold start duration", path))
+        .transpose()?;
+    Ok(BenchmarkResult {
+        framework,
+        output_format: row.output_format,
+        file_path: PathBuf::from(format!("{}.{}", row.fixture_id, row.file_type)),
+        file_size: row.file_size,
+        success: row.success,
+        error_message: row.error_message.clone(),
+        error_kind: error_kind_from_row(row, path)?,
+        duration: duration_from_millis(row.duration_ms, "duration", path)?,
+        extraction_duration,
+        subprocess_overhead,
+        metrics: performance_metrics_from_row(row, path)?,
+        quality: row.quality.clone(),
+        iterations: row.iterations.clone(),
+        statistics: row.statistics.clone(),
+        cold_start_duration,
+        file_extension: row.file_type.clone(),
+        framework_capabilities: row.framework_capabilities.clone(),
+        pdf_metadata: row.pdf_metadata.clone(),
+        ocr_status,
+        extracted_text: None,
+        system_load: row.system_load,
+    })
+}
+
+fn require_serialized_equal<T: Serialize>(actual: &T, expected: &T, label: &str, path: &Path) -> Result<()> {
+    let actual = serde_json::to_value(actual)
+        .map_err(|error| contract_error(format!("{}: serialize {label}: {error}", path.display())))?;
+    let expected = serde_json::to_value(expected)
+        .map_err(|error| contract_error(format!("{}: serialize expected {label}: {error}", path.display())))?;
+    require(actual == expected, format!("{}: {label} mismatch", path.display()))
+}
+
+fn validate_derived_aggregate_fields(
+    aggregate: &NewConsolidatedResults,
+    rows: &[&PerFixtureRow],
+    cohort: Cohort,
+    path: &Path,
+) -> Result<()> {
+    let results: Vec<BenchmarkResult> = rows
+        .iter()
+        .map(|row| benchmark_result_from_row(row, path))
+        .collect::<Result<_>>()?;
+    let rebuilt = crate::aggregate::aggregate_new_format(&results);
+    require_serialized_equal(
+        &aggregate.by_framework_mode,
+        &rebuilt.by_framework_mode,
+        "aggregate metrics",
+        path,
+    )?;
+    require_serialized_equal(&aggregate.disk_sizes, &rebuilt.disk_sizes, "disk sizes", path)?;
+    require_serialized_equal(
+        &aggregate.format_support,
+        &rebuilt.format_support,
+        "format support",
+        path,
+    )?;
+    require_serialized_equal(
+        &aggregate.failure_summary,
+        &rebuilt.failure_summary,
+        "failure summary",
+        path,
+    )?;
+    let expected_comparison = comparison_for_cohort(&rebuilt.by_framework_mode, cohort);
+    require_serialized_equal(&aggregate.comparison, &expected_comparison, "comparison rankings", path)?;
+    require(
+        aggregate.metadata.total_results == rebuilt.metadata.total_results
+            && aggregate.metadata.framework_count == rebuilt.metadata.framework_count
+            && aggregate.metadata.file_type_count == rebuilt.metadata.file_type_count
+            && aggregate.metadata.shared_corpus_markdown == rebuilt.metadata.shared_corpus_markdown
+            && aggregate.metadata.shared_corpus_plaintext == rebuilt.metadata.shared_corpus_plaintext
+            && chrono::DateTime::parse_from_rfc3339(&aggregate.metadata.timestamp).is_ok()
+            && aggregate.metadata.disk_size_conflicts == rebuilt.metadata.disk_size_conflicts,
+        format!("{}: consolidation metadata mismatch", path.display()),
+    )
+}
+
+fn validate_aggregate(path: &Path, cohort: Cohort, contract: &CohortContract, iterations: usize) -> Result<String> {
     let aggregate: NewConsolidatedResults = load_typed_json(path)?;
     require(
         aggregate.schema_version == SCHEMA_VERSION,
@@ -754,6 +1064,7 @@ fn validate_aggregate(path: &Path, cohort: Cohort, contract: &CohortContract) ->
 
     let present_entries: Vec<&MatrixEntry> = actual_keys.iter().map(|key| allowed_entries[*key]).collect();
     validate_format_support(&aggregate, &present_entries, contract, path)?;
+    validate_aggregate_provenance(&aggregate, &present_entries, contract, iterations, path)?;
 
     let expects_ocr = cohort.expects_ocr();
     // A present best-effort group must retain exact supported-format cardinality and valid failure
@@ -931,6 +1242,7 @@ fn validate_aggregate(path: &Path, cohort: Cohort, contract: &CohortContract) ->
             )?;
         }
     }
+    validate_derived_aggregate_fields(&aggregate, &rows, cohort, path)?;
 
     Ok(format!(
         "validated {} {} aggregate keys and {} fixture rows",
