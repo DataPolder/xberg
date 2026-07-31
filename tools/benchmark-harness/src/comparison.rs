@@ -41,8 +41,9 @@ use std::time::Instant;
 /// This is the minimum timeout applied to all documents, regardless of size.
 const EXTRACTION_TIMEOUT_BASE_SECS: u64 = 60;
 
-/// Minimum timeout for forced OCR pipelines, whose inference cost is substantially higher. ~keep
-const FORCED_OCR_TIMEOUT_BASE_SECS: u64 = 180;
+/// Minimum timeout for forced OCR pipelines, whose inference cost is substantially higher.
+/// Five minutes leaves CI variance headroom while the outer safety timeout still bounds hangs. ~keep
+const FORCED_OCR_TIMEOUT_BASE_SECS: u64 = 300;
 
 /// Per-page timeout for PDF documents in milliseconds.
 ///
