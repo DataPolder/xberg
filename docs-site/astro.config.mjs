@@ -40,7 +40,7 @@ export default defineConfig({
           title : "Xberg",
           description :
               "Full content intelligence engine: extract text, tables, entities, and embeddings from " +
-                  "98+ formats with OCR, transcription, code intelligence, and LLM integration. Native " +
+                  "101 formats with OCR, transcription, code intelligence, and LLM integration. Native " +
                   "bindings for 15 languages.",
           githubUrl : "https://github.com/xberg-io/xberg",
           editBaseUrl :

@@ -80,7 +80,7 @@
   </a>
 </div>
 
-Extract text, tables, images, metadata, and code intelligence from 98+ file formats and 306 programming languages including PDF, Office documents, images, and audio/video transcripts where native transcription is available. Native NAPI-RS bindings for Node.js with superior performance, async/await support, and TypeScript type definitions.
+Extract text, tables, images, metadata, and code intelligence from 101 file formats (115 file extensions) and 306 programming languages including PDF, Office documents, images, and audio/video transcripts where native transcription is available. Native NAPI-RS bindings for Node.js with superior performance, async/await support, and TypeScript type definitions.
 
 ## What This Package Provides
 
@@ -279,9 +279,9 @@ This binding uses NAPI-RS to provide native Node.js bindings with:
 
 ## Features
 
-### Supported File Formats (98+)
+### Supported File Formats (101 formats · 115 file extensions)
 
-98+ file formats across 8 major categories with intelligent format detection and comprehensive metadata extraction.
+101 formats across 115 file extensions in 8 major categories with intelligent format detection and comprehensive metadata extraction.
 
 #### Office Documents
 
@@ -472,7 +472,7 @@ Contributions are welcome! See [Contributing Guide](https://github.com/xberg-io/
 
 - [crawlberg](https://github.com/xberg-io/crawlberg) — web crawling and scraping with HTML→Markdown and headless-Chrome fallback.
 - [html-to-markdown](https://github.com/xberg-io/html-to-markdown) — fast, lossless HTML→Markdown engine.
-- [liter-llm](https://github.com/xberg-io/liter-llm) — universal LLM API client with native bindings for 14 languages and 143 providers.
+- [liter-llm](https://github.com/xberg-io/liter-llm) — universal LLM API client with native bindings for 14 languages and 165 providers.
 - [tree-sitter-language-pack](https://github.com/xberg-io/tree-sitter-language-pack) — tree-sitter grammars and code-intelligence primitives.
 - [alef](https://github.com/xberg-io/alef) — the polyglot binding generator that produces this README and all per-language bindings.
 - [Discord](https://discord.gg/xt9WY3GnKR) — community, roadmap, announcements.

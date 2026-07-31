@@ -338,7 +338,7 @@ See the [Docker guide](https://docs.xberg.io/guides/docker/) for deployment deta
 
 ## Other Bindings
 
-Native bindings also ship for R, Dart/Flutter, Swift, Kotlin (Android), Zig, and C (FFI). They follow the same `ExtractInput` → `extract` → `results[0]` shape (R, Swift, Zig, and C use JSON-string config and, for some, JSON-string results). See the per-language package directories under [`packages/`](https://github.com/xberg-io/xberg/tree/main/packages) for details.
+Native bindings also ship for Dart/Flutter, Swift, Kotlin (Android), Zig, and C (FFI). They follow the same `ExtractInput` → `extract` → `results[0]` shape (Swift, Zig, and C use JSON-string config and, for some, JSON-string results). See the per-language package directories under [`packages/`](https://github.com/xberg-io/xberg/tree/main/packages) for details.
 
 ## Platform Support
 

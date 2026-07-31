@@ -473,4 +473,4 @@ console.log(listSupportedFormats());
 
 ## Supported Document Formats
 
-Xberg supports 98+ file formats: PDF, Office (DOCX, PPTX, XLSX, …), eBooks, images (with OCR), HTML/XML/SVG, email (EML, MSG), archives, data (JSON/YAML/TOML/CSV), academic, and source code (306 languages). See [supported-formats.md](supported-formats.md) for the complete list.
+Xberg supports 101 file formats across 115 file extensions: PDF, Office (DOCX, PPTX, XLSX, …), eBooks, images (with OCR), HTML/XML/SVG, email (EML, MSG), archives, data (JSON/YAML/TOML/CSV), academic, and source code (306 languages). See [supported-formats.md](supported-formats.md) for the complete list.
