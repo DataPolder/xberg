@@ -3627,7 +3627,8 @@ mod tests {
 
     #[test]
     fn ranking_optionality_is_specific_to_the_active_cohort() {
-        let tika = create_test_result("tika", "pdf", OcrStatus::NotUsed, 1_000, 1_000_000.0, 10_000_000);
+        let mut tika = create_test_result("tika", "pdf", OcrStatus::NotUsed, 1_000, 1_000_000.0, 10_000_000);
+        tika.output_format = OutputFormat::Plaintext;
         let aggregated = aggregate_new_format(&[tika]);
 
         let native = comparison_for_cohort(&aggregated.by_framework_mode, crate::bench_matrix::Cohort::Native);
