@@ -15,6 +15,8 @@ use crate::{
     scale_param::ScaleParam,
 };
 
+const VISUAL_LINE_Y_TOLERANCE_PX: u32 = 10;
+
 #[derive(Debug)]
 pub struct OcrLite {
     db_net: DbNet,
@@ -141,7 +143,6 @@ impl OcrLite {
         angle_rollback: bool,
         angle_rollback_threshold: f32,
         cls_thresh: f32,
-        thresh: f32,
         rec_batch_size: u32,
     ) -> Result<OcrResult, OcrError> {
         tracing::debug!(
@@ -184,7 +185,6 @@ impl OcrLite {
             angle_rollback,
             angle_rollback_threshold,
             cls_thresh,
-            thresh,
             rec_batch_size,
         )
     }
@@ -202,7 +202,6 @@ impl OcrLite {
     /// - `do_angle` - Whether to perform angle detection
     /// - `most_angle` - Use most common angle for all text regions
     const DEFAULT_CLS_THRESH: f32 = 0.9;
-    const DEFAULT_THRESH: f32 = 0.3;
     const DEFAULT_REC_BATCH_SIZE: u32 = 6;
 
     pub fn detect(
@@ -228,7 +227,6 @@ impl OcrLite {
             false,
             0.0,
             Self::DEFAULT_CLS_THRESH,
-            Self::DEFAULT_THRESH,
             Self::DEFAULT_REC_BATCH_SIZE,
         )
     }
@@ -259,7 +257,6 @@ impl OcrLite {
             false,
             0.0,
             Self::DEFAULT_CLS_THRESH,
-            Self::DEFAULT_THRESH,
             rec_batch_size,
         )
     }
@@ -304,7 +301,6 @@ impl OcrLite {
             true,
             angle_rollback_threshold,
             Self::DEFAULT_CLS_THRESH,
-            Self::DEFAULT_THRESH,
             Self::DEFAULT_REC_BATCH_SIZE,
         )
     }
@@ -336,8 +332,7 @@ impl OcrLite {
 
     /// Sort text boxes in reading order: top-to-bottom, left-to-right.
     ///
-    /// Sorts by top-left Y coordinate first, then by top-left X coordinate within
-    /// the same Y. Matches PaddleOCR Python's `sorted_boxes` primary ordering.
+    /// Matches PaddleOCR's stable primary ordering and visual-line correction. ~keep
     fn sort_text_boxes(text_boxes: &mut [TextBox]) {
         text_boxes.sort_by(|a, b| {
             let ay = a.points.first().map_or(0, |p| p.y);
@@ -346,6 +341,22 @@ impl OcrLite {
             let bx = b.points.first().map_or(0, |p| p.x);
             (ay, ax).cmp(&(by, bx))
         });
+
+        for current in 1..text_boxes.len() {
+            let mut index = current;
+            while index > 0 {
+                let previous_point = text_boxes[index - 1].points.first();
+                let current_point = text_boxes[index].points.first();
+                let should_swap = previous_point.zip(current_point).is_some_and(|(previous, current)| {
+                    previous.y.abs_diff(current.y) < VISUAL_LINE_Y_TOLERANCE_PX && current.x < previous.x
+                });
+                if !should_swap {
+                    break;
+                }
+                text_boxes.swap(index - 1, index);
+                index -= 1;
+            }
+        }
     }
 
     fn detect_once(
@@ -361,13 +372,12 @@ impl OcrLite {
         angle_rollback: bool,
         angle_rollback_threshold: f32,
         cls_thresh: f32,
-        thresh: f32,
         rec_batch_size: u32,
     ) -> Result<OcrResult, OcrError> {
         tracing::debug!("PaddleOCR: running DB-net text detection");
-        let mut text_boxes =
-            self.db_net
-                .get_text_boxes(img_src, scale, box_score_thresh, box_thresh, un_clip_ratio, thresh)?;
+        let mut text_boxes = self
+            .db_net
+            .get_text_boxes(img_src, scale, box_score_thresh, box_thresh, un_clip_ratio)?;
 
         tracing::debug!(
             num_boxes = text_boxes.len(),
@@ -491,6 +501,40 @@ mod tests {
         assert_eq!(boxes[0].points[0].x, 50);
         assert_eq!(boxes[1].points[0].x, 100);
         assert_eq!(boxes[2].points[0].x, 200);
+    }
+
+    #[test]
+    fn test_sort_text_boxes_visual_line_jitter_left_to_right() {
+        let mut boxes = vec![make_box(200, 10), make_box(50, 19)];
+        OcrLite::sort_text_boxes(&mut boxes);
+        assert_eq!(boxes.iter().map(|b| b.points[0].x).collect::<Vec<_>>(), vec![50, 200]);
+    }
+
+    #[test]
+    fn test_sort_text_boxes_tolerance_boundary_stays_top_to_bottom() {
+        let mut boxes = vec![make_box(200, 10), make_box(50, 20)];
+        OcrLite::sort_text_boxes(&mut boxes);
+        assert_eq!(boxes.iter().map(|b| b.points[0].x).collect::<Vec<_>>(), vec![200, 50]);
+    }
+
+    #[test]
+    fn test_sort_text_boxes_bubbles_across_visual_line() {
+        let mut boxes = vec![make_box(300, 10), make_box(200, 12), make_box(50, 14)];
+        OcrLite::sort_text_boxes(&mut boxes);
+        assert_eq!(
+            boxes.iter().map(|b| b.points[0].x).collect::<Vec<_>>(),
+            vec![50, 200, 300]
+        );
+    }
+
+    #[test]
+    fn test_sort_text_boxes_does_not_transitively_merge_lines() {
+        let mut boxes = vec![make_box(300, 0), make_box(200, 9), make_box(100, 18)];
+        OcrLite::sort_text_boxes(&mut boxes);
+        assert_eq!(
+            boxes.iter().map(|b| b.points[0].x).collect::<Vec<_>>(),
+            vec![200, 300, 100]
+        );
     }
 
     #[test]

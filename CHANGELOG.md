@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- PaddleOCR detection now honors its configured DB threshold and matches upstream dilation,
+  perspective-crop, and visual-line ordering behavior, improving small, skewed, and jittered text.
 - Apple Keynote packages containing only slide archives now route to the Keynote extractor, and
   Numbers extraction reconstructs tables instead of emitting raw protobuf fragments.
 - AsciiDoc, NXML/JATS, and WebVTT files now route through their registered text or JATS extractors

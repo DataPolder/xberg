@@ -12,6 +12,9 @@ use ort::{inputs, session::SessionOutputs};
 use ort::{session::Session, value::Tensor};
 use std::cmp::Ordering;
 
+const DB_DILATION_KERNEL_SIZE: u32 = 2;
+const BINARY_FOREGROUND: u8 = u8::MAX;
+
 #[derive(Debug)]
 pub struct DbNet {
     session: Option<Session>,
@@ -43,7 +46,6 @@ impl DbNet {
         box_score_thresh: f32,
         box_thresh: f32,
         un_clip_ratio: f32,
-        thresh: f32,
     ) -> Result<Vec<TextBox>, OcrError> {
         let Some(session) = &self.session else {
             return Err(OcrError::SessionNotInitialized);
@@ -82,7 +84,6 @@ impl DbNet {
             box_score_thresh,
             box_thresh,
             un_clip_ratio,
-            thresh,
         )?;
 
         Ok(text_boxes)
@@ -94,9 +95,8 @@ impl DbNet {
         cols: u32,
         s: &ScaleParam,
         box_score_thresh: f32,
-        _box_thresh: f32,
+        box_thresh: f32,
         un_clip_ratio: f32,
-        thresh: f32,
     ) -> Result<Vec<TextBox>, OcrError> {
         let max_side_thresh = 3.0;
 
@@ -109,7 +109,8 @@ impl DbNet {
 
         let pred_data: Vec<f32> = red_data.try_extract_tensor::<f32>()?.1.to_vec();
 
-        let cbuf_data: Vec<u8> = pred_data.iter().map(|pixel| (pixel * 255.0) as u8).collect();
+        let threshold_img = Self::binarize_predictions(&pred_data, rows, cols, box_thresh)?;
+        let dilated_img = Self::dilate_db_mask(&threshold_img);
 
         let pred_img: image::ImageBuffer<image::Luma<f32>, Vec<f32>> =
             image::ImageBuffer::from_vec(cols, rows, pred_data).ok_or_else(|| {
@@ -122,23 +123,7 @@ impl DbNet {
                 ))
             })?;
 
-        let cbuf_img = image::GrayImage::from_vec(cols, rows, cbuf_data).ok_or_else(|| {
-            OcrError::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!(
-                    "Failed to create grayscale image buffer: {} x {} dimensions may be invalid",
-                    cols, rows
-                ),
-            ))
-        })?;
-
-        let threshold_img = imageproc::contrast::threshold(
-            &cbuf_img,
-            (thresh * 255.0) as u8,
-            imageproc::contrast::ThresholdType::Binary,
-        );
-
-        let img_contours: Vec<imageproc::contours::Contour<i32>> = imageproc::contours::find_contours(&threshold_img);
+        let img_contours: Vec<imageproc::contours::Contour<i32>> = imageproc::contours::find_contours(&dilated_img);
 
         let mut rs_boxes = Vec::with_capacity(img_contours.len());
 
@@ -194,6 +179,46 @@ impl DbNet {
         }
 
         Ok(rs_boxes)
+    }
+
+    fn binarize_predictions(
+        predictions: &[f32],
+        rows: u32,
+        cols: u32,
+        threshold: f32,
+    ) -> Result<image::GrayImage, OcrError> {
+        let binary_data = predictions
+            .iter()
+            .map(|&prediction| if prediction > threshold { BINARY_FOREGROUND } else { 0 })
+            .collect();
+
+        image::GrayImage::from_vec(cols, rows, binary_data).ok_or_else(|| {
+            OcrError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "Failed to create DB mask: {} x {} dimensions do not match predictions",
+                    cols, rows
+                ),
+            ))
+        })
+    }
+
+    fn dilate_db_mask(mask: &image::GrayImage) -> image::GrayImage {
+        let mut dilated = image::GrayImage::new(mask.width(), mask.height());
+        for (x, y, pixel) in mask.enumerate_pixels() {
+            if pixel.0[0] == 0 {
+                continue;
+            }
+
+            for offset_y in 0..DB_DILATION_KERNEL_SIZE {
+                for offset_x in 0..DB_DILATION_KERNEL_SIZE {
+                    if let Some(destination) = dilated.get_pixel_mut_checked(x + offset_x, y + offset_y) {
+                        *destination = image::Luma([BINARY_FOREGROUND]);
+                    }
+                }
+            }
+        }
+        dilated
     }
 
     fn get_mini_box(
@@ -406,5 +431,49 @@ impl DbNet {
         length += (dx * dx + dy * dy).sqrt();
 
         length
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn should_use_configured_db_threshold_when_binarizing_predictions() {
+        let predictions = [0.29, 0.30, 0.31, 0.80];
+
+        let mask = DbNet::binarize_predictions(&predictions, 1, 4, 0.30).unwrap();
+
+        assert_eq!(mask.as_raw(), &[0, 0, BINARY_FOREGROUND, BINARY_FOREGROUND]);
+    }
+
+    #[test]
+    fn should_apply_rapidocr_two_by_two_dilation_to_db_mask() {
+        let mut mask = image::GrayImage::new(4, 4);
+        mask.put_pixel(1, 1, image::Luma([BINARY_FOREGROUND]));
+
+        let dilated = DbNet::dilate_db_mask(&mask);
+
+        assert_eq!(
+            dilated.as_raw(),
+            &[
+                0,
+                0,
+                0,
+                0,
+                0,
+                BINARY_FOREGROUND,
+                BINARY_FOREGROUND,
+                0,
+                0,
+                BINARY_FOREGROUND,
+                BINARY_FOREGROUND,
+                0,
+                0,
+                0,
+                0,
+                0,
+            ]
+        );
     }
 }
