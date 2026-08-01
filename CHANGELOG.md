@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Layout-enabled image extraction now reuses safely positioned whole-image OCR elements, avoiding
+  text loss from redundant per-region OCR while retaining region structure and fallbacks.
 - Layout-enabled image extraction now recognizes TATR table structure from cached OCR elements
   while preserving non-table text and unstructured fallback output.
 - Rotated PDF pages now receive the inverse `/Rotate` correction exactly once before shared layout
