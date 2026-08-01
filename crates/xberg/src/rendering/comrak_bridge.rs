@@ -697,7 +697,8 @@ pub(crate) fn build_comrak_ast<'a>(doc: &InternalDocument, arena: &'a comrak::Ar
                     }
                     if !table.cells.is_empty() {
                         tracing::trace!(table_index, rows = table.cells.len(), "rendering table");
-                        let has_header = doc.source_format != "csv" || table.columns.is_some();
+                        let has_header =
+                            !matches!(doc.source_format.as_str(), "csv" | "typst") || table.columns.is_some();
                         let table_node = build_table(arena, &table.cells, has_header);
                         parent.append(table_node);
                     } else if !table.markdown.trim().is_empty() {

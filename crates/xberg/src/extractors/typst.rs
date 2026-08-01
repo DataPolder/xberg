@@ -24,8 +24,6 @@ use crate::core::config::ExtractionConfig;
 #[cfg(feature = "office")]
 use crate::plugins::{InternalDocumentExtractor, Plugin};
 #[cfg(feature = "office")]
-use crate::types::Metadata;
-#[cfg(feature = "office")]
 use crate::types::builder;
 #[cfg(feature = "office")]
 use crate::types::document_structure::TextAnnotation;
@@ -35,6 +33,8 @@ use crate::types::internal::InternalDocument;
 use crate::types::internal_builder::InternalDocumentBuilder;
 #[cfg(feature = "office")]
 use crate::types::uri::ExtractedUri;
+#[cfg(feature = "office")]
+use crate::types::{Metadata, Table};
 #[cfg(feature = "office")]
 use async_trait::async_trait;
 #[cfg(feature = "office")]
@@ -219,9 +219,7 @@ impl TypstExtractor {
                 let heading_text = trimmed[heading_level..].trim();
                 if !heading_text.is_empty() {
                     Self::flush_paragraph_internal(&mut paragraph_buf, &mut builder);
-                    let markers = "=".repeat(heading_level);
-                    let full_heading = format!("{} {}", markers, heading_text);
-                    builder.push_heading(heading_level as u8, &full_heading, None, None);
+                    builder.push_heading(heading_level as u8, heading_text, None, None);
                 }
                 continue;
             }
@@ -352,7 +350,116 @@ impl TypstExtractor {
 
         let effective_cols = if num_cols > 0 { num_cols } else { cells.len() };
         let rows: Vec<Vec<String>> = cells.chunks(effective_cols).map(|chunk| chunk.to_vec()).collect();
-        builder.push_table_from_cells(&rows, None, None);
+        let has_explicit_header = Self::has_explicit_table_header(table_str);
+        let columns = has_explicit_header.then(|| rows[0].clone());
+        let mut markdown_rows = rows.clone();
+        if !has_explicit_header {
+            markdown_rows.insert(0, vec![String::new(); effective_cols]);
+        }
+        let table = Table {
+            cells: rows,
+            markdown: crate::extraction::cells_to_markdown(&markdown_rows),
+            columns,
+            ..Default::default()
+        };
+        builder.push_table(table, None, None);
+    }
+
+    /// Return whether a table declares `table.header(...)` or its imported
+    /// `header(...)` alias outside cell content, strings, and comments.
+    fn has_explicit_table_header(table_str: &str) -> bool {
+        let bytes = table_str.as_bytes();
+        let mut bracket_depth = 0_u32;
+        let mut in_string = false;
+        let mut escaped = false;
+        let mut index = 0;
+
+        while index < bytes.len() {
+            let byte = bytes[index];
+            if in_string {
+                if escaped {
+                    escaped = false;
+                } else if byte == b'\\' {
+                    escaped = true;
+                } else if byte == b'"' {
+                    in_string = false;
+                }
+                index += 1;
+                continue;
+            }
+
+            if bracket_depth == 0
+                && let Some(next_index) = Self::skip_typst_comment(bytes, index)
+            {
+                index = next_index;
+                continue;
+            }
+
+            match byte {
+                b'"' => in_string = true,
+                b'[' => bracket_depth += 1,
+                b']' => bracket_depth = bracket_depth.saturating_sub(1),
+                _ if bracket_depth == 0 && Self::is_table_header_call(bytes, index) => return true,
+                _ => {}
+            }
+            index += 1;
+        }
+
+        false
+    }
+
+    /// Skip a Typst line or nested block comment starting at `index`.
+    fn skip_typst_comment(bytes: &[u8], index: usize) -> Option<usize> {
+        if bytes[index..].starts_with(b"//") {
+            return Some(
+                bytes[index + 2..]
+                    .iter()
+                    .position(|byte| *byte == b'\n')
+                    .map_or(bytes.len(), |offset| index + offset + 3),
+            );
+        }
+        if !bytes[index..].starts_with(b"/*") {
+            return None;
+        }
+
+        let mut depth = 1_u32;
+        let mut cursor = index + 2;
+        while cursor < bytes.len() && depth > 0 {
+            if bytes[cursor..].starts_with(b"/*") {
+                depth += 1;
+                cursor += 2;
+            } else if bytes[cursor..].starts_with(b"*/") {
+                depth -= 1;
+                cursor += 2;
+            } else {
+                cursor += 1;
+            }
+        }
+        Some(cursor)
+    }
+
+    /// Match a header function call with Typst identifier boundaries.
+    fn is_table_header_call(bytes: &[u8], index: usize) -> bool {
+        Self::is_function_call_at(bytes, index, b"table.header") || Self::is_function_call_at(bytes, index, b"header")
+    }
+
+    fn is_function_call_at(bytes: &[u8], index: usize, function_name: &[u8]) -> bool {
+        if !bytes[index..].starts_with(function_name) || index > 0 && Self::is_identifier_byte(bytes[index - 1]) {
+            return false;
+        }
+
+        let mut next = index + function_name.len();
+        if bytes.get(next).is_some_and(|byte| Self::is_identifier_byte(*byte)) {
+            return false;
+        }
+        while next < bytes.len() && bytes[next].is_ascii_whitespace() {
+            next += 1;
+        }
+        bytes.get(next) == Some(&b'(')
+    }
+
+    fn is_identifier_byte(byte: u8) -> bool {
+        byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.') || !byte.is_ascii()
     }
 
     /// Parse inline formatting markers in paragraph text, producing stripped text
@@ -969,6 +1076,15 @@ More content
     }
 
     #[test]
+    fn should_render_heading_text_without_typst_markers() {
+        let document = TypstExtractor::build_internal_document("= Level 1\n\nBody\n\n== Level 2\n");
+
+        let markdown = crate::rendering::render_markdown(&document);
+
+        assert_eq!(markdown, "# Level 1\n\nBody\n\n## Level 2\n");
+    }
+
+    #[test]
     fn test_extract_formatting() {
         let content = r#"Some *bold* and _italic_ text with `code`."#;
 
@@ -1038,6 +1154,123 @@ Done."#;
         let (output, _) = TypstExtractor::extract_from_typst(content);
 
         assert!(output.contains("TABLE:") || output.contains("Name") || output.contains("Alice"));
+    }
+
+    #[test]
+    fn should_render_bare_table_with_synthetic_empty_header() {
+        let content = r#"#table(
+  columns: 2,
+  [Alice], [30],
+  [Bob], [40],
+)"#;
+        let document = TypstExtractor::build_internal_document(content);
+
+        assert_eq!(
+            document.tables[0].cells,
+            vec![
+                vec!["Alice".to_string(), "30".to_string()],
+                vec!["Bob".to_string(), "40".to_string()],
+            ]
+        );
+        assert_eq!(document.tables[0].columns, None);
+
+        let markdown = crate::rendering::render_markdown(&document);
+
+        assert_eq!(markdown, "|  |  |\n| --- | --- |\n| Alice | 30 |\n| Bob | 40 |\n");
+    }
+
+    #[test]
+    fn should_preserve_explicit_table_header_as_columns() {
+        let content = r#"#table(
+  columns: 2,
+  table.header (
+    [Name], [Age],
+  ),
+  [Alice], [30],
+)"#;
+        let document = TypstExtractor::build_internal_document(content);
+
+        assert_eq!(
+            document.tables[0].cells,
+            vec![
+                vec!["Name".to_string(), "Age".to_string()],
+                vec!["Alice".to_string(), "30".to_string()],
+            ]
+        );
+        assert_eq!(
+            document.tables[0].columns,
+            Some(vec!["Name".to_string(), "Age".to_string()])
+        );
+
+        let markdown = crate::rendering::render_markdown(&document);
+
+        assert_eq!(markdown, "| Name | Age |\n| --- | --- |\n| Alice | 30 |\n");
+    }
+
+    #[test]
+    fn should_not_treat_table_header_text_in_a_cell_as_a_header_declaration() {
+        let content = r#"#table(
+  columns: 2,
+  [table.header()], [value],
+  [Alice], [30],
+)"#;
+        let document = TypstExtractor::build_internal_document(content);
+
+        assert_eq!(document.tables[0].columns, None);
+        assert_eq!(
+            crate::rendering::render_markdown(&document),
+            "|  |  |\n| --- | --- |\n| table.header() | value |\n| Alice | 30 |\n"
+        );
+    }
+
+    #[test]
+    fn should_ignore_table_header_calls_in_comments() {
+        let content = r#"#table(
+  columns: 2,
+  // table.header()
+  /* table.header() */
+  [Alice], [30],
+)"#;
+        let document = TypstExtractor::build_internal_document(content);
+
+        assert_eq!(document.tables[0].columns, None);
+        assert_eq!(
+            crate::rendering::render_markdown(&document),
+            "|  |  |\n| --- | --- |\n| Alice | 30 |\n"
+        );
+    }
+
+    #[test]
+    fn should_not_treat_identifier_substrings_as_header_declarations() {
+        let content = r#"#table(
+  columns: 2,
+  mytable.header(),
+  [Alice], [30],
+)"#;
+        let document = TypstExtractor::build_internal_document(content);
+
+        assert_eq!(document.tables[0].columns, None);
+    }
+
+    #[test]
+    fn should_preserve_imported_header_alias_as_columns() {
+        let content = r#"#table(
+  columns: 2,
+  header(
+    [Name], [Age],
+  ),
+  [Alice], [30],
+)"#;
+        let document = TypstExtractor::build_internal_document(content);
+
+        assert_eq!(
+            document.tables[0].columns,
+            Some(vec!["Name".to_string(), "Age".to_string()])
+        );
+        assert_eq!(
+            crate::rendering::render_markdown(&document),
+            "| Name | Age |\n| --- | --- |\n| Alice | 30 |\n"
+        );
     }
 
     #[test]
