@@ -44,6 +44,8 @@ use super::{is_language_supported, language_to_script_family, map_language_code}
 use xberg_paddle_ocr::PaddleOcrEngine;
 
 const ORIENTATION_CONFIDENCE_METADATA_KEY: &str = "orientation_confidence";
+const VERTICAL_TEXT_MIN_ASPECT_RATIO: f32 = 1.5;
+const VERTICAL_COLUMN_MIN_OVERLAP_RATIO: f32 = 0.5;
 
 #[derive(Debug)]
 struct RotationOutcome {
@@ -425,7 +427,7 @@ impl PaddleOcrBackend {
         let image_bytes_owned = image_bytes.to_vec();
         let config = effective_config;
 
-        let (text_blocks, processed_width, processed_height) = tokio::task::spawn_blocking(move || {
+        let (mut text_blocks, processed_width, processed_height) = tokio::task::spawn_blocking(move || {
             catch_unwind(std::panic::AssertUnwindSafe(|| {
                 Self::perform_ocr(&image_bytes_owned, &engine, &config)
             }))
@@ -440,6 +442,8 @@ impl PaddleOcrBackend {
             plugin_name: "paddle-ocr".to_string(),
         })??;
 
+        let vertical_cjk = Self::sort_vertical_cjk_blocks(&mut text_blocks, language);
+
         let mut line_elements = Vec::with_capacity(text_blocks.len());
         let mut word_elements = Vec::new();
         for block in &text_blocks {
@@ -449,12 +453,7 @@ impl PaddleOcrBackend {
             }
         }
 
-        let text = text_blocks
-            .iter()
-            .map(|block| block.block.text.as_str())
-            .filter(|t| !t.is_empty())
-            .collect::<Vec<_>>()
-            .join("\n\n");
+        let text = Self::assemble_block_text(&text_blocks, vertical_cjk);
 
         Ok(PaddlePageOcr {
             text,
@@ -463,6 +462,92 @@ impl PaddleOcrBackend {
             processed_width,
             processed_height,
         })
+    }
+
+    fn sort_vertical_cjk_blocks(blocks: &mut [xberg_paddle_ocr::DetailedTextBlock], language: &str) -> bool {
+        if !matches!(language, "ch" | "chinese_cht" | "japan" | "korean") || blocks.is_empty() {
+            return false;
+        }
+
+        let vertical_count = blocks
+            .iter()
+            .filter(|block| Self::is_vertical_text_block(block))
+            .count();
+        // Mixed pages need layout-region ordering; never move or fuse their horizontal content. ~keep
+        if vertical_count != blocks.len() {
+            return false;
+        }
+
+        let mut bounds = blocks.iter().filter_map(Self::block_bounds).collect::<Vec<_>>();
+        bounds.sort_by_key(|(min_x, _, max_x, _)| std::cmp::Reverse(u64::from(*min_x) + u64::from(*max_x)));
+
+        let mut columns: Vec<(u32, u32)> = Vec::new();
+        for (min_x, _, max_x, _) in bounds {
+            if let Some((column_min, column_max)) = columns.iter_mut().find(|(column_min, column_max)| {
+                Self::ranges_share_vertical_column(min_x, max_x, *column_min, *column_max)
+            }) {
+                *column_min = (*column_min).min(min_x);
+                *column_max = (*column_max).max(max_x);
+            } else {
+                columns.push((min_x, max_x));
+            }
+        }
+
+        // Traditional CJK columns read right-to-left; fragments within a column read top-to-bottom. ~keep
+        blocks.sort_by_key(|block| {
+            let Some((min_x, min_y, max_x, _)) = Self::block_bounds(block) else {
+                return (usize::MAX, u32::MAX);
+            };
+            let column = columns
+                .iter()
+                .position(|(column_min, column_max)| {
+                    Self::ranges_share_vertical_column(min_x, max_x, *column_min, *column_max)
+                })
+                .unwrap_or(usize::MAX);
+            (column, min_y)
+        });
+        true
+    }
+
+    fn assemble_block_text(blocks: &[xberg_paddle_ocr::DetailedTextBlock], compact_vertical: bool) -> String {
+        blocks
+            .iter()
+            .map(|block| block.block.text.as_str())
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join(if compact_vertical { "" } else { "\n\n" })
+    }
+
+    fn ranges_share_vertical_column(left_min: u32, left_max: u32, right_min: u32, right_max: u32) -> bool {
+        let overlap = left_max.min(right_max).saturating_sub(left_min.max(right_min));
+        let narrower_width = left_max
+            .saturating_sub(left_min)
+            .min(right_max.saturating_sub(right_min));
+        narrower_width > 0 && overlap as f32 / narrower_width as f32 >= VERTICAL_COLUMN_MIN_OVERLAP_RATIO
+    }
+
+    fn is_vertical_text_block(block: &xberg_paddle_ocr::DetailedTextBlock) -> bool {
+        let Some((min_x, min_y, max_x, max_y)) = Self::block_bounds(block) else {
+            return false;
+        };
+        let width = max_x.saturating_sub(min_x);
+        let height = max_y.saturating_sub(min_y);
+        height as f32 >= width as f32 * VERTICAL_TEXT_MIN_ASPECT_RATIO
+    }
+
+    fn block_bounds(block: &xberg_paddle_ocr::DetailedTextBlock) -> Option<(u32, u32, u32, u32)> {
+        let first = block.block.box_points.first()?;
+        Some(block.block.box_points.iter().fold(
+            (first.x, first.y, first.x, first.y),
+            |(min_x, min_y, max_x, max_y), point| {
+                (
+                    min_x.min(point.x),
+                    min_y.min(point.y),
+                    max_x.max(point.x),
+                    max_y.max(point.y),
+                )
+            },
+        ))
     }
 
     /// Perform actual OCR inference (runs in blocking context).
@@ -777,6 +862,36 @@ impl Default for PaddleOcrBackend {
 mod tests {
     use super::*;
 
+    fn detailed_block(text: &str, left: u32, top: u32, width: u32, height: u32) -> xberg_paddle_ocr::DetailedTextBlock {
+        xberg_paddle_ocr::DetailedTextBlock {
+            block: xberg_paddle_ocr::TextBlock {
+                box_points: vec![
+                    xberg_paddle_ocr::Point { x: left, y: top },
+                    xberg_paddle_ocr::Point {
+                        x: left + width,
+                        y: top,
+                    },
+                    xberg_paddle_ocr::Point {
+                        x: left + width,
+                        y: top + height,
+                    },
+                    xberg_paddle_ocr::Point {
+                        x: left,
+                        y: top + height,
+                    },
+                ],
+                box_score: 0.9,
+                angle_index: 0,
+                angle_score: 1.0,
+                text: text.to_string(),
+                text_score: 0.9,
+            },
+            words: Vec::new(),
+            line_column_count: 0.0,
+            rotation_retained: false,
+        }
+    }
+
     fn output_element(text: &str, level: OcrElementLevel, confidence: f64) -> OcrElement {
         OcrElement::new(
             text,
@@ -825,6 +940,97 @@ mod tests {
         assert_eq!(
             selected.iter().map(|element| element.text.as_str()).collect::<Vec<_>>(),
             ["line", "kept"]
+        );
+    }
+
+    #[test]
+    fn vertical_japanese_columns_are_ordered_right_to_left() {
+        let mut blocks = vec![
+            detailed_block("left", 10, 0, 10, 100),
+            detailed_block("right", 50, 0, 10, 100),
+            detailed_block("middle", 30, 0, 10, 100),
+        ];
+
+        let vertical = PaddleOcrBackend::sort_vertical_cjk_blocks(&mut blocks, "japan");
+
+        assert!(vertical);
+        assert_eq!(
+            blocks.iter().map(|block| block.block.text.as_str()).collect::<Vec<_>>(),
+            ["right", "middle", "left"]
+        );
+        assert_eq!(
+            PaddleOcrBackend::assemble_block_text(&blocks, vertical),
+            "rightmiddleleft"
+        );
+    }
+
+    #[test]
+    fn vertical_column_fragments_are_ordered_top_to_bottom_despite_x_jitter() {
+        let mut blocks = vec![
+            detailed_block("left", 10, 0, 10, 100),
+            detailed_block("right-bottom", 51, 60, 10, 50),
+            detailed_block("right-top", 50, 0, 10, 50),
+        ];
+
+        let vertical = PaddleOcrBackend::sort_vertical_cjk_blocks(&mut blocks, "japan");
+
+        assert!(vertical);
+        assert_eq!(
+            blocks.iter().map(|block| block.block.text.as_str()).collect::<Vec<_>>(),
+            ["right-top", "right-bottom", "left"]
+        );
+    }
+
+    #[test]
+    fn horizontal_japanese_lines_keep_detector_order() {
+        let mut blocks = vec![
+            detailed_block("first", 50, 0, 100, 10),
+            detailed_block("second", 10, 20, 100, 10),
+        ];
+
+        let vertical = PaddleOcrBackend::sort_vertical_cjk_blocks(&mut blocks, "japan");
+
+        assert!(!vertical);
+        assert_eq!(
+            blocks.iter().map(|block| block.block.text.as_str()).collect::<Vec<_>>(),
+            ["first", "second"]
+        );
+    }
+
+    #[test]
+    fn mixed_japanese_layout_keeps_detector_order_and_separators() {
+        let mut blocks = vec![
+            detailed_block("title", 0, 0, 100, 10),
+            detailed_block("right", 50, 20, 10, 100),
+            detailed_block("left", 10, 20, 10, 100),
+        ];
+
+        let vertical = PaddleOcrBackend::sort_vertical_cjk_blocks(&mut blocks, "japan");
+
+        assert!(!vertical);
+        assert_eq!(
+            blocks.iter().map(|block| block.block.text.as_str()).collect::<Vec<_>>(),
+            ["title", "right", "left"]
+        );
+        assert_eq!(
+            PaddleOcrBackend::assemble_block_text(&blocks, vertical),
+            "title\n\nright\n\nleft"
+        );
+    }
+
+    #[test]
+    fn non_cjk_vertical_lines_keep_detector_order() {
+        let mut blocks = vec![
+            detailed_block("left", 10, 0, 10, 100),
+            detailed_block("right", 50, 0, 10, 100),
+        ];
+
+        let vertical = PaddleOcrBackend::sort_vertical_cjk_blocks(&mut blocks, "en");
+
+        assert!(!vertical);
+        assert_eq!(
+            blocks.iter().map(|block| block.block.text.as_str()).collect::<Vec<_>>(),
+            ["left", "right"]
         );
     }
 
