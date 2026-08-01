@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Batch DOCX extraction reuses one owned input buffer and avoids rebuilding discarded document
+  structure, reducing memory copies and structure-processing overhead for large files.
+
 ### Fixed
 
 - Layout-enabled image extraction now recognizes TATR table structure from cached OCR elements

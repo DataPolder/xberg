@@ -46,6 +46,7 @@ impl Default for DocxExtractor {
 /// lists, tables, images, headers/footers, and footnotes/endnotes.
 /// Uses `DocumentStructureBuilder` for automatic section nesting and
 /// collects `TextAnnotation`s from Run formatting data.
+#[cfg(test)]
 fn build_document_structure(doc: &crate::extraction::docx::parser::Document) -> crate::types::DocumentStructure {
     use crate::types::builder::DocumentStructureBuilder;
     use crate::types::extraction::BoundingBox;
@@ -798,23 +799,22 @@ type DocxParseResult = (
     Option<Vec<PageBoundary>>,
     Vec<crate::extraction::docx::drawing::Drawing>,
     AHashMap<String, String>,
-    Option<crate::types::DocumentStructure>,
     InternalDocument,
 );
 
-/// Parse DOCX document content and extract text, tables, page boundaries, drawings, image relationships, optional document structure, and InternalDocument.
+/// Parse DOCX document content and extract text, tables, page boundaries, drawings, image
+/// relationships, and an `InternalDocument`.
 ///
 /// `inject_placeholders` is threaded into both `extract_text_with_boundaries` (controls
 /// whether `![…](image)` links appear in the markdown text) and `build_internal_document`
 /// (controls whether `Image` elements are added to the returned `InternalDocument`).
 fn parse_docx_core(
     content: &[u8],
-    include_doc_structure: bool,
     output_format: crate::core::config::OutputFormat,
     inject_placeholders: bool,
     mut budget: SecurityBudget,
 ) -> crate::error::Result<DocxParseResult> {
-    let doc = crate::extraction::docx::parser::parse_document(content, &mut budget)?;
+    let mut doc = crate::extraction::docx::parser::parse_document(content, &mut budget)?;
     let (text, page_boundaries) = doc.extract_text_with_boundaries(
         matches!(output_format, crate::core::config::OutputFormat::Markdown),
         inject_placeholders,
@@ -837,29 +837,13 @@ fn parse_docx_core(
         None
     };
 
-    let drawings = doc.drawings.clone();
-    let image_rels = doc.image_relationships.clone();
-    let doc_structure = if include_doc_structure {
-        Some(build_document_structure(&doc))
-    } else {
-        None
-    };
-    let revisions = if doc.revisions.is_empty() {
-        None
-    } else {
-        Some(doc.revisions.clone())
-    };
     let mut internal_doc = build_internal_document(&doc, inject_placeholders);
-    internal_doc.revisions = revisions;
-    Ok((
-        text,
-        tables,
-        page_boundaries,
-        drawings,
-        image_rels,
-        doc_structure,
-        internal_doc,
-    ))
+    if !doc.revisions.is_empty() {
+        internal_doc.revisions = Some(std::mem::take(&mut doc.revisions));
+    }
+    let drawings = std::mem::take(&mut doc.drawings);
+    let image_rels = std::mem::take(&mut doc.image_relationships);
+    Ok((text, tables, page_boundaries, drawings, image_rels, internal_doc))
 }
 
 impl Plugin for DocxExtractor {
@@ -963,73 +947,53 @@ impl InternalDocumentExtractor for DocxExtractor {
             config.output_format.clone()
         };
 
-        let include_doc_structure = config.include_document_structure;
         let inject_placeholders = config.images.as_ref().map(|i| i.inject_placeholders).unwrap_or(true);
         let budget = SecurityBudget::from_config(config);
-        let (text, tables, page_boundaries, drawings, image_rels, _doc_structure, mut internal_doc) = {
+        let content_owned: Arc<[u8]> = Arc::from(content);
+        let (text, tables, page_boundaries, drawings, image_rels, mut internal_doc) = {
             #[cfg(feature = "tokio-runtime")]
             if crate::core::batch_mode::is_batch_mode() {
                 if config.cancel_token.as_ref().map(|t| t.is_cancelled()).unwrap_or(false) {
                     return Err(crate::error::XbergError::Cancelled);
                 }
-                let content_owned = content.to_vec();
+                let parse_content = Arc::clone(&content_owned);
                 let span = tracing::Span::current();
                 tokio::task::spawn_blocking(move || {
                     let _guard = span.entered();
-                    parse_docx_core(
-                        &content_owned,
-                        include_doc_structure,
-                        output_format,
-                        inject_placeholders,
-                        budget,
-                    )
+                    parse_docx_core(&parse_content, output_format, inject_placeholders, budget)
                 })
                 .await
                 .map_err(|e| crate::error::XbergError::parsing(format!("DOCX extraction task failed: {}", e)))??
             } else {
-                parse_docx_core(
-                    content,
-                    include_doc_structure,
-                    output_format,
-                    inject_placeholders,
-                    budget,
-                )?
+                parse_docx_core(&content_owned, output_format, inject_placeholders, budget)?
             }
 
             #[cfg(not(feature = "tokio-runtime"))]
-            parse_docx_core(
-                content,
-                include_doc_structure,
-                output_format,
-                inject_placeholders,
-                budget,
-            )?
+            parse_docx_core(&content_owned, output_format, inject_placeholders, budget)?
         };
 
         let mut archive = {
             #[cfg(feature = "tokio-runtime")]
             if crate::core::batch_mode::is_batch_mode() {
-                let content_owned = content.to_vec();
+                let archive_content = Arc::clone(&content_owned);
                 let span = tracing::Span::current();
                 tokio::task::spawn_blocking(move || -> crate::error::Result<_> {
                     let _guard = span.entered();
-                    let cursor = Cursor::new(content_owned);
+                    let cursor = Cursor::new(archive_content);
                     zip::ZipArchive::new(cursor)
                         .map_err(|e| crate::error::XbergError::parsing(format!("Failed to open ZIP archive: {}", e)))
                 })
                 .await
                 .map_err(|e| crate::error::XbergError::parsing(format!("Task join error: {}", e)))??
             } else {
-                let content_owned = content.to_vec();
-                let cursor = Cursor::new(content_owned);
+                let cursor = Cursor::new(Arc::clone(&content_owned));
                 zip::ZipArchive::new(cursor)
                     .map_err(|e| crate::error::XbergError::parsing(format!("Failed to open ZIP archive: {}", e)))?
             }
 
             #[cfg(not(feature = "tokio-runtime"))]
             {
-                let content_owned = content.to_vec();
-                let cursor = Cursor::new(content_owned);
+                let cursor = Cursor::new(Arc::clone(&content_owned));
                 zip::ZipArchive::new(cursor)
                     .map_err(|e| crate::error::XbergError::parsing(format!("Failed to open ZIP archive: {}", e)))?
             }
@@ -1590,6 +1554,29 @@ mod tests {
         }
 
         zip.finish().unwrap().into_inner()
+    }
+
+    #[tokio::test]
+    async fn should_match_single_extraction_in_batch_mode() {
+        let data = build_test_docx(TRACK_CHANGES_XML);
+        let extractor = DocxExtractor::new();
+        let config = ExtractionConfig {
+            output_format: crate::core::config::OutputFormat::Markdown,
+            include_document_structure: true,
+            ..Default::default()
+        };
+        let mime_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+        let single = extractor.extract_content(&data, mime_type, &config).await.unwrap();
+        let batch = crate::core::batch_mode::with_batch_mode(extractor.extract_content(&data, mime_type, &config))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            serde_json::to_value(batch).unwrap(),
+            serde_json::to_value(single).unwrap(),
+            "batch-mode ownership changes must preserve the exact internal document"
+        );
     }
 
     #[tokio::test]
