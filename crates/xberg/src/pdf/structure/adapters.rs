@@ -1185,10 +1185,12 @@ mod tests {
         assert!(paragraphs[0].is_page_furniture);
     }
 
+    #[cfg(feature = "layout-detection")]
     fn ordered_list_test_paragraph(text: &str) -> types::PdfParagraph {
         make_ocr_paragraph(text.to_string(), Vec::new(), None)
     }
 
+    #[cfg(feature = "layout-detection")]
     fn anchored_ordered_list_test_pages() -> Vec<Vec<types::PdfParagraph>> {
         let mut anchor = ordered_list_test_paragraph("1. First item");
         anchor.is_list_item = true;
@@ -1209,6 +1211,7 @@ mod tests {
         ]
     }
 
+    #[cfg(feature = "layout-detection")]
     #[test]
     fn test_promotes_complete_anchored_ordered_list_sequence_across_pages() {
         let mut pages = anchored_ordered_list_test_pages();
@@ -1236,6 +1239,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "layout-detection")]
     #[test]
     fn test_does_not_promote_unanchored_or_incomplete_ordered_sequences() {
         let mut unanchored = anchored_ordered_list_test_pages();
@@ -1251,6 +1255,7 @@ mod tests {
         assert!(!incomplete[1][0].is_list_item, "a two-item prefix must not mutate");
     }
 
+    #[cfg(feature = "layout-detection")]
     #[test]
     fn test_does_not_promote_broken_or_over_gap_ordered_sequences() {
         let mut broken = anchored_ordered_list_test_pages();
@@ -1270,6 +1275,7 @@ mod tests {
         assert!(!over_gap[1][8].is_list_item);
     }
 
+    #[cfg(feature = "layout-detection")]
     #[test]
     fn test_empty_paragraphs_do_not_consume_ordered_list_gap() {
         const EMPTY_PARAGRAPHS: usize = 12;
@@ -1285,6 +1291,7 @@ mod tests {
         assert!(pages[1][ORIGINAL_THIRD_ITEM_INDEX + EMPTY_PARAGRAPHS].is_list_item);
     }
 
+    #[cfg(feature = "layout-detection")]
     #[test]
     fn test_rejects_structural_ordered_list_candidates() {
         for structural_kind in ["heading", "list", "code", "formula", "furniture", "caption"] {
@@ -1306,6 +1313,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "layout-detection")]
     #[test]
     fn test_rejects_numbered_section_heading_candidates() {
         let mut pages = anchored_ordered_list_test_pages();
