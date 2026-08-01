@@ -41,7 +41,9 @@ pub(crate) fn ocr_doc_to_layout_paragraphs(
 ) -> Vec<types::PdfParagraph> {
     use crate::types::internal::ElementKind;
     let page_height = page_height_px as f32;
-    let mut result = Vec::new();
+    let mut all_lines = Vec::new();
+    let mut all_hint_indices = Vec::new();
+    let mut element_indices = Vec::new();
     let elements = doc
         .elements
         .iter()
@@ -70,9 +72,12 @@ pub(crate) fn ocr_doc_to_layout_paragraphs(
         if promote_logo_title {
             promote_second_line_to_title(&mut lines, &mut hint_indices);
         }
-        result.extend(regroup_layout_lines(lines, hint_indices));
+        element_indices.extend(std::iter::repeat_n(element_index, lines.len()));
+        all_lines.extend(lines);
+        all_hint_indices.extend(hint_indices);
     }
 
+    let result = regroup_layout_lines_by_element(all_lines, all_hint_indices, element_indices);
     trace_conversion(doc, &result);
     result
 }
@@ -427,6 +432,7 @@ fn classification_matches_hint(paragraph: &types::PdfParagraph, class_name: type
         L::Code => paragraph.is_code_block,
         L::Formula => paragraph.is_formula,
         L::ListItem => paragraph.is_list_item,
+        L::Text => true,
         L::Caption | L::Footnote => true,
         L::PageHeader | L::PageFooter | L::Picture => paragraph.is_page_furniture,
         _ => false,
@@ -461,20 +467,47 @@ fn hint_containment(bbox: (f32, f32, f32, f32), hint: &types::LayoutHint) -> f32
     }
 }
 
-#[cfg(all(feature = "ocr", feature = "layout-detection"))]
+#[cfg(all(test, feature = "ocr", feature = "layout-detection"))]
 fn regroup_layout_lines(lines: Vec<types::PdfParagraph>, hint_indices: Vec<Option<usize>>) -> Vec<types::PdfParagraph> {
+    let element_indices = vec![0; lines.len()];
+    regroup_layout_lines_by_element(lines, hint_indices, element_indices)
+}
+
+#[cfg(all(feature = "ocr", feature = "layout-detection"))]
+fn regroup_layout_lines_by_element(
+    lines: Vec<types::PdfParagraph>,
+    hint_indices: Vec<Option<usize>>,
+    element_indices: Vec<usize>,
+) -> Vec<types::PdfParagraph> {
     let mut result = Vec::new();
     let mut body_lines = Vec::new();
-    let mut groups = group_by_hint(lines, hint_indices);
+    let mut body_region = None;
+    let mut groups = group_by_hint(lines, hint_indices, element_indices);
 
     for group in groups.drain(..) {
-        if group.iter().any(has_structural_override) {
+        if group.lines.iter().any(has_structural_override) {
             push_body_group(&mut result, std::mem::take(&mut body_lines));
-            if let Some(paragraph) = merge_structural_group(group) {
+            body_region = None;
+            if let Some(paragraph) = merge_structural_group(group.lines) {
                 result.push(paragraph);
             }
         } else {
-            body_lines.extend(group);
+            let lines_are_near = body_lines
+                .last()
+                .zip(group.lines.first())
+                .is_some_and(|(previous, current)| layout_lines_are_near(previous, current));
+            let same_region = lines_are_near
+                && body_region.is_some_and(|(hint_index, element_index)| {
+                    (group.hint_index.is_some() && hint_index == group.hint_index)
+                        || element_index == group.element_index
+                });
+            if !body_lines.is_empty() && !same_region {
+                push_body_group(&mut result, std::mem::take(&mut body_lines));
+            }
+            if body_lines.is_empty() {
+                body_region = Some((group.hint_index, group.element_index));
+            }
+            body_lines.extend(group.lines);
         }
     }
     push_body_group(&mut result, body_lines);
@@ -482,19 +515,58 @@ fn regroup_layout_lines(lines: Vec<types::PdfParagraph>, hint_indices: Vec<Optio
 }
 
 #[cfg(all(feature = "ocr", feature = "layout-detection"))]
-fn group_by_hint(lines: Vec<types::PdfParagraph>, hint_indices: Vec<Option<usize>>) -> Vec<Vec<types::PdfParagraph>> {
-    let mut groups: Vec<(Option<usize>, Vec<types::PdfParagraph>)> = Vec::new();
-    for (line, hint_index) in lines.into_iter().zip(hint_indices) {
-        if let Some((last_hint, group)) = groups.last_mut()
+struct LayoutLineGroup {
+    hint_index: Option<usize>,
+    element_index: usize,
+    lines: Vec<types::PdfParagraph>,
+}
+
+#[cfg(all(feature = "ocr", feature = "layout-detection"))]
+fn group_by_hint(
+    lines: Vec<types::PdfParagraph>,
+    hint_indices: Vec<Option<usize>>,
+    element_indices: Vec<usize>,
+) -> Vec<LayoutLineGroup> {
+    let mut groups: Vec<LayoutLineGroup> = Vec::new();
+    for ((line, hint_index), element_index) in lines.into_iter().zip(hint_indices).zip(element_indices) {
+        if let Some(group) = groups.last_mut()
             && hint_index.is_some()
-            && *last_hint == hint_index
+            && group.hint_index == hint_index
+            && group
+                .lines
+                .last()
+                .is_some_and(|previous| layout_lines_are_near(previous, &line))
         {
-            group.push(line);
+            group.lines.push(line);
         } else {
-            groups.push((hint_index, vec![line]));
+            groups.push(LayoutLineGroup {
+                hint_index,
+                element_index,
+                lines: vec![line],
+            });
         }
     }
-    groups.into_iter().map(|(_, group)| group).collect()
+    groups
+}
+
+#[cfg(all(feature = "ocr", feature = "layout-detection"))]
+fn layout_lines_are_near(previous: &types::PdfParagraph, current: &types::PdfParagraph) -> bool {
+    const MAX_GAP_IN_LINE_HEIGHTS: f32 = 1.5;
+
+    let (Some(previous_bbox), Some(current_bbox)) = (previous.block_bbox, current.block_bbox) else {
+        return false;
+    };
+    let previous_height = (previous_bbox.3 - previous_bbox.1).abs();
+    let current_height = (current_bbox.3 - current_bbox.1).abs();
+    let line_height = previous_height.max(current_height).max(1.0);
+    let vertical_gap = if current_bbox.3 < previous_bbox.1 {
+        previous_bbox.1 - current_bbox.3
+    } else if previous_bbox.3 < current_bbox.1 {
+        current_bbox.1 - previous_bbox.3
+    } else {
+        0.0
+    };
+    vertical_gap <= line_height * MAX_GAP_IN_LINE_HEIGHTS
 }
 
 #[cfg(all(feature = "ocr", feature = "layout-detection"))]
@@ -526,8 +598,11 @@ fn push_body_group(result: &mut Vec<types::PdfParagraph>, lines: Vec<types::PdfP
         return;
     }
     let bbox = union_bboxes(&lines);
+    let layout_class = lines.iter().find_map(|line| line.layout_class);
     let pdf_lines = lines.into_iter().flat_map(|line| line.lines).collect();
-    result.push(make_ocr_paragraph(text, pdf_lines, bbox));
+    let mut paragraph = make_ocr_paragraph(text, pdf_lines, bbox);
+    paragraph.layout_class = layout_class;
+    result.push(paragraph);
 }
 
 #[cfg(all(feature = "ocr", feature = "layout-detection"))]
@@ -917,6 +992,113 @@ mod tests {
             right: 500.0,
             top,
         }
+    }
+
+    #[cfg(feature = "layout-detection")]
+    fn layout_line_document(lines: &[(&str, f64, f64, f64, f64)]) -> InternalDocument {
+        let mut doc = InternalDocument::new("test");
+        for &(text, x0, y0, x1, y1) in lines {
+            let mut element = InternalElement::text(
+                ElementKind::OcrText {
+                    level: OcrElementLevel::Line,
+                },
+                text,
+                0,
+            );
+            element.bbox = Some(BoundingBox { x0, y0, x1, y1 });
+            doc.push_element(element);
+        }
+        doc
+    }
+
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn should_coalesce_adjacent_ocr_elements_in_same_text_region() {
+        let doc = layout_line_document(&[
+            ("First wrapped line", 100.0, 100.0, 500.0, 120.0),
+            ("continues in the same paragraph", 100.0, 120.0, 500.0, 140.0),
+        ]);
+        let hints = [layout_test_hint(types::LayoutHintClass::Text, 860.0, 900.0)];
+
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2);
+
+        assert_eq!(paragraphs.len(), 1);
+        assert_eq!(
+            paragraphs[0].text,
+            "First wrapped line\ncontinues in the same paragraph"
+        );
+        assert_eq!(paragraphs[0].layout_class, Some(types::LayoutHintClass::Text));
+    }
+
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn should_flush_body_regions_when_heading_separates_ocr_elements() {
+        let doc = layout_line_document(&[
+            ("Body before", 100.0, 100.0, 500.0, 120.0),
+            ("Section title", 100.0, 120.0, 500.0, 140.0),
+            ("Body after", 100.0, 140.0, 500.0, 160.0),
+        ]);
+        let hints = [
+            layout_test_hint(types::LayoutHintClass::Text, 840.0, 900.0),
+            layout_test_hint(types::LayoutHintClass::SectionHeader, 860.0, 880.0),
+        ];
+
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2);
+
+        assert_eq!(paragraphs.len(), 3);
+        assert_eq!(paragraphs[0].text, "Body before");
+        assert_eq!(paragraphs[1].text, "Section title");
+        assert_eq!(paragraphs[1].heading_level, Some(2));
+        assert_eq!(paragraphs[2].text, "Body after");
+    }
+
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn should_keep_adjacent_ocr_elements_in_distinct_text_regions_separate() {
+        let doc = layout_line_document(&[
+            ("Left column", 100.0, 100.0, 280.0, 120.0),
+            ("Right column", 320.0, 100.0, 500.0, 120.0),
+        ]);
+        let hints = [
+            types::LayoutHint {
+                class_name: types::LayoutHintClass::Text,
+                confidence: 0.95,
+                left: 100.0,
+                bottom: 880.0,
+                right: 280.0,
+                top: 900.0,
+            },
+            types::LayoutHint {
+                class_name: types::LayoutHintClass::Text,
+                confidence: 0.95,
+                left: 320.0,
+                bottom: 880.0,
+                right: 500.0,
+                top: 900.0,
+            },
+        ];
+
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2);
+
+        assert_eq!(paragraphs.len(), 2);
+        assert_eq!(paragraphs[0].text, "Left column");
+        assert_eq!(paragraphs[1].text, "Right column");
+    }
+
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn should_keep_distant_ocr_elements_in_same_text_region_separate() {
+        let doc = layout_line_document(&[
+            ("First paragraph", 100.0, 100.0, 500.0, 120.0),
+            ("Second paragraph", 100.0, 300.0, 500.0, 320.0),
+        ]);
+        let hints = [layout_test_hint(types::LayoutHintClass::Text, 680.0, 900.0)];
+
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2);
+
+        assert_eq!(paragraphs.len(), 2);
+        assert_eq!(paragraphs[0].text, "First paragraph");
+        assert_eq!(paragraphs[1].text, "Second paragraph");
     }
 
     #[cfg(feature = "layout-detection")]

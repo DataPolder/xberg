@@ -504,16 +504,72 @@ fn finish_cached_layout_document(
 }
 
 #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
-fn try_assemble_cached_layout_tables(
-    whole_image_doc: &InternalDocument,
+fn cached_layout_adds_structure(
     detections: &[crate::layout::LayoutDetection],
     recognized_tables: &[crate::RecognizedTable],
+) -> bool {
+    use crate::layout::LayoutClass;
+
+    !recognized_tables.is_empty()
+        || detections.iter().any(|detection| {
+            matches!(
+                detection.class_name,
+                LayoutClass::Title
+                    | LayoutClass::SectionHeader
+                    | LayoutClass::Code
+                    | LayoutClass::Formula
+                    | LayoutClass::ListItem
+                    | LayoutClass::CheckboxSelected
+                    | LayoutClass::CheckboxUnselected
+            )
+        })
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn layout_detection_accepts_text(detection: &crate::layout::LayoutDetection) -> bool {
+    !matches!(
+        detection.class_name,
+        crate::layout::LayoutClass::PageHeader
+            | crate::layout::LayoutClass::PageFooter
+            | crate::layout::LayoutClass::Picture
+            | crate::layout::LayoutClass::Chart
+    )
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn element_claimed_by_layout(
+    element: &crate::types::OcrElement,
+    detections: &[crate::layout::LayoutDetection],
+    recognized_tables: &[crate::RecognizedTable],
+) -> bool {
+    recognized_tables
+        .iter()
+        .any(|table| bbox_contains_element(table.detection_bbox, element))
+        || detections
+            .iter()
+            .any(|detection| layout_detection_accepts_text(detection) && bbox_contains_element(detection.bbox, element))
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn ocr_element_position(element: &crate::types::OcrElement) -> (u32, u32) {
+    let (left, top, _, _) = ocr_geometry_bounds(&element.geometry);
+    (top, left)
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn push_unmatched_ocr(builder: &mut InternalDocumentBuilder, elements: &[&crate::types::OcrElement]) {
+    let text = text_from_positioned_elements(elements);
+    if !text.trim().is_empty() {
+        builder.push_paragraph(text.trim(), vec![], Some(1), None);
+    }
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn cached_layout_elements(
+    whole_image_doc: &InternalDocument,
     image_width: u32,
     image_height: u32,
-) -> Option<InternalDocument> {
-    if recognized_tables.is_empty() {
-        return None;
-    }
+) -> Option<Vec<crate::types::OcrElement>> {
     let pages = whole_image_doc.prebuilt_pages.as_ref()?;
     if pages.len() != 1 || pages[0].page_number != 1 {
         return None;
@@ -524,7 +580,37 @@ fn try_assemble_cached_layout_tables(
     if elements.iter().any(|element| element.page_number != 1) {
         return None;
     }
+    Some(elements)
+}
 
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn ordered_cached_layout_items<'a>(
+    detections: &'a [crate::layout::LayoutDetection],
+    elements: &'a [crate::types::OcrElement],
+    recognized_tables: &[crate::RecognizedTable],
+) -> (
+    Vec<&'a crate::layout::LayoutDetection>,
+    Vec<&'a crate::types::OcrElement>,
+) {
+    // `prepare_layout_ocr` already applies the page-aware row/column ordering. ~keep
+    let ordered_detections = detections.iter().collect::<Vec<_>>();
+    let mut unmatched = elements
+        .iter()
+        .filter(|element| !element_claimed_by_layout(element, detections, recognized_tables))
+        .collect::<Vec<_>>();
+    unmatched.sort_by_key(|element| ocr_element_position(element));
+    (ordered_detections, unmatched)
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn assemble_cached_layout_elements(
+    whole_image_doc: &InternalDocument,
+    detections: &[crate::layout::LayoutDetection],
+    recognized_tables: &[crate::RecognizedTable],
+    elements: &[crate::types::OcrElement],
+    image_width: u32,
+    image_height: u32,
+) -> InternalDocument {
     let mut assigned = elements
         .iter()
         .map(|element| {
@@ -535,42 +621,86 @@ fn try_assemble_cached_layout_tables(
         .collect::<Vec<_>>();
     let mut builder = InternalDocumentBuilder::new("image");
     let mut formulas = Vec::new();
-    for detection in detections {
+    let (ordered_detections, unmatched) = ordered_cached_layout_items(detections, elements, recognized_tables);
+    let mut unmatched_index = 0;
+    for detection in ordered_detections {
+        let detection_position = (detection.bbox.y1.max(0.0) as u32, detection.bbox.x1.max(0.0) as u32);
+        let next_index = unmatched[unmatched_index..]
+            .partition_point(|element| ocr_element_position(element) < detection_position)
+            + unmatched_index;
+        push_unmatched_ocr(&mut builder, &unmatched[unmatched_index..next_index]);
+        unmatched_index = next_index;
         push_cached_layout_region(
             &mut builder,
             &mut formulas,
             detection,
             recognized_tables,
-            &elements,
+            elements,
             &mut assigned,
         );
     }
+    push_unmatched_ocr(&mut builder, &unmatched[unmatched_index..]);
 
-    let unmatched = elements
-        .iter()
-        .enumerate()
-        .filter_map(|(index, element)| (!assigned[index]).then_some(element))
-        .collect::<Vec<_>>();
-    let unmatched_text = text_from_positioned_elements(&unmatched);
-    if !unmatched_text.trim().is_empty() {
-        builder.push_paragraph(unmatched_text.trim(), vec![], Some(1), None);
-    }
-
-    let assembled = finish_cached_layout_document(
+    finish_cached_layout_document(
         builder,
         whole_image_doc,
         detections,
         formulas,
         image_width,
         image_height,
+    )
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn cached_document_has_structure(document: &InternalDocument) -> bool {
+    use crate::types::internal::ElementKind;
+
+    document.tables.iter().any(|table| {
+        !table.markdown.trim().is_empty() || table.cells.iter().flatten().any(|cell| !cell.trim().is_empty())
+    }) || document.elements.iter().any(|element| {
+        matches!(
+            element.kind,
+            ElementKind::Heading { .. } | ElementKind::Code | ElementKind::Formula | ElementKind::ListItem { .. }
+        )
+    })
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn try_assemble_cached_layout_document(
+    whole_image_doc: &InternalDocument,
+    detections: &[crate::layout::LayoutDetection],
+    recognized_tables: &[crate::RecognizedTable],
+    image_width: u32,
+    image_height: u32,
+) -> Option<InternalDocument> {
+    if !cached_layout_adds_structure(detections, recognized_tables) {
+        return None;
+    }
+    let elements = cached_layout_elements(whole_image_doc, image_width, image_height)?;
+    let assembled = assemble_cached_layout_elements(
+        whole_image_doc,
+        detections,
+        recognized_tables,
+        &elements,
+        image_width,
+        image_height,
     );
+    if !cached_document_has_structure(&assembled) {
+        return None;
+    }
     let retained_tokens = alphanumeric_token_retention(
         &crate::rendering::render_plain(&assembled),
         &internal_document_text(whole_image_doc),
     );
-    // Reject incomplete table reconstruction before it replaces the higher-quality
-    // whole-image/region OCR fallback. Dense tables can produce plausible but partial grids. ~keep
-    (retained_tokens >= MIN_LAYOUT_OCR_ALPHANUMERIC_TOKEN_RETENTION).then_some(assembled)
+    let minimum_retention = if recognized_tables.is_empty() {
+        // Non-table assembly is lossless: unmatched canonical OCR is cheap to retain. ~keep
+        1.0
+    } else {
+        MIN_LAYOUT_OCR_ALPHANUMERIC_TOKEN_RETENTION
+    };
+    // Dense recognized tables can be useful despite small OCR assignment losses; all
+    // other cached reconstruction must preserve every canonical alphanumeric token. ~keep
+    (retained_tokens >= minimum_retention).then_some(assembled)
 }
 
 #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
@@ -1227,7 +1357,7 @@ impl ImageExtractor {
 
         if let Ok(whole_image_doc) = &whole_image_result
             && source_image_is_proven_single_frame(content, mime_type)
-            && let Some(structured) = try_assemble_cached_layout_tables(
+            && let Some(structured) = try_assemble_cached_layout_document(
                 whole_image_doc,
                 &detections,
                 &recognized_tables,
@@ -1237,7 +1367,7 @@ impl ImageExtractor {
         {
             tracing::debug!(
                 tables = structured.tables.len(),
-                "Assembled image OCR with recognized layout tables"
+                "Assembled cached image OCR with layout structure"
             );
             return Ok(structured);
         }
@@ -1640,6 +1770,217 @@ mod tests {
 
     #[cfg(all(feature = "layout-detection", feature = "ocr"))]
     #[test]
+    fn should_assemble_cached_headings_without_recognized_tables() {
+        let detections = vec![
+            crate::layout::LayoutDetection::new(
+                crate::layout::LayoutClass::Title,
+                0.98,
+                crate::layout::BBox::new(0.0, 0.0, 200.0, 30.0),
+            ),
+            crate::layout::LayoutDetection::new(
+                crate::layout::LayoutClass::SectionHeader,
+                0.96,
+                crate::layout::BBox::new(0.0, 30.0, 200.0, 60.0),
+            ),
+        ];
+        let elements = vec![
+            positioned_word("Annual Report", 10, 5),
+            positioned_word("Summary", 10, 35),
+        ];
+        let whole = whole_image_doc_with_elements("Annual Report Summary", elements, 200, 100);
+
+        let assembled = try_assemble_cached_layout_document(&whole, &detections, &[], 200, 100)
+            .expect("semantic detections must structure cached whole-image OCR");
+        let markdown = crate::rendering::render_markdown(&assembled);
+
+        assert_eq!(
+            assembled.elements[0].kind,
+            crate::types::internal::ElementKind::Heading { level: 1 }
+        );
+        assert_eq!(
+            assembled.elements[1].kind,
+            crate::types::internal::ElementKind::Heading { level: 2 }
+        );
+        assert!(markdown.contains("# Annual Report"));
+        assert!(markdown.contains("## Summary"));
+        assert_eq!(
+            assembled.prebuilt_pages.as_ref().unwrap()[0]
+                .layout_regions
+                .as_ref()
+                .map(Vec::len),
+            Some(2)
+        );
+        assert_eq!(alphanumeric_token_retention(&markdown, "Annual Report Summary"), 1.0);
+    }
+
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    #[test]
+    fn should_keep_unmapped_invoice_tokens_when_assembling_cached_structure() {
+        let detections = vec![
+            crate::layout::LayoutDetection::new(
+                crate::layout::LayoutClass::Title,
+                0.98,
+                crate::layout::BBox::new(0.0, 0.0, 100.0, 30.0),
+            ),
+            crate::layout::LayoutDetection::new(
+                crate::layout::LayoutClass::SectionHeader,
+                0.96,
+                crate::layout::BBox::new(0.0, 30.0, 100.0, 60.0),
+            ),
+        ];
+        let elements = vec![
+            positioned_word("INVOICE", 10, 5),
+            positioned_word("Bill To", 10, 35),
+            positioned_word("John Doe", 10, 70),
+            positioned_word("Invoice 123", 120, 35),
+            positioned_word("Date 2025", 120, 70),
+        ];
+        let canonical = "INVOICE Bill To John Doe Invoice 123 Date 2025";
+        let whole = whole_image_doc_with_elements(canonical, elements, 240, 100);
+
+        let assembled = try_assemble_cached_layout_document(&whole, &detections, &[], 240, 100)
+            .expect("partial invoice layout must preserve cached OCR");
+        let markdown = crate::rendering::render_markdown(&assembled);
+
+        assert_eq!(
+            assembled.elements[0].kind,
+            crate::types::internal::ElementKind::Heading { level: 1 }
+        );
+        assert_eq!(
+            assembled.elements[1].kind,
+            crate::types::internal::ElementKind::Heading { level: 2 }
+        );
+        assert!(markdown.contains("# INVOICE"));
+        assert!(markdown.contains("## Bill To"));
+        assert!(markdown.contains("John Doe"));
+        assert!(markdown.contains("Invoice 123"));
+        assert!(markdown.contains("Date 2025"));
+        assert_eq!(
+            assembled.prebuilt_pages.as_ref().unwrap()[0]
+                .layout_regions
+                .as_ref()
+                .map(Vec::len),
+            Some(2)
+        );
+        assert_eq!(alphanumeric_token_retention(&markdown, canonical), 1.0);
+    }
+
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    #[test]
+    fn should_interleave_unmatched_ocr_with_structural_regions() {
+        let detections = vec![
+            crate::layout::LayoutDetection::new(
+                crate::layout::LayoutClass::Title,
+                0.98,
+                crate::layout::BBox::new(0.0, 30.0, 100.0, 55.0),
+            ),
+            crate::layout::LayoutDetection::new(
+                crate::layout::LayoutClass::SectionHeader,
+                0.96,
+                crate::layout::BBox::new(0.0, 70.0, 100.0, 95.0),
+            ),
+        ];
+        let elements = vec![
+            positioned_word("Before", 150, 5),
+            positioned_word("Title", 10, 35),
+            positioned_word("Between", 150, 60),
+            positioned_word("Section", 10, 75),
+            positioned_word("After", 150, 100),
+        ];
+        let canonical = "Before Title Between Section After";
+        let whole = whole_image_doc_with_elements(canonical, elements, 240, 130);
+
+        let assembled = try_assemble_cached_layout_document(&whole, &detections, &[], 240, 130)
+            .expect("populated structure must retain spatially interleaved OCR");
+        let texts = assembled
+            .elements
+            .iter()
+            .map(|element| element.text.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(texts, vec!["Before", "Title", "Between", "Section", "After"]);
+        assert_eq!(
+            alphanumeric_token_retention(&crate::rendering::render_plain(&assembled), canonical),
+            1.0
+        );
+    }
+
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    #[test]
+    fn should_retain_fallback_when_structural_detection_has_no_text() {
+        let detections = vec![crate::layout::LayoutDetection::new(
+            crate::layout::LayoutClass::Title,
+            0.98,
+            crate::layout::BBox::new(0.0, 0.0, 50.0, 30.0),
+        )];
+        let whole = whole_image_doc_with_elements(
+            "outside title",
+            vec![positioned_word("outside title", 100, 40)],
+            200,
+            100,
+        );
+
+        assert!(try_assemble_cached_layout_document(&whole, &detections, &[], 200, 100).is_none());
+    }
+
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    #[test]
+    fn should_reject_non_table_structure_with_partial_token_retention() {
+        let detections = vec![crate::layout::LayoutDetection::new(
+            crate::layout::LayoutClass::Title,
+            0.98,
+            crate::layout::BBox::new(0.0, 0.0, 60.0, 30.0),
+        )];
+        let elements = vec![
+            positioned_word("one", 10, 5),
+            positioned_word("two", 100, 35),
+            positioned_word("three", 100, 55),
+            positioned_word("four", 100, 75),
+        ];
+        let whole = whole_image_doc_with_elements("one two three four five", elements, 200, 100);
+
+        assert!(try_assemble_cached_layout_document(&whole, &detections, &[], 200, 100).is_none());
+    }
+
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    #[test]
+    fn should_keep_table_structure_at_existing_token_tolerance() {
+        let table_bbox = crate::layout::BBox::new(0.0, 0.0, 100.0, 120.0);
+        let detections = vec![crate::layout::LayoutDetection::new(
+            crate::layout::LayoutClass::Table,
+            0.98,
+            table_bbox,
+        )];
+        let elements = vec![
+            positioned_word("one", 10, 5),
+            positioned_word("two", 10, 25),
+            positioned_word("three", 10, 45),
+            positioned_word("four", 10, 65),
+            positioned_word("five", 10, 85),
+        ];
+        let whole = whole_image_doc_with_elements("one two three four five", elements, 100, 120);
+        let recognized = vec![crate::RecognizedTable {
+            detection_bbox: table_bbox,
+            cells: vec![
+                vec!["one".to_string(), "two".to_string()],
+                vec!["three".to_string(), "four".to_string()],
+            ],
+            markdown: "| one | two |\n| --- | --- |\n| three | four |".to_string(),
+        }];
+
+        let cached_elements = cached_layout_elements(&whole, 100, 120).unwrap();
+        let assembled = assemble_cached_layout_elements(&whole, &detections, &recognized, &cached_elements, 100, 120);
+        let retention = alphanumeric_token_retention(
+            &crate::rendering::render_plain(&assembled),
+            &internal_document_text(&whole),
+        );
+        assert_eq!(retention, MIN_LAYOUT_OCR_ALPHANUMERIC_TOKEN_RETENTION);
+
+        assert!(try_assemble_cached_layout_document(&whole, &detections, &recognized, 100, 120).is_some());
+    }
+
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    #[test]
     fn should_assemble_recognized_table_without_duplicate_fallback_text() {
         let table_bbox = crate::layout::BBox::new(0.0, 0.0, 100.0, 100.0);
         let detections = vec![
@@ -1665,7 +2006,7 @@ mod tests {
             markdown: "| Header | Value |\n| --- | --- |\n| A | 1 |".to_string(),
         }];
 
-        let assembled = try_assemble_cached_layout_tables(&whole, &detections, &recognized, 200, 100)
+        let assembled = try_assemble_cached_layout_document(&whole, &detections, &recognized, 200, 100)
             .expect("successful recognition must assemble a structured image table");
         let markdown = crate::rendering::render_markdown(&assembled);
 
@@ -1707,7 +2048,7 @@ mod tests {
             markdown: "| one |\n| --- |".to_string(),
         }];
 
-        assert!(try_assemble_cached_layout_tables(&whole, &detections, &recognized, 100, 100).is_none());
+        assert!(try_assemble_cached_layout_document(&whole, &detections, &recognized, 100, 100).is_none());
     }
 
     #[cfg(all(feature = "layout-detection", feature = "ocr"))]
@@ -1725,7 +2066,7 @@ mod tests {
             100,
         );
 
-        assert!(try_assemble_cached_layout_tables(&whole, &detections, &[], 100, 100).is_none());
+        assert!(try_assemble_cached_layout_document(&whole, &detections, &[], 100, 100).is_none());
     }
 
     #[cfg(all(feature = "layout-detection", feature = "ocr"))]

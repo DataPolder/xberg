@@ -126,7 +126,7 @@ pub(crate) fn map_language_code(xberg_code: &str) -> Option<&'static str> {
         "fr" | "fra" | "french" => Some("french"),
         "de" | "deu" | "german" => Some("german"),
         "ko" | "kor" | "korean" => Some("korean"),
-        "ja" | "jpn" | "japanese" | "japan" => Some("japan"),
+        "ja" | "jpn" | "jpn_vert" | "japanese" | "japan" => Some("japan"),
         "chi_tra" | "zh_tw" | "zh_hant" | "chinese_cht" => Some("chinese_cht"),
         "ru" | "rus" | "russian" | "uk" | "ukr" | "ukrainian" | "be" | "bel" | "belarusian" | "cyrillic" => {
             Some("cyrillic")
@@ -150,18 +150,25 @@ pub(crate) fn map_language_code(xberg_code: &str) -> Option<&'static str> {
 /// Select the PaddleOCR recognition language for a request and report what the
 /// selection cannot cover.
 ///
-/// PaddleOCR loads one recognition model per call, chosen from the first
-/// requested language. Any additional language whose script family the selected
-/// model does not cover will not be recognized, so a `ProcessingWarning` is
-/// emitted instead of silently dropping its text (#1346). An unmapped first
-/// language falls back to the English model, also with a warning.
+/// PaddleOCR loads one recognition model per call. The first requested language
+/// selects it, except that an English-first request prefers a later Korean or
+/// Japanese model because those models also cover Latin text. Any language the
+/// selected model does not cover emits a `ProcessingWarning` instead of being
+/// silently dropped (#1346). An unmapped first language falls back to English.
 #[cfg(feature = "paddle-ocr")]
 pub(crate) fn select_paddle_language(languages: &[String]) -> (&'static str, Vec<crate::types::ProcessingWarning>) {
     use std::borrow::Cow;
 
     let mut warnings = Vec::new();
     let primary = languages.first().map(String::as_str).unwrap_or("eng");
-    let paddle_lang = match map_language_code(primary) {
+    let primary_code = map_language_code(primary);
+    let paddle_lang = match primary_code {
+        Some("en") => languages
+            .iter()
+            .filter_map(|language| map_language_code(language))
+            // Korean and Japanese recognition models also cover Latin text. ~keep
+            .find(|code| matches!(*code, "korean" | "japan"))
+            .unwrap_or("en"),
         Some(code) => code,
         None => {
             tracing::warn!(
@@ -178,12 +185,11 @@ pub(crate) fn select_paddle_language(languages: &[String]) -> (&'static str, Vec
         }
     };
 
-    let family = language_to_script_family(paddle_lang);
     let uncovered: Vec<&str> = languages
         .iter()
-        .skip(1)
+        .skip(usize::from(primary_code.is_none()))
         .map(String::as_str)
-        .filter(|lang| map_language_code(lang).is_none_or(|code| language_to_script_family(code) != family))
+        .filter(|lang| map_language_code(lang).is_none_or(|code| !paddle_model_covers(paddle_lang, code)))
         .collect();
 
     if !uncovered.is_empty() {
@@ -202,6 +208,12 @@ pub(crate) fn select_paddle_language(languages: &[String]) -> (&'static str, Vec
     }
 
     (paddle_lang, warnings)
+}
+
+#[cfg(feature = "paddle-ocr")]
+fn paddle_model_covers(selected: &str, requested: &str) -> bool {
+    language_to_script_family(selected) == language_to_script_family(requested)
+        || (matches!(selected, "korean" | "japan") && requested == "en")
 }
 
 #[cfg(all(test, feature = "paddle-ocr"))]
@@ -255,6 +267,27 @@ mod language_selection_tests {
     fn test_empty_list_defaults_to_english() {
         let (lang, warnings) = select_paddle_language(&[]);
         assert_eq!(lang, "en");
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn should_map_vertical_japanese_to_japanese_model() {
+        let (lang, warnings) = select_paddle_language(&langs(&["jpn_vert"]));
+        assert_eq!(lang, "japan");
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn should_prioritize_korean_model_for_mixed_english_and_korean() {
+        let (lang, warnings) = select_paddle_language(&langs(&["eng", "kor"]));
+        assert_eq!(lang, "korean");
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn should_prioritize_japanese_model_for_mixed_english_and_vertical_japanese() {
+        let (lang, warnings) = select_paddle_language(&langs(&["eng", "jpn_vert"]));
+        assert_eq!(lang, "japan");
         assert!(warnings.is_empty());
     }
 }

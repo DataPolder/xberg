@@ -40,6 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   duplicated text when predicted cells overlap or span multiple columns.
 - Layout-enabled image extraction now recognizes TATR table structure from cached OCR elements
   while preserving non-table text and rejecting incomplete table reconstruction in favor of OCR fallback.
+- Layout-enabled OCR now preserves detected image headings without losing or reordering fallback text,
+  and regroups adjacent PDF OCR lines without collapsing distant paragraphs or separate layout regions.
 - Rotated PDF pages now receive the inverse `/Rotate` correction exactly once before shared layout
   and OCR inference, keeping PaddleOCR text upright with or without layout detection.
 - Benchmark text F1 treats OCR-inserted line breaks within CJK text as layout whitespace,
@@ -51,6 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   identities and fixture OCR languages, and score structural image ground truth.
 - PaddleOCR now reports processed image dimensions and applied orientation corrections, keeping
   OCR geometry aligned with optional layout detection on rotated documents.
+- PaddleOCR now selects the Japanese model for vertical Japanese and prefers Korean or Japanese
+  recognition for mixed Latin-script requests those models can cover.
 - Jupyter notebook paths retain `application/x-ipynb+json` routing when generic JSON content
   detection runs, and extracted notebook content no longer exposes diagnostic cell/output markers;
   cell identity, execution, tag, output-type, and MIME details remain available as structured metadata.
