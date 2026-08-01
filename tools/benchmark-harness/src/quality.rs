@@ -462,7 +462,7 @@ mod tests {
         assert_eq!(result.f1_score_text, 0.9714285714285714);
         assert_eq!(result.quality_score, 0.9714285714285714);
         assert_eq!(result.extra_tokens, Vec::new());
-        assert_eq!(result.correct, true);
+        assert!(result.correct);
     }
 
     #[test]
