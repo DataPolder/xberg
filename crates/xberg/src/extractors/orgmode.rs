@@ -595,12 +595,14 @@ impl OrgModeExtractor {
 
             if trimmed.starts_with('|') && trimmed.ends_with('|') {
                 let mut table_cells: Vec<Vec<String>> = Vec::new();
+                let mut has_header_separator = false;
                 while i < lines.len() {
                     let t = lines[i].trim();
                     if !t.starts_with('|') || !t.ends_with('|') {
                         break;
                     }
                     if t.contains("---") || t.contains("+-") {
+                        has_header_separator |= !table_cells.is_empty();
                         i += 1;
                         continue;
                     }
@@ -615,7 +617,7 @@ impl OrgModeExtractor {
                     i += 1;
                 }
                 if !table_cells.is_empty() {
-                    b.push_table_from_cells(&table_cells, None, None);
+                    Self::push_org_table(&mut b, table_cells, has_header_separator);
                 }
                 continue;
             }
@@ -764,6 +766,23 @@ impl OrgModeExtractor {
         }
 
         b.build()
+    }
+
+    /// Push an Org table while preserving whether the source declared a header separator.
+    fn push_org_table(b: &mut InternalDocumentBuilder, cells: Vec<Vec<String>>, has_header: bool) {
+        let columns = has_header.then(|| cells[0].clone());
+        let mut markdown_cells = cells.clone();
+        if !has_header {
+            let column_count = cells.iter().map(Vec::len).max().unwrap_or(0);
+            markdown_cells.insert(0, vec![String::new(); column_count]);
+        }
+        let table = Table {
+            cells,
+            markdown: Self::cells_to_markdown(&markdown_cells),
+            columns,
+            ..Default::default()
+        };
+        b.push_table(table, None, None);
     }
 
     /// Extract internal org links from a line and add relationships.
@@ -1169,6 +1188,48 @@ mod tests {
         assert!(markdown.contains("Alice"));
         assert!(markdown.contains("Bob"));
         assert!(markdown.contains("---"));
+    }
+
+    #[test]
+    fn should_preserve_separator_header_in_structured_and_rendered_org_table() {
+        let document = OrgModeExtractor::build_internal_document("| Name | Age |\n|------+-----|\n| Alice | 30 |");
+        assert_eq!(document.tables.len(), 1);
+        let table = &document.tables[0];
+
+        assert_eq!(
+            table.cells,
+            vec![
+                vec!["Name".to_string(), "Age".to_string()],
+                vec!["Alice".to_string(), "30".to_string()],
+            ]
+        );
+        assert_eq!(table.columns, Some(vec!["Name".to_string(), "Age".to_string()]));
+        assert_eq!(table.markdown, "| Name | Age |\n| --- | --- |\n| Alice | 30 |\n");
+        assert_eq!(
+            crate::rendering::render_markdown(&document),
+            "| Name | Age |\n| --- | --- |\n| Alice | 30 |\n"
+        );
+    }
+
+    #[test]
+    fn should_preserve_headerless_rows_in_structured_and_rendered_org_table() {
+        let document = OrgModeExtractor::build_internal_document("| Alice | 30 |\n| Bob | 40 |");
+        assert_eq!(document.tables.len(), 1);
+        let table = &document.tables[0];
+
+        assert_eq!(
+            table.cells,
+            vec![
+                vec!["Alice".to_string(), "30".to_string()],
+                vec!["Bob".to_string(), "40".to_string()],
+            ]
+        );
+        assert_eq!(table.columns, None);
+        assert_eq!(table.markdown, "|  |  |\n| --- | --- |\n| Alice | 30 |\n| Bob | 40 |\n");
+        assert_eq!(
+            crate::rendering::render_markdown(&document),
+            "|  |  |\n| --- | --- |\n| Alice | 30 |\n| Bob | 40 |\n"
+        );
     }
 
     #[test]
