@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - TATR table reconstruction now assigns each OCR word to one highest-overlap cell, preventing
   duplicated text when predicted cells overlap or span multiple columns.
 - Layout-enabled image extraction now recognizes TATR table structure from cached OCR elements
-  while preserving non-table text and unstructured fallback output.
+  while preserving non-table text and rejecting incomplete table reconstruction in favor of OCR fallback.
 - Rotated PDF pages now receive the inverse `/Rotate` correction exactly once before shared layout
   and OCR inference, keeping PaddleOCR text upright with or without layout detection.
 - Benchmark text F1 treats OCR-inserted line breaks within CJK text as layout whitespace,

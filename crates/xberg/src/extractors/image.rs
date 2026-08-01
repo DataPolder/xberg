@@ -556,14 +556,21 @@ fn try_assemble_cached_layout_tables(
         builder.push_paragraph(unmatched_text.trim(), vec![], Some(1), None);
     }
 
-    Some(finish_cached_layout_document(
+    let assembled = finish_cached_layout_document(
         builder,
         whole_image_doc,
         detections,
         formulas,
         image_width,
         image_height,
-    ))
+    );
+    let retained_tokens = alphanumeric_token_retention(
+        &crate::rendering::render_plain(&assembled),
+        &internal_document_text(whole_image_doc),
+    );
+    // Reject incomplete table reconstruction before it replaces the higher-quality
+    // whole-image/region OCR fallback. Dense tables can produce plausible but partial grids. ~keep
+    (retained_tokens >= MIN_LAYOUT_OCR_ALPHANUMERIC_TOKEN_RETENTION).then_some(assembled)
 }
 
 #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
@@ -1653,6 +1660,32 @@ mod tests {
             serde_json::to_value(&whole.prebuilt_ocr_elements).unwrap()
         );
         assert_eq!(assembled.prebuilt_pages.as_ref().unwrap()[0].tables.len(), 1);
+    }
+
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    #[test]
+    fn should_reject_recognized_table_when_it_drops_cached_ocr_text() {
+        let table_bbox = crate::layout::BBox::new(0.0, 0.0, 100.0, 100.0);
+        let detections = vec![crate::layout::LayoutDetection::new(
+            crate::layout::LayoutClass::Table,
+            0.98,
+            table_bbox,
+        )];
+        let elements = vec![
+            positioned_word("one", 10, 10),
+            positioned_word("two", 10, 25),
+            positioned_word("three", 10, 40),
+            positioned_word("four", 10, 55),
+            positioned_word("five", 10, 70),
+        ];
+        let whole = whole_image_doc_with_elements("one two three four five", elements, 100, 100);
+        let recognized = vec![crate::RecognizedTable {
+            detection_bbox: table_bbox,
+            cells: vec![vec!["one".to_string()]],
+            markdown: "| one |\n| --- |".to_string(),
+        }];
+
+        assert!(try_assemble_cached_layout_tables(&whole, &detections, &recognized, 100, 100).is_none());
     }
 
     #[cfg(all(feature = "layout-detection", feature = "ocr"))]
