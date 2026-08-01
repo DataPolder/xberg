@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Layout-enabled image table recognition now shares its decoded RGB raster with the TATR worker,
+  avoiding one full image allocation and pixel-buffer copy per qualifying image.
 - Multi-stage PDF OCR now shares rendered page rasters across pipeline tasks instead of copying
   each pixel buffer, reducing peak memory by roughly one RGB raster per concurrent page.
 - Batch DOCX extraction reuses one owned input buffer and avoids rebuilding discarded document

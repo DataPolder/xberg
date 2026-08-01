@@ -803,9 +803,14 @@ enum LayoutOcrPreparation {
     Complete(InternalDocument),
     Detected {
         whole_image_result: Result<InternalDocument>,
-        rgb: image::RgbImage,
+        rgb: std::sync::Arc<image::RgbImage>,
         detections: Vec<crate::layout::LayoutDetection>,
     },
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn share_detected_image(rgb: image::RgbImage) -> std::sync::Arc<image::RgbImage> {
+    std::sync::Arc::new(rgb)
 }
 
 #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
@@ -825,6 +830,7 @@ async fn prepare_layout_ocr(
                 .map(LayoutOcrPreparation::Complete);
         }
     };
+    let rgb = share_detected_image(rgb);
     tracing::info!(
         detections = detection.detections.len(),
         img_width = rgb.width(),
@@ -889,7 +895,7 @@ fn uses_tatr_image_table_recognition(table_model: crate::core::config::layout::T
 ))]
 async fn recognize_cached_image_tables(
     whole_image_doc: &InternalDocument,
-    rgb: &image::RgbImage,
+    rgb: &std::sync::Arc<image::RgbImage>,
     detections: &[crate::layout::LayoutDetection],
     config: &ExtractionConfig,
 ) -> Vec<crate::RecognizedTable> {
@@ -909,7 +915,7 @@ async fn recognize_cached_image_tables(
         return Vec::new();
     };
 
-    let page_image = rgb.clone();
+    let page_image = std::sync::Arc::clone(rgb);
     let detection = crate::layout::DetectionResult {
         page_width: rgb.width(),
         page_height: rgb.height(),
@@ -1564,6 +1570,22 @@ mod tests {
             serde_json::json!(height),
         );
         doc
+    }
+
+    #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+    #[test]
+    fn shared_detected_image_preserves_content_dimensions_and_backing_buffer() {
+        let rgb = image::RgbImage::from_raw(2, 1, vec![1, 2, 3, 4, 5, 6]).unwrap();
+        let pixels = rgb.as_raw().as_ptr();
+
+        let shared = share_detected_image(rgb);
+
+        assert_eq!(shared.dimensions(), (2, 1));
+        assert_eq!(shared.as_raw(), &[1, 2, 3, 4, 5, 6]);
+        assert_eq!(shared.as_raw().as_ptr(), pixels);
+
+        let task_image = std::sync::Arc::clone(&shared);
+        assert!(std::sync::Arc::ptr_eq(&task_image, &shared));
     }
 
     #[cfg(all(feature = "layout-detection", feature = "ocr"))]
