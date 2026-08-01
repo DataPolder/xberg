@@ -171,8 +171,10 @@ fn parse_options_deepseek_ocr_rejects_non_object_json_by_returning_defaults() {
     let backend = DeepseekOcrBackend::new();
     assert_eq!(backend.name(), "candle-deepseek-ocr");
 
-    let mut config = OcrConfig::default();
-    config.backend_options = Some(serde_json::json!(null));
+    let config = OcrConfig {
+        backend_options: Some(serde_json::json!(null)),
+        ..Default::default()
+    };
     let _ = config;
     assert_eq!(backend.name(), "candle-deepseek-ocr");
 }
@@ -188,8 +190,10 @@ fn parse_options_paddleocr_vl_rejects_non_object_json_by_returning_defaults() {
     let backend = PaddleOcrVlBackend::new(PaddleOcrVlTask::default());
     assert_eq!(backend.name(), "candle-paddleocr-vl");
 
-    let mut config = OcrConfig::default();
-    config.backend_options = Some(serde_json::json!(false));
+    let config = OcrConfig {
+        backend_options: Some(serde_json::json!(false)),
+        ..Default::default()
+    };
     let _ = config;
     assert_eq!(backend.name(), "candle-paddleocr-vl");
 }
@@ -222,8 +226,10 @@ fn parse_options_deepseek_ocr_accepts_empty_object_and_returns_defaults() {
     use xberg::plugins::Plugin as _;
 
     let backend = DeepseekOcrBackend::new();
-    let mut config = OcrConfig::default();
-    config.backend_options = Some(serde_json::json!({}));
+    let _config = OcrConfig {
+        backend_options: Some(serde_json::json!({})),
+        ..Default::default()
+    };
 
     assert_eq!(backend.name(), "candle-deepseek-ocr");
     assert_eq!(backend.version(), "0.1.0");
@@ -238,8 +244,10 @@ fn parse_options_paddleocr_vl_accepts_empty_object_and_returns_defaults() {
     use xberg_candle_ocr::models::PaddleOcrVlTask;
 
     let backend = PaddleOcrVlBackend::new(PaddleOcrVlTask::default());
-    let mut config = OcrConfig::default();
-    config.backend_options = Some(serde_json::json!({}));
+    let _config = OcrConfig {
+        backend_options: Some(serde_json::json!({})),
+        ..Default::default()
+    };
 
     assert_eq!(backend.name(), "candle-paddleocr-vl");
     assert_eq!(backend.version(), "0.1.0");
@@ -268,8 +276,10 @@ async fn candle_deepseek_ocr_e2e_extraction() {
 
     let backend = DeepseekOcrBackend::new();
 
-    let mut config = OcrConfig::default();
-    config.backend_options = Some(serde_json::json!({"model_path": model_path}));
+    let config = OcrConfig {
+        backend_options: Some(serde_json::json!({"model_path": model_path})),
+        ..Default::default()
+    };
 
     let result = backend
         .process_image(image_bytes, &config)
@@ -315,8 +325,10 @@ async fn candle_paddleocr_vl_e2e_extraction() {
 
     let backend = PaddleOcrVlBackend::new(PaddleOcrVlTask::default());
 
-    let mut config = OcrConfig::default();
-    config.backend_options = Some(serde_json::json!({"model_path": model_path}));
+    let config = OcrConfig {
+        backend_options: Some(serde_json::json!({"model_path": model_path})),
+        ..Default::default()
+    };
 
     let result = backend
         .process_image(image_bytes, &config)
