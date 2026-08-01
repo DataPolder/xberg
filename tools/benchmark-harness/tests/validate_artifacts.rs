@@ -13,7 +13,8 @@ use benchmark_harness::provenance::{
     CorpusProvenance, FixtureProvenance, FrameworkProvenance, RepositoryProvenance, RunProvenance, TimingProvenance,
 };
 use benchmark_harness::types::{
-    BenchmarkResult, ErrorKind, FrameworkCapabilities, IterationResult, OcrStatus, PerformanceMetrics,
+    BenchmarkResult, ErrorKind, FrameworkCapabilities, IterationResult, OcrStatus, OutputFormat, PerformanceMetrics,
+    QualityMetrics,
 };
 use benchmark_harness::validate_artifacts::{ValidateArtifactsArgs, validate};
 use benchmark_harness::{Error, write_json, write_run_provenance};
@@ -248,46 +249,66 @@ fn build_results(
     entry: &benchmark_harness::bench_matrix::MatrixEntry,
     contract: &CohortContract,
     cohort: Cohort,
+    fixtures_root: &Path,
 ) -> Vec<BenchmarkResult> {
     contract
         .document_stems
         .iter()
         .zip(contract.document_extensions.iter())
-        .filter(|(_, extension)| supports_extension(&entry.framework, extension))
-        .map(|(stem, extension)| BenchmarkResult {
-            framework: runtime_framework_name(entry),
-            output_format: entry.output_format,
-            file_path: PathBuf::from(format!("/workspace/test_documents/{stem}.{extension}")),
-            file_size: 1,
-            success: true,
-            error_message: None,
-            error_kind: ErrorKind::None,
-            duration: Duration::from_millis(1),
-            extraction_duration: None,
-            subprocess_overhead: None,
-            metrics: zero_metrics(),
-            quality: None,
-            iterations: (0..ITERATIONS)
-                .map(|index| IterationResult {
-                    // mirror that here so the fixture matches real artifacts.
-                    iteration: index + 1,
-                    duration: Duration::from_millis(1),
-                    extraction_duration: None,
-                    metrics: zero_metrics(),
-                })
-                .collect(),
-            statistics: None,
-            cold_start_duration: None,
-            file_extension: (*extension).to_string(),
-            framework_capabilities: FrameworkCapabilities::default(),
-            pdf_metadata: None,
-            ocr_status: if cohort.expects_ocr() {
-                OcrStatus::Used
-            } else {
-                OcrStatus::NotUsed
-            },
-            extracted_text: None,
-            system_load: None,
+        .zip(contract.fixtures.iter())
+        .filter(|((_, extension), _)| supports_extension(&entry.framework, extension))
+        .map(|((stem, extension), fixture)| {
+            let descriptor: serde_json::Value = serde_json::from_str(
+                &std::fs::read_to_string(fixtures_root.join(fixture)).expect("read fixture descriptor"),
+            )
+            .expect("parse fixture descriptor");
+            let has_quality_ground_truth = descriptor["ground_truth"]["text_file"].is_string()
+                || descriptor["ground_truth"]["markdown_file"].is_string();
+            let has_structural_ground_truth = descriptor["ground_truth"]["markdown_file"].is_string();
+            BenchmarkResult {
+                framework: runtime_framework_name(entry),
+                output_format: entry.output_format,
+                file_path: PathBuf::from(format!("/workspace/test_documents/{stem}.{extension}")),
+                file_size: 1,
+                success: true,
+                error_message: None,
+                error_kind: ErrorKind::None,
+                duration: Duration::from_millis(1),
+                extraction_duration: None,
+                subprocess_overhead: None,
+                metrics: zero_metrics(),
+                quality: has_quality_ground_truth.then(|| QualityMetrics {
+                    f1_score_text: 0.9,
+                    f1_score_numeric: 0.8,
+                    f1_score_layout: (entry.output_format == OutputFormat::Markdown && has_structural_ground_truth)
+                        .then_some(0.7),
+                    quality_score: 0.85,
+                    missing_tokens: vec![],
+                    extra_tokens: vec![],
+                    correct: false,
+                }),
+                iterations: (0..ITERATIONS)
+                    .map(|index| IterationResult {
+                        // mirror that here so the fixture matches real artifacts.
+                        iteration: index + 1,
+                        duration: Duration::from_millis(1),
+                        extraction_duration: None,
+                        metrics: zero_metrics(),
+                    })
+                    .collect(),
+                statistics: None,
+                cold_start_duration: None,
+                file_extension: (*extension).to_string(),
+                framework_capabilities: FrameworkCapabilities::default(),
+                pdf_metadata: None,
+                ocr_status: if cohort.expects_ocr() {
+                    OcrStatus::Used
+                } else {
+                    OcrStatus::NotUsed
+                },
+                extracted_text: None,
+                system_load: None,
+            }
         })
         .collect()
 }
@@ -309,7 +330,7 @@ fn artifact_scenario(cohort: Cohort) -> ArtifactScenario {
         let run_dir = artifacts_dir.join(format!("{}-{RUN_ID}", entry.artifact)).join("run");
         let provenance = build_provenance(entry, &contract, &tree.manifest_blake3, &tree.fixture_provenance);
         write_run_provenance(&provenance, &run_dir.join("provenance.json")).expect("write provenance");
-        let results = build_results(entry, &contract, cohort);
+        let results = build_results(entry, &contract, cohort, &tree.fixtures_root);
         write_json(&results, &run_dir.join("results.json")).expect("write results");
     }
 
@@ -433,6 +454,85 @@ fn accepts_exact_raw_contract_for_every_format_cohort() {
     }
 }
 
+#[test]
+fn rejects_every_invalid_raw_quality_metric_with_path_and_index_context() {
+    for (field, value) in [
+        ("f1_score_text", serde_json::json!(-0.01)),
+        ("f1_score_numeric", serde_json::json!(1.01)),
+        ("f1_score_layout", serde_json::json!(1.01)),
+        ("quality_score", serde_json::json!(2.0)),
+    ] {
+        let scenario = artifact_scenario(Cohort::Native);
+        let path = results_path(&scenario, 0);
+        tamper_json(&path, |results| {
+            results[0]["quality"][field] = value;
+        });
+
+        let error = validate(&scenario.args).expect_err("invalid raw quality must fail");
+        let message = error.to_string();
+        let context = format!("{}: result 0: Benchmark error: Invalid result state", path.display());
+        assert!(
+            message.contains(&context) && message.contains(field),
+            "expected path/index context and field {field:?}, got: {message}"
+        );
+    }
+}
+
+#[test]
+fn rejects_missing_quality_only_when_the_fixture_has_quality_ground_truth() {
+    let scenario = artifact_scenario(Cohort::Native);
+    let path = results_path(&scenario, 0);
+    tamper_json(&path, |results| {
+        results[0]["quality"] = serde_json::Value::Null;
+    });
+
+    assert_err_contains(
+        validate(&scenario.args),
+        &format!("{}: result 0 quality presence mismatch", path.display()),
+    );
+}
+
+#[test]
+fn rejects_missing_markdown_sf1_only_when_the_fixture_has_structural_ground_truth() {
+    let scenario = artifact_scenario(Cohort::Native);
+    let path = results_path(&scenario, 0);
+    let value: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let result_index = value
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|result| result["quality"]["f1_score_layout"].is_number())
+        .expect("native markdown artifact has structural ground truth");
+    tamper_json(&path, |results| {
+        results[result_index]["quality"]["f1_score_layout"] = serde_json::Value::Null;
+    });
+
+    assert_err_contains(
+        validate(&scenario.args),
+        &format!("{}: result {result_index} SF1 presence mismatch", path.display()),
+    );
+}
+
+#[test]
+fn release_validation_rejects_plaintext_sf1_despite_generic_writer_compatibility() {
+    let scenario = artifact_scenario(Cohort::Native);
+    let matrix_index = scenario
+        .contract
+        .matrix
+        .iter()
+        .position(|entry| !entry.optional && entry.output_format == OutputFormat::Plaintext)
+        .expect("native contract has required plaintext entry");
+    let path = results_path(&scenario, matrix_index);
+    tamper_json(&path, |results| {
+        results[0]["quality"]["f1_score_layout"] = serde_json::json!(0.7);
+    });
+
+    assert_err_contains(
+        validate(&scenario.args),
+        &format!("{}: result 0 SF1 presence mismatch", path.display()),
+    );
+}
+
 /// Index of a batch-mode xberg cell in the native matrix — the case that carries the runner's
 /// `-batch` framework-name suffix.
 fn batch_xberg_index(contract: &CohortContract) -> usize {
@@ -491,7 +591,7 @@ fn should_reject_optional_raw_failure_without_diagnostic_when_present() {
         value[0]["success"] = serde_json::Value::Bool(false);
         value[0]["error_kind"] = serde_json::Value::String("timeout".to_string());
     });
-    assert_err_contains(validate(&scenario.args), "failed");
+    assert_err_contains(validate(&scenario.args), "success=false but error_message is None");
 }
 
 #[test]
@@ -743,7 +843,7 @@ fn build_aggregate_with(
         .iter()
         .filter(|entry| include_entry(entry))
         .flat_map(|entry| {
-            let mut entry_results = build_results(entry, contract, cohort);
+            let mut entry_results = build_results(entry, contract, cohort, &repo_path("fixtures"));
             let framework = aggregate_framework_name(entry);
             for result in &mut entry_results {
                 result.framework.clone_from(&framework);
@@ -767,6 +867,13 @@ fn write_aggregate(aggregate: &NewConsolidatedResults) -> (TempDir, PathBuf) {
     let root = tempfile::tempdir().expect("tempdir");
     let path = root.path().join("aggregated.json");
     std::fs::write(&path, serde_json::to_string_pretty(aggregate).unwrap()).unwrap();
+    (root, path)
+}
+
+fn write_json_value(value: &serde_json::Value) -> (TempDir, PathBuf) {
+    let root = tempfile::tempdir().expect("tempdir");
+    let path = root.path().join("aggregated.json");
+    std::fs::write(&path, serde_json::to_string_pretty(value).unwrap()).unwrap();
     (root, path)
 }
 
@@ -813,6 +920,49 @@ fn accepts_exact_ocr_aggregate_contract() {
             present * contract.fixtures.len()
         )
     );
+}
+
+#[test]
+fn rejects_aggregate_row_when_nested_quality_is_removed_for_a_ground_truth_fixture() {
+    let contract = Cohort::Native.contract();
+    let aggregate = build_aggregate(&contract, Cohort::Native);
+    let mut value = serde_json::to_value(&aggregate).unwrap();
+    let row = value["per_fixture_results"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|row| row["success"] == true && row["quality"].is_object())
+        .expect("aggregate contains a successful quality row");
+    let fixture_id = row["fixture_id"].as_str().unwrap().to_string();
+    row["quality"] = serde_json::Value::Null;
+    let (_root, path) = write_json_value(&value);
+
+    assert_err_contains(
+        validate(&aggregate_args(Cohort::Native, path)),
+        &format!("fixture row {fixture_id} quality presence mismatch"),
+    );
+}
+
+#[test]
+fn rejects_aggregate_row_when_tf1_or_sf1_scalar_projection_is_removed() {
+    for field in ["f1_text", "f1_layout"] {
+        let contract = Cohort::Native.contract();
+        let aggregate = build_aggregate(&contract, Cohort::Native);
+        let mut value = serde_json::to_value(&aggregate).unwrap();
+        let row = value["per_fixture_results"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|row| row["success"] == true && row[field].is_number())
+            .unwrap_or_else(|| panic!("aggregate contains numeric {field}"));
+        row[field] = serde_json::Value::Null;
+        let (_root, path) = write_json_value(&value);
+
+        assert_err_contains(
+            validate(&aggregate_args(Cohort::Native, path)),
+            "fixture-row quality projection mismatch",
+        );
+    }
 }
 
 #[test]

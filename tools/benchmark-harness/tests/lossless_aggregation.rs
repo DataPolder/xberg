@@ -283,6 +283,11 @@ fn consolidate_pipeline_preserves_every_per_fixture_field_for_a_successful_resul
     assert_eq!(row.error_message, None);
 
     let quality = row.quality.as_ref().expect("quality present");
+    assert_eq!(row.f1_text, Some(0.92));
+    assert_eq!(row.f1_layout, Some(0.78));
+    assert_eq!(row.f1_numeric, Some(0.85));
+    assert_eq!(quality.f1_score_text, 0.92);
+    assert_eq!(quality.f1_score_layout, Some(0.78));
     assert_eq!(quality.missing_tokens, vec![("invoice".to_string(), 2)]);
     assert_eq!(quality.extra_tokens, vec![("garble".to_string(), 1)]);
 

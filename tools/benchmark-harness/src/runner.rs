@@ -2061,6 +2061,57 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn standard_single_and_batch_runners_populate_numeric_tf1_and_sf1() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("document.pdf"), b"pdf").unwrap();
+        std::fs::write(temp.path().join("ground_truth.txt"), "ok").unwrap();
+        std::fs::write(temp.path().join("ground_truth.md"), "ok").unwrap();
+        let fixture_path = temp.path().join("fixture.json");
+        std::fs::write(
+            &fixture_path,
+            serde_json::json!({
+                "document": "document.pdf",
+                "file_type": "pdf",
+                "file_size": 3,
+                "ground_truth": {
+                    "text_file": "ground_truth.txt",
+                    "markdown_file": "ground_truth.md",
+                    "source": "manual"
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        for benchmark_mode in [BenchmarkMode::SingleFile, BenchmarkMode::Batch] {
+            let mut registry = AdapterRegistry::new();
+            registry
+                .register(Arc::new(RecordingBatchAdapter {
+                    batches: Arc::new(std::sync::Mutex::new(Vec::new())),
+                }))
+                .unwrap();
+            let config = BenchmarkConfig {
+                benchmark_mode,
+                measure_quality: true,
+                warmup_iterations: 0,
+                benchmark_iterations: 1,
+                ..Default::default()
+            };
+            let mut runner = BenchmarkRunner::new(config, registry);
+            runner.load_fixtures(&fixture_path).unwrap();
+
+            let results = runner.run(&["recording".to_string()]).await.unwrap();
+            let quality = results[0]
+                .quality
+                .as_ref()
+                .expect("quality populated by standard runner");
+            assert_eq!(quality.f1_score_text, 1.0);
+            assert_eq!(quality.f1_score_numeric, 1.0);
+            assert_eq!(quality.f1_score_layout, Some(1.0));
+        }
+    }
+
+    #[tokio::test]
     async fn test_run_with_no_frameworks() {
         let config = BenchmarkConfig::default();
         let registry = AdapterRegistry::new();

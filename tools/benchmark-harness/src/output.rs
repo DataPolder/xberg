@@ -52,6 +52,31 @@ pub fn validate_result(result: &BenchmarkResult) -> Result<()> {
         )));
     }
 
+    if let Some(quality) = &result.quality {
+        for (name, value) in [
+            ("f1_score_text", quality.f1_score_text),
+            ("f1_score_numeric", quality.f1_score_numeric),
+            ("quality_score", quality.quality_score),
+        ] {
+            if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+                return Err(Error::Benchmark(format!(
+                    "Invalid result state for {}/{}: {name} must be a finite value in [0, 1], got {value}",
+                    result.framework,
+                    result.file_path.display()
+                )));
+            }
+        }
+        if let Some(value) = quality.f1_score_layout
+            && (!value.is_finite() || !(0.0..=1.0).contains(&value))
+        {
+            return Err(Error::Benchmark(format!(
+                "Invalid result state for {}/{}: f1_score_layout must be a finite value in [0, 1], got {value}",
+                result.framework,
+                result.file_path.display()
+            )));
+        }
+    }
+
     Ok(())
 }
 
@@ -480,7 +505,15 @@ mod tests {
                 p95_memory_bytes: 9_500_000,
                 p99_memory_bytes: 9_900_000,
             },
-            quality: None,
+            quality: Some(QualityMetrics {
+                f1_score_text: 0.91,
+                f1_score_numeric: 0.83,
+                f1_score_layout: Some(0.74),
+                quality_score: 0.85,
+                missing_tokens: vec![],
+                extra_tokens: vec![],
+                correct: false,
+            }),
             iterations: vec![],
             statistics: None,
             cold_start_duration: None,
@@ -501,6 +534,74 @@ mod tests {
         let parsed: Vec<BenchmarkResult> = serde_json::from_str(&contents).unwrap();
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].framework, "test-framework");
+        let quality = parsed[0].quality.as_ref().expect("quality metrics round-trip");
+        assert_eq!(quality.f1_score_text, 0.91);
+        assert_eq!(quality.f1_score_layout, Some(0.74));
+
+        let raw: serde_json::Value = serde_json::from_str(&contents).unwrap();
+        assert_eq!(raw[0]["quality"]["f1_score_text"], 0.91);
+        assert_eq!(raw[0]["quality"]["f1_score_layout"], 0.74);
+    }
+
+    #[test]
+    fn write_json_rejects_every_invalid_numeric_quality_contract_value() {
+        let temp_dir = TempDir::new().unwrap();
+        for (field, value) in [
+            ("f1_score_text", f64::NAN),
+            ("f1_score_numeric", -0.01),
+            ("f1_score_layout", 1.01),
+            ("quality_score", f64::INFINITY),
+        ] {
+            let output_path = temp_dir.path().join(format!("{field}.json"));
+            let mut result = create_benchmark_result("framework1", true, 100, Some(80), 1_000_000.0, 10_000_000);
+            let mut quality = QualityMetrics {
+                f1_score_text: 0.9,
+                f1_score_numeric: 0.8,
+                f1_score_layout: Some(0.7),
+                quality_score: 0.85,
+                missing_tokens: vec![],
+                extra_tokens: vec![],
+                correct: false,
+            };
+            match field {
+                "f1_score_text" => quality.f1_score_text = value,
+                "f1_score_numeric" => quality.f1_score_numeric = value,
+                "f1_score_layout" => quality.f1_score_layout = Some(value),
+                "quality_score" => quality.quality_score = value,
+                _ => unreachable!(),
+            }
+            result.quality = Some(quality);
+
+            let error = write_json(&[result], &output_path).unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains(&format!("{field} must be a finite value in [0, 1]")),
+                "unexpected validation error for {field}: {error}"
+            );
+            assert!(!output_path.exists());
+        }
+    }
+
+    #[test]
+    fn write_json_preserves_historical_plaintext_sf1_without_schema_context() {
+        let temp_dir = TempDir::new().unwrap();
+        let output_path = temp_dir.path().join("results.json");
+        let mut result = create_benchmark_result("framework1", true, 100, Some(80), 1_000_000.0, 10_000_000);
+        result.output_format = OutputFormat::Plaintext;
+        result.quality = Some(QualityMetrics {
+            f1_score_text: 0.9,
+            f1_score_numeric: 0.8,
+            f1_score_layout: Some(0.7),
+            quality_score: 0.85,
+            missing_tokens: vec![],
+            extra_tokens: vec![],
+            correct: false,
+        });
+
+        write_json(&[result], &output_path).expect("generic writer remains backward-compatible");
+        let value: serde_json::Value = serde_json::from_str(&fs::read_to_string(output_path).unwrap()).unwrap();
+        assert_eq!(value[0]["quality"]["f1_score_layout"], 0.7);
     }
 
     #[test]

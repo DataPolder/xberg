@@ -370,6 +370,89 @@ fn test_quality_percentiles_all_three() {
 }
 
 #[test]
+fn xberg_pdf_baseline_and_layout_keep_exact_tf1_sf1_by_format_and_in_rankings() {
+    let baseline = make_benchmark_result(
+        "xberg-markdown-baseline",
+        OutputFormat::Markdown,
+        "shared.pdf",
+        false,
+        true,
+        Some(QualityMetrics {
+            f1_score_text: 0.81,
+            f1_score_numeric: 0.72,
+            f1_score_layout: Some(0.63),
+            quality_score: 0.73,
+            missing_tokens: vec![],
+            extra_tokens: vec![],
+            correct: false,
+        }),
+    );
+    let layout = make_benchmark_result(
+        "xberg-markdown-layout",
+        OutputFormat::Markdown,
+        "shared.pdf",
+        false,
+        true,
+        Some(QualityMetrics {
+            f1_score_text: 0.91,
+            f1_score_numeric: 0.82,
+            f1_score_layout: Some(0.88),
+            quality_score: 0.88,
+            missing_tokens: vec![],
+            extra_tokens: vec![],
+            correct: false,
+        }),
+    );
+
+    let aggregated = aggregate_new_format(&[baseline, layout]);
+    let baseline_quality = aggregated.by_framework_mode["xberg-markdown-baseline:single"].by_file_type["pdf"]
+        .no_ocr
+        .as_ref()
+        .and_then(|performance| performance.quality.as_ref())
+        .expect("baseline PDF quality");
+    let layout_quality = aggregated.by_framework_mode["xberg-markdown-layout:single"].by_file_type["pdf"]
+        .no_ocr
+        .as_ref()
+        .and_then(|performance| performance.quality.as_ref())
+        .expect("layout PDF quality");
+    assert_eq!(baseline_quality.f1_text_p50, 0.81);
+    assert_eq!(baseline_quality.f1_layout_p50, Some(0.63));
+    assert_eq!(layout_quality.f1_text_p50, 0.91);
+    assert_eq!(layout_quality.f1_layout_p50, Some(0.88));
+
+    let baseline_row = aggregated
+        .per_fixture_results
+        .iter()
+        .find(|row| row.framework == "xberg-markdown-baseline")
+        .expect("baseline fixture row");
+    let layout_row = aggregated
+        .per_fixture_results
+        .iter()
+        .find(|row| row.framework == "xberg-markdown-layout")
+        .expect("layout fixture row");
+    assert_eq!((baseline_row.f1_text, baseline_row.f1_layout), (Some(0.81), Some(0.63)));
+    assert_eq!((layout_row.f1_text, layout_row.f1_layout), (Some(0.91), Some(0.88)));
+
+    let tf1_ranking = &aggregated.comparison.pdf_tf1_ranking_markdown;
+    assert_eq!(tf1_ranking.len(), 2);
+    assert_eq!(tf1_ranking[0].framework_mode, "xberg-markdown-layout:single");
+    assert_eq!(tf1_ranking[0].value, 0.91);
+    assert_eq!(tf1_ranking[1].framework_mode, "xberg-markdown-baseline:single");
+    assert_eq!(tf1_ranking[1].value, 0.81);
+
+    let sf1_ranking = &aggregated.comparison.pdf_sf1_ranking_markdown;
+    assert_eq!(sf1_ranking.len(), 2);
+    assert_eq!(sf1_ranking[0].framework_mode, "xberg-markdown-layout:single");
+    assert_eq!(sf1_ranking[0].value, 0.88);
+    assert_eq!(sf1_ranking[1].framework_mode, "xberg-markdown-baseline:single");
+    assert_eq!(sf1_ranking[1].value, 0.63);
+
+    let json = serde_json::to_value(&aggregated).unwrap();
+    assert!(json["per_fixture_results"][0]["f1_text"].is_number());
+    assert!(json["per_fixture_results"][0]["f1_layout"].is_number());
+}
+
+#[test]
 fn test_ocr_flag_in_per_fixture() {
     let results = vec![
         make_benchmark_result(

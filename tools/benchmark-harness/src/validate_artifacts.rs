@@ -24,7 +24,7 @@ use crate::aggregate::{
 use crate::bench_matrix::{Cohort, CohortContract, ExecutionMode, MatrixEntry};
 use crate::fixture::Fixture;
 use crate::provenance::RunProvenance;
-use crate::types::{BenchmarkResult, ErrorKind, OcrStatus, OutputFormat, PerformanceMetrics};
+use crate::types::{BenchmarkResult, ErrorKind, OcrStatus, OutputFormat, PerformanceMetrics, QualityMetrics};
 use crate::{Error, Result};
 
 /// Provenance schema version every `provenance.json` must record.
@@ -38,8 +38,8 @@ const EXPECTED_PROVENANCE_SCHEMA_VERSION: u32 = 2;
 pub struct ValidateArtifactsArgs {
     /// Which cohort's release contract to validate against.
     pub cohort: Cohort,
-    /// Path to a consolidated `aggregated.json`. When set, aggregate mode runs instead of
-    /// artifact mode and every other field below is ignored.
+    /// Path to a consolidated `aggregated.json`. When set, aggregate mode runs. `fixtures_root`
+    /// may override the checked-in fixture directory used for quality-contract metadata.
     pub aggregated_file: Option<PathBuf>,
     /// Directory containing one subdirectory per expected artifact (artifact mode only).
     pub artifacts_dir: Option<PathBuf>,
@@ -61,7 +61,18 @@ pub struct ValidateArtifactsArgs {
 pub fn validate(args: &ValidateArtifactsArgs) -> Result<String> {
     let contract = args.cohort.contract();
     match &args.aggregated_file {
-        Some(aggregated_file) => validate_aggregate(aggregated_file, args.cohort, &contract, args.iterations),
+        Some(aggregated_file) => {
+            let default_fixtures_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures");
+            let fixtures_root = args.fixtures_root.as_deref().unwrap_or(&default_fixtures_root);
+            let quality_expectations = fixture_quality_expectations(fixtures_root, &contract)?;
+            validate_aggregate(
+                aggregated_file,
+                args.cohort,
+                &contract,
+                args.iterations,
+                &quality_expectations,
+            )
+        }
         None => {
             let (artifacts_dir, cohort_manifest, fixtures_root, source_sha, run_id) = require_artifact_args(args)?;
             validate_raw_artifacts(
@@ -131,6 +142,36 @@ struct ExpectedFixture {
     document_blake3: String,
     document_bytes: u64,
     document_name: String,
+    has_quality_ground_truth: bool,
+    has_structural_ground_truth: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct FixtureQualityExpectation {
+    has_quality_ground_truth: bool,
+    has_structural_ground_truth: bool,
+}
+
+fn fixture_quality_expectations(
+    fixtures_root: &Path,
+    contract: &CohortContract,
+) -> Result<Vec<FixtureQualityExpectation>> {
+    contract
+        .fixtures
+        .iter()
+        .map(|fixture| {
+            let descriptor: Fixture = load_typed_json(&fixtures_root.join(fixture))?;
+            Ok(FixtureQualityExpectation {
+                has_quality_ground_truth: descriptor.ground_truth.as_ref().is_some_and(|ground_truth| {
+                    ground_truth.text_file.is_some() || ground_truth.markdown_file.is_some()
+                }),
+                has_structural_ground_truth: descriptor
+                    .ground_truth
+                    .as_ref()
+                    .is_some_and(|ground_truth| ground_truth.markdown_file.is_some()),
+            })
+        })
+        .collect()
 }
 
 /// Compute a BLAKE3 digest identical to the `b3sum` CLI output the Python script shelled out to.
@@ -240,12 +281,22 @@ fn expected_fixtures(fixtures_root: &Path, contract: &CohortContract) -> Result<
             .to_str()
             .map(posix_basename)
             .ok_or_else(|| contract_error(format!("{}: document path is not UTF-8", descriptor_path.display())))?;
+        let has_quality_ground_truth = descriptor
+            .ground_truth
+            .as_ref()
+            .is_some_and(|ground_truth| ground_truth.text_file.is_some() || ground_truth.markdown_file.is_some());
+        let has_structural_ground_truth = descriptor
+            .ground_truth
+            .as_ref()
+            .is_some_and(|ground_truth| ground_truth.markdown_file.is_some());
         expected.push(ExpectedFixture {
             fixture: (*fixture).to_string(),
             fixture_blake3: blake3_file(&descriptor_path)?,
             document_blake3: blake3_file(&document_path)?,
             document_bytes: std::fs::metadata(&document_path).map_err(Error::Io)?.len(),
             document_name,
+            has_quality_ground_truth,
+            has_structural_ground_truth,
         });
     }
 
@@ -439,13 +490,13 @@ fn validate_results(
     results: &[BenchmarkResult],
     path: &Path,
     entry: &MatrixEntry,
-    document_names: &[String],
+    expected_fixtures: &[&ExpectedFixture],
     iterations: usize,
     cohort: Cohort,
     allow_failures: bool,
 ) -> Result<()> {
     require(
-        results.len() == document_names.len(),
+        results.len() == expected_fixtures.len(),
         format!("{}: result fixture count mismatch", path.display()),
     )?;
 
@@ -454,7 +505,10 @@ fn validate_results(
         .map(|result| posix_basename(&result.file_path.to_string_lossy()))
         .collect();
     require(
-        actual_names == document_names,
+        actual_names
+            .iter()
+            .map(String::as_str)
+            .eq(expected_fixtures.iter().map(|fixture| fixture.document_name.as_str())),
         format!("{}: result fixture order/content mismatch", path.display()),
     )?;
     let unique_names: HashSet<&String> = actual_names.iter().collect();
@@ -469,6 +523,9 @@ fn validate_results(
         OcrStatus::NotUsed
     };
     for (index, result) in results.iter().enumerate() {
+        crate::output::validate_result(result)
+            .map_err(|error| contract_error(format!("{}: result {index}: {error}", path.display())))?;
+        let expected_fixture = expected_fixtures[index];
         require(
             extract_framework_and_mode(&result.framework).0 == entry.framework,
             format!("{}: result {index} framework mismatch", path.display()),
@@ -485,6 +542,14 @@ fn validate_results(
             require(
                 result.error_message.is_none(),
                 format!("{}: result {index} has an error message", path.display()),
+            )?;
+            validate_release_quality_contract(
+                result.quality.as_ref(),
+                entry.output_format,
+                expected_fixture.has_quality_ground_truth,
+                expected_fixture.has_structural_ground_truth,
+                path,
+                &format!("result {index}"),
             )?;
         } else {
             require(allow_failures, format!("{}: result {index} failed", path.display()))?;
@@ -526,6 +591,28 @@ fn validate_results(
         require(
             sequential,
             format!("{}: result {index} iteration order/duplicates mismatch", path.display()),
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_release_quality_contract(
+    quality: Option<&QualityMetrics>,
+    output_format: OutputFormat,
+    has_quality_ground_truth: bool,
+    has_structural_ground_truth: bool,
+    path: &Path,
+    context: &str,
+) -> Result<()> {
+    require(
+        quality.is_some() == has_quality_ground_truth,
+        format!("{}: {context} quality presence mismatch", path.display()),
+    )?;
+    if let Some(quality) = quality {
+        let expected_sf1 = output_format == OutputFormat::Markdown && has_structural_ground_truth;
+        require(
+            quality.f1_score_layout.is_some() == expected_sf1,
+            format!("{}: {context} SF1 presence mismatch", path.display()),
         )?;
     }
     Ok(())
@@ -599,10 +686,8 @@ fn validate_raw_artifacts(
         let results_path = only_file(artifact_dir, "results.json")?;
         let provenance_path = only_file(artifact_dir, "provenance.json")?;
         let supported_indexes = supported_fixture_indexes(entry, contract);
-        let documents: Vec<String> = supported_indexes
-            .iter()
-            .map(|index| fixtures[*index].document_name.clone())
-            .collect();
+        let selected_fixtures: Vec<&ExpectedFixture> =
+            supported_indexes.iter().map(|index| &fixtures[*index]).collect();
 
         let provenance: RunProvenance = load_typed_json(&provenance_path)?;
         validate_provenance(
@@ -622,7 +707,7 @@ fn validate_raw_artifacts(
             &results,
             &results_path,
             entry,
-            &documents,
+            &selected_fixtures,
             iterations,
             cohort,
             entry.optional,
@@ -905,6 +990,40 @@ fn performance_metrics_from_row(row: &PerFixtureRow, path: &Path) -> Result<Perf
 }
 
 fn validate_quality_projection(row: &PerFixtureRow, path: &Path) -> Result<()> {
+    if let Some(quality) = &row.quality {
+        // This strict format rule is intentionally scoped to the current aggregated release
+        // schema. Generic `results.json` loading/writing remains backward-compatible with older
+        // captures that populated layout F1 for plaintext rows without a schema version. ~keep
+        require(
+            row.output_format != OutputFormat::Plaintext || quality.f1_score_layout.is_none(),
+            format!(
+                "{}: plaintext fixture-row quality must not contain f1_score_layout",
+                path.display()
+            ),
+        )?;
+        for (name, value) in [
+            ("f1_score_text", quality.f1_score_text),
+            ("f1_score_numeric", quality.f1_score_numeric),
+            ("quality_score", quality.quality_score),
+        ] {
+            require(
+                value.is_finite() && (0.0..=1.0).contains(&value),
+                format!(
+                    "{}: fixture-row {name} must be a finite value in [0, 1]",
+                    path.display()
+                ),
+            )?;
+        }
+        if let Some(value) = quality.f1_score_layout {
+            require(
+                value.is_finite() && (0.0..=1.0).contains(&value),
+                format!(
+                    "{}: fixture-row f1_score_layout must be a finite value in [0, 1]",
+                    path.display()
+                ),
+            )?;
+        }
+    }
     let quality_projection = row.quality.as_ref().map(|quality| {
         (
             Some(quality.f1_score_text),
@@ -1027,7 +1146,13 @@ fn validate_derived_aggregate_fields(
     )
 }
 
-fn validate_aggregate(path: &Path, cohort: Cohort, contract: &CohortContract, iterations: usize) -> Result<String> {
+fn validate_aggregate(
+    path: &Path,
+    cohort: Cohort,
+    contract: &CohortContract,
+    iterations: usize,
+    quality_expectations: &[FixtureQualityExpectation],
+) -> Result<String> {
     let aggregate: NewConsolidatedResults = load_typed_json(path)?;
     require(
         aggregate.schema_version == SCHEMA_VERSION,
@@ -1180,10 +1305,24 @@ fn validate_aggregate(path: &Path, cohort: Cohort, contract: &CohortContract, it
         let entry = allowed_entries
             .get(&key)
             .ok_or_else(|| contract_error(format!("{}: row has no matching aggregate key", path.display())))?;
+        let fixture_index = contract
+            .document_stems
+            .iter()
+            .position(|stem| *stem == row.fixture_id)
+            .ok_or_else(|| contract_error(format!("{}: row has unknown fixture identity", path.display())))?;
+        let quality_expectation = quality_expectations[fixture_index];
         if row.success {
             require(
                 row.error_kind.is_none() && row.error_message.is_none(),
                 format!("{}: successful fixture row contains an error", path.display()),
+            )?;
+            validate_release_quality_contract(
+                row.quality.as_ref(),
+                row.output_format,
+                quality_expectation.has_quality_ground_truth,
+                quality_expectation.has_structural_ground_truth,
+                path,
+                &format!("fixture row {}", row.fixture_id),
             )?;
         } else {
             require(
