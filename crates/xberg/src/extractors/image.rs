@@ -504,21 +504,18 @@ fn finish_cached_layout_document(
 }
 
 #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
-fn try_assemble_cached_layout_ocr(
+fn try_assemble_cached_layout_tables(
     whole_image_doc: &InternalDocument,
     detections: &[crate::layout::LayoutDetection],
     recognized_tables: &[crate::RecognizedTable],
     image_width: u32,
     image_height: u32,
 ) -> Option<InternalDocument> {
-    let pages = whole_image_doc.prebuilt_pages.as_ref()?;
-    if pages.len() != 1 || pages[0].page_number != 1 {
+    if recognized_tables.is_empty() {
         return None;
     }
-    if recognized_tables.is_empty()
-        && whole_image_layout_mapping_retention(whole_image_doc, detections, image_width, image_height)?
-            < MIN_LAYOUT_OCR_ALPHANUMERIC_TOKEN_RETENTION
-    {
+    let pages = whole_image_doc.prebuilt_pages.as_ref()?;
+    if pages.len() != 1 || pages[0].page_number != 1 {
         return None;
     }
     let source_elements = whole_image_doc.prebuilt_ocr_elements.as_ref()?;
@@ -958,8 +955,8 @@ fn should_use_layout_ocr(config: &ExtractionConfig) -> bool {
 /// Supports: PNG, JPEG, WebP, BMP, TIFF, GIF.
 /// Extracts dimensions, format, and EXIF metadata.
 /// Optionally runs OCR when configured.
-/// When layout detection is also enabled, maps positioned whole-image OCR
-/// elements into detected layout classes when their coordinates are usable.
+/// When layout detection is also enabled, uses per-region OCR with
+/// markdown formatting based on detected layout classes.
 pub struct ImageExtractor;
 
 impl ImageExtractor {
@@ -1176,11 +1173,11 @@ impl ImageExtractor {
         Ok(doc)
     }
 
-    /// Extract text from image using whole-image OCR plus layout detection.
+    /// Extract text from image using layout detection + per-region OCR.
     ///
-    /// Maps cached positioned OCR elements into detected regions (headings,
-    /// text, code, formulas, etc.). Falls back to per-region OCR when cached
-    /// coordinates cannot be used safely.
+    /// Runs layout detection to identify document regions (headings, text,
+    /// code, formulas, etc.), then OCRs each region individually and
+    /// assembles the results into structured markdown.
     #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
     async fn extract_with_layout_ocr(
         &self,
@@ -1217,7 +1214,7 @@ impl ImageExtractor {
 
         if let Ok(whole_image_doc) = &whole_image_result
             && source_image_is_proven_single_frame(content, mime_type)
-            && let Some(structured) = try_assemble_cached_layout_ocr(
+            && let Some(structured) = try_assemble_cached_layout_tables(
                 whole_image_doc,
                 &detections,
                 &recognized_tables,
@@ -1227,7 +1224,7 @@ impl ImageExtractor {
         {
             tracing::debug!(
                 tables = structured.tables.len(),
-                "Assembled image layout from cached whole-image OCR"
+                "Assembled image OCR with recognized layout tables"
             );
             return Ok(structured);
         }
@@ -1579,10 +1576,6 @@ mod tests {
         });
         let original = whole.clone();
 
-        assert!(
-            try_assemble_cached_layout_ocr(&whole, &detections, &[], 200, 100).is_none(),
-            "incomplete layout coverage must keep the canonical fallback"
-        );
         let retained = try_retain_canonical_whole_image_ocr(&whole, &detections, 200, 100, true)
             .expect("50% layout coverage must retain canonical whole-image OCR");
 
@@ -1604,38 +1597,16 @@ mod tests {
 
     #[cfg(all(feature = "layout-detection", feature = "ocr"))]
     #[test]
-    fn should_assemble_cached_ocr_without_text_loss_or_duplication() {
-        let detections = vec![
-            crate::layout::LayoutDetection::new(
-                crate::layout::LayoutClass::Title,
-                0.96,
-                crate::layout::BBox::new(0.0, 0.0, 200.0, 50.0),
-            ),
-            crate::layout::LayoutDetection::new(
-                crate::layout::LayoutClass::Text,
-                0.96,
-                crate::layout::BBox::new(0.0, 50.0, 200.0, 100.0),
-            ),
-        ];
-        let elements = vec![
-            positioned_word("Invoice", 10, 10),
-            positioned_word("1042", 60, 10),
-            positioned_word("Total", 10, 60),
-            positioned_word("1250", 60, 60),
-            positioned_word("USD", 110, 60),
-        ];
-        let whole = whole_image_doc_with_elements("Invoice 1042\nTotal 1250 USD", elements, 200, 100);
+    fn should_use_region_ocr_when_layout_coverage_is_sufficient() {
+        let detections = vec![crate::layout::LayoutDetection::new(
+            crate::layout::LayoutClass::Text,
+            0.96,
+            crate::layout::BBox::new(0.0, 0.0, 200.0, 100.0),
+        )];
+        let elements = vec![positioned_word("inside", 10, 20)];
+        let whole = whole_image_doc_with_elements("inside", elements, 200, 100);
 
-        let assembled = try_assemble_cached_layout_ocr(&whole, &detections, &[], 200, 100)
-            .expect("fully mapped OCR elements must bypass per-region OCR");
-
-        assert_eq!(internal_document_text(&assembled), "Invoice 1042\nTotal 1250 USD");
-        assert_eq!(
-            assembled.prebuilt_pages.as_ref().unwrap()[0].content,
-            "Invoice 1042\nTotal 1250 USD"
-        );
-        assert_eq!(internal_document_text(&assembled).matches("Invoice").count(), 1);
-        assert_eq!(internal_document_text(&assembled).matches("Total").count(), 1);
+        assert!(try_retain_canonical_whole_image_ocr(&whole, &detections, 200, 100, true).is_none());
     }
 
     #[cfg(all(feature = "layout-detection", feature = "ocr"))]
@@ -1665,7 +1636,7 @@ mod tests {
             markdown: "| Header | Value |\n| --- | --- |\n| A | 1 |".to_string(),
         }];
 
-        let assembled = try_assemble_cached_layout_ocr(&whole, &detections, &recognized, 200, 100)
+        let assembled = try_assemble_cached_layout_tables(&whole, &detections, &recognized, 200, 100)
             .expect("successful recognition must assemble a structured image table");
         let markdown = crate::rendering::render_markdown(&assembled);
 
@@ -1686,19 +1657,20 @@ mod tests {
 
     #[cfg(all(feature = "layout-detection", feature = "ocr"))]
     #[test]
-    fn should_fall_back_when_cached_ocr_coordinates_are_unavailable() {
+    fn should_preserve_existing_fallback_when_no_table_was_recognized() {
         let detections = vec![crate::layout::LayoutDetection::new(
-            crate::layout::LayoutClass::Text,
+            crate::layout::LayoutClass::Table,
             0.98,
             crate::layout::BBox::new(0.0, 0.0, 100.0, 100.0),
         )];
-        let mut whole = whole_image_doc_with_elements("fallback", vec![positioned_word("fallback", 10, 10)], 100, 100);
-        whole
-            .metadata
-            .additional
-            .remove(crate::ocr::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY);
+        let whole = whole_image_doc_with_elements(
+            "unstructured fallback",
+            vec![positioned_word("unstructured", 10, 10)],
+            100,
+            100,
+        );
 
-        assert!(try_assemble_cached_layout_ocr(&whole, &detections, &[], 100, 100).is_none());
+        assert!(try_assemble_cached_layout_tables(&whole, &detections, &[], 100, 100).is_none());
     }
 
     #[cfg(all(feature = "layout-detection", feature = "ocr"))]
