@@ -84,6 +84,14 @@
 //! only reachable via [`WpdMetadata::raw`], alongside every other pair, so no
 //! metadata the shim captured is silently dropped.
 
+// The binary wire decoder below (WIRE_VERSION, the size-clamp consts, Reader, decode,
+// decode_event) is reached only through the FFI extractor, which is gated
+// `#[cfg(any(target_os = "linux", "macos", "windows"))]` (see lib.rs). On other targets
+// — e.g. the iOS slices the Swift artifact bundle cross-compiles — only the re-exported
+// DTO types are used, leaving the decoder unreferenced. Allow that rather than fail the
+// bundle's `-D warnings` build; on the FFI targets the decoder is used, so nothing is masked.
+#![allow(dead_code)]
+
 use crate::WpdError;
 
 /// The wire format version this decoder understands. Bump alongside the

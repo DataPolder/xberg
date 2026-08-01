@@ -18,6 +18,12 @@ import {
   type UrlExtractionConfig,
 } from "@xberg-io/xberg";
 
+// The binding's config types are deeply `readonly` (1.0.7 API tightening), but these
+// nodes build the config incrementally by assignment. Strip the top-level `readonly`
+// for the local builder; a `Writable<T>` is still assignable to the `readonly` `T` the
+// `extract` / `mapUrl` calls expect. ~keep
+type Writable<T> = { -readonly [P in keyof T]: T[P] };
+
 // Output format identifiers mirror the `OutputFormat` string enum exported by
 // `@xberg-io/xberg`. Kept as a local alias so the node compiles against the
 // binding's type without importing the runtime enum value. ~keep
@@ -84,7 +90,7 @@ function parseOcrLanguages(raw: string): string[] {
 function buildExtractionConfig(outputFormat: XbergOutputFormat, options: IDataObject): ExtractionConfig {
   const enableOcr = options.enableOcr !== false;
 
-  const config: ExtractionConfig = {
+  const config: Writable<ExtractionConfig> = {
     outputFormat,
     forceOcr: enableOcr ? options.forceOcr === true : false,
     disableOcr: !enableOcr,
@@ -332,7 +338,7 @@ async function runMapUrl(context: IExecuteFunctions): Promise<INodeExecutionData
       }
       const mapOptions = context.getNodeParameter("mapOptions", itemIndex, {}) as IDataObject;
 
-      const config: UrlExtractionConfig = {};
+      const config: Writable<UrlExtractionConfig> = {};
       if (mapOptions.mode) {
         config.mode = mapOptions.mode as NonNullable<UrlExtractionConfig["mode"]>;
       }
