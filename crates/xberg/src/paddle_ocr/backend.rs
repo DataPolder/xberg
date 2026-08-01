@@ -28,10 +28,12 @@ fn paddle_accel_builder_fn(
 
 use crate::Result;
 use crate::core::config::OcrConfig;
-use crate::ocr::conversion::{elements_to_hocr_words, text_block_to_element};
+use crate::ocr::conversion::{detailed_text_block_to_elements, elements_to_hocr_words};
 use crate::plugins::{OcrBackend, OcrBackendType, Plugin};
 use crate::table_core::{reconstruct_table, table_to_markdown};
-use crate::types::{ExtractedDocument, FormatMetadata, Metadata, OcrElement, OcrMetadata, Table};
+use crate::types::{
+    ExtractedDocument, FormatMetadata, Metadata, OcrElement, OcrElementConfig, OcrElementLevel, OcrMetadata, Table,
+};
 
 #[cfg(test)]
 use super::config::DEFAULT_RECOGNITION_BATCH_SIZE;
@@ -39,7 +41,7 @@ use super::config::{MAX_RECOGNITION_BATCH_SIZE, MIN_RECOGNITION_BATCH_SIZE, Padd
 use super::model_manager::{ModelManager, SharedModelPaths};
 use super::{is_language_supported, language_to_script_family, map_language_code};
 
-use xberg_paddle_ocr::OcrLite;
+use xberg_paddle_ocr::PaddleOcrEngine;
 
 const ORIENTATION_CONFIDENCE_METADATA_KEY: &str = "orientation_confidence";
 
@@ -49,6 +51,14 @@ struct RotationOutcome {
     processed_width: u32,
     processed_height: u32,
     orientation: Option<crate::doc_orientation::OrientationResult>,
+}
+
+struct PaddlePageOcr {
+    text: String,
+    line_elements: Vec<OcrElement>,
+    word_elements: Vec<OcrElement>,
+    processed_width: u32,
+    processed_height: u32,
 }
 
 impl RotationOutcome {
@@ -161,8 +171,8 @@ pub struct PaddleOcrBackend {
     shared_paths: Mutex<AHashMap<String, SharedModelPaths>>,
     /// Per-model OCR engines, lazily initialized. Keyed by "{tier}/{model_key}".
     /// Multiple script families may share the same engine (e.g. chinese+japanese use unified_server).
-    /// OcrLite inference methods take `&self`, enabling lock-free concurrent page OCR.
-    engine_pool: Mutex<AHashMap<String, Arc<OcrLite>>>,
+    /// Paddle inference methods take `&self`, enabling lock-free concurrent page OCR.
+    engine_pool: Mutex<AHashMap<String, Arc<PaddleOcrEngine>>>,
     /// Document orientation detector, lazily initialized.
     doc_ori_detector: once_cell::sync::OnceCell<crate::doc_orientation::DocOrientationDetector>,
     /// Hardware acceleration configuration for ORT sessions (set at construction).
@@ -245,7 +255,7 @@ impl PaddleOcrBackend {
         family: &str,
         config: &PaddleOcrConfig,
         accel: Option<&crate::core::config::acceleration::AccelerationConfig>,
-    ) -> Result<Arc<OcrLite>> {
+    ) -> Result<Arc<PaddleOcrEngine>> {
         let tier = &config.model_tier;
         let version = &config.model_version;
         let resolved = self.model_manager.resolve_rec_model_versioned(version, family, tier)?;
@@ -274,7 +284,7 @@ impl PaddleOcrBackend {
 
         tracing::info!(family, model_key = %resolved.model_key, tier, "Initializing PaddleOCR engine");
 
-        let mut ocr_lite = OcrLite::new();
+        let mut ocr_engine = PaddleOcrEngine::new();
 
         let det_model_path = Self::find_onnx_model(&shared.det_model)?;
         let cls_model_path = Self::find_onnx_model(&shared.cls_model)?;
@@ -298,7 +308,7 @@ impl PaddleOcrBackend {
             None
         };
 
-        ocr_lite
+        ocr_engine
             .init_models_with_dict_custom(
                 det_model_path.to_str().ok_or_else(|| crate::XbergError::Ocr {
                     message: "Invalid detection model path".to_string(),
@@ -326,7 +336,7 @@ impl PaddleOcrBackend {
 
         tracing::info!(family, model_key = %resolved.model_key, "PaddleOCR engine initialized successfully");
 
-        let engine = Arc::new(ocr_lite);
+        let engine = Arc::new(ocr_engine);
 
         let mut pool = self.engine_pool.lock().map_err(|e| crate::XbergError::Plugin {
             message: format!("Failed to acquire engine pool lock: {e}"),
@@ -408,7 +418,7 @@ impl PaddleOcrBackend {
         language: &str,
         effective_config: Arc<PaddleOcrConfig>,
         accel: Option<&crate::core::config::acceleration::AccelerationConfig>,
-    ) -> Result<(String, Vec<OcrElement>, u32, u32)> {
+    ) -> Result<PaddlePageOcr> {
         let family = language_to_script_family(language);
         let engine = self.get_or_init_engine_for_family(family, &effective_config, accel)?;
 
@@ -430,26 +440,33 @@ impl PaddleOcrBackend {
             plugin_name: "paddle-ocr".to_string(),
         })??;
 
-        let ocr_elements: Result<Vec<OcrElement>> = text_blocks
-            .iter()
-            .map(|block| text_block_to_element(block, 1))
-            .filter_map(|result| result.transpose())
-            .collect();
-
-        let ocr_elements = ocr_elements?;
+        let mut line_elements = Vec::with_capacity(text_blocks.len());
+        let mut word_elements = Vec::new();
+        for block in &text_blocks {
+            if let Some(group) = detailed_text_block_to_elements(block, 1)? {
+                line_elements.push(group.line);
+                word_elements.extend(group.words);
+            }
+        }
 
         let text = text_blocks
             .iter()
-            .map(|block| block.text.as_str())
+            .map(|block| block.block.text.as_str())
             .filter(|t| !t.is_empty())
             .collect::<Vec<_>>()
             .join("\n\n");
 
-        Ok((text, ocr_elements, processed_width, processed_height))
+        Ok(PaddlePageOcr {
+            text,
+            line_elements,
+            word_elements,
+            processed_width,
+            processed_height,
+        })
     }
 
     /// Perform actual OCR inference (runs in blocking context).
-    /// OcrLite::detect takes &self — no Mutex needed, enabling true parallel page OCR.
+    /// PaddleOcrEngine::detect takes `&self`; no mutex is needed for parallel page OCR.
     fn effective_rec_batch_size(config: &PaddleOcrConfig) -> u32 {
         config
             .rec_batch_num
@@ -458,9 +475,9 @@ impl PaddleOcrBackend {
 
     fn perform_ocr(
         image_bytes: &[u8],
-        ocr_engine: &Arc<OcrLite>,
+        ocr_engine: &Arc<PaddleOcrEngine>,
         config: &PaddleOcrConfig,
-    ) -> Result<(Vec<xberg_paddle_ocr::TextBlock>, u32, u32)> {
+    ) -> Result<(Vec<xberg_paddle_ocr::DetailedTextBlock>, u32, u32)> {
         let img = crate::extraction::image::load_image_for_ocr(image_bytes)
             .map_err(|e| crate::XbergError::Ocr {
                 message: e.to_string(),
@@ -480,7 +497,7 @@ impl PaddleOcrBackend {
         let rec_batch_size = Self::effective_rec_batch_size(config);
 
         let result = ocr_engine
-            .detect_with_rec_batch_size(
+            .detect_detailed_with_rec_batch_size(
                 &img,
                 padding,
                 max_side_len,
@@ -500,12 +517,29 @@ impl PaddleOcrBackend {
         let text_blocks: Vec<_> = result
             .text_blocks
             .into_iter()
-            .filter(|block| block.text_score >= drop_score && !block.text_score.is_nan())
+            .filter(|block| block.block.text_score >= drop_score && !block.block.text_score.is_nan())
             .collect();
 
         tracing::debug!(text_block_count = text_blocks.len(), "PaddleOCR detection completed");
 
         Ok((text_blocks, processed_width, processed_height))
+    }
+
+    fn select_output_elements(
+        lines: &[OcrElement],
+        words: &[OcrElement],
+        config: Option<&OcrElementConfig>,
+    ) -> Vec<OcrElement> {
+        let Some(config) = config.filter(|config| config.include_elements) else {
+            return Vec::new();
+        };
+        let mut elements = match config.min_level {
+            OcrElementLevel::Word => lines.iter().chain(words).cloned().collect::<Vec<_>>(),
+            OcrElementLevel::Line => lines.to_vec(),
+            OcrElementLevel::Block | OcrElementLevel::Page => Vec::new(),
+        };
+        elements.retain(|element| element.confidence.recognition >= config.min_confidence);
+        elements
     }
 }
 
@@ -589,7 +623,13 @@ impl OcrBackend for PaddleOcrBackend {
 
         let effective_accel = self.resolve_acceleration(config.acceleration.as_ref());
 
-        let (text, ocr_elements, processed_width, processed_height) = self
+        let PaddlePageOcr {
+            text,
+            line_elements,
+            word_elements,
+            processed_width,
+            processed_height,
+        } = self
             .do_ocr(
                 &ocr_image_bytes,
                 paddle_lang,
@@ -600,7 +640,7 @@ impl OcrBackend for PaddleOcrBackend {
         let rotation_outcome =
             rotation_outcome.unwrap_or_else(|| RotationOutcome::unrotated(processed_width, processed_height));
 
-        let text_blocks_count = ocr_elements.len();
+        let text_blocks_count = line_elements.len();
 
         let ocr_doc = {
             use crate::types::extraction::BoundingBox;
@@ -608,7 +648,7 @@ impl OcrBackend for PaddleOcrBackend {
             use crate::types::ocr_elements::OcrElementLevel;
 
             let mut doc = InternalDocument::new("pdf");
-            for elem in &ocr_elements {
+            for elem in &line_elements {
                 let (left, top, width, height) = elem.geometry.to_aabb();
                 let bbox = BoundingBox {
                     x0: left as f64,
@@ -634,7 +674,8 @@ impl OcrBackend for PaddleOcrBackend {
 
         tracing::debug!(
             text_blocks = text_blocks_count,
-            ocr_elements = ocr_elements.len(),
+            line_elements = line_elements.len(),
+            word_elements = word_elements.len(),
             internal_doc_elements = ocr_doc.elements.len(),
             "PaddleOCR InternalDocument built"
         );
@@ -644,8 +685,9 @@ impl OcrBackend for PaddleOcrBackend {
         let mut table_rows: Option<u32> = None;
         let mut table_cols: Option<u32> = None;
 
-        if effective_config.enable_table_detection && !ocr_elements.is_empty() {
-            let words = elements_to_hocr_words(&ocr_elements, 0.3);
+        if effective_config.enable_table_detection && !line_elements.is_empty() {
+            let table_elements = line_elements.iter().chain(&word_elements).cloned().collect::<Vec<_>>();
+            let words = elements_to_hocr_words(&table_elements, 0.3);
 
             if !words.is_empty() {
                 let cells = reconstruct_table(&words, 20, 0.5);
@@ -681,12 +723,12 @@ impl OcrBackend for PaddleOcrBackend {
             ..Default::default()
         };
 
-        let include_elements = config.element_config.as_ref().is_some_and(|ec| ec.include_elements);
-
-        let ocr_elements_opt = if include_elements && !ocr_elements.is_empty() {
-            Some(ocr_elements)
-        } else {
+        let output_elements =
+            Self::select_output_elements(&line_elements, &word_elements, config.element_config.as_ref());
+        let ocr_elements_opt = if output_elements.is_empty() {
             None
+        } else {
+            Some(output_elements)
         };
 
         Ok(ExtractedDocument {
@@ -734,6 +776,57 @@ impl Default for PaddleOcrBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn output_element(text: &str, level: OcrElementLevel, confidence: f64) -> OcrElement {
+        OcrElement::new(
+            text,
+            crate::types::OcrBoundingGeometry::Rectangle {
+                left: 0,
+                top: 0,
+                width: 10,
+                height: 10,
+            },
+            crate::types::OcrConfidence::from_tesseract(confidence * 100.0),
+        )
+        .with_level(level)
+    }
+
+    #[test]
+    fn default_paddle_element_granularity_remains_line_only() {
+        let lines = [output_element("line", OcrElementLevel::Line, 0.9)];
+        let words = [output_element("word", OcrElementLevel::Word, 0.9)];
+        let config = OcrElementConfig {
+            include_elements: true,
+            ..Default::default()
+        };
+
+        let selected = PaddleOcrBackend::select_output_elements(&lines, &words, Some(&config));
+
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].text, "line");
+    }
+
+    #[test]
+    fn word_granularity_exposes_hierarchy_and_filters_confidence() {
+        let lines = [output_element("line", OcrElementLevel::Line, 0.9)];
+        let words = [
+            output_element("kept", OcrElementLevel::Word, 0.8),
+            output_element("dropped", OcrElementLevel::Word, 0.4),
+        ];
+        let config = OcrElementConfig {
+            include_elements: true,
+            min_level: OcrElementLevel::Word,
+            min_confidence: 0.5,
+            build_hierarchy: false,
+        };
+
+        let selected = PaddleOcrBackend::select_output_elements(&lines, &words, Some(&config));
+
+        assert_eq!(
+            selected.iter().map(|element| element.text.as_str()).collect::<Vec<_>>(),
+            ["line", "kept"]
+        );
+    }
 
     #[test]
     fn test_paddle_ocr_backend_creation() {

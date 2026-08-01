@@ -7,7 +7,7 @@
 
 use crate::layout::models::tatr::{self, TatrModel};
 use crate::layout::types::{BBox, DetectionResult, LayoutClass, RecognizedTable};
-use crate::types::OcrElement;
+use crate::types::{OcrElement, OcrElementLevel};
 
 /// Default confidence threshold for layout detections.
 const MIN_CONFIDENCE: f32 = 0.3;
@@ -87,18 +87,29 @@ fn recognize_single_table(
         return None;
     }
 
-    let table_elements: Vec<&OcrElement> = elements
-        .iter()
-        .filter(|e| {
-            if e.text.trim().is_empty() {
-                return false;
-            }
-            element_bbox_iow(e, table_bbox) >= MIN_CELL_ELEMENT_IOW
-        })
-        .collect();
+    let table_elements = select_table_elements(elements, table_bbox);
 
     let (cells, markdown) = build_markdown_table(&cell_grid, &table_elements, crop_x as f32, crop_y as f32);
     Some((cells, markdown))
+}
+
+fn select_table_elements<'a>(elements: &'a [OcrElement], table_bbox: &BBox) -> Vec<&'a OcrElement> {
+    let mut words = Vec::new();
+    let mut lines = Vec::new();
+
+    for element in elements {
+        if element.text.trim().is_empty() || element_bbox_iow(element, table_bbox) < MIN_CELL_ELEMENT_IOW {
+            continue;
+        }
+
+        match element.level {
+            OcrElementLevel::Word => words.push(element),
+            OcrElementLevel::Line => lines.push(element),
+            OcrElementLevel::Block | OcrElementLevel::Page => {}
+        }
+    }
+
+    if words.is_empty() { lines } else { words }
 }
 
 /// Build a markdown table from TATR cell grid + OCR elements.
@@ -326,6 +337,49 @@ mod tests {
             OcrConfidence::from_tesseract(95.0),
         )
         .with_level(OcrElementLevel::Word)
+    }
+
+    fn line(text: &str, left: u32, top: u32, width: u32, height: u32) -> OcrElement {
+        OcrElement::new(
+            text,
+            OcrBoundingGeometry::Rectangle {
+                left,
+                top,
+                width,
+                height,
+            },
+            OcrConfidence::from_tesseract(95.0),
+        )
+        .with_level(OcrElementLevel::Line)
+    }
+
+    #[test]
+    fn should_prefer_valid_words_over_lines_for_table_assignment() {
+        let table_bbox = BBox::new(0.0, 0.0, 100.0, 100.0);
+        let elements = [
+            line("duplicated line", 10, 10, 80, 10),
+            word("first", 10, 10, 20, 10),
+            word("second", 40, 10, 25, 10),
+            line("block", 10, 30, 80, 10).with_level(OcrElementLevel::Block),
+            word("", 70, 10, 10, 10),
+            word("outside", 150, 10, 20, 10),
+        ];
+
+        let selected = select_table_elements(&elements, &table_bbox);
+        let selected_text = selected.iter().map(|element| element.text.as_str()).collect::<Vec<_>>();
+
+        assert_eq!(selected_text, vec!["first", "second"]);
+    }
+
+    #[test]
+    fn should_fall_back_to_valid_lines_when_table_has_no_valid_words() {
+        let table_bbox = BBox::new(0.0, 0.0, 100.0, 100.0);
+        let elements = [line("line text", 10, 10, 80, 10), word("outside", 150, 10, 20, 10)];
+
+        let selected = select_table_elements(&elements, &table_bbox);
+        let selected_text = selected.iter().map(|element| element.text.as_str()).collect::<Vec<_>>();
+
+        assert_eq!(selected_text, vec!["line text"]);
     }
 
     #[test]

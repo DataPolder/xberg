@@ -8,12 +8,20 @@ use crate::{
     base_net::BaseNet,
     constants::{CRNN_MEAN_VALUES, CRNN_NORM_VALUES},
     ocr_error::OcrError,
-    ocr_result::TextLine,
+    ocr_result::{DetailedTextLine, RecognizedWord, TextLine},
     ocr_utils::OcrUtils,
 };
 
 const CRNN_DST_HEIGHT: u32 = 48;
 const CTC_SPACE_TOKEN: &str = " ";
+const CTC_WORD_GAP_THRESHOLD: u32 = 5;
+
+#[derive(Debug, Clone, Copy)]
+struct DecodedToken<'a> {
+    text: &'a str,
+    column: u32,
+    confidence: f32,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RecognitionDictionaryLayout {
@@ -145,18 +153,30 @@ impl CrnnNet {
         angle_rollback_threshold: f32,
         batch_size: u32,
     ) -> Result<Vec<TextLine>, OcrError> {
+        self.get_detailed_text_lines(part_imgs, angle_rollback_records, angle_rollback_threshold, batch_size)
+            .map(|lines| lines.into_iter().map(Into::into).collect())
+    }
+
+    /// Recognize text while retaining word-level CTC alignment details.
+    pub fn get_detailed_text_lines(
+        &self,
+        part_imgs: &[image::RgbImage],
+        angle_rollback_records: &HashMap<usize, image::RgbImage>,
+        angle_rollback_threshold: f32,
+        batch_size: u32,
+    ) -> Result<Vec<DetailedTextLine>, OcrError> {
         if part_imgs.is_empty() {
             return Ok(Vec::new());
         }
 
         let part_img_refs = part_imgs.iter().collect::<Vec<_>>();
-        let mut text_lines = self.get_text_lines_batched(&part_img_refs, batch_size)?;
+        let mut text_lines = self.get_detailed_text_lines_batched(&part_img_refs, batch_size)?;
 
         let rollback_indices = text_lines
             .iter()
             .enumerate()
             .filter_map(|(index, text_line)| {
-                if text_line.text_score.is_nan() || text_line.text_score < angle_rollback_threshold {
+                if text_line.line.text_score.is_nan() || text_line.line.text_score < angle_rollback_threshold {
                     angle_rollback_records.get(&index).map(|image| (index, image))
                 } else {
                     None
@@ -166,10 +186,10 @@ impl CrnnNet {
 
         if rollback_indices.len() == 1 {
             let (index, image) = rollback_indices[0];
-            text_lines[index] = self.get_text_line(image)?;
+            text_lines[index] = self.get_detailed_text_line(image)?;
         } else if !rollback_indices.is_empty() {
             let images = rollback_indices.iter().map(|(_, image)| *image).collect::<Vec<_>>();
-            let replacements = self.get_text_lines_batched(&images, batch_size)?;
+            let replacements = self.get_detailed_text_lines_batched(&images, batch_size)?;
             for ((index, _), replacement) in rollback_indices.into_iter().zip(replacements) {
                 text_lines[index] = replacement;
             }
@@ -180,11 +200,11 @@ impl CrnnNet {
 
     /// Batch recognition: sort crops by width, group into batches, pad to max width,
     /// run single ONNX inference per batch. Matches PaddleOCR/RapidOCR batching strategy.
-    fn get_text_lines_batched(
+    fn get_detailed_text_lines_batched(
         &self,
         part_imgs: &[&image::RgbImage],
         batch_size: u32,
-    ) -> Result<Vec<TextLine>, OcrError> {
+    ) -> Result<Vec<DetailedTextLine>, OcrError> {
         let session = self.session.as_ref().ok_or(OcrError::SessionNotInitialized)?;
         let batch_size = (batch_size as usize).max(1);
 
@@ -199,12 +219,12 @@ impl CrnnNet {
             .collect();
         indexed_widths.sort_by_key(|&(_, w)| w);
 
-        let mut results: Vec<(usize, TextLine)> = Vec::with_capacity(part_imgs.len());
+        let mut results: Vec<(usize, DetailedTextLine)> = Vec::with_capacity(part_imgs.len());
 
         for chunk in indexed_widths.chunks(batch_size) {
             if chunk.len() == 1 {
                 let (orig_idx, _) = chunk[0];
-                let text_line = self.get_text_line(part_imgs[orig_idx])?;
+                let text_line = self.get_detailed_text_line(part_imgs[orig_idx])?;
                 results.push((orig_idx, text_line));
                 continue;
             }
@@ -262,7 +282,9 @@ impl CrnnNet {
             for (batch_idx, item) in chunk.iter().enumerate().take(batch_dim.min(n)) {
                 let offset = batch_idx * timesteps * num_classes;
                 let slice = &flat_data[offset..offset + timesteps * num_classes];
-                let text_line = Self::score_to_text_line(slice, timesteps, num_classes, &self.keys)?;
+                let line_column_count = timesteps as f32 * item.1 as f32 / max_width as f32;
+                let text_line =
+                    Self::score_to_detailed_text_line(slice, timesteps, num_classes, &self.keys, line_column_count)?;
                 results.push((item.0, text_line));
             }
         }
@@ -282,7 +304,7 @@ impl CrnnNet {
         Ok(results.into_iter().map(|(_, tl)| tl).collect())
     }
 
-    fn get_text_line(&self, img_src: &image::RgbImage) -> Result<TextLine, OcrError> {
+    fn get_detailed_text_line(&self, img_src: &image::RgbImage) -> Result<DetailedTextLine, OcrError> {
         let Some(session) = &self.session else {
             return Err(OcrError::SessionNotInitialized);
         };
@@ -330,24 +352,26 @@ impl CrnnNet {
         })? as usize;
         let src_data: Vec<f32> = src_data.to_vec();
 
-        Self::score_to_text_line(&src_data, height, width, &self.keys)
+        Self::score_to_detailed_text_line(&src_data, height, width, &self.keys, height as f32)
     }
 
-    fn score_to_text_line(
+    fn score_to_detailed_text_line(
         output_data: &[f32],
         height: usize,
         width: usize,
         keys: &[String],
-    ) -> Result<TextLine, OcrError> {
+        line_column_count: f32,
+    ) -> Result<DetailedTextLine, OcrError> {
         let dictionary_layout = RecognitionDictionaryLayout::resolve(keys.len(), width)?;
         let mut text_line = TextLine::default();
+        let mut decoded_tokens = Vec::new();
         let mut last_index = 0;
 
         let mut text_score_sum = 0.0;
         let mut text_score_count = 0;
-        for i in 0..height {
-            let start = i * width;
-            let stop = (i + 1) * width;
+        for column in 0..height {
+            let start = column * width;
+            let stop = (column + 1) * width;
             let slice = &output_data[start..stop.min(output_data.len())];
 
             let (max_index, max_value) =
@@ -359,12 +383,17 @@ impl CrnnNet {
                     });
 
             if max_index > 0
-                && !(i > 0 && max_index == last_index)
+                && !(column > 0 && max_index == last_index)
                 && let Some(token) = dictionary_layout.token(max_index, keys)
             {
                 text_line.text.push_str(token);
                 text_score_sum += max_value;
                 text_score_count += 1;
+                decoded_tokens.push(DecodedToken {
+                    text: token,
+                    column: column as u32,
+                    confidence: max_value,
+                });
             }
             last_index = max_index;
         }
@@ -374,13 +403,96 @@ impl CrnnNet {
         } else {
             0.0
         };
-        Ok(text_line)
+
+        Ok(DetailedTextLine {
+            line: text_line,
+            words: Self::group_recognized_words(&decoded_tokens),
+            line_column_count,
+        })
+    }
+
+    fn group_recognized_words(tokens: &[DecodedToken<'_>]) -> Vec<RecognizedWord> {
+        let mut words = Vec::new();
+        let mut current_text = String::new();
+        let mut current_columns = Vec::new();
+        let mut confidence_sum = 0.0;
+        let mut current_is_cjk = None;
+
+        for token in tokens {
+            if token.text.chars().all(char::is_whitespace) {
+                Self::finish_recognized_word(&mut words, &mut current_text, &mut current_columns, &mut confidence_sum);
+                current_is_cjk = None;
+                continue;
+            }
+
+            let token_is_cjk = token.text.chars().any(Self::is_cjk_character);
+            let gap_splits_word = current_columns
+                .last()
+                .is_some_and(|&column| token.column.saturating_sub(column) > CTC_WORD_GAP_THRESHOLD);
+            let split_before_cjk = token_is_cjk && !current_columns.is_empty();
+            if current_is_cjk.is_some_and(|is_cjk| is_cjk != token_is_cjk) || gap_splits_word || split_before_cjk {
+                Self::finish_recognized_word(&mut words, &mut current_text, &mut current_columns, &mut confidence_sum);
+            }
+
+            current_is_cjk = Some(token_is_cjk);
+            current_text.push_str(token.text);
+            current_columns.push(token.column);
+            confidence_sum += token.confidence;
+        }
+
+        Self::finish_recognized_word(&mut words, &mut current_text, &mut current_columns, &mut confidence_sum);
+        words
+    }
+
+    fn finish_recognized_word(
+        words: &mut Vec<RecognizedWord>,
+        text: &mut String,
+        columns: &mut Vec<u32>,
+        confidence_sum: &mut f32,
+    ) {
+        let Some(&start_column) = columns.first() else {
+            return;
+        };
+        let end_column = columns.last().copied().unwrap_or(start_column);
+        let mean_confidence = *confidence_sum / columns.len() as f32;
+        let confidence = if mean_confidence.is_finite() {
+            mean_confidence
+        } else {
+            0.0
+        };
+        words.push(RecognizedWord {
+            text: std::mem::take(text),
+            columns: std::mem::take(columns),
+            start_column,
+            end_column,
+            confidence,
+        });
+        *confidence_sum = 0.0;
+    }
+
+    fn is_cjk_character(character: char) -> bool {
+        matches!(
+            character,
+            '\u{3400}'..='\u{4DBF}'
+                | '\u{4E00}'..='\u{9FFF}'
+                | '\u{F900}'..='\u{FAFF}'
+                | '\u{20000}'..='\u{2FA1F}'
+        )
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn score_to_text_line(
+        output_data: &[f32],
+        height: usize,
+        width: usize,
+        keys: &[String],
+    ) -> Result<TextLine, OcrError> {
+        CrnnNet::score_to_detailed_text_line(output_data, height, width, keys, height as f32).map(Into::into)
+    }
 
     fn output_for_classes(class_count: usize, classes: &[usize]) -> Vec<f32> {
         let mut output = vec![0.0; class_count * classes.len()];
@@ -390,11 +502,19 @@ mod tests {
         output
     }
 
+    fn output_for_class_scores(class_count: usize, classes: &[(usize, f32)]) -> Vec<f32> {
+        let mut output = vec![0.0; class_count * classes.len()];
+        for (timestep, &(class_index, score)) in classes.iter().enumerate() {
+            output[timestep * class_count + class_index] = score;
+        }
+        output
+    }
+
     #[test]
     fn test_score_to_text_line_skips_blank_index() {
         let keys = vec!["#".to_string(), "a".to_string(), "b".to_string()];
         let output = vec![1.0, 0.0, 0.0, 0.0, 0.9, 0.1, 0.0, 0.1, 0.8];
-        let result = CrnnNet::score_to_text_line(&output, 3, 3, &keys).unwrap();
+        let result = score_to_text_line(&output, 3, 3, &keys).unwrap();
         assert_eq!(result.text, "ab");
     }
 
@@ -402,15 +522,121 @@ mod tests {
     fn test_score_to_text_line_deduplicates_consecutive() {
         let keys = vec!["#".to_string(), "h".to_string(), "i".to_string()];
         let output = vec![0.0, 0.9, 0.0, 0.0, 0.8, 0.0, 0.0, 0.0, 0.9, 0.0, 0.0, 0.8];
-        let result = CrnnNet::score_to_text_line(&output, 4, 3, &keys).unwrap();
+        let result = score_to_text_line(&output, 4, 3, &keys).unwrap();
         assert_eq!(result.text, "hi");
+    }
+
+    #[test]
+    fn should_align_duplicate_ctc_tokens_and_blanks_to_selected_columns() {
+        let keys = vec!["a".to_string(), "b".to_string()];
+        let class_count = keys.len() + 1;
+        let output = output_for_class_scores(class_count, &[(1, 0.9), (1, 0.8), (0, 1.0), (1, 0.7), (2, 0.6)]);
+
+        let result = CrnnNet::score_to_detailed_text_line(&output, 5, class_count, &keys, 5.0).unwrap();
+
+        assert_eq!(result.line.text, "aab");
+        assert_eq!(result.words.len(), 1);
+        assert_eq!(result.words[0].text, "aab");
+        assert_eq!(result.words[0].columns, [0, 3, 4]);
+        assert_eq!(result.words[0].start_column, 0);
+        assert_eq!(result.words[0].end_column, 4);
+        assert!((result.words[0].confidence - 0.733_333_35).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn should_group_english_words_across_spaces_with_word_confidence() {
+        let keys = vec![
+            "h".to_string(),
+            "i".to_string(),
+            "b".to_string(),
+            "y".to_string(),
+            "e".to_string(),
+        ];
+        let class_count = keys.len() + 2;
+        let output = output_for_class_scores(
+            class_count,
+            &[(1, 0.8), (2, 0.6), (6, 0.9), (3, 0.7), (4, 0.9), (5, 0.8)],
+        );
+
+        let result = CrnnNet::score_to_detailed_text_line(&output, 6, class_count, &keys, 4.5).unwrap();
+
+        assert_eq!(result.line.text, "hi bye");
+        assert_eq!(result.line_column_count, 4.5);
+        assert_eq!(
+            result.words.iter().map(|word| word.text.as_str()).collect::<Vec<_>>(),
+            ["hi", "bye"]
+        );
+        assert_eq!(result.words[0].columns, [0, 1]);
+        assert_eq!(result.words[1].columns, [3, 4, 5]);
+        assert!((result.words[0].confidence - 0.7).abs() < f32::EPSILON);
+        assert!((result.words[1].confidence - 0.8).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn should_split_english_words_when_ctc_columns_have_a_large_gap() {
+        let tokens = [
+            DecodedToken {
+                text: "a",
+                column: 1,
+                confidence: 0.8,
+            },
+            DecodedToken {
+                text: "b",
+                column: 8,
+                confidence: 0.6,
+            },
+        ];
+
+        let words = CrnnNet::group_recognized_words(&tokens);
+
+        assert_eq!(words.len(), 2);
+        assert_eq!(words[0].text, "a");
+        assert_eq!(words[1].text, "b");
+    }
+
+    #[test]
+    fn should_emit_each_cjk_character_as_a_word() {
+        let tokens = [
+            DecodedToken {
+                text: "中",
+                column: 1,
+                confidence: 0.8,
+            },
+            DecodedToken {
+                text: "文",
+                column: 2,
+                confidence: 0.6,
+            },
+        ];
+
+        let words = CrnnNet::group_recognized_words(&tokens);
+
+        assert_eq!(
+            words.iter().map(|word| word.text.as_str()).collect::<Vec<_>>(),
+            ["中", "文"]
+        );
+    }
+
+    #[test]
+    fn should_sanitize_non_finite_word_confidence() {
+        let tokens = [DecodedToken {
+            text: "a",
+            column: 1,
+            confidence: f32::INFINITY,
+        }];
+
+        let words = CrnnNet::group_recognized_words(&tokens);
+
+        assert_eq!(words.len(), 1);
+        assert_eq!(words[0].confidence, 0.0);
+        assert!(words[0].confidence.is_finite());
     }
 
     #[test]
     fn test_score_to_text_line_preserves_complete_dictionary() {
         let keys = vec!["#".to_string(), "a".to_string(), " ".to_string()];
         let output = output_for_classes(keys.len(), &[0, 1, 2]);
-        let result = CrnnNet::score_to_text_line(&output, 3, keys.len(), &keys).unwrap();
+        let result = score_to_text_line(&output, 3, keys.len(), &keys).unwrap();
         assert_eq!(result.text, "a ");
     }
 
@@ -419,7 +645,7 @@ mod tests {
         let keys = vec!["a".to_string(), "b".to_string()];
         let class_count = keys.len() + 1;
         let output = output_for_classes(class_count, &[0, 1, 2]);
-        let result = CrnnNet::score_to_text_line(&output, 3, class_count, &keys).unwrap();
+        let result = score_to_text_line(&output, 3, class_count, &keys).unwrap();
         assert_eq!(result.text, "ab");
     }
 
@@ -428,7 +654,7 @@ mod tests {
         let keys = vec!["a".to_string(), "b".to_string()];
         let class_count = keys.len() + 2;
         let output = output_for_classes(class_count, &[0, 1, 2, 3]);
-        let result = CrnnNet::score_to_text_line(&output, 4, class_count, &keys).unwrap();
+        let result = score_to_text_line(&output, 4, class_count, &keys).unwrap();
         assert_eq!(result.text, "ab ");
     }
 
@@ -437,7 +663,7 @@ mod tests {
         let keys = vec!["a".to_string()];
         let class_count = keys.len() + 3;
         let output = output_for_classes(class_count, &[1]);
-        let error = CrnnNet::score_to_text_line(&output, 1, class_count, &keys).unwrap_err();
+        let error = score_to_text_line(&output, 1, class_count, &keys).unwrap_err();
         let message = error.to_string();
         assert!(message.contains("dictionary has 1 entries"));
         assert!(message.contains("model output has 4 classes"));

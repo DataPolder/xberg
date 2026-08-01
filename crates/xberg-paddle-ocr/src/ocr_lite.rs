@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use image::ImageBuffer;
+use imageproc::geometric_transformations::Projection;
 use ort::session::builder::SessionBuilder;
 use tracing;
 
@@ -10,30 +11,93 @@ use crate::{
     crnn_net::CrnnNet,
     db_net::DbNet,
     ocr_error::OcrError,
-    ocr_result::{OcrResult, Point, TextBlock, TextBox},
+    ocr_result::{
+        DetailedOcrResult, DetailedTextBlock, DetailedTextLine, OcrResult, Point, RecognizedWord, TextBlock, TextBox,
+        WordBlock,
+    },
     ocr_utils::OcrUtils,
     scale_param::ScaleParam,
 };
 
 const VISUAL_LINE_Y_TOLERANCE_PX: u32 = 10;
 
+#[derive(Debug, Clone, Copy)]
+struct CropProjectionMetadata {
+    crop_to_source: Projection,
+    crop_width: f32,
+    crop_height: f32,
+    vertical_rotation_applied: bool,
+}
+
+impl CropProjectionMetadata {
+    fn new(box_points: &[Point], cropped_image: &image::RgbImage) -> Option<Self> {
+        let points = box_points.get(..4)?;
+        let edge_length = |first: Point, second: Point| {
+            let dx = first.x as f32 - second.x as f32;
+            let dy = first.y as f32 - second.y as f32;
+            (dx * dx + dy * dy).sqrt()
+        };
+        let crop_width = edge_length(points[0], points[1]).max(edge_length(points[2], points[3])) as u32;
+        let crop_height = edge_length(points[0], points[3]).max(edge_length(points[1], points[2])) as u32;
+        if crop_width == 0 || crop_height == 0 {
+            return None;
+        }
+
+        let vertical_rotation_applied = if cropped_image.dimensions() == (crop_width, crop_height) {
+            false
+        } else if cropped_image.dimensions() == (crop_height, crop_width) {
+            true
+        } else {
+            return None;
+        };
+        let source_points = [
+            (points[0].x as f32, points[0].y as f32),
+            (points[1].x as f32, points[1].y as f32),
+            (points[2].x as f32, points[2].y as f32),
+            (points[3].x as f32, points[3].y as f32),
+        ];
+        let crop_points = [
+            (0.0, 0.0),
+            (crop_width as f32, 0.0),
+            (crop_width as f32, crop_height as f32),
+            (0.0, crop_height as f32),
+        ];
+        let crop_to_source = Projection::from_control_points(source_points, crop_points)?.invert();
+
+        Some(Self {
+            crop_to_source,
+            crop_width: crop_width as f32,
+            crop_height: crop_height as f32,
+            vertical_rotation_applied,
+        })
+    }
+
+    fn recognition_width(self) -> f32 {
+        if self.vertical_rotation_applied {
+            self.crop_height
+        } else {
+            self.crop_width
+        }
+    }
+}
+
 #[derive(Debug)]
-pub struct OcrLite {
+pub struct PaddleOcrEngine {
     db_net: DbNet,
     angle_net: AngleNet,
     crnn_net: CrnnNet,
 }
 
-unsafe impl Send for OcrLite {}
-unsafe impl Sync for OcrLite {}
+unsafe impl Send for PaddleOcrEngine {}
+unsafe impl Sync for PaddleOcrEngine {}
 
-impl Default for OcrLite {
+impl Default for PaddleOcrEngine {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl OcrLite {
+impl PaddleOcrEngine {
     pub fn new() -> Self {
         Self {
             db_net: DbNet::new(),
@@ -130,7 +194,7 @@ impl OcrLite {
         Ok(())
     }
 
-    fn detect_base(
+    fn detect_base_detailed(
         &self,
         img_src: &image::RgbImage,
         padding: u32,
@@ -144,7 +208,7 @@ impl OcrLite {
         angle_rollback_threshold: f32,
         cls_thresh: f32,
         rec_batch_size: u32,
-    ) -> Result<OcrResult, OcrError> {
+    ) -> Result<DetailedOcrResult, OcrError> {
         tracing::debug!(
             width = img_src.width(),
             height = img_src.height(),
@@ -173,7 +237,7 @@ impl OcrLite {
             "PaddleOCR: image resized"
         );
 
-        self.detect_once(
+        self.detect_once_detailed(
             &padding_src,
             &scale,
             padding,
@@ -215,7 +279,32 @@ impl OcrLite {
         do_angle: bool,
         most_angle: bool,
     ) -> Result<OcrResult, OcrError> {
-        self.detect_base(
+        self.detect_detailed(
+            img_src,
+            padding,
+            max_side_len,
+            box_score_thresh,
+            box_thresh,
+            un_clip_ratio,
+            do_angle,
+            most_angle,
+        )
+        .map(Into::into)
+    }
+
+    /// Detect text and retain word-level recognition geometry.
+    pub fn detect_detailed(
+        &self,
+        img_src: &image::RgbImage,
+        padding: u32,
+        max_side_len: u32,
+        box_score_thresh: f32,
+        box_thresh: f32,
+        un_clip_ratio: f32,
+        do_angle: bool,
+        most_angle: bool,
+    ) -> Result<DetailedOcrResult, OcrError> {
+        self.detect_base_detailed(
             img_src,
             padding,
             max_side_len,
@@ -245,7 +334,35 @@ impl OcrLite {
         most_angle: bool,
         rec_batch_size: u32,
     ) -> Result<OcrResult, OcrError> {
-        self.detect_base(
+        self.detect_detailed_with_rec_batch_size(
+            img_src,
+            padding,
+            max_side_len,
+            box_score_thresh,
+            box_thresh,
+            un_clip_ratio,
+            do_angle,
+            most_angle,
+            rec_batch_size,
+        )
+        .map(Into::into)
+    }
+
+    /// Detect text with detailed word geometry and a configurable recognition batch size.
+    #[allow(clippy::too_many_arguments)]
+    pub fn detect_detailed_with_rec_batch_size(
+        &self,
+        img_src: &image::RgbImage,
+        padding: u32,
+        max_side_len: u32,
+        box_score_thresh: f32,
+        box_thresh: f32,
+        un_clip_ratio: f32,
+        do_angle: bool,
+        most_angle: bool,
+        rec_batch_size: u32,
+    ) -> Result<DetailedOcrResult, OcrError> {
+        self.detect_base_detailed(
             img_src,
             padding,
             max_side_len,
@@ -289,7 +406,35 @@ impl OcrLite {
         most_angle: bool,
         angle_rollback_threshold: f32,
     ) -> Result<OcrResult, OcrError> {
-        self.detect_base(
+        self.detect_detailed_angle_rollback(
+            img_src,
+            padding,
+            max_side_len,
+            box_score_thresh,
+            box_thresh,
+            un_clip_ratio,
+            do_angle,
+            most_angle,
+            angle_rollback_threshold,
+        )
+        .map(Into::into)
+    }
+
+    /// Detect detailed word geometry with angle rollback support.
+    #[allow(clippy::too_many_arguments)]
+    pub fn detect_detailed_angle_rollback(
+        &self,
+        img_src: &image::RgbImage,
+        padding: u32,
+        max_side_len: u32,
+        box_score_thresh: f32,
+        box_thresh: f32,
+        un_clip_ratio: f32,
+        do_angle: bool,
+        most_angle: bool,
+        angle_rollback_threshold: f32,
+    ) -> Result<DetailedOcrResult, OcrError> {
+        self.detect_base_detailed(
             img_src,
             padding,
             max_side_len,
@@ -359,7 +504,7 @@ impl OcrLite {
         }
     }
 
-    fn detect_once(
+    fn detect_once_detailed(
         &self,
         img_src: &image::RgbImage,
         scale: &ScaleParam,
@@ -373,7 +518,7 @@ impl OcrLite {
         angle_rollback_threshold: f32,
         cls_thresh: f32,
         rec_batch_size: u32,
-    ) -> Result<OcrResult, OcrError> {
+    ) -> Result<DetailedOcrResult, OcrError> {
         tracing::debug!("PaddleOCR: running DB-net text detection");
         let mut text_boxes = self
             .db_net
@@ -389,6 +534,11 @@ impl OcrLite {
         Self::sort_text_boxes(&mut text_boxes);
 
         let part_images = OcrUtils::get_part_images(img_src, &text_boxes);
+        let crop_projections = text_boxes
+            .iter()
+            .zip(&part_images)
+            .map(|(text_box, part_image)| CropProjectionMetadata::new(&text_box.points, part_image))
+            .collect::<Vec<_>>();
 
         if do_angle {
             tracing::debug!(num_regions = part_images.len(), "PaddleOCR: running angle classifier");
@@ -425,7 +575,7 @@ impl OcrLite {
             num_regions = rotated_images.len(),
             "PaddleOCR: running CRNN text recognition"
         );
-        let text_lines = self.crnn_net.get_text_lines(
+        let (text_lines, rollback_applied) = self.recognize_detailed_with_rollbacks(
             &rotated_images,
             &angle_rollback_records,
             angle_rollback_threshold,
@@ -435,8 +585,8 @@ impl OcrLite {
         if text_lines.is_empty() {
             tracing::warn!("PaddleOCR: no text recognized");
         } else {
-            let avg_score = text_lines.iter().map(|l| l.text_score).sum::<f32>() / text_lines.len() as f32;
-            let empty_count = text_lines.iter().filter(|l| l.text.trim().is_empty()).count();
+            let avg_score = text_lines.iter().map(|l| l.line.text_score).sum::<f32>() / text_lines.len() as f32;
+            let empty_count = text_lines.iter().filter(|l| l.line.text.trim().is_empty()).count();
             tracing::debug!(
                 num_lines = text_lines.len(),
                 avg_score = avg_score,
@@ -447,7 +597,22 @@ impl OcrLite {
 
         let mut text_blocks = Vec::with_capacity(text_lines.len());
         for (i, text_line) in text_lines.into_iter().enumerate() {
-            text_blocks.push(TextBlock {
+            let rotation_retained = Self::rotation_retained(angles[i].index, rollback_applied[i]);
+            let DetailedTextLine {
+                line,
+                words: recognized_words,
+                line_column_count,
+            } = text_line;
+            let words = Self::build_word_blocks(
+                &line,
+                recognized_words,
+                line_column_count,
+                crop_projections[i],
+                rotation_retained,
+                padding,
+                img_src.dimensions(),
+            );
+            let block = TextBlock {
                 box_points: text_boxes[i]
                     .points
                     .iter()
@@ -459,19 +624,247 @@ impl OcrLite {
                 box_score: text_boxes[i].score,
                 angle_index: angles[i].index,
                 angle_score: angles[i].score,
-                text: text_line.text,
-                text_score: text_line.text_score,
+                text: line.text,
+                text_score: line.text_score,
+            };
+            text_blocks.push(DetailedTextBlock {
+                block,
+                words,
+                line_column_count,
+                rotation_retained,
             });
         }
 
-        Ok(OcrResult { text_blocks })
+        Ok(DetailedOcrResult { text_blocks })
+    }
+
+    fn recognize_detailed_with_rollbacks(
+        &self,
+        rotated_images: &[image::RgbImage],
+        rollback_records: &HashMap<usize, image::RgbImage>,
+        rollback_threshold: f32,
+        batch_size: u32,
+    ) -> Result<(Vec<DetailedTextLine>, Vec<bool>), OcrError> {
+        let no_rollback_records = HashMap::new();
+        let mut lines = self.crnn_net.get_detailed_text_lines(
+            rotated_images,
+            &no_rollback_records,
+            rollback_threshold,
+            batch_size,
+        )?;
+        let rollback_indices = lines
+            .iter()
+            .enumerate()
+            .filter_map(|(index, line)| {
+                let should_rollback = line.line.text_score.is_nan() || line.line.text_score < rollback_threshold;
+                should_rollback
+                    .then(|| rollback_records.get(&index).map(|image| (index, image.clone())))
+                    .flatten()
+            })
+            .collect::<Vec<_>>();
+        let mut rollback_applied = vec![false; lines.len()];
+        if rollback_indices.is_empty() {
+            return Ok((lines, rollback_applied));
+        }
+
+        let images = rollback_indices
+            .iter()
+            .map(|(_, image)| image.clone())
+            .collect::<Vec<_>>();
+        let replacements =
+            self.crnn_net
+                .get_detailed_text_lines(&images, &no_rollback_records, rollback_threshold, batch_size)?;
+        for ((index, _), replacement) in rollback_indices.into_iter().zip(replacements) {
+            lines[index] = replacement;
+            rollback_applied[index] = true;
+        }
+        Ok((lines, rollback_applied))
+    }
+
+    fn rotation_retained(angle_index: i32, rollback_applied: bool) -> bool {
+        angle_index == 1 && !rollback_applied
+    }
+
+    fn build_word_blocks(
+        line: &crate::ocr_result::TextLine,
+        words: Vec<RecognizedWord>,
+        line_column_count: f32,
+        projection: Option<CropProjectionMetadata>,
+        rotation_retained: bool,
+        padding: u32,
+        padded_dimensions: (u32, u32),
+    ) -> Vec<WordBlock> {
+        let Some(projection) = projection else {
+            return words.into_iter().map(Into::into).collect();
+        };
+        let recognition_width = projection.recognition_width();
+        let Some(average_character_width) =
+            Self::average_character_width(line, &words, line_column_count, recognition_width)
+        else {
+            return words.into_iter().map(Into::into).collect();
+        };
+        let column_width = recognition_width / line_column_count;
+        let mut bounds = words
+            .iter()
+            .map(|word| Self::word_horizontal_bounds(word, line_column_count, column_width, average_character_width))
+            .collect::<Vec<_>>();
+        Self::adjust_word_bound_overlaps(&mut bounds);
+
+        words
+            .into_iter()
+            .zip(bounds)
+            .map(|(word, bounds)| {
+                let box_points = bounds
+                    .and_then(|bounds| {
+                        Self::project_word_bounds(projection, bounds, rotation_retained, padding, padded_dimensions)
+                    })
+                    .unwrap_or_default();
+                WordBlock { word, box_points }
+            })
+            .collect()
+    }
+
+    fn adjust_word_bound_overlaps(bounds: &mut [Option<(f32, f32)>]) {
+        for index in 0..bounds.len().saturating_sub(1) {
+            let (previous, next) = bounds.split_at_mut(index + 1);
+            let (Some((_, previous_right)), Some((next_left, _))) = (&mut previous[index], &mut next[0]) else {
+                continue;
+            };
+            if *previous_right > *next_left {
+                let midpoint = (*previous_right + *next_left) / 2.0;
+                *previous_right = midpoint;
+                *next_left = midpoint;
+            }
+        }
+    }
+
+    fn average_character_width(
+        line: &crate::ocr_result::TextLine,
+        words: &[RecognizedWord],
+        line_column_count: f32,
+        recognition_width: f32,
+    ) -> Option<f32> {
+        if !line_column_count.is_finite()
+            || line_column_count <= 0.0
+            || !recognition_width.is_finite()
+            || recognition_width <= 0.0
+        {
+            return None;
+        }
+        let column_width = recognition_width / line_column_count;
+        let widths = words.iter().filter_map(|word| {
+            let (first, last) = Self::effective_word_column_span(word, line_column_count)?;
+            (word.columns.len() > 1 && last > first)
+                .then_some((last - first) * column_width / (word.columns.len() - 1) as f32)
+        });
+        let (width_sum, width_count) = widths.fold((0.0, 0usize), |(sum, count), width| (sum + width, count + 1));
+        let average_width = if width_count > 0 {
+            width_sum / width_count as f32
+        } else {
+            recognition_width / line.text.chars().count() as f32
+        };
+        (average_width.is_finite() && average_width > 0.0).then_some(average_width)
+    }
+
+    fn word_horizontal_bounds(
+        word: &RecognizedWord,
+        line_column_count: f32,
+        column_width: f32,
+        average_character_width: f32,
+    ) -> Option<(f32, f32)> {
+        let (first, last) = Self::effective_word_column_span(word, line_column_count)?;
+        if last < first || !column_width.is_finite() || !average_character_width.is_finite() {
+            return None;
+        }
+        let half_width = average_character_width / 2.0;
+        let left = (((first + 0.5) * column_width - half_width).trunc()).max(0.0);
+        let right = ((last + 0.5) * column_width + half_width).trunc();
+        (right > left).then_some((left, right))
+    }
+
+    fn effective_word_column_span(word: &RecognizedWord, line_column_count: f32) -> Option<(f32, f32)> {
+        let (&first, &last) = word.columns.first().zip(word.columns.last())?;
+        if !line_column_count.is_finite() || line_column_count <= 0.0 {
+            return None;
+        }
+        let max_column = (line_column_count.ceil() - 1.0).max(0.0);
+        Some(((first as f32).min(max_column), (last as f32).min(max_column)))
+    }
+
+    fn project_word_bounds(
+        projection: CropProjectionMetadata,
+        bounds: (f32, f32),
+        rotation_retained: bool,
+        padding: u32,
+        padded_dimensions: (u32, u32),
+    ) -> Option<Vec<Point>> {
+        let recognition_width = projection.recognition_width();
+        let (mut left, mut right) = bounds;
+        right = right.min(recognition_width);
+        if rotation_retained {
+            (left, right) = (recognition_width - right, recognition_width - left);
+        }
+        if !left.is_finite() || !right.is_finite() || left < 0.0 || right <= left {
+            return None;
+        }
+
+        let crop_points = if projection.vertical_rotation_applied {
+            [
+                (0.0, left),
+                (projection.crop_width, left),
+                (projection.crop_width, right),
+                (0.0, right),
+            ]
+        } else {
+            [
+                (left, 0.0),
+                (right, 0.0),
+                (right, projection.crop_height),
+                (left, projection.crop_height),
+            ]
+        };
+        let original_width = padded_dimensions.0.saturating_sub(padding.saturating_mul(2));
+        let original_height = padded_dimensions.1.saturating_sub(padding.saturating_mul(2));
+        let points = crop_points
+            .into_iter()
+            .map(|point| projection.crop_to_source * point)
+            .map(|(x, y)| Self::unpad_projected_point(x, y, padding, original_width, original_height))
+            .collect::<Option<Vec<_>>>()?;
+
+        (Self::quadrilateral_area(&points) > 0.0).then_some(points)
+    }
+
+    fn unpad_projected_point(x: f32, y: f32, padding: u32, original_width: u32, original_height: u32) -> Option<Point> {
+        if !x.is_finite() || !y.is_finite() {
+            return None;
+        }
+        let x = (x - padding as f32).clamp(0.0, original_width as f32).trunc() as u32;
+        let y = (y - padding as f32).clamp(0.0, original_height as f32).trunc() as u32;
+        Some(Point { x, y })
+    }
+
+    fn quadrilateral_area(points: &[Point]) -> f32 {
+        if points.len() != 4 {
+            return 0.0;
+        }
+        let mut twice_area = 0.0;
+        for index in 0..points.len() {
+            let current = points[index];
+            let next = points[(index + 1) % points.len()];
+            twice_area += current.x as f32 * next.y as f32 - next.x as f32 * current.y as f32;
+        }
+        twice_area.abs() / 2.0
     }
 }
+
+/// Backward-compatible name for [`PaddleOcrEngine`].
+#[deprecated(note = "use PaddleOcrEngine")]
+pub type OcrLite = PaddleOcrEngine;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ocr_result::TextBox;
+    use crate::ocr_result::{TextBox, TextLine};
 
     fn make_box(x: u32, y: u32) -> TextBox {
         TextBox {
@@ -485,10 +878,194 @@ mod tests {
         }
     }
 
+    fn make_detailed_line() -> DetailedTextLine {
+        DetailedTextLine {
+            line: TextLine {
+                text: "ab".to_string(),
+                text_score: 0.8,
+            },
+            words: vec![RecognizedWord {
+                text: "ab".to_string(),
+                columns: vec![2, 3],
+                start_column: 2,
+                end_column: 3,
+                confidence: 0.8,
+            }],
+            line_column_count: 10.0,
+        }
+    }
+
+    fn project_test_line(
+        box_points: Vec<Point>,
+        crop_dimensions: (u32, u32),
+        rotation_retained: bool,
+        padded_dimensions: (u32, u32),
+    ) -> Vec<Point> {
+        let crop = image::RgbImage::new(crop_dimensions.0, crop_dimensions.1);
+        let projection = CropProjectionMetadata::new(&box_points, &crop);
+        let line = make_detailed_line();
+        PaddleOcrEngine::build_word_blocks(
+            &line.line,
+            line.words,
+            line.line_column_count,
+            projection,
+            rotation_retained,
+            10,
+            padded_dimensions,
+        )[0]
+        .box_points
+        .clone()
+    }
+
+    #[test]
+    fn should_project_horizontal_word_columns_to_source_quadrilateral() {
+        let points = make_box(10, 20).points;
+
+        let projected = project_test_line(points, (100, 20), false, (120, 60));
+
+        assert_eq!(
+            projected,
+            [
+                Point { x: 20, y: 10 },
+                Point { x: 40, y: 10 },
+                Point { x: 40, y: 30 },
+                Point { x: 20, y: 30 },
+            ]
+        );
+    }
+
+    #[test]
+    fn should_reverse_retained_180_degree_rotation_when_projecting_word() {
+        let points = make_box(10, 20).points;
+
+        let projected = project_test_line(points, (100, 20), true, (120, 60));
+
+        assert_eq!(
+            projected,
+            [
+                Point { x: 60, y: 10 },
+                Point { x: 80, y: 10 },
+                Point { x: 80, y: 30 },
+                Point { x: 60, y: 30 },
+            ]
+        );
+    }
+
+    #[test]
+    fn should_not_reverse_180_degree_rotation_after_angle_rollback() {
+        assert!(PaddleOcrEngine::rotation_retained(1, false));
+        assert!(!PaddleOcrEngine::rotation_retained(1, true));
+
+        let projected = project_test_line(make_box(10, 20).points, (100, 20), false, (120, 60));
+
+        assert_eq!(projected[0], Point { x: 20, y: 10 });
+        assert_eq!(projected[2], Point { x: 40, y: 30 });
+    }
+
+    #[test]
+    fn should_reverse_vertical_crop_rotation_when_projecting_word() {
+        let points = vec![
+            Point { x: 10, y: 10 },
+            Point { x: 30, y: 10 },
+            Point { x: 30, y: 110 },
+            Point { x: 10, y: 110 },
+        ];
+
+        let projected = project_test_line(points, (100, 20), false, (40, 120));
+
+        assert_eq!(
+            projected,
+            [
+                Point { x: 0, y: 20 },
+                Point { x: 20, y: 20 },
+                Point { x: 20, y: 40 },
+                Point { x: 0, y: 40 },
+            ]
+        );
+    }
+
+    #[test]
+    fn should_omit_geometry_for_degenerate_crop_projection() {
+        let points = vec![Point { x: 10, y: 10 }; 4];
+
+        let projected = project_test_line(points, (0, 0), false, (40, 40));
+
+        assert!(projected.is_empty());
+    }
+
+    #[test]
+    fn should_clamp_padded_batch_columns_to_effective_timeline() {
+        let crop = image::RgbImage::new(100, 20);
+        let projection = CropProjectionMetadata::new(&make_box(10, 20).points, &crop);
+        let mut line = make_detailed_line();
+        line.words[0].columns = vec![8, 9];
+        line.words[0].start_column = 8;
+        line.words[0].end_column = 9;
+        line.line_column_count = 5.0;
+
+        let words = PaddleOcrEngine::build_word_blocks(
+            &line.line,
+            line.words,
+            line.line_column_count,
+            projection,
+            false,
+            10,
+            (120, 60),
+        );
+
+        assert_eq!(words.len(), 1);
+        assert_eq!(words[0].word.columns, [8, 9]);
+        assert_eq!(
+            words[0].box_points,
+            [
+                Point { x: 65, y: 10 },
+                Point { x: 100, y: 10 },
+                Point { x: 100, y: 30 },
+                Point { x: 65, y: 30 },
+            ]
+        );
+    }
+
+    #[test]
+    fn should_convert_detailed_result_to_exact_legacy_fields() {
+        let block = TextBlock {
+            box_points: make_box(5, 7).points,
+            box_score: 0.9,
+            angle_index: 1,
+            angle_score: 0.8,
+            text: "hello".to_string(),
+            text_score: 0.7,
+        };
+        let detailed = DetailedOcrResult {
+            text_blocks: vec![DetailedTextBlock {
+                block: block.clone(),
+                words: vec![WordBlock::from(RecognizedWord {
+                    text: "hello".to_string(),
+                    columns: vec![1, 2, 3],
+                    start_column: 1,
+                    end_column: 3,
+                    confidence: 0.7,
+                })],
+                line_column_count: 5.0,
+                rotation_retained: true,
+            }],
+        };
+
+        let legacy: OcrResult = detailed.into();
+
+        assert_eq!(legacy.text_blocks.len(), 1);
+        assert_eq!(legacy.text_blocks[0].box_points, block.box_points);
+        assert_eq!(legacy.text_blocks[0].box_score, block.box_score);
+        assert_eq!(legacy.text_blocks[0].angle_index, block.angle_index);
+        assert_eq!(legacy.text_blocks[0].angle_score, block.angle_score);
+        assert_eq!(legacy.text_blocks[0].text, block.text);
+        assert_eq!(legacy.text_blocks[0].text_score, block.text_score);
+    }
+
     #[test]
     fn test_sort_text_boxes_top_to_bottom() {
         let mut boxes = vec![make_box(10, 100), make_box(10, 50), make_box(10, 10)];
-        OcrLite::sort_text_boxes(&mut boxes);
+        PaddleOcrEngine::sort_text_boxes(&mut boxes);
         assert_eq!(boxes[0].points[0].y, 10);
         assert_eq!(boxes[1].points[0].y, 50);
         assert_eq!(boxes[2].points[0].y, 100);
@@ -497,7 +1074,7 @@ mod tests {
     #[test]
     fn test_sort_text_boxes_same_line_left_to_right() {
         let mut boxes = vec![make_box(200, 10), make_box(100, 10), make_box(50, 10)];
-        OcrLite::sort_text_boxes(&mut boxes);
+        PaddleOcrEngine::sort_text_boxes(&mut boxes);
         assert_eq!(boxes[0].points[0].x, 50);
         assert_eq!(boxes[1].points[0].x, 100);
         assert_eq!(boxes[2].points[0].x, 200);
@@ -506,21 +1083,21 @@ mod tests {
     #[test]
     fn test_sort_text_boxes_visual_line_jitter_left_to_right() {
         let mut boxes = vec![make_box(200, 10), make_box(50, 19)];
-        OcrLite::sort_text_boxes(&mut boxes);
+        PaddleOcrEngine::sort_text_boxes(&mut boxes);
         assert_eq!(boxes.iter().map(|b| b.points[0].x).collect::<Vec<_>>(), vec![50, 200]);
     }
 
     #[test]
     fn test_sort_text_boxes_tolerance_boundary_stays_top_to_bottom() {
         let mut boxes = vec![make_box(200, 10), make_box(50, 20)];
-        OcrLite::sort_text_boxes(&mut boxes);
+        PaddleOcrEngine::sort_text_boxes(&mut boxes);
         assert_eq!(boxes.iter().map(|b| b.points[0].x).collect::<Vec<_>>(), vec![200, 50]);
     }
 
     #[test]
     fn test_sort_text_boxes_bubbles_across_visual_line() {
         let mut boxes = vec![make_box(300, 10), make_box(200, 12), make_box(50, 14)];
-        OcrLite::sort_text_boxes(&mut boxes);
+        PaddleOcrEngine::sort_text_boxes(&mut boxes);
         assert_eq!(
             boxes.iter().map(|b| b.points[0].x).collect::<Vec<_>>(),
             vec![50, 200, 300]
@@ -530,7 +1107,7 @@ mod tests {
     #[test]
     fn test_sort_text_boxes_does_not_transitively_merge_lines() {
         let mut boxes = vec![make_box(300, 0), make_box(200, 9), make_box(100, 18)];
-        OcrLite::sort_text_boxes(&mut boxes);
+        PaddleOcrEngine::sort_text_boxes(&mut boxes);
         assert_eq!(
             boxes.iter().map(|b| b.points[0].x).collect::<Vec<_>>(),
             vec![200, 300, 100]
@@ -545,7 +1122,7 @@ mod tests {
             make_box(50, 50),
             make_box(200, 100),
         ];
-        OcrLite::sort_text_boxes(&mut boxes);
+        PaddleOcrEngine::sort_text_boxes(&mut boxes);
 
         assert_eq!(boxes[0].points[0].x, 50);
         assert_eq!(boxes[1].points[0].x, 300);
@@ -556,14 +1133,14 @@ mod tests {
     #[test]
     fn test_sort_text_boxes_empty() {
         let mut boxes: Vec<TextBox> = vec![];
-        OcrLite::sort_text_boxes(&mut boxes);
+        PaddleOcrEngine::sort_text_boxes(&mut boxes);
         assert!(boxes.is_empty());
     }
 
     #[test]
     fn test_sort_text_boxes_single() {
         let mut boxes = vec![make_box(10, 20)];
-        OcrLite::sort_text_boxes(&mut boxes);
+        PaddleOcrEngine::sort_text_boxes(&mut boxes);
         assert_eq!(boxes.len(), 1);
     }
 }

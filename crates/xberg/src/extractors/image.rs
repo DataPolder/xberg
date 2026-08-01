@@ -234,19 +234,41 @@ fn transformed_ocr_bounds(
 }
 
 #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn preferred_ocr_elements(
+    elements: &[crate::types::OcrElement],
+    preferred_level: crate::types::OcrElementLevel,
+) -> Vec<&crate::types::OcrElement> {
+    let fallback_level = match preferred_level {
+        crate::types::OcrElementLevel::Line => crate::types::OcrElementLevel::Word,
+        crate::types::OcrElementLevel::Word => crate::types::OcrElementLevel::Line,
+        _ => preferred_level,
+    };
+    let meaningful = elements
+        .iter()
+        .filter(|element| !element.text.trim().is_empty())
+        .collect::<Vec<_>>();
+    let selected_level = if meaningful.iter().any(|element| element.level == preferred_level) {
+        Some(preferred_level)
+    } else if meaningful.iter().any(|element| element.level == fallback_level) {
+        Some(fallback_level)
+    } else {
+        None
+    };
+
+    meaningful
+        .into_iter()
+        .filter(|element| selected_level.is_none_or(|level| element.level == level))
+        .collect()
+}
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
 fn transformed_ocr_elements(
     elements: &[crate::types::OcrElement],
     transform: OcrCoordinateTransform,
+    preferred_level: crate::types::OcrElementLevel,
 ) -> Option<Vec<crate::types::OcrElement>> {
-    let has_word_elements = elements
-        .iter()
-        .any(|element| element.level == crate::types::OcrElementLevel::Word && !element.text.trim().is_empty());
-    elements
-        .iter()
-        .filter(|element| {
-            !element.text.trim().is_empty()
-                && (!has_word_elements || element.level == crate::types::OcrElementLevel::Word)
-        })
+    preferred_ocr_elements(elements, preferred_level)
+        .into_iter()
         .map(|element| {
             let (left, top, right, bottom) = transformed_ocr_bounds(&element.geometry, transform)?;
             let mut transformed = element.clone();
@@ -291,10 +313,7 @@ fn whole_image_layout_mapping_retention(
         return None;
     }
     let elements = doc.prebuilt_ocr_elements.as_ref()?;
-    let meaningful: Vec<_> = elements
-        .iter()
-        .filter(|element| !element.text.trim().is_empty())
-        .collect();
+    let meaningful = preferred_ocr_elements(elements, crate::types::OcrElementLevel::Line);
     if meaningful.is_empty() || meaningful.iter().any(|element| element.page_number != 1) {
         return None;
     }
@@ -576,7 +595,7 @@ fn cached_layout_elements(
     }
     let source_elements = whole_image_doc.prebuilt_ocr_elements.as_ref()?;
     let transform = whole_image_ocr_coordinate_transform(whole_image_doc, image_width, image_height)?;
-    let elements = transformed_ocr_elements(source_elements, transform)?;
+    let elements = transformed_ocr_elements(source_elements, transform, crate::types::OcrElementLevel::Line)?;
     if elements.iter().any(|element| element.page_number != 1) {
         return None;
     }
@@ -1041,7 +1060,8 @@ async fn recognize_cached_image_tables(
     let Some(transform) = whole_image_ocr_coordinate_transform(whole_image_doc, rgb.width(), rgb.height()) else {
         return Vec::new();
     };
-    let Some(elements) = transformed_ocr_elements(source_elements, transform) else {
+    let Some(elements) = transformed_ocr_elements(source_elements, transform, crate::types::OcrElementLevel::Word)
+    else {
         return Vec::new();
     };
 
@@ -1090,6 +1110,17 @@ fn ocr_backend_emits_structured_markdown(config: &ExtractionConfig) -> bool {
 #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
 fn should_use_layout_ocr(config: &ExtractionConfig) -> bool {
     config.layout.is_some() && config.ocr.is_some() && !ocr_backend_emits_structured_markdown(config)
+}
+
+#[cfg(any(feature = "ocr", feature = "ocr-wasm", feature = "ocr-pipeline"))]
+fn enable_image_ocr_elements(config: &mut crate::core::config::OcrConfig, include_words: bool) {
+    let element_config = config
+        .element_config
+        .get_or_insert_with(crate::types::OcrElementConfig::default);
+    element_config.include_elements = true;
+    if include_words {
+        element_config.min_level = crate::types::OcrElementLevel::Word;
+    }
 }
 
 #[cfg_attr(alef, alef(skip))]
@@ -1160,16 +1191,11 @@ impl ImageExtractor {
         let mut ocr_config_with_format = ocr_config.clone();
         ocr_config_with_format.output_format = Some(config.output_format.clone());
         ocr_config_with_format.acceleration = config.acceleration.clone();
-
-        match ocr_config_with_format.element_config.as_mut() {
-            Some(ec) => ec.include_elements = true,
-            None => {
-                ocr_config_with_format.element_config = Some(crate::types::OcrElementConfig {
-                    include_elements: true,
-                    ..Default::default()
-                });
-            }
-        }
+        #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+        let include_words = should_use_layout_ocr(config);
+        #[cfg(not(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm"))))]
+        let include_words = false;
+        enable_image_ocr_elements(&mut ocr_config_with_format, include_words);
 
         let ocr_result = backend.process_image(content, &ocr_config_with_format).await?;
 
@@ -1671,6 +1697,21 @@ mod tests {
     }
 
     #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    fn positioned_line_box(text: &str, left: u32, top: u32, width: u32, height: u32) -> crate::types::OcrElement {
+        crate::types::OcrElement::new(
+            text,
+            crate::types::OcrBoundingGeometry::Rectangle {
+                left,
+                top,
+                width,
+                height,
+            },
+            crate::types::OcrConfidence::from_tesseract(95.0),
+        )
+        .with_level(crate::types::OcrElementLevel::Line)
+    }
+
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
     fn whole_image_doc_with_elements(
         text: &str,
         elements: Vec<crate::types::OcrElement>,
@@ -1716,6 +1757,100 @@ mod tests {
 
         let task_image = std::sync::Arc::clone(&shared);
         assert!(std::sync::Arc::ptr_eq(&task_image, &shared));
+    }
+
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn should_preserve_requested_element_level_without_layout() {
+        let mut config = crate::core::config::OcrConfig {
+            element_config: Some(crate::types::OcrElementConfig {
+                min_level: crate::types::OcrElementLevel::Line,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        enable_image_ocr_elements(&mut config, false);
+
+        let element_config = config.element_config.unwrap();
+        assert!(element_config.include_elements);
+        assert_eq!(element_config.min_level, crate::types::OcrElementLevel::Line);
+    }
+
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    #[test]
+    fn should_request_word_elements_for_layout_assembly() {
+        let mut config = crate::core::config::OcrConfig::default();
+
+        enable_image_ocr_elements(&mut config, true);
+
+        let element_config = config.element_config.unwrap();
+        assert!(element_config.include_elements);
+        assert_eq!(element_config.min_level, crate::types::OcrElementLevel::Word);
+    }
+
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    #[test]
+    fn should_select_line_text_for_semantics_and_word_boxes_for_tables() {
+        let elements = vec![
+            positioned_line_box("Hello, world!", 10, 10, 120, 20),
+            positioned_word_box("Hello,", 10, 10, 50, 20),
+            positioned_word_box("world!", 70, 10, 60, 20),
+        ];
+        let transform = OcrCoordinateTransform {
+            processed_width: 200,
+            processed_height: 100,
+            scale_x: 1.0,
+            scale_y: 1.0,
+        };
+
+        let semantic = transformed_ocr_elements(&elements, transform, crate::types::OcrElementLevel::Line).unwrap();
+        let semantic_refs = semantic.iter().collect::<Vec<_>>();
+        assert_eq!(semantic.len(), 1);
+        assert_eq!(text_from_positioned_elements(&semantic_refs), "Hello, world!");
+
+        let table = transformed_ocr_elements(&elements, transform, crate::types::OcrElementLevel::Word).unwrap();
+        assert_eq!(
+            table.iter().map(|element| element.text.as_str()).collect::<Vec<_>>(),
+            ["Hello,", "world!"]
+        );
+    }
+
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    #[test]
+    fn should_fall_back_when_preferred_ocr_granularity_is_missing() {
+        let lines = vec![positioned_line_box("Line only", 10, 10, 80, 20)];
+        let words = vec![positioned_word("Word", 10, 10)];
+
+        assert_eq!(
+            preferred_ocr_elements(&lines, crate::types::OcrElementLevel::Word)[0].level,
+            crate::types::OcrElementLevel::Line
+        );
+        assert_eq!(
+            preferred_ocr_elements(&words, crate::types::OcrElementLevel::Line)[0].level,
+            crate::types::OcrElementLevel::Word
+        );
+    }
+
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    #[test]
+    fn should_measure_mixed_level_layout_retention_once_at_line_granularity() {
+        let detections = vec![crate::layout::LayoutDetection::new(
+            crate::layout::LayoutClass::Text,
+            0.96,
+            crate::layout::BBox::new(0.0, 0.0, 100.0, 50.0),
+        )];
+        let elements = vec![
+            positioned_line_box("inside outside", 10, 10, 80, 20),
+            positioned_word_box("inside", 10, 10, 35, 20),
+            positioned_word_box("outside", 140, 10, 45, 20),
+        ];
+        let whole = whole_image_doc_with_elements("inside outside", elements, 200, 100);
+
+        assert_eq!(
+            whole_image_layout_mapping_retention(&whole, &detections, 200, 100),
+            Some(1.0)
+        );
     }
 
     #[cfg(all(feature = "layout-detection", feature = "ocr"))]

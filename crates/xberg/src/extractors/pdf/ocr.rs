@@ -1662,7 +1662,8 @@ pub(crate) async fn extract_with_ocr(
             .get("mean_text_conf")
             .and_then(|v| v.as_f64())
             .map(|v| v / 100.0);
-        let ocr_elements = result.ocr_elements.unwrap_or_default();
+        let backend_elements = result.ocr_elements.unwrap_or_default();
+        let ocr_elements = filter_public_ocr_elements(&backend_elements, base_ocr_config);
         let llm_usage = result.llm_usage.unwrap_or_default();
         let formulas = result.formulas;
         let page_texts = if let Some(pages) = result.pages {
@@ -1876,7 +1877,7 @@ pub(crate) async fn extract_with_ocr(
                 for elem in elems.iter_mut() {
                     elem.page_number = (page_idx + 1) as u32;
                 }
-                all_ocr_elements.extend(elems.iter().cloned());
+                all_ocr_elements.extend(filter_public_ocr_elements(elems, base_ocr_config));
             }
 
             for mut formula in ocr_result.formulas {
@@ -2640,23 +2641,56 @@ pub(crate) async fn run_ocr_pipeline(
     }
 }
 
-/// Clone an OCR config with `include_elements` forced to true.
+/// Clone an OCR config with word-level elements forced on for layout consumers.
 ///
-/// Layout assembly requires OCR elements with bounding geometry. This ensures
-/// the backend produces them regardless of the user's original config.
+/// Layout assembly requires word geometry for table cells while semantic paragraph
+/// assembly continues to consume the backend's line-only internal document.
 #[cfg(all(feature = "ocr", feature = "layout-detection"))]
 fn ensure_elements_enabled(config: &crate::core::config::ocr::OcrConfig) -> crate::core::config::ocr::OcrConfig {
     let mut config = config.clone();
     match config.element_config.as_mut() {
-        Some(ec) => ec.include_elements = true,
+        Some(ec) => {
+            ec.include_elements = true;
+            ec.min_level = crate::types::OcrElementLevel::Word;
+        }
         None => {
             config.element_config = Some(crate::types::OcrElementConfig {
                 include_elements: true,
+                min_level: crate::types::OcrElementLevel::Word,
                 ..Default::default()
             });
         }
     }
     config
+}
+
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn filter_public_ocr_elements(
+    elements: &[crate::types::OcrElement],
+    config: &crate::core::config::ocr::OcrConfig,
+) -> Vec<crate::types::OcrElement> {
+    let Some(element_config) = config.element_config.as_ref().filter(|config| config.include_elements) else {
+        return Vec::new();
+    };
+
+    let minimum_rank = ocr_element_level_rank(element_config.min_level);
+
+    elements
+        .iter()
+        .filter(|element| element.confidence.recognition >= element_config.min_confidence)
+        .filter(|element| ocr_element_level_rank(element.level) >= minimum_rank)
+        .cloned()
+        .collect()
+}
+
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn ocr_element_level_rank(level: crate::types::OcrElementLevel) -> u8 {
+    match level {
+        crate::types::OcrElementLevel::Word => 0,
+        crate::types::OcrElementLevel::Line => 1,
+        crate::types::OcrElementLevel::Block => 2,
+        crate::types::OcrElementLevel::Page => 3,
+    }
 }
 
 /// Inject layout-detection settings into OcrConfig backend options for paired-mode backends.
@@ -4992,6 +5026,101 @@ Buffers:           50000 kB
             Some(true),
             "enable_chart_understanding should be injected into the new object"
         );
+    }
+
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    #[test]
+    fn layout_ocr_config_should_force_word_elements_for_internal_consumers() {
+        let config = crate::core::config::OcrConfig {
+            element_config: Some(crate::types::OcrElementConfig {
+                include_elements: false,
+                min_level: crate::types::OcrElementLevel::Line,
+                min_confidence: 0.75,
+                build_hierarchy: true,
+            }),
+            ..Default::default()
+        };
+
+        let result = ensure_elements_enabled(&config);
+        let element_config = result.element_config.expect("layout OCR must request elements");
+
+        assert!(element_config.include_elements);
+        assert_eq!(element_config.min_level, crate::types::OcrElementLevel::Word);
+        assert_eq!(element_config.min_confidence, 0.75);
+        assert!(element_config.build_hierarchy);
+    }
+
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    #[test]
+    fn public_ocr_elements_should_preserve_requested_granularity_and_confidence() {
+        let elements = vec![
+            test_ocr_element("word", crate::types::OcrElementLevel::Word, 0.9),
+            test_ocr_element("weak word", crate::types::OcrElementLevel::Word, 0.4),
+            test_ocr_element("line", crate::types::OcrElementLevel::Line, 0.8),
+            test_ocr_element("block", crate::types::OcrElementLevel::Block, 0.95),
+            test_ocr_element("page", crate::types::OcrElementLevel::Page, 0.95),
+        ];
+        let no_elements = crate::core::config::OcrConfig::default();
+        let line_elements = ocr_config_requesting_elements(crate::types::OcrElementLevel::Line, 0.5);
+        let word_elements = ocr_config_requesting_elements(crate::types::OcrElementLevel::Word, 0.5);
+        let block_elements = ocr_config_requesting_elements(crate::types::OcrElementLevel::Block, 0.0);
+        let page_elements = ocr_config_requesting_elements(crate::types::OcrElementLevel::Page, 0.0);
+
+        assert!(filter_public_ocr_elements(&elements, &no_elements).is_empty());
+        assert_eq!(
+            element_texts(filter_public_ocr_elements(&elements, &line_elements)),
+            vec!["line", "block", "page"]
+        );
+        assert_eq!(
+            element_texts(filter_public_ocr_elements(&elements, &word_elements)),
+            vec!["word", "line", "block", "page"]
+        );
+        assert_eq!(
+            element_texts(filter_public_ocr_elements(&elements, &block_elements)),
+            vec!["block", "page"]
+        );
+        assert_eq!(
+            element_texts(filter_public_ocr_elements(&elements, &page_elements)),
+            vec!["page"]
+        );
+    }
+
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    fn test_ocr_element(
+        text: &str,
+        level: crate::types::OcrElementLevel,
+        recognition: f64,
+    ) -> crate::types::OcrElement {
+        crate::types::OcrElement {
+            text: text.to_string(),
+            level,
+            confidence: crate::types::OcrConfidence {
+                detection: None,
+                recognition,
+            },
+            ..Default::default()
+        }
+    }
+
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    fn ocr_config_requesting_elements(
+        min_level: crate::types::OcrElementLevel,
+        min_confidence: f64,
+    ) -> crate::core::config::OcrConfig {
+        crate::core::config::OcrConfig {
+            element_config: Some(crate::types::OcrElementConfig {
+                include_elements: true,
+                min_level,
+                min_confidence,
+                build_hierarchy: true,
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    fn element_texts(elements: Vec<crate::types::OcrElement>) -> Vec<String> {
+        elements.into_iter().map(|element| element.text).collect()
     }
 
     /// Simulate NICS background checks table: many short numeric tokens.

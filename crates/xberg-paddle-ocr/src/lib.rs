@@ -31,5 +31,12 @@ pub mod ocr_utils;
 pub mod scale_param;
 
 pub use ocr_error::OcrError;
-pub use ocr_lite::OcrLite;
-pub use ocr_result::{Angle, OcrResult, Point, TextBlock, TextBox, TextLine};
+pub use ocr_lite::PaddleOcrEngine;
+pub use ocr_result::{
+    Angle, DetailedOcrResult, DetailedTextBlock, DetailedTextLine, OcrResult, Point, RecognizedWord, TextBlock,
+    TextBox, TextLine, WordBlock,
+};
+
+/// Backward-compatible name for [`PaddleOcrEngine`].
+#[deprecated(note = "use PaddleOcrEngine")]
+pub type OcrLite = PaddleOcrEngine;

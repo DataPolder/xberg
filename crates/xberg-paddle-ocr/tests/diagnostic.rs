@@ -67,12 +67,12 @@ fn diagnostic_detection_pipeline() {
     let img = create_test_image();
     eprintln!("Step 1 - Test image created: {}x{}", img.width(), img.height());
 
-    let mut ocr_lite = xberg_paddle_ocr::OcrLite::new();
+    let mut ocr_engine = xberg_paddle_ocr::PaddleOcrEngine::new();
     let det_path = model_dir.join("det/model.onnx");
     let cls_path = model_dir.join("cls/model.onnx");
     let rec_path = model_dir.join("rec/model.onnx");
 
-    let init_result = ocr_lite.init_models(
+    let init_result = ocr_engine.init_models(
         det_path.to_str().unwrap(),
         cls_path.to_str().unwrap(),
         rec_path.to_str().unwrap(),
@@ -104,7 +104,7 @@ fn diagnostic_detection_pipeline() {
             padding, max_side, box_score, box_thresh, unclip
         );
 
-        let result = ocr_lite.detect(
+        let result = ocr_engine.detect(
             &img,
             *padding,
             *max_side,

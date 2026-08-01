@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- PaddleOCR now exposes the `PaddleOcrEngine` name and detailed word-level quadrilaterals;
+  the former `OcrLite` name remains available as a deprecated compatibility alias.
 - Dense XLSX extraction now scans worksheet bounds without cloning every cell before normal range
   parsing, while oversized sparse sheets materialize their cells only once.
 - Layout-enabled image table recognition now shares its decoded RGB raster with the TATR worker,
@@ -22,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- PaddleOCR layout and table consumers now use projected CTC word boxes while preserving line-level
+  semantic text and caller-requested element granularity, avoiding mixed-level duplicate table text.
 - PaddleOCR detection now honors its configured DB threshold and matches upstream dilation,
   perspective-crop, and visual-line ordering behavior, improving small, skewed, and jittered text.
 - Apple Keynote packages containing only slide archives now route to the Keynote extractor, and

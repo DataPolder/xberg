@@ -25,7 +25,7 @@ use crate::types::{OcrBoundingGeometry, OcrConfidence, OcrElement, OcrElementLev
 use crate::error::{Result, XbergError};
 
 #[cfg(feature = "paddle-ocr")]
-use xberg_paddle_ocr::TextBlock;
+use xberg_paddle_ocr::{DetailedTextBlock, TextBlock, WordBlock};
 
 #[cfg(feature = "paddle-ocr")]
 use super::table::HocrWord;
@@ -93,6 +93,62 @@ pub(crate) fn text_block_to_element(block: &TextBlock, page_number: u32) -> Resu
             .with_rotation_opt(rotation)
             .with_metadata("backend", serde_json::json!("paddle-ocr")),
     ))
+}
+
+/// Line and word elements derived from one PaddleOCR recognition block.
+#[cfg(feature = "paddle-ocr")]
+pub(crate) struct PaddleElementGroup {
+    pub(crate) line: OcrElement,
+    pub(crate) words: Vec<OcrElement>,
+}
+
+/// Convert detailed PaddleOCR output without mixing semantic line text and word geometry.
+#[cfg(feature = "paddle-ocr")]
+pub(crate) fn detailed_text_block_to_elements(
+    block: &DetailedTextBlock,
+    page_number: u32,
+) -> Result<Option<PaddleElementGroup>> {
+    let Some(line) = text_block_to_element(&block.block, page_number)? else {
+        return Ok(None);
+    };
+    let words = block
+        .words
+        .iter()
+        .filter_map(|word| word_block_to_element(word, &line, block.block.box_score, page_number))
+        .collect();
+    Ok(Some(PaddleElementGroup { line, words }))
+}
+
+#[cfg(feature = "paddle-ocr")]
+fn word_block_to_element(
+    word: &WordBlock,
+    line: &OcrElement,
+    detection_confidence: f32,
+    page_number: u32,
+) -> Option<OcrElement> {
+    let points = word.box_points.get(..4)?;
+    if word.word.text.trim().is_empty() {
+        return None;
+    }
+    let geometry = OcrBoundingGeometry::Quadrilateral {
+        points: [
+            (points[0].x, points[0].y),
+            (points[1].x, points[1].y),
+            (points[2].x, points[2].y),
+            (points[3].x, points[3].y),
+        ],
+    };
+    Some(
+        OcrElement::new(
+            word.word.text.clone(),
+            geometry,
+            OcrConfidence::from_paddle(detection_confidence, word.word.confidence),
+        )
+        .with_level(OcrElementLevel::Word)
+        .with_page_number(page_number)
+        .with_rotation_opt(line.rotation.clone())
+        .with_metadata("backend", serde_json::json!("paddle-ocr")),
+    )
 }
 
 /// Tesseract TSV row data for conversion.
@@ -300,8 +356,9 @@ pub(crate) fn element_to_hocr_word(element: &OcrElement) -> HocrWord {
 
 /// Convert a vector of OcrElements to HocrWords for batch table processing.
 ///
-/// Filters to word-level elements only, as table reconstruction
-/// works best with word-level granularity.
+/// Prefers word-level elements globally, as table reconstruction works best
+/// with word-level granularity, and falls back to line-level elements when no
+/// words satisfy the confidence threshold.
 ///
 /// # Arguments
 ///
@@ -313,10 +370,21 @@ pub(crate) fn element_to_hocr_word(element: &OcrElement) -> HocrWord {
 /// A vector of HocrWords filtered by confidence and element level.
 #[cfg(feature = "paddle-ocr")]
 pub(crate) fn elements_to_hocr_words(elements: &[OcrElement], min_confidence: f64) -> Vec<HocrWord> {
+    let has_valid_words = elements
+        .iter()
+        .any(|element| element.confidence.recognition >= min_confidence && element.level == OcrElementLevel::Word);
+
     elements
         .iter()
-        .filter(|e| e.confidence.recognition >= min_confidence)
-        .filter(|e| matches!(e.level, OcrElementLevel::Word | OcrElementLevel::Line))
+        .filter(|element| element.confidence.recognition >= min_confidence)
+        // Mixing line and word boxes duplicates text and corrupts table geometry. ~keep
+        .filter(|element| {
+            if has_valid_words {
+                element.level == OcrElementLevel::Word
+            } else {
+                element.level == OcrElementLevel::Line
+            }
+        })
         .map(element_to_hocr_word)
         .collect()
 }
@@ -463,6 +531,68 @@ mod tests {
 
     #[cfg(feature = "paddle-ocr")]
     #[test]
+    fn elements_to_hocr_words_prefers_words_over_lines_globally() {
+        let elements = vec![
+            table_input_element("word one", OcrElementLevel::Word, 0.91),
+            table_input_element("full line", OcrElementLevel::Line, 0.99),
+            table_input_element("word two", OcrElementLevel::Word, 0.92),
+        ];
+
+        let words = elements_to_hocr_words(&elements, 0.6);
+
+        assert_eq!(
+            words.iter().map(|word| word.text.as_str()).collect::<Vec<_>>(),
+            ["word one", "word two"]
+        );
+    }
+
+    #[cfg(feature = "paddle-ocr")]
+    #[test]
+    fn elements_to_hocr_words_falls_back_to_lines_when_words_are_absent() {
+        let elements = vec![
+            table_input_element("line one", OcrElementLevel::Line, 0.91),
+            table_input_element("line two", OcrElementLevel::Line, 0.92),
+        ];
+
+        let words = elements_to_hocr_words(&elements, 0.6);
+
+        assert_eq!(
+            words.iter().map(|word| word.text.as_str()).collect::<Vec<_>>(),
+            ["line one", "line two"]
+        );
+    }
+
+    #[cfg(feature = "paddle-ocr")]
+    #[test]
+    fn elements_to_hocr_words_falls_back_to_lines_when_words_fail_confidence() {
+        let elements = vec![
+            table_input_element("low word", OcrElementLevel::Word, 0.59),
+            table_input_element("fallback line", OcrElementLevel::Line, 0.81),
+        ];
+
+        let words = elements_to_hocr_words(&elements, 0.6);
+
+        assert_eq!(words.len(), 1);
+        assert_eq!(words[0].text, "fallback line");
+    }
+
+    #[cfg(feature = "paddle-ocr")]
+    fn table_input_element(text: &str, level: OcrElementLevel, confidence: f64) -> OcrElement {
+        OcrElement::new(
+            text,
+            OcrBoundingGeometry::Rectangle {
+                left: 0,
+                top: 0,
+                width: 50,
+                height: 20,
+            },
+            OcrConfidence::from_tesseract(confidence * 100.0),
+        )
+        .with_level(level)
+    }
+
+    #[cfg(feature = "paddle-ocr")]
+    #[test]
     fn test_text_block_to_element() {
         use xberg_paddle_ocr::Point;
 
@@ -505,6 +635,61 @@ mod tests {
         let rot = element.rotation.as_ref().unwrap();
         assert_eq!(rot.angle_degrees, 0.0);
         assert!((rot.confidence.unwrap() - 0.99).abs() < 0.001);
+    }
+
+    #[cfg(feature = "paddle-ocr")]
+    #[test]
+    fn detailed_text_block_preserves_line_and_word_geometry_separately() {
+        use xberg_paddle_ocr::{Point, RecognizedWord, WordBlock};
+
+        let block = DetailedTextBlock {
+            block: TextBlock {
+                box_points: vec![
+                    Point { x: 10, y: 20 },
+                    Point { x: 110, y: 20 },
+                    Point { x: 110, y: 40 },
+                    Point { x: 10, y: 40 },
+                ],
+                box_score: 0.95,
+                angle_index: 0,
+                angle_score: 0.99,
+                text: "first second".to_string(),
+                text_score: 0.88,
+            },
+            words: vec![WordBlock {
+                word: RecognizedWord {
+                    text: "first".to_string(),
+                    confidence: 0.91,
+                    ..Default::default()
+                },
+                box_points: vec![
+                    Point { x: 10, y: 20 },
+                    Point { x: 50, y: 20 },
+                    Point { x: 50, y: 40 },
+                    Point { x: 10, y: 40 },
+                ],
+            }],
+            line_column_count: 20.0,
+            rotation_retained: false,
+        };
+
+        let group = detailed_text_block_to_elements(&block, 2)
+            .expect("valid detailed block")
+            .expect("detection passes confidence threshold");
+
+        assert_eq!(group.line.text, "first second");
+        assert_eq!(group.line.level, OcrElementLevel::Line);
+        assert_eq!(group.words.len(), 1);
+        assert_eq!(group.words[0].text, "first");
+        assert_eq!(group.words[0].level, OcrElementLevel::Word);
+        assert_eq!(group.words[0].page_number, 2);
+        assert!((group.words[0].confidence.recognition - 0.91).abs() < 0.001);
+        assert_eq!(
+            group.words[0].geometry,
+            OcrBoundingGeometry::Quadrilateral {
+                points: [(10, 20), (50, 20), (50, 40), (10, 40)]
+            }
+        );
     }
 
     #[cfg(feature = "paddle-ocr")]
