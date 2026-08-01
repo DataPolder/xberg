@@ -66,6 +66,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   OCR geometry aligned with optional layout detection on rotated documents.
 - PaddleOCR now selects the Japanese model for vertical Japanese and prefers Korean or Japanese
   recognition for mixed Latin-script requests those models can cover.
+- PP-OCRv6 requests containing Korean now use PaddleOCR's script-specific Korean recognizer,
+  recovering Hangul text that the unified recognition model omitted.
 - Jupyter notebook paths retain `application/x-ipynb+json` routing when generic JSON content
   detection runs, and extracted notebook content no longer exposes diagnostic cell/output markers;
   cell identity, execution, tag, output-type, and MIME details remain available as structured metadata.

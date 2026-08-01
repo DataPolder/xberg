@@ -248,10 +248,13 @@ const V6_REC_MODELS: &[V6RecModelDefinition] = &[
     },
 ];
 
-/// Script families covered by the PP-OCRv6 unified recognition model (CJK + Latin + JA/KO).
+/// Script families covered by the PP-OCRv6 unified recognition model.
+///
+/// Korean uses its PP-OCRv5 script-specific recognizer because it retains
+/// materially better Hangul accuracy than the unified v6 export. ~keep
 /// Families outside this set fall back to the PP-OCRv5 per-script recognition models.
 #[cfg(feature = "paddle-ocr")]
-const V6_UNIFIED_FAMILIES: &[&str] = &["english", "chinese", "korean", "latin"];
+const V6_UNIFIED_FAMILIES: &[&str] = &["english", "chinese", "latin"];
 
 /// Maps a configured tier to an effective PP-OCRv6 tier. Legacy v5 tiers (`server`/`mobile`)
 /// and any unknown value fall back to `medium`, the v6 default.
@@ -723,7 +726,7 @@ impl ModelManager {
 
     /// Resolves the recognition model for a script family, model version, and tier.
     ///
-    /// For `pp-ocrv6`, families covered by the unified model (English, Chinese, Korean, Latin)
+    /// For `pp-ocrv6`, families covered by the unified model (English, Chinese, Latin)
     /// resolve to the v6 recognition model for the effective tier; all other scripts fall back
     /// to the PP-OCRv5 per-script models. Any other version resolves entirely via PP-OCRv5.
     pub(crate) fn resolve_rec_model_versioned(
@@ -995,11 +998,17 @@ mod tests {
 
     #[test]
     fn test_v6_unified_family_routing() {
-        assert!(V6_UNIFIED_FAMILIES.contains(&"english"));
-        assert!(V6_UNIFIED_FAMILIES.contains(&"chinese"));
-        assert!(V6_UNIFIED_FAMILIES.contains(&"korean"));
-        assert!(V6_UNIFIED_FAMILIES.contains(&"latin"));
-        for uncovered in &["arabic", "eslav", "thai", "greek", "devanagari", "tamil", "telugu"] {
+        assert_eq!(V6_UNIFIED_FAMILIES, &["english", "chinese", "latin"]);
+        for uncovered in &[
+            "korean",
+            "arabic",
+            "eslav",
+            "thai",
+            "greek",
+            "devanagari",
+            "tamil",
+            "telugu",
+        ] {
             assert!(!V6_UNIFIED_FAMILIES.contains(uncovered));
         }
     }
