@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The prebuilt macOS CLI tarballs (`aarch64-apple-darwin`, `x86_64-apple-darwin`) now bundle the full
+  libheif dynamic-library closure beside the `xberg` binary and rewrite its load commands to
+  `@loader_path`, so the binary no longer fails with a `libheif.1.dylib` not-loaded error on machines
+  that lack Homebrew's libheif at the baked-in path (#1357).
 - PaddleOCR layout and table consumers now use projected CTC word boxes while preserving line-level
   semantic text and caller-requested element granularity, avoiding mixed-level duplicate table text.
 - PaddleOCR detection now honors its configured DB threshold and matches upstream dilation,

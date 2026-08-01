@@ -1097,6 +1097,17 @@ jobs:
               fi
               codesign --force -s - "$STAGE/libonnxruntime.dylib" || true
             fi
+            # macOS CLI builds enable the formats feature, which dynamically
+            # links libheif. Bundle its complete non-system dylib closure next to
+            # the binary and rewrite load commands to @loader_path so the tarball
+            # is self-contained rather than carrying an absolute Homebrew libheif
+            # path that is absent on users' machines (xberg-io/xberg#1357). The
+            # dlopen'd ONNX Runtime dylib (Intel, handled above) is not a link-time
+            # dependency, so this closure walk does not disturb it.
+            if [[ "$TARGET" == *-apple-darwin ]]; then
+              bash scripts/ci/vendor-native-closure-macos.sh "$STAGE/xberg"
+              "$STAGE/xberg" --version
+            fi
             # Linux CLI builds enable the formats feature, which dynamically
             # links libheif. Ship its complete non-system dependency closure.
             if [[ "$TARGET" == *-unknown-linux-gnu ]]; then
