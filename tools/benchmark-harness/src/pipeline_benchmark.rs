@@ -81,6 +81,12 @@ pub struct PipelineDocResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PipelineAggregate {
     pub pipeline: String,
+    /// Number of documents contributing to SF1 statistics.
+    #[serde(default)]
+    pub sf1_count: Option<usize>,
+    /// Number of documents contributing to TF1 statistics.
+    #[serde(default)]
+    pub tf1_count: Option<usize>,
     pub mean_sf1: f64,
     pub mean_tf1: f64,
     pub mean_time_ms: f64,
@@ -397,7 +403,6 @@ pub fn print_pipeline_table(results: &[PipelineDocResult], sort_by: SortMetric, 
         eprintln!();
     }
 
-    let total_docs = results.len();
     eprintln!("{}", "-".repeat(36 + pipelines.len() * 35));
     eprint!("{:<30} {:>5}", "AVERAGE", "");
     for (i, _) in pipelines.iter().enumerate() {
@@ -456,15 +461,19 @@ pub fn print_pipeline_table(results: &[PipelineDocResult], sort_by: SortMetric, 
         }
     }
     eprintln!();
-    let sf1_excluded: usize = results.iter().map(|r| r.results[0].sf1).filter(|v| v.is_nan()).count();
-    if sf1_excluded > 0 {
-        eprintln!(
-            "  (SF1 averaged over {}/{} docs; {} paragraph-only docs excluded)",
-            total_docs - sf1_excluded,
-            total_docs,
-            sf1_excluded
-        );
+    for aggregate in compute_aggregates(results) {
+        eprintln!("{}", format_coverage_line(&aggregate, results.len()));
     }
+}
+
+fn format_coverage_line(aggregate: &PipelineAggregate, total_docs: usize) -> String {
+    let (Some(sf1_count), Some(tf1_count)) = (aggregate.sf1_count, aggregate.tf1_count) else {
+        return format!("  {} coverage: unknown (legacy artifact)", aggregate.pipeline);
+    };
+    format!(
+        "  {} coverage: SF1 {}/{} docs, TF1 {}/{} docs",
+        aggregate.pipeline, sf1_count, total_docs, tf1_count, total_docs
+    )
 }
 
 /// Print per-block-type F1 breakdown for triage.
@@ -575,11 +584,16 @@ pub fn compute_aggregates(results: &[PipelineDocResult]) -> Vec<PipelineAggregat
         tf1s.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         times.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
-        let sf1_n = sf1s.len() as f64;
-        let tf1_n = tf1s.len() as f64;
+        // Metric availability differs by document, so retain independent denominators. ~keep
+        let sf1_count = sf1s.len();
+        let tf1_count = tf1s.len();
+        let sf1_n = sf1_count as f64;
+        let tf1_n = tf1_count as f64;
 
         aggregates.push(PipelineAggregate {
             pipeline: pipeline_name,
+            sf1_count: Some(sf1_count),
+            tf1_count: Some(tf1_count),
             mean_sf1: if sf1_n > 0.0 {
                 sf1s.iter().sum::<f64>() / sf1_n
             } else {
@@ -860,10 +874,10 @@ mod tests {
     }
 
     #[test]
-    fn aggregates_ignore_unavailable_tf1_scores() {
-        let pipeline_result = |tf1| PipelineResult {
+    fn aggregates_count_available_metrics_independently() {
+        let pipeline_result = |sf1, tf1| PipelineResult {
             pipeline: Pipeline::Docling,
-            sf1: tf1,
+            sf1,
             tf1,
             char_similarity: tf1,
             order_score: tf1,
@@ -875,23 +889,30 @@ mod tests {
             extra_tokens: Vec::new(),
             content: String::new(),
         };
-        let doc_result = |name: &str, tf1| PipelineDocResult {
+        let doc_result = |name: &str, sf1, tf1| PipelineDocResult {
             name: name.to_string(),
             file_type: "pdf".to_string(),
             file_size: 1,
-            results: vec![pipeline_result(tf1)],
+            results: vec![pipeline_result(sf1, tf1)],
         };
-        let results = vec![doc_result("success", 0.75), doc_result("failure", f64::NAN)];
+        let results = vec![
+            doc_result("all-metrics", 0.75, 0.75),
+            doc_result("tf1-only", f64::NAN, 0.25),
+        ];
 
         let aggregates = compute_aggregates(&results);
 
         assert_eq!(aggregates.len(), 1);
-        assert_eq!(aggregates[0].mean_tf1, 0.75);
+        assert_eq!(aggregates[0].sf1_count, Some(1));
+        assert_eq!(aggregates[0].tf1_count, Some(2));
+        assert_eq!(aggregates[0].mean_tf1, 0.5);
         assert_eq!(aggregates[0].p50_tf1, 0.75);
-        assert!(
-            serde_json::to_string(&aggregates)
-                .unwrap()
-                .contains("\"mean_tf1\":0.75")
+        let serialized = serde_json::to_value(&aggregates).unwrap();
+        assert_eq!(serialized[0]["sf1_count"], 1);
+        assert_eq!(serialized[0]["tf1_count"], 2);
+        assert_eq!(
+            format_coverage_line(&aggregates[0], results.len()),
+            "  docling coverage: SF1 1/2 docs, TF1 2/2 docs"
         );
     }
 
@@ -922,6 +943,8 @@ mod tests {
 
         assert!(aggregates[0].mean_sf1.is_nan());
         assert!(aggregates[0].mean_tf1.is_nan());
+        assert_eq!(aggregates[0].sf1_count, Some(0));
+        assert_eq!(aggregates[0].tf1_count, Some(0));
         assert!(aggregates[0].p50_sf1.is_nan());
         assert!(aggregates[0].p50_tf1.is_nan());
         assert!(serialized[0]["mean_sf1"].is_null());
@@ -937,11 +960,26 @@ mod tests {
             "git_sha": "abc",
             "doc_count": 0,
             "pipeline_count": 0,
-            "aggregates": [],
+            "aggregates": [{
+                "pipeline": "docling",
+                "mean_sf1": 0.0,
+                "mean_tf1": 0.0,
+                "mean_time_ms": 0.0,
+                "p50_sf1": 0.0,
+                "p50_tf1": 0.0,
+                "p50_time_ms": 0.0,
+                "p90_time_ms": 0.0
+            }],
             "docs": []
         }))
         .unwrap();
         assert!(summary.provenance.hash_algorithm.is_empty());
+        assert_eq!(summary.aggregates[0].sf1_count, None);
+        assert_eq!(summary.aggregates[0].tf1_count, None);
+        assert_eq!(
+            format_coverage_line(&summary.aggregates[0], 0),
+            "  docling coverage: unknown (legacy artifact)"
+        );
     }
 
     #[test]
