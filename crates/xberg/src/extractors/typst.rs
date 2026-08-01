@@ -323,17 +323,19 @@ impl TypstExtractor {
             .and_then(|m| m.as_str().parse::<usize>().ok())
             .unwrap_or(0);
 
-        let mut cells: Vec<String> = Vec::new();
+        let mut cells: Vec<(String, usize)> = Vec::new();
         let mut in_bracket = false;
         let mut cell = String::new();
-        for ch in table_str.chars() {
+        let mut cell_start = 0;
+        for (index, ch) in table_str.char_indices() {
             match ch {
                 '[' => {
                     in_bracket = true;
+                    cell_start = index;
                     cell.clear();
                 }
                 ']' if in_bracket => {
-                    cells.push(cell.trim().to_string());
+                    cells.push((cell.trim().to_string(), cell_start));
                     in_bracket = false;
                     cell.clear();
                 }
@@ -349,11 +351,23 @@ impl TypstExtractor {
         }
 
         let effective_cols = if num_cols > 0 { num_cols } else { cells.len() };
-        let rows: Vec<Vec<String>> = cells.chunks(effective_cols).map(|chunk| chunk.to_vec()).collect();
-        let has_explicit_header = Self::has_explicit_table_header(table_str);
-        let columns = has_explicit_header.then(|| rows[0].clone());
+        let header_range = Self::explicit_table_header_range(table_str);
+        let header_row_index = header_range.and_then(|range| {
+            cells
+                .chunks(effective_cols)
+                .position(|row| row.len() == effective_cols && row.iter().all(|(_, offset)| range.contains(offset)))
+        });
+        let mut rows: Vec<Vec<String>> = cells
+            .chunks(effective_cols)
+            .map(|chunk| chunk.iter().map(|(cell, _)| cell.clone()).collect())
+            .collect();
+        let columns = header_row_index.map(|index| {
+            let header = rows.remove(index);
+            rows.insert(0, header.clone());
+            header
+        });
         let mut markdown_rows = rows.clone();
-        if !has_explicit_header {
+        if columns.is_none() {
             markdown_rows.insert(0, vec![String::new(); effective_cols]);
         }
         let table = Table {
@@ -365,9 +379,9 @@ impl TypstExtractor {
         builder.push_table(table, None, None);
     }
 
-    /// Return whether a table declares `table.header(...)` or its imported
-    /// `header(...)` alias outside cell content, strings, and comments.
-    fn has_explicit_table_header(table_str: &str) -> bool {
+    /// Locate the arguments of `table.header(...)` or its imported `header(...)`
+    /// alias outside cell content, strings, and comments.
+    fn explicit_table_header_range(table_str: &str) -> Option<std::ops::Range<usize>> {
         let bytes = table_str.as_bytes();
         let mut bracket_depth = 0_u32;
         let mut in_string = false;
@@ -399,13 +413,19 @@ impl TypstExtractor {
                 b'"' => in_string = true,
                 b'[' => bracket_depth += 1,
                 b']' => bracket_depth = bracket_depth.saturating_sub(1),
-                _ if bracket_depth == 0 && Self::is_table_header_call(bytes, index) => return true,
+                _ if bracket_depth == 0 => {
+                    if let Some(open) = Self::table_header_call_open(bytes, index)
+                        && let Some(close) = Self::find_matching_typst_parenthesis(bytes, open)
+                    {
+                        return Some(open + 1..close);
+                    }
+                }
                 _ => {}
             }
             index += 1;
         }
 
-        false
+        None
     }
 
     /// Skip a Typst line or nested block comment starting at `index`.
@@ -439,23 +459,68 @@ impl TypstExtractor {
     }
 
     /// Match a header function call with Typst identifier boundaries.
-    fn is_table_header_call(bytes: &[u8], index: usize) -> bool {
-        Self::is_function_call_at(bytes, index, b"table.header") || Self::is_function_call_at(bytes, index, b"header")
+    fn table_header_call_open(bytes: &[u8], index: usize) -> Option<usize> {
+        Self::function_call_open_at(bytes, index, b"table.header")
+            .or_else(|| Self::function_call_open_at(bytes, index, b"header"))
     }
 
-    fn is_function_call_at(bytes: &[u8], index: usize, function_name: &[u8]) -> bool {
+    fn function_call_open_at(bytes: &[u8], index: usize, function_name: &[u8]) -> Option<usize> {
         if !bytes[index..].starts_with(function_name) || index > 0 && Self::is_identifier_byte(bytes[index - 1]) {
-            return false;
+            return None;
         }
 
         let mut next = index + function_name.len();
         if bytes.get(next).is_some_and(|byte| Self::is_identifier_byte(*byte)) {
-            return false;
+            return None;
         }
         while next < bytes.len() && bytes[next].is_ascii_whitespace() {
             next += 1;
         }
-        bytes.get(next) == Some(&b'(')
+        (bytes.get(next) == Some(&b'(')).then_some(next)
+    }
+
+    fn find_matching_typst_parenthesis(bytes: &[u8], open: usize) -> Option<usize> {
+        let mut parenthesis_depth = 1_u32;
+        let mut bracket_depth = 0_u32;
+        let mut in_string = false;
+        let mut escaped = false;
+        let mut index = open + 1;
+
+        while index < bytes.len() {
+            let byte = bytes[index];
+            if in_string {
+                if escaped {
+                    escaped = false;
+                } else if byte == b'\\' {
+                    escaped = true;
+                } else if byte == b'"' {
+                    in_string = false;
+                }
+                index += 1;
+                continue;
+            }
+            if let Some(next_index) = Self::skip_typst_comment(bytes, index) {
+                index = next_index;
+                continue;
+            }
+
+            match byte {
+                b'"' => in_string = true,
+                b'[' => bracket_depth += 1,
+                b']' => bracket_depth = bracket_depth.saturating_sub(1),
+                b'(' if bracket_depth == 0 => parenthesis_depth += 1,
+                b')' if bracket_depth == 0 => {
+                    parenthesis_depth -= 1;
+                    if parenthesis_depth == 0 {
+                        return Some(index);
+                    }
+                }
+                _ => {}
+            }
+            index += 1;
+        }
+
+        None
     }
 
     fn is_identifier_byte(byte: u8) -> bool {
@@ -1263,6 +1328,34 @@ Done."#;
 )"#;
         let document = TypstExtractor::build_internal_document(content);
 
+        assert_eq!(
+            document.tables[0].columns,
+            Some(vec!["Name".to_string(), "Age".to_string()])
+        );
+        assert_eq!(
+            crate::rendering::render_markdown(&document),
+            "| Name | Age |\n| --- | --- |\n| Alice | 30 |\n"
+        );
+    }
+
+    #[test]
+    fn should_place_header_after_body_cells_first() {
+        let content = r#"#table(
+  columns: 2,
+  [Alice], [30],
+  table.header(
+    [Name], [Age],
+  ),
+)"#;
+        let document = TypstExtractor::build_internal_document(content);
+
+        assert_eq!(
+            document.tables[0].cells,
+            vec![
+                vec!["Name".to_string(), "Age".to_string()],
+                vec!["Alice".to_string(), "30".to_string()],
+            ]
+        );
         assert_eq!(
             document.tables[0].columns,
             Some(vec!["Name".to_string(), "Age".to_string()])
