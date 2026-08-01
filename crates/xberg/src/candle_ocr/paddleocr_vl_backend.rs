@@ -380,40 +380,48 @@ mod tests {
 
     #[test]
     fn test_parse_options_custom_task() {
-        let mut config = OcrConfig::default();
-        config.backend_options = Some(serde_json::json!({
-            "task": "table"
-        }));
+        let config = OcrConfig {
+            backend_options: Some(serde_json::json!({
+                "task": "table"
+            })),
+            ..Default::default()
+        };
         let options = PaddleOcrVlBackend::parse_options(&config);
         assert_eq!(options.task, PaddleOcrVlTask::Table);
     }
 
     #[test]
     fn test_parse_options_custom_device() {
-        let mut config = OcrConfig::default();
-        config.backend_options = Some(serde_json::json!({
-            "device": "cpu"
-        }));
+        let config = OcrConfig {
+            backend_options: Some(serde_json::json!({
+                "device": "cpu"
+            })),
+            ..Default::default()
+        };
         let options = PaddleOcrVlBackend::parse_options(&config);
         assert_eq!(options.device, DevicePreference::Cpu);
     }
 
     #[test]
     fn test_parse_options_model_path() {
-        let mut config = OcrConfig::default();
-        config.backend_options = Some(serde_json::json!({
-            "model_path": "/models/paddleocr-vl"
-        }));
+        let config = OcrConfig {
+            backend_options: Some(serde_json::json!({
+                "model_path": "/models/paddleocr-vl"
+            })),
+            ..Default::default()
+        };
         let options = PaddleOcrVlBackend::parse_options(&config);
         assert_eq!(options.model_path.as_deref(), Some("/models/paddleocr-vl"));
     }
 
     #[test]
     fn test_parse_options_custom_model_id() {
-        let mut config = OcrConfig::default();
-        config.backend_options = Some(serde_json::json!({
-            "model_id": "some-org/custom-paddleocr-vl"
-        }));
+        let config = OcrConfig {
+            backend_options: Some(serde_json::json!({
+                "model_id": "some-org/custom-paddleocr-vl"
+            })),
+            ..Default::default()
+        };
         let options = PaddleOcrVlBackend::parse_options(&config);
         assert!(options.model_path.is_none());
         assert_eq!(options.model_id, "some-org/custom-paddleocr-vl");
@@ -421,11 +429,13 @@ mod tests {
 
     #[test]
     fn test_parse_options_hf_cache_and_revision() {
-        let mut config = OcrConfig::default();
-        config.backend_options = Some(serde_json::json!({
-            "hf_revision": "0123456789abcdef",
-            "cache_dir": "/tmp/hf-hub"
-        }));
+        let config = OcrConfig {
+            backend_options: Some(serde_json::json!({
+                "hf_revision": "0123456789abcdef",
+                "cache_dir": "/tmp/hf-hub"
+            })),
+            ..Default::default()
+        };
         let options = PaddleOcrVlBackend::parse_options(&config);
         assert_eq!(options.hf_revision.as_deref(), Some("0123456789abcdef"));
         assert_eq!(options.cache_dir.as_deref(), Some(Path::new("/tmp/hf-hub")));

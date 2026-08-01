@@ -303,24 +303,30 @@ mod tests {
 
     #[test]
     fn test_parse_options_model_path() {
-        let mut config = OcrConfig::default();
-        config.backend_options = Some(serde_json::json!({"model_path": "/models/deepseek"}));
+        let config = OcrConfig {
+            backend_options: Some(serde_json::json!({"model_path": "/models/deepseek"})),
+            ..Default::default()
+        };
         let (model_path, _device, _version) = DeepseekOcrBackend::parse_options(&config);
         assert_eq!(model_path.as_deref(), Some("/models/deepseek"));
     }
 
     #[test]
     fn test_parse_options_custom_device() {
-        let mut config = OcrConfig::default();
-        config.backend_options = Some(serde_json::json!({"device": "cpu"}));
+        let config = OcrConfig {
+            backend_options: Some(serde_json::json!({"device": "cpu"})),
+            ..Default::default()
+        };
         let (_model_path, device, _version) = DeepseekOcrBackend::parse_options(&config);
         assert_eq!(device, DevicePreference::Cpu);
     }
 
     #[test]
     fn test_parse_options_version() {
-        let mut config = OcrConfig::default();
-        config.backend_options = Some(serde_json::json!({"version": 3}));
+        let config = OcrConfig {
+            backend_options: Some(serde_json::json!({"version": 3})),
+            ..Default::default()
+        };
         let (_model_path, _device, version) = DeepseekOcrBackend::parse_options(&config);
         assert_eq!(version, 3);
     }

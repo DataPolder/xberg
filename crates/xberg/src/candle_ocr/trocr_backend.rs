@@ -297,20 +297,24 @@ mod tests {
 
     #[test]
     fn test_parse_options_custom_variant() {
-        let mut config = OcrConfig::default();
-        config.backend_options = Some(serde_json::json!({
-            "variant": "large-printed"
-        }));
+        let config = OcrConfig {
+            backend_options: Some(serde_json::json!({
+                "variant": "large-printed"
+            })),
+            ..Default::default()
+        };
         let options = TrocrBackend::parse_options(&config);
         assert_eq!(options.variant, Some(TrocrVariant::LargePrinted));
     }
 
     #[test]
     fn test_parse_options_custom_device() {
-        let mut config = OcrConfig::default();
-        config.backend_options = Some(serde_json::json!({
-            "device": "cpu"
-        }));
+        let config = OcrConfig {
+            backend_options: Some(serde_json::json!({
+                "device": "cpu"
+            })),
+            ..Default::default()
+        };
         let options = TrocrBackend::parse_options(&config);
         assert_eq!(options.device, DevicePreference::Cpu);
     }
