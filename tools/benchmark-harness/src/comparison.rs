@@ -767,7 +767,21 @@ fn apply_fixture_ocr_language(config: &mut xberg::ExtractionConfig, doc: &Corpus
         return;
     }
     if let Some(ocr) = config.ocr.as_mut() {
-        ocr.language = languages;
+        ocr.language = languages.clone();
+        if let Some(pipeline) = ocr.pipeline.as_mut() {
+            for stage in &mut pipeline.stages {
+                if stage.backend == "tesseract"
+                    && let Some(tesseract) = stage.tesseract_config.as_mut()
+                {
+                    tesseract.language = languages.clone();
+                }
+            }
+        } else if ocr.backend == "tesseract"
+            && let Some(tesseract) = ocr.tesseract_config.as_mut()
+        {
+            // The timed benchmark materializes this nested config to disable its cache. ~keep
+            tesseract.language = languages;
+        }
     }
 }
 
@@ -1998,8 +2012,39 @@ mod tests {
             let ocr = config.ocr.expect("timed extraction must materialize fallback OCR");
             assert_eq!(ocr.language, ["deu", "eng"]);
             assert_eq!(ocr.backend, "tesseract");
+            assert_eq!(
+                ocr.tesseract_config.expect("timed fallback config").language,
+                ["deu", "eng"]
+            );
             assert!(!config.force_ocr, "{} must retain fallback-only OCR", pipeline.name());
         }
+    }
+
+    #[test]
+    fn fixture_language_updates_materialized_tesseract_pipeline_config() {
+        let mut metadata = HashMap::new();
+        metadata.insert("ocr_language".to_string(), serde_json::json!("jpn_vert"));
+        let doc = CorpusDocument {
+            name: "vertical-japanese".to_string(),
+            document_path: std::path::PathBuf::new(),
+            file_type: "jpeg".to_string(),
+            file_size: 0,
+            ground_truth_text: None,
+            ground_truth_markdown: None,
+            metadata,
+            fixture_path: std::path::PathBuf::new(),
+        };
+        let mut config = build_extraction_config(Pipeline::TesseractLayout);
+
+        disable_timed_ocr_result_caches(&mut config, true);
+        apply_fixture_ocr_language(&mut config, &doc);
+
+        let ocr = config.ocr.expect("Tesseract pipeline must configure OCR");
+        assert_eq!(ocr.language, ["jpn_vert"]);
+        assert_eq!(
+            ocr.tesseract_config.expect("timed Tesseract config").language,
+            ["jpn_vert"]
+        );
     }
 
     #[test]
