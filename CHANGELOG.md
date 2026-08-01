@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Standalone `excel` and `excel-wasm` feature builds now include the XML parsing and table-capacity
+  support required by XLSX extraction.
 - Org-mode extraction now distinguishes separator-defined table headers from headerless tables,
   preserving every data row in rendered Markdown.
 - EPUB extraction now resolves `epub:switch` branches per output renderer, preserving supported
