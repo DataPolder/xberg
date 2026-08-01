@@ -2,7 +2,11 @@
 
 use crate::Result;
 use crate::core::config::ExtractionConfig;
-use crate::extractors::iwork::{dedup_text, extract_metadata_from_zip, extract_text_from_proto, read_iwa_file};
+use crate::extractors::iwork::{
+    IwaExpansionBudget, dedup_text, extract_metadata_from_zip, extract_text_from_proto, read_iwa_file,
+    validate_iwork_zip,
+};
+use crate::extractors::security::{SecurityBudget, SecurityLimits};
 use crate::plugins::{InternalDocumentExtractor, Plugin};
 use crate::types::internal::InternalDocument;
 use crate::types::internal_builder::InternalDocumentBuilder;
@@ -69,12 +73,15 @@ struct KeynoteData {
 ///
 /// Keynote stores its content across many IWA files:
 /// - `Index/Presentation.iwa` — master slide structure and layout
-/// - `Index/Slide_*.iwa` — individual slide content and speaker notes
-/// - `Index/MasterSlide_*.iwa` — master slide text
+/// - `Index/Slide-*.iwa` / `Index/Slide_*.iwa` — individual slide content and speaker notes
+/// - `Index/MasterSlide-*.iwa` / `Index/MasterSlide_*.iwa` — master slide text
 ///
 /// We separate slide-specific IWA files from other files to produce
 /// per-slide structured output.
-fn parse_keynote(content: &[u8]) -> Result<KeynoteData> {
+fn parse_keynote(content: &[u8], limits: &SecurityLimits) -> Result<KeynoteData> {
+    validate_iwork_zip(content, limits)?;
+    let mut budget = SecurityBudget::for_iwork(limits);
+    let mut expansion = IwaExpansionBudget::from_limits(limits);
     let iwa_paths = super::collect_iwa_paths(content)?;
     let metadata = extract_metadata_from_zip(content);
 
@@ -100,29 +107,31 @@ fn parse_keynote(content: &[u8]) -> Result<KeynoteData> {
     let mut seen_global = std::collections::HashSet::new();
 
     for path in &slide_paths {
-        match read_iwa_file(content, path) {
+        match read_iwa_file(content, path, &mut expansion) {
             Ok(decompressed) => {
-                let texts = extract_text_from_proto(&decompressed);
+                let texts = extract_text_from_proto(&decompressed, &mut budget)?;
                 let unique: Vec<String> = texts.into_iter().filter(|t| seen_global.insert(t.clone())).collect();
                 if !unique.is_empty() {
                     slide_texts.push(unique);
                 }
             }
-            Err(_) => {
-                tracing::debug!("Skipping IWA file (decompression failed): {path}");
+            Err(error) if matches!(&error, crate::error::XbergError::Security { .. }) => return Err(error),
+            Err(error) => {
+                tracing::debug!(%error, "Skipping IWA file (decompression failed): {path}");
             }
         }
     }
 
     let mut other_raw: Vec<String> = Vec::new();
     for path in &other_paths {
-        match read_iwa_file(content, path) {
+        match read_iwa_file(content, path, &mut expansion) {
             Ok(decompressed) => {
-                let texts = extract_text_from_proto(&decompressed);
+                let texts = extract_text_from_proto(&decompressed, &mut budget)?;
                 other_raw.extend(texts);
             }
-            Err(_) => {
-                tracing::debug!("Skipping IWA file (decompression failed): {path}");
+            Err(error) if matches!(&error, crate::error::XbergError::Security { .. }) => return Err(error),
+            Err(error) => {
+                tracing::debug!(%error, "Skipping IWA file (decompression failed): {path}");
             }
         }
     }
@@ -155,15 +164,17 @@ impl InternalDocumentExtractor for KeynoteExtractor {
                     return Err(crate::error::XbergError::Cancelled);
                 }
                 let content_owned = content.to_vec();
+                let limits = config.security_limits.clone().unwrap_or_default();
                 let span = tracing::Span::current();
                 tokio::task::spawn_blocking(move || {
                     let _guard = span.entered();
-                    parse_keynote(&content_owned)
+                    parse_keynote(&content_owned, &limits)
                 })
                 .await
                 .map_err(|e| crate::error::XbergError::parsing(format!("Keynote extraction task failed: {e}")))??
             } else {
-                parse_keynote(content)?
+                let limits = config.security_limits.clone().unwrap_or_default();
+                parse_keynote(content, &limits)?
             }
 
             #[cfg(not(feature = "tokio-runtime"))]
@@ -171,7 +182,8 @@ impl InternalDocumentExtractor for KeynoteExtractor {
                 if config.cancel_token.as_ref().map(|t| t.is_cancelled()).unwrap_or(false) {
                     return Err(crate::error::XbergError::Cancelled);
                 }
-                parse_keynote(content)?
+                let limits = config.security_limits.clone().unwrap_or_default();
+                parse_keynote(content, &limits)?
             }
         };
 
@@ -192,7 +204,7 @@ impl InternalDocumentExtractor for KeynoteExtractor {
 /// Build an `InternalDocument` from parsed Keynote data.
 ///
 /// Creates a slide element for each detected slide group, using the first text
-/// line as the slide title. Additional lines become paragraphs within the slide.
+/// line as the slide title. Additional lines become paragraphs.
 /// Metadata from the ZIP archive is applied to the document.
 fn build_keynote_internal_document(data: &KeynoteData) -> InternalDocument {
     let mut builder = InternalDocumentBuilder::new("keynote");
@@ -201,15 +213,13 @@ fn build_keynote_internal_document(data: &KeynoteData) -> InternalDocument {
         builder.set_metadata(data.metadata.clone());
     }
 
-    for (idx, slide_lines) in data.slide_texts.iter().enumerate() {
-        let slide_number = (idx + 1) as u32;
-
+    for (index, slide_lines) in data.slide_texts.iter().enumerate() {
         if slide_lines.is_empty() {
             continue;
         }
 
         let title = slide_lines[0].trim();
-        builder.push_slide(slide_number, Some(title), None);
+        builder.push_slide((index + 1) as u32, Some(title), None);
 
         for line in &slide_lines[1..] {
             let trimmed = line.trim();
@@ -238,6 +248,7 @@ fn build_keynote_internal_document(data: &KeynoteData) -> InternalDocument {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::internal::ElementKind;
 
     #[test]
     fn test_keynote_extractor_plugin_interface() {
@@ -252,5 +263,21 @@ mod tests {
         let extractor = KeynoteExtractor::new();
         let types = extractor.supported_mime_types();
         assert!(types.contains(&"application/x-iwork-keynote-sffkey"));
+    }
+
+    #[test]
+    fn should_preserve_slide_element_semantics() {
+        let data = KeynoteData {
+            slide_texts: vec![vec!["Title".to_string(), "Body".to_string()]],
+            other_texts: Vec::new(),
+            metadata: crate::types::metadata::Metadata::default(),
+        };
+
+        let document = build_keynote_internal_document(&data);
+
+        assert_eq!(document.elements[0].kind, ElementKind::Slide { number: 1 });
+        assert_eq!(document.elements[0].text, "Title");
+        assert_eq!(document.elements[1].kind, ElementKind::Paragraph);
+        assert_eq!(document.elements[1].text, "Body");
     }
 }

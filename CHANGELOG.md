@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Apple Keynote packages containing only slide archives now route to the Keynote extractor, and
+  Numbers extraction reconstructs tables instead of emitting raw protobuf fragments.
 - AsciiDoc, NXML/JATS, and WebVTT files now route through their registered text or JATS extractors
   instead of being reported as unsupported.
 - Standalone `excel` and `excel-wasm` feature builds now include the XML parsing and table-capacity

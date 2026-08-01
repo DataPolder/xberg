@@ -2,7 +2,11 @@
 
 use crate::Result;
 use crate::core::config::ExtractionConfig;
-use crate::extractors::iwork::{dedup_text, extract_metadata_from_zip, extract_text_from_proto, read_iwa_file};
+use crate::extractors::iwork::{
+    IwaExpansionBudget, dedup_text, extract_metadata_from_zip, extract_text_from_proto, read_iwa_file,
+    validate_iwork_zip,
+};
+use crate::extractors::security::{SecurityBudget, SecurityLimits};
 use crate::plugins::{InternalDocumentExtractor, Plugin};
 use crate::types::internal::InternalDocument;
 use crate::types::internal_builder::InternalDocumentBuilder;
@@ -74,7 +78,10 @@ struct PagesData {
 ///
 /// We prioritize Document IWA files for the main body and separate
 /// annotation/data content.
-fn parse_pages(content: &[u8]) -> Result<PagesData> {
+fn parse_pages(content: &[u8], limits: &SecurityLimits) -> Result<PagesData> {
+    validate_iwork_zip(content, limits)?;
+    let mut budget = SecurityBudget::for_iwork(limits);
+    let mut expansion = IwaExpansionBudget::from_limits(limits);
     let iwa_paths = super::collect_iwa_paths(content)?;
     let metadata = extract_metadata_from_zip(content);
 
@@ -97,26 +104,28 @@ fn parse_pages(content: &[u8]) -> Result<PagesData> {
 
     let mut doc_texts: Vec<String> = Vec::new();
     for path in &doc_paths {
-        match read_iwa_file(content, path) {
+        match read_iwa_file(content, path, &mut expansion) {
             Ok(decompressed) => {
-                let texts = extract_text_from_proto(&decompressed);
+                let texts = extract_text_from_proto(&decompressed, &mut budget)?;
                 doc_texts.extend(texts);
             }
-            Err(_) => {
-                tracing::debug!("Skipping IWA file (decompression failed): {path}");
+            Err(error) if matches!(&error, crate::error::XbergError::Security { .. }) => return Err(error),
+            Err(error) => {
+                tracing::debug!(%error, "Skipping IWA file (decompression failed): {path}");
             }
         }
     }
 
     let mut other_texts_raw: Vec<String> = Vec::new();
     for path in &other_paths {
-        match read_iwa_file(content, path) {
+        match read_iwa_file(content, path, &mut expansion) {
             Ok(decompressed) => {
-                let texts = extract_text_from_proto(&decompressed);
+                let texts = extract_text_from_proto(&decompressed, &mut budget)?;
                 other_texts_raw.extend(texts);
             }
-            Err(_) => {
-                tracing::debug!("Skipping IWA file (decompression failed): {path}");
+            Err(error) if matches!(&error, crate::error::XbergError::Security { .. }) => return Err(error),
+            Err(error) => {
+                tracing::debug!(%error, "Skipping IWA file (decompression failed): {path}");
             }
         }
     }
@@ -150,15 +159,17 @@ impl InternalDocumentExtractor for PagesExtractor {
                     return Err(crate::error::XbergError::Cancelled);
                 }
                 let content_owned = content.to_vec();
+                let limits = config.security_limits.clone().unwrap_or_default();
                 let span = tracing::Span::current();
                 tokio::task::spawn_blocking(move || {
                     let _guard = span.entered();
-                    parse_pages(&content_owned)
+                    parse_pages(&content_owned, &limits)
                 })
                 .await
                 .map_err(|e| crate::error::XbergError::parsing(format!("Pages extraction task failed: {e}")))??
             } else {
-                parse_pages(content)?
+                let limits = config.security_limits.clone().unwrap_or_default();
+                parse_pages(content, &limits)?
             }
 
             #[cfg(not(feature = "tokio-runtime"))]
@@ -166,7 +177,8 @@ impl InternalDocumentExtractor for PagesExtractor {
                 if config.cancel_token.as_ref().map(|t| t.is_cancelled()).unwrap_or(false) {
                     return Err(crate::error::XbergError::Cancelled);
                 }
-                parse_pages(content)?
+                let limits = config.security_limits.clone().unwrap_or_default();
+                parse_pages(content, &limits)?
             }
         };
 

@@ -20,12 +20,56 @@ pub mod pages;
 
 use crate::Result;
 use crate::error::XbergError;
+use crate::extractors::security::{
+    SecurityBudget, SecurityError, SecurityLimits, StringGrowthValidator, ZipBombValidator,
+};
 use crate::text::utf8_validation;
 use std::io::Cursor;
 use std::io::Read;
 
 /// Maximum size for an individual IWA file to guard against decompression bombs.
 const MAX_IWA_DECOMPRESSED_SIZE: usize = 64 * 1024 * 1024;
+
+/// Document-wide budget for bytes expanded from nested IWA Snappy streams.
+pub(crate) struct IwaExpansionBudget {
+    growth: StringGrowthValidator,
+    max_size: usize,
+}
+
+impl IwaExpansionBudget {
+    pub(crate) fn from_limits(limits: &SecurityLimits) -> Self {
+        Self {
+            growth: StringGrowthValidator::new(limits.max_content_size),
+            max_size: limits.max_content_size,
+        }
+    }
+
+    fn account(&mut self, length: usize) -> Result<()> {
+        self.growth.check_append(length)?;
+        Ok(())
+    }
+
+    fn validate_member_size(&self, size: u64) -> Result<()> {
+        let max = self.max_size.min(MAX_IWA_DECOMPRESSED_SIZE);
+        if size > max as u64 {
+            return Err(SecurityError::ContentTooLarge {
+                size: usize::try_from(size).unwrap_or(usize::MAX),
+                max,
+            }
+            .into());
+        }
+        Ok(())
+    }
+}
+
+/// Validate the outer iWork ZIP before reading any package members.
+pub(crate) fn validate_iwork_zip(content: &[u8], limits: &SecurityLimits) -> Result<()> {
+    let cursor = Cursor::new(content);
+    let mut archive =
+        zip::ZipArchive::new(cursor).map_err(|e| XbergError::parsing(format!("Failed to open iWork ZIP: {e}")))?;
+    ZipBombValidator::new(limits.clone()).validate(&mut archive)?;
+    Ok(())
+}
 
 /// Collects all .iwa file paths from a ZIP archive.
 ///
@@ -57,7 +101,7 @@ pub(crate) fn collect_iwa_paths(content: &[u8]) -> Result<Vec<String>> {
 /// - type `0x01`: Uncompressed block → use payload as-is
 ///
 /// Multiple blocks are concatenated to form the decompressed IWA stream.
-pub(crate) fn read_iwa_file(content: &[u8], path: &str) -> Result<Vec<u8>> {
+pub(crate) fn read_iwa_file(content: &[u8], path: &str, expansion: &mut IwaExpansionBudget) -> Result<Vec<u8>> {
     use std::io::Read;
 
     let cursor = Cursor::new(content);
@@ -68,12 +112,16 @@ pub(crate) fn read_iwa_file(content: &[u8], path: &str) -> Result<Vec<u8>> {
         .by_name(path)
         .map_err(|_| XbergError::parsing(format!("IWA file not found in archive: {path}")))?;
 
-    let compressed_size = file.size() as usize;
+    expansion.validate_member_size(file.size())?;
+    let compressed_size = usize::try_from(file.size()).map_err(|_| SecurityError::ContentTooLarge {
+        size: usize::MAX,
+        max: expansion.max_size.min(MAX_IWA_DECOMPRESSED_SIZE),
+    })?;
     let mut raw = Vec::with_capacity(compressed_size.min(MAX_IWA_DECOMPRESSED_SIZE));
     file.read_to_end(&mut raw)
         .map_err(|e| XbergError::parsing(format!("Failed to read IWA file {path}: {e}")))?;
 
-    decode_iwa_stream(&raw).map_err(|e| XbergError::parsing(format!("Failed to decode IWA {path}: {e}")))
+    decode_iwa_stream(&raw, expansion)
 }
 
 /// Decode an Apple IWA byte stream into the raw protobuf payload.
@@ -81,55 +129,89 @@ pub(crate) fn read_iwa_file(content: &[u8], path: &str) -> Result<Vec<u8>> {
 /// IWA framing: each block = 1 byte type + 3 bytes LE length + N bytes payload
 /// - type 0x00 → Snappy-compressed, decompress with `snap::raw::Decoder`
 /// - type 0x01 → Uncompressed, use as-is
-pub(crate) fn decode_iwa_stream(data: &[u8]) -> std::result::Result<Vec<u8>, String> {
+pub(crate) fn decode_iwa_stream(data: &[u8], expansion: &mut IwaExpansionBudget) -> Result<Vec<u8>> {
     let mut decoder = snap::raw::Decoder::new();
     let mut output = Vec::new();
     let mut i = 0usize;
 
-    while i + 4 <= data.len() {
-        let chunk_type = data[i];
-        let chunk_len = (data[i + 1] as usize) | ((data[i + 2] as usize) << 8) | ((data[i + 3] as usize) << 16);
-        i += 4;
+    while data.len().saturating_sub(i) >= 4 {
+        let (chunk_type, payload, next) = read_iwa_chunk(data, i)?;
+        i = next;
+        append_iwa_chunk(chunk_type, payload, &mut decoder, &mut output, expansion)?;
+    }
 
-        let end = i + chunk_len;
-        if end > data.len() {
-            return Err(format!(
-                "IWA chunk out of bounds: offset={i}, chunk_len={chunk_len}, data_len={}",
-                data.len()
-            ));
-        }
-
-        let payload = &data[i..end];
-        i = end;
-
-        match chunk_type {
-            0x00 => {
-                let decompressed = decoder
-                    .decompress_vec(payload)
-                    .map_err(|e| format!("Snappy decompression failed: {e}"))?;
-
-                if output.len() + decompressed.len() > MAX_IWA_DECOMPRESSED_SIZE {
-                    return Err(format!(
-                        "Decompressed IWA exceeds size limit ({MAX_IWA_DECOMPRESSED_SIZE} bytes)"
-                    ));
-                }
-                output.extend_from_slice(&decompressed);
-            }
-            0x01 => {
-                if output.len() + payload.len() > MAX_IWA_DECOMPRESSED_SIZE {
-                    return Err(format!(
-                        "Uncompressed IWA exceeds size limit ({MAX_IWA_DECOMPRESSED_SIZE} bytes)"
-                    ));
-                }
-                output.extend_from_slice(payload);
-            }
-            _ => {
-                tracing::debug!("Unknown IWA chunk type: 0x{:02x}, len={chunk_len}", chunk_type);
-            }
-        }
+    if i != data.len() {
+        return Err(XbergError::parsing(format!(
+            "IWA stream has {} trailing framing bytes",
+            data.len() - i
+        )));
     }
 
     Ok(output)
+}
+
+fn read_iwa_chunk(data: &[u8], offset: usize) -> Result<(u8, &[u8], usize)> {
+    let chunk_type = data[offset];
+    let chunk_len =
+        (data[offset + 1] as usize) | ((data[offset + 2] as usize) << 8) | ((data[offset + 3] as usize) << 16);
+    let payload_offset = offset + 4;
+    let end = payload_offset
+        .checked_add(chunk_len)
+        .ok_or_else(|| XbergError::parsing("IWA chunk offset overflow"))?;
+    if end > data.len() {
+        return Err(XbergError::parsing(format!(
+            "IWA chunk out of bounds: offset={payload_offset}, chunk_len={chunk_len}, data_len={}",
+            data.len()
+        )));
+    }
+    Ok((chunk_type, &data[payload_offset..end], end))
+}
+
+fn append_iwa_chunk(
+    chunk_type: u8,
+    payload: &[u8],
+    decoder: &mut snap::raw::Decoder,
+    output: &mut Vec<u8>,
+    expansion: &mut IwaExpansionBudget,
+) -> Result<()> {
+    match chunk_type {
+        0x00 => {
+            let length = snap::raw::decompress_len(payload)
+                .map_err(|error| XbergError::parsing(format!("Snappy length preflight failed: {error}")))?;
+            account_iwa_expansion(output.len(), length, expansion)?;
+            let decompressed = decoder
+                .decompress_vec(payload)
+                .map_err(|error| XbergError::parsing(format!("Snappy decompression failed: {error}")))?;
+            output.extend_from_slice(&decompressed);
+        }
+        0x01 => {
+            account_iwa_expansion(output.len(), payload.len(), expansion)?;
+            output.extend_from_slice(payload);
+        }
+        _ => {
+            return Err(XbergError::parsing(format!(
+                "Unknown IWA chunk type: 0x{chunk_type:02x}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn account_iwa_expansion(current: usize, added: usize, expansion: &mut IwaExpansionBudget) -> Result<()> {
+    let expanded_size = current.checked_add(added).ok_or_else(|| {
+        XbergError::from(SecurityError::ContentTooLarge {
+            size: usize::MAX,
+            max: MAX_IWA_DECOMPRESSED_SIZE,
+        })
+    })?;
+    if expanded_size > MAX_IWA_DECOMPRESSED_SIZE {
+        return Err(SecurityError::ContentTooLarge {
+            size: expanded_size,
+            max: MAX_IWA_DECOMPRESSED_SIZE,
+        }
+        .into());
+    }
+    expansion.account(added)
 }
 
 /// Extract all UTF-8 text strings from a raw protobuf byte slice.
@@ -141,60 +223,95 @@ pub(crate) fn decode_iwa_stream(data: &[u8]) -> std::result::Result<Vec<u8>, Str
 ///
 /// This approach avoids the need for `prost-build` and generated proto code while
 /// still extracting human-readable text reliably from iWork documents.
-pub(crate) fn extract_text_from_proto(data: &[u8]) -> Vec<String> {
-    let mut texts: Vec<String> = Vec::new();
-    let mut i = 0usize;
+pub(crate) fn extract_text_from_proto(data: &[u8], budget: &mut SecurityBudget) -> Result<Vec<String>> {
+    budget.enter()?;
+    let result = extract_proto_fields(data, budget);
+    budget.leave();
+    result
+}
 
-    while i < data.len() {
-        let (tag_varint, tag_len) = match read_varint(data, i) {
-            Some(v) => v,
-            None => break,
+fn extract_proto_fields(data: &[u8], budget: &mut SecurityBudget) -> Result<Vec<String>> {
+    let mut texts = Vec::new();
+    let mut position = 0usize;
+    while position < data.len() {
+        budget.step()?;
+        let Some((tag, tag_length)) = read_varint(data, position) else {
+            break;
         };
-        i += tag_len;
-
-        let wire_type = tag_varint & 0x7;
-
-        match wire_type {
-            0 => match read_varint(data, i) {
-                Some((_, len)) => i += len,
-                None => break,
-            },
-            1 => {
-                i += 8;
-            }
-            2 => {
-                let (length, len_bytes) = match read_varint(data, i) {
-                    Some(v) => v,
-                    None => break,
-                };
-                i += len_bytes;
-                let end = i + length as usize;
-                if end > data.len() {
-                    break;
-                }
-                let payload = &data[i..end];
-                i = end;
-
-                if let Ok(s) = utf8_validation::from_utf8(payload) {
-                    let trimmed = s.trim();
-                    if trimmed.len() >= 3 && trimmed.chars().any(|c| c.is_alphabetic() || c.is_numeric()) {
-                        texts.push(trimmed.to_string());
-                    }
-                }
-
-                let nested = extract_text_from_proto(payload);
-                texts.extend(nested);
-            }
-            5 => {
-                i += 4;
-            }
-            _ => {
-                break;
-            }
+        position += tag_length;
+        if !extract_proto_field(data, &mut position, tag & 0x7, budget, &mut texts)? {
+            break;
         }
     }
+    Ok(texts)
+}
 
-    texts
+fn extract_proto_field(
+    data: &[u8],
+    position: &mut usize,
+    wire_type: u64,
+    budget: &mut SecurityBudget,
+    texts: &mut Vec<String>,
+) -> Result<bool> {
+    match wire_type {
+        0 => Ok(skip_proto_varint(data, position)),
+        1 => {
+            *position = position.saturating_add(8);
+            Ok(true)
+        }
+        2 => extract_length_delimited_field(data, position, budget, texts),
+        5 => {
+            *position = position.saturating_add(4);
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
+fn skip_proto_varint(data: &[u8], position: &mut usize) -> bool {
+    let Some((_, length)) = read_varint(data, *position) else {
+        return false;
+    };
+    *position += length;
+    true
+}
+
+fn extract_length_delimited_field(
+    data: &[u8],
+    position: &mut usize,
+    budget: &mut SecurityBudget,
+    texts: &mut Vec<String>,
+) -> Result<bool> {
+    let Some((length, prefix_length)) = read_varint(data, *position) else {
+        return Ok(false);
+    };
+    *position += prefix_length;
+    let length =
+        usize::try_from(length).map_err(|_| XbergError::parsing("protobuf length does not fit this platform"))?;
+    let Some(end) = position.checked_add(length) else {
+        return Err(XbergError::parsing("protobuf field offset overflow"));
+    };
+    if end > data.len() {
+        return Ok(false);
+    }
+    let payload = &data[*position..end];
+    *position = end;
+    append_proto_text(payload, budget, texts)?;
+    texts.extend(extract_text_from_proto(payload, budget)?);
+    Ok(true)
+}
+
+fn append_proto_text(payload: &[u8], budget: &mut SecurityBudget, texts: &mut Vec<String>) -> Result<()> {
+    let Ok(text) = utf8_validation::from_utf8(payload) else {
+        return Ok(());
+    };
+    let trimmed = text.trim();
+    if trimmed.len() >= 3 && trimmed.chars().any(|character| character.is_alphanumeric()) {
+        budget.check_entity(trimmed)?;
+        budget.account_text(trimmed.len())?;
+        texts.push(trimmed.to_string());
+    }
+    Ok(())
 }
 
 /// Read a protobuf varint from `data` starting at byte `pos`.
@@ -344,7 +461,8 @@ mod tests {
         let mut proto = vec![0x1A, text.len() as u8];
         proto.extend_from_slice(text);
 
-        let extracted = extract_text_from_proto(&proto);
+        let mut budget = SecurityBudget::from_limits(&SecurityLimits::default());
+        let extracted = extract_text_from_proto(&proto, &mut budget).unwrap();
         assert!(
             extracted.iter().any(|s| s.contains("Hello World")),
             "Should extract the embedded UTF-8 string: {:?}",
@@ -358,7 +476,8 @@ mod tests {
         let mut proto = vec![0x1A, binary.len() as u8];
         proto.extend_from_slice(&binary);
 
-        let extracted = extract_text_from_proto(&proto);
+        let mut budget = SecurityBudget::from_limits(&SecurityLimits::default());
+        let extracted = extract_text_from_proto(&proto, &mut budget).unwrap();
         for s in &extracted {
             assert!(
                 !s.chars().all(|c| c.is_alphabetic()),
@@ -376,12 +495,88 @@ mod tests {
         let mut outer = vec![0x12, inner.len() as u8];
         outer.extend_from_slice(&inner);
 
-        let extracted = extract_text_from_proto(&outer);
+        let mut budget = SecurityBudget::from_limits(&SecurityLimits::default());
+        let extracted = extract_text_from_proto(&outer, &mut budget).unwrap();
         assert!(
             extracted.iter().any(|s| s.contains("Nested Content")),
             "Should extract text from nested protobuf messages: {:?}",
             extracted
         );
+    }
+
+    #[test]
+    fn should_enforce_protobuf_nesting_limit() {
+        let inner_text = b"Nested Content";
+        let mut inner = vec![0x1A, inner_text.len() as u8];
+        inner.extend_from_slice(inner_text);
+        let mut outer = vec![0x12, inner.len() as u8];
+        outer.extend_from_slice(&inner);
+        let limits = SecurityLimits {
+            max_nesting_depth: 1,
+            max_xml_depth: 100,
+            ..SecurityLimits::default()
+        };
+        let mut budget = SecurityBudget::for_iwork(&limits);
+
+        assert!(matches!(
+            extract_text_from_proto(&outer, &mut budget),
+            Err(XbergError::Security { .. })
+        ));
+    }
+
+    #[test]
+    fn should_reject_snappy_expansion_before_decompression() {
+        let expanded = vec![b'x'; 1_024];
+        let compressed = snap::raw::Encoder::new().compress_vec(&expanded).unwrap();
+        let mut framed = vec![0, 0, 0, 0];
+        let length = compressed.len();
+        framed[1] = (length & 0xff) as u8;
+        framed[2] = ((length >> 8) & 0xff) as u8;
+        framed[3] = ((length >> 16) & 0xff) as u8;
+        framed.extend_from_slice(&compressed);
+        let limits = SecurityLimits {
+            max_content_size: 128,
+            ..SecurityLimits::default()
+        };
+        let mut expansion = IwaExpansionBudget::from_limits(&limits);
+
+        assert!(matches!(
+            decode_iwa_stream(&framed, &mut expansion),
+            Err(XbergError::Security { .. })
+        ));
+    }
+
+    #[test]
+    fn should_enforce_document_wide_iwa_expansion_budget() {
+        let mut payload = vec![1, 80, 0, 0];
+        payload.extend(std::iter::repeat_n(0, 80));
+        let limits = SecurityLimits {
+            max_content_size: 128,
+            ..SecurityLimits::default()
+        };
+        let mut expansion = IwaExpansionBudget::from_limits(&limits);
+
+        assert_eq!(decode_iwa_stream(&payload, &mut expansion).unwrap().len(), 80);
+        assert!(matches!(
+            decode_iwa_stream(&payload, &mut expansion),
+            Err(XbergError::Security { .. })
+        ));
+    }
+
+    #[test]
+    fn should_reject_unknown_iwa_chunk_type() {
+        let limits = SecurityLimits::default();
+        let mut expansion = IwaExpansionBudget::from_limits(&limits);
+
+        assert!(decode_iwa_stream(&[2, 0, 0, 0], &mut expansion).is_err());
+    }
+
+    #[test]
+    fn should_reject_trailing_iwa_framing_bytes() {
+        let limits = SecurityLimits::default();
+        let mut expansion = IwaExpansionBudget::from_limits(&limits);
+
+        assert!(decode_iwa_stream(&[0, 0, 0], &mut expansion).is_err());
     }
 
     #[test]

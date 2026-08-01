@@ -8,7 +8,7 @@
 //! - Entity length validation
 //! - Path traversal detection
 
-#[cfg(any(feature = "archives", feature = "hwpx"))]
+#[cfg(any(feature = "archives", feature = "hwpx", feature = "iwork"))]
 use std::io::{Read, Seek};
 
 /// Configuration for security limits across extractors.
@@ -191,13 +191,13 @@ impl std::fmt::Display for SecurityError {
 impl std::error::Error for SecurityError {}
 
 /// Helper struct for validating ZIP archives for security issues.
-#[cfg(any(feature = "archives", feature = "hwpx"))]
+#[cfg(any(feature = "archives", feature = "hwpx", feature = "iwork"))]
 #[cfg_attr(alef, alef(skip))]
 pub struct ZipBombValidator {
     limits: SecurityLimits,
 }
 
-#[cfg(any(feature = "archives", feature = "hwpx"))]
+#[cfg(any(feature = "archives", feature = "hwpx", feature = "iwork"))]
 impl ZipBombValidator {
     /// Create a new ZIP bomb validator.
     pub(crate) fn new(limits: SecurityLimits) -> Self {
@@ -491,6 +491,14 @@ impl SecurityBudget {
             growth: StringGrowthValidator::new(limits.max_content_size),
             table: TableValidator::new(limits.max_table_cells),
         }
+    }
+
+    /// Build a protobuf/iWork budget using the format-agnostic nesting limit.
+    pub(crate) fn for_iwork(limits: &SecurityLimits) -> Self {
+        let mut budget = Self::from_limits(limits);
+        // iWork parses protobuf messages, so XML depth is not applicable here. ~keep
+        budget.depth = DepthValidator::new(limits.max_nesting_depth);
+        budget
     }
 
     /// Convenience: build from `ExtractionConfig.security_limits` falling back to defaults.

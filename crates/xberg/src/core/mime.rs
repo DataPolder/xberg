@@ -920,6 +920,7 @@ fn detect_office_format_from_zip(content: &[u8]) -> Option<&'static str> {
     const PAGES_MARKER: &[u8] = b"Index/Document.iwa";
     const NUMBERS_MARKER: &[u8] = b"Index/CalculationEngine.iwa";
     const KEYNOTE_MARKER: &[u8] = b"Index/Presentation.iwa";
+    const KEYNOTE_SLIDE_MARKERS: &[&[u8]] = &[b"Index/Slide-", b"Index/Slide_"];
 
     const HWPX_MARKER: &[u8] = b"Contents/content.hpf";
     #[cfg(any(feature = "office", feature = "hwpx", feature = "iwork", feature = "archives"))]
@@ -937,7 +938,12 @@ fn detect_office_format_from_zip(content: &[u8]) -> Option<&'static str> {
     if contains_subsequence(content, NUMBERS_MARKER) {
         return Some(IWORK_NUMBERS_MIME_TYPE);
     }
-    if contains_subsequence(content, KEYNOTE_MARKER) {
+    // ~keep: Minimal Keynote packages may contain slide archives without a Presentation.iwa index.
+    if contains_subsequence(content, KEYNOTE_MARKER)
+        || KEYNOTE_SLIDE_MARKERS
+            .iter()
+            .any(|marker| contains_subsequence(content, marker))
+    {
         return Some(IWORK_KEYNOTE_MIME_TYPE);
     }
 
