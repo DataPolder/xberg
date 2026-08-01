@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- TATR table reconstruction now assigns each OCR word to one highest-overlap cell, preventing
+  duplicated text when predicted cells overlap or span multiple columns.
 - Layout-enabled image extraction now reuses safely positioned whole-image OCR elements, avoiding
   text loss from redundant per-region OCR while retaining region structure and fallbacks.
 - Layout-enabled image extraction now recognizes TATR table structure from cached OCR elements

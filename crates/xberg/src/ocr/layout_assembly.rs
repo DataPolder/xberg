@@ -12,6 +12,9 @@ use crate::types::OcrElement;
 /// Default confidence threshold for layout detections.
 const MIN_CONFIDENCE: f32 = 0.3;
 
+/// Minimum intersection-over-word-area required to assign an OCR element to a table cell.
+const MIN_CELL_ELEMENT_IOW: f32 = 0.2;
+
 /// Run TATR table recognition for all Table regions in a page.
 ///
 /// For each Table detection, crops the page image, runs TATR inference,
@@ -90,7 +93,7 @@ fn recognize_single_table(
             if e.text.trim().is_empty() {
                 return false;
             }
-            element_bbox_iow(e, table_bbox) >= 0.2
+            element_bbox_iow(e, table_bbox) >= MIN_CELL_ELEMENT_IOW
         })
         .collect();
 
@@ -118,21 +121,13 @@ fn build_markdown_table(
         return (Vec::new(), String::new());
     }
 
-    let mut grid: Vec<Vec<String>> = Vec::with_capacity(cell_grid.len());
-
-    for row in cell_grid {
+    let mut assigned = assign_elements_to_best_cells(cell_grid, elements, offset_x, offset_y, num_cols);
+    let mut grid: Vec<Vec<String>> = Vec::with_capacity(assigned.len());
+    for row in &mut assigned {
         let mut grid_row = vec![String::new(); num_cols];
-
-        for (col_idx, cell) in row.iter().enumerate() {
-            let page_bbox = BBox::new(
-                cell.x1 + offset_x,
-                cell.y1 + offset_y,
-                cell.x2 + offset_x,
-                cell.y2 + offset_y,
-            );
-            grid_row[col_idx] = match_elements_to_cell(elements, &page_bbox);
+        for (column, cell_elements) in row.iter_mut().enumerate() {
+            grid_row[column] = text_from_assigned_elements(cell_elements);
         }
-
         grid.push(grid_row);
     }
 
@@ -164,33 +159,68 @@ fn build_markdown_table(
     (grid, md)
 }
 
-/// Match OCR elements to a cell bbox, returning the cell's text content.
-///
-/// Uses intersection-over-word-area (IoW) matching: an element is assigned to
-/// this cell if the overlap between the element bbox and cell bbox covers at
-/// least 20% of the element's area. This is more robust than center-point
-/// containment for elements that straddle cell boundaries.
-fn match_elements_to_cell(elements: &[&OcrElement], cell_bbox: &BBox) -> String {
-    let mut matched: Vec<(&OcrElement, f32, f32)> = Vec::new();
+type PositionedElement<'a> = (&'a OcrElement, f32, f32);
+type CellAssignments<'a> = Vec<Vec<Vec<PositionedElement<'a>>>>;
 
-    for elem in elements {
-        let iow = element_bbox_iow(elem, cell_bbox);
-        if iow >= 0.2 {
-            let (cx, cy) = element_center_f32(elem);
-            matched.push((elem, cx, cy));
+/// Assign every OCR element to its single highest-IoW cell across the full grid.
+/// Equal overlaps keep the first cell in row-major order.
+fn assign_elements_to_best_cells<'a>(
+    cell_grid: &[Vec<tatr::CellBBox>],
+    elements: &[&'a OcrElement],
+    offset_x: f32,
+    offset_y: f32,
+    num_cols: usize,
+) -> CellAssignments<'a> {
+    let page_cells = cell_grid
+        .iter()
+        .map(|row| {
+            row.iter()
+                .take(num_cols)
+                .map(|cell| {
+                    BBox::new(
+                        cell.x1 + offset_x,
+                        cell.y1 + offset_y,
+                        cell.x2 + offset_x,
+                        cell.y2 + offset_y,
+                    )
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let mut assigned: CellAssignments<'a> = page_cells.iter().map(|row| vec![Vec::new(); row.len()]).collect();
+
+    for &element in elements {
+        let mut best_iow = 0.0;
+        let mut best_cell = None;
+        for (row, cells) in page_cells.iter().enumerate() {
+            for (column, cell) in cells.iter().enumerate() {
+                let iow = element_bbox_iow(element, cell);
+                if iow > best_iow {
+                    best_iow = iow;
+                    best_cell = Some((row, column));
+                }
+            }
+        }
+        if best_iow >= MIN_CELL_ELEMENT_IOW
+            && let Some((row, column)) = best_cell
+        {
+            let (center_x, center_y) = element_center_f32(element);
+            assigned[row][column].push((element, center_x, center_y));
         }
     }
+    assigned
+}
 
-    if matched.is_empty() {
+/// Assemble uniquely assigned elements in top-to-bottom, left-to-right order.
+fn text_from_assigned_elements(elements: &mut [PositionedElement<'_>]) -> String {
+    if elements.is_empty() {
         return String::new();
     }
-
-    matched.sort_by(|a, b| a.2.total_cmp(&b.2).then_with(|| a.1.total_cmp(&b.1)));
-
-    matched
+    elements.sort_by(|left, right| left.2.total_cmp(&right.2).then_with(|| left.1.total_cmp(&right.1)));
+    elements
         .iter()
-        .map(|(e, _, _)| e.text.trim())
-        .filter(|t| !t.is_empty())
+        .map(|(element, _, _)| element.text.trim())
+        .filter(|text| !text.is_empty())
         .collect::<Vec<_>>()
         .join(" ")
 }
@@ -273,4 +303,94 @@ fn is_cell_grid_valid(cell_grid: &[Vec<tatr::CellBBox>]) -> bool {
     }
 
     true
+}
+
+#[cfg(all(test, feature = "ocr"))]
+mod tests {
+    use super::*;
+    use crate::types::{OcrBoundingGeometry, OcrConfidence, OcrElementLevel};
+
+    fn cell(x1: f32, y1: f32, x2: f32, y2: f32) -> tatr::CellBBox {
+        tatr::CellBBox { x1, y1, x2, y2 }
+    }
+
+    fn word(text: &str, left: u32, top: u32, width: u32, height: u32) -> OcrElement {
+        OcrElement::new(
+            text,
+            OcrBoundingGeometry::Rectangle {
+                left,
+                top,
+                width,
+                height,
+            },
+            OcrConfidence::from_tesseract(95.0),
+        )
+        .with_level(OcrElementLevel::Word)
+    }
+
+    #[test]
+    fn should_assign_ordinary_grid_elements_in_reading_order() {
+        let grid = vec![
+            vec![cell(0.0, 0.0, 50.0, 50.0), cell(50.0, 0.0, 100.0, 50.0)],
+            vec![cell(0.0, 50.0, 50.0, 100.0), cell(50.0, 50.0, 100.0, 100.0)],
+        ];
+        let elements = [
+            word("B", 70, 10, 10, 10),
+            word("two", 25, 10, 10, 10),
+            word("one", 10, 10, 10, 10),
+            word("D", 70, 70, 10, 10),
+            word("C", 10, 70, 10, 10),
+        ];
+        let element_refs = elements.iter().collect::<Vec<_>>();
+
+        let (cells, markdown) = build_markdown_table(&grid, &element_refs, 0.0, 0.0);
+
+        assert_eq!(cells, vec![vec!["one two", "B"], vec!["C", "D"]]);
+        assert_eq!(markdown, "| one two | B |\n| --- | --- |\n| C | D |");
+    }
+
+    #[test]
+    fn should_assign_overlapping_element_only_to_highest_iow_cell() {
+        let grid = vec![vec![cell(0.0, 0.0, 60.0, 50.0), cell(40.0, 0.0, 100.0, 50.0)]];
+        let elements = [word("overlap", 50, 10, 20, 10)];
+        let element_refs = elements.iter().collect::<Vec<_>>();
+
+        let (cells, _) = build_markdown_table(&grid, &element_refs, 0.0, 0.0);
+
+        assert_eq!(cells, vec![vec!["", "overlap"]]);
+    }
+
+    #[test]
+    fn should_break_equal_iow_ties_by_row_then_column() {
+        let grid = vec![vec![cell(0.0, 0.0, 60.0, 50.0), cell(40.0, 0.0, 100.0, 50.0)]];
+        let elements = [word("tie", 45, 10, 10, 10)];
+        let element_refs = elements.iter().collect::<Vec<_>>();
+
+        let (cells, _) = build_markdown_table(&grid, &element_refs, 0.0, 0.0);
+
+        assert_eq!(cells, vec![vec!["tie", ""]]);
+    }
+
+    #[test]
+    fn should_assign_zero_area_element_by_center_without_duplication() {
+        let grid = vec![vec![cell(0.0, 0.0, 50.0, 50.0), cell(50.0, 0.0, 100.0, 50.0)]];
+        let elements = [word("point", 75, 25, 0, 0)];
+        let element_refs = elements.iter().collect::<Vec<_>>();
+
+        let (cells, _) = build_markdown_table(&grid, &element_refs, 0.0, 0.0);
+
+        assert_eq!(cells, vec![vec!["", "point"]]);
+    }
+
+    #[test]
+    fn should_emit_spanning_cell_element_once_for_repeated_boxes() {
+        let spanning = cell(0.0, 0.0, 100.0, 50.0);
+        let grid = vec![vec![spanning, spanning]];
+        let elements = [word("span", 40, 10, 20, 10)];
+        let element_refs = elements.iter().collect::<Vec<_>>();
+
+        let (cells, _) = build_markdown_table(&grid, &element_refs, 0.0, 0.0);
+
+        assert_eq!(cells, vec![vec!["span", ""]]);
+    }
 }
