@@ -64,8 +64,12 @@ struct FixtureTree {
 fn materialize_fixture_tree(cohort: Cohort, contract: &CohortContract) -> FixtureTree {
     let root = tempfile::tempdir().expect("tempdir");
     let cohort_manifest = root.path().join("cohort.json");
-    let fixtures_root = root.path().join("tools/benchmark-harness/fixtures");
+    let harness_root = root.path().join("tools/benchmark-harness");
+    let fixtures_root = harness_root.join("fixtures");
     std::fs::create_dir_all(&fixtures_root).expect("create fixtures root");
+    // ~keep Materialize the repository anchor used by production fixture validation so these
+    // release-layout tests exercise their intended contract instead of a standalone-tree boundary.
+    std::fs::copy(repo_path("Cargo.toml"), harness_root.join("Cargo.toml")).expect("copy harness manifest");
 
     let cohort_slug = match cohort {
         Cohort::Native => "native-pdf-fast-b8",
@@ -700,10 +704,22 @@ fn build_aggregate(contract: &CohortContract, cohort: Cohort) -> NewConsolidated
             missing_reason: None,
         })
         .collect();
+    // ~keep Consolidation tags every framework loaded from a batch artifact directory. This
+    // builder bypasses that filesystem loader, so mirror the tag before deriving aggregate keys.
     let results: Vec<BenchmarkResult> = contract
         .matrix
         .iter()
-        .flat_map(|entry| build_results(entry, contract, cohort))
+        .flat_map(|entry| {
+            let mut entry_results = build_results(entry, contract, cohort);
+            if matches!(entry.mode, benchmark_harness::bench_matrix::ExecutionMode::Batch) {
+                for result in &mut entry_results {
+                    if !result.framework.ends_with("-batch") {
+                        result.framework.push_str("-batch");
+                    }
+                }
+            }
+            entry_results
+        })
         .collect();
     let mut aggregate = benchmark_harness::aggregate_new_format(&results);
     aggregate.run_provenance = run_provenance;

@@ -269,9 +269,7 @@ fn collect_json_recursive(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
         let path = entry.path();
         if path.is_dir() {
             collect_json_recursive(&path, out)?;
-        } else if path.extension().is_some_and(|ext| ext == "json")
-            && !crate::fixture::is_split_sidecar(&path)
-        {
+        } else if path.extension().is_some_and(|ext| ext == "json") && !crate::fixture::is_split_sidecar(&path) {
             // `*.split.json` sidecars describe split_and_extract page boundaries, not extraction
             // fixtures — they have no `file_type`/ground truth and must be skipped here, mirroring
             // the loader in `fixture.rs`. Otherwise `--strict` treats them as GT load failures.

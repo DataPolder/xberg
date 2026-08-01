@@ -1,6 +1,6 @@
 [package]
 name = "xberg-ffi"
-version = "1.0.7"
+version = "1.0.8"
 edition = "2021"
 license = "MIT"
 description = "High-performance document intelligence library"
@@ -26,10 +26,6 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 [features]
 default = ["full", "pdf", "ocr", "paddle-ocr", "paddle-ocr-types", "layout-detection", "layout-types", "embeddings", "embedding-presets", "reranker", "reranker-presets", "sparse-embeddings", "sparse-embedding-presets", "late-interaction", "late-interaction-presets", "chunking", "keywords-yake", "keywords-rake", "language-detection", "html", "tree-sitter", "office", "email", "archives", "stopwords", "auto-rotate", "auto-rotate-types", "tokio-runtime", "api", "api-types", "mcp", "liter-llm", "quality", "svg", "transcription", "transcription-types", "classification", "captioning", "ner-onnx", "ner-llm", "diff", "markdown-footnotes", "redaction", "enrichment", "heuristics", "presets", "structured", "url-ingestion"]
 full = ["xberg/full"]
-# `full` minus `heic`, for the cross-compiled Swift bundle (packages/swift/rust) whose
-# libheif pkg-config build script cannot cross-compile. NOT alef-generated (full-no-heic is
-# not in alef's curated passthrough set) — reapply after `alef all`, like the swift shim patch.
-full-no-heic = ["xberg/full-no-heic"]
 pdf = ["xberg/pdf"]
 ocr = ["xberg/ocr"]
 paddle-ocr = ["xberg/paddle-ocr"]
@@ -88,20 +84,20 @@ serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 
-[target.'cfg(all(target_os = "macos", target_arch = "x86_64"))'.dependencies]
-xberg = { path = "../xberg", version = "1.0.7", features = ["macos-intel-target"] }
-
 [target.'cfg(not(any(target_os = "android", target_os = "ios", target_os = "windows", all(target_os = "macos", target_arch = "x86_64"))))'.dependencies]
-xberg = { path = "../xberg", version = "1.0.7", features = ["full", "pdf", "ocr", "paddle-ocr", "paddle-ocr-types", "layout-detection", "layout-types", "embeddings", "embedding-presets", "reranker", "reranker-presets", "sparse-embeddings", "sparse-embedding-presets", "late-interaction", "late-interaction-presets", "chunking", "keywords-yake", "keywords-rake", "language-detection", "html", "tree-sitter", "office", "email", "archives", "stopwords", "auto-rotate", "auto-rotate-types", "tokio-runtime", "api", "api-types", "mcp", "liter-llm", "quality", "svg", "transcription", "transcription-types", "classification", "captioning", "ner-onnx", "ner-llm", "diff", "markdown-footnotes", "redaction", "enrichment", "heuristics", "presets", "structured", "url-ingestion"] }
+xberg = { path = "../xberg", version = "1.0.8", features = ["full", "pdf", "ocr", "paddle-ocr", "paddle-ocr-types", "layout-detection", "layout-types", "embeddings", "embedding-presets", "reranker", "reranker-presets", "sparse-embeddings", "sparse-embedding-presets", "late-interaction", "late-interaction-presets", "chunking", "keywords-yake", "keywords-rake", "language-detection", "html", "tree-sitter", "office", "email", "archives", "stopwords", "auto-rotate", "auto-rotate-types", "tokio-runtime", "api", "api-types", "mcp", "liter-llm", "quality", "svg", "transcription", "transcription-types", "classification", "captioning", "ner-onnx", "ner-llm", "diff", "markdown-footnotes", "redaction", "enrichment", "heuristics", "presets", "structured", "url-ingestion"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
-xberg = { path = "../xberg", version = "1.0.7", features = ["android-target"] }
+xberg = { path = "../xberg", version = "1.0.8", features = ["android-target"] }
 
 [target.'cfg(target_os = "ios")'.dependencies]
-xberg = { path = "../xberg", version = "1.0.7", features = ["android-target"] }
+xberg = { path = "../xberg", version = "1.0.8", features = ["android-target"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-xberg = { path = "../xberg", version = "1.0.7", features = ["windows-target"] }
+xberg = { path = "../xberg", version = "1.0.8", features = ["windows-target"] }
+
+[target.'cfg(all(target_os = "macos", target_arch = "x86_64"))'.dependencies]
+xberg = { path = "../xberg", version = "1.0.8", features = ["macos-intel-target"] }
 
 
 [build-dependencies]

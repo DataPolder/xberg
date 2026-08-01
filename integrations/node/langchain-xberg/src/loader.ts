@@ -84,7 +84,11 @@ export class XbergLoader extends BaseDocumentLoader {
     }
 
     const { paths, batch } = await this.resolvePaths();
-    const inputs: ExtractInput[] = paths.map((path) => ({ kind: ExtractInputKind.Uri, uri: path, mimeType: this.mimeType }));
+    const inputs: ExtractInput[] = paths.map((path) => ({
+      kind: ExtractInputKind.Uri,
+      uri: path,
+      mimeType: this.mimeType,
+    }));
     return { inputs, sources: paths, batch };
   }
 
