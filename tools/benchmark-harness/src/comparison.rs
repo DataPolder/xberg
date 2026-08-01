@@ -393,6 +393,37 @@ fn build_paddle_extraction_config(
     }
 }
 
+fn disable_timed_extraction_caches(config: &mut xberg::ExtractionConfig) {
+    config.use_cache = false;
+
+    disable_timed_ocr_result_caches(config, false);
+}
+
+fn disable_timed_ocr_result_caches(config: &mut xberg::ExtractionConfig, materialize_implicit: bool) {
+    // Materializing the default OCR config preserves implicit-Tesseract behavior while making its
+    // independent result cache controllable for image and OCR-fallback benchmarks. ~keep
+    if config.ocr.is_none() && materialize_implicit {
+        config.ocr = Some(xberg::OcrConfig::default());
+    }
+    let Some(ocr) = config.ocr.as_mut() else {
+        return;
+    };
+    if let Some(pipeline) = ocr.pipeline.as_mut() {
+        for stage in &mut pipeline.stages {
+            if stage.backend == "tesseract" {
+                stage
+                    .tesseract_config
+                    .get_or_insert_with(xberg::TesseractConfig::default)
+                    .use_cache = false;
+            }
+        }
+    } else if ocr.backend == "tesseract" {
+        ocr.tesseract_config
+            .get_or_insert_with(xberg::TesseractConfig::default)
+            .use_cache = false;
+    }
+}
+
 /// Build a xberg ExtractionConfig for the given pipeline.
 pub fn build_extraction_config(pipeline: Pipeline) -> xberg::ExtractionConfig {
     use xberg::core::config::{OutputFormat, layout::LayoutDetectionConfig};
@@ -402,7 +433,7 @@ pub fn build_extraction_config(pipeline: Pipeline) -> xberg::ExtractionConfig {
         ..Default::default()
     };
 
-    match pipeline {
+    let mut config = match pipeline {
         Pipeline::Baseline => base,
         Pipeline::Layout => xberg::ExtractionConfig {
             layout: Some(LayoutDetectionConfig::default()),
@@ -619,7 +650,10 @@ pub fn build_extraction_config(pipeline: Pipeline) -> xberg::ExtractionConfig {
             }),
             ..base
         },
-    }
+    };
+
+    disable_timed_extraction_caches(&mut config);
+    config
 }
 
 /// Structural scoring outputs for one document: the SF1 rollup, reading-order
@@ -763,6 +797,7 @@ pub async fn extract_pipeline(
             let t = Instant::now();
             let mut config = build_extraction_config(pipeline);
             apply_fixture_ocr_language(&mut config, doc);
+            disable_timed_ocr_result_caches(&mut config, true);
             let doc_path = doc.document_path.clone();
             let doc_name = doc.name.clone();
             let pipeline_name = pipeline.name().to_string();
@@ -1802,6 +1837,84 @@ mod tests {
                 pipeline
             );
         }
+    }
+
+    #[test]
+    fn timed_xberg_pipeline_configs_disable_extraction_cache() {
+        for pipeline in Pipeline::all_xberg() {
+            let config = build_extraction_config(pipeline);
+
+            assert!(
+                !config.use_cache,
+                "timed pipeline {} must measure extraction rather than a cache hit",
+                pipeline.name()
+            );
+
+            let Some(ocr) = config.ocr.as_ref() else {
+                continue;
+            };
+            if let Some(ocr_pipeline) = ocr.pipeline.as_ref() {
+                for stage in &ocr_pipeline.stages {
+                    if stage.backend == "tesseract" {
+                        assert!(
+                            !stage
+                                .tesseract_config
+                                .as_ref()
+                                .expect("timed Tesseract stages must configure cache control")
+                                .use_cache,
+                            "timed Tesseract stage in {} must disable its result cache",
+                            pipeline.name()
+                        );
+                    }
+                }
+            } else if ocr.backend == "tesseract" {
+                assert!(
+                    !ocr.tesseract_config
+                        .as_ref()
+                        .expect("timed Tesseract pipelines must configure cache control")
+                        .use_cache,
+                    "timed pipeline {} must disable the Tesseract result cache",
+                    pipeline.name()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn timed_pipeline_disables_each_tesseract_stage_cache() {
+        let ocr = serde_json::from_value(serde_json::json!({
+            "pipeline": {
+                "stages": [
+                    { "backend": "tesseract" },
+                    { "backend": "paddleocr" }
+                ]
+            }
+        }))
+        .unwrap();
+        let mut config = xberg::ExtractionConfig {
+            ocr: Some(ocr),
+            ..Default::default()
+        };
+
+        disable_timed_ocr_result_caches(&mut config, true);
+
+        let stages = &config.ocr.unwrap().pipeline.unwrap().stages;
+        assert!(!stages[0].tesseract_config.as_ref().unwrap().use_cache);
+        assert!(stages[1].tesseract_config.is_none());
+    }
+
+    #[test]
+    fn timed_implicit_ocr_disables_default_tesseract_cache_at_extraction_boundary() {
+        let mut config = xberg::ExtractionConfig::default();
+
+        disable_timed_ocr_result_caches(&mut config, true);
+
+        let tesseract = config
+            .ocr
+            .unwrap()
+            .tesseract_config
+            .expect("implicit timed OCR must materialize Tesseract cache control");
+        assert!(!tesseract.use_cache);
     }
 
     #[test]
