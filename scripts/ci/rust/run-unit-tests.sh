@@ -53,6 +53,14 @@ if [ -n "${XBERG_PDFIUM_PREBUILT:-}" ]; then
   echo "  DYLD_FALLBACK_LIBRARY_PATH: $DYLD_FALLBACK_LIBRARY_PATH"
 fi
 
+# Live HF preset tests (*_live: embedding/reranker/sparse/late-interaction) download
+# models and run ONNX inference over the network. They are flaky and have a dedicated
+# retry job (`live-hf` in ci-rust.yaml) that invokes cargo directly and is unaffected
+# by this variable. Skip them in the plain unit-test legs so a network hiccup or a
+# backend crash (e.g. the macOS ORT SIGSEGV in embedding_preset_live) does not fail the
+# unit tests. ~keep
+export XBERG_SKIP_LIVE_HF=1
+
 echo "=== Starting cargo test ==="
 
 # NOTE: We intentionally avoid `--all-features` for the `xberg` crate because
@@ -68,7 +76,18 @@ if ! {
   # ~keep APIs; `cargo test -p xberg --features full --doc` currently fails those
   # ~keep examples because rustdoc compiles them as an external crate.
   echo "=== cargo test -p xberg --features full ==="
-  RUST_BACKTRACE=full cargo test --locked -p xberg --features full --all-targets --verbose || exit
+  # `full` now includes candle-vlm-ocr; candle's gemm-f16 matmul backend carries
+  # aarch64 inline asm requiring the fullfp16 target feature, which this runner's
+  # rustc baseline lacks ("instruction requires: fullfp16"). On Linux aarch64 test
+  # `full-no-heic,heic` (== full minus candle, heic kept) so the crate still covers
+  # everything except the un-buildable candle backends. Matches the candle drop in
+  # the gliner leg below; Apple Silicon has fullfp16 and keeps candle. ~keep
+  xberg_test_features=full
+  if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "aarch64" ]; then
+    echo "Linux aarch64: using full-no-heic,heic (full pulls candle -> gemm-f16 needs fullfp16)"
+    xberg_test_features=full-no-heic,heic
+  fi
+  RUST_BACKTRACE=full cargo test --locked -p xberg --features "$xberg_test_features" --all-targets --verbose || exit
 
   echo "=== cargo test --workspace (all features, excluding xberg) ==="
   extra_excludes=()
