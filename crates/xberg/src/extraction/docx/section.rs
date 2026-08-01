@@ -88,35 +88,6 @@ pub struct SectionProperties {
     pub doc_grid_line_pitch: Option<i32>,
 }
 
-impl PageMargins {
-    /// Convert all margins from twips to points.
-    ///
-    /// Conversion factor: 1 twip = 1/20 point, or equivalently divide by 20.
-    pub(crate) fn to_points(&self) -> PageMarginsPoints {
-        PageMarginsPoints {
-            top: self.top.map(|v| v as f64 / 20.0),
-            right: self.right.map(|v| v as f64 / 20.0),
-            bottom: self.bottom.map(|v| v as f64 / 20.0),
-            left: self.left.map(|v| v as f64 / 20.0),
-            header: self.header.map(|v| v as f64 / 20.0),
-            footer: self.footer.map(|v| v as f64 / 20.0),
-            gutter: self.gutter.map(|v| v as f64 / 20.0),
-        }
-    }
-}
-
-impl SectionProperties {
-    /// Convert page width from twips to points.
-    pub(crate) fn page_width_points(&self) -> Option<f64> {
-        self.page_width_twips.map(|v| v as f64 / 20.0)
-    }
-
-    /// Convert page height from twips to points.
-    pub(crate) fn page_height_points(&self) -> Option<f64> {
-        self.page_height_twips.map(|v| v as f64 / 20.0)
-    }
-}
-
 /// Get a namespaced integer attribute.
 fn get_w_attr_i32(element: &BytesStart, local_name: &str) -> Option<i32> {
     let w_prefixed = format!("w:{}", local_name);
@@ -297,9 +268,6 @@ mod tests {
 
         assert_eq!(props.page_width_twips, Some(11906));
         assert_eq!(props.page_height_twips, Some(16838));
-
-        assert_eq!(props.page_width_points(), Some(595.3));
-        assert_eq!(props.page_height_points(), Some(841.9));
     }
 
     #[test]
@@ -315,9 +283,6 @@ mod tests {
 
         assert_eq!(props.page_width_twips, Some(12240));
         assert_eq!(props.page_height_twips, Some(15840));
-
-        assert_eq!(props.page_width_points(), Some(612.0));
-        assert_eq!(props.page_height_points(), Some(792.0));
     }
 
     #[test]
@@ -354,10 +319,6 @@ mod tests {
         assert_eq!(props.margins.header, Some(720));
         assert_eq!(props.margins.footer, Some(720));
         assert_eq!(props.margins.gutter, Some(0));
-
-        let margins_points = props.margins.to_points();
-        assert_eq!(margins_points.top, Some(72.0));
-        assert_eq!(margins_points.header, Some(36.0));
     }
 
     #[test]
@@ -451,29 +412,6 @@ mod tests {
         let props = parse_section_properties_streaming(&mut reader);
         assert_eq!(props.orientation, Some(Orientation::Landscape));
         assert_eq!(props.page_width_twips, Some(16838));
-    }
-
-    #[test]
-    fn test_page_margins_conversion() {
-        let margins = PageMargins {
-            top: Some(1440),
-            right: Some(1080),
-            bottom: Some(1440),
-            left: Some(1080),
-            header: Some(720),
-            footer: Some(720),
-            gutter: None,
-        };
-
-        let points = margins.to_points();
-
-        assert_eq!(points.top, Some(72.0));
-        assert_eq!(points.right, Some(54.0));
-        assert_eq!(points.bottom, Some(72.0));
-        assert_eq!(points.left, Some(54.0));
-        assert_eq!(points.header, Some(36.0));
-        assert_eq!(points.footer, Some(36.0));
-        assert_eq!(points.gutter, None);
     }
 
     #[test]

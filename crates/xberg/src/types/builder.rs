@@ -59,16 +59,6 @@ impl DocumentStructureBuilder {
         }
     }
 
-    /// Create a builder with pre-allocated node capacity.
-    pub(crate) fn with_capacity(capacity: usize) -> Self {
-        Self {
-            doc: DocumentStructure::with_capacity(capacity),
-            section_stack: Vec::new(),
-            container_stack: Vec::new(),
-            node_count: 0,
-        }
-    }
-
     /// Set the source format identifier (e.g. "docx", "html", "pptx").
     pub(crate) fn source_format(mut self, format: impl Into<String>) -> Self {
         self.doc.source_format = Some(format.into());
@@ -178,12 +168,6 @@ impl DocumentStructureBuilder {
         self.push_body_node(content, page, None, vec![])
     }
 
-    /// Push a math formula node.
-    pub(crate) fn push_formula(&mut self, text: &str, page: Option<u32>) -> NodeIndex {
-        let content = NodeContent::Formula { text: text.to_string() };
-        self.push_body_node(content, page, None, vec![])
-    }
-
     /// Push an image reference node.
     pub(crate) fn push_image(
         &mut self,
@@ -226,12 +210,6 @@ impl DocumentStructureBuilder {
         let idx = self.push_body_node(content, page, None, vec![]);
         self.container_stack.push(idx);
         idx
-    }
-
-    /// Push a footnote node.
-    pub(crate) fn push_footnote(&mut self, text: &str, page: Option<u32>) -> NodeIndex {
-        let content = NodeContent::Footnote { text: text.to_string() };
-        self.push_node_raw(content, page, None, ContentLayer::Footnote, vec![])
     }
 
     /// Push a page break marker (always root-level, never nested under sections).
@@ -327,18 +305,6 @@ impl DocumentStructureBuilder {
     pub(crate) fn push_metadata_block(&mut self, entries: Vec<(String, String)>, page: Option<u32>) -> NodeIndex {
         let content = NodeContent::MetadataBlock { entries };
         self.push_body_node(content, page, None, vec![])
-    }
-
-    /// Push a header paragraph (running page header).
-    pub(crate) fn push_header(&mut self, text: &str, page: Option<u32>) -> NodeIndex {
-        let content = NodeContent::Paragraph { text: text.to_string() };
-        self.push_node_raw(content, page, None, ContentLayer::Header, vec![])
-    }
-
-    /// Push a footer paragraph (running page footer).
-    pub(crate) fn push_footer(&mut self, text: &str, page: Option<u32>) -> NodeIndex {
-        let content = NodeContent::Paragraph { text: text.to_string() };
-        self.push_node_raw(content, page, None, ContentLayer::Footer, vec![])
     }
 
     /// Set format-specific attributes on an existing node.
@@ -734,20 +700,6 @@ mod tests {
         assert!(doc.validate().is_ok());
         let node_attrs = doc.nodes[0].attributes.as_ref().unwrap();
         assert_eq!(node_attrs.get("class").unwrap(), "highlight");
-    }
-
-    #[test]
-    fn test_furniture_nodes() {
-        let mut b = DocumentStructureBuilder::new();
-        b.push_paragraph("Body text", vec![], Some(1), None);
-        b.push_header("Page Header", Some(1));
-        b.push_footer("Page Footer", Some(1));
-        b.push_footnote("Footnote text", Some(1));
-        let doc = b.build();
-
-        assert!(doc.validate().is_ok());
-        assert_eq!(doc.body_roots().count(), 1);
-        assert_eq!(doc.furniture_roots().count(), 3);
     }
 
     #[test]
