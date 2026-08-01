@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Multi-stage PDF OCR now shares rendered page rasters across pipeline tasks instead of copying
+  each pixel buffer, reducing peak memory by roughly one RGB raster per concurrent page.
 - Batch DOCX extraction reuses one owned input buffer and avoids rebuilding discarded document
   structure, reducing memory copies and structure-processing overhead for large files.
 

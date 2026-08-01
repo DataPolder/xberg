@@ -606,6 +606,16 @@ fn render_selected_pages_from_document(
     Ok(images)
 }
 
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+fn share_rendered_page_images(
+    page_images: Vec<(usize, image::DynamicImage)>,
+) -> Vec<(usize, std::sync::Arc<image::DynamicImage>)> {
+    page_images
+        .into_iter()
+        .map(|(page_idx, image)| (page_idx, std::sync::Arc::new(image)))
+        .collect()
+}
+
 /// Build mixed text from native extraction and per-page OCR results.
 ///
 /// For each page boundary, if the page is in `ocr_page_numbers` (1-indexed),
@@ -733,6 +743,7 @@ pub(crate) async fn extract_mixed_ocr_native(
         // most `batch_size`, the resolved worker budget) via a `JoinSet`, mirroring the
         // concurrency shape of the single-backend path below.
         if let Some(ref pipeline) = effective_pipeline {
+            let page_images = share_rendered_page_images(page_images);
             // on wasm32 (no OS threads, and extractor/backend futures are `!Send` there —
             // see the matching gate on the single-backend path below). Falls back to the
             // sequential loop there even though `tokio-runtime` may be active.
@@ -740,10 +751,7 @@ pub(crate) async fn extract_mixed_ocr_native(
             {
                 let mut join_set = tokio::task::JoinSet::new();
                 for (page_idx, image) in &page_images {
-                    // Each task needs an owned, 'static image to spawn; wrap in `Arc` so
-                    // concurrent pages don't each pay a full pixel-buffer copy beyond this
-                    // one clone-to-own.
-                    let image_arc = Arc::new(image.clone());
+                    let image_arc = Arc::clone(image);
                     let pipeline_clone = pipeline.clone();
                     let config_clone = config.clone();
                     let idx = *page_idx;
@@ -793,7 +801,7 @@ pub(crate) async fn extract_mixed_ocr_native(
                     let (text, _tables, _elements, doc, usage, page_texts, _rasters, formulas) =
                         Box::pin(run_ocr_pipeline(
                             None,
-                            Some(std::slice::from_ref(image)),
+                            Some(std::slice::from_ref(image.as_ref())),
                             #[cfg(feature = "layout-detection")]
                             None,
                             config,
@@ -4505,6 +4513,29 @@ Buffers:           50000 kB
     fn parse_meminfo_available_handles_unparseable_value_as_zero() {
         let synthetic = "MemAvailable: notanumber kB\n";
         assert_eq!(parse_meminfo_available(synthetic), 0);
+    }
+
+    #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
+    #[test]
+    fn shared_rendered_pages_preserve_order_content_and_backing_buffers() {
+        let first = image::DynamicImage::ImageRgb8(image::RgbImage::from_raw(2, 1, vec![1, 2, 3, 4, 5, 6]).unwrap());
+        let second = image::DynamicImage::ImageRgb8(image::RgbImage::from_raw(1, 1, vec![7, 8, 9]).unwrap());
+        let first_pixels = first.as_bytes().as_ptr();
+        let second_pixels = second.as_bytes().as_ptr();
+
+        let shared = share_rendered_page_images(vec![(4, first), (1, second)]);
+
+        assert_eq!(
+            shared.iter().map(|(page_idx, _)| *page_idx).collect::<Vec<_>>(),
+            vec![4, 1]
+        );
+        assert_eq!(shared[0].1.as_bytes(), &[1, 2, 3, 4, 5, 6]);
+        assert_eq!(shared[1].1.as_bytes(), &[7, 8, 9]);
+        assert_eq!(shared[0].1.as_bytes().as_ptr(), first_pixels);
+        assert_eq!(shared[1].1.as_bytes().as_ptr(), second_pixels);
+
+        let task_image = std::sync::Arc::clone(&shared[0].1);
+        assert!(std::sync::Arc::ptr_eq(&task_image, &shared[0].1));
     }
 
     /// Pipeline-level test for the actual bug path in #1078 (force_ocr_pages / mixed
