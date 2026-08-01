@@ -19,7 +19,9 @@ dev = [
 ]
 # docling-jobkit drives the batch path (in-process converter manager) and pulls
 # docling-slim>=2.117.0, which also serves the single-file path via the `docling` namespace.
-bench-docling = ["docling-jobkit==3.2.0"]
+# docling-slim ships no OCR engine; EasyOCR is docling's default OCR backend and is
+# required by the OCR cohorts (and the EasyOCR model-prefetch step), so add it explicitly.
+bench-docling = ["docling-jobkit==3.2.0", "easyocr>=1.7.2"]
 bench-markitdown = ["markitdown[all]==0.1.6"]
 bench-mineru = ["mineru[pipeline]==3.4.4", "onnxruntime", "six"]
 bench-pymupdf4llm = ["pillow>=10.0.0", "pymupdf-layout==1.28.0", "pymupdf4llm==1.28.0"]
