@@ -42,8 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   while preserving non-table text and rejecting incomplete table reconstruction in favor of OCR fallback.
 - Layout-enabled OCR now preserves detected image headings without losing or reordering fallback text,
   and regroups adjacent PDF OCR lines without collapsing distant paragraphs or separate layout regions.
-- Rotated PDF pages now receive the inverse `/Rotate` correction exactly once before shared layout
-  and OCR inference, keeping PaddleOCR text upright with or without layout detection.
+- Rotated PDF OCR now avoids reusing display-coordinate Markdown layout rasters and reruns layout
+  on inverse-`/Rotate`-normalized images, keeping OCR upright without desynchronizing detections.
 - Benchmark text F1 treats OCR-inserted line breaks within CJK text as layout whitespace,
   preventing semantically identical Chinese, Japanese, and Korean output from scoring zero.
 - Pipeline quality benchmarks allow forced OCR inference enough time to finish instead of

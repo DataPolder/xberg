@@ -274,17 +274,21 @@ type OcrLayoutGateDecisions = (Option<Vec<u32>>, Option<Vec<String>>);
 /// Whether the markdown layout pass's rasters may be reused as OCR input.
 ///
 /// Under `LayoutStrategy::Auto` with `SkipRender`, gate-skipped pages carry
-/// 64x64 white placeholders. Reusing those as OCR rasters would OCR blank
-/// squares (silent empty pages), so reuse is allowed only when every page ran
-/// the model. When it is refused, the OCR path runs its own layout pass in
-/// `RenderWithoutInference` mode, which renders gated pages correctly.
+/// 64x64 white placeholders. Rotated pages also remain in the display-space
+/// coordinate frame required by Markdown layout. Reuse is therefore allowed
+/// only when every page ran the model and no page has an effective `/Rotate`;
+/// otherwise OCR reruns layout with normalized rasters. ~keep
 #[cfg(all(
     feature = "pdf",
     feature = "layout-detection",
     any(feature = "ocr", feature = "ocr-pipeline")
 ))]
-fn markdown_layout_reusable_for_ocr(decisions: Option<&[crate::pdf::layout_gate::PageGateDecision]>) -> bool {
+fn markdown_layout_reusable_for_ocr(
+    decisions: Option<&[crate::pdf::layout_gate::PageGateDecision]>,
+    page_rotations: &[u32],
+) -> bool {
     decisions.is_none_or(|decisions| decisions.iter().all(|decision| decision.run_layout))
+        && page_rotations.iter().all(|rotation| rotation.is_multiple_of(360))
 }
 
 /// Convert gate decisions into the metadata representation.
@@ -726,7 +730,11 @@ impl PdfExtractor {
             feature = "layout-detection",
             any(feature = "ocr", feature = "ocr-pipeline")
         ))]
-        if !markdown_layout_reusable_for_ocr(markdown_layout_gate_decisions.as_deref()) {
+        let markdown_page_rotations = markdown_layout_images
+            .as_ref()
+            .map(|images| crate::pdf::render::get_page_rotations(content, images.len()))
+            .unwrap_or_default();
+        if !markdown_layout_reusable_for_ocr(markdown_layout_gate_decisions.as_deref(), &markdown_page_rotations) {
             markdown_layout_images = None;
             markdown_layout_detections = None;
             markdown_layout_acceleration_override = None;
@@ -1467,16 +1475,19 @@ mod tests {
         any(feature = "ocr", feature = "ocr-pipeline")
     ))]
     #[test]
-    fn markdown_layout_rasters_are_reusable_for_ocr_only_when_no_page_was_gated() {
-        assert!(markdown_layout_reusable_for_ocr(None));
-        assert!(markdown_layout_reusable_for_ocr(Some(&[
-            gate_decision(true),
-            gate_decision(true)
-        ])));
-        assert!(!markdown_layout_reusable_for_ocr(Some(&[
-            gate_decision(true),
-            gate_decision(false)
-        ])));
+    fn markdown_layout_rasters_are_reusable_only_when_ungated_and_unrotated() {
+        assert!(markdown_layout_reusable_for_ocr(None, &[]));
+        assert!(markdown_layout_reusable_for_ocr(
+            Some(&[gate_decision(true), gate_decision(true)]),
+            &[0, 0]
+        ));
+        assert!(!markdown_layout_reusable_for_ocr(
+            Some(&[gate_decision(true), gate_decision(false)]),
+            &[0, 0]
+        ));
+        for rotation in [90, 180, 270] {
+            assert!(!markdown_layout_reusable_for_ocr(None, &[rotation]));
+        }
     }
 
     #[cfg(all(
