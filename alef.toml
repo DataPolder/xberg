@@ -1,5 +1,5 @@
 [workspace]
-alef_version = "0.48.16"
+alef_version = "0.49.0"
 # -D warnings (emitted into every generated Rust binding as #![allow(...)]).
 extra_clippy_allows = ["redundant_field_names"]
 languages = [
@@ -812,6 +812,11 @@ prefix = "xberg"
 header_name = "xberg.h"
 lib_name = "xberg_ffi"
 visitor_callbacks = false
+# Declare `full-no-heic` as an opt-in passthrough (kept out of `default`) so the
+# swift-bridge shim can depend on `xberg-ffi` with that feature — heic's
+# `libheif-sys` build.rs cannot cross-compile. Not part of the auto-generated
+# passthrough set, so it must be listed here.
+extra_features = ["full-no-heic"]
 plugin_error_constructor = "xberg::XbergError::Plugin { message: msg, plugin_name: String::new() }"
 exclude_types = []
 exclude_functions = [
@@ -1220,6 +1225,12 @@ module_name = "Xberg"
 package_name = "Xberg"
 # `cfg(not(ios/android/windows))` target dep uses `features = ["full"]` which
 excluded_default_features = ["heic"]
+# The swift shim also links `xberg-ffi` directly. Emit that dependency with
+# `default-features = false` + `full-no-heic` so heic (whose `libheif-sys`
+# build.rs cannot cross-compile) is dropped on every cross-compiled swift
+# target. `full-no-heic` is the everything-minus-heic umbrella, so this matches
+# the primary core dep's effective feature set without enumerating each flag.
+ffi_features = ["full-no-heic"]
 features = [
   "pdf",
   "excel",
