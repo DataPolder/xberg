@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- EPUB extraction now resolves `epub:switch` branches per output renderer, preserving supported
+  XHTML and MathML cases while retaining readable plain-text fallbacks.
 - Typst extraction now emits marker-free headings and distinguishes explicit table headers from
   bare table rows, preserving correct Markdown structure.
 - MSG extraction now reads the canonical binary `PidTagHtml` stream with the Internet codepage,

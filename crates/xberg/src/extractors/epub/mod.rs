@@ -34,6 +34,9 @@ use crate::extractors::security::SecurityBudget;
 use content::{extract_text_from_xhtml, extract_text_from_xhtml_budgeted, looks_like_navigation_document};
 use metadata::{build_additional_metadata, parse_opf};
 use parsing::{parse_container_xml, read_file_from_zip, resolve_path};
+
+const MARKUP_SWITCH_NAMESPACES: &[&str] = &[content::XHTML_NAMESPACE, content::MATHML_NAMESPACE];
+const PLAIN_SWITCH_NAMESPACES: &[&str] = &[content::XHTML_NAMESPACE];
 #[cfg_attr(alef, alef(skip))]
 /// EPUB format extractor using permissive-licensed dependencies.
 ///
@@ -93,17 +96,16 @@ fn trim_trailing_newlines(s: &str) -> &str {
 #[allow(dead_code)]
 impl EpubExtractor {
     fn build_fallback_document_structure(
-        document: &content::EpubSpineDocument,
+        xhtml: &str,
         index: usize,
     ) -> crate::types::document_structure::DocumentStructure {
         use crate::types::builder::DocumentStructureBuilder;
 
         let mut builder = DocumentStructureBuilder::new().source_format("epub");
-        let chapter_title =
-            extract_title_from_xhtml(&document.xhtml).unwrap_or_else(|| format!("Chapter {}", index + 1));
+        let chapter_title = extract_title_from_xhtml(xhtml).unwrap_or_else(|| format!("Chapter {}", index + 1));
         builder.push_heading(1, &chapter_title, None, None);
 
-        let text = extract_text_from_xhtml(&document.xhtml);
+        let text = extract_text_from_xhtml(xhtml);
         for paragraph in text.split("\n\n") {
             let trimmed = paragraph.trim();
             if !trimmed.is_empty() {
@@ -117,6 +119,7 @@ impl EpubExtractor {
     /// Render a spine document once.
     fn render_spine_document(
         document: &content::EpubSpineDocument,
+        xhtml: &str,
         index: usize,
         config: &ExtractionConfig,
     ) -> RenderedSpineDocument {
@@ -129,7 +132,7 @@ impl EpubExtractor {
                 config.content_filter.as_ref(),
             );
             match crate::extraction::html::convert_html_to_markdown_with_metadata(
-                &document.xhtml,
+                xhtml,
                 html_options,
                 Some(config.output_format.clone()),
             ) {
@@ -142,15 +145,15 @@ impl EpubExtractor {
                             document.file_path, err
                         )),
                     });
-                    (extract_text_from_xhtml(&document.xhtml).trim_end().to_string(), false)
+                    (extract_text_from_xhtml(xhtml).trim_end().to_string(), false)
                 }
             }
         } else {
-            (extract_text_from_xhtml(&document.xhtml).trim_end().to_string(), true)
+            (extract_text_from_xhtml(xhtml).trim_end().to_string(), true)
         };
 
         let document = if config.include_document_structure {
-            let chapter_structure = crate::extraction::html::structure::build_document_structure(&document.xhtml);
+            let chapter_structure = crate::extraction::html::structure::build_document_structure(xhtml);
 
             if chapter_structure.nodes.is_empty() {
                 warnings.push(ProcessingWarning {
@@ -160,7 +163,7 @@ impl EpubExtractor {
                         document.file_path
                     )),
                 });
-                Some(Self::build_fallback_document_structure(document, index))
+                Some(Self::build_fallback_document_structure(xhtml, index))
             } else {
                 Some(chapter_structure)
             }
@@ -283,10 +286,16 @@ impl EpubExtractor {
             }
 
             let file_path = &spine_doc.file_path;
-            let sanitized = &spine_doc.xhtml;
+            let supported_namespaces = if wants_markup {
+                MARKUP_SWITCH_NAMESPACES
+            } else {
+                PLAIN_SWITCH_NAMESPACES
+            };
+            let resolved_xhtml = content::resolve_epub_switch_elements(&spine_doc.xhtml, supported_namespaces);
+            let sanitized = resolved_xhtml.as_str();
 
             if wants_markup {
-                let rendered = Self::render_spine_document(spine_doc, index, config);
+                let rendered = Self::render_spine_document(spine_doc, sanitized, index, config);
                 if rendered.content_fully_converted {
                     pre_rendered_fragments.push(rendered.content_fragment);
                 } else {

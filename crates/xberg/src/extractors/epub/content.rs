@@ -16,6 +16,10 @@ use zip::ZipArchive;
 use super::metadata::{EpubPackageDocument, ManifestItem};
 use super::parsing::read_file_from_zip;
 
+const EPUB_NAMESPACE: &str = "http://www.idpf.org/2007/ops";
+pub(super) const XHTML_NAMESPACE: &str = "http://www.w3.org/1999/xhtml";
+pub(super) const MATHML_NAMESPACE: &str = "http://www.w3.org/1998/Math/MathML";
+
 #[derive(Debug, Clone)]
 /// A resolved XHTML spine document prepared for EPUB extraction.
 ///
@@ -203,6 +207,62 @@ pub(super) fn strip_embedded_media_elements(xhtml: &str) -> String {
     strip_xml_elements(xhtml, |node| {
         matches!(node.tag_name().name().to_ascii_lowercase().as_str(), "audio" | "video")
     })
+}
+
+/// Resolve deprecated EPUB 3 `epub:switch` elements to the branch Xberg renders.
+/// Cases outside the downstream renderer's explicit namespace capabilities
+/// select `epub:default`. ~keep
+pub(super) fn resolve_epub_switch_elements(xhtml: &str, supported_namespaces: &[&str]) -> String {
+    let Ok(document) = roxmltree::Document::parse(xhtml) else {
+        return xhtml.to_string();
+    };
+    let mut removed_ranges = Vec::new();
+    for switch in document.descendants().filter(|node| is_epub_element(*node, "switch")) {
+        let selected = switch
+            .children()
+            .find(|child| {
+                is_epub_element(*child, "case")
+                    && child.attribute("required-namespace").is_some_and(|required| {
+                        supported_namespaces
+                            .iter()
+                            .any(|supported| required.trim() == *supported)
+                    })
+            })
+            .or_else(|| switch.children().find(|child| is_epub_element(*child, "default")));
+
+        removed_ranges.extend(
+            switch
+                .children()
+                .filter(|child| is_epub_element(*child, "case") || is_epub_element(*child, "default"))
+                .filter(|child| Some(*child) != selected)
+                .map(|child| child.range()),
+        );
+    }
+
+    removed_ranges.sort_unstable_by(|left, right| match left.start.cmp(&right.start) {
+        Ordering::Equal => right.end.cmp(&left.end),
+        order => order,
+    });
+    let mut outer_ranges = Vec::with_capacity(removed_ranges.len());
+    for range in removed_ranges {
+        if outer_ranges
+            .last()
+            .is_none_or(|outer: &std::ops::Range<usize>| range.start >= outer.end)
+        {
+            outer_ranges.push(range);
+        }
+    }
+    let mut resolved = xhtml.to_string();
+    for range in outer_ranges.into_iter().rev() {
+        resolved.replace_range(range, "");
+    }
+    resolved
+}
+
+fn is_epub_element(node: roxmltree::Node<'_, '_>, local_name: &str) -> bool {
+    node.is_element()
+        && node.tag_name().namespace() == Some(EPUB_NAMESPACE)
+        && node.tag_name().name().eq_ignore_ascii_case(local_name)
 }
 
 fn is_specialized_navigation_node(node: roxmltree::Node<'_, '_>) -> bool {
@@ -837,6 +897,52 @@ mod tests {
         assert!(!stripped.contains("movie.mp4"), "got: {stripped}");
         assert!(!stripped.contains("sound.mp3"), "got: {stripped}");
         assert!(!stripped.contains("fallback"), "got: {stripped}");
+    }
+
+    #[test]
+    fn should_resolve_epub_switch_to_supported_case_or_default() {
+        let xhtml = r#"<html xmlns="http://www.w3.org/1999/xhtml">
+<body>
+<epub:switch xmlns:epub="http://www.idpf.org/2007/ops">
+  <epub:case required-namespace="urn:unsupported"><p>UNKNOWN_CASE</p></epub:case>
+  <epub:default><p>DEFAULT</p></epub:default>
+</epub:switch>
+<epub:switch xmlns:epub="http://www.idpf.org/2007/ops">
+  <epub:case required-namespace="http://www.w3.org/1998/Math/MathML">
+    <math xmlns="http://www.w3.org/1998/Math/MathML"><mi>x</mi></math>
+  </epub:case>
+  <epub:default><p>MATH_FALLBACK</p></epub:default>
+</epub:switch>
+<epub:switch xmlns:epub="http://www.idpf.org/2007/ops">
+  <epub:case required-namespace="http://www.w3.org/1999/xhtml">
+    <p>XHTML_CASE</p>
+    <epub:switch>
+      <epub:case required-namespace="urn:nested-unsupported"><p>NESTED_WRONG</p></epub:case>
+      <epub:default><p>NESTED_DEFAULT</p></epub:default>
+    </epub:switch>
+  </epub:case>
+  <epub:default><p>XHTML_FALLBACK</p></epub:default>
+</epub:switch>
+<switch><p>ORDINARY</p></switch>
+</body></html>"#;
+
+        let markup = resolve_epub_switch_elements(xhtml, &[XHTML_NAMESPACE, MATHML_NAMESPACE]);
+        let plain = resolve_epub_switch_elements(xhtml, &[XHTML_NAMESPACE]);
+
+        for resolved in [&markup, &plain] {
+            assert!(resolved.contains("DEFAULT"), "got: {resolved}");
+            assert!(resolved.contains("XHTML_CASE"), "got: {resolved}");
+            assert!(resolved.contains("NESTED_DEFAULT"), "got: {resolved}");
+            assert!(resolved.contains("<switch><p>ORDINARY</p></switch>"), "got: {resolved}");
+            assert!(!resolved.contains("UNKNOWN_CASE"), "got: {resolved}");
+            assert!(!resolved.contains("NESTED_WRONG"), "got: {resolved}");
+            assert!(!resolved.contains("XHTML_FALLBACK"), "got: {resolved}");
+            assert!(roxmltree::Document::parse(resolved).is_ok(), "got: {resolved}");
+        }
+        assert!(markup.contains("<mi>x</mi>"), "got: {markup}");
+        assert!(!markup.contains("MATH_FALLBACK"), "got: {markup}");
+        assert!(!plain.contains("<mi>x</mi>"), "got: {plain}");
+        assert!(plain.contains("MATH_FALLBACK"), "got: {plain}");
     }
 
     #[test]

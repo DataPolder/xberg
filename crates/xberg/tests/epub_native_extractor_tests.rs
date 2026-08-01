@@ -11,7 +11,7 @@
 
 use std::path::PathBuf;
 use xberg::ExtractInput;
-use xberg::core::config::ExtractionConfig;
+use xberg::core::config::{ExtractionConfig, OutputFormat};
 use xberg::extractors::EpubExtractor;
 use xberg::plugins::DocumentExtractor;
 
@@ -122,8 +122,11 @@ async fn test_native_epub_features_extraction() {
 
     let bytes = std::fs::read(&test_file).expect("Failed to read features.epub");
     let extractor = EpubExtractor;
-    let config = ExtractionConfig::default();
-    let input = ExtractInput::from_bytes(bytes, "application/epub+zip", None);
+    let config = ExtractionConfig {
+        output_format: OutputFormat::Markdown,
+        ..Default::default()
+    };
+    let input = ExtractInput::from_bytes(bytes.clone(), "application/epub+zip", None);
     let result = extractor
         .extract(input, &config)
         .await
@@ -134,6 +137,49 @@ async fn test_native_epub_features_extraction() {
         "CRITICAL: Should extract from ALL chapters, got only {} bytes. \
          This indicates the two-pass bug is not fixed!",
         result.content.len()
+    );
+    assert_eq!(
+        result.content.lines().filter(|line| line.trim() == "PASS").count(),
+        1,
+        "epub:switch should select its default branch"
+    );
+    assert_eq!(
+        result.content.lines().filter(|line| line.trim() == "FAIL").count(),
+        0,
+        "epub:switch should omit unsupported and fallback branches"
+    );
+    assert!(
+        result.content.lines().any(|line| line.trim() == "2 \u{2061} x + y - z"),
+        "Markdown output should retain the selected MathML equation, got:\n{}",
+        result.content
+    );
+
+    let plain_config = ExtractionConfig {
+        output_format: OutputFormat::Plain,
+        ..Default::default()
+    };
+    let plain_input = ExtractInput::from_bytes(bytes, "application/epub+zip", None);
+    let plain_result = extractor
+        .extract(plain_input, &plain_config)
+        .await
+        .expect("Should extract plain features.epub successfully");
+    assert_eq!(
+        plain_result
+            .content
+            .lines()
+            .filter(|line| line.trim() == "PASS")
+            .count(),
+        1,
+        "Plain output should retain the default for an unsupported namespace"
+    );
+    assert_eq!(
+        plain_result
+            .content
+            .lines()
+            .filter(|line| line.trim() == "FAIL")
+            .count(),
+        1,
+        "Plain output should retain the readable fallback when MathML is unsupported"
     );
 
     println!(
