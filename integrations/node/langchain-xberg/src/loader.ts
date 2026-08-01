@@ -1,7 +1,7 @@
 import { stat } from "node:fs/promises";
 import { BaseDocumentLoader } from "@langchain/core/document_loaders/base";
 import type { Document } from "@langchain/core/documents";
-import { extract, extractBatch } from "@xberg-io/xberg";
+import { extract, extractBatch, ExtractInputKind } from "@xberg-io/xberg";
 import type { ExtractInput, ExtractionConfig } from "@xberg-io/xberg";
 import fastGlob from "fast-glob";
 import { isChunkingEnabled, isPerPageEnabled, resultToDocuments, type ResultEnvelope } from "./mapping";
@@ -79,12 +79,12 @@ export class XbergLoader extends BaseDocumentLoader {
   private async buildInputs(): Promise<{ inputs: ExtractInput[]; sources: string[]; batch: boolean }> {
     if (this.data !== undefined) {
       const source = `bytes://${this.mimeType}`;
-      const input: ExtractInput = { kind: "bytes", bytes: this.data, mimeType: this.mimeType };
+      const input: ExtractInput = { kind: ExtractInputKind.Bytes, bytes: this.data, mimeType: this.mimeType };
       return { inputs: [input], sources: [source], batch: false };
     }
 
     const { paths, batch } = await this.resolvePaths();
-    const inputs: ExtractInput[] = paths.map((path) => ({ kind: "uri", uri: path, mimeType: this.mimeType }));
+    const inputs: ExtractInput[] = paths.map((path) => ({ kind: ExtractInputKind.Uri, uri: path, mimeType: this.mimeType }));
     return { inputs, sources: paths, batch };
   }
 

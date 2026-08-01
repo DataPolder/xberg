@@ -3,6 +3,7 @@ import { basename, resolve } from "node:path";
 
 import { Document } from "@llamaindex/core/schema";
 
+import { ExtractInputKind } from "@xberg-io/xberg";
 import type { ExtractInput, ExtractionConfig } from "@xberg-io/xberg";
 
 import type { DocumentMetadata, SerializedChunk, SerializedElement, XbergBytesInput, XbergInput } from "./types.js";
@@ -193,7 +194,7 @@ export function prepareInputs(input: XbergInput): { inputs: ExtractInput[]; sour
   if (typeof input === "string" || Array.isArray(input)) {
     const paths = Array.isArray(input) ? input : [input];
     return {
-      inputs: paths.map((path) => ({ kind: "uri", uri: path })),
+      inputs: paths.map((path) => ({ kind: ExtractInputKind.Uri, uri: path })),
       sources: paths.map((path) => ({ path })),
     };
   }
@@ -205,7 +206,7 @@ export function prepareInputs(input: XbergInput): { inputs: ExtractInput[]; sour
         throw new Error("data and mimeType must be parallel lists of equal length");
       }
       return {
-        inputs: data.map((bytes, index) => ({ kind: "bytes", bytes, mimeType: mimeType[index] })),
+        inputs: data.map((bytes, index) => ({ kind: ExtractInputKind.Bytes, bytes, mimeType: mimeType[index] })),
         sources: data.map((bytes) => ({ data: bytes })),
       };
     }
@@ -213,7 +214,7 @@ export function prepareInputs(input: XbergInput): { inputs: ExtractInput[]; sour
       throw new Error("mimeType must be a string for single bytes input");
     }
     return {
-      inputs: [{ kind: "bytes", bytes: data, mimeType }],
+      inputs: [{ kind: ExtractInputKind.Bytes, bytes: data, mimeType }],
       sources: [{ data }],
     };
   }
