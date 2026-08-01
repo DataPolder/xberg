@@ -102,9 +102,8 @@ function buildExtractionConfig(outputFormat: XbergOutputFormat, options: IDataOb
   }
   if (options.enableChunking === true) {
     config.chunking = {
-      // The binding's `ChunkingConfig` uses snake_case for these two fields. ~keep
-      max_chars: (options.chunkSize as number) || DEFAULT_CHUNK_SIZE,
-      max_overlap: (options.chunkOverlap as number) ?? DEFAULT_CHUNK_OVERLAP,
+      maxCharacters: (options.chunkSize as number) || DEFAULT_CHUNK_SIZE,
+      overlap: (options.chunkOverlap as number) ?? DEFAULT_CHUNK_OVERLAP,
     };
   }
   if (options.extractImages === true) {
