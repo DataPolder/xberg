@@ -796,8 +796,10 @@ pub async fn extract_pipeline(
         _ => {
             let t = Instant::now();
             let mut config = build_extraction_config(pipeline);
-            apply_fixture_ocr_language(&mut config, doc);
+            // Materialize implicit OCR before applying fixture metadata so baseline PDF extraction
+            // keeps force_ocr disabled while its fallback OCR uses the requested language. ~keep
             disable_timed_ocr_result_caches(&mut config, true);
+            apply_fixture_ocr_language(&mut config, doc);
             let doc_path = doc.document_path.clone();
             let doc_name = doc.name.clone();
             let pipeline_name = pipeline.name().to_string();
@@ -1974,7 +1976,34 @@ mod tests {
     }
 
     #[test]
-    fn fixture_language_overrides_only_configured_ocr_language() {
+    fn fixture_language_applies_to_materialized_implicit_ocr_without_forcing_it() {
+        let mut metadata = HashMap::new();
+        metadata.insert("ocr_language".to_string(), serde_json::json!(" deu + eng "));
+        let doc = CorpusDocument {
+            name: "multilingual".to_string(),
+            document_path: std::path::PathBuf::new(),
+            file_type: "png".to_string(),
+            file_size: 0,
+            ground_truth_text: None,
+            ground_truth_markdown: None,
+            metadata,
+            fixture_path: std::path::PathBuf::new(),
+        };
+
+        for pipeline in [Pipeline::Baseline, Pipeline::PdfOxide] {
+            let mut config = build_extraction_config(pipeline);
+            disable_timed_ocr_result_caches(&mut config, true);
+            apply_fixture_ocr_language(&mut config, &doc);
+
+            let ocr = config.ocr.expect("timed extraction must materialize fallback OCR");
+            assert_eq!(ocr.language, ["deu", "eng"]);
+            assert_eq!(ocr.backend, "tesseract");
+            assert!(!config.force_ocr, "{} must retain fallback-only OCR", pipeline.name());
+        }
+    }
+
+    #[test]
+    fn fixture_language_preserves_explicit_paddle_backend_and_model_tier() {
         let mut metadata = HashMap::new();
         metadata.insert("ocr_language".to_string(), serde_json::json!(" deu + eng "));
         let doc = CorpusDocument {
@@ -1989,19 +2018,13 @@ mod tests {
         };
         let mut config = build_extraction_config(Pipeline::PaddleV6SmallLayout);
 
+        disable_timed_ocr_result_caches(&mut config, true);
         apply_fixture_ocr_language(&mut config, &doc);
 
         let ocr = config.ocr.expect("Paddle preset must configure OCR");
         assert_eq!(ocr.language, ["deu", "eng"]);
         assert_eq!(ocr.backend, "paddleocr");
         assert_eq!(ocr.paddle_ocr_config.expect("model identity")["model_tier"], "small");
-
-        let mut baseline = build_extraction_config(Pipeline::Baseline);
-        apply_fixture_ocr_language(&mut baseline, &doc);
-        assert!(
-            baseline.ocr.is_none(),
-            "fixture metadata must not enable OCR for baseline"
-        );
     }
 
     fn create_vendored_fixture(root: &Path, content: &str) -> (std::path::PathBuf, std::path::PathBuf) {
