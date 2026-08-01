@@ -70,6 +70,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   recovering Hangul text that the unified recognition model omitted.
 - PaddleOCR now preserves the right-to-left column order and contiguous text of traditional
   vertical Chinese and Japanese documents.
+- Image OCR now preserves blank-line paragraph boundaries instead of flattening every recognized
+  text block into one paragraph.
 - Jupyter notebook paths retain `application/x-ipynb+json` routing when generic JSON content
   detection runs, and extracted notebook content no longer exposes diagnostic cell/output markers;
   cell identity, execution, tag, output-type, and MIME details remain available as structured metadata.

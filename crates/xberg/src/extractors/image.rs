@@ -1422,7 +1422,7 @@ impl ImageExtractor {
 
 /// Build a simple `InternalDocument` for an image extraction result.
 ///
-/// If OCR text is available, pushes it as a paragraph. Always pushes
+/// If OCR text is available, preserves its blank-line-delimited paragraphs. Always pushes
 /// the image itself as an `Image` node. When `image_data` is provided,
 /// the binary data is stored in `InternalDocument::images` and the
 /// element references it by index.
@@ -1434,7 +1434,9 @@ fn build_image_internal_document(
     if let Some(text) = ocr_text
         && !text.trim().is_empty()
     {
-        builder.push_paragraph(text.trim(), vec![], None, None);
+        for paragraph in split_ocr_paragraphs(text) {
+            builder.push_paragraph(&paragraph, vec![], None, None);
+        }
     }
     if let Some(img) = image_data {
         builder.push_image(None, img, None, None);
@@ -1461,6 +1463,26 @@ fn build_image_internal_document(
         });
     }
     builder.build()
+}
+
+fn split_ocr_paragraphs(text: &str) -> Vec<String> {
+    let mut paragraphs = Vec::new();
+    let mut current = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            if !current.is_empty() {
+                paragraphs.push(current.join("\n"));
+                current.clear();
+            }
+        } else {
+            current.push(line);
+        }
+    }
+    if !current.is_empty() {
+        paragraphs.push(current.join("\n"));
+    }
+    paragraphs
 }
 
 impl Default for ImageExtractor {
@@ -1669,6 +1691,32 @@ mod tests {
 
     fn image_ocr_document(text: &str) -> InternalDocument {
         build_image_internal_document(Some(text), None)
+    }
+
+    #[test]
+    fn image_ocr_preserves_blank_line_paragraph_boundaries() {
+        let doc = image_ocr_document("\nfirst line\nwrapped line\n\n\nsecond paragraph\n");
+        let paragraphs = doc
+            .elements
+            .iter()
+            .filter(|element| matches!(element.kind, crate::types::internal::ElementKind::Paragraph))
+            .map(|element| element.text.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(paragraphs, ["first line\nwrapped line", "second paragraph"]);
+    }
+
+    #[test]
+    fn image_ocr_keeps_single_newline_wrapping_in_one_paragraph() {
+        let doc = image_ocr_document("first line\nwrapped line");
+        let paragraphs = doc
+            .elements
+            .iter()
+            .filter(|element| matches!(element.kind, crate::types::internal::ElementKind::Paragraph))
+            .map(|element| element.text.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(paragraphs, ["first line\nwrapped line"]);
     }
 
     #[cfg(all(feature = "layout-detection", feature = "ocr"))]
