@@ -182,6 +182,7 @@ impl Fixture {
                     | "parsebench"
                     | "fintabnet"
                     | "federal_register"
+                    | "apple_preview"
             ) {
                 return Err(Error::InvalidFixture {
                     path: fixture_path.to_path_buf(),
@@ -579,6 +580,29 @@ mod tests {
         };
 
         assert!(fixture.validate(Path::new("fixture.json")).is_ok());
+    }
+
+    #[test]
+    fn fixture_validation_accepts_apple_preview_ground_truth() {
+        let root = TempDir::new().unwrap();
+        let fixture_path = root.path().join("fixture.json");
+        std::fs::write(root.path().join("expected.txt"), "cell value").unwrap();
+        let fixture = Fixture {
+            document: PathBuf::from("test.numbers"),
+            file_type: "numbers".to_string(),
+            file_size: 1024,
+            expected_frameworks: vec!["xberg".to_string()],
+            metadata: HashMap::new(),
+            ground_truth: Some(GroundTruth {
+                text_file: Some(PathBuf::from("expected.txt")),
+                markdown_file: None,
+                fields_json: None,
+                formulas_json: None,
+                source: "apple_preview".to_string(),
+            }),
+        };
+
+        assert!(fixture.validate(&fixture_path).is_ok());
     }
 
     #[test]
