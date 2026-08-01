@@ -223,10 +223,11 @@ impl OcrBackend for TesseractBackend {
             })?;
         #[cfg(target_arch = "wasm32")]
         let ocr_result = operation();
-        let ocr_result = ocr_result.map_err(|e| crate::XbergError::Ocr {
+        let mut ocr_result = ocr_result.map_err(|e| crate::XbergError::Ocr {
             message: format!("Tesseract OCR failed: {}", e),
             source: Some(Box::new(e)),
         })?;
+        normalize_vertical_cjk_result(&mut ocr_result, &tess_config.language, &tess_config.output_format);
 
         let resolved_language = ocr_result
             .metadata
@@ -331,10 +332,11 @@ impl OcrBackend for TesseractBackend {
             })?;
         #[cfg(target_arch = "wasm32")]
         let ocr_result = operation();
-        let ocr_result = ocr_result.map_err(|e| crate::XbergError::Ocr {
+        let mut ocr_result = ocr_result.map_err(|e| crate::XbergError::Ocr {
             message: format!("Tesseract OCR failed: {}", e),
             source: Some(Box::new(e)),
         })?;
+        normalize_vertical_cjk_result(&mut ocr_result, &tess_config.language, &tess_config.output_format);
 
         let resolved_language = ocr_result
             .metadata
@@ -417,9 +419,87 @@ impl OcrBackend for TesseractBackend {
     }
 }
 
+fn normalize_vertical_cjk_result(result: &mut crate::types::OcrExtractionResult, language: &str, output_format: &str) {
+    if matches!(output_format, "hocr" | "tsv")
+        || !language
+            .split('+')
+            .any(|code| code.to_ascii_lowercase().ends_with("_vert"))
+    {
+        return;
+    }
+    result.content = compact_cjk_horizontal_spacing(&result.content);
+    for table in &mut result.tables {
+        for row in &mut table.cells {
+            for cell in row {
+                *cell = compact_cjk_horizontal_spacing(cell);
+            }
+        }
+        table.markdown = compact_cjk_horizontal_spacing(&table.markdown);
+    }
+    if let Some(document) = result.internal_document.as_mut() {
+        for (index, element) in document.elements.iter_mut().enumerate() {
+            element.text = compact_cjk_horizontal_spacing(&element.text);
+            element.id = crate::types::internal::InternalElementId::generate(
+                element.kind.discriminant(),
+                &element.text,
+                element.page,
+                index as u32,
+            );
+        }
+    }
+}
+
+fn compact_cjk_horizontal_spacing(text: &str) -> String {
+    let chars = text.chars().collect::<Vec<_>>();
+    let mut output = String::with_capacity(text.len());
+    let mut index = 0;
+    while index < chars.len() {
+        if !matches!(chars[index], ' ' | '\t') {
+            output.push(chars[index]);
+            index += 1;
+            continue;
+        }
+
+        let whitespace_start = index;
+        while index < chars.len() && matches!(chars[index], ' ' | '\t') {
+            index += 1;
+        }
+        let joins_cjk = output.chars().next_back().is_some_and(is_compact_cjk_char)
+            && chars.get(index).copied().is_some_and(is_compact_cjk_char);
+        if !joins_cjk {
+            output.extend(chars[whitespace_start..index].iter());
+        }
+    }
+    output
+}
+
+fn is_compact_cjk_char(character: char) -> bool {
+    matches!(
+        character as u32,
+        0x2E80..=0x30FF | 0x31F0..=0x9FFF | 0xAC00..=0xD7AF | 0xF900..=0xFAFF | 0xFF00..=0xFFEF
+            | 0x20000..=0x2FA1F
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vertical_cjk_spacing_removes_only_inter_character_horizontal_space() {
+        assert_eq!(
+            compact_cjk_horizontal_spacing("元 来 日 本 語 は 漢文 に 倣い 、 API 文書 。\n次 行"),
+            "元来日本語は漢文に倣い、 API 文書。\n次行"
+        );
+    }
+
+    #[test]
+    fn vertical_cjk_spacing_preserves_latin_and_paragraph_whitespace() {
+        assert_eq!(
+            compact_cjk_horizontal_spacing("API 仕様\tversion 2\n\n次段落"),
+            "API 仕様\tversion 2\n\n次段落"
+        );
+    }
 
     #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]

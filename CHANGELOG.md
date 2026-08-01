@@ -72,6 +72,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   vertical Chinese and Japanese documents.
 - Image OCR now preserves blank-line paragraph boundaries instead of flattening every recognized
   text block into one paragraph.
+- Tesseract vertical CJK OCR now removes artificial spaces between adjacent script characters
+  while preserving Latin-word and paragraph whitespace.
 - Jupyter notebook paths retain `application/x-ipynb+json` routing when generic JSON content
   detection runs, and extracted notebook content no longer exposes diagnostic cell/output markers;
   cell identity, execution, tag, output-type, and MIME details remain available as structured metadata.
