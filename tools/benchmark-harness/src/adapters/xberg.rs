@@ -379,6 +379,21 @@ mod tests {
     }
 
     #[test]
+    fn benchmark_descriptors_are_eligible_when_xberg_supports_their_extensions() {
+        let supported_formats: std::collections::HashSet<String> = xberg::list_supported_formats()
+            .into_iter()
+            .map(|format| format.extension)
+            .collect();
+
+        for descriptor_file_type in ["asciidoc", "nxml", "vtt"] {
+            assert!(
+                supported_formats.contains(descriptor_file_type),
+                "Xberg benchmark descriptor `{descriptor_file_type}` was filtered out"
+            );
+        }
+    }
+
+    #[test]
     fn benchmark_invocations_disable_user_config_discovery() {
         for batch in [false, true] {
             let args = benchmark_base_args(batch, "markdown", false);

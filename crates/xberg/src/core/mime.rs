@@ -84,6 +84,16 @@ static FORMATS: &[FormatEntry] = &[
         aliases: &[],
     },
     FormatEntry {
+        extensions: &["adoc", "asciidoc"],
+        mime_type: "text/asciidoc",
+        aliases: &["text/x-asciidoc"],
+    },
+    FormatEntry {
+        extensions: &["vtt"],
+        mime_type: "text/vtt",
+        aliases: &[],
+    },
+    FormatEntry {
         extensions: &[],
         mime_type: "text/troff",
         aliases: &[],
@@ -519,7 +529,7 @@ static FORMATS: &[FormatEntry] = &[
         aliases: &["text/docbook"],
     },
     FormatEntry {
-        extensions: &["jats"],
+        extensions: &["jats", "nxml"],
         mime_type: "application/x-jats+xml",
         aliases: &["text/jats"],
     },
@@ -1119,13 +1129,15 @@ fn contains_subsequence(haystack: &[u8], needle: &[u8]) -> bool {
 pub fn get_extensions_for_mime(mime_type: &str) -> Result<Vec<String>> {
     let mut extensions = Vec::new();
 
-    for (ext, mime) in EXT_TO_MIME.iter() {
-        if *mime == mime_type {
-            extensions.push(ext.to_string());
+    for entry in FORMATS {
+        if entry.mime_type == mime_type || entry.aliases.contains(&mime_type) {
+            extensions.extend(entry.extensions.iter().map(|extension| (*extension).to_string()));
         }
     }
 
     if !extensions.is_empty() {
+        extensions.sort();
+        extensions.dedup();
         return Ok(extensions);
     }
 
@@ -1195,7 +1207,7 @@ mod tests {
         archive.finish().unwrap().into_inner()
     }
 
-    #[cfg(all(feature = "office", feature = "xml", feature = "tokio-runtime"))]
+    #[cfg(all(feature = "xml", feature = "tokio-runtime", not(target_arch = "wasm32")))]
     async fn assert_specialized_xml_routes_through_real_extractor(
         extension: &str,
         content: &str,
@@ -1262,6 +1274,58 @@ mod tests {
             )
             .await;
         }
+    }
+
+    #[cfg(all(feature = "xml", feature = "tokio-runtime", not(target_arch = "wasm32")))]
+    #[tokio::test]
+    async fn should_route_nxml_extension_to_jats_extractor() {
+        let content = r#"<?xml version="1.0" encoding="utf-8"?>
+<article>
+<front><article-meta><title-group><article-title>Routing Test</article-title></title-group></article-meta></front>
+<body><sec><title>Results</title><p>NXML semantic text.</p></sec></body></article>"#;
+
+        assert_specialized_xml_routes_through_real_extractor(
+            "nxml",
+            content,
+            "application/x-jats+xml",
+            "NXML semantic text.",
+        )
+        .await;
+    }
+
+    #[cfg(all(feature = "tokio-runtime", not(target_arch = "wasm32")))]
+    #[tokio::test]
+    async fn should_route_benchmark_text_extensions_to_plain_text_extractor() {
+        let test_cases = [
+            ("adoc", "text/asciidoc", "AsciiDoc short-extension routing text."),
+            ("asciidoc", "text/asciidoc", "AsciiDoc routing text."),
+            ("vtt", "text/vtt", "WebVTT routing text."),
+        ];
+
+        for (extension, expected_mime, expected_text) in test_cases {
+            let dir = tempdir().unwrap();
+            let file_path = dir.path().join(format!("routing.{extension}"));
+            std::fs::write(&file_path, expected_text).unwrap();
+
+            let config = crate::core::config::ExtractionConfig {
+                use_cache: false,
+                ..Default::default()
+            };
+            let result = crate::core::extractor::extract_file(&file_path, None, &config)
+                .await
+                .unwrap();
+
+            assert_eq!(result.mime_type, expected_mime);
+            assert!(result.content.contains(expected_text));
+        }
+    }
+
+    #[test]
+    fn should_resolve_registered_mime_alias_to_extensions() {
+        assert_eq!(
+            get_extensions_for_mime("text/x-asciidoc").unwrap(),
+            vec!["adoc".to_string(), "asciidoc".to_string()]
+        );
     }
 
     #[test]

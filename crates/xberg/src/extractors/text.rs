@@ -118,6 +118,9 @@ impl InternalDocumentExtractor for PlainTextExtractor {
     fn supported_mime_types(&self) -> &[&str] {
         &[
             "text/plain",
+            "text/asciidoc",
+            "text/x-asciidoc",
+            "text/vtt",
             "text/troff",
             "text/x-mdoc",
             "text/x-pod",
@@ -160,6 +163,9 @@ mod tests {
             extractor.supported_mime_types(),
             &[
                 "text/plain",
+                "text/asciidoc",
+                "text/x-asciidoc",
+                "text/vtt",
                 "text/troff",
                 "text/x-mdoc",
                 "text/x-pod",
