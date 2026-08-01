@@ -12,13 +12,14 @@ import sys
 import time
 from pathlib import Path
 
-import fitz
 import numpy as np
 
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures"
 VENDORED_DIR = Path(__file__).resolve().parent.parent / "vendored"
+COHORTS_DIR = Path(__file__).resolve().parent.parent / "cohorts"
+OCR_IMAGES_COHORT = COHORTS_DIR / "ocr-images-fast.json"
 
-OCR_FIXTURES = [
+PDF_OCR_FIXTURES = [
     "pdf_image_only_german",
     "pdf_non_searchable",
     "pdf_ocr_rotated_270",
@@ -29,10 +30,19 @@ OCR_FIXTURES = [
 ]
 
 
+def load_ocr_fixture_paths() -> list[Path]:
+    """Load the PDF fixtures and the canonical fast OCR image cohort."""
+    fixture_paths = [FIXTURES_DIR / f"{name}.json" for name in PDF_OCR_FIXTURES]
+    cohort = json.loads(OCR_IMAGES_COHORT.read_text(encoding="utf-8"))
+    fixture_paths.extend(FIXTURES_DIR / fixture for fixture in cohort["fixtures"])
+    return fixture_paths
+
+
 def pdf_to_images(pdf_path: str, dpi: int = 300) -> list[np.ndarray]:
     """Convert PDF pages to numpy arrays (RGB, HWC)."""
     import io
 
+    import fitz
     from PIL import Image
 
     doc = fitz.open(pdf_path)
@@ -46,19 +56,32 @@ def pdf_to_images(pdf_path: str, dpi: int = 300) -> list[np.ndarray]:
     return images
 
 
+def document_to_images(document_path: str) -> list[np.ndarray]:
+    """Load PDF pages or raster image frames as RGB numpy arrays."""
+    if Path(document_path).suffix.lower() == ".pdf":
+        return pdf_to_images(document_path)
+
+    from PIL import Image, ImageSequence
+
+    with Image.open(document_path) as image:
+        return [
+            np.array(frame.convert("RGB")) for frame in ImageSequence.Iterator(image)
+        ]
+
+
 def lines_to_markdown(lines: list[str]) -> str:
     """Each OCR text line becomes a markdown paragraph."""
     paragraphs = [line.strip() for line in lines if line.strip()]
     return "\n\n".join(paragraphs) + "\n" if paragraphs else ""
 
 
-def run_paddleocr_python(pdf_path: str) -> tuple[str, float]:
+def run_paddleocr_python(document_path: str) -> tuple[str, float]:
     """Run PaddleOCR Python v3.4+ using the predict() API."""
     os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
     from paddleocr import PaddleOCR
 
     ocr = PaddleOCR(use_textline_orientation=True, lang="en")
-    images = pdf_to_images(pdf_path)
+    images = document_to_images(document_path)
 
     start = time.monotonic()
     all_lines: list[str] = []
@@ -75,24 +98,36 @@ def run_paddleocr_python(pdf_path: str) -> tuple[str, float]:
     return lines_to_markdown(all_lines), elapsed_ms
 
 
-def run_rapidocr(pdf_path: str) -> tuple[str, float]:
+def rapidocr_lines(result: object) -> list[str]:
+    """Return recognized text from current or legacy RapidOCR output."""
+    texts = getattr(result, "txts", None)
+    if texts is not None:
+        return [str(text).strip() for text in texts if str(text).strip()]
+
+    legacy_result = result[0] if isinstance(result, tuple) else result
+    if not legacy_result:
+        return []
+    return [
+        str(line[1]).strip()
+        for line in legacy_result
+        if line and len(line) >= 2 and str(line[1]).strip()
+    ]
+
+
+def run_rapidocr(document_path: str) -> tuple[str, float]:
     """Run RapidOCR."""
-    from rapidocr_onnxruntime import RapidOCR
+    try:
+        from rapidocr import RapidOCR
+    except ImportError:
+        from rapidocr_onnxruntime import RapidOCR
 
     ocr = RapidOCR()
-    images = pdf_to_images(pdf_path)
+    images = document_to_images(document_path)
 
     start = time.monotonic()
     all_lines: list[str] = []
     for img in images:
-        result, _ = ocr(img)
-        if not result:
-            continue
-        for line in result:
-            if line and len(line) >= 2:
-                text = str(line[1]).strip()
-                if text:
-                    all_lines.append(text)
+        all_lines.extend(rapidocr_lines(ocr(img)))
     elapsed_ms = (time.monotonic() - start) * 1000
 
     return lines_to_markdown(all_lines), elapsed_ms
@@ -123,8 +158,8 @@ def main():
             sys.exit(1)
         pipelines = {selected: pipelines[selected]}
 
-    for fixture_name in OCR_FIXTURES:
-        fixture_path = FIXTURES_DIR / f"{fixture_name}.json"
+    for fixture_path in load_ocr_fixture_paths():
+        fixture_name = fixture_path.stem
         if not fixture_path.exists():
             print(f"  SKIP {fixture_name}: fixture not found")
             continue
