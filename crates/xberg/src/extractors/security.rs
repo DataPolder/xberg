@@ -494,6 +494,10 @@ impl SecurityBudget {
     }
 
     /// Build a protobuf/iWork budget using the format-agnostic nesting limit.
+    // All callers live in the `iwork`-gated extractor module, so gate the
+    // constructor to match — otherwise it is dead code under feature combos
+    // that omit `iwork` (e.g. the no-ORT tract clippy leg). ~keep
+    #[cfg(feature = "iwork")]
     pub(crate) fn for_iwork(limits: &SecurityLimits) -> Self {
         let mut budget = Self::from_limits(limits);
         // iWork parses protobuf messages, so XML depth is not applicable here. ~keep
