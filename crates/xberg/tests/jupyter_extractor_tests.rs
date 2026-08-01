@@ -362,6 +362,13 @@ async fn test_jupyter_rank_notebook_extraction() {
 
     assert!(!extraction.content.is_empty(), "Extracted content should not be empty");
 
+    // The extractor renders raw cell content (code + text outputs) and routes
+    // diagnostics to metadata / images rather than inline `[output_type: ..]`
+    // markers (see fix(notebook) 6dbaac0a69), so classification and kernel
+    // assertions read `metadata.additional`, and image outputs read
+    // `extraction.images`. ~keep
+    let rank_metadata = serde_json::to_string(&extraction.metadata.additional).unwrap_or_default();
+
     assert!(
         extraction.content.contains("matplotlib")
             || extraction.content.contains("pyplot")
@@ -378,8 +385,8 @@ async fn test_jupyter_rank_notebook_extraction() {
     );
 
     assert!(
-        extraction.content.contains("display") || extraction.content.contains("output"),
-        "Should preserve output type markers"
+        rank_metadata.contains("display_data") || rank_metadata.contains("execute_result"),
+        "Should preserve output type classifications in metadata"
     );
 
     assert!(
@@ -392,15 +399,15 @@ async fn test_jupyter_rank_notebook_extraction() {
     assert!(
         extraction.content.contains("html")
             || extraction.content.contains("text")
-            || extraction.content.contains("see"),
-        "Should extract alternative text representation"
+            || extraction.content.contains("Figure"),
+        "Should extract alternative text representation of the figure output"
     );
 
     assert!(
-        extraction.content.contains("ipykernel")
-            || extraction.content.contains("python")
-            || extraction.content.contains("Python"),
-        "Should preserve kernel or language information"
+        rank_metadata.contains("ipykernel")
+            || rank_metadata.contains("python")
+            || rank_metadata.contains("Python"),
+        "Should preserve kernel or language information in metadata"
     );
 
     println!(
@@ -568,14 +575,14 @@ async fn test_jupyter_mime_output_handling() {
     let extraction = result.expect("Operation failed");
 
     assert!(
-        extraction.content.contains("image")
-            || extraction.content.contains("png")
-            || extraction.content.contains("jpg"),
-        "Should handle image MIME types"
+        extraction.images.as_ref().is_some_and(|images| !images.is_empty()),
+        "Should extract image MIME outputs into the images collection"
     );
 
     assert!(
-        extraction.content.contains("html") || extraction.content.contains("text"),
+        extraction.content.contains("html")
+            || extraction.content.contains("text")
+            || extraction.content.contains("Figure"),
         "Should preserve HTML and text representations"
     );
 
@@ -674,11 +681,9 @@ async fn test_jupyter_pandoc_baseline_alignment() {
         let extraction = result.expect("Operation failed");
 
         assert!(
-            extraction.content.contains("cell")
-                || extraction.content.contains("code")
-                || extraction.content.contains("markdown")
-                || extraction.content.contains("output"),
-            "{}: Should contain cell/output structure markers that match Pandoc format",
+            !extraction.content.trim().is_empty()
+                || extraction.images.as_ref().is_some_and(|images| !images.is_empty()),
+            "{}: Should extract cell content or outputs",
             notebook_name
         );
 
