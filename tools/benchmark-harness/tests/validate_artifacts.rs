@@ -61,6 +61,20 @@ struct FixtureTree {
     fixture_provenance: Vec<FixtureProvenance>,
 }
 
+fn copy_ground_truth_files(source_descriptor: &Path, descriptor: &Path, value: &serde_json::Value) {
+    let source_parent = source_descriptor.parent().expect("source descriptor has a parent");
+    let destination_parent = descriptor.parent().expect("descriptor has a parent");
+    for field in ["text_file", "markdown_file"] {
+        let Some(relative_path) = value["ground_truth"][field].as_str() else {
+            continue;
+        };
+        let destination = destination_parent.join(relative_path);
+        std::fs::create_dir_all(destination.parent().expect("ground truth has a parent"))
+            .expect("create ground truth dir");
+        std::fs::copy(source_parent.join(relative_path), destination).expect("copy ground truth");
+    }
+}
+
 fn materialize_fixture_tree(cohort: Cohort, contract: &CohortContract) -> FixtureTree {
     let root = tempfile::tempdir().expect("tempdir");
     let cohort_manifest = root.path().join("cohort.json");
@@ -87,13 +101,17 @@ fn materialize_fixture_tree(cohort: Cohort, contract: &CohortContract) -> Fixtur
     let mut fixture_provenance = Vec::with_capacity(contract.fixtures.len());
     for (fixture, document_stem) in contract.fixtures.iter().zip(contract.document_stems.iter()) {
         let descriptor_path = fixtures_root.join(fixture);
+        let source_descriptor_path = repo_path(&format!("fixtures/{fixture}"));
         std::fs::create_dir_all(descriptor_path.parent().expect("descriptor has a parent"))
             .expect("create descriptor dir");
-        std::fs::copy(repo_path(&format!("fixtures/{fixture}")), &descriptor_path).expect("copy fixture descriptor");
+        std::fs::copy(&source_descriptor_path, &descriptor_path).expect("copy fixture descriptor");
 
         let descriptor: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&descriptor_path).expect("read descriptor"))
                 .expect("parse descriptor");
+        // ~keep Production validates descriptor-owned ground truth before artifact contracts.
+        // Copy the checked-in bytes so this synthetic repository exercises the same boundary.
+        copy_ground_truth_files(&source_descriptor_path, &descriptor_path, &descriptor);
         let document_field = descriptor["document"]
             .as_str()
             .expect("descriptor has a document field");
@@ -137,6 +155,14 @@ fn runtime_framework_name(entry: &benchmark_harness::bench_matrix::MatrixEntry) 
     } else {
         entry.framework.clone()
     }
+}
+
+fn aggregate_framework_name(entry: &benchmark_harness::bench_matrix::MatrixEntry) -> String {
+    let mut framework = runtime_framework_name(entry);
+    if matches!(entry.mode, benchmark_harness::bench_matrix::ExecutionMode::Batch) && !framework.ends_with("-batch") {
+        framework.push_str("-batch");
+    }
+    framework
 }
 
 fn supports_extension(framework: &str, extension: &str) -> bool {
@@ -384,17 +410,17 @@ fn optional_matrix_index(contract: &CohortContract) -> usize {
 #[test]
 fn accepts_exact_native_contract() {
     let scenario = artifact_scenario(Cohort::Native);
-    let required = required_count(&scenario.contract);
+    let present = scenario.contract.matrix.len();
     let message = validate(&scenario.args).expect("native contract should validate");
-    assert_eq!(message, format!("validated {required} native benchmark artifacts"));
+    assert_eq!(message, format!("validated {present} native benchmark artifacts"));
 }
 
 #[test]
 fn accepts_exact_ocr_contract() {
     let scenario = artifact_scenario(Cohort::Ocr);
-    let required = required_count(&scenario.contract);
+    let present = scenario.contract.matrix.len();
     let message = validate(&scenario.args).expect("ocr contract should validate");
-    assert_eq!(message, format!("validated {required} ocr benchmark artifacts"));
+    assert_eq!(message, format!("validated {present} ocr benchmark artifacts"));
 }
 
 #[test]
@@ -679,7 +705,12 @@ fn rejects_iteration_count_mismatch() {
     assert_err_contains(validate(&scenario.args), "iteration count mismatch");
 }
 
-fn build_aggregate(contract: &CohortContract, cohort: Cohort) -> NewConsolidatedResults {
+fn build_aggregate_with(
+    contract: &CohortContract,
+    cohort: Cohort,
+    include_entry: impl Fn(&benchmark_harness::bench_matrix::MatrixEntry) -> bool,
+    mutate_results: impl FnOnce(&mut Vec<BenchmarkResult>),
+) -> NewConsolidatedResults {
     let fixture_provenance: Vec<FixtureProvenance> = contract
         .fixtures
         .iter()
@@ -693,6 +724,7 @@ fn build_aggregate(contract: &CohortContract, cohort: Cohort) -> NewConsolidated
     let run_provenance: Vec<RunProvenanceRecord> = contract
         .matrix
         .iter()
+        .filter(|entry| include_entry(entry))
         .map(|entry| RunProvenanceRecord {
             source_dir: entry.artifact.clone(),
             provenance: Some(build_provenance(
@@ -709,22 +741,26 @@ fn build_aggregate(contract: &CohortContract, cohort: Cohort) -> NewConsolidated
     let results: Vec<BenchmarkResult> = contract
         .matrix
         .iter()
+        .filter(|entry| include_entry(entry))
         .flat_map(|entry| {
             let mut entry_results = build_results(entry, contract, cohort);
-            if matches!(entry.mode, benchmark_harness::bench_matrix::ExecutionMode::Batch) {
-                for result in &mut entry_results {
-                    if !result.framework.ends_with("-batch") {
-                        result.framework.push_str("-batch");
-                    }
-                }
+            let framework = aggregate_framework_name(entry);
+            for result in &mut entry_results {
+                result.framework.clone_from(&framework);
             }
             entry_results
         })
         .collect();
+    let mut results = results;
+    mutate_results(&mut results);
     let mut aggregate = benchmark_harness::aggregate_new_format(&results);
     aggregate.run_provenance = run_provenance;
     benchmark_harness::aggregate::apply_pinned_cohort_comparison(&mut aggregate).expect("apply cohort comparison");
     aggregate
+}
+
+fn build_aggregate(contract: &CohortContract, cohort: Cohort) -> NewConsolidatedResults {
+    build_aggregate_with(contract, cohort, |_| true, |_| {})
 }
 
 fn write_aggregate(aggregate: &NewConsolidatedResults) -> (TempDir, PathBuf) {
@@ -752,13 +788,13 @@ fn accepts_exact_native_aggregate_contract() {
     let contract = Cohort::Native.contract();
     let aggregate = build_aggregate(&contract, Cohort::Native);
     let (_root, path) = write_aggregate(&aggregate);
-    let required = required_count(&contract);
+    let present = contract.matrix.len();
     let message = validate(&aggregate_args(Cohort::Native, path)).expect("native aggregate should validate");
     assert_eq!(
         message,
         format!(
-            "validated {required} native aggregate keys and {} fixture rows",
-            required * contract.fixtures.len()
+            "validated {present} native aggregate keys and {} fixture rows",
+            present * contract.fixtures.len()
         )
     );
 }
@@ -768,13 +804,13 @@ fn accepts_exact_ocr_aggregate_contract() {
     let contract = Cohort::Ocr.contract();
     let aggregate = build_aggregate(&contract, Cohort::Ocr);
     let (_root, path) = write_aggregate(&aggregate);
-    let required = required_count(&contract);
+    let present = contract.matrix.len();
     let message = validate(&aggregate_args(Cohort::Ocr, path)).expect("ocr aggregate should validate");
     assert_eq!(
         message,
         format!(
-            "validated {required} ocr aggregate keys and {} fixture rows",
-            required * contract.fixtures.len()
+            "validated {present} ocr aggregate keys and {} fixture rows",
+            present * contract.fixtures.len()
         )
     );
 }
@@ -882,29 +918,9 @@ fn rejects_aggregate_metrics_fabricated_independently_of_fixture_rows() {
 fn accepts_native_aggregate_when_optional_mineru_absent() {
     // validation must still pass on the required frameworks.
     let contract = Cohort::Native.contract();
-    let optional_entry = contract
-        .matrix
-        .iter()
-        .find(|entry| entry.optional)
-        .expect("native cohort has an optional entry");
-    let optional_key = optional_entry.aggregate_key();
-    let optional_framework = optional_entry.framework.clone();
-
-    let mut aggregate = build_aggregate(&contract, Cohort::Native);
-    aggregate.by_framework_mode.remove(&optional_key);
-    aggregate
-        .per_fixture_results
-        .retain(|row| row.framework != optional_framework);
-    aggregate.run_provenance.retain(|record| {
-        record
-            .provenance
-            .as_ref()
-            .and_then(|provenance| provenance.frameworks.first())
-            .is_none_or(|framework| framework.name != optional_framework)
-    });
-    aggregate.metadata.total_results = aggregate.per_fixture_results.len();
-    aggregate.metadata.framework_count -= 1;
-    benchmark_harness::aggregate::apply_pinned_cohort_comparison(&mut aggregate).expect("refresh comparison");
+    // ~keep Filter before aggregation so every production-derived view consistently excludes the
+    // absent best-effort framework, including failure and format-support summaries.
+    let aggregate = build_aggregate_with(&contract, Cohort::Native, |entry| !entry.optional, |_| {});
 
     let (_root, path) = write_aggregate(&aggregate);
     let required = required_count(&contract);
@@ -977,27 +993,35 @@ fn should_accept_well_categorized_optional_aggregate_failure_when_present() {
         .iter()
         .find(|entry| entry.optional)
         .expect("native cohort has an optional entry");
-    let mut aggregate = build_aggregate(&contract, Cohort::Native);
-    let bucket = aggregate
-        .by_framework_mode
-        .get_mut(&optional_entry.aggregate_key())
-        .expect("aggregate contains optional group")
-        .by_file_type
-        .get_mut("pdf")
-        .expect("native group contains pdf")
-        .no_ocr
-        .as_mut()
-        .expect("native group uses no_ocr");
-    bucket.successful_sample_count -= 1;
-    bucket.timeouts = 1;
-    let row = aggregate
+    let optional_runtime_framework = aggregate_framework_name(optional_entry);
+    // ~keep Inject the failure before production aggregation so bucket counters, rows, rankings,
+    // and failure summaries are derived from one source of truth.
+    let aggregate = build_aggregate_with(
+        &contract,
+        Cohort::Native,
+        |_| true,
+        |results| {
+            let result = results
+                .iter_mut()
+                .find(|result| result.framework == optional_runtime_framework)
+                .expect("aggregate input contains optional result");
+            result.success = false;
+            result.error_kind = ErrorKind::Timeout;
+            result.error_message = Some("timed out after 900 seconds".to_string());
+        },
+    );
+    let failed_row = aggregate
         .per_fixture_results
-        .iter_mut()
-        .find(|row| row.framework == optional_entry.framework)
-        .expect("aggregate contains optional row");
-    row.success = false;
-    row.error_kind = Some("Timeout".to_string());
-    row.error_message = Some("timed out after 900 seconds".to_string());
+        .iter()
+        .find(|row| row.framework == optional_entry.framework && !row.success)
+        .expect("aggregate retains optional failure row");
+    assert_eq!(failed_row.error_kind.as_deref(), Some("Timeout"));
+    let timeout_count = aggregate.by_framework_mode[&optional_entry.aggregate_key()].by_file_type["pdf"]
+        .no_ocr
+        .as_ref()
+        .expect("native group uses no_ocr")
+        .timeouts;
+    assert_eq!(timeout_count, 1);
     let (_root, path) = write_aggregate(&aggregate);
     validate(&aggregate_args(Cohort::Native, path)).expect("categorized optional aggregate failure should validate");
 }
