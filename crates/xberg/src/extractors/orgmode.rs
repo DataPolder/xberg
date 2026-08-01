@@ -601,7 +601,7 @@ impl OrgModeExtractor {
                     if !t.starts_with('|') || !t.ends_with('|') {
                         break;
                     }
-                    if t.contains("---") || t.contains("+-") {
+                    if Self::is_org_table_horizontal_line(t) {
                         has_header_separator |= !table_cells.is_empty();
                         i += 1;
                         continue;
@@ -783,6 +783,16 @@ impl OrgModeExtractor {
             ..Default::default()
         };
         b.push_table(table, None, None);
+    }
+
+    fn is_org_table_horizontal_line(line: &str) -> bool {
+        let Some(inner) = line.trim().strip_prefix('|').and_then(|line| line.strip_suffix('|')) else {
+            return false;
+        };
+
+        inner
+            .split('+')
+            .all(|segment| !segment.is_empty() && segment.bytes().all(|byte| byte == b'-'))
     }
 
     /// Extract internal org links from a line and add relationships.
@@ -1208,6 +1218,26 @@ mod tests {
         assert_eq!(
             crate::rendering::render_markdown(&document),
             "| Name | Age |\n| --- | --- |\n| Alice | 30 |\n"
+        );
+    }
+
+    #[test]
+    fn should_preserve_data_containing_horizontal_line_substrings() {
+        let document = OrgModeExtractor::build_internal_document(
+            "| Version | Status |\n|---------+--------|\n| release---candidate | stable |",
+        );
+        let table = &document.tables[0];
+
+        assert_eq!(
+            table.cells,
+            vec![
+                vec!["Version".to_string(), "Status".to_string()],
+                vec!["release---candidate".to_string(), "stable".to_string()],
+            ]
+        );
+        assert_eq!(
+            crate::rendering::render_markdown(&document),
+            "| Version | Status |\n| --- | --- |\n| release---candidate | stable |\n"
         );
     }
 
