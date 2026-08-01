@@ -46,10 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bare table rows, preserving correct Markdown structure.
 - MSG extraction now reads the canonical binary `PidTagHtml` stream with the Internet codepage,
   preserving HTML-only message bodies alongside attachments.
-- TATR table reconstruction now assigns each OCR word to one highest-overlap cell, preventing
-  duplicated text when predicted cells overlap or span multiple columns.
+- TATR table reconstruction now assigns each selected OCR word exactly once, using the nearest
+  cell when predicted cells do not overlap, preventing both duplicated and silently dropped text.
 - Layout-enabled image extraction now recognizes TATR table structure from cached OCR elements
-  while preserving non-table text and rejecting incomplete table reconstruction in favor of OCR fallback.
+  while preserving non-table line structure and requiring complete OCR token retention before
+  accepting the reconstructed layout.
 - Layout-enabled OCR now preserves detected image headings without losing or reordering fallback text,
   and regroups adjacent PDF OCR lines without collapsing distant paragraphs or separate layout regions.
 - Rotated PDF OCR now avoids reusing display-coordinate Markdown layout rasters and reruns layout

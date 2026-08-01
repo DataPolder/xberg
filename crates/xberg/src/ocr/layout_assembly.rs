@@ -174,7 +174,8 @@ type PositionedElement<'a> = (&'a OcrElement, f32, f32);
 type CellAssignments<'a> = Vec<Vec<Vec<PositionedElement<'a>>>>;
 
 /// Assign every OCR element to its single highest-IoW cell across the full grid.
-/// Equal overlaps keep the first cell in row-major order.
+/// Elements without cell overlap use the nearest cell. Equal scores keep the
+/// first cell in row-major order.
 fn assign_elements_to_best_cells<'a>(
     cell_grid: &[Vec<tatr::CellBBox>],
     elements: &[&'a OcrElement],
@@ -203,6 +204,9 @@ fn assign_elements_to_best_cells<'a>(
     for &element in elements {
         let mut best_iow = 0.0;
         let mut best_cell = None;
+        let mut nearest_distance = f32::INFINITY;
+        let mut nearest_cell = None;
+        let (center_x, center_y) = element_center_f32(element);
         for (row, cells) in page_cells.iter().enumerate() {
             for (column, cell) in cells.iter().enumerate() {
                 let iow = element_bbox_iow(element, cell);
@@ -210,12 +214,14 @@ fn assign_elements_to_best_cells<'a>(
                     best_iow = iow;
                     best_cell = Some((row, column));
                 }
+                let distance = point_to_bbox_distance_squared(center_x, center_y, cell);
+                if distance < nearest_distance {
+                    nearest_distance = distance;
+                    nearest_cell = Some((row, column));
+                }
             }
         }
-        if best_iow >= MIN_CELL_ELEMENT_IOW
-            && let Some((row, column)) = best_cell
-        {
-            let (center_x, center_y) = element_center_f32(element);
+        if let Some((row, column)) = best_cell.or(nearest_cell) {
             assigned[row][column].push((element, center_x, center_y));
         }
     }
@@ -272,6 +278,24 @@ fn element_center_f32(elem: &OcrElement) -> (f32, f32) {
 /// Check if a point (cx, cy) is inside a BBox (pixel coords: y increases downward).
 fn point_in_bbox(cx: f32, cy: f32, bbox: &BBox) -> bool {
     cx >= bbox.x1 && cx <= bbox.x2 && cy >= bbox.y1 && cy <= bbox.y2
+}
+
+fn point_to_bbox_distance_squared(x: f32, y: f32, bbox: &BBox) -> f32 {
+    let horizontal = if x < bbox.x1 {
+        bbox.x1 - x
+    } else if x > bbox.x2 {
+        x - bbox.x2
+    } else {
+        0.0
+    };
+    let vertical = if y < bbox.y1 {
+        bbox.y1 - y
+    } else if y > bbox.y2 {
+        y - bbox.y2
+    } else {
+        0.0
+    };
+    horizontal * horizontal + vertical * vertical
 }
 
 /// Validate TATR cell grid sanity.
@@ -446,5 +470,43 @@ mod tests {
         let (cells, _) = build_markdown_table(&grid, &element_refs, 0.0, 0.0);
 
         assert_eq!(cells, vec![vec!["span", ""]]);
+    }
+
+    #[test]
+    fn should_assign_low_iow_element_to_best_overlapping_cell() {
+        let grid = vec![vec![cell(0.0, 0.0, 40.0, 50.0), cell(60.0, 0.0, 100.0, 50.0)]];
+        let elements = [word("edge", 30, 10, 400, 10)];
+        let element_refs = elements.iter().collect::<Vec<_>>();
+
+        let (cells, _) = build_markdown_table(&grid, &element_refs, 0.0, 0.0);
+
+        assert_eq!(cells, vec![vec!["", "edge"]]);
+    }
+
+    #[test]
+    fn should_assign_non_overlapping_element_to_nearest_cell_once() {
+        let grid = vec![vec![cell(0.0, 0.0, 40.0, 50.0), cell(60.0, 0.0, 100.0, 50.0)]];
+        let elements = [word("gap", 45, 10, 10, 10)];
+        let element_refs = elements.iter().collect::<Vec<_>>();
+
+        let (cells, _) = build_markdown_table(&grid, &element_refs, 0.0, 0.0);
+
+        assert_eq!(cells, vec![vec!["gap", ""]]);
+        assert_eq!(cells.iter().flatten().filter(|text| text.contains("gap")).count(), 1);
+    }
+
+    #[test]
+    fn should_preserve_duplicate_word_multiset_without_multiplying_assignments() {
+        let grid = vec![vec![cell(0.0, 0.0, 40.0, 50.0), cell(60.0, 0.0, 100.0, 50.0)]];
+        let elements = [word("total", 30, 10, 400, 10), word("total", 30, 20, 400, 10)];
+        let element_refs = elements.iter().collect::<Vec<_>>();
+
+        let (cells, _) = build_markdown_table(&grid, &element_refs, 0.0, 0.0);
+
+        assert_eq!(cells, vec![vec!["", "total total"]]);
+        assert_eq!(
+            cells.iter().flatten().flat_map(|cell| cell.split_whitespace()).count(),
+            2
+        );
     }
 }

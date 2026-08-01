@@ -13,6 +13,9 @@ use async_trait::async_trait;
 const MIN_LAYOUT_OCR_ALPHANUMERIC_TOKEN_RETENTION: f64 = 0.80;
 
 #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+const REQUIRED_CACHED_LAYOUT_TOKEN_RETENTION: f64 = 1.0;
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
 const LAYOUT_READING_ORDER_ROW_HEIGHT_RATIO: f32 = 0.05;
 
 #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
@@ -711,15 +714,7 @@ fn try_assemble_cached_layout_document(
         &crate::rendering::render_plain(&assembled),
         &internal_document_text(whole_image_doc),
     );
-    let minimum_retention = if recognized_tables.is_empty() {
-        // Non-table assembly is lossless: unmatched canonical OCR is cheap to retain. ~keep
-        1.0
-    } else {
-        MIN_LAYOUT_OCR_ALPHANUMERIC_TOKEN_RETENTION
-    };
-    // Dense recognized tables can be useful despite small OCR assignment losses; all
-    // other cached reconstruction must preserve every canonical alphanumeric token. ~keep
-    (retained_tokens >= minimum_retention).then_some(assembled)
+    (retained_tokens >= REQUIRED_CACHED_LAYOUT_TOKEN_RETENTION).then_some(assembled)
 }
 
 #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
@@ -2079,7 +2074,7 @@ mod tests {
 
     #[cfg(all(feature = "layout-detection", feature = "ocr"))]
     #[test]
-    fn should_keep_table_structure_at_existing_token_tolerance() {
+    fn should_reject_table_structure_at_exact_four_of_five_token_retention() {
         let table_bbox = crate::layout::BBox::new(0.0, 0.0, 100.0, 120.0);
         let detections = vec![crate::layout::LayoutDetection::new(
             crate::layout::LayoutClass::Table,
@@ -2111,7 +2106,44 @@ mod tests {
         );
         assert_eq!(retention, MIN_LAYOUT_OCR_ALPHANUMERIC_TOKEN_RETENTION);
 
-        assert!(try_assemble_cached_layout_document(&whole, &detections, &recognized, 100, 120).is_some());
+        assert!(try_assemble_cached_layout_document(&whole, &detections, &recognized, 100, 120).is_none());
+    }
+
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    #[test]
+    fn should_keep_line_elements_for_non_table_text_with_recognized_table() {
+        let table_bbox = crate::layout::BBox::new(0.0, 0.0, 100.0, 60.0);
+        let detections = vec![crate::layout::LayoutDetection::new(
+            crate::layout::LayoutClass::Table,
+            0.98,
+            table_bbox,
+        )];
+        let elements = vec![
+            positioned_line_box("Header", 10, 10, 50, 20),
+            positioned_line_box("Outside", 120, 10, 70, 20),
+        ];
+        let whole = whole_image_doc_with_elements("Header Outside", elements, 200, 100);
+        let recognized = vec![crate::RecognizedTable {
+            detection_bbox: table_bbox,
+            cells: vec![vec!["Header".to_string()]],
+            markdown: "| Header |\n| --- |".to_string(),
+        }];
+
+        let assembled = try_assemble_cached_layout_document(&whole, &detections, &recognized, 200, 100)
+            .expect("line geometry must preserve canonical text outside the recognized table");
+
+        assert_eq!(
+            alphanumeric_token_retention(&crate::rendering::render_plain(&assembled), "Header Outside"),
+            1.0
+        );
+        assert_eq!(
+            crate::rendering::render_markdown(&assembled).matches("Header").count(),
+            1
+        );
+        assert_eq!(
+            crate::rendering::render_markdown(&assembled).matches("Outside").count(),
+            1
+        );
     }
 
     #[cfg(all(feature = "layout-detection", feature = "ocr"))]
