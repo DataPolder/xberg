@@ -236,58 +236,16 @@ fn process_xlsx_workbook<RS: Read + Seek>(
 /// This function streams cells to compute the actual bounding box without allocating
 /// a full Range, then only creates the Range if the bounding box is within safe limits.
 fn process_xlsx_sheet_safe<RS: Read + Seek>(workbook: &mut calamine::Xlsx<RS>, sheet_name: &str) -> Result<ExcelSheet> {
-    let (cells, row_min, row_max, col_min, col_max) = {
-        let mut cell_reader = workbook
-            .worksheet_cells_reader(sheet_name)
-            .map_err(|e| XbergError::parsing(format!("Failed to read sheet '{}': {}", sheet_name, e)))?;
-
-        let mut cells: Vec<((u32, u32), Data)> = Vec::new();
-        let mut row_min = u32::MAX;
-        let mut row_max = 0u32;
-        let mut col_min = u32::MAX;
-        let mut col_max = 0u32;
-
-        while let Ok(Some(cell)) = cell_reader.next_cell() {
-            let (row, col) = cell.get_position();
-            row_min = row_min.min(row);
-            row_max = row_max.max(row);
-            col_min = col_min.min(col);
-            col_max = col_max.max(col);
-
-            let data: Data = match cell.get_value() {
-                DataRef::Empty => Data::Empty,
-                DataRef::String(s) => Data::String(s.clone()),
-                DataRef::SharedString(s) => Data::String(s.to_string()),
-                DataRef::Float(f) => Data::Float(*f),
-                DataRef::Int(i) => Data::Int(*i),
-                DataRef::Bool(b) => Data::Bool(*b),
-                DataRef::DateTime(dt) => Data::DateTime(*dt),
-                DataRef::DateTimeIso(s) => Data::DateTimeIso(s.clone()),
-                DataRef::DurationIso(s) => Data::DurationIso(s.clone()),
-                DataRef::Error(e) => Data::Error(e.clone()),
-            };
-            cells.push(((row, col), data));
+    match classify_xlsx_sheet_shape(workbook, sheet_name)? {
+        XlsxSheetShape::Empty => return Ok(empty_excel_sheet(sheet_name)),
+        XlsxSheetShape::Dense => {}
+        XlsxSheetShape::Sparse => {
+            let (cells, row_min, row_max, col_min, col_max) = collect_xlsx_sheet_cells(workbook, sheet_name)?;
+            if cells.is_empty() {
+                return Ok(empty_excel_sheet(sheet_name));
+            }
+            return process_sparse_sheet_from_cells(sheet_name, cells, row_min, row_max, col_min, col_max);
         }
-        (cells, row_min, row_max, col_min, col_max)
-    };
-
-    if cells.is_empty() {
-        return Ok(ExcelSheet {
-            name: sheet_name.to_owned(),
-            markdown: format!("## {}\n\n*Empty sheet*", sheet_name),
-            row_count: 0,
-            col_count: 0,
-            cell_count: 0,
-            table_cells: None,
-        });
-    }
-
-    let bb_rows = (row_max - row_min + 1) as u64;
-    let bb_cols = (col_max - col_min + 1) as u64;
-    let bb_cells = bb_rows.saturating_mul(bb_cols);
-
-    if bb_cells > MAX_BOUNDING_BOX_CELLS {
-        return process_sparse_sheet_from_cells(sheet_name, cells, row_min, row_max, col_min, col_max);
     }
 
     let range = workbook
@@ -295,6 +253,97 @@ fn process_xlsx_sheet_safe<RS: Read + Seek>(workbook: &mut calamine::Xlsx<RS>, s
         .map_err(|e| XbergError::parsing(format!("Failed to parse sheet '{}': {}", sheet_name, e)))?;
 
     Ok(process_sheet(sheet_name, &range))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XlsxSheetShape {
+    Empty,
+    Dense,
+    Sparse,
+}
+
+fn classify_xlsx_sheet_shape<RS: Read + Seek>(
+    workbook: &mut calamine::Xlsx<RS>,
+    sheet_name: &str,
+) -> Result<XlsxSheetShape> {
+    let mut cell_reader = workbook
+        .worksheet_cells_reader(sheet_name)
+        .map_err(|e| XbergError::parsing(format!("Failed to read sheet '{}': {}", sheet_name, e)))?;
+    let mut bounds: Option<(u32, u32, u32, u32)> = None;
+
+    while let Ok(Some(cell)) = cell_reader.next_cell() {
+        let (row, col) = cell.get_position();
+        let (row_min, row_max, col_min, col_max) = bounds.get_or_insert((row, row, col, col));
+        *row_min = (*row_min).min(row);
+        *row_max = (*row_max).max(row);
+        *col_min = (*col_min).min(col);
+        *col_max = (*col_max).max(col);
+
+        let row_count = u64::from(*row_max - *row_min + 1);
+        let col_count = u64::from(*col_max - *col_min + 1);
+        if row_count.saturating_mul(col_count) > MAX_BOUNDING_BOX_CELLS {
+            return Ok(XlsxSheetShape::Sparse);
+        }
+    }
+
+    Ok(if bounds.is_some() {
+        XlsxSheetShape::Dense
+    } else {
+        XlsxSheetShape::Empty
+    })
+}
+
+type XlsxOwnedCells = (Vec<((u32, u32), Data)>, u32, u32, u32, u32);
+
+fn collect_xlsx_sheet_cells<RS: Read + Seek>(
+    workbook: &mut calamine::Xlsx<RS>,
+    sheet_name: &str,
+) -> Result<XlsxOwnedCells> {
+    let mut cell_reader = workbook
+        .worksheet_cells_reader(sheet_name)
+        .map_err(|e| XbergError::parsing(format!("Failed to read sheet '{}': {}", sheet_name, e)))?;
+    let mut cells = Vec::new();
+    let mut row_min = u32::MAX;
+    let mut row_max = 0;
+    let mut col_min = u32::MAX;
+    let mut col_max = 0;
+
+    while let Ok(Some(cell)) = cell_reader.next_cell() {
+        let (row, col) = cell.get_position();
+        row_min = row_min.min(row);
+        row_max = row_max.max(row);
+        col_min = col_min.min(col);
+        col_max = col_max.max(col);
+        cells.push(((row, col), owned_xlsx_cell_value(cell.get_value())));
+    }
+
+    Ok((cells, row_min, row_max, col_min, col_max))
+}
+
+fn owned_xlsx_cell_value(value: &DataRef<'_>) -> Data {
+    match value {
+        DataRef::Empty => Data::Empty,
+        DataRef::String(value) => Data::String(value.clone()),
+        DataRef::SharedString(value) => Data::String(value.to_string()),
+        DataRef::Float(value) => Data::Float(*value),
+        DataRef::Int(value) => Data::Int(*value),
+        DataRef::Bool(value) => Data::Bool(*value),
+        DataRef::DateTime(value) => Data::DateTime(*value),
+        DataRef::DateTimeIso(value) => Data::DateTimeIso(value.clone()),
+        DataRef::DurationIso(value) => Data::DurationIso(value.clone()),
+        DataRef::Error(value) => Data::Error(value.clone()),
+    }
+}
+
+fn empty_excel_sheet(sheet_name: &str) -> ExcelSheet {
+    ExcelSheet {
+        name: sheet_name.to_owned(),
+        markdown: format!("## {}\n\n*Empty sheet*", sheet_name),
+        row_count: 0,
+        col_count: 0,
+        cell_count: 0,
+        table_cells: None,
+    }
 }
 
 /// Process a sparse sheet directly from collected cells without creating a full Range.
@@ -1163,6 +1212,143 @@ mod tests {
         assert_eq!(sheet.row_count, 10);
         assert_eq!(sheet.col_count, 5);
         assert_eq!(sheet.cell_count, 50);
+    }
+
+    fn make_xlsx_with_worksheet(worksheet_xml: &str) -> Vec<u8> {
+        use std::io::Write;
+        use zip::write::{SimpleFileOptions, ZipWriter};
+
+        let mut buffer = Vec::new();
+        {
+            let mut zip = ZipWriter::new(Cursor::new(&mut buffer));
+            let options = SimpleFileOptions::default();
+
+            zip.start_file("[Content_Types].xml", options).unwrap();
+            zip.write_all(
+                br#"<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Override PartName="/xl/workbook.xml"
+    ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml"
+    ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>"#,
+            )
+            .unwrap();
+
+            zip.start_file("_rels/.rels", options).unwrap();
+            zip.write_all(
+                br#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
+    Target="xl/workbook.xml"/>
+</Relationships>"#,
+            )
+            .unwrap();
+
+            zip.start_file("xl/workbook.xml", options).unwrap();
+            zip.write_all(
+                br#"<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets>
+</workbook>"#,
+            )
+            .unwrap();
+
+            zip.start_file("xl/_rels/workbook.xml.rels", options).unwrap();
+            zip.write_all(
+                br#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
+    Target="worksheets/sheet1.xml"/>
+</Relationships>"#,
+            )
+            .unwrap();
+
+            zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+            zip.write_all(worksheet_xml.as_bytes()).unwrap();
+            zip.finish().unwrap();
+        }
+        buffer
+    }
+
+    #[test]
+    fn should_preserve_dense_xlsx_output_after_position_only_preflight() {
+        let bytes = make_xlsx_with_worksheet(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="A1:B2"/>
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="inlineStr"><is><t>Header</t></is></c>
+      <c r="B1" t="inlineStr"><is><t>Value</t></is></c>
+    </row>
+    <row r="2">
+      <c r="A2" t="inlineStr"><is><t>Alpha</t></is></c>
+      <c r="B2" t="inlineStr"><is><t>Beta</t></is></c>
+    </row>
+  </sheetData>
+</worksheet>"#,
+        );
+        let mut workbook = calamine::Xlsx::new(Cursor::new(bytes.as_slice())).unwrap();
+
+        assert_eq!(
+            classify_xlsx_sheet_shape(&mut workbook, "Sheet1").unwrap(),
+            XlsxSheetShape::Dense
+        );
+        let sheet = process_xlsx_sheet_safe(&mut workbook, "Sheet1").unwrap();
+
+        assert_eq!(sheet.row_count, 2);
+        assert_eq!(sheet.col_count, 2);
+        assert_eq!(sheet.cell_count, 4);
+        assert_eq!(
+            sheet.table_cells,
+            Some(vec![
+                vec!["Header".to_string(), "Value".to_string()],
+                vec!["Alpha".to_string(), "Beta".to_string()],
+            ])
+        );
+        assert_eq!(
+            sheet.markdown,
+            "## Sheet1\n\n| Header | Value |\n| --- | --- |\n| Alpha | Beta |\n"
+        );
+    }
+
+    #[test]
+    fn should_preserve_pathological_sparse_xlsx_output_after_reopening_reader() {
+        let bytes = make_xlsx_with_worksheet(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="A1:XFD1048575"/>
+  <sheetData>
+    <row r="1"><c r="A1" t="inlineStr"><is><t>Start</t></is></c></row>
+    <row r="1048575"><c r="XFD1048575" t="inlineStr"><is><t>End</t></is></c></row>
+  </sheetData>
+</worksheet>"#,
+        );
+        let mut workbook = calamine::Xlsx::new(Cursor::new(bytes.as_slice())).unwrap();
+
+        assert_eq!(
+            classify_xlsx_sheet_shape(&mut workbook, "Sheet1").unwrap(),
+            XlsxSheetShape::Sparse
+        );
+        let sheet = process_xlsx_sheet_safe(&mut workbook, "Sheet1").unwrap();
+
+        assert_eq!(sheet.row_count, 1_048_575);
+        assert_eq!(sheet.col_count, 16_384);
+        assert_eq!(sheet.cell_count, 2);
+        assert_eq!(
+            sheet.table_cells,
+            Some(vec![
+                vec!["Start".to_string(), String::new()],
+                vec![String::new(), "End".to_string()],
+            ])
+        );
+        assert_eq!(sheet.markdown, "## Sheet1\n\n| Start |  |\n| --- | --- |\n|  | End |\n");
     }
 
     /// Build a minimal in-memory `.xlsx` zip that contains a synthetic

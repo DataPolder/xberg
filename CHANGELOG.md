@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Dense XLSX extraction now scans worksheet bounds without cloning every cell before normal range
+  parsing, while oversized sparse sheets materialize their cells only once.
 - Layout-enabled image table recognition now shares its decoded RGB raster with the TATR worker,
   avoiding one full image allocation and pixel-buffer copy per qualifying image.
 - Multi-stage PDF OCR now shares rendered page rasters across pipeline tasks instead of copying
