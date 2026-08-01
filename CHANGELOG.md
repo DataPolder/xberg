@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- MSG extraction now reads the canonical binary `PidTagHtml` stream with the Internet codepage,
+  preserving HTML-only message bodies alongside attachments.
 - TATR table reconstruction now assigns each OCR word to one highest-overlap cell, preventing
   duplicated text when predicted cells overlap or span multiple columns.
 - Layout-enabled image extraction now recognizes TATR table structure from cached OCR elements

@@ -39,6 +39,10 @@ static SCRIPT_RE: OnceLock<Regex> = OnceLock::new();
 static STYLE_RE: OnceLock<Regex> = OnceLock::new();
 static WHITESPACE_RE: OnceLock<Regex> = OnceLock::new();
 
+const PID_TAG_HTML: u16 = 0x1013;
+const PID_TAG_INTERNET_CODEPAGE: u16 = 0x3FDE;
+const PID_TAG_MESSAGE_CODEPAGE: u16 = 0x3FFD;
+
 pub(crate) struct ParsedEmailContent {
     pub(crate) result: EmailExtractionResult,
     pub(crate) nested_messages: Vec<NestedMessagePayload>,
@@ -795,9 +799,10 @@ fn extract_msg_from_cfb<F: std::io::Read + std::io::Seek>(
     comp: &mut cfb::CompoundFile<F>,
     fallback_codepage: Option<u32>,
 ) -> Result<EmailExtractionResult> {
-    let codepage = read_msg_int_prop(comp, "", 0x3FFD)
-        .or_else(|| read_msg_int_prop(comp, "", 0x3FDE))
-        .or(fallback_codepage);
+    let message_codepage = read_msg_int_prop(comp, "", PID_TAG_MESSAGE_CODEPAGE);
+    let internet_codepage = read_msg_int_prop(comp, "", PID_TAG_INTERNET_CODEPAGE);
+    let codepage = message_codepage.or(internet_codepage).or(fallback_codepage);
+    let html_codepage = internet_codepage.or(message_codepage).or(fallback_codepage);
 
     let subject = read_msg_string_prop(comp, "", 0x0037, codepage);
     let sender_name = read_msg_string_prop(comp, "", 0x0C1A, codepage);
@@ -806,7 +811,7 @@ fn extract_msg_from_cfb<F: std::io::Read + std::io::Seek>(
         .filter(|s| !s.is_empty());
     let from_email = sender_email;
     let body = read_msg_string_prop(comp, "", 0x1000, codepage);
-    let html_body = read_msg_string_prop(comp, "", 0x1013, codepage);
+    let html_body = read_msg_html_prop(comp, "", html_codepage);
     let message_id = read_msg_string_prop(comp, "", 0x1035, codepage).filter(|s| !s.is_empty());
 
     let date = read_msg_filetime_prop(comp, "", 0x0039)
@@ -981,6 +986,35 @@ fn read_msg_string_prop<F: std::io::Read + std::io::Seek>(
             .unwrap_or(encoding_rs::WINDOWS_1252);
         let (decoded, _, _) = encoding.decode(&buf);
         decoded.trim_end_matches('\0').to_string()
+    })
+}
+
+/// Read the PidTagHtml property, whose canonical MAPI type is PT_BINARY.
+///
+/// Some producers use a string-typed property instead, so retain those probes
+/// before falling back to the standard binary stream. ~keep
+fn read_msg_html_prop<F: std::io::Read + std::io::Seek>(
+    comp: &mut cfb::CompoundFile<F>,
+    base: &str,
+    codepage: Option<u32>,
+) -> Option<String> {
+    read_msg_string_prop(comp, base, PID_TAG_HTML, codepage).or_else(|| {
+        let path = format!("{base}/__substg1.0_{PID_TAG_HTML:04X}0102");
+        let buf = read_msg_stream(comp, &path)?;
+        let decoded = if let Some(codepage) = codepage {
+            let (text, _, _) = encoding_for_windows_codepage(codepage).decode(&buf);
+            text.trim_end_matches('\0').to_string()
+        } else {
+            match utf8_validation::from_utf8(&buf) {
+                Ok(text) => text.trim_start_matches('\u{FEFF}').trim_end_matches('\0').to_string(),
+                Err(_) => {
+                    let encoding = encoding_rs::WINDOWS_1252;
+                    let (text, _, _) = encoding.decode(&buf);
+                    text.trim_end_matches('\0').to_string()
+                }
+            }
+        };
+        Some(decoded)
     })
 }
 
@@ -1919,6 +1953,21 @@ mod tests {
         let data = include_bytes!("../../../../test_documents/vendored/unstructured/msg/fake-email.msg");
         let result = parse_msg_content(data, None).unwrap();
         assert!(!result.content.is_empty());
+    }
+
+    #[test]
+    fn test_parse_msg_reads_binary_html_body_with_attachment() {
+        let data = include_bytes!("../../../../test_documents/email/msg_with_attachments_alt.msg");
+
+        let result = parse_msg_content(data, None).unwrap();
+
+        assert_eq!(result.subject.as_deref(), Some("This is the subject"));
+        assert_eq!(result.from_email.as_deref(), Some("peterpan@neverland.com"));
+        assert_eq!(result.to_emails, vec!["crocodile@neverland.com".to_string()]);
+        assert_eq!(result.content, "This is a message");
+        assert_eq!(result.html_content.as_deref(), Some("This is a message"));
+        assert_eq!(result.attachments.len(), 1);
+        assert_eq!(result.attachments[0].filename.as_deref(), Some("canvas.png"));
     }
 
     #[test]
