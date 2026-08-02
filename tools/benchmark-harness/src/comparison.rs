@@ -336,6 +336,8 @@ pub struct ComparisonConfig {
     pub guardrails_file: Option<std::path::PathBuf>,
     /// Optional name filter (only run docs whose name contains this)
     pub name_filter: Option<String>,
+    /// Optional exact fixture `metadata.category` filter.
+    pub category_filter: Option<String>,
     /// Optional path to write full comparison results as JSON.
     pub json_output: Option<std::path::PathBuf>,
     /// Run noise detection on extracted outputs.
@@ -1085,6 +1087,7 @@ pub async fn run_comparison(config: &ComparisonConfig) -> Result<Vec<DocResult>>
         require_ground_truth: true,
         require_markdown_ground_truth: false,
         name_patterns: config.name_filter.clone().into_iter().collect(),
+        category: config.category_filter.clone(),
         ..Default::default()
     };
 
@@ -1772,6 +1775,7 @@ fn run_diagnostics(config: &ComparisonConfig, results: &[DocResult]) -> Result<(
         require_ground_truth: true,
         require_markdown_ground_truth: true,
         name_patterns: config.name_filter.clone().into_iter().collect(),
+        category: config.category_filter.clone(),
         ..Default::default()
     };
     let docs = corpus::build_corpus(&config.fixtures_dir, &filter)?;
@@ -2349,6 +2353,7 @@ mod tests {
             guardrails: false,
             guardrails_file: None,
             name_filter: None,
+            category_filter: None,
             json_output: None,
             noise: false,
             diagnose: false,

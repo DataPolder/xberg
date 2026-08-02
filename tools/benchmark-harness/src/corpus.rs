@@ -45,6 +45,8 @@ pub struct CorpusFilter {
     /// Exact fixture stems or fixture-root-relative JSON descriptor paths.
     /// Combined with `name_patterns` using OR semantics. ~keep
     pub exact_names: Vec<String>,
+    /// Only include fixtures whose `metadata.category` is exactly this string.
+    pub category: Option<String>,
 }
 
 fn corpus_document(fixture_path: &Path, fixture: &crate::fixture::Fixture) -> Option<CorpusDocument> {
@@ -95,6 +97,10 @@ fn matches_filter(doc: &CorpusDocument, relative_fixture_path: &Path, filter: &C
         && filter.max_file_size.is_none_or(|max_size| doc.file_size <= max_size)
         && (!filter.require_ground_truth || doc.ground_truth_text.is_some())
         && (!filter.require_markdown_ground_truth || doc.ground_truth_markdown.is_some())
+        && filter
+            .category
+            .as_deref()
+            .is_none_or(|category| doc.metadata.get("category").and_then(serde_json::Value::as_str) == Some(category))
 }
 
 fn sort_corpus_by_selection(docs: &mut [CorpusDocument], fixtures_dir: &Path, exact_names: &[String]) {
@@ -176,6 +182,56 @@ mod tests {
         assert!(filter.max_file_size.is_none());
         assert!(filter.name_patterns.is_empty());
         assert!(filter.exact_names.is_empty());
+        assert!(filter.category.is_none());
+    }
+
+    #[test]
+    fn category_filter_matches_metadata_category_exactly() {
+        let mut doc = CorpusDocument {
+            name: "sample".to_string(),
+            document_path: PathBuf::from("sample.png"),
+            file_type: "png".to_string(),
+            file_size: 1,
+            ground_truth_text: Some(PathBuf::from("sample.txt")),
+            ground_truth_markdown: None,
+            metadata: HashMap::from([("category".to_string(), serde_json::json!("image-ocr-realgt"))]),
+            fixture_path: PathBuf::from("sample.json"),
+        };
+        let relative_path = Path::new("sample.json");
+        let filter = CorpusFilter {
+            category: Some("image-ocr-realgt".to_string()),
+            ..Default::default()
+        };
+
+        assert!(matches_filter(&doc, relative_path, &filter));
+
+        doc.metadata
+            .insert("category".to_string(), serde_json::json!("image-ocr-realgt-extra"));
+        assert!(!matches_filter(&doc, relative_path, &filter));
+
+        doc.metadata.clear();
+        assert!(!matches_filter(&doc, relative_path, &filter));
+    }
+
+    #[test]
+    fn category_and_name_filters_are_combined() {
+        let doc = CorpusDocument {
+            name: "sample".to_string(),
+            document_path: PathBuf::from("sample.png"),
+            file_type: "png".to_string(),
+            file_size: 1,
+            ground_truth_text: Some(PathBuf::from("sample.txt")),
+            ground_truth_markdown: None,
+            metadata: HashMap::from([("category".to_string(), serde_json::json!("image-ocr-realgt"))]),
+            fixture_path: PathBuf::from("sample.json"),
+        };
+        let filter = CorpusFilter {
+            name_patterns: vec!["other".to_string()],
+            category: Some("image-ocr-realgt".to_string()),
+            ..Default::default()
+        };
+
+        assert!(!matches_filter(&doc, Path::new("sample.json"), &filter));
     }
 
     #[test]

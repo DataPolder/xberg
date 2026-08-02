@@ -339,6 +339,15 @@ benchmark-harness compare \
 | `--dump-outputs` | Write extraction outputs to `/tmp/xberg_compare/` |
 | `--guardrails`   | Fail on quality regressions (non-zero exit)           |
 | `--filter`       | Only run documents matching this substring            |
+| `--category`     | Only run documents with this exact `metadata.category` |
+
+For example, run the maintained real-ground-truth image OCR corpus in one process:
+
+```bash
+benchmark-harness compare -f fixtures/ \
+  --category image-ocr-realgt \
+  --pipelines paddle-v6-small+layout,tesseract+layout
+```
 
 Guardrail contracts may include a `relative_order` array of exact text anchors. The comparison
 fails unless every anchor is present in the listed order, allowing focused reading-order checks

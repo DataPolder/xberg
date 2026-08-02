@@ -482,6 +482,10 @@ enum Commands {
         #[arg(long)]
         filter: Option<String>,
 
+        /// Only run documents whose metadata.category exactly matches this string
+        #[arg(long)]
+        category: Option<String>,
+
         /// Write full comparison results to JSON file
         #[arg(long)]
         json_output: Option<PathBuf>,
@@ -1189,6 +1193,7 @@ async fn main() -> Result<()> {
             guardrails,
             guardrails_file,
             filter,
+            category,
             json_output,
             noise,
             diagnose,
@@ -1208,6 +1213,7 @@ async fn main() -> Result<()> {
                 guardrails,
                 guardrails_file: Some(guardrails_file),
                 name_filter: filter,
+                category_filter: category,
                 json_output,
                 noise,
                 diagnose,
@@ -1799,6 +1805,27 @@ mod tests {
             error.to_string(),
             "Configuration error: unknown pipeline 'typo' supplied to compare --pipelines"
         );
+    }
+
+    #[test]
+    fn compare_accepts_category_alongside_name_filter() {
+        let cli = Cli::try_parse_from([
+            "benchmark-harness",
+            "compare",
+            "--fixtures",
+            "fixtures",
+            "--category",
+            "image-ocr-realgt",
+            "--filter",
+            "ndl",
+        ])
+        .unwrap();
+
+        let Commands::Compare { category, filter, .. } = cli.command else {
+            panic!("expected compare command");
+        };
+        assert_eq!(category.as_deref(), Some("image-ocr-realgt"));
+        assert_eq!(filter.as_deref(), Some("ndl"));
     }
 
     #[test]
