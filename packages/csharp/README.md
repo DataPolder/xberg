@@ -1,4 +1,4 @@
-# C#
+# C
 
 <div align="center" style="display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 20px 0;">
   <a href="https://github.com/xberg-io/alef">
@@ -102,11 +102,12 @@ dotnet add package XbergIo.Xberg
 
 Or via NuGet Package Manager:
 
-```
+```text
 Install-Package XbergIo.Xberg
 ```
 
 ### System Requirements
+
 - **.NET 10.0+** required
 - Optional: [ONNX Runtime](https://github.com/microsoft/onnxruntime/releases) version 1.24+ for ORT-dependent inference features
 - Optional: [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) for OCR functionality
@@ -267,6 +268,7 @@ class Program
 ## Features
 
 ### Supported File Formats (101 formats · 115 file extensions) 101 formats across 115 file extensions in 8 major
+
 categories with intelligent format detection and comprehensive metadata extraction. #### Office Documents | Category |
 Formats | Capabilities | |----------|---------|--------------| | **Word Processing** | `.docx`, `.docm`, `.doc`,
 `.dotx`, `.dotm`, `.dot`, `.odt`, `.pages`, `.wpd`, `.wp`, `.wp5`, `.wp6` | Full text, tables, images, metadata, styles
@@ -282,18 +284,22 @@ via hayro-jpeg2000 (pure Rust decoder), JBIG2 support, table detection, format-s
   | **HEIC family** | `.heic`, `.heics`, `.heif`, `.avif`, `.avcs` | EXIF metadata, optional libheif pixel decoding |
 | **Vector** | `.svg` | DOM parsing, embedded text, graphics metadata |
 
-  #### Audio & Video | Category | Formats | Features | |----------|---------|----------| | **Audio** | `.mp3`, `.mpga`,
+#### Audio & Video | Category | Formats | Features | |----------|---------|----------| | **Audio** | `.mp3`, `.mpga`
+
   `.m4a`, `.wav`, `.webm` | Whisper transcription when native transcription is available | | **Video audio track** |
   `.mp4`, `.mpeg`, `.webm` | Audio-track transcription only |
 
-#### Web & Data | Category | Formats | Features | |----------|---------|----------| | **Markup** | `.html`, `.htm`,
+#### Web & Data | Category | Formats | Features | |----------|---------|----------| | **Markup** | `.html`, `.htm`
+
 `.xhtml`, `.xml`, `.svg` | DOM parsing, metadata (Open Graph, Twitter Card), link extraction | | **Structured Data** |
 `.json`, `.yaml`, `.yml`, `.toml`, `.csv`, `.tsv` | Schema detection, nested structures, validation | | **Text &
 Markdown** | `.txt`, `.md`, `.markdown`, `.djot`, `.mdx`, `.rst`, `.org`, `.rtf` | CommonMark, GFM, Djot, MDX,
 reStructuredText, Org Mode | #### Email & Archives | Category | Formats | Features | |----------|---------|----------| |
 **Email** | `.eml`, `.msg`, `.pst` | Headers, body (HTML/plain), attachments, threading | | **Archives** | `.zip`,
 `.tar`, `.tgz`, `.gz`, `.7z` | Recursive extraction of nested archives, file listing, metadata, zip-bomb protection |
-#### Academic & Scientific | Category | Formats | Features | |----------|---------|----------| | **Citations** | `.bib`,
+
+#### Academic & Scientific | Category | Formats | Features | |----------|---------|----------| | **Citations** | `.bib`
+
 `.ris`, `.nbib`, `.enw` | Structured parsing: RIS, PubMed/MEDLINE, EndNote XML, BibTeX/BibLaTeX, CSL JSON by MIME type |
 | **Scientific** | `.tex`, `.latex`, `.typ`, `.typst`, `.jats`, `.ipynb` | LaTeX, Typst, Jupyter notebooks, PubMed JATS
 | | **Publishing** | `.fb2`, `.docbook`, `.dbk`, `.docbook4`, `.docbook5`, `.opml` | FictionBook, DocBook XML, OPML
@@ -309,15 +315,16 @@ Reference](https://docs.xberg.io/reference/formats/)** ### Key Capabilities - **
 content with position and formatting information - **Metadata Extraction** - Retrieve document properties, creation
 date, author, etc. - **Table Extraction** - Parse tables with structure and cell content preservation - **Image
 Extraction** - Extract embedded images and render page previews
-  - **Audio/Video Transcription** - Extract speech transcripts from MP3, M4A, WAV, WebM, and MP4 inputs when the native
+
+- **Audio/Video Transcription** - Extract speech transcripts from MP3, M4A, WAV, WebM, and MP4 inputs when the native
   transcription feature is available
 - **OCR Support** - Integrate multiple OCR backends for scanned documents
-  - **Async/Await** - Non-blocking document processing with concurrent operations
-  - **Plugin System** - Extensible post-processing for custom text transformation
-  - **Embeddings** - Generate vector embeddings using ONNX Runtime models or provider-hosted services
+- **Async/Await** - Non-blocking document processing with concurrent operations
+- **Plugin System** - Extensible post-processing for custom text transformation
+- **Embeddings** - Generate vector embeddings using ONNX Runtime models or provider-hosted services
 - **Batch Processing** - Efficiently process multiple documents in parallel - **Memory Efficient** - Stream large files
 without loading entirely into memory - **Language Detection** - Detect and support multiple languages in documents
-  - **Code Intelligence** - Extract structure, imports, exports, symbols, and docstrings from [371 programming
+- **Code Intelligence** - Extract structure, imports, exports, symbols, and docstrings from [371 programming
   languages](https://docs.tree-sitter-language-pack.xberg.io) via tree-sitter
 - **Configuration** - Fine-grained control over extraction behavior - **Six Output Formats** - Plain text, Markdown,
 Djot, HTML, JSON tree structure, or Structured JSON with OCR metadata

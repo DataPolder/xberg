@@ -494,7 +494,7 @@ qr-codes = ["dep:rqrr", "dep:image"] # Pure-Rust QR decoding via rqrr.
 # and rasterize SVG → PNG/JPEG/WebP via resvg + tiny-skia. Pure-Rust, WASM-safe.
 # Text is rendered as paths (no font lookup) because `text` / `system-fonts` features
 # are intentionally excluded to avoid native font-scanning deps.
-svg = ["dep:resvg", "image-encode"]
+svg = ["dep:resvg", "dep:usvg", "image-encode"]
 
 tower-service = ["dep:tower", "tokio-runtime"]
 url-config-types = ["dep:crawlberg"]
@@ -1076,6 +1076,7 @@ unhwp = { version = "0.8.0", default-features = false, features = ["hwpx"], opti
 unicode-normalization = { version = "0.1.25", optional = true }
 url = { workspace = true }
 urlencoding = "2"
+usvg = { workspace = true, optional = true }
 utoipa = { version = "5.5", features = ["axum_extras"], optional = true }
 uuid = { version = "1", features = ["v4"], optional = true }
 v_htmlescape = { version = "0.17", optional = true }

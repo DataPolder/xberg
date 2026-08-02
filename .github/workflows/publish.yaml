@@ -2237,7 +2237,6 @@ jobs:
             xberg-cli-*.zip
 
   # Prove a consumer can actually `cargo binstall xberg-cli` the freshly uploaded
-  # static archives. Reads the committed `[package.metadata.binstall]` locally
   # (--manifest-path) so it verifies the exact metadata against the release assets
   # without waiting on the crates.io publish. Only the musl targets have binstall
   # archives, so the matrix is overridden to those triples.

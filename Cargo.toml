@@ -130,6 +130,11 @@ tracing = "0.1"
 tract-onnx = { version = "0.23.4", default-features = false }
 tree-sitter-language-pack = { version = "1.14.0", default-features = false, features = ["serde"] }
 url = "2.5.8"
+# usvg (re-exported by resvg) with only the `writer` feature so `Tree::to_string`
+# / `WriteOptions` are available for SVG sanitize re-serialization. `writer` pulls
+# just xmlwriter + base64 — pure-Rust, WASM-safe, no fonts. resvg 0.48 forwards no
+# `writer` feature of its own, so usvg is enabled directly; versions unify at 0.48.
+usvg = { version = "0.48", default-features = false, features = ["writer"] }
 wasm-bindgen = { version = "0.2", features = ["enable-interning"] }
 wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = [

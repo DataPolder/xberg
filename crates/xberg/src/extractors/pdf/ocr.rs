@@ -2344,7 +2344,7 @@ fn attach_ocr_pipeline_stage_warnings(
 /// Attach force_ocr image-XObject fallback warnings (#1355) to the OCR-produced
 /// document, mirroring [`attach_ocr_pipeline_stage_warnings`]'s `get_or_insert_with`
 /// shape so the warning always survives even when no structured document was built.
-#[cfg(feature = "pdf")]
+#[cfg(all(feature = "pdf", feature = "ocr"))]
 fn attach_ocr_fallback_warnings(
     mut doc: Option<crate::types::internal::InternalDocument>,
     text: &str,

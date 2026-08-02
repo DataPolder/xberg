@@ -180,7 +180,7 @@ wheels = [
 
 [[package]]
 name = "xberg"
-version = "1.0.8"
+version = "1.0.9"
 source = { directory = "../../packages/python" }
 
 [package.metadata]

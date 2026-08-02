@@ -134,6 +134,7 @@ fn raw_pixels_to_png(w: u32, h: u32, format: &pdf_oxide::extractors::PixelFormat
 ///
 /// Returned in content-stream paint order; empty when the page has no image XObjects or
 /// none of them yielded usable bytes.
+#[cfg(feature = "ocr")]
 pub(crate) fn page_ocr_fallback_image_bytes(doc: &pdf_oxide::PdfDocument, page_idx: usize) -> Vec<Bytes> {
     let handles = match doc.page_image_handles(page_idx) {
         Ok(h) => h,
@@ -621,6 +622,7 @@ mod tests {
     /// `page_ocr_fallback_image_bytes` must recover usable image bytes for a page whose
     /// content is real, decodable image XObjects — the fixture used elsewhere in this
     /// file for image extraction (issue #1355 force_ocr fallback).
+    #[cfg(feature = "ocr")]
     #[test]
     fn test_page_ocr_fallback_image_bytes_recovers_real_image() {
         let pdf_path = test_documents_dir().join("pdf/embedded_images_tables.pdf");
@@ -651,6 +653,7 @@ mod tests {
 
     /// A page index past the end of the document must not panic; `page_image_handles`
     /// returns an `Err` that the fallback helper degrades to an empty vec.
+    #[cfg(feature = "ocr")]
     #[test]
     fn test_page_ocr_fallback_image_bytes_out_of_range_page_returns_empty() {
         let pdf_path = test_documents_dir().join("pdf/embedded_images_tables.pdf");

@@ -8,7 +8,6 @@
 # extracts. The profile pulls no ONNX/Tesseract/libheif; the only C/C++ code is
 # libwpd (WordPerfect) + a handful of `*-sys` crates (zstd, bzip2, ring), all
 # compiled from source and statically linked, hence the static libstdc++/libgcc.
-# =============================================================================
 FROM alpine:3.21 AS builder
 
 ARG RUST_TOOLCHAIN=nightly-2026-03-10

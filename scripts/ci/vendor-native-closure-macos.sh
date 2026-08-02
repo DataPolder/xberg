@@ -21,7 +21,6 @@ die() {
   exit 1
 }
 
-# Global scratch dir so the EXIT trap never references main()'s locals (which
 # are out of scope at exit and would trip `set -u`).
 WORKDIR=""
 cleanup() { [ -n "${WORKDIR:-}" ] && rm -rf "$WORKDIR"; }
