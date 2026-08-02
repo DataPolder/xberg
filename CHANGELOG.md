@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Dart native-library loading now propagates download, filesystem, and checksum failures instead
+  of silently falling back to an unverified default library resolution path.
+
 ## [1.0.9] - 2026-08-02
 
 ### Added
