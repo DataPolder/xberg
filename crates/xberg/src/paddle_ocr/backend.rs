@@ -43,6 +43,40 @@ use super::{is_language_supported, language_to_script_family, map_language_code}
 
 use xberg_paddle_ocr::PaddleOcrEngine;
 
+type InitCell<T> = Arc<once_cell::sync::OnceCell<T>>;
+type InitPool<T> = Mutex<AHashMap<String, InitCell<T>>>;
+type EngineInitCell = InitCell<Arc<PaddleOcrEngine>>;
+
+fn init_cell_for_key<T>(pool: &InitPool<T>, key: &str) -> std::result::Result<InitCell<T>, String> {
+    let mut pool = pool.lock().map_err(|error| error.to_string())?;
+    if let Some(cell) = pool.get(key) {
+        return Ok(Arc::clone(cell));
+    }
+
+    let cell = Arc::new(once_cell::sync::OnceCell::new());
+    pool.insert(key.to_string(), Arc::clone(&cell));
+    Ok(cell)
+}
+
+fn engine_pool_key(
+    version: &str,
+    tier: &str,
+    model_key: &str,
+    accel: Option<&crate::core::config::acceleration::AccelerationConfig>,
+) -> String {
+    use crate::core::config::acceleration::ExecutionProviderType;
+
+    let accel_key = match accel.map(|config| (&config.provider, config.device_id)) {
+        Some((ExecutionProviderType::Cuda, device_id)) => format!("cuda:{device_id}"),
+        Some((ExecutionProviderType::TensorRt, device_id)) => format!("tensorrt:{device_id}"),
+        Some((ExecutionProviderType::CoreMl, _)) => "coreml".to_string(),
+        Some((ExecutionProviderType::Auto, _)) => "auto".to_string(),
+        Some((ExecutionProviderType::Cpu, _)) | None => "cpu".to_string(),
+    };
+    format!("{version}/{tier}/{model_key}/{accel_key}")
+}
+
+const INFERENCE_THREAD_COUNT: usize = 1;
 const ORIENTATION_CONFIDENCE_METADATA_KEY: &str = "orientation_confidence";
 const VERTICAL_TEXT_MIN_ASPECT_RATIO: f32 = 1.5;
 const VERTICAL_COLUMN_MIN_OVERLAP_RATIO: f32 = 0.5;
@@ -160,8 +194,8 @@ fn image_metadata(outcome: &RotationOutcome) -> AHashMap<Cow<'static, str>, serd
 /// # Thread Safety
 ///
 /// The backend is `Send + Sync` and can be used across threads safely via `Arc`.
-/// Each engine in the pool has its own mutex, so concurrent OCR on different
-/// script families does not block.
+/// Per-key initialization cells serialize each cold start. Initialized engines
+/// can run OCR concurrently without holding the pool lock.
 #[cfg_attr(alef, alef(skip))]
 pub struct PaddleOcrBackend {
     config: Arc<PaddleOcrConfig>,
@@ -171,10 +205,11 @@ pub struct PaddleOcrBackend {
     /// override loads the detection model matching its recognition model instead
     /// of the backend-default version/tier (issue #1279).
     shared_paths: Mutex<AHashMap<String, SharedModelPaths>>,
-    /// Per-model OCR engines, lazily initialized. Keyed by "{tier}/{model_key}".
+    /// Per-model OCR engines, lazily initialized. Keyed by "{version}/{tier}/{model_key}/{accel}".
     /// Multiple script families may share the same engine (e.g. chinese+japanese use unified_server).
+    /// The per-key cell ensures concurrent cold requests initialize each engine only once. ~keep
     /// Paddle inference methods take `&self`, enabling lock-free concurrent page OCR.
-    engine_pool: Mutex<AHashMap<String, Arc<PaddleOcrEngine>>>,
+    engine_pool: Mutex<AHashMap<String, EngineInitCell>>,
     /// Document orientation detector, lazily initialized.
     doc_ori_detector: once_cell::sync::OnceCell<crate::doc_orientation::DocOrientationDetector>,
     /// Hardware acceleration configuration for ORT sessions (set at construction).
@@ -247,7 +282,7 @@ impl PaddleOcrBackend {
 
     /// Get or create an OCR engine for the given script family.
     ///
-    /// The engine pool is keyed by a composite `"{tier}/{model_key}/{accel}"` string.
+    /// The engine pool is keyed by a composite `"{version}/{tier}/{model_key}/{accel}"` string.
     /// This ensures that:
     /// - Multiple families sharing the same unified model reuse one engine
     /// - Different tiers get different engines (different det model)
@@ -261,97 +296,70 @@ impl PaddleOcrBackend {
         let tier = &config.model_tier;
         let version = &config.model_version;
         let resolved = self.model_manager.resolve_rec_model_versioned(version, family, tier)?;
-        let accel_key = match accel.map(|a| &a.provider) {
-            Some(crate::core::config::acceleration::ExecutionProviderType::Cuda) => "cuda",
-            Some(crate::core::config::acceleration::ExecutionProviderType::TensorRt) => "tensorrt",
-            Some(crate::core::config::acceleration::ExecutionProviderType::CoreMl) => "coreml",
-            Some(crate::core::config::acceleration::ExecutionProviderType::Auto) => "auto",
-            Some(crate::core::config::acceleration::ExecutionProviderType::Cpu) | None => "cpu",
-        };
-        let pool_key = format!("{version}/{tier}/{}/{accel_key}", resolved.model_key);
+        let pool_key = engine_pool_key(version, tier, &resolved.model_key, accel);
 
-        {
-            let pool = self.engine_pool.lock().map_err(|e| crate::XbergError::Plugin {
-                message: format!("Failed to acquire engine pool lock: {e}"),
-                plugin_name: "paddle-ocr".to_string(),
-            })?;
-            if let Some(engine) = pool.get(&pool_key) {
-                return Ok(Arc::clone(engine));
-            }
-        }
-
-        let shared = self.get_or_init_shared_paths(config)?;
-
-        crate::ort_discovery::ensure_ort_available();
-
-        tracing::info!(family, model_key = %resolved.model_key, tier, "Initializing PaddleOCR engine");
-
-        let mut ocr_engine = PaddleOcrEngine::new();
-
-        let det_model_path = Self::find_onnx_model(&shared.det_model)?;
-        let cls_model_path = Self::find_onnx_model(&shared.cls_model)?;
-        let rec_model_path = Self::find_onnx_model(&resolved.model_dir)?;
-
-        let num_threads = 1;
-
-        let dict_path = resolved.dict_file.to_str().ok_or_else(|| crate::XbergError::Ocr {
-            message: "Invalid dictionary file path".to_string(),
-            source: None,
+        let init_cell = init_cell_for_key(&self.engine_pool, &pool_key).map_err(|error| crate::XbergError::Plugin {
+            message: format!("Failed to acquire engine pool lock: {error}"),
+            plugin_name: "paddle-ocr".to_string(),
         })?;
+        let engine = init_cell.get_or_try_init(|| -> Result<Arc<PaddleOcrEngine>> {
+            let shared = self.get_or_init_shared_paths(config)?;
 
-        // NOTE: The thread-local is set by `process_image` from the per-call
-        let builder_fn: Option<
-            fn(
-                ort::session::builder::SessionBuilder,
-            ) -> std::result::Result<ort::session::builder::SessionBuilder, ort::Error>,
-        > = if PADDLE_TL_ACCEL.with(|cell| cell.borrow().is_some()) {
-            Some(paddle_accel_builder_fn)
-        } else {
-            None
-        };
+            crate::ort_discovery::ensure_ort_available();
 
-        ocr_engine
-            .init_models_with_dict_custom(
-                det_model_path.to_str().ok_or_else(|| crate::XbergError::Ocr {
-                    message: "Invalid detection model path".to_string(),
-                    source: None,
-                })?,
-                cls_model_path.to_str().ok_or_else(|| crate::XbergError::Ocr {
-                    message: "Invalid classification model path".to_string(),
-                    source: None,
-                })?,
-                rec_model_path.to_str().ok_or_else(|| crate::XbergError::Ocr {
-                    message: "Invalid recognition model path".to_string(),
-                    source: None,
-                })?,
-                dict_path,
-                num_threads,
-                builder_fn,
-            )
-            .map_err(|e| crate::XbergError::Ocr {
-                message: format!(
-                    "Failed to initialize PaddleOCR models for {family} ({}): {e}",
-                    resolved.model_key
-                ),
+            tracing::info!(family, model_key = %resolved.model_key, tier, "Initializing PaddleOCR engine");
+
+            let mut ocr_engine = PaddleOcrEngine::new();
+            let det_model_path = Self::find_onnx_model(&shared.det_model)?;
+            let cls_model_path = Self::find_onnx_model(&shared.cls_model)?;
+            let rec_model_path = Self::find_onnx_model(&resolved.model_dir)?;
+            let dict_path = resolved.dict_file.to_str().ok_or_else(|| crate::XbergError::Ocr {
+                message: "Invalid dictionary file path".to_string(),
                 source: None,
             })?;
 
-        tracing::info!(family, model_key = %resolved.model_key, "PaddleOCR engine initialized successfully");
+            // NOTE: The thread-local is set by `process_image` from the per-call.
+            let builder_fn: Option<
+                fn(
+                    ort::session::builder::SessionBuilder,
+                ) -> std::result::Result<ort::session::builder::SessionBuilder, ort::Error>,
+            > = if PADDLE_TL_ACCEL.with(|cell| cell.borrow().is_some()) {
+                Some(paddle_accel_builder_fn)
+            } else {
+                None
+            };
 
-        let engine = Arc::new(ocr_engine);
+            ocr_engine
+                .init_models_with_dict_custom(
+                    det_model_path.to_str().ok_or_else(|| crate::XbergError::Ocr {
+                        message: "Invalid detection model path".to_string(),
+                        source: None,
+                    })?,
+                    cls_model_path.to_str().ok_or_else(|| crate::XbergError::Ocr {
+                        message: "Invalid classification model path".to_string(),
+                        source: None,
+                    })?,
+                    rec_model_path.to_str().ok_or_else(|| crate::XbergError::Ocr {
+                        message: "Invalid recognition model path".to_string(),
+                        source: None,
+                    })?,
+                    dict_path,
+                    INFERENCE_THREAD_COUNT,
+                    builder_fn,
+                )
+                .map_err(|e| crate::XbergError::Ocr {
+                    message: format!(
+                        "Failed to initialize PaddleOCR models for {family} ({}): {e}",
+                        resolved.model_key
+                    ),
+                    source: None,
+                })?;
 
-        let mut pool = self.engine_pool.lock().map_err(|e| crate::XbergError::Plugin {
-            message: format!("Failed to acquire engine pool lock: {e}"),
-            plugin_name: "paddle-ocr".to_string(),
+            tracing::info!(family, model_key = %resolved.model_key, "PaddleOCR engine initialized successfully");
+            Ok(Arc::new(ocr_engine))
         })?;
 
-        if let Some(existing_engine) = pool.get(&pool_key) {
-            return Ok(Arc::clone(existing_engine));
-        }
-
-        pool.insert(pool_key, Arc::clone(&engine));
-
-        Ok(engine)
+        Ok(Arc::clone(engine))
     }
 
     /// Find the ONNX model file within a model directory.
@@ -861,6 +869,97 @@ impl Default for PaddleOcrBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Barrier;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::thread;
+
+    const CONCURRENT_INITIALIZER_COUNT: usize = 8;
+
+    #[test]
+    fn engine_init_cell_initializes_a_key_once_across_threads() {
+        let pool = Arc::new(Mutex::new(AHashMap::new()));
+        let start = Arc::new(Barrier::new(CONCURRENT_INITIALIZER_COUNT));
+        let initialization_count = Arc::new(AtomicUsize::new(0));
+
+        let workers = (0..CONCURRENT_INITIALIZER_COUNT)
+            .map(|_| {
+                let pool = Arc::clone(&pool);
+                let start = Arc::clone(&start);
+                let initialization_count = Arc::clone(&initialization_count);
+                thread::spawn(move || {
+                    start.wait();
+                    let cell = init_cell_for_key(&pool, "shared").expect("pool lock should be available");
+                    *cell.get_or_init(|| {
+                        initialization_count.fetch_add(1, Ordering::SeqCst);
+                        42
+                    })
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let results = workers
+            .into_iter()
+            .map(|worker| worker.join().expect("initializer worker should not panic"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(results, vec![42; CONCURRENT_INITIALIZER_COUNT]);
+        assert_eq!(initialization_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn engine_init_cell_does_not_hold_pool_lock_during_initialization() {
+        let pool = Mutex::new(AHashMap::new());
+        let first = init_cell_for_key(&pool, "first").expect("pool lock should be available");
+
+        let value = first.get_or_init(|| {
+            let second = init_cell_for_key(&pool, "second").expect("another key should remain accessible");
+            assert_eq!(second.set(2), Ok(()));
+            1
+        });
+
+        assert_eq!(*value, 1);
+        assert_eq!(pool.lock().expect("pool lock should be available").len(), 2);
+    }
+
+    #[test]
+    fn engine_init_cell_retries_after_initialization_failure() {
+        let pool = Mutex::new(AHashMap::new());
+        let cell = init_cell_for_key(&pool, "retryable").expect("pool lock should be available");
+        let initialization_count = AtomicUsize::new(0);
+
+        let first: std::result::Result<&usize, &str> = cell.get_or_try_init(|| {
+            initialization_count.fetch_add(1, Ordering::SeqCst);
+            Err("initialization failed")
+        });
+        let second = cell.get_or_try_init(|| {
+            initialization_count.fetch_add(1, Ordering::SeqCst);
+            Ok::<usize, &str>(42)
+        });
+
+        assert_eq!(first, Err("initialization failed"));
+        assert_eq!(second, Ok(&42));
+        assert_eq!(initialization_count.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn engine_pool_key_distinguishes_gpu_devices() {
+        use crate::core::config::acceleration::{AccelerationConfig, ExecutionProviderType};
+
+        let first_gpu = AccelerationConfig {
+            provider: ExecutionProviderType::Cuda,
+            device_id: 0,
+        };
+        let second_gpu = AccelerationConfig {
+            provider: ExecutionProviderType::Cuda,
+            device_id: 1,
+        };
+
+        assert_eq!(engine_pool_key("v6", "small", "latin", None), "v6/small/latin/cpu");
+        assert_ne!(
+            engine_pool_key("v6", "small", "latin", Some(&first_gpu)),
+            engine_pool_key("v6", "small", "latin", Some(&second_gpu))
+        );
+    }
 
     fn detailed_block(text: &str, left: u32, top: u32, width: u32, height: u32) -> xberg_paddle_ocr::DetailedTextBlock {
         xberg_paddle_ocr::DetailedTextBlock {
