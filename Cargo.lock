@@ -11933,7 +11933,6 @@ dependencies = [
 name = "xberg-paddle-ocr"
 version = "1.0.8"
 dependencies = [
- "fast_image_resize",
  "geo-clipper",
  "geo-types",
  "image 0.25.10",
