@@ -5,7 +5,7 @@ import unittest
 from contextlib import ExitStack
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 from PIL import Image
@@ -101,6 +101,30 @@ class VendoredBaselineTests(unittest.TestCase):
 
         self.assertEqual(document_path, (Path("fixtures") / "document.png").resolve())
 
+    def test_backend_ocr_language_maps_fixture_codes_per_backend(self):
+        cases = [
+            ("eng", "en", "en"),
+            ("deu", "german", "latin"),
+            ("jpn", "japan", "japan"),
+            ("jpn_vert", "japan", "japan"),
+        ]
+
+        for fixture_language, paddle_language, rapid_language in cases:
+            with self.subTest(fixture_language=fixture_language):
+                fixture = {"metadata": {"ocr_language": fixture_language}}
+                self.assertEqual(baselines.backend_ocr_language("paddleocr-python", fixture), paddle_language)
+                self.assertEqual(baselines.backend_ocr_language("rapidocr", fixture), rapid_language)
+
+    def test_backend_ocr_language_defaults_missing_metadata_to_english(self):
+        self.assertEqual(baselines.backend_ocr_language("paddleocr-python", {}), "en")
+        self.assertEqual(baselines.backend_ocr_language("rapidocr", {"metadata": {}}), "en")
+
+    def test_backend_ocr_language_rejects_unsupported_nonempty_code(self):
+        fixture = {"metadata": {"ocr_language": "eng+kor"}}
+
+        with self.assertRaisesRegex(ValueError, "unsupported metadata.ocr_language 'eng\\+kor' for rapidocr"):
+            baselines.backend_ocr_language("rapidocr", fixture)
+
     def test_validate_unique_fixture_names_rejects_output_collisions(self):
         fixture_paths = [Path("first/example.json"), Path("second/example.json")]
 
@@ -129,6 +153,58 @@ class VendoredBaselineTests(unittest.TestCase):
         result = ([[[0, 0], " first ", 0.9], [[0, 0], "", 0.8]], {})
 
         self.assertEqual(baselines.rapidocr_lines(result), ["first"])
+
+    def test_run_paddleocr_python_passes_fixture_language_to_constructor(self):
+        constructor = Mock()
+        constructor.return_value.predict.return_value = []
+        paddleocr_module = SimpleNamespace(PaddleOCR=constructor)
+
+        with ExitStack() as patches:
+            patches.enter_context(patch.dict(sys.modules, {"paddleocr": paddleocr_module}))
+            patches.enter_context(patch.object(baselines, "document_to_images", return_value=[np.zeros((1, 1, 3))]))
+            baselines.run_paddleocr_python("fixture.png", "german")
+
+        constructor.assert_called_once_with(use_textline_orientation=True, lang="german")
+
+    def test_create_rapidocr_passes_language_to_current_constructor(self):
+        constructor = Mock()
+        rapidocr_module = SimpleNamespace(RapidOCR=constructor)
+
+        with patch.dict(sys.modules, {"rapidocr": rapidocr_module}):
+            baselines.create_rapidocr("japan")
+
+        constructor.assert_called_once_with(params={"Rec.lang_type": "japan"})
+
+    def test_create_rapidocr_rejects_legacy_only_environment(self):
+        with (
+            patch.dict(
+                sys.modules,
+                {"rapidocr": None, "rapidocr_onnxruntime": SimpleNamespace(RapidOCR=Mock())},
+            ),
+            self.assertRaisesRegex(ModuleNotFoundError, "requires rapidocr>=3.0.*reproducible language model"),
+        ):
+            baselines.create_rapidocr("en")
+
+    def test_main_exits_with_failure_for_unsupported_fixture_language(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            fixture_dir = Path(temporary_directory)
+            fixture_path = fixture_dir / "unsupported.json"
+            document_path = fixture_dir / "document.png"
+            fixture_path.write_text(
+                json.dumps({"document": document_path.name, "metadata": {"ocr_language": "eng+kor"}}),
+                encoding="utf-8",
+            )
+            document_path.touch()
+            runner = Mock()
+
+            with ExitStack() as patches:
+                patches.enter_context(patch.object(baselines, "load_ocr_fixture_paths", return_value=[fixture_path]))
+                patches.enter_context(patch.object(baselines, "run_rapidocr", runner))
+                patches.enter_context(patch("traceback.print_exc"))
+                with self.assertRaisesRegex(RuntimeError, "1 vendored baseline generation.*eng\\+kor"):
+                    baselines.main(["rapidocr", "--force"])
+
+        runner.assert_not_called()
 
 
 if __name__ == "__main__":
