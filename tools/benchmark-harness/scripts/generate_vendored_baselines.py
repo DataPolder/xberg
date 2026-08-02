@@ -4,11 +4,12 @@ Usage:
     uv run tools/benchmark-harness/scripts/generate_vendored_baselines.py
     uv run tools/benchmark-harness/scripts/generate_vendored_baselines.py rapidocr
     uv run tools/benchmark-harness/scripts/generate_vendored_baselines.py --force
+    uv run tools/benchmark-harness/scripts/generate_vendored_baselines.py rapidocr --category image-ocr-realgt
 """
 
+import argparse
 import json
 import os
-import sys
 import time
 from pathlib import Path
 
@@ -30,12 +31,49 @@ PDF_OCR_FIXTURES = [
 ]
 
 
-def load_ocr_fixture_paths() -> list[Path]:
-    """Load the PDF fixtures and the canonical fast OCR image cohort."""
+def deduplicate_fixture_paths(fixture_paths: list[Path]) -> list[Path]:
+    """Remove duplicate paths while preserving their first-seen order."""
+    return list(dict.fromkeys(fixture_paths))
+
+
+def load_ocr_fixture_paths(category: str | None = None) -> list[Path]:
+    """Load the default OCR cohort or fixtures in an exact metadata category."""
+    if category is not None:
+        fixture_paths = []
+        candidates = sorted(
+            FIXTURES_DIR.rglob("*.json"),
+            key=lambda path: path.relative_to(FIXTURES_DIR).as_posix(),
+        )
+        for fixture_path in candidates:
+            fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+            if fixture.get("metadata", {}).get("category") == category:
+                fixture_paths.append(fixture_path)
+        return deduplicate_fixture_paths(fixture_paths)
+
     fixture_paths = [FIXTURES_DIR / f"{name}.json" for name in PDF_OCR_FIXTURES]
     cohort = json.loads(OCR_IMAGES_COHORT.read_text(encoding="utf-8"))
     fixture_paths.extend(FIXTURES_DIR / fixture for fixture in cohort["fixtures"])
-    return fixture_paths
+    return deduplicate_fixture_paths(fixture_paths)
+
+
+def validate_unique_fixture_names(fixture_paths: list[Path]) -> None:
+    """Reject fixture selections that would overwrite stem-keyed vendored outputs."""
+    paths_by_name: dict[str, list[Path]] = {}
+    for fixture_path in fixture_paths:
+        paths_by_name.setdefault(fixture_path.stem, []).append(fixture_path)
+
+    duplicate_names = sorted(name for name, paths in paths_by_name.items() if len(paths) > 1)
+    if duplicate_names:
+        names = ", ".join(duplicate_names)
+        raise ValueError(f"fixture selection contains duplicate output names: {names}")
+
+
+def resolve_document_path(fixture_path: Path, fixture: dict[str, object]) -> Path:
+    """Resolve a fixture document relative to its descriptor."""
+    document = fixture.get("document")
+    if not isinstance(document, str) or not document:
+        raise ValueError(f"fixture has no document path: {fixture_path}")
+    return (fixture_path.parent / document).resolve()
 
 
 def pdf_to_images(pdf_path: str, dpi: int = 300) -> list[np.ndarray]:
@@ -136,23 +174,28 @@ def save_vendored(pipeline_name: str, fixture_name: str, md: str, time_ms: float
     (timing_dir / f"{fixture_name}.ms").write_text(f"{time_ms:.1f}\n")
 
 
-def main():
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse the baseline generator command line."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("pipeline", nargs="?", choices=("paddleocr-python", "rapidocr"))
+    parser.add_argument("--force", action="store_true", help="replace existing non-empty outputs")
+    parser.add_argument("--category", help="select fixtures with this exact metadata.category")
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = parse_args(argv)
     pipelines = {
         "paddleocr-python": run_paddleocr_python,
         "rapidocr": run_rapidocr,
     }
 
-    force = "--force" in sys.argv
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    if args.pipeline:
+        pipelines = {args.pipeline: pipelines[args.pipeline]}
 
-    if args:
-        selected = args[0]
-        if selected not in pipelines:
-            print(f"Unknown: {selected}. Choose: {list(pipelines.keys())}")
-            sys.exit(1)
-        pipelines = {selected: pipelines[selected]}
-
-    for fixture_path in load_ocr_fixture_paths():
+    fixture_paths = load_ocr_fixture_paths(args.category)
+    validate_unique_fixture_names(fixture_paths)
+    for fixture_path in fixture_paths:
         fixture_name = fixture_path.stem
         if not fixture_path.exists():
             print(f"  SKIP {fixture_name}: fixture not found")
@@ -161,20 +204,20 @@ def main():
         with open(fixture_path) as f:
             fixture = json.load(f)
 
-        doc_path = str((FIXTURES_DIR / fixture["document"]).resolve())
-        if not os.path.exists(doc_path):
+        doc_path = resolve_document_path(fixture_path, fixture)
+        if not doc_path.exists():
             print(f"  SKIP {fixture_name}: document not found")
             continue
 
         for pipeline_name, run_fn in pipelines.items():
             existing = VENDORED_DIR / pipeline_name / "md" / f"{fixture_name}.md"
-            if not force and existing.exists() and existing.stat().st_size > 0:
+            if not args.force and existing.exists() and existing.stat().st_size > 0:
                 print(f"  CACHED {pipeline_name}/{fixture_name}")
                 continue
 
             print(f"  RUN {pipeline_name}/{fixture_name} ...", end="", flush=True)
             try:
-                md, time_ms = run_fn(doc_path)
+                md, time_ms = run_fn(str(doc_path))
                 save_vendored(pipeline_name, fixture_name, md, time_ms)
                 print(f" {time_ms:.0f}ms, {len(md)} chars")
             except Exception as e:

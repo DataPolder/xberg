@@ -480,6 +480,10 @@ Regenerate with:
 
 ```bash
 python tools/benchmark-harness/scripts/generate_vendored_baselines.py
+
+# Generate one backend for every fixture in an exact metadata category
+python tools/benchmark-harness/scripts/generate_vendored_baselines.py \
+  rapidocr --category image-ocr-realgt
 ```
 
 ## Development
