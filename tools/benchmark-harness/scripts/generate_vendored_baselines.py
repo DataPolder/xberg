@@ -1,10 +1,10 @@
 """Generate vendored OCR baselines from PaddleOCR Python and RapidOCR.
 
 Usage:
-    uv run tools/benchmark-harness/scripts/generate_vendored_baselines.py
-    uv run tools/benchmark-harness/scripts/generate_vendored_baselines.py rapidocr
-    uv run tools/benchmark-harness/scripts/generate_vendored_baselines.py --force
-    uv run tools/benchmark-harness/scripts/generate_vendored_baselines.py rapidocr --category image-ocr-realgt
+    uv run --locked --isolated --python 3.12 --only-group bench-rapidocr \
+        python tools/benchmark-harness/scripts/generate_vendored_baselines.py rapidocr
+    uv run --locked --isolated --python 3.12 --only-group bench-paddleocr-python \
+        python tools/benchmark-harness/scripts/generate_vendored_baselines.py paddleocr-python
 """
 
 import argparse
@@ -233,7 +233,7 @@ def save_vendored(pipeline_name: str, fixture_name: str, md: str, time_ms: float
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse the baseline generator command line."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("pipeline", nargs="?", choices=("paddleocr-python", "rapidocr"))
+    parser.add_argument("pipeline", choices=("paddleocr-python", "rapidocr"))
     parser.add_argument("--force", action="store_true", help="replace existing non-empty outputs")
     parser.add_argument("--category", help="select fixtures with this exact metadata.category")
     return parser.parse_args(argv)
@@ -246,8 +246,7 @@ def main(argv: list[str] | None = None) -> None:
         "rapidocr": run_rapidocr,
     }
 
-    if args.pipeline:
-        pipelines = {args.pipeline: pipelines[args.pipeline]}
+    pipelines = {args.pipeline: pipelines[args.pipeline]}
 
     fixture_paths = load_ocr_fixture_paths(args.category)
     validate_unique_fixture_names(fixture_paths)

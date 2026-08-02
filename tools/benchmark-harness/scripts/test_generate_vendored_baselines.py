@@ -83,16 +83,15 @@ class VendoredBaselineTests(unittest.TestCase):
 
         self.assertEqual([path.name for path in paths], ["z.json", "a.json", "b.json"])
 
-    def test_parse_args_preserves_pipeline_and_force_and_accepts_category(self):
+    def test_parse_args_requires_pipeline_and_preserves_options(self):
         args = baselines.parse_args(["rapidocr", "--force", "--category", "image-ocr-realgt"])
 
         self.assertEqual(args.pipeline, "rapidocr")
         self.assertTrue(args.force)
         self.assertEqual(args.category, "image-ocr-realgt")
 
-        force_only_args = baselines.parse_args(["--force"])
-        self.assertIsNone(force_only_args.pipeline)
-        self.assertTrue(force_only_args.force)
+        with self.assertRaises(SystemExit):
+            baselines.parse_args(["--force"])
 
     def test_resolve_document_path_uses_fixture_directory(self):
         fixture_path = Path("fixtures/nested/example.json")
