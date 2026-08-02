@@ -781,10 +781,15 @@ async fn main() -> Result<()> {
             use benchmark_harness::adapters::create_xberg_adapter;
 
             let mut xberg_count = 0;
-            let pipelines = [XbergPipeline::Baseline, XbergPipeline::Layout, XbergPipeline::PaddleOcr];
+            let pipelines = [
+                XbergPipeline::Baseline,
+                XbergPipeline::Layout,
+                XbergPipeline::BaselinePaddle,
+                XbergPipeline::LayoutPaddle,
+            ];
             let formats = [parsed_format];
             for pipeline in &pipelines {
-                if !ocr && matches!(pipeline, XbergPipeline::PaddleOcr) {
+                if !ocr && matches!(pipeline, XbergPipeline::BaselinePaddle | XbergPipeline::LayoutPaddle) {
                     continue;
                 }
                 for format in &formats {
@@ -830,7 +835,7 @@ async fn main() -> Result<()> {
             }
 
             let total_requested = if frameworks.is_empty() {
-                if ocr { 3 } else { 2 }
+                if ocr { 4 } else { 2 }
             } else {
                 frameworks.iter().filter(|f| f.contains("xberg")).count()
             };

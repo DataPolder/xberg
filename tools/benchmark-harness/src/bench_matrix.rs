@@ -179,6 +179,14 @@ impl Cohort {
         matches!(self, Cohort::Native | Cohort::Ocr | Cohort::Images)
     }
 
+    /// Whether this cohort's xberg cells include the PaddleOCR-engine variants (`baseline-paddle`,
+    /// and `layout-paddle` when layout is also included) alongside the default Tesseract-backed
+    /// `baseline`/`layout` runs. Only the OCR cohorts (scanned PDF, images) force OCR, so only they
+    /// benefit from a second OCR engine; the native/office/markup/... families never run OCR.
+    pub fn includes_paddle_ocr(self) -> bool {
+        matches!(self, Cohort::Ocr | Cohort::Images)
+    }
+
     /// Build this cohort's pinned release contract.
     pub fn contract(self) -> CohortContract {
         match self {
@@ -383,16 +391,23 @@ fn matrix_entry(
 }
 
 /// The Xberg cells for a cohort: markdown/plaintext x single/batch for each enabled pipeline.
-/// Rendered-page cohorts (`include_layout`) run both `baseline` and `layout` (8 cells); the
-/// remaining families run `baseline` only (4 cells).
-fn xberg_entries(cohort: &str, include_layout: bool) -> Vec<MatrixEntry> {
-    let pipelines: &[&str] = if include_layout {
-        &["baseline", "layout"]
-    } else {
-        &["baseline"]
-    };
+/// Rendered-page cohorts (`include_layout`) run both `baseline` and `layout`; OCR cohorts
+/// (`include_paddle`) additionally run the PaddleOCR-engine variants `baseline-paddle` (and
+/// `layout-paddle` when layout is also included). Each pipeline contributes 4 cells, so the counts
+/// are: baseline-only = 4, +layout = 8, +paddle = 16.
+fn xberg_entries(cohort: &str, include_layout: bool, include_paddle: bool) -> Vec<MatrixEntry> {
+    let mut pipelines: Vec<&str> = vec!["baseline"];
+    if include_layout {
+        pipelines.push("layout");
+    }
+    if include_paddle {
+        pipelines.push("baseline-paddle");
+        if include_layout {
+            pipelines.push("layout-paddle");
+        }
+    }
     let mut entries = Vec::new();
-    for &pipeline in pipelines {
+    for &pipeline in &pipelines {
         for output_format in [OutputFormat::Markdown, OutputFormat::Plaintext] {
             for mode in [ExecutionMode::SingleFile, ExecutionMode::Batch] {
                 entries.push(matrix_entry(
@@ -460,7 +475,7 @@ fn optional(entries: Vec<MatrixEntry>) -> Vec<MatrixEntry> {
 }
 
 fn native_matrix() -> Vec<MatrixEntry> {
-    let mut matrix = xberg_entries(NATIVE_COHORT, true);
+    let mut matrix = xberg_entries(NATIVE_COHORT, true, false);
     matrix.extend(grid_entries("docling", NATIVE_COHORT));
     matrix.push(matrix_entry(
         format!("benchmarks-markitdown-markdown-single-file-{NATIVE_COHORT}"),
@@ -492,7 +507,7 @@ fn native_matrix() -> Vec<MatrixEntry> {
 }
 
 fn ocr_matrix() -> Vec<MatrixEntry> {
-    let mut matrix = xberg_entries(OCR_COHORT, true);
+    let mut matrix = xberg_entries(OCR_COHORT, true, true);
     matrix.extend(grid_entries("docling", OCR_COHORT));
     matrix.push(markdown_single_file_entry("mineru", OCR_COHORT).into_optional());
     // Tika and Unstructured are Tesseract-backed and now run the OCR cohorts too
@@ -514,39 +529,39 @@ fn broad_office_competitors(cohort: &str) -> Vec<MatrixEntry> {
 }
 
 fn office_matrix() -> Vec<MatrixEntry> {
-    let mut matrix = xberg_entries(OFFICE_COHORT, false);
+    let mut matrix = xberg_entries(OFFICE_COHORT, false, false);
     matrix.extend(broad_office_competitors(OFFICE_COHORT));
     matrix
 }
 
 fn markup_matrix() -> Vec<MatrixEntry> {
-    let mut matrix = xberg_entries(MARKUP_COHORT, false);
+    let mut matrix = xberg_entries(MARKUP_COHORT, false, false);
     matrix.extend(broad_office_competitors(MARKUP_COHORT));
     matrix
 }
 
 fn data_matrix() -> Vec<MatrixEntry> {
-    let mut matrix = xberg_entries(DATA_COHORT, false);
+    let mut matrix = xberg_entries(DATA_COHORT, false, false);
     matrix.extend(broad_office_competitors(DATA_COHORT));
     matrix
 }
 
 fn ebook_matrix() -> Vec<MatrixEntry> {
-    let mut matrix = xberg_entries(EBOOK_COHORT, false);
+    let mut matrix = xberg_entries(EBOOK_COHORT, false, false);
     matrix.push(plaintext_single_file_entry("tika", EBOOK_COHORT).into_optional());
     matrix.push(markdown_single_file_entry("pymupdf4llm", EBOOK_COHORT).into_optional());
     matrix
 }
 
 fn email_matrix() -> Vec<MatrixEntry> {
-    let mut matrix = xberg_entries(EMAIL_COHORT, false);
+    let mut matrix = xberg_entries(EMAIL_COHORT, false, false);
     matrix.push(plaintext_single_file_entry("unstructured", EMAIL_COHORT).into_optional());
     matrix.push(plaintext_single_file_entry("tika", EMAIL_COHORT).into_optional());
     matrix
 }
 
 fn images_matrix() -> Vec<MatrixEntry> {
-    let mut matrix = xberg_entries(IMAGES_COHORT, true);
+    let mut matrix = xberg_entries(IMAGES_COHORT, true, true);
     matrix.extend(optional(grid_entries("docling", IMAGES_COHORT)));
     // pymupdf4llm's adapter path is `pymupdf4llm.to_markdown`, which exposes no OCR
     // configuration, so it is NOT treated as OCR-language-capable: its fixture OCR
@@ -667,13 +682,13 @@ mod tests {
     /// but never required for the per-format-family cohorts.
     const CONTRACT_CELL_COUNTS: [(Cohort, usize, usize); 8] = [
         (Cohort::Native, 21, 20),
-        (Cohort::Ocr, 19, 16),
+        (Cohort::Ocr, 27, 24),
         (Cohort::Office, 11, 4),
         (Cohort::Markup, 11, 4),
         (Cohort::Ebook, 6, 4),
         (Cohort::Email, 6, 4),
         (Cohort::Data, 11, 4),
-        (Cohort::Images, 16, 8),
+        (Cohort::Images, 24, 16),
     ];
 
     #[test]
@@ -726,17 +741,34 @@ mod tests {
                 "{}: layout-pipeline presence must match includes_layout()",
                 cohort.as_str()
             );
+            let has_paddle = contract
+                .matrix
+                .iter()
+                .any(|entry| entry.framework.starts_with("xberg-") && entry.framework.ends_with("-paddle"));
+            assert_eq!(
+                has_paddle,
+                cohort.includes_paddle_ocr(),
+                "{}: paddle-pipeline presence must match includes_paddle_ocr()",
+                cohort.as_str()
+            );
             let xberg_required = contract
                 .matrix
                 .iter()
                 .filter(|entry| entry.framework.starts_with("xberg-"))
                 .count();
-            assert_eq!(
-                xberg_required,
-                if cohort.includes_layout() { 8 } else { 4 },
-                "{}: xberg cell count",
-                cohort.as_str()
-            );
+            // 4 cells (md/plain x single/batch) per enabled pipeline: baseline, +layout,
+            // +baseline-paddle, +layout-paddle (the last only when layout is also present).
+            let mut pipelines: usize = 1;
+            if cohort.includes_layout() {
+                pipelines += 1;
+            }
+            if cohort.includes_paddle_ocr() {
+                pipelines += 1;
+                if cohort.includes_layout() {
+                    pipelines += 1;
+                }
+            }
+            assert_eq!(xberg_required, pipelines * 4, "{}: xberg cell count", cohort.as_str());
         }
     }
 

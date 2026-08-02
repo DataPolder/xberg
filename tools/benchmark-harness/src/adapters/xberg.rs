@@ -85,6 +85,8 @@ pub fn create_xberg_adapter(
         && matches!(
             pipeline,
             XbergPipeline::PaddleOcr
+                | XbergPipeline::BaselinePaddle
+                | XbergPipeline::LayoutPaddle
                 | XbergPipeline::CandleTrocr
                 | XbergPipeline::CandlePaddleocrVl
                 | XbergPipeline::CandleGlmOcr
@@ -115,7 +117,18 @@ pub fn create_xberg_adapter(
             args.push("true".to_string());
             args.push("--use-layout-for-markdown".to_string());
         }
-        XbergPipeline::PaddleOcr => {
+        XbergPipeline::PaddleOcr | XbergPipeline::BaselinePaddle => {
+            args.push("--ocr".to_string());
+            args.push("true".to_string());
+            args.push("--ocr-backend".to_string());
+            args.push("paddle-ocr".to_string());
+            args.push("--force-ocr".to_string());
+            args.push("true".to_string());
+        }
+        XbergPipeline::LayoutPaddle => {
+            args.push("--layout".to_string());
+            args.push("true".to_string());
+            args.push("--use-layout-for-markdown".to_string());
             args.push("--ocr".to_string());
             args.push("true".to_string());
             args.push("--ocr-backend".to_string());

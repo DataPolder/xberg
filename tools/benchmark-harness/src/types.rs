@@ -77,6 +77,12 @@ pub enum XbergPipeline {
     /// PaddleOCR: OCR with PaddleOCR backend
     #[serde(rename = "paddle-ocr")]
     PaddleOcr,
+    /// Baseline structure pipeline with the PaddleOCR engine (force-OCR, no layout model)
+    #[serde(rename = "baseline-paddle")]
+    BaselinePaddle,
+    /// Layout structure pipeline with the PaddleOCR engine (force-OCR + layout model)
+    #[serde(rename = "layout-paddle")]
+    LayoutPaddle,
     /// Candle TrOCR: OCR with candle-based TrOCR backend
     #[serde(rename = "candle-trocr")]
     CandleTrocr,
@@ -101,6 +107,8 @@ impl XbergPipeline {
             XbergPipeline::Baseline => "baseline",
             XbergPipeline::Layout => "layout",
             XbergPipeline::PaddleOcr => "paddle-ocr",
+            XbergPipeline::BaselinePaddle => "baseline-paddle",
+            XbergPipeline::LayoutPaddle => "layout-paddle",
             XbergPipeline::CandleTrocr => "candle-trocr",
             XbergPipeline::CandlePaddleocrVl => "candle-paddleocr-vl",
             XbergPipeline::CandleGlmOcr => "candle-glm-ocr",
@@ -124,6 +132,8 @@ impl FromStr for XbergPipeline {
             "baseline" => Ok(XbergPipeline::Baseline),
             "layout" => Ok(XbergPipeline::Layout),
             "paddle-ocr" | "paddle_ocr" | "paddleocr" => Ok(XbergPipeline::PaddleOcr),
+            "baseline-paddle" | "baseline_paddle" => Ok(XbergPipeline::BaselinePaddle),
+            "layout-paddle" | "layout_paddle" => Ok(XbergPipeline::LayoutPaddle),
             "candle-trocr" | "candle_trocr" | "trocr" => Ok(XbergPipeline::CandleTrocr),
             "candle-paddleocr-vl" | "candle_paddleocr_vl" | "paddleocr-vl" => Ok(XbergPipeline::CandlePaddleocrVl),
             "candle-glm-ocr" | "candle_glm_ocr" | "glm-ocr" => Ok(XbergPipeline::CandleGlmOcr),
@@ -132,7 +142,7 @@ impl FromStr for XbergPipeline {
                 Ok(XbergPipeline::CandlePaddleocrVl15)
             }
             _ => Err(format!(
-                "unknown Xberg pipeline: {}. Valid: baseline, layout, paddle-ocr, candle-trocr, candle-paddleocr-vl, candle-glm-ocr, candle-deepseek-ocr, candle-paddleocr-vl-15",
+                "unknown Xberg pipeline: {}. Valid: baseline, layout, paddle-ocr, baseline-paddle, layout-paddle, candle-trocr, candle-paddleocr-vl, candle-glm-ocr, candle-deepseek-ocr, candle-paddleocr-vl-15",
                 s
             )),
         }

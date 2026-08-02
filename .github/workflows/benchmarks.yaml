@@ -175,14 +175,14 @@ jobs:
   bench-rust:
     name: bench-rust (${{ matrix.pipeline }}, ${{ matrix.output_format }}, ${{ matrix.mode }}, ${{ matrix.cohort }})
     needs: setup
-    runs-on: ${{ matrix.pipeline == 'layout' && 'runner-large-arm64' || 'runner-medium-arm64' }}
+    runs-on: ${{ (matrix.pipeline == 'layout' || contains(matrix.pipeline, 'paddle')) && 'runner-large-arm64' || 'runner-medium-arm64' }}
     timeout-minutes: 360
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
-        pipeline: [baseline, layout]
+        pipeline: [baseline, layout, baseline-paddle, layout-paddle]
         output_format: [markdown, plaintext]
         mode: [single-file, batch]
         cohort:
@@ -196,12 +196,28 @@ jobs:
           - ocr-images-fast
         # The layout pipeline only benefits rendered-page formats (PDF, images); for the other
         # families a layout run would merely duplicate baseline, so drop those cells.
+        # The PaddleOCR-engine variants (baseline-paddle, layout-paddle) force OCR, so they run ONLY
+        # on the OCR cohorts (ocr-pdf-fast-b4, ocr-images-fast); drop them from every non-OCR cohort.
+        # NOTE: keep this block a clean list of `- {...}` entries — the validate-workflow-matrix.py
+        # exclude parser stops at the first non-entry line, so do not intersperse comments here.
         exclude:
           - { pipeline: layout, cohort: native-office-fast }
           - { pipeline: layout, cohort: native-markup-fast }
           - { pipeline: layout, cohort: native-ebook-fast }
           - { pipeline: layout, cohort: native-email-fast }
           - { pipeline: layout, cohort: native-data-fast }
+          - { pipeline: baseline-paddle, cohort: native-pdf-fast-b8 }
+          - { pipeline: baseline-paddle, cohort: native-office-fast }
+          - { pipeline: baseline-paddle, cohort: native-markup-fast }
+          - { pipeline: baseline-paddle, cohort: native-ebook-fast }
+          - { pipeline: baseline-paddle, cohort: native-email-fast }
+          - { pipeline: baseline-paddle, cohort: native-data-fast }
+          - { pipeline: layout-paddle, cohort: native-pdf-fast-b8 }
+          - { pipeline: layout-paddle, cohort: native-office-fast }
+          - { pipeline: layout-paddle, cohort: native-markup-fast }
+          - { pipeline: layout-paddle, cohort: native-ebook-fast }
+          - { pipeline: layout-paddle, cohort: native-email-fast }
+          - { pipeline: layout-paddle, cohort: native-data-fast }
     steps:
       - uses: actions/checkout@v6
         with:
@@ -249,8 +265,12 @@ jobs:
           ort-version: ${{ env.ORT_VERSION }}
 
       - name: Setup Layout Models
-        if: matrix.pipeline == 'layout'
+        if: contains(matrix.pipeline, 'layout')
         uses: ./.github/actions/setup-layout-models
+
+      - name: Setup PaddleOCR Models
+        if: contains(matrix.pipeline, 'paddle')
+        uses: ./.github/actions/setup-paddle-ocr-models
 
       - name: Run benchmark
         env:
