@@ -2347,7 +2347,7 @@ fn attach_ocr_pipeline_stage_warnings(
 //
 // `ocr-pipeline` (not just `ocr`): the caller is inside `extract_with_ocr`
 // (`any(ocr, ocr-pipeline)`), and the `binstall` CLI profile enables `ocr-pipeline`
-// via `liter-llm` without `ocr`.
+// via `liter-llm` without `ocr`. ~keep
 #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
 fn attach_ocr_fallback_warnings(
     mut doc: Option<crate::types::internal::InternalDocument>,

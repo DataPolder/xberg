@@ -51,6 +51,17 @@ exclude = [
   ".claude-plugin/marketplace.json",
   ".agents/plugins/marketplace.json",
   ".ai-rulez-generated.json",
+  "packages/*/README.md",
+  "crates/xberg/README.md",
+  "crates/xberg-cli/README.md",
+  "crates/xberg-node/README.md",
+  "crates/xberg-ffi/README.md",
+  "crates/xberg-wasm/README.md",
+  "crates/xberg-paddle-ocr/README.md",
+  "crates/xberg-tesseract/README.md",
+  "packages/dart/lib/src/xberg_bridge_generated/**",
+  "docs-site/public/assets/**",
+  "packages/go/cmd/setup/main.go",
 ]
 
 [lint.markdown.rumdl]
@@ -209,7 +220,7 @@ remove_todos = false
 remove_fixme = false
 remove_docs = false
 use_default_ignores = true
-preserve_patterns = ["SAFETY", "SPDX", "Copyright", "License", "licensed under"]
+preserve_patterns = ["SAFETY", "SPDX", "Copyright", "License", "licensed under", "namespace"]
 
 [tools.clang-format]
 enabled = true
@@ -345,6 +356,7 @@ enabled = true
 "**/examples/**" = ["ANN", "D100", "D103", "I001", "INP001", "PLR2004", "S101", "PLC0415", "SLF001", "T201", "typo"]
 "**/tests/**/*.py" = ["PT019", "PLC0415", "SLF001"]
 "**/text_repair.rs" = ["typo"]
+"tools/benchmark-harness/guardrails.json" = ["typo"]
 ".cargo/config.toml" = ["comment", "doc-comment"]
 "Package.swift" = ["comment", "doc-comment"]
 "cli-proxy/pypi/**/*.py" = ["ANN001", "ANN202", "S310", "T201"]
@@ -519,6 +531,17 @@ lint = { exclude = [
   ".claude-plugin/marketplace.json",
   ".agents/plugins/marketplace.json",
   ".ai-rulez-generated.json",
+  "packages/*/README.md",
+  "crates/xberg/README.md",
+  "crates/xberg-cli/README.md",
+  "crates/xberg-node/README.md",
+  "crates/xberg-ffi/README.md",
+  "crates/xberg-wasm/README.md",
+  "crates/xberg-paddle-ocr/README.md",
+  "crates/xberg-tesseract/README.md",
+  "packages/dart/lib/src/xberg_bridge_generated/**",
+  "docs-site/public/assets/**",
+  "packages/go/cmd/setup/main.go",
 ] }
 fmt = { exclude = [
   "**/*.freezed.dart",
@@ -572,6 +595,17 @@ fmt = { exclude = [
   ".claude-plugin/marketplace.json",
   ".agents/plugins/marketplace.json",
   ".ai-rulez-generated.json",
+  "packages/*/README.md",
+  "crates/xberg/README.md",
+  "crates/xberg-cli/README.md",
+  "crates/xberg-node/README.md",
+  "crates/xberg-ffi/README.md",
+  "crates/xberg-wasm/README.md",
+  "crates/xberg-paddle-ocr/README.md",
+  "crates/xberg-tesseract/README.md",
+  "packages/dart/lib/src/xberg_bridge_generated/**",
+  "docs-site/public/assets/**",
+  "packages/go/cmd/setup/main.go",
 ] }
 file_safety = { exclude = [
   "**/*.freezed.dart",
@@ -625,6 +659,17 @@ file_safety = { exclude = [
   ".claude-plugin/marketplace.json",
   ".agents/plugins/marketplace.json",
   ".ai-rulez-generated.json",
+  "packages/*/README.md",
+  "crates/xberg/README.md",
+  "crates/xberg-cli/README.md",
+  "crates/xberg-node/README.md",
+  "crates/xberg-ffi/README.md",
+  "crates/xberg-wasm/README.md",
+  "crates/xberg-paddle-ocr/README.md",
+  "crates/xberg-tesseract/README.md",
+  "packages/dart/lib/src/xberg_bridge_generated/**",
+  "docs-site/public/assets/**",
+  "packages/go/cmd/setup/main.go",
 ] }
 cargo = true
 commit = { stages = ["commit-msg"] }
