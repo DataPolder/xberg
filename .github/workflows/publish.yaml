@@ -1204,6 +1204,7 @@ jobs:
         run: |
           docker build -f docker/Dockerfile.binstall-musl \
             --build-arg FEATURES=${{ matrix.features }} \
+            --build-arg TARGET=${{ matrix.target }} \
             --output type=local,dest=./build-output .
 
       - name: Package binstall CLI artifact (single static binary)
