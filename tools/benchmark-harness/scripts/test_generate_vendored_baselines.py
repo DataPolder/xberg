@@ -8,7 +8,7 @@ import numpy as np
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import generate_vendored_baselines as baselines  # noqa: E402 -- sibling script import ~keep
+import generate_vendored_baselines as baselines
 
 
 class VendoredBaselineTests(unittest.TestCase):
