@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.9] - 2026-08-02
+
+### Added
+
+- `cargo binstall xberg-cli` now installs a self-contained, fully static musl CLI binary with no
+  ONNX/Tesseract/libheif runtime dependencies. The `x86_64-unknown-linux-musl` build additionally
+  bundles the pure-Rust Candle VLM OCR backends (TrOCR and PaddleOCR-VL); `aarch64-unknown-linux-musl`
+  ships extraction-only. ONNX/Tesseract/HEIC OCR remain available via Homebrew and the bundled
+  per-target release tarballs.
+
 ### Changed
 
 - PaddleOCR now exposes the `PaddleOcrEngine` name and detailed word-level quadrilaterals;
