@@ -9,8 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.10] - 2026-08-02
+
 ### Fixed
 
+- `cargo install xberg-cli` now succeeds on a stock Windows toolchain. HEIC/HEIF decoding links
+  native `libheif`, which has no default build path on Windows, so it is no longer part of the
+  CLI's default features and the install no longer fails building `libheif-sys`. Enable HEIC with
+  `--features heic`; the prebuilt release binaries, Docker `all` image, and Homebrew bottle
+  continue to ship it. (#1361)
+- The `cargo binstall xberg-cli` static musl builds now compile. The #1355 image-fallback OCR
+  helpers were gated on the `ocr` feature but are reachable under the `ocr-pipeline`-only
+  `binstall` profile, which failed to build both musl targets in the 1.0.9 release.
+- `brew install xberg-io/tap/xberg` installs a working binary again instead of an empty bottle;
+  the 1.0.9 bottle rebuild had been skipped when the CLI asset upload cascaded from the failed
+  binstall build. (#1356)
+- The hosted demo page (docs.xberg.io/demo.html) no longer 404s its toolbar and file-picker
+  icons. (#1360)
 - Dart native-library loading now propagates download, filesystem, and checksum failures instead
   of silently falling back to an unverified default library resolution path.
 - PaddleOCR concurrent cold starts now share one engine initialization per model and accelerator,
