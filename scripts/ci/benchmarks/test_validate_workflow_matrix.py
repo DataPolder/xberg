@@ -17,9 +17,9 @@ class WorkflowMatrixValidationTests(unittest.TestCase):
     def test_expands_every_exact_contract_cell_once(self) -> None:
         cells = VALIDATOR.workflow_cells(WORKFLOW)
 
-        self.assertEqual(len(cells), 101)
-        self.assertEqual(len({VALIDATOR.cell_key(cell) for cell in cells}), 101)
-        self.assertEqual(sum(not cell["optional"] for cell in cells), 64)
+        self.assertEqual(len(cells), 117)
+        self.assertEqual(len({VALIDATOR.cell_key(cell) for cell in cells}), 117)
+        self.assertEqual(sum(not cell["optional"] for cell in cells), 80)
 
     def test_framework_env_drift_changes_cell_even_when_artifact_name_is_unchanged(
         self,
