@@ -190,8 +190,22 @@ fn validate_framework_result_cardinality<'a, 'b>(
 fn selected_frameworks_use_tesseract(frameworks: &[String]) -> bool {
     frameworks.is_empty()
         || frameworks.iter().any(|framework| {
-            framework.starts_with("xberg-") && (framework.contains("-baseline") || framework.contains("-layout"))
+            framework.starts_with("xberg-")
+                && !framework.contains("paddle")
+                && (framework.contains("-baseline") || framework.contains("-layout"))
         })
+}
+
+const XBERG_RUN_PIPELINES: [benchmark_harness::XbergPipeline; 5] = [
+    benchmark_harness::XbergPipeline::Baseline,
+    benchmark_harness::XbergPipeline::Layout,
+    benchmark_harness::XbergPipeline::PaddleOcr,
+    benchmark_harness::XbergPipeline::BaselinePaddle,
+    benchmark_harness::XbergPipeline::LayoutPaddle,
+];
+
+fn should_register_xberg_pipeline(pipeline: benchmark_harness::XbergPipeline, has_explicit_frameworks: bool) -> bool {
+    pipeline != benchmark_harness::XbergPipeline::PaddleOcr || has_explicit_frameworks
 }
 
 fn parse_pipeline_names(names: &[String], argument: &str) -> Result<Vec<benchmark_harness::comparison::Pipeline>> {
@@ -445,7 +459,9 @@ enum Commands {
         #[arg(short, long)]
         fixtures: PathBuf,
 
-        /// Pipelines to compare (comma-separated: baseline,layout,tesseract,paddle,docling)
+        /// Pipelines to compare. Paddle presets include paddle-v6-{medium,small,tiny}[+layout]
+        /// and paddle-v5-server[+layout]. Tesseract PSM presets are
+        /// tesseract-{vertical-block,single-block,sparse-text} (PSM 5, 6, and 11).
         #[arg(long, value_delimiter = ',')]
         pipelines: Option<Vec<String>>,
 
@@ -493,8 +509,9 @@ enum Commands {
         #[arg(long, conflicts_with_all = ["doc", "group"])]
         cohort: Option<PathBuf>,
 
-        /// Pipeline paths to run (comma-separated; use canonical names such as
-        /// baseline, layout, paddle-v6-medium, or paddle-v6-medium+layout). ~keep
+        /// Pipeline paths to run. Paddle presets include paddle-v6-{medium,small,tiny}[+layout]
+        /// and paddle-v5-server[+layout]. Tesseract PSM presets are
+        /// tesseract-{vertical-block,single-block,sparse-text} (PSM 5, 6, and 11). ~keep
         #[arg(long, value_delimiter = ',')]
         paths: Option<Vec<String>>,
 
@@ -781,15 +798,17 @@ async fn main() -> Result<()> {
             use benchmark_harness::adapters::create_xberg_adapter;
 
             let mut xberg_count = 0;
-            let pipelines = [
-                XbergPipeline::Baseline,
-                XbergPipeline::Layout,
-                XbergPipeline::BaselinePaddle,
-                XbergPipeline::LayoutPaddle,
-            ];
             let formats = [parsed_format];
-            for pipeline in &pipelines {
-                if !ocr && matches!(pipeline, XbergPipeline::BaselinePaddle | XbergPipeline::LayoutPaddle) {
+            for pipeline in &XBERG_RUN_PIPELINES {
+                if !should_register_xberg_pipeline(*pipeline, !frameworks.is_empty()) {
+                    continue;
+                }
+                if !ocr
+                    && matches!(
+                        pipeline,
+                        XbergPipeline::PaddleOcr | XbergPipeline::BaselinePaddle | XbergPipeline::LayoutPaddle
+                    )
+                {
                     continue;
                 }
                 for format in &formats {
@@ -1633,9 +1652,10 @@ fn format_size(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        Cli, Commands, cohort_contract_summary, evaluate_framework_coverage, normalize_run_frameworks,
-        parse_model_provenance, parse_pipeline_names, parse_sort_metric, selected_frameworks_use_tesseract,
-        tracing_filter, validate_framework_result_cardinality,
+        Cli, Commands, XBERG_RUN_PIPELINES, cohort_contract_summary, evaluate_framework_coverage,
+        normalize_run_frameworks, parse_model_provenance, parse_pipeline_names, parse_sort_metric,
+        selected_frameworks_use_tesseract, should_register_xberg_pipeline, tracing_filter,
+        validate_framework_result_cardinality,
     };
     use benchmark_harness::types::ErrorKind;
     use clap::Parser;
@@ -1705,7 +1725,29 @@ mod tests {
         assert!(!selected_frameworks_use_tesseract(&[
             "xberg-markdown-paddle-ocr".to_string()
         ]));
+        assert!(!selected_frameworks_use_tesseract(&[
+            "xberg-markdown-baseline-paddle-batch".to_string()
+        ]));
+        assert!(!selected_frameworks_use_tesseract(&[
+            "xberg-markdown-layout-paddle".to_string()
+        ]));
         assert!(!selected_frameworks_use_tesseract(&["docling".to_string()]));
+    }
+
+    #[test]
+    fn run_registration_requires_explicit_legacy_paddle_selection() {
+        assert!(XBERG_RUN_PIPELINES.contains(&benchmark_harness::XbergPipeline::PaddleOcr));
+        assert_eq!(
+            XBERG_RUN_PIPELINES
+                .iter()
+                .filter(|pipeline| should_register_xberg_pipeline(**pipeline, false))
+                .count(),
+            4
+        );
+        assert!(should_register_xberg_pipeline(
+            benchmark_harness::XbergPipeline::PaddleOcr,
+            true
+        ));
     }
 
     #[test]

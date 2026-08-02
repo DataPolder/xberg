@@ -274,16 +274,12 @@ fn config_json_enables_ocr(args: &[String]) -> bool {
         == Some(true)
 }
 
-fn tesseract_ocr_config_from_args(args: &[String]) -> Option<serde_json::Value> {
+fn effective_ocr_config_from_args(args: &[String]) -> Option<serde_json::Value> {
     let cli_backend = args
         .windows(2)
         .rev()
         .find(|pair| pair[0] == "--ocr-backend")
         .map(|pair| pair[1].as_str());
-    if cli_backend.is_some_and(|backend| backend != "tesseract") {
-        return None;
-    }
-
     let cli_enabled = args.iter().enumerate().rev().find_map(|(index, arg)| {
         if arg == "--no-ocr" {
             return Some(false);
@@ -302,32 +298,38 @@ fn tesseract_ocr_config_from_args(args: &[String]) -> Option<serde_json::Value> 
         .and_then(|config| config.get("ocr").cloned());
     if let Some(mut ocr) = configured_ocr {
         let object = ocr.as_object_mut()?;
-        let configured_backend = object.get("backend").and_then(serde_json::Value::as_str);
-        if cli_backend.is_none() && configured_backend.is_some_and(|backend| backend != "tesseract") {
-            return None;
-        }
         if cli_enabled != Some(true) && object.get("enabled").and_then(serde_json::Value::as_bool) == Some(false) {
             return None;
         }
         if cli_enabled == Some(true) {
             object.insert("enabled".to_string(), serde_json::Value::Bool(true));
         }
-        if cli_backend == Some("tesseract") {
+        if let Some(cli_backend) = cli_backend {
             object.insert(
                 "backend".to_string(),
-                serde_json::Value::String("tesseract".to_string()),
+                serde_json::Value::String(cli_backend.to_string()),
             );
         }
         return Some(ocr);
     }
 
-    (cli_enabled == Some(true)).then(|| {
-        serde_json::json!({
+    (cli_enabled == Some(true)).then(|| match cli_backend {
+        Some("tesseract") | None => serde_json::json!({
             "enabled": true,
             "backend": "tesseract",
             "tesseract_config": {"use_cache": false}
-        })
+        }),
+        Some(backend) => serde_json::json!({
+            "enabled": true,
+            "backend": backend
+        }),
     })
+}
+
+fn xberg_ocr_language_args(args: &[String], ocr_language: Option<&str>) -> Option<[String; 2]> {
+    effective_ocr_config_from_args(args)?;
+    let language = ocr_language.and_then(crate::adapter::canonical_ocr_language_arg)?;
+    Some(["--ocr-language".to_string(), language])
 }
 
 fn build_batch_file_configs(
@@ -1039,10 +1041,9 @@ impl SubprocessAdapter {
         let request_args = self.single_file_request_args(force_ocr);
         cmd.args(&request_args);
         if self.name.starts_with("xberg-")
-            && tesseract_ocr_config_from_args(&request_args).is_some()
-            && let Some(language) = ocr_language.and_then(crate::adapter::canonical_ocr_language_arg)
+            && let Some(language_args) = xberg_ocr_language_args(&request_args, ocr_language)
         {
-            cmd.arg("--ocr-language").arg(language);
+            cmd.args(language_args);
         }
         if let Some(forward) = self.ocr_language_forward_arg(ocr_language) {
             cmd.arg(forward);
@@ -1100,7 +1101,7 @@ impl SubprocessAdapter {
             .is_some_and(|capability| capability.entry_point == BatchEntryPoint::XbergCliExtractBatch)
         {
             let cwd = std::env::current_dir().map_err(Error::Io)?;
-            let base_ocr = tesseract_ocr_config_from_args(&request_args);
+            let base_ocr = effective_ocr_config_from_args(&request_args);
             let configs = build_batch_file_configs(file_paths, ocr_languages, &cwd, base_ocr.as_ref());
             if configs.is_empty() {
                 None
@@ -2807,7 +2808,7 @@ mod tests {
             "--config-json".to_string(),
             r#"{"ocr":{"enabled":true,"backend":"tesseract","tesseract_config":{"use_cache":false}}}"#.to_string(),
         ];
-        let base_ocr = tesseract_ocr_config_from_args(&args).expect("Tesseract OCR config");
+        let base_ocr = effective_ocr_config_from_args(&args).expect("Tesseract OCR config");
         let cwd = tempfile::tempdir().unwrap();
         let input = Path::new("sample.pdf");
         let configs = build_batch_file_configs(
@@ -2859,7 +2860,7 @@ mod tests {
             }
         });
         let args = vec!["--config-json".to_string(), config.to_string()];
-        let base_ocr = tesseract_ocr_config_from_args(&args).expect("Tesseract OCR config");
+        let base_ocr = effective_ocr_config_from_args(&args).expect("Tesseract OCR config");
         let cwd = tempfile::tempdir().unwrap();
         let input = Path::new("sample.pdf");
         let configs = build_batch_file_configs(&[input], &[Some("deu".to_string())], cwd.path(), Some(&base_ocr));
@@ -2893,7 +2894,7 @@ mod tests {
             "--force-ocr".to_string(),
             "true".to_string(),
         ];
-        let ocr = tesseract_ocr_config_from_args(&args).expect("forced Tesseract OCR config");
+        let ocr = effective_ocr_config_from_args(&args).expect("forced Tesseract OCR config");
 
         assert_eq!(ocr.pointer("/enabled"), Some(&serde_json::json!(true)));
         assert_eq!(ocr.pointer("/backend"), Some(&serde_json::json!("tesseract")));
@@ -2904,7 +2905,7 @@ mod tests {
     }
 
     #[test]
-    fn non_tesseract_pipeline_does_not_receive_tessdata_language_override() {
+    fn paddle_file_config_receives_fixture_language_without_tesseract_config() {
         let args = vec![
             "--config-json".to_string(),
             r#"{"ocr":{"enabled":true,"backend":"tesseract"}}"#.to_string(),
@@ -2912,15 +2913,55 @@ mod tests {
             "paddle-ocr".to_string(),
         ];
 
-        assert!(tesseract_ocr_config_from_args(&args).is_none());
-        assert!(
-            build_batch_file_configs(
-                &[Path::new("sample.pdf")],
-                &[Some("deu".to_string())],
-                Path::new("/tmp"),
-                None,
-            )
-            .is_empty()
+        let base_ocr = effective_ocr_config_from_args(&args).expect("Paddle OCR config");
+        let configs = build_batch_file_configs(
+            &[Path::new("sample.pdf")],
+            &[Some(" deu + eng ".to_string())],
+            Path::new("/tmp"),
+            Some(&base_ocr),
+        );
+        let config = configs.get("/tmp/sample.pdf").expect("file config");
+
+        assert_eq!(config.pointer("/ocr/backend"), Some(&serde_json::json!("paddle-ocr")));
+        assert_eq!(
+            config.pointer("/ocr/language"),
+            Some(&serde_json::json!(["deu", "eng"]))
+        );
+        assert_eq!(config.pointer("/ocr/tesseract_config"), None);
+    }
+
+    #[test]
+    fn paddle_single_file_receives_fixture_language() {
+        let args = vec![
+            "--ocr".to_string(),
+            "true".to_string(),
+            "--ocr-backend".to_string(),
+            "paddle-ocr".to_string(),
+        ];
+
+        assert_eq!(
+            xberg_ocr_language_args(&args, Some(" deu + eng ")),
+            Some(["--ocr-language".to_string(), "deu+eng".to_string()])
+        );
+    }
+
+    #[test]
+    fn tesseract_single_file_language_forwarding_is_unchanged() {
+        let args = vec![
+            "--ocr".to_string(),
+            "true".to_string(),
+            "--ocr-backend".to_string(),
+            "tesseract".to_string(),
+        ];
+
+        assert_eq!(
+            xberg_ocr_language_args(&args, Some("jpn_vert")),
+            Some(["--ocr-language".to_string(), "jpn_vert".to_string()])
+        );
+        let ocr = effective_ocr_config_from_args(&args).expect("Tesseract OCR config");
+        assert_eq!(
+            ocr.pointer("/tesseract_config/use_cache"),
+            Some(&serde_json::json!(false))
         );
     }
 

@@ -577,6 +577,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn legacy_paddle_pipeline_parses_supported_spellings() {
+        for value in ["paddle-ocr", "paddle_ocr", "paddleocr"] {
+            assert_eq!(value.parse::<XbergPipeline>(), Ok(XbergPipeline::PaddleOcr));
+        }
+    }
+
+    #[test]
     fn stage_timings_round_trips_with_ort_field_present() {
         let timings = StageTimings {
             process_init_ms: 12.5,

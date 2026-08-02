@@ -134,12 +134,15 @@ Fixtures are JSON files organized by format directory under `fixtures/`:
 
 ## Frameworks
 
-### Xberg CLI Pipelines (3)
+### Xberg CLI Pipelines
 
 Xberg is benchmarked through its native CLI pipelines in single-file mode and through the
 CLI `batch` entry point for throughput:
 
-`xberg-markdown-baseline`, `xberg-markdown-layout`, and `xberg-markdown-paddle-ocr`.
+The current CI matrix contains `xberg-markdown-baseline`, `xberg-markdown-layout`,
+`xberg-markdown-baseline-paddle`, and `xberg-markdown-layout-paddle`. The legacy
+`xberg-markdown-paddle-ocr` adapter remains available for explicit compatibility runs,
+but is not included in current matrix counts. Append `-batch` in native-batch mode.
 
 ### Reference Frameworks (7)
 
@@ -160,8 +163,11 @@ The `compare` and `pipeline-benchmark` commands support these extraction paths:
 | ------------------ | ---------------------------------------------- |
 | `baseline`         | Native PDF text extraction (no OCR, no layout) |
 | `layout`           | Native PDF with layout detection               |
-| `tesseract`        | Tesseract OCR with force_ocr                   |
-| `tesseract+layout` | Tesseract OCR with layout detection            |
+| `tesseract`        | Tesseract OCR with force_ocr (automatic PSM)    |
+| `tesseract+layout` | Tesseract OCR with layout detection             |
+| `tesseract-vertical-block` | Tesseract PSM 5 (vertical block)          |
+| `tesseract-single-block` | Tesseract PSM 6 (single uniform block)       |
+| `tesseract-sparse-text` | Tesseract PSM 11 (sparse text)                |
 | `paddle-v6-medium` | PP-OCRv6 medium tier with force_ocr            |
 | `paddle-v6-medium+layout` | PP-OCRv6 medium tier with layout detection |
 | `paddle-v6-small[+layout]` | PP-OCRv6 small tier, optionally with layout |
