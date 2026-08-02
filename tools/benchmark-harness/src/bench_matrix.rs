@@ -355,25 +355,43 @@ const DATA_DOCUMENT_EXTENSIONS: &[&str] = &["csv", "csv", "tsv", "json", "json",
 
 const IMAGES_COHORT: &str = "ocr-images-fast";
 const IMAGES_MANIFEST_NAME: &str = "ocr-images-fast-v1";
-const IMAGES_MANIFEST_BLAKE3: &str = "b3c74126fc378702d6afe07b1d419dcbe84e76ba49a8bbaa80c106c60d013ee7";
-const IMAGES_BATCH_SIZE: usize = 6;
+const IMAGES_MANIFEST_BLAKE3: &str = "57127121a7d8c03d08d552ce00065436d9f3208b445b00dd704911a5d270b3a0";
+const IMAGES_BATCH_SIZE: usize = 14;
 const IMAGES_FIXTURES: &[&str] = &[
-    "image_scanned.json",
-    "image_ocr_test_original.json",
-    "image_text.json",
-    "tif_ocr.json",
-    "image_invoice.json",
-    "image_table.json",
+    "cord_receipt_01.json",
+    "cord_receipt_02.json",
+    "cord_receipt_03.json",
+    "cord_receipt_04.json",
+    "doclaynet_page_01.json",
+    "doclaynet_page_02.json",
+    "ndl_meiji_vertical_01.json",
+    "ndl_meiji_vertical_02.json",
+    "ndl_meiji_vertical_03.json",
+    "ndl_meiji_vertical_04.json",
+    "ndl_meiji_vertical_05.json",
+    "textocr_scene_01.json",
+    "textocr_scene_02.json",
+    "textocr_scene_03.json",
 ];
 const IMAGES_DOCUMENT_STEMS: &[&str] = &[
-    "english_and_korean",
-    "ocr_test_original",
-    "jpn_vert",
-    "ocr_image",
-    "invoice_image",
-    "complex_document",
+    "cord_receipt_01",
+    "cord_receipt_02",
+    "cord_receipt_03",
+    "cord_receipt_04",
+    "doclaynet_page_01",
+    "doclaynet_page_02",
+    "ndl_meiji_vertical_01",
+    "ndl_meiji_vertical_02",
+    "ndl_meiji_vertical_03",
+    "ndl_meiji_vertical_04",
+    "ndl_meiji_vertical_05",
+    "textocr_scene_01",
+    "textocr_scene_02",
+    "textocr_scene_03",
 ];
-const IMAGES_DOCUMENT_EXTENSIONS: &[&str] = &["png", "png", "jpeg", "tif", "png", "png"];
+const IMAGES_DOCUMENT_EXTENSIONS: &[&str] = &[
+    "jpg", "jpg", "jpg", "jpg", "jpg", "jpg", "jpg", "jpg", "jpg", "jpg", "jpg", "jpg", "jpg", "jpg",
+];
 
 fn matrix_entry(
     artifact: String,

@@ -259,7 +259,7 @@ mod tests {
             ("native-ebook-fast", "native-ebook-fast-v1", 6, false),
             ("native-email-fast", "native-email-fast-v1", 6, false),
             ("native-data-fast", "native-data-fast-v1", 6, false),
-            ("ocr-images-fast", "ocr-images-fast-v1", 6, true),
+            ("ocr-images-fast", "ocr-images-fast-v1", 14, true),
             ("paddle-layout-quality-b4", "paddle-layout-quality-b4-v1", 12, true),
         ];
         for (stem, name, count, ocr_enabled) in cohorts {
