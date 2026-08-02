@@ -10,6 +10,7 @@ use std::path::PathBuf;
 pub(super) const MIN_RECOGNITION_BATCH_SIZE: u32 = 1;
 pub(super) const DEFAULT_RECOGNITION_BATCH_SIZE: u32 = 6;
 pub(super) const MAX_RECOGNITION_BATCH_SIZE: u32 = 64;
+const DEFAULT_DETECTION_LIMIT_SIDE_LEN: u32 = 1024;
 
 /// Configuration for PaddleOCR backend.
 ///
@@ -63,7 +64,7 @@ pub struct PaddleOcrConfig {
     /// Controls the expansion of detected text regions
     pub det_db_unclip_ratio: f32,
 
-    /// Maximum side length for detection image (default: 960)
+    /// Maximum side length for detection image (default: 1024)
     /// Larger images may be resized to this limit for faster inference
     pub det_limit_side_len: u32,
 
@@ -125,7 +126,7 @@ impl PaddleOcrConfig {
             det_db_thresh: 0.3,
             det_db_box_thresh: 0.5,
             det_db_unclip_ratio: 1.6,
-            det_limit_side_len: 960,
+            det_limit_side_len: DEFAULT_DETECTION_LIMIT_SIDE_LEN,
             rec_batch_num: DEFAULT_RECOGNITION_BATCH_SIZE,
             padding: 10,
             drop_score: 0.5,
@@ -473,7 +474,7 @@ mod tests {
         assert_eq!(config.det_db_thresh, 0.3);
         assert_eq!(config.det_db_box_thresh, 0.5);
         assert_eq!(config.det_db_unclip_ratio, 1.6);
-        assert_eq!(config.det_limit_side_len, 960);
+        assert_eq!(config.det_limit_side_len, 1024);
         assert_eq!(config.rec_batch_num, 6);
         assert_eq!(config.padding, 10);
         assert_eq!(config.model_tier, "mobile");
@@ -564,6 +565,18 @@ mod tests {
 
         assert_eq!(config.det_limit_side_len, 1280);
         assert_eq!(config.rec_batch_num, 8);
+    }
+
+    #[test]
+    fn should_default_detection_side_length_when_omitted() {
+        let config: PaddleOcrConfig = serde_json::from_str(r#"{"language":"en"}"#).unwrap();
+        assert_eq!(config.det_limit_side_len, 1024);
+    }
+
+    #[test]
+    fn should_preserve_explicit_detection_side_length_override() {
+        let config: PaddleOcrConfig = serde_json::from_str(r#"{"language":"en","det_limit_side_len":960}"#).unwrap();
+        assert_eq!(config.det_limit_side_len, 960);
     }
 
     #[test]
