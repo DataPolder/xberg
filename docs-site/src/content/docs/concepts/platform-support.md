@@ -56,7 +56,7 @@ Legend: ✅ prebuilt shipped · ❌ not shipped · — not applicable
    ORT. arm64 devices get the full ORT-enabled build.
 7. **WASM** is a single `wasm32` artifact, portable across any WASM runtime (browser and Node). It uses
    the `wasm-target` feature set (`ocr-wasm`, `excel-wasm`, `layout-tract`, `auto-rotate-tract`,
-   `ner-candle-wasm`; no native ORT). Tree-sitter code intelligence is **excluded**: the 306-language
+   `ner-candle-wasm`; no native ORT). Tree-sitter code intelligence is **excluded**: the 371-language
    grammar pack pushes the `.wasm` past the 50 MB per-file limit of public CDNs (jsDelivr), so source
    files extract as text but are not parsed. Layout detection and document-orientation run through the
    pure-Rust `tract` engine (see note 8). Named-entity recognition runs in the browser through the

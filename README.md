@@ -86,7 +86,7 @@
 
 Point Xberg at anything — a PDF, a scanned image, a spreadsheet, an audio file, a URL, a whole archive, or a source tree — and get back clean text, tables, metadata, and structured data. One engine handles format detection, reading, OCR, and extraction, so you never stitch a pipeline together from a dozen libraries.
 
-**101 formats · 115 file extensions** · **306 code languages** · **15 language bindings** · **6 output formats** · OCR · transcription · embeddings
+**101 formats · 115 file extensions** · **371 code languages** · **15 language bindings** · **6 output formats** · OCR · transcription · embeddings
 
 The fastest, most precise open-source document and PDF-to-Markdown engine — [see the benchmarks](https://xberg.io/benchmarks).
 
@@ -110,7 +110,7 @@ Point Xberg at anything — a PDF, a spreadsheet, a scanned image, an audio file
 | **Archives, traversed** | List and **recursively** extract nested `.zip`, `.tar`, `.gz`, `.7z` — documents inside documents — guarded by zip-bomb, compression-ratio, and nesting-depth limits. |
 | **OCR on demand** | Tesseract, PaddleOCR, Candle, or VLM backends — fallback chains, confidence scores, language auto-detection, extensible via plugins. |
 | **Layout & tables** | ML layout models (PP-DocLayout-V3, RT-DETR) and table structure (TATR, SLANet) reconstruct reading order and cell grids for clean Markdown. |
-| **Code intelligence** | Functions, classes, imports, symbols, docstrings from 306 programming languages. Syntax-aware chunking for RAG pipelines. |
+| **Code intelligence** | Functions, classes, imports, symbols, docstrings from 371 programming languages. Syntax-aware chunking for RAG pipelines. |
 | **Embeddings & search** | Local (ONNX) or provider-hosted embeddings (165 providers via liter-llm), sparse and late-interaction, cross-encoder reranking. |
 | **Enrichment** | NER, keyword extraction (YAKE/RAKE), summarization, translation, redaction, page classification, QR detection, language detection, token reduction (TOON). |
 | **Structured extraction** | Schema-driven JSON straight from any document via local (Ollama, LM Studio, vLLM) or hosted LLMs — no prompt engineering. |
@@ -490,9 +490,9 @@ Common use cases — see [Quick start guide](https://docs.xberg.io/getting-start
 | **Scientific** | `.tex`, `.latex`, `.typ`, `.typst`, `.jats`, `.ipynb` | LaTeX, Typst, Jupyter notebooks, PubMed JATS |
 | **Publishing** | `.fb2`, `.docbook`, `.dbk`, `.docbook4`, `.docbook5`, `.opml` | FictionBook, DocBook XML, OPML outlines |
 
-### Code Intelligence (306 Languages)
+### Code Intelligence (371 Languages)
 
-Extract structure from 306 programming languages via tree-sitter:
+Extract structure from 371 programming languages via tree-sitter:
 
 | Feature | Description |
 |---------|-------------|

@@ -80,7 +80,7 @@
   </a>
 </div>
 
-Extract text, tables, images, metadata, and code intelligence from 101 file formats and 306 programming languages including PDF, Office documents, images, and audio/video transcripts where native transcription is available. Java bindings with type-safe API, Foreign Function & Memory API integration, and native performance.
+Extract text, tables, images, metadata, and code intelligence from 101 file formats and 371 programming languages including PDF, Office documents, images, and audio/video transcripts where native transcription is available. Java bindings with type-safe API, Foreign Function & Memory API integration, and native performance.
 
 ## What This Package Provides
 
@@ -308,7 +308,7 @@ reStructuredText, Org Mode | #### Email & Archives | Category | Formats | Featur
 | **Scientific** | `.tex`, `.latex`, `.typ`, `.typst`, `.jats`, `.ipynb` | LaTeX, Typst, Jupyter notebooks, PubMed JATS
 | | **Publishing** | `.fb2`, `.docbook`, `.dbk`, `.docbook4`, `.docbook5`, `.opml` | FictionBook, DocBook XML, OPML
 outlines | | **Documentation** | MIME-only POD, mdoc, troff | Technical documentation formats | #### Code Intelligence
-(306 Languages) | Feature | Description | |---------|-------------| | **Structure Extraction** | Functions, classes,
+(371 Languages) | Feature | Description | |---------|-------------| | **Structure Extraction** | Functions, classes,
 methods, structs, interfaces, enums | | **Import/Export Analysis** | Module dependencies, re-exports, wildcard imports |
 | **Symbol Extraction** | Variables, constants, type aliases, properties | | **Docstring Parsing** | Google, NumPy,
 Sphinx, JSDoc, RustDoc, and 10+ formats | | **Diagnostics** | Parse errors with line/column positions | | **Syntax-Aware
@@ -328,7 +328,7 @@ Extraction** - Extract embedded images and render page previews
 - **Embeddings** - Generate vector embeddings using ONNX Runtime models or provider-hosted services
 - **Batch Processing** - Efficiently process multiple documents in parallel - **Memory Efficient** - Stream large files
 without loading entirely into memory - **Language Detection** - Detect and support multiple languages in documents
-- **Code Intelligence** - Extract structure, imports, exports, symbols, and docstrings from [306 programming
+- **Code Intelligence** - Extract structure, imports, exports, symbols, and docstrings from [371 programming
   languages](https://docs.tree-sitter-language-pack.xberg.io) via tree-sitter
 - **Configuration** - Fine-grained control over extraction behavior - **Six Output Formats** - Plain text, Markdown,
 Djot, HTML, JSON tree structure, or Structured JSON with OCR metadata

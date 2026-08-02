@@ -6,10 +6,10 @@ import { Tabs, TabItem } from "@astrojs/starlight/components";
 
 Xberg integrates [tree-sitter-language-pack](https://docs.tree-sitter-language-pack.xberg.io) (TSLP) to parse source code files. When you extract a source code file, Xberg detects the programming language, parses it with tree-sitter, and emits the source as content split at semantic boundaries -- functions, classes, and modules -- rather than fixed line counts.
 
-Language support covers **306 programming languages** via tree-sitter grammars. See the [TSLP documentation](https://docs.tree-sitter-language-pack.xberg.io) for the full language list.
+Language support covers **371 programming languages** via tree-sitter grammars. See the [TSLP documentation](https://docs.tree-sitter-language-pack.xberg.io) for the full language list.
 
 :::caution[Not available in the WASM build]
-Code intelligence is **excluded from the WebAssembly build** (`@xberg-io/xberg-wasm`). The statically linked tree-sitter grammar pack for all 306 languages pushes the browser `.wasm` binary well past the 50 MB per-file limit imposed by public CDNs such as jsDelivr. Source files still extract as plain text in WASM, but they are not parsed or split at semantic boundaries. Use a native binding (Rust, Python, Node, Go, etc.) when you need code intelligence.
+Code intelligence is **excluded from the WebAssembly build** (`@xberg-io/xberg-wasm`). The statically linked tree-sitter grammar pack for all 371 languages pushes the browser `.wasm` binary well past the 50 MB per-file limit imposed by public CDNs such as jsDelivr. Source files still extract as plain text in WASM, but they are not parsed or split at semantic boundaries. Use a native binding (Rust, Python, Node, Go, etc.) when you need code intelligence.
 :::
 
 See the [TreeSitterConfig reference](/reference/configuration/#treesitterconfig) for all configuration options.
@@ -207,7 +207,7 @@ If neither method identifies the language, extraction returns an `UnsupportedFor
 
 ## Language Support
 
-Tree-sitter-language-pack supports 306 programming languages, including Python, Rust, TypeScript, JavaScript, Go, Java, C/C++, Ruby, PHP, C#, Swift, Kotlin, and Elixir. For the full list, see the [TSLP language reference](https://docs.tree-sitter-language-pack.xberg.io).
+Tree-sitter-language-pack supports 371 programming languages, including Python, Rust, TypeScript, JavaScript, Go, Java, C/C++, Ruby, PHP, C#, Swift, Kotlin, and Elixir. For the full list, see the [TSLP language reference](https://docs.tree-sitter-language-pack.xberg.io).
 
 ## Related Documentation
 

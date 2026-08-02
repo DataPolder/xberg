@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
-description = "High-performance document intelligence library for Rust. Extract text, metadata, and structured data from PDFs, Office documents, images, and 101 formats and 306 programming languages via tree-sitter code intelligence with async/sync APIs."
+description = "High-performance document intelligence library for Rust. Extract text, metadata, and structured data from PDFs, Office documents, images, and 101 formats and 371 programming languages via tree-sitter code intelligence with async/sync APIs."
 license.workspace = true
 repository = "https://github.com/xberg-io/xberg"
 homepage = "https://xberg.io"
@@ -596,7 +596,7 @@ no-ort-target = [
 # with curated parser set (markdown, javascript, python, rust, json, yaml, html, css, sql, c, etc.)
 # and update this aggregate to use it instead of the full tree-sitter feature.
 # NOTE: tree-sitter is intentionally EXCLUDED from wasm-target. The statically
-# linked tree-sitter grammar pack (306 languages) pushed the browser wasm binary
+# linked tree-sitter grammar pack (371 languages) pushed the browser wasm binary
 # past ~100 MB, over jsDelivr's 50 MB per-file limit, which broke the live demo
 # (the CDN 403s the oversized .wasm). Code intelligence is therefore unavailable
 # in the WASM build; native targets keep `tree-sitter`. See docs (WASM limitations).
