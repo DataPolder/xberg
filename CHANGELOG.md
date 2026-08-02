@@ -28,8 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   icons. (#1360)
 - Dart native-library loading now propagates download, filesystem, and checksum failures instead
   of silently falling back to an unverified default library resolution path.
-- PaddleOCR concurrent cold starts now share one engine initialization per model and accelerator,
-  with distinct cache entries for different GPU device IDs.
+- PaddleOCR concurrent cold starts now run off async worker threads and share one engine
+  initialization per model and accelerator, with distinct cache entries for different GPU device IDs.
 
 ## [1.0.9] - 2026-08-02
 
