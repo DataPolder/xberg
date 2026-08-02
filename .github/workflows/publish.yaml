@@ -1171,6 +1171,56 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  # Fully static musl CLI for `cargo binstall xberg-cli`. binstall extracts only
+  # the binary from the archive, so this ships ONE static ELF (no sibling dylibs,
+  # unlike the bundled cli-binaries-musl tarball). x86_64 gets Candle OCR
+  # (binstall-ocr); aarch64 is extraction-only (binstall) since candle's gemm-f16
+  # needs fullfp16, absent on the musl aarch64 baseline. Assets are named
+  # `xberg-cli-binstall-<target>` so upload-cli-release attaches them via its
+  # existing `xberg-cli-*` glob, and `[package.metadata.binstall]` points here.
+  cli-binaries-binstall:
+    name: Build static binstall CLI (${{ matrix.target }})
+    needs: [prepare, check-cli]
+    if: ${{ needs.prepare.outputs.release_cli == 'true' && (needs.check-cli.outputs.exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, features: binstall-ocr }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl, features: binstall }
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          fetch-depth: 0
+
+          submodules: recursive
+      - name: Build static CLI via Alpine Docker
+        run: |
+          docker build -f docker/Dockerfile.binstall-musl \
+            --build-arg FEATURES=${{ matrix.features }} \
+            --output type=local,dest=./build-output .
+
+      - name: Package binstall CLI artifact (single static binary)
+        env:
+          TARGET: ${{ matrix.target }}
+        shell: bash
+        run: |
+          STAGE="xberg-cli-binstall-${TARGET}"
+          mkdir -p "$STAGE"
+          cp LICENSE THIRD_PARTY_LICENSES.md "$STAGE/"
+          cp build-output/xberg "$STAGE/xberg"
+          chmod +x "$STAGE/xberg"
+          tar -czf "${STAGE}.tar.gz" "$STAGE"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cli-binstall-${{ matrix.target }}
+          path: xberg-cli-binstall-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
   go-ffi-libraries:
     name: Build Go FFI library (${{ matrix.platform }})
     needs: [prepare, check-go]
@@ -2151,8 +2201,8 @@ jobs:
 
   upload-cli-release:
     name: Upload CLI binaries to GitHub Release
-    needs: [prepare, cli-binaries, cli-binaries-musl]
-    if: ${{ needs.prepare.outputs.is_tag == 'true' && needs.cli-binaries.result == 'success' && needs.cli-binaries-musl.result == 'success' }}
+    needs: [prepare, cli-binaries, cli-binaries-musl, cli-binaries-binstall]
+    if: ${{ needs.prepare.outputs.is_tag == 'true' && needs.cli-binaries.result == 'success' && needs.cli-binaries-musl.result == 'success' && needs.cli-binaries-binstall.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/create-github-app-token@v2
@@ -2168,6 +2218,9 @@ jobs:
           path: dist/cli
           merge-multiple: true
 
+      # `cli-*` also matches the `cli-binstall-*` artifacts, and the
+      # `xberg-cli-*` globs below attach the `xberg-cli-binstall-<target>`
+      # archives alongside the bundled tarballs in one shot.
       - uses: xberg-io/actions/upload-release-assets@v1
         with:
           tag: ${{ needs.prepare.outputs.tag }}
@@ -2177,6 +2230,29 @@ jobs:
           assets: |
             xberg-cli-*.tar.gz
             xberg-cli-*.zip
+
+  # Prove a consumer can actually `cargo binstall xberg-cli` the freshly uploaded
+  # static archives. Reads the committed `[package.metadata.binstall]` locally
+  # (--manifest-path) so it verifies the exact metadata against the release assets
+  # without waiting on the crates.io publish. Only the musl targets have binstall
+  # archives, so the matrix is overridden to those triples.
+  verify-binstall:
+    name: Verify cargo-binstall
+    needs: [prepare, upload-cli-release]
+    if: ${{ needs.prepare.outputs.is_tag == 'true' && needs.upload-cli-release.result == 'success' && needs.prepare.outputs.dry_run != 'true' }}
+    permissions:
+      contents: read
+    uses: xberg-io/actions/.github/workflows/reusable-binstall-verify.yml@v1
+    with:
+      package-name: xberg-cli
+      binary-name: xberg
+      manifest-path: crates/xberg-cli
+      checkout-ref: ${{ needs.prepare.outputs.checkout_ref }}
+      targets: >-
+        [
+          {"os": "ubuntu-latest", "target": "x86_64-unknown-linux-musl"},
+          {"os": "ubuntu-24.04-arm", "target": "aarch64-unknown-linux-musl"}
+        ]
 
   upload-go-release:
     name: Upload Go FFI archives to GitHub Release

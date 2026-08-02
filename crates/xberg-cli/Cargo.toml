@@ -15,6 +15,15 @@ categories = ["command-line-utilities", "text-processing"]
 [package.metadata.cargo-machete]
 ignored = ["serde_toon_format"]
 
+# `cargo binstall xberg-cli` pulls the self-contained static archive built by the
+# `cli-binaries-binstall` job (a single `xberg` binary, `--features binstall[-ocr]`),
+# NOT the bundled `xberg-cli-<target>` tarballs (those carry sibling dylibs that
+# binstall does not place). `{ archive-suffix }`/`{ binary-ext }` resolve per target
+# (`.tar.gz`/`` on unix). ~keep
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/xberg-cli-binstall-{ target }{ archive-suffix }"
+bin-dir = "xberg-cli-binstall-{ target }/{ bin }{ binary-ext }"
+
 [[bin]]
 name = "xberg"
 path = "src/main.rs"
@@ -42,12 +51,21 @@ pdf-surface = ["xberg/pdf"]
 pdf-heuristic = ["pdf-surface"]
 pdf-ocr = ["pdf-heuristic", "ocr-surface", "xberg/ocr"]
 formats = ["pdf-surface", "xberg/formats"]
+# `formats` minus `heic`: the same pure-Rust extractor set (pdf, office, excel,
+# email, html, xml, archives, notebook, hwp/hwpx, iwork, wordperfect, svg, mdx)
+# with NO libheif link-time dependency. Backs `legacy-base` (so the base carries
+# no native heic link) and the self-contained `binstall` profile. HEIC stays
+# available wherever `formats`/`heic`/`default` are listed explicitly. ~keep
+formats-no-heic = ["pdf-surface", "xberg/formats-no-heic"]
 analysis = ["xberg/analysis"]
 url-surface = []
 core-cli = ["url-surface", "xberg/url-ingestion", "xberg/cli"]
 # Internal compatibility aggregate. Before lean PDF profiles existed, every
 # xberg-cli feature inherited these capabilities from the dependency declaration.
-legacy-base = ["formats", "analysis", "core-cli", "ocr-surface"]
+# Uses `formats-no-heic` (not `formats`) so the base every feature pulls carries
+# no libheif link-time dep; `default`/`all`/`heic` re-add HEIC explicitly. This is
+# what lets the `binstall` profile produce a fully static, dylib-free binary. ~keep
+legacy-base = ["formats-no-heic", "analysis", "core-cli", "ocr-surface"]
 ort-bundled = ["legacy-base", "xberg/ort-bundled"]
 # Load ONNX Runtime at runtime (dlopen) instead of static-linking a prebuilt.
 # The x86_64-apple-darwin CLI is built with the normal default features PLUS
@@ -105,7 +123,32 @@ ner-onnx = ["legacy-base", "xberg/ner-onnx"]
 ner-llm = ["legacy-base", "xberg/ner-llm"]
 summarization = ["legacy-base", "xberg/summarization"]
 summarization-llm = ["legacy-base", "xberg/summarization-llm"]
-heic = ["legacy-base", "xberg/heic"]
+heic = ["legacy-base", "formats", "xberg/heic"]
+# Self-contained static single-file CLI for `cargo binstall xberg-cli`. Every
+# capability here is pure-Rust and statically linkable on musl: document
+# extraction (formats-no-heic), analysis, chunking, tree-sitter, URL ingestion,
+# and LLM-http post-processing. Deliberately EXCLUDES everything that needs a
+# shared native library binstall cannot place: no ONNX (`embeddings`,
+# `layout-detection`, `paddle-ocr`, `ner-onnx`), no Tesseract `ocr`, no `heic`.
+# Built with `--no-default-features --features binstall` on both musl arches.
+# ONNX/Tesseract/HEIC remain available via Homebrew and the bundled tarballs. ~keep
+binstall = [
+    "formats-no-heic",
+    "analysis",
+    "core-cli",
+    "html",
+    "url-ingestion",
+    "liter-llm",
+    "chunking-tokenizers",
+    "tree-sitter",
+]
+# `binstall` plus Candle's pure-Rust VLM OCR (TrOCR + PaddleOCR-VL). These two
+# backends run CPU inference with NO ONNX/native deps (unlike `candle-vlm-ocr`,
+# whose GLM/DeepSeek path pulls `layout-detection` -> ort). x86_64-musl only:
+# candle's gemm-f16 matmul carries aarch64 inline asm requiring the fullfp16
+# target feature that the musl aarch64 baseline lacks, so aarch64 ships plain
+# `binstall` (extraction, no Candle OCR). ~keep
+binstall-ocr = ["binstall", "candle-trocr", "candle-paddleocr-vl"]
 all = [
     "default",
     "api",

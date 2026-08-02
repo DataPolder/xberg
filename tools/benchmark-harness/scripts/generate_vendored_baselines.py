@@ -64,9 +64,7 @@ def document_to_images(document_path: str) -> list[np.ndarray]:
     from PIL import Image, ImageSequence
 
     with Image.open(document_path) as image:
-        return [
-            np.array(frame.convert("RGB")) for frame in ImageSequence.Iterator(image)
-        ]
+        return [np.array(frame.convert("RGB")) for frame in ImageSequence.Iterator(image)]
 
 
 def lines_to_markdown(lines: list[str]) -> str:
@@ -107,11 +105,7 @@ def rapidocr_lines(result: object) -> list[str]:
     legacy_result = result[0] if isinstance(result, tuple) else result
     if not legacy_result:
         return []
-    return [
-        str(line[1]).strip()
-        for line in legacy_result
-        if line and len(line) >= 2 and str(line[1]).strip()
-    ]
+    return [str(line[1]).strip() for line in legacy_result if line and len(line) >= 2 and str(line[1]).strip()]
 
 
 def run_rapidocr(document_path: str) -> tuple[str, float]:

@@ -404,9 +404,7 @@ async fn test_jupyter_rank_notebook_extraction() {
     );
 
     assert!(
-        rank_metadata.contains("ipykernel")
-            || rank_metadata.contains("python")
-            || rank_metadata.contains("Python"),
+        rank_metadata.contains("ipykernel") || rank_metadata.contains("python") || rank_metadata.contains("Python"),
         "Should preserve kernel or language information in metadata"
     );
 

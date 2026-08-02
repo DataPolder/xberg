@@ -1,0 +1,67 @@
+# =============================================================================
+# Fully static musl CLI for `cargo binstall xberg-cli`.
+#
+# Unlike Dockerfile.musl-build (which builds `--features all`, links ONNX/libheif
+# dynamically, and ships a wrapper + bundled `lib/`), this builds the pure-Rust
+# `binstall`/`binstall-ocr` profile with `+crt-static` so the result is ONE
+# self-contained static ELF with no sibling dylibs — exactly what cargo-binstall
+# extracts. The profile pulls no ONNX/Tesseract/libheif; the only C/C++ code is
+# libwpd (WordPerfect) + a handful of `*-sys` crates (zstd, bzip2, ring), all
+# compiled from source and statically linked, hence the static libstdc++/libgcc.
+# =============================================================================
+FROM alpine:3.21 AS builder
+
+ARG RUST_TOOLCHAIN=nightly-2026-03-10
+# `binstall-ocr` (x86_64: extraction + Candle TrOCR/PaddleOCR-VL) or `binstall`
+# (aarch64: extraction only — candle gemm-f16 needs fullfp16, absent on the musl
+# aarch64 baseline). The publish workflow sets this per target.
+ARG FEATURES=binstall-ocr
+
+WORKDIR /build
+
+RUN apk add --no-cache \
+    curl musl-dev cmake make pkgconf \
+    perl linux-headers git file \
+    gcc g++ libstdc++ libstdc++-dev
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+    | sh -s -- -y --default-toolchain "${RUST_TOOLCHAIN}" --component rust-src && \
+    echo "Rust host: $(~/.cargo/bin/rustc -vV | grep host)"
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# `+crt-static` statically links musl libc; `-static-libstdc++`/`-static-libgcc`
+# fold libwpd's C++ runtime into the binary so nothing is left to resolve at load.
+ENV RUSTFLAGS="-C target-feature=+crt-static -C link-arg=-static-libstdc++ -C link-arg=-static-libgcc"
+
+COPY Cargo.toml Cargo.lock ./
+COPY crates/xberg/ crates/xberg/
+COPY crates/xberg-gliner/ crates/xberg-gliner/
+COPY crates/xberg-cli/ crates/xberg-cli/
+COPY crates/xberg-tesseract/ crates/xberg-tesseract/
+COPY crates/xberg-paddle-ocr/ crates/xberg-paddle-ocr/
+COPY crates/xberg-candle-ocr/ crates/xberg-candle-ocr/
+COPY crates/xberg-libheif/ crates/xberg-libheif/
+COPY crates/xberg-libwpd/ crates/xberg-libwpd/
+
+RUN sed -i '/xberg-py/d; /xberg_rb/d; /xberg-node/d; /xberg-ffi/d; /xberg-jni/d; /xberg-php/d; /xberg-rag/d; /xberg_rustler/d; /xberg_nif/d; /packages\/dart\/rust/d; /packages\/swift\/rust/d; /"crates\/xberg-wasm"/d; /^\[profile\.release\.package\.xberg-wasm\]$/,$d; /benchmark-harness/d; /e2e-generator/d; /snippet-runner/d; /e2e\/rust/d' Cargo.toml
+
+RUN cargo build --release --package xberg-cli \
+        --no-default-features --features "${FEATURES}" && \
+    cp target/release/xberg /build/xberg && \
+    strip /build/xberg
+
+# Fail the build unless the binary is genuinely static — no NEEDED entries, no
+# interpreter — so a regression that reintroduces a dylib dep cannot ship.
+RUN file /build/xberg && \
+    if readelf -d /build/xberg 2>/dev/null | grep -q NEEDED; then \
+        echo "FAIL: binary has dynamic NEEDED dependencies:" >&2; \
+        readelf -d /build/xberg | grep NEEDED >&2; exit 1; \
+    fi && \
+    if readelf -l /build/xberg 2>/dev/null | grep -q INTERP; then \
+        echo "FAIL: binary has a dynamic interpreter (not static):" >&2; exit 1; \
+    fi && \
+    /build/xberg --version && \
+    echo "OK: fully static single-binary CLI (${FEATURES})"
+
+FROM scratch
+COPY --from=builder /build/xberg /xberg
