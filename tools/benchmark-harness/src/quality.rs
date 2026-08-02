@@ -208,6 +208,9 @@ fn is_cjk_character(character: char) -> bool {
         character,
         '\u{1100}'..='\u{11ff}'
             | '\u{2e80}'..='\u{2eff}'
+            // Japanese iteration marks such as `々` survive alphanumeric filtering; excluding
+            // them would disable bigram expansion for an entire whitespace-free OCR line. ~keep
+            | '\u{3000}'..='\u{303f}'
             | '\u{3040}'..='\u{30ff}'
             | '\u{3130}'..='\u{318f}'
             | '\u{31f0}'..='\u{31ff}'
@@ -476,6 +479,11 @@ mod tests {
     fn should_use_cjk_bigrams_with_single_character_fallback() {
         assert_eq!(tokenize("日本語"), vec!["日本", "本語"]);
         assert_eq!(tokenize("日"), vec!["日"]);
+    }
+
+    #[test]
+    fn should_keep_iteration_marks_inside_whitespace_free_japanese_bigrams() {
+        assert_eq!(tokenize("時々刻々"), vec!["時々", "々刻", "刻々"]);
     }
 
     #[test]
