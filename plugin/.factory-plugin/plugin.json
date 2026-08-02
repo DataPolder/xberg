@@ -1,6 +1,6 @@
 {
   "name": "xberg",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Local document extraction: text, tables, metadata, images from 101 formats with optional OCR.",
   "author": {
     "name": "Kreuzberg, Inc.",

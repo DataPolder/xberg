@@ -100,7 +100,6 @@ pnpm add @xberg-io/xberg-wasm
 ```
 
 ### System Requirements
-
 - Modern browser with WebAssembly support, or Deno 1.0+, or Cloudflare Workers
 - Optional: [Tesseract WASM](https://github.com/naptha/tesseract.js) for OCR functionality
 
@@ -263,7 +262,6 @@ extractDocuments(fileBytes, mimes)
 ## Features
 
 ### Supported File Formats (101 formats · 115 file extensions) 101 formats across 115 file extensions in 8 major
-
 categories with intelligent format detection and comprehensive metadata extraction. #### Office Documents | Category |
 Formats | Capabilities | |----------|---------|--------------| | **Word Processing** | `.docx`, `.docm`, `.doc`,
 `.dotx`, `.dotm`, `.dot`, `.odt`, `.pages`, `.wpd`, `.wp`, `.wp5`, `.wp6` | Full text, tables, images, metadata, styles
@@ -278,17 +276,14 @@ color space | | **Advanced** | `.jp2`, `.jpx`, `.jpm`, `.mj2`, `.jbig2`, `.jb2`,
 via hayro-jpeg2000 (pure Rust decoder), JBIG2 support, table detection, format-specific metadata |
 | **Vector** | `.svg` | DOM parsing, embedded text, graphics metadata |
 
-#### Web & Data | Category | Formats | Features | |----------|---------|----------| | **Markup** | `.html`, `.htm`
-
+#### Web & Data | Category | Formats | Features | |----------|---------|----------| | **Markup** | `.html`, `.htm`,
 `.xhtml`, `.xml`, `.svg` | DOM parsing, metadata (Open Graph, Twitter Card), link extraction | | **Structured Data** |
 `.json`, `.yaml`, `.yml`, `.toml`, `.csv`, `.tsv` | Schema detection, nested structures, validation | | **Text &
 Markdown** | `.txt`, `.md`, `.markdown`, `.djot`, `.mdx`, `.rst`, `.org`, `.rtf` | CommonMark, GFM, Djot, MDX,
 reStructuredText, Org Mode | #### Email & Archives | Category | Formats | Features | |----------|---------|----------| |
 **Email** | `.eml`, `.msg`, `.pst` | Headers, body (HTML/plain), attachments, threading | | **Archives** | `.zip`,
 `.tar`, `.tgz`, `.gz`, `.7z` | Recursive extraction of nested archives, file listing, metadata, zip-bomb protection |
-
-#### Academic & Scientific | Category | Formats | Features | |----------|---------|----------| | **Citations** | `.bib`
-
+#### Academic & Scientific | Category | Formats | Features | |----------|---------|----------| | **Citations** | `.bib`,
 `.ris`, `.nbib`, `.enw` | Structured parsing: RIS, PubMed/MEDLINE, EndNote XML, BibTeX/BibLaTeX, CSL JSON by MIME type |
 | **Scientific** | `.tex`, `.latex`, `.typ`, `.typst`, `.jats`, `.ipynb` | LaTeX, Typst, Jupyter notebooks, PubMed JATS
 | | **Publishing** | `.fb2`, `.docbook`, `.dbk`, `.docbook4`, `.docbook5`, `.opml` | FictionBook, DocBook XML, OPML
@@ -304,7 +299,6 @@ Reference](https://docs.xberg.io/reference/formats/)** ### Key Capabilities - **
 content with position and formatting information - **Metadata Extraction** - Retrieve document properties, creation
 date, author, etc. - **Table Extraction** - Parse tables with structure and cell content preservation - **Image
 Extraction** - Extract embedded images and render page previews
-
 - **OCR Support** - Integrate multiple OCR backends for scanned documents
   - **Async/Await** - Non-blocking document processing with concurrent operations
   - **Plugin System** - Extensible post-processing for custom text transformation
