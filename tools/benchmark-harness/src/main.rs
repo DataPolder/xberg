@@ -460,7 +460,8 @@ enum Commands {
         fixtures: PathBuf,
 
         /// Pipelines to compare. Paddle presets include paddle-v6-{medium,small,tiny}[+layout]
-        /// and paddle-v5-server[+layout]. Tesseract PSM presets are
+        /// and paddle-v5-server[+layout]. Opt-in Paddle quality sweeps use the
+        /// paddle-v6-small+layout+{det-side-*,det-db-*,drop-score-*} prefix. Tesseract PSM presets are
         /// tesseract-{vertical-block,single-block,sparse-text} (PSM 5, 6, and 11).
         #[arg(long, value_delimiter = ',')]
         pipelines: Option<Vec<String>>,

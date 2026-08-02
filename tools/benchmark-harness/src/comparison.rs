@@ -56,6 +56,16 @@ const EXTRACTION_TIMEOUT_PER_PAGE_MS: u64 = 400;
 
 const PP_OCR_V5: &str = "pp-ocrv5";
 const PP_OCR_V6: &str = "pp-ocrv6";
+const PADDLE_DET_SIDE_1024: u32 = 1024;
+const PADDLE_DET_SIDE_1536: u32 = 1536;
+const PADDLE_DET_SIDE_2048: u32 = 2048;
+const PADDLE_DET_DB_THRESH_020: f32 = 0.20;
+const PADDLE_DET_DB_THRESH_030: f32 = 0.30;
+const PADDLE_DET_DB_BOX_THRESH_035: f32 = 0.35;
+const PADDLE_DET_DB_BOX_THRESH_050: f32 = 0.50;
+const PADDLE_DROP_SCORE_030: f32 = 0.30;
+const PADDLE_DROP_SCORE_040: f32 = 0.40;
+const PADDLE_DROP_SCORE_050: f32 = 0.50;
 const TESSERACT_PSM_VERTICAL_BLOCK: i32 = 5;
 const TESSERACT_PSM_SINGLE_BLOCK: i32 = 6;
 const TESSERACT_PSM_SPARSE_TEXT: i32 = 11;
@@ -97,6 +107,27 @@ pub enum Pipeline {
     /// PP-OCRv6 small tier + layout detection
     #[serde(rename = "paddle-v6-small+layout", alias = "paddle-v6-small-layout")]
     PaddleV6SmallLayout,
+    /// PP-OCRv6 small + layout with the fully pinned 1024-pixel quality control profile
+    #[serde(rename = "paddle-v6-small+layout+det-side-1024")]
+    PaddleV6SmallLayoutDetSide1024,
+    /// PP-OCRv6 small + layout with a 1536-pixel detector input limit
+    #[serde(rename = "paddle-v6-small+layout+det-side-1536")]
+    PaddleV6SmallLayoutDetSide1536,
+    /// PP-OCRv6 small + layout with a 2048-pixel detector input limit
+    #[serde(rename = "paddle-v6-small+layout+det-side-2048")]
+    PaddleV6SmallLayoutDetSide2048,
+    /// PP-OCRv6 small + layout with a 0.20 detector pixel threshold
+    #[serde(rename = "paddle-v6-small+layout+det-db-thresh-020")]
+    PaddleV6SmallLayoutDetDbThresh020,
+    /// PP-OCRv6 small + layout with a 0.35 detector box threshold
+    #[serde(rename = "paddle-v6-small+layout+det-db-box-thresh-035")]
+    PaddleV6SmallLayoutDetDbBoxThresh035,
+    /// PP-OCRv6 small + layout with a 0.30 recognition drop score
+    #[serde(rename = "paddle-v6-small+layout+drop-score-030")]
+    PaddleV6SmallLayoutDropScore030,
+    /// PP-OCRv6 small + layout with a 0.40 recognition drop score
+    #[serde(rename = "paddle-v6-small+layout+drop-score-040")]
+    PaddleV6SmallLayoutDropScore040,
     /// PP-OCRv6 tiny tier (force_ocr)
     #[serde(rename = "paddle-v6-tiny")]
     PaddleV6Tiny,
@@ -163,6 +194,13 @@ impl Pipeline {
             Pipeline::PaddleLayout => "paddle-v6-medium+layout",
             Pipeline::PaddleV6Small => "paddle-v6-small",
             Pipeline::PaddleV6SmallLayout => "paddle-v6-small+layout",
+            Pipeline::PaddleV6SmallLayoutDetSide1024 => "paddle-v6-small+layout+det-side-1024",
+            Pipeline::PaddleV6SmallLayoutDetSide1536 => "paddle-v6-small+layout+det-side-1536",
+            Pipeline::PaddleV6SmallLayoutDetSide2048 => "paddle-v6-small+layout+det-side-2048",
+            Pipeline::PaddleV6SmallLayoutDetDbThresh020 => "paddle-v6-small+layout+det-db-thresh-020",
+            Pipeline::PaddleV6SmallLayoutDetDbBoxThresh035 => "paddle-v6-small+layout+det-db-box-thresh-035",
+            Pipeline::PaddleV6SmallLayoutDropScore030 => "paddle-v6-small+layout+drop-score-030",
+            Pipeline::PaddleV6SmallLayoutDropScore040 => "paddle-v6-small+layout+drop-score-040",
             Pipeline::PaddleV6Tiny => "paddle-v6-tiny",
             Pipeline::PaddleV6TinyLayout => "paddle-v6-tiny+layout",
             Pipeline::PaddleServer => "paddle-v5-server",
@@ -209,6 +247,13 @@ impl Pipeline {
             | "paddle-v6-medium-layout" => Some(Pipeline::PaddleLayout),
             "paddle-v6-small" => Some(Pipeline::PaddleV6Small),
             "paddle-v6-small+layout" | "paddle-v6-small-layout" => Some(Pipeline::PaddleV6SmallLayout),
+            "paddle-v6-small+layout+det-side-1024" => Some(Pipeline::PaddleV6SmallLayoutDetSide1024),
+            "paddle-v6-small+layout+det-side-1536" => Some(Pipeline::PaddleV6SmallLayoutDetSide1536),
+            "paddle-v6-small+layout+det-side-2048" => Some(Pipeline::PaddleV6SmallLayoutDetSide2048),
+            "paddle-v6-small+layout+det-db-thresh-020" => Some(Pipeline::PaddleV6SmallLayoutDetDbThresh020),
+            "paddle-v6-small+layout+det-db-box-thresh-035" => Some(Pipeline::PaddleV6SmallLayoutDetDbBoxThresh035),
+            "paddle-v6-small+layout+drop-score-030" => Some(Pipeline::PaddleV6SmallLayoutDropScore030),
+            "paddle-v6-small+layout+drop-score-040" => Some(Pipeline::PaddleV6SmallLayoutDropScore040),
             "paddle-v6-tiny" => Some(Pipeline::PaddleV6Tiny),
             "paddle-v6-tiny+layout" | "paddle-v6-tiny-layout" => Some(Pipeline::PaddleV6TinyLayout),
             "paddle-server" | "paddle-v5-server" => Some(Pipeline::PaddleServer),
@@ -257,6 +302,8 @@ impl Pipeline {
     /// deliberately omitted from `all_xberg()`: they need large model
     /// downloads from HuggingFace and only build with their own feature flags,
     /// so default cross-pipeline runs do not include them.
+    /// Named Paddle quality-sweep presets are also omitted so experimental configurations cannot
+    /// silently expand release benchmark matrices. ~keep
     /// `CandleGlmOcr` is included because the `glm-ocr-bench` feature gates
     /// the entire harness build, making the inclusion safe.
     pub fn all_xberg() -> Vec<Pipeline> {
@@ -388,6 +435,65 @@ fn build_paddle_extraction_config(
     model_tier: &str,
     layout: Option<xberg::core::config::layout::LayoutDetectionConfig>,
 ) -> xberg::ExtractionConfig {
+    build_paddle_extraction_config_with_quality_profile(model_version, model_tier, layout, None)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PaddleQualityProfile {
+    det_limit_side_len: u32,
+    det_db_thresh: f32,
+    det_db_box_thresh: f32,
+    drop_score: f32,
+}
+
+const PADDLE_DEFAULT_QUALITY_PROFILE: PaddleQualityProfile = PaddleQualityProfile {
+    det_limit_side_len: PADDLE_DET_SIDE_1024,
+    det_db_thresh: PADDLE_DET_DB_THRESH_030,
+    det_db_box_thresh: PADDLE_DET_DB_BOX_THRESH_050,
+    drop_score: PADDLE_DROP_SCORE_050,
+};
+const PADDLE_DET_SIDE_1536_QUALITY_PROFILE: PaddleQualityProfile = PaddleQualityProfile {
+    det_limit_side_len: PADDLE_DET_SIDE_1536,
+    ..PADDLE_DEFAULT_QUALITY_PROFILE
+};
+const PADDLE_DET_SIDE_2048_QUALITY_PROFILE: PaddleQualityProfile = PaddleQualityProfile {
+    det_limit_side_len: PADDLE_DET_SIDE_2048,
+    ..PADDLE_DEFAULT_QUALITY_PROFILE
+};
+const PADDLE_DET_DB_THRESH_020_QUALITY_PROFILE: PaddleQualityProfile = PaddleQualityProfile {
+    det_db_thresh: PADDLE_DET_DB_THRESH_020,
+    ..PADDLE_DEFAULT_QUALITY_PROFILE
+};
+const PADDLE_DET_DB_BOX_THRESH_035_QUALITY_PROFILE: PaddleQualityProfile = PaddleQualityProfile {
+    det_db_box_thresh: PADDLE_DET_DB_BOX_THRESH_035,
+    ..PADDLE_DEFAULT_QUALITY_PROFILE
+};
+const PADDLE_DROP_SCORE_030_QUALITY_PROFILE: PaddleQualityProfile = PaddleQualityProfile {
+    drop_score: PADDLE_DROP_SCORE_030,
+    ..PADDLE_DEFAULT_QUALITY_PROFILE
+};
+const PADDLE_DROP_SCORE_040_QUALITY_PROFILE: PaddleQualityProfile = PaddleQualityProfile {
+    drop_score: PADDLE_DROP_SCORE_040,
+    ..PADDLE_DEFAULT_QUALITY_PROFILE
+};
+
+fn build_paddle_extraction_config_with_quality_profile(
+    model_version: &str,
+    model_tier: &str,
+    layout: Option<xberg::core::config::layout::LayoutDetectionConfig>,
+    quality_profile: Option<PaddleQualityProfile>,
+) -> xberg::ExtractionConfig {
+    let mut paddle_ocr_config = serde_json::json!({
+        "model_version": model_version,
+        "model_tier": model_tier
+    });
+    if let Some(profile) = quality_profile {
+        paddle_ocr_config["det_limit_side_len"] = serde_json::json!(profile.det_limit_side_len);
+        paddle_ocr_config["det_db_thresh"] = serde_json::json!(profile.det_db_thresh);
+        paddle_ocr_config["det_db_box_thresh"] = serde_json::json!(profile.det_db_box_thresh);
+        paddle_ocr_config["drop_score"] = serde_json::json!(profile.drop_score);
+    }
+
     xberg::ExtractionConfig {
         output_format: xberg::core::config::OutputFormat::Markdown,
         force_ocr: true,
@@ -395,15 +501,21 @@ fn build_paddle_extraction_config(
             backend: "paddleocr".to_string(),
             language: vec!["eng".to_string()],
             auto_rotate: false,
-            paddle_ocr_config: Some(serde_json::json!({
-                "model_version": model_version,
-                "model_tier": model_tier
-            })),
+            paddle_ocr_config: Some(paddle_ocr_config),
             ..Default::default()
         }),
         layout,
         ..Default::default()
     }
+}
+
+fn build_paddle_v6_small_layout_quality_config(profile: PaddleQualityProfile) -> xberg::ExtractionConfig {
+    build_paddle_extraction_config_with_quality_profile(
+        PP_OCR_V6,
+        "small",
+        Some(xberg::core::config::layout::LayoutDetectionConfig::default()),
+        Some(profile),
+    )
 }
 
 fn build_tesseract_extraction_config(psm: i32) -> xberg::ExtractionConfig {
@@ -506,6 +618,27 @@ pub fn build_extraction_config(pipeline: Pipeline) -> xberg::ExtractionConfig {
         Pipeline::PaddleV6Small => build_paddle_extraction_config(PP_OCR_V6, "small", None),
         Pipeline::PaddleV6SmallLayout => {
             build_paddle_extraction_config(PP_OCR_V6, "small", Some(LayoutDetectionConfig::default()))
+        }
+        Pipeline::PaddleV6SmallLayoutDetSide1024 => {
+            build_paddle_v6_small_layout_quality_config(PADDLE_DEFAULT_QUALITY_PROFILE)
+        }
+        Pipeline::PaddleV6SmallLayoutDetSide1536 => {
+            build_paddle_v6_small_layout_quality_config(PADDLE_DET_SIDE_1536_QUALITY_PROFILE)
+        }
+        Pipeline::PaddleV6SmallLayoutDetSide2048 => {
+            build_paddle_v6_small_layout_quality_config(PADDLE_DET_SIDE_2048_QUALITY_PROFILE)
+        }
+        Pipeline::PaddleV6SmallLayoutDetDbThresh020 => {
+            build_paddle_v6_small_layout_quality_config(PADDLE_DET_DB_THRESH_020_QUALITY_PROFILE)
+        }
+        Pipeline::PaddleV6SmallLayoutDetDbBoxThresh035 => {
+            build_paddle_v6_small_layout_quality_config(PADDLE_DET_DB_BOX_THRESH_035_QUALITY_PROFILE)
+        }
+        Pipeline::PaddleV6SmallLayoutDropScore030 => {
+            build_paddle_v6_small_layout_quality_config(PADDLE_DROP_SCORE_030_QUALITY_PROFILE)
+        }
+        Pipeline::PaddleV6SmallLayoutDropScore040 => {
+            build_paddle_v6_small_layout_quality_config(PADDLE_DROP_SCORE_040_QUALITY_PROFILE)
         }
         Pipeline::PaddleV6Tiny => build_paddle_extraction_config(PP_OCR_V6, "tiny", None),
         Pipeline::PaddleV6TinyLayout => {
@@ -1998,6 +2131,75 @@ mod tests {
     }
 
     #[test]
+    fn paddle_quality_sweep_presets_pin_every_swept_dimension() {
+        let cases = [
+            (Pipeline::PaddleV6SmallLayoutDetSide1024, PADDLE_DEFAULT_QUALITY_PROFILE),
+            (
+                Pipeline::PaddleV6SmallLayoutDetSide1536,
+                PADDLE_DET_SIDE_1536_QUALITY_PROFILE,
+            ),
+            (
+                Pipeline::PaddleV6SmallLayoutDetSide2048,
+                PADDLE_DET_SIDE_2048_QUALITY_PROFILE,
+            ),
+            (
+                Pipeline::PaddleV6SmallLayoutDetDbThresh020,
+                PADDLE_DET_DB_THRESH_020_QUALITY_PROFILE,
+            ),
+            (
+                Pipeline::PaddleV6SmallLayoutDetDbBoxThresh035,
+                PADDLE_DET_DB_BOX_THRESH_035_QUALITY_PROFILE,
+            ),
+            (
+                Pipeline::PaddleV6SmallLayoutDropScore030,
+                PADDLE_DROP_SCORE_030_QUALITY_PROFILE,
+            ),
+            (
+                Pipeline::PaddleV6SmallLayoutDropScore040,
+                PADDLE_DROP_SCORE_040_QUALITY_PROFILE,
+            ),
+        ];
+
+        for (pipeline, expected) in cases {
+            let config = build_extraction_config(pipeline);
+            let ocr = config.ocr.expect("quality preset must configure OCR");
+            let paddle = ocr.paddle_ocr_config.expect("quality preset must pin Paddle settings");
+
+            assert!(config.force_ocr);
+            assert!(config.layout.is_some());
+            assert_eq!(ocr.backend, "paddleocr");
+            assert_eq!(paddle["model_version"], PP_OCR_V6);
+            assert_eq!(paddle["model_tier"], "small");
+            assert_eq!(paddle["det_limit_side_len"], expected.det_limit_side_len);
+            assert_eq!(paddle["det_db_thresh"], expected.det_db_thresh);
+            assert_eq!(paddle["det_db_box_thresh"], expected.det_db_box_thresh);
+            assert_eq!(paddle["drop_score"], expected.drop_score);
+        }
+    }
+
+    #[test]
+    fn paddle_quality_sweep_presets_are_opt_in() {
+        let defaults = Pipeline::all_xberg();
+        for pipeline in [
+            Pipeline::PaddleV6SmallLayoutDetSide1024,
+            Pipeline::PaddleV6SmallLayoutDetSide1536,
+            Pipeline::PaddleV6SmallLayoutDetSide2048,
+            Pipeline::PaddleV6SmallLayoutDetDbThresh020,
+            Pipeline::PaddleV6SmallLayoutDetDbBoxThresh035,
+            Pipeline::PaddleV6SmallLayoutDropScore030,
+            Pipeline::PaddleV6SmallLayoutDropScore040,
+        ] {
+            assert!(!defaults.contains(&pipeline), "{} must remain opt-in", pipeline.name());
+            assert_eq!(
+                serde_json::to_value(pipeline).expect("quality preset must serialize"),
+                serde_json::Value::String(pipeline.name().to_string()),
+                "{} must preserve its result identity when serialized",
+                pipeline.name()
+            );
+        }
+    }
+
+    #[test]
     fn legacy_paddle_server_presets_pin_v5_server_models() {
         for pipeline in [Pipeline::PaddleServer, Pipeline::PaddleServerLayout] {
             let config = build_extraction_config(pipeline);
@@ -2651,6 +2853,13 @@ mod tests {
             "paddle-v6-medium+layout",
             "paddle-v6-small",
             "paddle-v6-small+layout",
+            "paddle-v6-small+layout+det-side-1024",
+            "paddle-v6-small+layout+det-side-1536",
+            "paddle-v6-small+layout+det-side-2048",
+            "paddle-v6-small+layout+det-db-thresh-020",
+            "paddle-v6-small+layout+det-db-box-thresh-035",
+            "paddle-v6-small+layout+drop-score-030",
+            "paddle-v6-small+layout+drop-score-040",
             "paddle-v6-tiny",
             "paddle-v6-tiny+layout",
             "paddle-v5-server",

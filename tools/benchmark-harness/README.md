@@ -177,6 +177,21 @@ The `compare` and `pipeline-benchmark` commands support these extraction paths:
 | `paddleocr-python` | Vendored PaddleOCR Python extraction           |
 | `rapidocr`         | Vendored RapidOCR extraction                   |
 
+Paddle quality experiments are opt-in and keep a stable result identity in the pipeline name while fully pinning the
+detector/recognition configuration passed to Xberg. The control is `paddle-v6-small+layout+det-side-1024`. Compare it
+with `det-side-1536` and `det-side-2048`, then run the one-factor threshold variants
+`det-db-thresh-020`, `det-db-box-thresh-035`, `drop-score-030`, and `drop-score-040` using the same prefix. The control
+pins the production values `det_db_thresh=0.30`, `det_db_box_thresh=0.50`, and `drop_score=0.50`; experimental presets
+are deliberately excluded from default comparison matrices.
+
+```bash
+benchmark-harness compare -f fixtures/ --pipelines \
+  paddle-v6-small+layout+det-side-1024,\
+paddle-v6-small+layout+det-side-1536,\
+paddle-v6-small+layout+det-side-2048 \
+  --json-output /tmp/paddle-det-side-sweep.json
+```
+
 ## CLI Reference
 
 ### `run` -- CI benchmark execution
