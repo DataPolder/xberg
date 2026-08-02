@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- PaddleOCR-only CLI builds no longer compile PDF Markdown layout reuse code when layout detection
+  is disabled.
 - The prebuilt macOS CLI tarballs (`aarch64-apple-darwin`, `x86_64-apple-darwin`) now bundle the full
   libheif dynamic-library closure beside the `xberg` binary and rewrite its load commands to
   `@loader_path`, so the binary no longer fails with a `libheif.1.dylib` not-loaded error on machines
