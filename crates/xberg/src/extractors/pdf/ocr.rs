@@ -2344,7 +2344,11 @@ fn attach_ocr_pipeline_stage_warnings(
 /// Attach force_ocr image-XObject fallback warnings (#1355) to the OCR-produced
 /// document, mirroring [`attach_ocr_pipeline_stage_warnings`]'s `get_or_insert_with`
 /// shape so the warning always survives even when no structured document was built.
-#[cfg(all(feature = "pdf", feature = "ocr"))]
+//
+// `ocr-pipeline` (not just `ocr`): the caller is inside `extract_with_ocr`
+// (`any(ocr, ocr-pipeline)`), and the `binstall` CLI profile enables `ocr-pipeline`
+// via `liter-llm` without `ocr`.
+#[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
 fn attach_ocr_fallback_warnings(
     mut doc: Option<crate::types::internal::InternalDocument>,
     text: &str,

@@ -134,7 +134,11 @@ fn raw_pixels_to_png(w: u32, h: u32, format: &pdf_oxide::extractors::PixelFormat
 ///
 /// Returned in content-stream paint order; empty when the page has no image XObjects or
 /// none of them yielded usable bytes.
-#[cfg(feature = "ocr")]
+///
+// Available under `ocr-pipeline` too (not just `ocr`): `extract_with_ocr` — the sole
+// caller — is gated `any(ocr, ocr-pipeline)`, and the `binstall` CLI profile pulls
+// `ocr-pipeline` (via `liter-llm`) without `ocr`.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 pub(crate) fn page_ocr_fallback_image_bytes(doc: &pdf_oxide::PdfDocument, page_idx: usize) -> Vec<Bytes> {
     let handles = match doc.page_image_handles(page_idx) {
         Ok(h) => h,
