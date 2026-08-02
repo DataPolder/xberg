@@ -355,7 +355,11 @@ jobs:
   check-cli:
     name: Check GitHub Release for CLI assets
     needs: prepare
-    if: ${{ needs.prepare.outputs.is_tag == 'true' && needs.prepare.outputs.release_cli == 'true' }}
+    # Run in dry-run too (mirrors the zig check gate) so a `dry_run` dispatch does
+    # not skip check-cli — otherwise every CLI build job (which `needs` this) would
+    # cascade-skip, and the CLI lane (incl. the static binstall Docker build) could
+    # never be exercised without cutting a real tag.
+    if: ${{ (needs.prepare.outputs.is_tag == 'true' || needs.prepare.outputs.dry_run == 'true') && needs.prepare.outputs.release_cli == 'true' }}
     runs-on: ubuntu-latest
     outputs:
       exists: ${{ steps.check.outputs.exists }}
