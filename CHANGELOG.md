@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - PaddleOCR now preserves native resolution for 1024-pixel images by default, improving scene-text
   accuracy while retaining explicit detector-size overrides.
+- Layout-enabled image OCR now reuses successful single-frame whole-image text when structured
+  assembly is unavailable, avoiding repeated region OCR and redundant Tesseract table analysis.
 - PaddleOCR-only CLI builds no longer compile PDF Markdown layout reuse code when layout detection
   is disabled.
 - The prebuilt macOS CLI tarballs (`aarch64-apple-darwin`, `x86_64-apple-darwin`) now bundle the full

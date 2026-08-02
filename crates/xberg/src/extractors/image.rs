@@ -791,16 +791,19 @@ fn try_retain_canonical_whole_image_ocr(
     if !source_is_single_frame {
         return None;
     }
-    let retention = whole_image_layout_mapping_retention(whole_image_doc, detections, image_width, image_height)?;
-    if retention >= MIN_LAYOUT_OCR_ALPHANUMERIC_TOKEN_RETENTION {
+    let retention = whole_image_layout_mapping_retention(whole_image_doc, detections, image_width, image_height);
+    let mut retained = whole_image_doc.clone();
+    let pages = retained.prebuilt_pages.as_mut()?;
+    if pages.len() != 1 || pages[0].page_number != 1 {
         return None;
     }
-    let mut retained = whole_image_doc.clone();
-    retained.prebuilt_pages.as_mut()?[0].layout_regions =
-        Some(layout_regions_from_detections(detections, image_width, image_height));
+
+    // A successful single-frame whole-image OCR is the lossless terminal fallback;
+    // repeating OCR per region is expensive and can discard canonical tokens. ~keep
+    pages[0].layout_regions = Some(layout_regions_from_detections(detections, image_width, image_height));
     tracing::debug!(
-        retention,
-        "Retained canonical whole-image OCR because layout coverage was incomplete"
+        ?retention,
+        "Retained canonical whole-image OCR after cached layout assembly was unavailable"
     );
     Some(retained)
 }
@@ -1012,6 +1015,13 @@ fn configured_region_ocr(
     let backend = registry.read().get(&ocr_config.backend)?;
     let mut region_config = ocr_config.clone();
     region_config.output_format = Some(crate::core::config::OutputFormat::Plain);
+    if region_config.backend == "tesseract" {
+        // Layout assembly consumes region text only; skip redundant Tesseract hOCR and
+        // document-level table reconstruction when region OCR is unavoidable. ~keep
+        let tesseract_config = region_config.tesseract_config.get_or_insert_default();
+        tesseract_config.output_format = "text".to_string();
+        tesseract_config.enable_table_detection = false;
+    }
     if region_config.acceleration.is_none() {
         region_config.acceleration = config.acceleration.clone();
     }
@@ -1934,7 +1944,7 @@ mod tests {
 
     #[cfg(all(feature = "layout-detection", feature = "ocr"))]
     #[test]
-    fn should_use_region_ocr_when_layout_coverage_is_sufficient() {
+    fn should_retain_canonical_whole_image_when_layout_coverage_is_sufficient() {
         let detections = vec![crate::layout::LayoutDetection::new(
             crate::layout::LayoutClass::Text,
             0.96,
@@ -1943,7 +1953,38 @@ mod tests {
         let elements = vec![positioned_word("inside", 10, 20)];
         let whole = whole_image_doc_with_elements("inside", elements, 200, 100);
 
-        assert!(try_retain_canonical_whole_image_ocr(&whole, &detections, 200, 100, true).is_none());
+        let retained = try_retain_canonical_whole_image_ocr(&whole, &detections, 200, 100, true)
+            .expect("successful single-frame OCR must avoid repeated region OCR");
+
+        assert_eq!(retained.elements, whole.elements);
+        assert_eq!(retained.prebuilt_pages.as_ref().unwrap()[0].content, "inside");
+        assert_eq!(
+            retained.prebuilt_pages.as_ref().unwrap()[0]
+                .layout_regions
+                .as_ref()
+                .map(Vec::len),
+            Some(1)
+        );
+    }
+
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    #[test]
+    fn should_disable_redundant_tesseract_analysis_for_region_ocr() {
+        let extraction_config = ExtractionConfig::default();
+        let ocr_config = crate::core::config::OcrConfig::default();
+
+        let (_, region_config) = configured_region_ocr(&extraction_config, &ocr_config).unwrap();
+        let tesseract_config = region_config
+            .tesseract_config
+            .expect("region OCR must materialize Tesseract configuration");
+
+        assert_eq!(
+            region_config.output_format,
+            Some(crate::core::config::OutputFormat::Plain)
+        );
+        assert_eq!(tesseract_config.output_format, "text");
+        assert!(!tesseract_config.enable_table_detection);
+        assert!(ocr_config.tesseract_config.is_none());
     }
 
     #[cfg(all(feature = "layout-detection", feature = "ocr"))]
