@@ -56,6 +56,9 @@ const EXTRACTION_TIMEOUT_PER_PAGE_MS: u64 = 400;
 
 const PP_OCR_V5: &str = "pp-ocrv5";
 const PP_OCR_V6: &str = "pp-ocrv6";
+const TESSERACT_PSM_VERTICAL_BLOCK: i32 = 5;
+const TESSERACT_PSM_SINGLE_BLOCK: i32 = 6;
+const TESSERACT_PSM_SPARSE_TEXT: i32 = 11;
 
 /// Extraction pipeline identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -69,6 +72,15 @@ pub enum Pipeline {
     Tesseract,
     /// Tesseract OCR + layout detection
     TesseractLayout,
+    /// Tesseract OCR with single-block page segmentation (PSM 6)
+    #[serde(alias = "tesseract-psm6")]
+    TesseractSingleBlock,
+    /// Tesseract OCR with vertical single-block page segmentation (PSM 5)
+    #[serde(alias = "tesseract-vertical", alias = "tesseract-psm5")]
+    TesseractVerticalBlock,
+    /// Tesseract OCR with sparse-text page segmentation (PSM 11)
+    #[serde(alias = "tesseract-psm11")]
+    TesseractSparseText,
     /// PP-OCRv6 medium tier (force_ocr)
     #[serde(rename = "paddle-v6-medium", alias = "paddle", alias = "paddle-mobile")]
     Paddle,
@@ -144,6 +156,9 @@ impl Pipeline {
             Pipeline::Layout => "layout",
             Pipeline::Tesseract => "tesseract",
             Pipeline::TesseractLayout => "tesseract+layout",
+            Pipeline::TesseractSingleBlock => "tesseract-single-block",
+            Pipeline::TesseractVerticalBlock => "tesseract-vertical-block",
+            Pipeline::TesseractSparseText => "tesseract-sparse-text",
             Pipeline::Paddle => "paddle-v6-medium",
             Pipeline::PaddleLayout => "paddle-v6-medium+layout",
             Pipeline::PaddleV6Small => "paddle-v6-small",
@@ -180,6 +195,11 @@ impl Pipeline {
             "layout" => Some(Pipeline::Layout),
             "tesseract" => Some(Pipeline::Tesseract),
             "tesseract+layout" | "tesseract-layout" => Some(Pipeline::TesseractLayout),
+            "tesseract-single-block" | "tesseract-psm6" => Some(Pipeline::TesseractSingleBlock),
+            "tesseract-vertical-block" | "tesseract-vertical" | "tesseract-psm5" => {
+                Some(Pipeline::TesseractVerticalBlock)
+            }
+            "tesseract-sparse-text" | "tesseract-psm11" => Some(Pipeline::TesseractSparseText),
             "paddle" | "paddle-mobile" | "paddle-v6-medium" => Some(Pipeline::Paddle),
             "paddle+layout"
             | "paddle-layout"
@@ -386,6 +406,24 @@ fn build_paddle_extraction_config(
     }
 }
 
+fn build_tesseract_extraction_config(psm: i32) -> xberg::ExtractionConfig {
+    xberg::ExtractionConfig {
+        output_format: xberg::core::config::OutputFormat::Markdown,
+        force_ocr: true,
+        ocr: Some(xberg::core::config::OcrConfig {
+            backend: "tesseract".to_string(),
+            language: vec!["eng".to_string()],
+            tesseract_config: Some(xberg::TesseractConfig {
+                language: vec!["eng".to_string()],
+                psm,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
 fn disable_timed_extraction_caches(config: &mut xberg::ExtractionConfig) {
     config.use_cache = false;
 
@@ -458,6 +496,9 @@ pub fn build_extraction_config(pipeline: Pipeline) -> xberg::ExtractionConfig {
             layout: Some(LayoutDetectionConfig::default()),
             ..base
         },
+        Pipeline::TesseractSingleBlock => build_tesseract_extraction_config(TESSERACT_PSM_SINGLE_BLOCK),
+        Pipeline::TesseractVerticalBlock => build_tesseract_extraction_config(TESSERACT_PSM_VERTICAL_BLOCK),
+        Pipeline::TesseractSparseText => build_tesseract_extraction_config(TESSERACT_PSM_SPARSE_TEXT),
         Pipeline::Paddle => build_paddle_extraction_config(PP_OCR_V6, "medium", None),
         Pipeline::PaddleLayout => {
             build_paddle_extraction_config(PP_OCR_V6, "medium", Some(LayoutDetectionConfig::default()))
@@ -2615,6 +2656,9 @@ mod tests {
             "paddle-v5-server",
             "paddle-v5-server+layout",
             "tesseract-autorotate",
+            "tesseract-single-block",
+            "tesseract-vertical-block",
+            "tesseract-sparse-text",
             "paddle-norotate",
             "docling",
             "paddleocr-python",
@@ -2664,6 +2708,92 @@ mod tests {
             Pipeline::parse("paddle+layout").expect("alias").name(),
             "paddle-v6-medium+layout"
         );
+    }
+
+    #[test]
+    fn tesseract_segmentation_presets_pin_psm_and_language() {
+        let cases = [
+            (Pipeline::TesseractSingleBlock, TESSERACT_PSM_SINGLE_BLOCK),
+            (Pipeline::TesseractVerticalBlock, TESSERACT_PSM_VERTICAL_BLOCK),
+            (Pipeline::TesseractSparseText, TESSERACT_PSM_SPARSE_TEXT),
+        ];
+
+        for (pipeline, expected_psm) in cases {
+            let config = build_extraction_config(pipeline);
+            let ocr = config.ocr.expect("Tesseract preset must configure OCR");
+            let tesseract = ocr
+                .tesseract_config
+                .expect("segmentation preset must configure Tesseract");
+
+            assert!(config.force_ocr);
+            assert!(config.layout.is_none());
+            assert_eq!(ocr.backend, "tesseract");
+            assert_eq!(ocr.language, ["eng"]);
+            assert_eq!(tesseract.language, ["eng"]);
+            assert_eq!(tesseract.psm, expected_psm);
+        }
+    }
+
+    #[test]
+    fn tesseract_segmentation_aliases_use_canonical_names() {
+        let cases = [
+            (
+                "tesseract-psm5",
+                Pipeline::TesseractVerticalBlock,
+                "tesseract-vertical-block",
+            ),
+            (
+                "tesseract-vertical",
+                Pipeline::TesseractVerticalBlock,
+                "tesseract-vertical-block",
+            ),
+            (
+                "tesseract-psm6",
+                Pipeline::TesseractSingleBlock,
+                "tesseract-single-block",
+            ),
+            (
+                "tesseract-psm11",
+                Pipeline::TesseractSparseText,
+                "tesseract-sparse-text",
+            ),
+        ];
+
+        for (alias, expected, canonical) in cases {
+            assert_eq!(Pipeline::parse(alias), Some(expected));
+            assert_eq!(expected.name(), canonical);
+            assert_eq!(
+                serde_json::from_str::<Pipeline>(&format!(r#""{alias}""#)).expect("deserialize alias"),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn fixture_language_updates_vertical_segmentation_without_changing_psm() {
+        let mut metadata = HashMap::new();
+        metadata.insert("ocr_language".to_string(), serde_json::json!("jpn_vert"));
+        let doc = CorpusDocument {
+            name: "vertical-japanese".to_string(),
+            document_path: std::path::PathBuf::new(),
+            file_type: "jpeg".to_string(),
+            file_size: 0,
+            ground_truth_text: None,
+            ground_truth_markdown: None,
+            metadata,
+            fixture_path: std::path::PathBuf::new(),
+        };
+        let mut config = build_extraction_config(Pipeline::TesseractVerticalBlock);
+
+        apply_fixture_ocr_language(&mut config, &doc);
+
+        let ocr = config.ocr.expect("Tesseract preset must configure OCR");
+        let tesseract = ocr
+            .tesseract_config
+            .expect("segmentation preset must configure Tesseract");
+        assert_eq!(ocr.language, ["jpn_vert"]);
+        assert_eq!(tesseract.language, ["jpn_vert"]);
+        assert_eq!(tesseract.psm, TESSERACT_PSM_VERTICAL_BLOCK);
     }
 
     #[test]
