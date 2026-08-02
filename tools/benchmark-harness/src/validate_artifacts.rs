@@ -517,11 +517,17 @@ fn validate_results(
         format!("{}: duplicate fixture results", path.display()),
     )?;
 
+    // OCR usage is contractual only for xberg, the subject under test: the OCR cohort must exercise
+    // xberg's OCR pipeline (Used) and every other cohort must not (NotUsed). External competitors
+    // self-report OCR usage from their own internals — some are Tesseract-backed yet legitimately
+    // skip OCR on a given file (e.g. Tika reading an embedded text layer) — so their reported status
+    // is descriptive data we record, not a contract we enforce.
     let expected_ocr = if cohort.expects_ocr() {
         OcrStatus::Used
     } else {
         OcrStatus::NotUsed
     };
+    let enforce_ocr_status = entry.framework.starts_with("xberg-");
     for (index, result) in results.iter().enumerate() {
         crate::output::validate_result(result)
             .map_err(|error| contract_error(format!("{}: result {index}: {error}", path.display())))?;
@@ -576,7 +582,7 @@ fn validate_results(
             )?;
         }
         require(
-            result.ocr_status == expected_ocr,
+            !enforce_ocr_status || result.ocr_status == expected_ocr,
             format!("{}: result {index} OCR status mismatch", path.display()),
         )?;
         require(
@@ -744,14 +750,11 @@ fn validate_bucket(bucket: &PerformancePercentiles, key: &str, allow_failures: b
     Ok(bucket.total_sample_count)
 }
 
-fn identity_string(
-    framework: &str,
-    output_format: OutputFormat,
-    mode: &str,
-    fixture_id: &str,
-    ocr: Option<bool>,
-) -> String {
-    format!("{framework}:{output_format}:{mode}:{fixture_id}:ocr={ocr:?}")
+fn identity_string(framework: &str, output_format: OutputFormat, mode: &str, fixture_id: &str) -> String {
+    // (framework, output_format, mode, fixture_id) already uniquely identifies a row within a cohort.
+    // OCR usage is intentionally excluded: it is contractual only for xberg (enforced per-result and
+    // per-bucket elsewhere) and merely descriptive for competitors, whose reported side we do not gate.
+    format!("{framework}:{output_format}:{mode}:{fixture_id}")
 }
 
 fn logical_framework(framework: &str) -> &str {
@@ -1201,58 +1204,71 @@ fn validate_aggregate(
             !group.by_file_type.is_empty(),
             format!("{}: group {key} has no file-type metrics", path.display()),
         )?;
-        // A cohort's OCR expectation is uniform, so every fixture in every file-type bucket must
-        // sit on the same OCR side; the opposite side must be empty.
-        let mut actual_ext_counts: HashMap<&str, usize> = HashMap::new();
-        for (file_type, file_group) in &group.by_file_type {
-            let (present, absent) = if expects_ocr {
-                (&file_group.with_ocr, &file_group.no_ocr)
-            } else {
-                (&file_group.no_ocr, &file_group.with_ocr)
-            };
+        // xberg (the subject under test) has a uniform OCR expectation, so its fixtures must all sit
+        // on the cohort's expected OCR side with the opposite side empty, and its per-extension sample
+        // cardinality must match the contract exactly. Competitors self-report OCR usage from their own
+        // internals — a single framework can straddle both sides across a cohort, and a failed
+        // extraction reports Unknown (in neither OCR bucket) — so we only integrity-check whatever
+        // buckets they populated; their fixture coverage is enforced exactly by the per-fixture-row
+        // identity set below, which is OCR-status agnostic.
+        if entry.framework.starts_with("xberg-") {
+            let mut actual_ext_counts: HashMap<&str, usize> = HashMap::new();
+            for (file_type, file_group) in &group.by_file_type {
+                let (present, absent) = if expects_ocr {
+                    (&file_group.with_ocr, &file_group.no_ocr)
+                } else {
+                    (&file_group.no_ocr, &file_group.with_ocr)
+                };
+                require(
+                    absent.is_none(),
+                    format!(
+                        "{}: group {key} file type {file_type} has wrong OCR bucket",
+                        path.display()
+                    ),
+                )?;
+                let bucket = present.as_ref().ok_or_else(|| {
+                    contract_error(format!(
+                        "{}: group {key} file type {file_type} missing OCR bucket",
+                        path.display()
+                    ))
+                })?;
+                actual_ext_counts.insert(file_type.as_str(), validate_bucket(bucket, key, entry.optional)?);
+            }
+            let supported_indexes = supported_fixture_indexes(entry, contract);
+            let mut entry_ext_counts: HashMap<&str, usize> = HashMap::new();
+            for index in supported_indexes {
+                *entry_ext_counts.entry(contract.document_extensions[index]).or_insert(0) += 1;
+            }
+            let expected_set: HashSet<&str> = entry_ext_counts.keys().copied().collect();
+            let actual_set: HashSet<&str> = actual_ext_counts.keys().copied().collect();
             require(
-                absent.is_none(),
+                expected_set == actual_set,
                 format!(
-                    "{}: group {key} file type {file_type} has wrong OCR bucket",
-                    path.display()
+                    "{}: group {key} {}",
+                    path.display(),
+                    describe_set_mismatch(
+                        "file-type buckets",
+                        expected_set.iter().copied(),
+                        actual_set.iter().copied()
+                    )
                 ),
             )?;
-            let bucket = present.as_ref().ok_or_else(|| {
-                contract_error(format!(
-                    "{}: group {key} file type {file_type} missing OCR bucket",
-                    path.display()
-                ))
-            })?;
-            actual_ext_counts.insert(file_type.as_str(), validate_bucket(bucket, key, entry.optional)?);
-        }
-        let supported_indexes = supported_fixture_indexes(entry, contract);
-        let mut entry_ext_counts: HashMap<&str, usize> = HashMap::new();
-        for index in supported_indexes {
-            *entry_ext_counts.entry(contract.document_extensions[index]).or_insert(0) += 1;
-        }
-        let expected_set: HashSet<&str> = entry_ext_counts.keys().copied().collect();
-        let actual_set: HashSet<&str> = actual_ext_counts.keys().copied().collect();
-        require(
-            expected_set == actual_set,
-            format!(
-                "{}: group {key} {}",
-                path.display(),
-                describe_set_mismatch(
-                    "file-type buckets",
-                    expected_set.iter().copied(),
-                    actual_set.iter().copied()
-                )
-            ),
-        )?;
-        for (extension, expected_count) in &entry_ext_counts {
-            let actual = actual_ext_counts.get(extension).copied().unwrap_or(0);
-            require(
-                actual == *expected_count,
-                format!(
-                    "{}: group {key} file type {extension} covers {actual} samples, expected {expected_count}",
-                    path.display()
-                ),
-            )?;
+            for (extension, expected_count) in &entry_ext_counts {
+                let actual = actual_ext_counts.get(extension).copied().unwrap_or(0);
+                require(
+                    actual == *expected_count,
+                    format!(
+                        "{}: group {key} file type {extension} covers {actual} samples, expected {expected_count}",
+                        path.display()
+                    ),
+                )?;
+            }
+        } else {
+            for file_group in group.by_file_type.values() {
+                for side in [&file_group.no_ocr, &file_group.with_ocr].into_iter().flatten() {
+                    validate_bucket(side, key, entry.optional)?;
+                }
+            }
         }
     }
 
@@ -1268,7 +1284,6 @@ fn validate_aggregate(
                         entry.output_format,
                         entry.mode.aggregate_slug(),
                         contract.document_stems[index],
-                        Some(expects_ocr),
                     )
                 })
         })
@@ -1281,15 +1296,7 @@ fn validate_aggregate(
 
     let identities: HashSet<String> = rows
         .iter()
-        .map(|row| {
-            identity_string(
-                &row.framework,
-                row.output_format,
-                &row.execution_mode,
-                &row.fixture_id,
-                row.ocr,
-            )
-        })
+        .map(|row| identity_string(&row.framework, row.output_format, &row.execution_mode, &row.fixture_id))
         .collect();
     require(
         identities == expected_identities,
@@ -1352,34 +1359,36 @@ fn validate_aggregate(
     // them against each other so a well-typed but internally inconsistent aggregate cannot pass. ~keep
     for (key, group) in &aggregate.by_framework_mode {
         for (file_type, file_group) in &group.by_file_type {
-            let bucket = if expects_ocr {
-                file_group.with_ocr.as_ref()
-            } else {
-                file_group.no_ocr.as_ref()
-            }
-            .ok_or_else(|| contract_error(format!("{}: missing validated OCR bucket", path.display())))?;
-            let bucket_rows: Vec<&&PerFixtureRow> = rows
-                .iter()
-                .filter(|row| {
-                    crate::aggregate::make_aggregate_key(&row.framework, row.output_format, &row.execution_mode) == *key
-                        && row.file_type == *file_type
-                })
-                .collect();
-            let count_kind = |kind: &str| {
-                bucket_rows
+            // Reconcile each populated OCR side against exactly the rows that fed it (no_ocr ← NotUsed,
+            // with_ocr ← Used). Splitting by side lets a competitor legitimately straddle both without
+            // double-counting, while xberg's single expected side reconciles as before.
+            for (side_is_with_ocr, bucket) in [(false, &file_group.no_ocr), (true, &file_group.with_ocr)] {
+                let Some(bucket) = bucket.as_ref() else { continue };
+                let bucket_rows: Vec<&&PerFixtureRow> = rows
                     .iter()
-                    .filter(|row| !row.success && row.error_kind.as_deref() == Some(kind))
-                    .count()
-            };
-            require(
-                bucket.successful_sample_count == bucket_rows.iter().filter(|row| row.success).count()
-                    && bucket.framework_errors == count_kind("FrameworkError")
-                    && bucket.harness_errors == count_kind("HarnessError")
-                    && bucket.config_setup_errors == count_kind("ConfigSetupError")
-                    && bucket.timeouts == count_kind("Timeout")
-                    && bucket.empty_content == count_kind("EmptyContent"),
-                format!("{key}: group failure counts do not match fixture rows for {file_type}"),
-            )?;
+                    .filter(|row| {
+                        crate::aggregate::make_aggregate_key(&row.framework, row.output_format, &row.execution_mode)
+                            == *key
+                            && row.file_type == *file_type
+                            && row.ocr == Some(side_is_with_ocr)
+                    })
+                    .collect();
+                let count_kind = |kind: &str| {
+                    bucket_rows
+                        .iter()
+                        .filter(|row| !row.success && row.error_kind.as_deref() == Some(kind))
+                        .count()
+                };
+                require(
+                    bucket.successful_sample_count == bucket_rows.iter().filter(|row| row.success).count()
+                        && bucket.framework_errors == count_kind("FrameworkError")
+                        && bucket.harness_errors == count_kind("HarnessError")
+                        && bucket.config_setup_errors == count_kind("ConfigSetupError")
+                        && bucket.timeouts == count_kind("Timeout")
+                        && bucket.empty_content == count_kind("EmptyContent"),
+                    format!("{key}: group failure counts do not match fixture rows for {file_type}"),
+                )?;
+            }
         }
     }
     validate_derived_aggregate_fields(&aggregate, &rows, cohort, path)?;
