@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Canonical PaddleOCR benchmark presets no longer force optional whole-image auto-rotation, avoiding
+  confident but incorrect 180-degree rotations that suppressed scene-text quality.
 - PaddleOCR now preserves native resolution for 1024-pixel images by default, improving scene-text
   accuracy while retaining explicit detector-size overrides.
 - Layout-enabled image OCR now reuses successful single-frame whole-image text when structured

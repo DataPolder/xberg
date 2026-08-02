@@ -57,12 +57,6 @@ const EXTRACTION_TIMEOUT_PER_PAGE_MS: u64 = 400;
 const PP_OCR_V5: &str = "pp-ocrv5";
 const PP_OCR_V6: &str = "pp-ocrv6";
 
-#[derive(Debug, Clone, Copy)]
-enum AutoRotate {
-    Enabled,
-    Disabled,
-}
-
 /// Extraction pipeline identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -373,7 +367,6 @@ fn build_paddle_extraction_config(
     model_version: &str,
     model_tier: &str,
     layout: Option<xberg::core::config::layout::LayoutDetectionConfig>,
-    auto_rotate: AutoRotate,
 ) -> xberg::ExtractionConfig {
     xberg::ExtractionConfig {
         output_format: xberg::core::config::OutputFormat::Markdown,
@@ -381,7 +374,7 @@ fn build_paddle_extraction_config(
         ocr: Some(xberg::core::config::OcrConfig {
             backend: "paddleocr".to_string(),
             language: vec!["eng".to_string()],
-            auto_rotate: matches!(auto_rotate, AutoRotate::Enabled),
+            auto_rotate: false,
             paddle_ocr_config: Some(serde_json::json!({
                 "model_version": model_version,
                 "model_tier": model_tier
@@ -465,34 +458,22 @@ pub fn build_extraction_config(pipeline: Pipeline) -> xberg::ExtractionConfig {
             layout: Some(LayoutDetectionConfig::default()),
             ..base
         },
-        Pipeline::Paddle => build_paddle_extraction_config(PP_OCR_V6, "medium", None, AutoRotate::Enabled),
-        Pipeline::PaddleLayout => build_paddle_extraction_config(
-            PP_OCR_V6,
-            "medium",
-            Some(LayoutDetectionConfig::default()),
-            AutoRotate::Enabled,
-        ),
-        Pipeline::PaddleV6Small => build_paddle_extraction_config(PP_OCR_V6, "small", None, AutoRotate::Enabled),
-        Pipeline::PaddleV6SmallLayout => build_paddle_extraction_config(
-            PP_OCR_V6,
-            "small",
-            Some(LayoutDetectionConfig::default()),
-            AutoRotate::Enabled,
-        ),
-        Pipeline::PaddleV6Tiny => build_paddle_extraction_config(PP_OCR_V6, "tiny", None, AutoRotate::Enabled),
-        Pipeline::PaddleV6TinyLayout => build_paddle_extraction_config(
-            PP_OCR_V6,
-            "tiny",
-            Some(LayoutDetectionConfig::default()),
-            AutoRotate::Enabled,
-        ),
-        Pipeline::PaddleServer => build_paddle_extraction_config(PP_OCR_V5, "server", None, AutoRotate::Enabled),
-        Pipeline::PaddleServerLayout => build_paddle_extraction_config(
-            PP_OCR_V5,
-            "server",
-            Some(LayoutDetectionConfig::default()),
-            AutoRotate::Enabled,
-        ),
+        Pipeline::Paddle => build_paddle_extraction_config(PP_OCR_V6, "medium", None),
+        Pipeline::PaddleLayout => {
+            build_paddle_extraction_config(PP_OCR_V6, "medium", Some(LayoutDetectionConfig::default()))
+        }
+        Pipeline::PaddleV6Small => build_paddle_extraction_config(PP_OCR_V6, "small", None),
+        Pipeline::PaddleV6SmallLayout => {
+            build_paddle_extraction_config(PP_OCR_V6, "small", Some(LayoutDetectionConfig::default()))
+        }
+        Pipeline::PaddleV6Tiny => build_paddle_extraction_config(PP_OCR_V6, "tiny", None),
+        Pipeline::PaddleV6TinyLayout => {
+            build_paddle_extraction_config(PP_OCR_V6, "tiny", Some(LayoutDetectionConfig::default()))
+        }
+        Pipeline::PaddleServer => build_paddle_extraction_config(PP_OCR_V5, "server", None),
+        Pipeline::PaddleServerLayout => {
+            build_paddle_extraction_config(PP_OCR_V5, "server", Some(LayoutDetectionConfig::default()))
+        }
         Pipeline::TesseractAutoRotate => xberg::ExtractionConfig {
             force_ocr: true,
             ocr: Some(xberg::core::config::OcrConfig {
@@ -503,7 +484,7 @@ pub fn build_extraction_config(pipeline: Pipeline) -> xberg::ExtractionConfig {
             }),
             ..base
         },
-        Pipeline::PaddleNoRotate => build_paddle_extraction_config(PP_OCR_V6, "medium", None, AutoRotate::Disabled),
+        Pipeline::PaddleNoRotate => build_paddle_extraction_config(PP_OCR_V6, "medium", None),
         Pipeline::LayoutSlanetAuto => xberg::ExtractionConfig {
             layout: Some(LayoutDetectionConfig {
                 table_model: xberg::core::config::layout::TableModel::SlanetAuto,
@@ -1953,6 +1934,7 @@ mod tests {
                 .expect("Paddle preset must pin model identity");
 
             assert_eq!(ocr.backend, "paddleocr", "unexpected backend for {}", pipeline.name());
+            assert!(!ocr.auto_rotate, "canonical Paddle preset must use the public default");
             assert_eq!(
                 paddle["model_version"],
                 PP_OCR_V6,
@@ -1978,12 +1960,13 @@ mod tests {
     fn legacy_paddle_server_presets_pin_v5_server_models() {
         for pipeline in [Pipeline::PaddleServer, Pipeline::PaddleServerLayout] {
             let config = build_extraction_config(pipeline);
-            let paddle = config
-                .ocr
+            let ocr = config.ocr.as_ref().expect("legacy server preset must configure OCR");
+            let paddle = ocr
+                .paddle_ocr_config
                 .as_ref()
-                .and_then(|ocr| ocr.paddle_ocr_config.as_ref())
                 .expect("legacy server preset must pin model identity");
 
+            assert!(!ocr.auto_rotate, "canonical Paddle preset must use the public default");
             assert_eq!(paddle["model_version"], PP_OCR_V5);
             assert_eq!(paddle["model_tier"], "server");
         }
