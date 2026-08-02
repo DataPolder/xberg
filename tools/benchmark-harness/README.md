@@ -192,6 +192,36 @@ paddle-v6-small+layout+det-side-2048 \
   --json-output /tmp/paddle-det-side-sweep.json
 ```
 
+### Local cold-runtime responsiveness
+
+Run the diagnostic from the repository root:
+
+```bash
+cargo run --release -p benchmark-harness --bin xberg-runtime-responsiveness -- \
+  --input tools/benchmark-harness/fixtures/split/single_paper.pdf \
+  --batch-size 1 \
+  --config-json '{
+    "force_ocr": true,
+    "ocr": {
+      "backend": "paddleocr",
+      "language": ["eng"],
+      "auto_rotate": false,
+      "paddle_ocr_config": {"model_version": "pp-ocrv6", "model_tier": "medium"}
+    }
+  }' \
+  --max-threads 1 \
+  --max-concurrent 1 \
+  > /tmp/xberg-runtime-responsiveness.json
+```
+
+Launch a fresh process for every repetition so each report includes cold runtime and Paddle
+initialization. Keep compiled artifacts, model files, and OS filesystem caches warm between runs.
+`extraction_duration_ms` measures the end-to-end PDF render plus Paddle initialization and inference,
+not isolated initialization. `stalled_wake_event_count` counts coalesced scheduler wake events that
+exceeded the reported threshold; `missed_tick_count` records skipped probe deadlines separately.
+The input fingerprint is computed after extraction so it does not warm the measured page cache. It
+can still identify a known document by comparison, so treat reports for private inputs as sensitive.
+
 ## CLI Reference
 
 ### `run` -- CI benchmark execution

@@ -70,6 +70,7 @@ pub mod provenance;
 pub mod quality;
 pub mod registry;
 pub mod runner;
+pub mod runtime_responsiveness;
 pub mod sizes;
 pub mod split_benchmark;
 pub mod stats;

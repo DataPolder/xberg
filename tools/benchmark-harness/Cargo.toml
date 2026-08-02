@@ -22,6 +22,10 @@ path = "src/main.rs"
 name = "xberg-batch-diagnostic"
 path = "src/xberg_batch_diagnostic_main.rs"
 
+[[bin]]
+name = "xberg-runtime-responsiveness"
+path = "src/xberg_runtime_responsiveness_main.rs"
+
 [features]
 default = []
 profiling = ["pprof"]
@@ -62,6 +66,7 @@ tikv-jemallocator = { version = "0.7", optional = true }
 tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = { workspace = true }
 which = "8"
 xberg = { path = "../../crates/xberg", features = ["full"] }
 

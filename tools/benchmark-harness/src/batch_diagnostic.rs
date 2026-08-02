@@ -144,7 +144,7 @@ pub async fn run_batch_lane_diagnostic(
     })
 }
 
-fn validate_config(config: &BatchDiagnosticConfig) -> Result<()> {
+pub(crate) fn validate_config(config: &BatchDiagnosticConfig) -> Result<()> {
     if config.inputs.is_empty() {
         return Err(Error::Config("at least one input is required".into()));
     }
@@ -171,7 +171,7 @@ fn validate_config(config: &BatchDiagnosticConfig) -> Result<()> {
     Ok(())
 }
 
-fn resolve_extraction_config(config: &BatchDiagnosticConfig) -> Result<ExtractionConfig> {
+pub(crate) fn resolve_extraction_config(config: &BatchDiagnosticConfig) -> Result<ExtractionConfig> {
     let mut extraction_config = match config.extraction_config_json.as_deref() {
         Some(raw) => parse_extraction_config_json(raw)?,
         None => ExtractionConfig::default(),
@@ -277,7 +277,7 @@ fn parse_extraction_config_json(raw: &str) -> Result<ExtractionConfig> {
     }
 }
 
-fn expanded_inputs(config: &BatchDiagnosticConfig) -> Vec<PathBuf> {
+pub(crate) fn expanded_inputs(config: &BatchDiagnosticConfig) -> Vec<PathBuf> {
     config.inputs.iter().cycle().take(config.batch_size).cloned().collect()
 }
 
@@ -362,7 +362,7 @@ fn ensure_equivalent(inputs: &[PathBuf], sequential: &[ExtractedDocument], batch
     Ok(())
 }
 
-fn validate_batch_mapping(inputs: &[PathBuf], batch: &[ExtractedDocument]) -> Result<()> {
+pub(crate) fn validate_batch_mapping(inputs: &[PathBuf], batch: &[ExtractedDocument]) -> Result<()> {
     if inputs.len() != batch.len() {
         return Err(Error::Benchmark(format!(
             "batch returned {} documents for {} inputs",
