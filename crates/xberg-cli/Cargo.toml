@@ -29,8 +29,14 @@ name = "xberg"
 path = "src/main.rs"
 
 [features]
+# `formats-no-heic`, not `formats`: HEIC/HEIF decoding links native `libheif`
+# (libheif-sys), which has no build path on a stock Windows toolchain, so
+# `cargo install xberg-cli` failed there building `libheif-sys` (#1361). The
+# default now installs cleanly on every platform; HEIC is opt-in via
+# `--features heic` (or `all`). The prebuilt release binaries, Docker `all`
+# image, and Homebrew bottle re-add `heic` explicitly (CI has libheif). ~keep
 default = [
-    "formats",
+    "formats-no-heic",
     "analysis",
     "core-cli",
     "embeddings",

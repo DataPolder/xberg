@@ -1018,7 +1018,7 @@ jobs:
           - {
               os: macos-15-intel,
               target: x86_64-apple-darwin,
-              extra_cargo_args: "--features ort-dynamic,mcp,mcp-http,api",
+              extra_cargo_args: "--features ort-dynamic,mcp,mcp-http,api,heic",
             }
           - { os: windows-latest, target: x86_64-pc-windows-msvc }
     steps:
@@ -1049,7 +1049,10 @@ jobs:
           package-name: xberg-cli
           binary-name: xberg
           target: ${{ matrix.target }}
-          extra-cargo-args: ${{ matrix.extra_cargo_args || '--features mcp,mcp-http,api' }}
+          # `heic` re-adds HEIC/HEIF to the prebuilt binaries — the CLI default
+          # dropped it so `cargo install` works on stock Windows (#1361); CI has
+          # libheif so the official binaries keep HEIC. ~keep
+          extra-cargo-args: ${{ matrix.extra_cargo_args || '--features mcp,mcp-http,api,heic' }}
 
       # Stage ONNX Runtime for Intel macOS after the build so the ort-dynamic
       # compile is unaffected; this exports ORT_DYLIB_PATH for the vendor step.
