@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- PaddleOCR and Tesseract automatic image rotation now use the document-orientation model's RGB
+  input and existing probability output correctly, and recover sparse edge-aligned text that the
+  model's standard center crop omitted.
+
 ## [1.0.10] - 2026-08-02
 
 ### Fixed
