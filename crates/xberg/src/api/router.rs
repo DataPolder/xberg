@@ -7,6 +7,7 @@ use axum::{
     extract::DefaultBodyLimit,
     routing::{delete, get, post, put},
 };
+use tower::limit::GlobalConcurrencyLimitLayer;
 use tower_http::{
     catch_panic::CatchPanicLayer,
     compression::CompressionLayer,
@@ -28,6 +29,32 @@ use super::{
     openweb::{openweb_docling_handler, openweb_external_handler},
     types::{ApiSizeLimits, ApiState},
 };
+
+/// Environment variable controlling the server's global concurrency limit.
+/// Set to `0` to disable the limit (unbounded concurrent requests).
+const MAX_CONCURRENT_REQUESTS_ENV: &str = "XBERG_MAX_CONCURRENT_REQUESTS";
+
+/// Resolve the maximum number of requests processed concurrently by the server.
+///
+/// Without a bound, every in-flight request buffers its body and extraction
+/// working set in memory, so a burst of large requests can exhaust RAM and OOM
+/// the process — especially in memory-limited containers. The default caps
+/// concurrency at twice the CPU count (clamped to `[4, 32]`), applying
+/// backpressure instead of unbounded growth. `XBERG_MAX_CONCURRENT_REQUESTS`
+/// overrides it; `0` disables the limit for deployments that bound concurrency
+/// upstream (e.g. a reverse proxy or queue).
+fn resolve_max_concurrent_requests() -> usize {
+    const MIN_DEFAULT: usize = 4;
+    const MAX_DEFAULT: usize = 32;
+
+    match std::env::var(MAX_CONCURRENT_REQUESTS_ENV) {
+        Ok(value) => value.trim().parse::<usize>().unwrap_or_else(|_| {
+            tracing::warn!("{MAX_CONCURRENT_REQUESTS_ENV}={value:?} is not a valid usize; using the computed default");
+            (num_cpus::get() * 2).clamp(MIN_DEFAULT, MAX_DEFAULT)
+        }),
+        Err(_) => (num_cpus::get() * 2).clamp(MIN_DEFAULT, MAX_DEFAULT),
+    }
+}
 
 /// Create the API router with all routes configured.
 ///
@@ -187,7 +214,7 @@ pub(crate) fn create_router_with_limits_and_server_config(
         router = router.route("/openapi.json", get(openapi_schema_handler));
     }
 
-    router
+    let router = router
         .layer(DefaultBodyLimit::max(limits.max_request_body_bytes))
         .layer(RequestBodyLimitLayer::new(limits.max_request_body_bytes))
         .layer(cors_layer)
@@ -203,8 +230,26 @@ pub(crate) fn create_router_with_limits_and_server_config(
                 .on_request(DefaultOnRequest::new().level(tracing::Level::DEBUG))
                 .on_response(DefaultOnResponse::new().level(tracing::Level::DEBUG))
                 .on_failure(DefaultOnFailure::new().level(tracing::Level::WARN)),
-        )
-        .with_state(state)
+        );
+
+    // Outermost layer: cap how many requests process concurrently so a burst of
+    // large uploads applies backpressure instead of exhausting memory (#1368).
+    let max_concurrent_requests = resolve_max_concurrent_requests();
+    let router = if max_concurrent_requests > 0 {
+        tracing::info!(
+            max_concurrent_requests,
+            "API global concurrency limit active (set {MAX_CONCURRENT_REQUESTS_ENV}=0 to disable)"
+        );
+        router.layer(GlobalConcurrencyLimitLayer::new(max_concurrent_requests))
+    } else {
+        tracing::warn!(
+            "API global concurrency limit DISABLED ({MAX_CONCURRENT_REQUESTS_ENV}=0); \
+             concurrent requests are unbounded and may exhaust memory under load"
+        );
+        router
+    };
+
+    router.with_state(state)
 }
 
 /// OpenAPI schema handler.
@@ -263,5 +308,40 @@ mod tests {
             ..Default::default()
         };
         let _router = create_router_with_limits_and_server_config(extraction_config, limits, server_config);
+    }
+
+    #[test]
+    #[allow(unsafe_code)]
+    fn resolve_max_concurrent_requests_honors_env_and_defaults() {
+        let original = std::env::var(MAX_CONCURRENT_REQUESTS_ENV).ok();
+
+        unsafe {
+            std::env::set_var(MAX_CONCURRENT_REQUESTS_ENV, "7");
+            assert_eq!(resolve_max_concurrent_requests(), 7, "explicit value must be honored");
+
+            std::env::set_var(MAX_CONCURRENT_REQUESTS_ENV, "0");
+            assert_eq!(resolve_max_concurrent_requests(), 0, "0 must disable the limit");
+
+            std::env::set_var(MAX_CONCURRENT_REQUESTS_ENV, "not-a-number");
+            let fallback = resolve_max_concurrent_requests();
+            assert!(
+                (4..=32).contains(&fallback),
+                "invalid value must fall back to the bounded default"
+            );
+
+            std::env::remove_var(MAX_CONCURRENT_REQUESTS_ENV);
+            let default = resolve_max_concurrent_requests();
+            assert!(
+                (4..=32).contains(&default),
+                "unset default must be bounded (not unlimited), got {default}"
+            );
+        }
+
+        unsafe {
+            match original {
+                Some(value) => std::env::set_var(MAX_CONCURRENT_REQUESTS_ENV, value),
+                None => std::env::remove_var(MAX_CONCURRENT_REQUESTS_ENV),
+            }
+        }
     }
 }
