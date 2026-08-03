@@ -1,69 +1,102 @@
-### Supported File Formats (101 formats · 115 file extensions) 101 formats across 115 file extensions in 8 major
-categories with intelligent format detection and comprehensive metadata extraction. #### Office Documents | Category |
-Formats | Capabilities | |----------|---------|--------------| | **Word Processing** | `.docx`, `.docm`, `.doc`,
-`.dotx`, `.dotm`, `.dot`, `.odt`, `.pages`, `.wpd`, `.wp`, `.wp5`, `.wp6` | Full text, tables, images, metadata, styles
-| | **Spreadsheets** | `.xlsx`, `.xlsm`, `.xlsb`, `.xls`, `.xla`, `.xlam`, `.xltm`, `.xltx`, `.xlt`, `.ods`, `.numbers`
-| Sheet data, formulas, cell metadata, charts | | **Presentations** | `.pptx`, `.pptm`, `.ppt`, `.ppsx`, `.potx`,
-`.potm`, `.pot`, `.odp`, `.key` | Slides, speaker notes, images, metadata | | **PDF** | `.pdf` | Text, tables, images,
-metadata, OCR support | | **eBooks** | `.epub`, `.fb2` | Chapters, metadata, embedded resources | | **Database** |
-`.dbf` | Table data extraction, field type support | | **Hangul** | `.hwp`, `.hwpx` | Korean document format, text
-extraction | #### Images (OCR-Enabled) | Category | Formats | Features | |----------|---------|----------| | **Raster**
-| `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.bmp`, `.tiff`, `.tif` | OCR, table detection, EXIF metadata, dimensions,
-color space | | **Advanced** | `.jp2`, `.jpx`, `.jpm`, `.mj2`, `.jbig2`, `.jb2`, `.pnm`, `.pbm`, `.pgm`, `.ppm` | OCR
-via hayro-jpeg2000 (pure Rust decoder), JBIG2 support, table detection, format-specific metadata |
+### Supported File Formats (101 formats · 115 file extensions)
+
+101 formats across 115 file extensions in 8 major categories with intelligent format detection and comprehensive metadata extraction.
+
+#### Office Documents
+
+| Category | Formats | Capabilities |
+|----------|---------|--------------|
+| **Word Processing** | `.docx`, `.docm`, `.doc`, `.dotx`, `.dotm`, `.dot`, `.odt`, `.pages`, `.wpd`, `.wp`, `.wp5`, `.wp6` | Full text, tables, images, metadata, styles |
+| **Spreadsheets** | `.xlsx`, `.xlsm`, `.xlsb`, `.xls`, `.xla`, `.xlam`, `.xltm`, `.xltx`, `.xlt`, `.ods`, `.numbers` | Sheet data, formulas, cell metadata, charts |
+| **Presentations** | `.pptx`, `.pptm`, `.ppt`, `.ppsx`, `.potx`, `.potm`, `.pot`, `.odp`, `.key` | Slides, speaker notes, images, metadata |
+| **PDF** | `.pdf` | Text, tables, images, metadata, OCR support |
+| **eBooks** | `.epub`, `.fb2` | Chapters, metadata, embedded resources |
+| **Database** | `.dbf` | Table data extraction, field type support |
+| **Hangul** | `.hwp`, `.hwpx` | Korean document format, text extraction |
+
+#### Images (OCR-Enabled)
+
+| Category | Formats | Features |
+|----------|---------|----------|
+| **Raster** | `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.bmp`, `.tiff`, `.tif` | OCR, table detection, EXIF metadata, dimensions, color space |
+| **Advanced** | `.jp2`, `.jpx`, `.jpm`, `.mj2`, `.jbig2`, `.jb2`, `.pnm`, `.pbm`, `.pgm`, `.ppm` | OCR via hayro-jpeg2000 (pure Rust decoder), JBIG2 support, table detection, format-specific metadata |
 {% if language != "r" and language != "wasm" %}
-  | **HEIC family** | `.heic`, `.heics`, `.heif`, `.avif`, `.avcs` | EXIF metadata, optional libheif pixel decoding |
+| **HEIC family** | `.heic`, `.heics`, `.heif`, `.avif`, `.avcs` | EXIF metadata, optional libheif pixel decoding |
 {% endif %}
 | **Vector** | `.svg` | DOM parsing, embedded text, graphics metadata |
 
 {% if language != "r" and language != "wasm" %}
-  #### Audio & Video | Category | Formats | Features | |----------|---------|----------| | **Audio** | `.mp3`, `.mpga`,
-  `.m4a`, `.wav`, `.webm` | Whisper transcription when native transcription is available | | **Video audio track** |
-  `.mp4`, `.mpeg`, `.webm` | Audio-track transcription only |
+#### Audio & Video
+
+| Category | Formats | Features |
+|----------|---------|----------|
+| **Audio** | `.mp3`, `.mpga`, `.m4a`, `.wav`, `.webm` | Whisper transcription when native transcription is available |
+| **Video audio track** | `.mp4`, `.mpeg`, `.webm` | Audio-track transcription only |
 {% endif %}
 
-#### Web & Data | Category | Formats | Features | |----------|---------|----------| | **Markup** | `.html`, `.htm`,
-`.xhtml`, `.xml`, `.svg` | DOM parsing, metadata (Open Graph, Twitter Card), link extraction | | **Structured Data** |
-`.json`, `.yaml`, `.yml`, `.toml`, `.csv`, `.tsv` | Schema detection, nested structures, validation | | **Text &
-Markdown** | `.txt`, `.md`, `.markdown`, `.djot`, `.mdx`, `.rst`, `.org`, `.rtf` | CommonMark, GFM, Djot, MDX,
-reStructuredText, Org Mode | #### Email & Archives | Category | Formats | Features | |----------|---------|----------| |
-**Email** | `.eml`, `.msg`, `.pst` | Headers, body (HTML/plain), attachments, threading | | **Archives** | `.zip`,
-`.tar`, `.tgz`, `.gz`, `.7z` | Recursive extraction of nested archives, file listing, metadata, zip-bomb protection |
-#### Academic & Scientific | Category | Formats | Features | |----------|---------|----------| | **Citations** | `.bib`,
-`.ris`, `.nbib`, `.enw` | Structured parsing: RIS, PubMed/MEDLINE, EndNote XML, BibTeX/BibLaTeX, CSL JSON by MIME type |
-| **Scientific** | `.tex`, `.latex`, `.typ`, `.typst`, `.jats`, `.ipynb` | LaTeX, Typst, Jupyter notebooks, PubMed JATS
-| | **Publishing** | `.fb2`, `.docbook`, `.dbk`, `.docbook4`, `.docbook5`, `.opml` | FictionBook, DocBook XML, OPML
-outlines | | **Documentation** | MIME-only POD, mdoc, troff | Technical documentation formats | #### Code Intelligence
-(371 Languages) | Feature | Description | |---------|-------------| | **Structure Extraction** | Functions, classes,
-methods, structs, interfaces, enums | | **Import/Export Analysis** | Module dependencies, re-exports, wildcard imports |
-| **Symbol Extraction** | Variables, constants, type aliases, properties | | **Docstring Parsing** | Google, NumPy,
-Sphinx, JSDoc, RustDoc, and 10+ formats | | **Diagnostics** | Parse errors with line/column positions | | **Syntax-Aware
-Chunking** | Split code by semantic boundaries, not arbitrary byte offsets | Powered by
-[tree-sitter-language-pack](https://github.com/xberg-io/tree-sitter-language-pack) —
-[documentation](https://docs.tree-sitter-language-pack.xberg.io). **[Complete Format
-Reference](https://docs.xberg.io/reference/formats/)** ### Key Capabilities - **Text Extraction** - Extract all text
-content with position and formatting information - **Metadata Extraction** - Retrieve document properties, creation
-date, author, etc. - **Table Extraction** - Parse tables with structure and cell content preservation - **Image
-Extraction** - Extract embedded images and render page previews
+#### Web & Data
+
+| Category | Formats | Features |
+|----------|---------|----------|
+| **Markup** | `.html`, `.htm`, `.xhtml`, `.xml`, `.svg` | DOM parsing, metadata (Open Graph, Twitter Card), link extraction |
+| **Structured Data** | `.json`, `.yaml`, `.yml`, `.toml`, `.csv`, `.tsv` | Schema detection, nested structures, validation |
+| **Text & Markdown** | `.txt`, `.md`, `.markdown`, `.djot`, `.mdx`, `.rst`, `.org`, `.rtf` | CommonMark, GFM, Djot, MDX, reStructuredText, Org Mode |
+
+#### Email & Archives
+
+| Category | Formats | Features |
+|----------|---------|----------|
+| **Email** | `.eml`, `.msg`, `.pst` | Headers, body (HTML/plain), attachments, threading |
+| **Archives** | `.zip`, `.tar`, `.tgz`, `.gz`, `.7z` | Recursive extraction of nested archives, file listing, metadata, zip-bomb protection |
+
+#### Academic & Scientific
+
+| Category | Formats | Features |
+|----------|---------|----------|
+| **Citations** | `.bib`, `.ris`, `.nbib`, `.enw` | Structured parsing: RIS, PubMed/MEDLINE, EndNote XML, BibTeX/BibLaTeX, CSL JSON by MIME type |
+| **Scientific** | `.tex`, `.latex`, `.typ`, `.typst`, `.jats`, `.ipynb` | LaTeX, Typst, Jupyter notebooks, PubMed JATS |
+| **Publishing** | `.fb2`, `.docbook`, `.dbk`, `.docbook4`, `.docbook5`, `.opml` | FictionBook, DocBook XML, OPML outlines |
+| **Documentation** | MIME-only POD, mdoc, troff | Technical documentation formats |
+
+#### Code Intelligence (371 Languages)
+
+| Feature | Description |
+|---------|-------------|
+| **Structure Extraction** | Functions, classes, methods, structs, interfaces, enums |
+| **Import/Export Analysis** | Module dependencies, re-exports, wildcard imports |
+| **Symbol Extraction** | Variables, constants, type aliases, properties |
+| **Docstring Parsing** | Google, NumPy, Sphinx, JSDoc, RustDoc, and 10+ formats |
+| **Diagnostics** | Parse errors with line/column positions |
+| **Syntax-Aware Chunking** | Split code by semantic boundaries, not arbitrary byte offsets |
+
+Powered by [tree-sitter-language-pack](https://github.com/xberg-io/tree-sitter-language-pack) — [documentation](https://docs.tree-sitter-language-pack.xberg.io).
+
+**[Complete Format Reference](https://docs.xberg.io/reference/formats/)**
+
+### Key Capabilities
+
+- **Text Extraction** - Extract all text content with position and formatting information
+- **Metadata Extraction** - Retrieve document properties, creation date, author, etc.
+- **Table Extraction** - Parse tables with structure and cell content preservation
+- **Image Extraction** - Extract embedded images and render page previews
 {% if language != "r" and language != "wasm" %}
-  - **Audio/Video Transcription** - Extract speech transcripts from MP3, M4A, WAV, WebM, and MP4 inputs when the native
-  transcription feature is available
+- **Audio/Video Transcription** - Extract speech transcripts from MP3, M4A, WAV, WebM, and MP4 inputs when the native transcription feature is available
 {% endif %}
 - **OCR Support** - Integrate multiple OCR backends for scanned documents
 {% if features.async %}
-  - **Async/Await** - Non-blocking document processing with concurrent operations
+- **Async/Await** - Non-blocking document processing with concurrent operations
 {% endif %}
 {% if features.plugin_system %}
-  - **Plugin System** - Extensible post-processing for custom text transformation
+- **Plugin System** - Extensible post-processing for custom text transformation
 {% endif %}
 {% if features.embeddings %}
-  - **Embeddings** - Generate vector embeddings using ONNX Runtime models or provider-hosted services
+- **Embeddings** - Generate vector embeddings using ONNX Runtime models or provider-hosted services
 {% endif %}
-- **Batch Processing** - Efficiently process multiple documents in parallel - **Memory Efficient** - Stream large files
-without loading entirely into memory - **Language Detection** - Detect and support multiple languages in documents
+- **Batch Processing** - Efficiently process multiple documents in parallel
+- **Memory Efficient** - Stream large files without loading entirely into memory
+- **Language Detection** - Detect and support multiple languages in documents
 {% if features.code_intelligence %}
-  - **Code Intelligence** - Extract structure, imports, exports, symbols, and docstrings from [371 programming
-  languages](https://docs.tree-sitter-language-pack.xberg.io) via tree-sitter
+- **Code Intelligence** - Extract structure, imports, exports, symbols, and docstrings from [371 programming languages](https://docs.tree-sitter-language-pack.xberg.io) via tree-sitter
 {% endif %}
-- **Configuration** - Fine-grained control over extraction behavior - **Six Output Formats** - Plain text, Markdown,
-Djot, HTML, JSON tree structure, or Structured JSON with OCR metadata
+- **Configuration** - Fine-grained control over extraction behavior
+- **Six Output Formats** - Plain text, Markdown, Djot, HTML, JSON tree structure, or Structured JSON with OCR metadata
