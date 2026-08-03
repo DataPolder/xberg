@@ -97,7 +97,7 @@ Extract text, tables, images, metadata, and code intelligence from 101 file form
 Fetch the package and pin it in `build.zig.zon`:
 
 ```bash
-zig fetch --save https://github.com/xberg-io/xberg/archive/refs/tags/v1.0.10.tar.gz
+zig fetch --save https://github.com/xberg-io/xberg/archive/refs/tags/v1.0.11.tar.gz
 ```
 
 Then wire it into `build.zig`:

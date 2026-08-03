@@ -7,10 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [1.0.11] - 2026-08-03
 
 ### Fixed
 
+- The extraction HTTP server now bounds in-flight request concurrency so a burst of large uploads
+  can no longer exhaust memory and OOM-kill the process in memory-limited containers. The limit
+  defaults to `2 × CPU count` clamped to `[4, 32]`; override it with `XBERG_MAX_CONCURRENT_REQUESTS`
+  (set `0` to disable). (#1368)
 - PaddleOCR output now keeps consecutive visual text lines in the same Markdown paragraph instead
   of turning every detected line into a separate paragraph.
 - PaddleOCR and Tesseract automatic image rotation now use the document-orientation model's RGB
