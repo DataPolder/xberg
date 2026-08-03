@@ -142,6 +142,8 @@ pub enum Pipeline {
     PaddleServerLayout,
     /// Tesseract OCR with auto_rotate enabled
     TesseractAutoRotate,
+    /// PaddleOCR with auto_rotate enabled
+    PaddleAutoRotate,
     /// PaddleOCR without auto_rotate (for comparison)
     PaddleNoRotate,
     /// Docling vendored extraction (read from file)
@@ -206,6 +208,7 @@ impl Pipeline {
             Pipeline::PaddleServer => "paddle-v5-server",
             Pipeline::PaddleServerLayout => "paddle-v5-server+layout",
             Pipeline::TesseractAutoRotate => "tesseract-autorotate",
+            Pipeline::PaddleAutoRotate => "paddle-autorotate",
             Pipeline::PaddleNoRotate => "paddle-norotate",
             Pipeline::Docling => "docling",
             Pipeline::PaddleOcrPython => "paddleocr-python",
@@ -261,6 +264,7 @@ impl Pipeline {
                 Some(Pipeline::PaddleServerLayout)
             }
             "tesseract-autorotate" => Some(Pipeline::TesseractAutoRotate),
+            "paddle-autorotate" => Some(Pipeline::PaddleAutoRotate),
             "paddle-norotate" => Some(Pipeline::PaddleNoRotate),
             "docling" => Some(Pipeline::Docling),
             "paddleocr-python" => Some(Pipeline::PaddleOcrPython),
@@ -660,6 +664,15 @@ pub fn build_extraction_config(pipeline: Pipeline) -> xberg::ExtractionConfig {
             }),
             ..base
         },
+        Pipeline::PaddleAutoRotate => {
+            let mut config = build_paddle_extraction_config(PP_OCR_V6, "medium", None);
+            config
+                .ocr
+                .as_mut()
+                .expect("Paddle benchmark config must include OCR")
+                .auto_rotate = true;
+            config
+        }
         Pipeline::PaddleNoRotate => build_paddle_extraction_config(PP_OCR_V6, "medium", None),
         Pipeline::LayoutSlanetAuto => xberg::ExtractionConfig {
             layout: Some(LayoutDetectionConfig {
@@ -2182,6 +2195,19 @@ mod tests {
     }
 
     #[test]
+    fn paddle_rotation_presets_differ_only_by_auto_rotate() {
+        let auto_rotate = build_extraction_config(Pipeline::PaddleAutoRotate);
+        let no_rotate = build_extraction_config(Pipeline::PaddleNoRotate);
+        let auto_ocr = auto_rotate.ocr.expect("auto-rotate preset must configure OCR");
+        let no_rotate_ocr = no_rotate.ocr.expect("no-rotate preset must configure OCR");
+
+        assert!(auto_ocr.auto_rotate);
+        assert!(!no_rotate_ocr.auto_rotate);
+        assert_eq!(auto_ocr.backend, no_rotate_ocr.backend);
+        assert_eq!(auto_ocr.paddle_ocr_config, no_rotate_ocr.paddle_ocr_config);
+    }
+
+    #[test]
     fn paddle_quality_sweep_presets_are_opt_in() {
         let defaults = Pipeline::all_xberg();
         for pipeline in [
@@ -2870,6 +2896,7 @@ mod tests {
             "paddle-v5-server",
             "paddle-v5-server+layout",
             "tesseract-autorotate",
+            "paddle-autorotate",
             "tesseract-single-block",
             "tesseract-vertical-block",
             "tesseract-sparse-text",
