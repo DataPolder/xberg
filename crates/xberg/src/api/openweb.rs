@@ -167,3 +167,172 @@ pub(crate) async fn openweb_docling_handler(
         status: "success".to_string(),
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use axum::{
+        Router,
+        body::Body,
+        http::{Request, StatusCode},
+        routing::{post, put},
+    };
+    use tower::ServiceExt;
+
+    use super::*;
+
+    /// Tiny real fixture (39 bytes) from the shared `test_documents` corpus: plain text,
+    /// no OCR/network required, extracts to non-empty Markdown quickly.
+    fn fixture_bytes() -> Vec<u8> {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test_documents/text/plain.txt");
+        std::fs::read(&path).unwrap_or_else(|e| panic!("failed to read fixture {}: {e}", path.display()))
+    }
+
+    fn test_router() -> Router {
+        let extraction_service = crate::service::ExtractionServiceBuilder::new().build();
+        let state = ApiState {
+            default_config: std::sync::Arc::new(crate::ExtractionConfig::default()),
+            extraction_service: std::sync::Arc::new(std::sync::Mutex::new(extraction_service)),
+            #[cfg(feature = "api")]
+            job_store: std::sync::Arc::new(crate::api::jobs::JobStore::new()),
+        };
+
+        Router::new()
+            .route("/process", put(openweb_external_handler))
+            .route("/v1/convert/file", post(openweb_docling_handler))
+            .with_state(state)
+    }
+
+    #[tokio::test]
+    async fn openweb_process_returns_markdown_and_source() {
+        let app = test_router();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/process")
+                    .header("content-type", "text/plain")
+                    .header("X-Filename", "plain.txt")
+                    .body(Body::from(fixture_bytes()))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("handler responded");
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body bytes readable");
+        let parsed: OpenWebDocumentResponse =
+            serde_json::from_slice(&bytes).expect("response parses as OpenWebDocumentResponse");
+        assert!(!parsed.page_content.is_empty(), "page_content must be non-empty");
+        assert_eq!(parsed.metadata.source, "plain.txt");
+    }
+
+    #[tokio::test]
+    async fn openweb_process_rejects_empty_body() {
+        let app = test_router();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/process")
+                    .header("content-type", "text/plain")
+                    .header("X-Filename", "empty.txt")
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("handler responded");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn openweb_process_url_decodes_filename_header() {
+        let app = test_router();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/process")
+                    .header("content-type", "text/plain")
+                    .header("X-Filename", "my%20file.txt")
+                    .body(Body::from(fixture_bytes()))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("handler responded");
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body bytes readable");
+        let parsed: OpenWebDocumentResponse =
+            serde_json::from_slice(&bytes).expect("response parses as OpenWebDocumentResponse");
+        assert_eq!(parsed.metadata.source, "my file.txt");
+    }
+
+    #[tokio::test]
+    async fn openweb_docling_convert_returns_md_content() {
+        let app = test_router();
+        let boundary = "testboundary123";
+
+        let mut body = Vec::new();
+        body.extend_from_slice(
+            format!(
+                "--{boundary}\r\nContent-Disposition: form-data; name=\"files\"; filename=\"plain.txt\"\r\nContent-Type: text/plain\r\n\r\n"
+            )
+            .as_bytes(),
+        );
+        body.extend_from_slice(&fixture_bytes());
+        body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/convert/file")
+                    .header("content-type", format!("multipart/form-data; boundary={boundary}"))
+                    .body(Body::from(body))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("handler responded");
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body bytes readable");
+        let parsed: DoclingCompatResponse =
+            serde_json::from_slice(&bytes).expect("response parses as DoclingCompatResponse");
+        assert!(!parsed.document.md_content.is_empty(), "md_content must be non-empty");
+        assert_eq!(parsed.status, "success");
+    }
+
+    #[tokio::test]
+    async fn openweb_docling_rejects_missing_file() {
+        let app = test_router();
+        let boundary = "testboundary";
+        let body = format!("--{boundary}--\r\n");
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/convert/file")
+                    .header("content-type", format!("multipart/form-data; boundary={boundary}"))
+                    .body(Body::from(body))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("handler responded");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+}
