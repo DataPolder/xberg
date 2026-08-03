@@ -403,6 +403,9 @@ enabled = true
   "T201",
 ]
 "scripts/ci/docker/test_docker.py" = ["EXE001"]
+# Benchmark-matrix guard runs under `python3 -m unittest` (no pytest in the CI job),
+# so unittest-style assertions are intentional here. ~keep
+"scripts/ci/benchmarks/test_*.py" = ["PT009", "PT027"]
 "tools/benchmark-harness/python_baselines/*.py" = [
   "ANN001",
   "ANN201",
