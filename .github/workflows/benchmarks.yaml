@@ -1295,8 +1295,12 @@ jobs:
         run: |
           set -euo pipefail
           for clicohort in native ocr office markup ebook email data images; do
+            # Pass --fixtures-root explicitly (as the raw-artifact step above does): without it the
+            # binary falls back to a compile-time env!("CARGO_MANIFEST_DIR") path baked on the
+            # bench-rust build runner (/home/runner/_work/...), which does not exist on this runner.
             ./target/release/benchmark-harness validate-artifacts \
               --cohort "$clicohort" \
+              --fixtures-root tools/benchmark-harness/fixtures \
               --aggregated-file "consolidated-output/$clicohort/aggregated.json"
           done
 
