@@ -575,12 +575,13 @@ impl PaddleOcrBackend {
     }
 
     fn assemble_block_text(blocks: &[xberg_paddle_ocr::DetailedTextBlock], compact_vertical: bool) -> String {
+        // Detector blocks are visual lines, not paragraphs; Markdown keeps single newlines inside a paragraph. ~keep
         blocks
             .iter()
             .map(|block| block.block.text.as_str())
             .filter(|text| !text.is_empty())
             .collect::<Vec<_>>()
-            .join(if compact_vertical { "" } else { "\n\n" })
+            .join(if compact_vertical { "" } else { "\n" })
     }
 
     fn ranges_share_vertical_column(left_min: u32, left_max: u32, right_min: u32, right_max: u32) -> bool {
@@ -1150,6 +1151,19 @@ mod tests {
     }
 
     #[test]
+    fn horizontal_lines_remain_within_one_markdown_paragraph() {
+        let blocks = vec![
+            detailed_block("first visual line", 0, 0, 100, 10),
+            detailed_block("second visual line", 0, 20, 100, 10),
+        ];
+
+        assert_eq!(
+            PaddleOcrBackend::assemble_block_text(&blocks, false),
+            "first visual line\nsecond visual line"
+        );
+    }
+
+    #[test]
     fn mixed_japanese_layout_keeps_detector_order_and_separators() {
         let mut blocks = vec![
             detailed_block("title", 0, 0, 100, 10),
@@ -1166,7 +1180,7 @@ mod tests {
         );
         assert_eq!(
             PaddleOcrBackend::assemble_block_text(&blocks, vertical),
-            "title\n\nright\n\nleft"
+            "title\nright\nleft"
         );
     }
 

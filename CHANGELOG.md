@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- PaddleOCR output now keeps consecutive visual text lines in the same Markdown paragraph instead
+  of turning every detected line into a separate paragraph.
 - PaddleOCR and Tesseract automatic image rotation now use the document-orientation model's RGB
   input and existing probability output correctly, and recover sparse edge-aligned text that the
   model's standard center crop omitted.
