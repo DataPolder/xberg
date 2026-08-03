@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- CSV header inference no longer misclassifies all-text tables as headerless. A first row such as
+  `Name,City` is now treated as the header (the dominant CSV convention) instead of rendering a
+  broken blank header row with the real header pushed down into the data. A numeric-looking first
+  row is still treated as data. (#1369)
+
 ## [1.0.11] - 2026-08-03
 
 ### Fixed

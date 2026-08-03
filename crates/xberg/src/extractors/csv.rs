@@ -330,9 +330,15 @@ fn is_csv_number(cell: &str) -> bool {
 /// Detect whether the first row is a header row.
 ///
 /// Heuristic: the first row is considered a header if:
-/// - It has at least 2 columns
+/// - There are at least 2 rows and the first row has at least 2 columns
 /// - No cell in the first row looks numeric (all text/labels)
-/// - At least one cell in the data rows (rows 1-5) is numeric
+///
+/// A numeric-looking first row is treated as data (headerless). An all-text
+/// first row is treated as a header even when the data rows are also all text:
+/// that is the dominant CSV convention, and the previous heuristic — which also
+/// required at least one numeric data cell — misclassified all-text tables such
+/// as `Name,City / Alice,NYC` as headerless, rendering a broken blank header row
+/// (xberg-io/xberg#1369).
 fn detect_header(rows: &[Vec<String>]) -> bool {
     if rows.len() < 2 {
         return false;
@@ -343,13 +349,7 @@ fn detect_header(rows: &[Vec<String>]) -> bool {
         return false;
     }
 
-    if first_row.iter().any(|cell| is_csv_number(cell)) {
-        return false;
-    }
-
-    let data_rows = &rows[1..rows.len().min(6)];
-
-    data_rows.iter().any(|row| row.iter().any(|cell| is_csv_number(cell)))
+    !first_row.iter().any(|cell| is_csv_number(cell))
 }
 
 /// Infer column types by scanning the first N data rows.
@@ -661,9 +661,12 @@ mod tests {
 
     #[tokio::test]
     async fn should_render_headerless_csv_without_promoting_first_data_row() {
+        // A numeric first row is unambiguously data, so it stays headerless and
+        // the first row is not promoted into the header. (An all-text first row
+        // is treated as a header instead — see xberg-io/xberg#1369.)
         let extractor = CsvExtractor::new();
         let config = ExtractionConfig::default();
-        let csv_data = b"Alice,NYC,Engineer\nBob,LA,Designer\n";
+        let csv_data = b"1,2,3\n4,5,6\n";
 
         let result = extractor
             .extract_content(csv_data, "text/csv", &config)
@@ -672,11 +675,11 @@ mod tests {
 
         let markdown = crate::rendering::render_markdown(&result);
         assert!(markdown.starts_with("|  |  |  |\n| --- | --- | --- |\n"));
-        assert!(markdown.contains("| Alice | NYC | Engineer |"));
-        assert!(markdown.contains("| Bob | LA | Designer |"));
+        assert!(markdown.contains("| 1 | 2 | 3 |"));
+        assert!(markdown.contains("| 4 | 5 | 6 |"));
 
         let plain = crate::rendering::render_plain(&result);
-        assert_eq!(plain, "Alice NYC Engineer\nBob LA Designer");
+        assert_eq!(plain, "1 2 3\n4 5 6");
     }
 
     #[tokio::test]
@@ -767,7 +770,29 @@ mod tests {
             vec!["Alice".to_string(), "NYC".to_string()],
             vec!["Bob".to_string(), "LA".to_string()],
         ];
-        assert!(!detect_header(&rows), "Should not detect header when all data is text");
+        assert!(
+            detect_header(&rows),
+            "an all-text first row is the header by CSV convention, not a blank synthetic header (#1369)"
+        );
+    }
+
+    #[test]
+    fn all_text_csv_renders_first_row_as_header_not_blank() {
+        // Regression for xberg-io/xberg#1369: an all-text table must render its
+        // first row as the header, not a synthetic blank header with the real
+        // header pushed down into the data.
+        let rows = vec![
+            vec!["Name".to_string(), "City".to_string()],
+            vec!["Alice".to_string(), "NYC".to_string()],
+            vec!["Bob".to_string(), "LA".to_string()],
+        ];
+        let has_header = detect_header(&rows);
+        let markdown = build_markdown_table(&rows, has_header);
+
+        assert!(has_header);
+        assert!(!markdown.contains("|  |  |"), "must not emit a blank synthetic header row");
+        assert!(markdown.starts_with("| Name | City |\n| --- | --- |\n"));
+        assert!(markdown.contains("| Alice | NYC |"));
     }
 
     #[test]
