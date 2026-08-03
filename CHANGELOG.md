@@ -7,10 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [1.0.12] - 2026-08-03
 
 ### Fixed
 
+- The `xberg mcp` `extract` and `extract_batch` tools no longer emit structured output that fails
+  their own declared output schema. The schema required `errors` and the `crawl_*` fields, but a
+  normal extraction omits them when empty, so MCP clients (e.g. Claude Code) rejected the result.
+  Those fields are now optional in the schema, matching the serialized output. (#1372)
+- The `install.sh` script no longer creates a self-referential `xberg` symlink that shadowed the
+  installed binary, and it now selects the glibc (`-gnu`) build on standard Linux distributions
+  instead of always downloading the musl build — which failed to run on glibc systems such as
+  Ubuntu. musl systems (e.g. Alpine) still get the musl build. (#1371)
 - CSV header inference no longer misclassifies all-text tables as headerless. A first row such as
   `Name,City` is now treated as the header (the dominant CSV convention) instead of rendering a
   broken blank header row with the real header pushed down into the data. A numeric-looking first
