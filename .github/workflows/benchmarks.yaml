@@ -701,8 +701,9 @@ jobs:
       matrix:
         mode: [single-file]
         output_format: [markdown, plaintext]
-        # PyMuPDF4LLM emits markdown; run it over PDF plus the ebook and OCR-image families.
-        cohort: [native-pdf-fast-b8, native-ebook-fast, ocr-images-fast]
+        # PyMuPDF4LLM emits markdown and has no OCR path, so it runs the PDF and ebook families
+        # (which have text layers) but NOT the scanned-image cohort, where it would always be empty.
+        cohort: [native-pdf-fast-b8, native-ebook-fast]
         exclude:
           - output_format: plaintext
     steps:

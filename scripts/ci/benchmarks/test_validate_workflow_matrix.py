@@ -17,8 +17,8 @@ WORKFLOW = (REPOSITORY_ROOT / ".github/workflows/benchmarks.yaml").read_text()
 def test_expands_every_exact_contract_cell_once() -> None:
     cells = VALIDATOR.workflow_cells(WORKFLOW)
 
-    assert len(cells) == 117
-    assert len({VALIDATOR.cell_key(cell) for cell in cells}) == 117
+    assert len(cells) == 116
+    assert len({VALIDATOR.cell_key(cell) for cell in cells}) == 116
     assert sum(not cell["optional"] for cell in cells) == 80
 
 

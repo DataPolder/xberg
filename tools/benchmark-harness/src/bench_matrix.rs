@@ -581,11 +581,10 @@ fn email_matrix() -> Vec<MatrixEntry> {
 fn images_matrix() -> Vec<MatrixEntry> {
     let mut matrix = xberg_entries(IMAGES_COHORT, true, true);
     matrix.extend(optional(grid_entries("docling", IMAGES_COHORT)));
-    // pymupdf4llm's adapter path is `pymupdf4llm.to_markdown`, which exposes no OCR
-    // configuration, so it is NOT treated as OCR-language-capable: its fixture OCR
-    // language is never forwarded (no `with_ocr_language_arg`) and its image cell
-    // measures text-layer extraction only. Kept best-effort for that signal.
-    matrix.push(markdown_single_file_entry("pymupdf4llm", IMAGES_COHORT).into_optional());
+    // pymupdf4llm has no OCR path (`pymupdf4llm.to_markdown` only reads existing text layers), so on
+    // a scanned-image cohort it always returns empty content and can never clear the min-success-rate
+    // gate — it is excluded here to avoid a guaranteed-failing best-effort cell. It still runs the
+    // PDF/ebook cohorts, where a text layer exists.
     matrix.push(markdown_single_file_entry("mineru", IMAGES_COHORT).into_optional());
     // Tika and Unstructured are Tesseract-backed and now run the image OCR cohort too
     // (single-file, plaintext). Best-effort: absence never fails validation.
@@ -706,7 +705,7 @@ mod tests {
         (Cohort::Ebook, 6, 4),
         (Cohort::Email, 6, 4),
         (Cohort::Data, 11, 4),
-        (Cohort::Images, 24, 16),
+        (Cohort::Images, 23, 16),
     ];
 
     #[test]

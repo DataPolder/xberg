@@ -1121,16 +1121,29 @@ impl BenchmarkRunner {
                         self.cold_start_durations.insert(adapter.name().to_string(), cold_start);
                     }
                     Err(warmup_error) => {
-                        let teardown_error = Self::teardown_frameworks(&frameworks).await.err();
-                        let teardown_context = teardown_error
-                            .map(|error| format!("; teardown also failed: {error}"))
-                            .unwrap_or_default();
-                        return Err(Error::Benchmark(format!(
-                            "warmup failed for '{}': {}{}",
+                        // The subject-under-test (xberg) must warm up cleanly — a warmup failure
+                        // there is fatal. Best-effort competitors may legitimately fail warmup on
+                        // inputs they cannot handle (e.g. a non-OCR tool on a scanned image returns
+                        // empty content); treat that as non-fatal and let the per-file results and
+                        // the min-success-rate gate adjudicate the cell instead of aborting it.
+                        if adapter.name().starts_with("xberg") {
+                            let teardown_error = Self::teardown_frameworks(&frameworks).await.err();
+                            let teardown_context = teardown_error
+                                .map(|error| format!("; teardown also failed: {error}"))
+                                .unwrap_or_default();
+                            return Err(Error::Benchmark(format!(
+                                "warmup failed for '{}': {}{}",
+                                adapter.name(),
+                                warmup_error,
+                                teardown_context
+                            )));
+                        }
+                        eprintln!(
+                            "  Warning: warmup failed for best-effort framework '{}': {} \
+                             — continuing without a cold-start sample",
                             adapter.name(),
-                            warmup_error,
-                            teardown_context
-                        )));
+                            warmup_error
+                        );
                     }
                 }
             } else {
