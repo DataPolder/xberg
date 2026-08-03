@@ -790,7 +790,10 @@ mod tests {
         let markdown = build_markdown_table(&rows, has_header);
 
         assert!(has_header);
-        assert!(!markdown.contains("|  |  |"), "must not emit a blank synthetic header row");
+        assert!(
+            !markdown.contains("|  |  |"),
+            "must not emit a blank synthetic header row"
+        );
         assert!(markdown.starts_with("| Name | City |\n| --- | --- |\n"));
         assert!(markdown.contains("| Alice | NYC |"));
     }
