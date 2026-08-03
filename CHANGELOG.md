@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added Sceptre as a native ONNX Runtime OCR backend for desktop and server builds. Select it with
+  `ocr.backend = "sceptre"` or `--ocr-backend sceptre`; it returns line quadrilaterals and
+  recognition confidence, supports six EasyOCR gen2 language groups, and accepts native tuning
+  under `backend_options`.
+
 ### Fixed
 
 - Image OCR benchmarks now score structural F1 only against genuinely structured Markdown ground

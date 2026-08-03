@@ -82,7 +82,8 @@ Downloaded models and the extraction cache move from the `kreuzberg` path segmen
 
 ### Removed OCR backend
 
-The **EasyOCR** backend (a Python/torch-only extra in Kreuzberg) is removed. Use **Tesseract**,
-**PaddleOCR**, the pure-Rust **Candle** backend, or a **VLM** backend instead.
+The Python/torch **EasyOCR** backend from Kreuzberg is removed. Xberg 1.1 adds **Sceptre**, a native
+Rust implementation of the same CRAFT and CRNN pipeline. You can also use **Tesseract**,
+**PaddleOCR**, the pure-Rust **Candle** backend, or a **VLM** backend.
 
 See the [installation guide](/getting-started/installation/) for the current package names.

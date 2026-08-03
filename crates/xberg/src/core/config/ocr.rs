@@ -275,7 +275,8 @@ fn default_min_provenance_fallback_ratio() -> f64 {
 /// A single backend stage in the OCR pipeline.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OcrPipelineStage {
-    /// Backend name: "tesseract", "paddleocr", "paddle-ocr", "vlm", or a custom registered name.
+    /// Backend name: "tesseract", "paddleocr", "paddle-ocr", "sceptre", "vlm", or a custom registered name.
+    /// Sceptre is available only in native desktop and server builds, not WebAssembly, Android, or iOS.
     pub backend: String,
 
     /// Priority weight (higher = tried first). Stages are sorted by priority descending.
@@ -508,7 +509,8 @@ pub struct OcrConfig {
     #[serde(default = "default_ocr_enabled")]
     pub enabled: bool,
 
-    /// OCR backend: tesseract, paddleocr, paddle-ocr, or vlm
+    /// OCR backend: tesseract, paddleocr, paddle-ocr, sceptre, or vlm.
+    /// Sceptre is available only in native desktop and server builds, not WebAssembly, Android, or iOS.
     #[serde(default = "default_tesseract_backend")]
     pub backend: String,
 
@@ -681,6 +683,7 @@ impl OcrConfig {
     /// - tesseract
     /// - paddleocr
     /// - paddle-ocr
+    /// - sceptre
     /// - vlm
     ///
     /// Typos in backend names are caught at configuration validation time, not at runtime.

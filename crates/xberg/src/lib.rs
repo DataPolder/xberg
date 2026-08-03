@@ -156,6 +156,14 @@ pub(crate) mod inference;
 #[cfg(any(feature = "paddle-ocr", feature = "paddle-ocr-types"))]
 pub mod paddle_ocr;
 
+#[cfg(all(
+    feature = "sceptre-ocr",
+    not(target_arch = "wasm32"),
+    not(target_os = "android"),
+    not(target_os = "ios")
+))]
+pub mod sceptre_ocr;
+
 #[cfg(feature = "candle-ocr")]
 pub mod candle_ocr;
 
