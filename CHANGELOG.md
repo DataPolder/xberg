@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   language packs such as Japanese (`jpn_vert`) use vertical-block segmentation.
 - Standalone image extraction now reports successful OCR through `metadata.ocr_used` and the OCR
   extraction method, including layout-aware OCR results.
+- Tesseract now leaves source images unchanged when preprocessing is not configured, avoiding
+  quality loss from implicit DPI upscaling, background normalization, sharpening, and grayscale
+  conversion; explicitly configured preprocessing keeps the previous behavior.
 - CSV and TSV plaintext now use the canonical table renderer instead of lossy `Row N` and
   header-value prose.
 - Extracted EML and MSG attachment text is now included in the parent document while the structured

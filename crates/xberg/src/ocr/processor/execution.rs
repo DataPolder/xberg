@@ -384,6 +384,88 @@ const MIN_LIGHT_PIXEL_FRACTION_FOR_INVERT: f64 = 0.01;
 /// representative.
 const POLARITY_SAMPLE_STRIDE: i32 = 4;
 
+/// Source resolution used when OCR receives the original image unchanged.
+const RAW_IMAGE_SOURCE_DPI: i32 = 72;
+/// Source resolution retained when explicit DPI normalization fails.
+const PREPROCESSING_FALLBACK_SOURCE_DPI: i32 = 300;
+
+struct PreparedOcrImage {
+    data: Vec<u8>,
+    width: u32,
+    height: u32,
+    source_dpi: i32,
+    apply_pix_preprocessing: bool,
+}
+
+fn prepare_ocr_image(
+    rgb_data: Vec<u8>,
+    width: u32,
+    height: u32,
+    preprocessing: Option<&crate::types::ImagePreprocessingConfig>,
+    ci_debug_enabled: bool,
+) -> PreparedOcrImage {
+    let Some(preprocessing) = preprocessing else {
+        return PreparedOcrImage {
+            data: rgb_data,
+            width,
+            height,
+            source_dpi: RAW_IMAGE_SOURCE_DPI,
+            apply_pix_preprocessing: false,
+        };
+    };
+
+    prepare_preprocessed_ocr_image(rgb_data, width, height, preprocessing, ci_debug_enabled)
+}
+
+fn prepare_preprocessed_ocr_image(
+    rgb_data: Vec<u8>,
+    width: u32,
+    height: u32,
+    preprocessing: &crate::types::ImagePreprocessingConfig,
+    ci_debug_enabled: bool,
+) -> PreparedOcrImage {
+    let dpi_config = crate::types::ImageDpiConfig {
+        target_dpi: preprocessing.target_dpi,
+        ..Default::default()
+    };
+    match normalize_image_dpi_owned(rgb_data, width as usize, height as usize, &dpi_config, None) {
+        Ok(result) => {
+            let normalized_width = result.dimensions.0 as u32;
+            let normalized_height = result.dimensions.1 as u32;
+            let source_dpi = result.metadata.final_dpi;
+            log_ci_debug(ci_debug_enabled, "dpi_normalization", || {
+                format!(
+                    "original={}x{} normalized={}x{} target_dpi={} final_dpi={} resized={}",
+                    width,
+                    height,
+                    normalized_width,
+                    normalized_height,
+                    result.metadata.target_dpi,
+                    source_dpi,
+                    !result.metadata.skipped_resize
+                )
+            });
+            PreparedOcrImage {
+                data: result.rgb_data,
+                width: normalized_width,
+                height: normalized_height,
+                source_dpi,
+                apply_pix_preprocessing: true,
+            }
+        }
+        Err((error, data)) => {
+            tracing::warn!("DPI normalization failed, using original image: {}", error);
+            PreparedOcrImage {
+                data,
+                width,
+                height,
+                source_dpi: PREPROCESSING_FALLBACK_SOURCE_DPI,
+                apply_pix_preprocessing: true,
+            }
+        }
+    }
+}
+
 /// Decide whether an image should be inverted before OCR.
 ///
 /// `force_invert` mirrors `ImagePreprocessingConfig.invert_colors`: `true`
@@ -569,44 +651,17 @@ pub(super) fn perform_ocr(
         format!("dimensions={}x{} color_type=RGB8", orig_width, orig_height)
     });
 
-    let dpi_config = config
-        .preprocessing
-        .as_ref()
-        .map(|p| crate::types::ImageDpiConfig {
-            target_dpi: p.target_dpi,
-            ..Default::default()
-        })
-        .unwrap_or_default();
-
-    let (image_data, width, height, source_dpi) =
-        match normalize_image_dpi_owned(rgb_data, orig_width as usize, orig_height as usize, &dpi_config, None) {
-            Ok(result) => {
-                let w = result.dimensions.0 as u32;
-                let h = result.dimensions.1 as u32;
-                let final_dpi = result.metadata.final_dpi;
-
-                log_ci_debug(ci_debug_enabled, "dpi_normalization", || {
-                    format!(
-                        "original={}x{} normalized={}x{} target_dpi={} final_dpi={} resized={}",
-                        orig_width,
-                        orig_height,
-                        w,
-                        h,
-                        result.metadata.target_dpi,
-                        final_dpi,
-                        !result.metadata.skipped_resize
-                    )
-                });
-
-                (result.rgb_data, w, h, final_dpi)
-            }
-            Err((e, image_data)) => {
-                tracing::warn!("DPI normalization failed, using original image: {}", e);
-                let w = orig_width;
-                let h = orig_height;
-                (image_data, w, h, 300)
-            }
-        };
+    let prepared_image = prepare_ocr_image(
+        rgb_data,
+        orig_width,
+        orig_height,
+        config.preprocessing.as_ref(),
+        ci_debug_enabled,
+    );
+    let image_data = prepared_image.data;
+    let width = prepared_image.width;
+    let height = prepared_image.height;
+    let source_dpi = prepared_image.source_dpi;
     #[cfg_attr(not(auto_rotate), allow(unused_mut))]
     let mut ocr_image_width = width;
     #[cfg_attr(not(auto_rotate), allow(unused_mut))]
@@ -681,7 +736,7 @@ pub(super) fn perform_ocr(
 
     let force_invert_colors = config.preprocessing.as_ref().map(|p| p.invert_colors).unwrap_or(false);
 
-    let processed_pix: Option<xberg_tesseract::Pix> = {
+    let processed_pix: Option<xberg_tesseract::Pix> = if prepared_image.apply_pix_preprocessing {
         match xberg_tesseract::Pix::from_raw_rgb(&image_data, width, height) {
             Ok(mut pix) => {
                 if let Ok((xres, yres)) = pix.get_resolution()
@@ -704,6 +759,8 @@ pub(super) fn perform_ocr(
                 None
             }
         }
+    } else {
+        None
     };
 
     if let Some(ref pix) = processed_pix {
@@ -777,9 +834,13 @@ pub(super) fn perform_ocr(
                         rotate_rgb_image_data(&image_data, width, height, correction_deg);
                     let new_bytes_per_line = new_width * bytes_per_pixel;
 
-                    let rotated_pix = xberg_tesseract::Pix::from_raw_rgb(&rotated_data, new_width, new_height)
-                        .ok()
-                        .and_then(|pix| preprocess_pix(pix, force_invert_colors).ok());
+                    let rotated_pix = if prepared_image.apply_pix_preprocessing {
+                        xberg_tesseract::Pix::from_raw_rgb(&rotated_data, new_width, new_height)
+                            .ok()
+                            .and_then(|pix| preprocess_pix(pix, force_invert_colors).ok())
+                    } else {
+                        None
+                    };
 
                     if let Some(ref pix) = rotated_pix {
                         api.set_image_2(pix.as_ptr()).map_err(|e| {
@@ -1453,6 +1514,32 @@ mod tests {
         assert_eq!(processed.height(), height as i32);
         assert_eq!(processed.depth(), 8);
         assert_eq!(processed.get_resolution().unwrap(), (72, 72));
+    }
+
+    #[test]
+    fn test_prepare_ocr_image_without_config_preserves_original_rgb() {
+        let rgb_data = vec![0, 1, 2, 3, 4, 5];
+
+        let prepared = prepare_ocr_image(rgb_data.clone(), 2, 1, None, false);
+
+        assert_eq!(prepared.data, rgb_data);
+        assert_eq!(prepared.width, 2);
+        assert_eq!(prepared.height, 1);
+        assert_eq!(prepared.source_dpi, RAW_IMAGE_SOURCE_DPI);
+        assert!(!prepared.apply_pix_preprocessing);
+    }
+
+    #[test]
+    fn test_prepare_ocr_image_with_config_keeps_preprocessing_enabled() {
+        let rgb_data = vec![255; 12];
+        let preprocessing = crate::types::ImagePreprocessingConfig {
+            target_dpi: 72,
+            ..Default::default()
+        };
+
+        let prepared = prepare_ocr_image(rgb_data, 2, 2, Some(&preprocessing), false);
+
+        assert!(prepared.apply_pix_preprocessing);
     }
 
     #[test]
