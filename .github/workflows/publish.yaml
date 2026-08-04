@@ -3015,8 +3015,7 @@ jobs:
             dotnet pack packages/csharp/Xberg.Runtime/Xberg.Runtime.csproj \
               -c Release \
               -p:Version=${{ needs.prepare.outputs.version }} \
-              -p:Rid="${rid}" \
-              -p:NativeStageDir="$(pwd)/packages/csharp/Xberg/runtimes/${rid}/native" \
+              -p:PublishedRID="${rid}" \
               -o dist/nuget
           done
         shell: bash
