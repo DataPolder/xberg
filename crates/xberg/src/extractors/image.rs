@@ -1177,6 +1177,7 @@ impl ImageExtractor {
     }
 
     fn mark_ocr_extraction(doc: &mut InternalDocument) {
+        doc.metadata.ocr_used = true;
         doc.metadata.additional.insert(
             std::borrow::Cow::Borrowed("extraction_method"),
             serde_json::Value::String(crate::types::ExtractionMethod::Ocr.as_str().to_string()),
@@ -1651,6 +1652,7 @@ impl InternalDocumentExtractor for ImageExtractor {
                     || self.extract_with_ocr(content, mime_type, config),
                 )
                 .await?;
+                Self::mark_ocr_extraction(&mut doc);
                 doc.metadata.format = Some(crate::types::FormatMetadata::Image(image_metadata));
                 doc.mime_type = mime_type.to_string();
                 if config.needs_image_data() {
@@ -1665,6 +1667,7 @@ impl InternalDocumentExtractor for ImageExtractor {
             ))]
             {
                 let mut doc = self.extract_with_ocr(content, mime_type, config).await?;
+                Self::mark_ocr_extraction(&mut doc);
                 doc.metadata.format = Some(crate::types::FormatMetadata::Image(image_metadata));
                 doc.mime_type = mime_type.to_string();
                 if config.needs_image_data() {
@@ -1767,6 +1770,40 @@ mod tests {
 
     fn image_ocr_document(text: &str) -> InternalDocument {
         build_image_internal_document(Some(text), None)
+    }
+
+    #[test]
+    fn should_mark_metadata_when_standalone_image_ocr_succeeds() {
+        let mut doc = image_ocr_document("recognized text");
+
+        ImageExtractor::mark_ocr_extraction(&mut doc);
+        let result =
+            crate::extraction::derive::derive_extraction_result(doc, false, crate::core::config::OutputFormat::Plain);
+
+        assert!(result.metadata.ocr_used);
+        assert_eq!(result.extraction_method, Some(crate::types::ExtractionMethod::Ocr));
+    }
+
+    #[tokio::test]
+    async fn should_not_mark_metadata_when_standalone_image_ocr_is_disabled() {
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::ImageBuffer::<image::Rgb<u8>, _>::from_pixel(1, 1, image::Rgb([255u8, 255, 255]))
+            .write_to(&mut png, image::ImageFormat::Png)
+            .expect("failed to encode test PNG");
+        let config = ExtractionConfig {
+            disable_ocr: true,
+            ..Default::default()
+        };
+
+        let doc = ImageExtractor::new()
+            .extract_content(&png.into_inner(), "image/png", &config)
+            .await
+            .expect("metadata-only image extraction must succeed");
+        let result =
+            crate::extraction::derive::derive_extraction_result(doc, false, crate::core::config::OutputFormat::Plain);
+
+        assert!(!result.metadata.ocr_used);
+        assert_eq!(result.extraction_method, None);
     }
 
     #[test]
@@ -2792,6 +2829,11 @@ mod tests {
             crate::core::config::OutputFormat::Plain,
         );
 
+        assert!(
+            result.metadata.ocr_used,
+            "successful image OCR must be reflected in metadata"
+        );
+        assert_eq!(result.extraction_method, Some(crate::types::ExtractionMethod::Ocr));
         let pages = result
             .pages
             .as_ref()

@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Standalone-image Tesseract OCR now defaults to sparse-text segmentation, while cropped layout
   regions use single-block segmentation and explicit user settings remain unchanged. Vertical
   Japanese (`jpn_vert`) is also accepted as an OCR language.
+- Standalone image extraction now reports successful OCR through `metadata.ocr_used` and the OCR
+  extraction method, including layout-aware OCR results.
 - CSV and TSV plaintext now use the canonical table renderer instead of lossy `Row N` and
   header-value prose.
 - Extracted EML and MSG attachment text is now included in the parent document while the structured
