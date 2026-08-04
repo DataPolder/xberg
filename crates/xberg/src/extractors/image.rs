@@ -23,6 +23,9 @@ const WHOLE_IMAGE_TESSERACT_PSM: i32 = 11;
 ))]
 const WHOLE_IMAGE_TESSERACT_PSM: i32 = 6;
 
+#[cfg(any(feature = "ocr", feature = "ocr-wasm", feature = "ocr-pipeline"))]
+const VERTICAL_BLOCK_TESSERACT_PSM: i32 = 5;
+
 #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
 const LAYOUT_REGION_TESSERACT_PSM: i32 = 6;
 
@@ -1060,6 +1063,21 @@ fn apply_default_tesseract_psm(config: &mut crate::core::config::OcrConfig, psm:
     config.tesseract_config = Some(tesseract_config);
 }
 
+#[cfg(any(feature = "ocr", feature = "ocr-wasm", feature = "ocr-pipeline"))]
+fn apply_default_whole_image_tesseract_psm(config: &mut crate::core::config::OcrConfig) {
+    let has_vertical_language = config
+        .language
+        .iter()
+        .flat_map(|language| language.split('+'))
+        .any(|language| language.trim().to_ascii_lowercase().ends_with("_vert"));
+    let psm = if has_vertical_language {
+        VERTICAL_BLOCK_TESSERACT_PSM
+    } else {
+        WHOLE_IMAGE_TESSERACT_PSM
+    };
+    apply_default_tesseract_psm(config, psm);
+}
+
 #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
 fn uses_tatr_image_table_recognition(table_model: crate::core::config::layout::TableModel) -> bool {
     use crate::core::config::layout::TableModel;
@@ -1227,7 +1245,7 @@ impl ImageExtractor {
         };
 
         let mut ocr_config_with_format = ocr_config.clone();
-        apply_default_tesseract_psm(&mut ocr_config_with_format, WHOLE_IMAGE_TESSERACT_PSM);
+        apply_default_whole_image_tesseract_psm(&mut ocr_config_with_format);
         ocr_config_with_format.output_format = Some(config.output_format.clone());
         ocr_config_with_format.acceleration = config.acceleration.clone();
         #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
@@ -1737,35 +1755,56 @@ mod tests {
 
     #[cfg(any(feature = "ocr", feature = "ocr-wasm", feature = "ocr-pipeline"))]
     #[test]
-    fn should_apply_sparse_text_psm_to_default_whole_image_tesseract_config() {
+    fn should_apply_vertical_block_psm_to_default_vertical_tesseract_config() {
         let mut ocr_config = crate::core::config::OcrConfig {
             language: vec!["jpn_vert".to_string()],
             ..Default::default()
         };
 
-        apply_default_tesseract_psm(&mut ocr_config, WHOLE_IMAGE_TESSERACT_PSM);
+        apply_default_whole_image_tesseract_psm(&mut ocr_config);
+
+        let tesseract_config = ocr_config
+            .tesseract_config
+            .expect("whole-image OCR must materialize Tesseract configuration");
+        assert_eq!(tesseract_config.psm, VERTICAL_BLOCK_TESSERACT_PSM);
+        assert_eq!(tesseract_config.language, vec!["jpn_vert"]);
+    }
+
+    #[cfg(any(feature = "ocr", feature = "ocr-wasm", feature = "ocr-pipeline"))]
+    #[test]
+    fn should_apply_default_whole_image_psm_to_horizontal_tesseract_config() {
+        let mut ocr_config = crate::core::config::OcrConfig {
+            language: vec!["eng".to_string()],
+            ..Default::default()
+        };
+
+        apply_default_whole_image_tesseract_psm(&mut ocr_config);
 
         let tesseract_config = ocr_config
             .tesseract_config
             .expect("whole-image OCR must materialize Tesseract configuration");
         assert_eq!(tesseract_config.psm, WHOLE_IMAGE_TESSERACT_PSM);
-        assert_eq!(tesseract_config.language, vec!["jpn_vert"]);
+        assert_eq!(tesseract_config.language, vec!["eng"]);
     }
 
     #[cfg(any(feature = "ocr", feature = "ocr-wasm", feature = "ocr-pipeline"))]
     #[test]
     fn should_preserve_explicit_whole_image_tesseract_psm() {
         let mut ocr_config = crate::core::config::OcrConfig {
+            language: vec!["jpn_vert".to_string()],
             tesseract_config: Some(crate::types::TesseractConfig {
+                language: vec!["jpn_vert".to_string()],
                 psm: 4,
                 ..Default::default()
             }),
             ..Default::default()
         };
 
-        apply_default_tesseract_psm(&mut ocr_config, WHOLE_IMAGE_TESSERACT_PSM);
+        apply_default_whole_image_tesseract_psm(&mut ocr_config);
 
-        assert_eq!(ocr_config.tesseract_config.expect("explicit config must remain").psm, 4);
+        let tesseract_config = ocr_config.tesseract_config.expect("explicit config must remain");
+        assert_eq!(tesseract_config.psm, 4);
+        assert_eq!(tesseract_config.language, vec!["jpn_vert"]);
     }
 
     fn image_ocr_document(text: &str) -> InternalDocument {
