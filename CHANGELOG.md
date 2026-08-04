@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Japanese (`jpn_vert`) is also accepted as an OCR language.
 - CSV and TSV plaintext now use the canonical table renderer instead of lossy `Row N` and
   header-value prose.
+- Extracted EML and MSG attachment text is now included in the parent document while the structured
+  attachment children remain available.
 
 ## [1.0.12] - 2026-08-03
 
