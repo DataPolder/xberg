@@ -1310,12 +1310,28 @@ impl BenchmarkRunner {
                     && let Some(gt_text) = ground_truth_map.get(&result.file_path)
                 {
                     let md_gt = markdown_gt_map.get(&result.file_path).map(|s| s.as_str());
-                    result.quality = Some(crate::quality::compute_quality_with_structure(
-                        extracted,
-                        gt_text,
-                        md_gt,
-                        self.output_format,
-                    ));
+                    let quality =
+                        crate::quality::compute_quality_with_structure(extracted, gt_text, md_gt, self.output_format);
+
+                    // A result that reported success with no error yet produced zero token
+                    // overlap against a non-empty ground truth is not a legitimately "perfect
+                    // failure" quality sample — it is empty-or-garbage output masquerading as a
+                    // successful extraction. Left as success=true, its 0.0 gets pooled into
+                    // quality percentiles as a genuine (if terrible) score, which inflates
+                    // competitor win margins instead of counting against their success rate.
+                    // Reclassify it as a framework-fault failure so it is excluded from quality
+                    // percentiles but still counted in coverage/failure stats. Guarded on
+                    // non-empty ground truth so empty-GT fixtures are never punished. ~keep
+                    if result.success
+                        && result.error_kind == ErrorKind::None
+                        && !gt_text.trim().is_empty()
+                        && quality.f1_score_text == 0.0
+                    {
+                        result.success = false;
+                        result.error_kind = ErrorKind::EmptyContent;
+                    }
+
+                    result.quality = Some(quality);
                 }
             }
         }
@@ -1473,6 +1489,141 @@ mod tests {
                 per_item_timing: false,
             })
         }
+    }
+
+    /// Adapter that always reports success with a fixed, caller-supplied extracted text —
+    /// used to drive the `run()` quality-scoring loop's silent-zero reclassification with a
+    /// controlled extracted-text/ground-truth pairing.
+    struct ScriptedTextAdapter {
+        text: String,
+    }
+
+    #[async_trait::async_trait]
+    impl FrameworkAdapter for ScriptedTextAdapter {
+        fn name(&self) -> &str {
+            "scripted-text"
+        }
+
+        fn supports_format(&self, file_type: &str) -> bool {
+            file_type == "pdf"
+        }
+
+        fn supported_output_formats(&self) -> Vec<OutputFormat> {
+            vec![OutputFormat::Markdown]
+        }
+
+        async fn extract(
+            &self,
+            file_path: &Path,
+            _timeout: Duration,
+            _force_ocr: bool,
+            _ocr_language: Option<&str>,
+            output_format: OutputFormat,
+        ) -> Result<BenchmarkResult> {
+            Ok(BenchmarkResult {
+                framework: self.name().to_string(),
+                output_format,
+                file_path: file_path.to_path_buf(),
+                file_size: 1,
+                success: true,
+                error_message: None,
+                error_kind: ErrorKind::None,
+                duration: Duration::from_millis(1),
+                extraction_duration: None,
+                subprocess_overhead: None,
+                metrics: PerformanceMetrics::default(),
+                quality: None,
+                iterations: vec![],
+                statistics: None,
+                cold_start_duration: None,
+                file_extension: "pdf".to_string(),
+                framework_capabilities: FrameworkCapabilities::default(),
+                pdf_metadata: None,
+                ocr_status: OcrStatus::NotUsed,
+                extracted_text: Some(self.text.clone()),
+                system_load: None,
+            })
+        }
+    }
+
+    /// Runs `runner.run()` end-to-end for a single "document.pdf" fixture whose ground-truth
+    /// text is `ground_truth_text`, extracted by [`ScriptedTextAdapter`] returning
+    /// `extracted_text`. Mirrors the fixture/ground-truth setup used by
+    /// `standard_single_and_batch_runners_populate_numeric_tf1_and_sf1`.
+    async fn run_scripted_quality_case(ground_truth_text: &str, extracted_text: &str) -> BenchmarkResult {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("document.pdf"), b"pdf").unwrap();
+        std::fs::write(temp.path().join("ground_truth.txt"), ground_truth_text).unwrap();
+        let fixture_path = temp.path().join("fixture.json");
+        std::fs::write(
+            &fixture_path,
+            serde_json::json!({
+                "document": "document.pdf",
+                "file_type": "pdf",
+                "file_size": 3,
+                "ground_truth": {
+                    "text_file": "ground_truth.txt",
+                    "source": "manual"
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let mut registry = AdapterRegistry::new();
+        registry
+            .register(Arc::new(ScriptedTextAdapter {
+                text: extracted_text.to_string(),
+            }))
+            .unwrap();
+        let config = BenchmarkConfig {
+            benchmark_mode: BenchmarkMode::SingleFile,
+            measure_quality: true,
+            warmup_iterations: 0,
+            benchmark_iterations: 1,
+            ..Default::default()
+        };
+        let mut runner = BenchmarkRunner::new(config, registry);
+        runner.load_fixtures(&fixture_path).unwrap();
+
+        let mut results = runner.run(&["scripted-text".to_string()]).await.unwrap();
+        results.remove(0)
+    }
+
+    #[tokio::test]
+    async fn zero_overlap_result_is_reclassified_as_empty_content_failure() {
+        let result = run_scripted_quality_case("expected reference text", "totally unrelated garbage").await;
+
+        let quality = result.quality.as_ref().expect("quality is still populated");
+        assert_eq!(quality.f1_score_text, 0.0);
+        assert!(!result.success, "zero-overlap result must be reclassified as a failure");
+        assert_eq!(result.error_kind, ErrorKind::EmptyContent);
+    }
+
+    #[tokio::test]
+    async fn nonzero_overlap_result_is_not_reclassified() {
+        let result = run_scripted_quality_case("expected reference text", "expected reference text").await;
+
+        let quality = result.quality.as_ref().expect("quality is populated");
+        assert!(quality.f1_score_text > 0.0);
+        assert!(result.success, "a genuine partial/full match must stay a success");
+        assert_eq!(result.error_kind, ErrorKind::None);
+    }
+
+    #[tokio::test]
+    async fn empty_ground_truth_is_not_reclassified() {
+        // Ground truth is empty (after trim); f1_score_text is 0.0 by definition (extracted is
+        // non-empty, truth is empty), but the fixture itself carries no signal to score against,
+        // so the result must not be punished as an empty-content failure.
+        let result = run_scripted_quality_case("   ", "some extracted text").await;
+
+        let quality = result.quality.as_ref().expect("quality is populated");
+        assert_eq!(quality.f1_score_text, 0.0);
+        assert!(
+            result.success,
+            "empty ground truth must never be reclassified as a failure"
+        );
+        assert_eq!(result.error_kind, ErrorKind::None);
     }
 
     impl SequenceAdapter {
