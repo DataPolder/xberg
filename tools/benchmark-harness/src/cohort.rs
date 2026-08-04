@@ -210,6 +210,26 @@ mod tests {
     }
 
     #[test]
+    fn image_cohorts_are_fully_eligible_for_sceptre() {
+        use crate::adapter::OcrLanguagePolicy;
+
+        let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        for cohort in ["ocr-images-structured", "ocr-images-fast"] {
+            let manifest_path = crate_root.join(format!("cohorts/{cohort}.json"));
+            let manifest = CohortManifest::from_file(&manifest_path).unwrap();
+            let fixtures = manifest
+                .load_fixtures(&crate_root.join("fixtures"), &manifest_path)
+                .unwrap();
+
+            assert!(manifest.ocr_enabled);
+            assert_eq!(fixtures.len(), manifest.batch_size);
+            assert!(fixtures.fixtures().iter().all(|(_, fixture)| {
+                fixture.requires_ocr() && OcrLanguagePolicy::SceptrePerDocument.supports(fixture.ocr_language())
+            }));
+        }
+    }
+
+    #[test]
     fn ocr_pdf_fast_b4_is_loadable_with_quality_ground_truth() {
         const BATCH_SIZE: usize = 4;
 
