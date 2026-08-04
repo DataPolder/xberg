@@ -9,6 +9,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.13] - 2026-08-04
+
+### Fixed
+
+- OCR-backed PDF extraction now preserves geometry-derived document structure without requiring
+  optional ML layout detection, including pages replaced by mixed native/OCR extraction, and keeps
+  consecutive Tesseract paragraphs in their shared hOCR text area.
+- PDF table reconstruction now rejects sparse, short-wide contact blocks that were previously
+  misclassified as tables.
+- Standalone-image Tesseract OCR now defaults to sparse-text segmentation, while cropped layout
+  regions use single-block segmentation and explicit user settings remain unchanged. Vertical
+  language packs such as Japanese (`jpn_vert`) use vertical-block segmentation.
+- Standalone image extraction now reports successful OCR through `metadata.ocr_used` and the OCR
+  extraction method, including layout-aware OCR results.
+- Tesseract now applies its default image preprocessing only to clean, near-white document pages;
+  shadowed receipts and photographic images keep their source pixels, avoiding quality loss from
+  destructive DPI upscaling, background normalization, sharpening, and grayscale conversion.
+- Sparse, low-confidence standalone Tesseract results now retry the previous automatic page
+  segmentation with explicit preprocessing and use it only when word confidence is consistently
+  strong, recovering difficult receipts and scene text without replacing reliable sparse output.
+- CSV and TSV plaintext now use the canonical table renderer instead of lossy `Row N` and
+  header-value prose.
+- Extracted EML and MSG attachment text is now included in the parent document while the structured
+  attachment children remain available.
+- DOCX extraction now emits a tab character for an in-run `<w:tab/>` instead of dropping it, so
+  tab-separated fields — most visibly Word table-of-contents rows — no longer weld adjacent words
+  together (`Alpha<tab>Beta` was extracted as `AlphaBeta`). Tab-stop definitions remain invisible.
+  (#1377)
+- The Swift package builds and publishes again. The cross-compiled desktop `xberg-ffi` dependency no
+  longer pulls in HEIC (`libheif-sys`, which has no cross-compile support) or the Candle OCR
+  backends, which had broken Swift package publishing in 1.0.12.
+- The NuGet runtime packages for macOS and Linux (`osx-x64`, `osx-arm64`, `linux-x64`, `linux-arm64`)
+  now publish at the current version instead of being stuck at an older one; previously only the
+  Windows runtime package was updated. (#1375)
+- The public in-browser (WASM) demo now attributes its file-size limit to the browser sandbox and
+  points to the CLI and API for large or multi-page documents, instead of implying the document
+  itself is at fault. (#1376)
+
 ## [1.0.12] - 2026-08-03
 
 ### Fixed

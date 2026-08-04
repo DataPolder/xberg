@@ -41,13 +41,13 @@ import (
 )
 
 const (
-	moduleVersion     = "1.0.12"
+	moduleVersion     = "1.0.13"
 	repoURL           = "https://github.com/xberg-io/xberg"
 	assetPrefix       = "xberg"
 	ffiLibName        = "xberg_ffi"
 	crateName         = "xberg"
 	shimFilename      = "xberg_cgo_link.go"
-	versionIdent      = "1_0_12"
+	versionIdent      = "1_0_13"
 	envOverrideVar    = "XBERG_GO_NATIVE_BASE_URL"
 	bindingImportPath = "github.com/xberg-io/xberg/packages/go"
 	bindingImportName = "xbergnativesetup"

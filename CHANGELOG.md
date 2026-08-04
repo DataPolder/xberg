@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.13] - 2026-08-04
+
 ### Fixed
 
 - OCR-backed PDF extraction now preserves geometry-derived document structure without requiring
@@ -31,6 +33,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   header-value prose.
 - Extracted EML and MSG attachment text is now included in the parent document while the structured
   attachment children remain available.
+- DOCX extraction now emits a tab character for an in-run `<w:tab/>` instead of dropping it, so
+  tab-separated fields — most visibly Word table-of-contents rows — no longer weld adjacent words
+  together (`Alpha<tab>Beta` was extracted as `AlphaBeta`). Tab-stop definitions remain invisible.
+  (#1377)
+- The Swift package builds and publishes again. The cross-compiled desktop `xberg-ffi` dependency no
+  longer pulls in HEIC (`libheif-sys`, which has no cross-compile support) or the Candle OCR
+  backends, which had broken Swift package publishing in 1.0.12.
+- The NuGet runtime packages for macOS and Linux (`osx-x64`, `osx-arm64`, `linux-x64`, `linux-arm64`)
+  now publish at the current version instead of being stuck at an older one; previously only the
+  Windows runtime package was updated. (#1375)
+- The public in-browser (WASM) demo now attributes its file-size limit to the browser sandbox and
+  points to the CLI and API for large or multi-page documents, instead of implying the document
+  itself is at fault. (#1376)
 
 ## [1.0.12] - 2026-08-03
 

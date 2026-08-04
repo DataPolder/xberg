@@ -2115,7 +2115,6 @@ mod tests {
                 continue;
             };
             // A `tesseract_config` that already existed (explicit PSM presets, e.g.
-            // `Pipeline::TesseractSingleBlock`) must have its result cache disabled. A pipeline
             // that leaves `tesseract_config` implicit (auto-PSM) must keep it absent — xberg only
             // auto-selects PSM when `ocr.tesseract_config` is absent, so materializing one here
             // to force `use_cache = false` would silently pin PSM to the default (3).
@@ -2408,7 +2407,6 @@ mod tests {
             assert_eq!(ocr.backend, "tesseract");
             // `tesseract_config` must be materialized (only) once the fixture's language is
             // final, so its PSM matches what xberg's own auto-selection would have picked for
-            // "deu"+"eng" (non-vertical) instead of pinning `TesseractConfig::default()`'s PSM 3.
             let tesseract = ocr
                 .tesseract_config
                 .expect("finalize_timed_ocr_result_cache must materialize a tesseract_config");
@@ -2441,7 +2439,6 @@ mod tests {
 
         let ocr = config.ocr.expect("Tesseract pipeline must configure OCR");
         assert_eq!(ocr.language, ["jpn_vert"]);
-        // `Pipeline::TesseractLayout` leaves `tesseract_config` implicit (auto-PSM); finalizing
         // the timed result cache must materialize one with the vertical-language PSM 5 xberg
         // selects for `*_vert` languages, not the default PSM 3.
         let tesseract = ocr
@@ -2455,7 +2452,6 @@ mod tests {
     #[test]
     fn fixture_language_refreshes_stale_implicit_stage_language_before_finalizing_psm() {
         // BLOCKER 2 regression: a Tesseract pipeline stage that already pins its own `language`
-        // (e.g. `Some(["eng"])`, distinct from a *fresh* implicit stage with `language: None`)
         // must NOT stay stale after `apply_fixture_ocr_language` runs. If it did,
         // `finalize_timed_ocr_result_cache` would prefer that stale per-stage language over the
         // fixture's real one (matching xberg's own "stage language wins over parent" semantics)

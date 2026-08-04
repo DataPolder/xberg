@@ -7,7 +7,7 @@ title: "Python API Reference"
 <!-- To regenerate: alef docs -->
 <!-- To verify freshness: alef verify --exit-code -->
 
-## Python API Reference <span class="version-badge">v1.0.12</span>
+## Python API Reference <span class="version-badge">v1.0.13</span>
 
 ### Functions
 

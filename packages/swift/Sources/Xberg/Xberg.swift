@@ -13043,7 +13043,7 @@ extension RustBridge.ConversionOptions: @unchecked Sendable {}
 extension RustBridge.PreprocessingOptions: @unchecked Sendable {}
 // swift-bridge opaque type referenced in async forwarder return — Rust type is Send + Sync.
 // Auto-included even when the IR filter excluded it (e.g. cfg-gated alef(skip) stub).
-extension RustBridge.SparseEmbedding: @unchecked Sendable {}
+extension RustBridge.MultiVectorEmbedding: @unchecked Sendable {}
 // swift-bridge opaque type referenced in async forwarder return — Rust type is Send + Sync.
 // Auto-included even when the IR filter excluded it (e.g. cfg-gated alef(skip) stub).
-extension RustBridge.MultiVectorEmbedding: @unchecked Sendable {}
+extension RustBridge.SparseEmbedding: @unchecked Sendable {}
