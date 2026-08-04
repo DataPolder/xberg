@@ -38,8 +38,7 @@ const TESSERACT_BENCHMARK_CONFIG_JSON: &str = r#"{
     "force_ocr":true,
     "ocr":{
         "enabled":true,
-        "backend":"tesseract",
-        "tesseract_config":{"use_cache":false}
+        "backend":"tesseract"
     }
 }"#;
 
@@ -375,15 +374,19 @@ mod tests {
     }
 
     #[test]
-    fn tesseract_benchmark_config_forces_ocr_and_disables_cache() {
+    fn tesseract_benchmark_config_forces_ocr_without_pinning_psm() {
         let config = merged_benchmark_config(true);
         assert!(config.force_ocr);
         let ocr = config.ocr.unwrap();
-        let tesseract = ocr.tesseract_config.unwrap();
 
         assert!(ocr.enabled);
         assert_eq!(ocr.backend, "tesseract");
-        assert!(!tesseract.use_cache);
+        // `tesseract_config` must stay absent so xberg's own auto-PSM selection
+        // (`apply_default_whole_image_tesseract_psm`) fires instead of the pinned PSM 3 default. ~keep
+        assert!(
+            ocr.tesseract_config.is_none(),
+            "benchmark config must not materialize tesseract_config, or it would pin PSM 3"
+        );
     }
 
     #[test]
