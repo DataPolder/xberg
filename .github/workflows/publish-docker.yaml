@@ -81,7 +81,7 @@ jobs:
         with:
           ref: ${{ steps.meta.outputs.checkout_ref }}
           fetch-depth: 0
-          submodules: recursive
+          submodules: false
           lfs: true
 
       - name: Show metadata
@@ -186,7 +186,7 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
-          submodules: recursive
+          submodules: false
           lfs: true
 
       - name: Free up disk space
