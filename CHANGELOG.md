@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - OCR-backed PDF extraction now preserves geometry-derived document structure without requiring
   optional ML layout detection, including pages replaced by mixed native/OCR extraction.
+- Standalone-image Tesseract OCR now defaults to sparse-text segmentation, while cropped layout
+  regions use single-block segmentation and explicit user settings remain unchanged. Vertical
+  Japanese (`jpn_vert`) is also accepted as an OCR language.
 
 ## [1.0.12] - 2026-08-03
 

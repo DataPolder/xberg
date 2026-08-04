@@ -9,6 +9,23 @@ use crate::types::internal_builder::InternalDocumentBuilder;
 use crate::types::metadata::Metadata;
 use async_trait::async_trait;
 
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    any(feature = "ocr", feature = "ocr-wasm", feature = "ocr-pipeline")
+))]
+const WHOLE_IMAGE_TESSERACT_PSM: i32 = 11;
+
+// Tesseract's automatic layout modes can hang under the single-threaded WASM
+// runtime, so retain the existing single-block default there. ~keep
+#[cfg(all(
+    target_arch = "wasm32",
+    any(feature = "ocr", feature = "ocr-wasm", feature = "ocr-pipeline")
+))]
+const WHOLE_IMAGE_TESSERACT_PSM: i32 = 6;
+
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+const LAYOUT_REGION_TESSERACT_PSM: i32 = 6;
+
 #[cfg(any(test, all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm"))))]
 const MIN_LAYOUT_OCR_ALPHANUMERIC_TOKEN_RETENTION: f64 = 0.80;
 
@@ -1016,6 +1033,7 @@ fn configured_region_ocr(
     let mut region_config = ocr_config.clone();
     region_config.output_format = Some(crate::core::config::OutputFormat::Plain);
     if region_config.backend == "tesseract" {
+        apply_default_tesseract_psm(&mut region_config, LAYOUT_REGION_TESSERACT_PSM);
         // Layout assembly consumes region text only; skip redundant Tesseract hOCR and
         // document-level table reconstruction when region OCR is unavoidable. ~keep
         let tesseract_config = region_config.tesseract_config.get_or_insert_default();
@@ -1026,6 +1044,20 @@ fn configured_region_ocr(
         region_config.acceleration = config.acceleration.clone();
     }
     Ok((backend, region_config))
+}
+
+#[cfg(any(feature = "ocr", feature = "ocr-wasm", feature = "ocr-pipeline"))]
+fn apply_default_tesseract_psm(config: &mut crate::core::config::OcrConfig, psm: i32) {
+    if config.backend != "tesseract" || config.tesseract_config.is_some() {
+        return;
+    }
+
+    let tesseract_config = crate::types::TesseractConfig {
+        language: config.language.clone(),
+        psm,
+        ..Default::default()
+    };
+    config.tesseract_config = Some(tesseract_config);
 }
 
 #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
@@ -1194,6 +1226,7 @@ impl ImageExtractor {
         };
 
         let mut ocr_config_with_format = ocr_config.clone();
+        apply_default_tesseract_psm(&mut ocr_config_with_format, WHOLE_IMAGE_TESSERACT_PSM);
         ocr_config_with_format.output_format = Some(config.output_format.clone());
         ocr_config_with_format.acceleration = config.acceleration.clone();
         #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
@@ -1699,6 +1732,39 @@ impl InternalDocumentExtractor for ImageExtractor {
 mod tests {
     use super::*;
 
+    #[cfg(any(feature = "ocr", feature = "ocr-wasm", feature = "ocr-pipeline"))]
+    #[test]
+    fn should_apply_sparse_text_psm_to_default_whole_image_tesseract_config() {
+        let mut ocr_config = crate::core::config::OcrConfig {
+            language: vec!["jpn_vert".to_string()],
+            ..Default::default()
+        };
+
+        apply_default_tesseract_psm(&mut ocr_config, WHOLE_IMAGE_TESSERACT_PSM);
+
+        let tesseract_config = ocr_config
+            .tesseract_config
+            .expect("whole-image OCR must materialize Tesseract configuration");
+        assert_eq!(tesseract_config.psm, WHOLE_IMAGE_TESSERACT_PSM);
+        assert_eq!(tesseract_config.language, vec!["jpn_vert"]);
+    }
+
+    #[cfg(any(feature = "ocr", feature = "ocr-wasm", feature = "ocr-pipeline"))]
+    #[test]
+    fn should_preserve_explicit_whole_image_tesseract_psm() {
+        let mut ocr_config = crate::core::config::OcrConfig {
+            tesseract_config: Some(crate::types::TesseractConfig {
+                psm: 4,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        apply_default_tesseract_psm(&mut ocr_config, WHOLE_IMAGE_TESSERACT_PSM);
+
+        assert_eq!(ocr_config.tesseract_config.expect("explicit config must remain").psm, 4);
+    }
+
     fn image_ocr_document(text: &str) -> InternalDocument {
         build_image_internal_document(Some(text), None)
     }
@@ -1983,8 +2049,29 @@ mod tests {
             Some(crate::core::config::OutputFormat::Plain)
         );
         assert_eq!(tesseract_config.output_format, "text");
+        assert_eq!(tesseract_config.psm, 6);
         assert!(!tesseract_config.enable_table_detection);
         assert!(ocr_config.tesseract_config.is_none());
+    }
+
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    #[test]
+    fn should_preserve_explicit_tesseract_psm_for_region_ocr() {
+        let extraction_config = ExtractionConfig::default();
+        let ocr_config = crate::core::config::OcrConfig {
+            tesseract_config: Some(crate::types::TesseractConfig {
+                psm: 4,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let (_, region_config) = configured_region_ocr(&extraction_config, &ocr_config).unwrap();
+
+        assert_eq!(
+            region_config.tesseract_config.expect("explicit config must remain").psm,
+            4
+        );
     }
 
     #[cfg(all(feature = "layout-detection", feature = "ocr"))]

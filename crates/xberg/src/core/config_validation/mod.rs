@@ -138,6 +138,8 @@ mod tests {
         assert!(validate_language_code("spa").is_ok());
         assert!(validate_language_code("zho").is_ok());
         assert!(validate_language_code("jpn").is_ok());
+        assert!(validate_language_code("jpn_vert").is_ok());
+        assert!(validate_language_code("JPN_VERT").is_ok());
         assert!(validate_language_code("kor").is_ok());
     }
 

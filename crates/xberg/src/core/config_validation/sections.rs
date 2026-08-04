@@ -61,6 +61,7 @@ const VALID_LANGUAGE_CODES: &[&str] = &[
     "rus",
     "zho",
     "jpn",
+    "jpn_vert",
     "kor",
     "ces",
     "dan",
