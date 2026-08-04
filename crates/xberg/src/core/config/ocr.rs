@@ -276,7 +276,8 @@ fn default_min_provenance_fallback_ratio() -> f64 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OcrPipelineStage {
     /// Backend name: "tesseract", "paddleocr", "paddle-ocr", "sceptre", "vlm", or a custom registered name.
-    /// Sceptre is available only in native desktop and server builds, not WebAssembly, Android, or iOS.
+    /// Sceptre uses ONNX Runtime on desktop/server and tract on Android/iOS; browser WebAssembly has a separate
+    /// byte-fed engine because the normal async OCR registry assumes native model storage.
     pub backend: String,
 
     /// Priority weight (higher = tried first). Stages are sorted by priority descending.
@@ -510,7 +511,8 @@ pub struct OcrConfig {
     pub enabled: bool,
 
     /// OCR backend: tesseract, paddleocr, paddle-ocr, sceptre, or vlm.
-    /// Sceptre is available only in native desktop and server builds, not WebAssembly, Android, or iOS.
+    /// Sceptre uses ONNX Runtime on desktop/server and tract on supported mobile builds.
+    /// Browser WebAssembly uses the separate byte-fed Sceptre worker API.
     #[serde(default = "default_tesseract_backend")]
     pub backend: String,
 

@@ -149,6 +149,12 @@ mod tests {
                 "Sceptre language {language} should pass shared validation"
             );
         }
+        for language in ["ch_sim", "rs_latin", "rs-cyrillic", "tel", "kan", "abq", "tjk"] {
+            assert!(
+                validate_language_code(language).is_ok(),
+                "EasyOCR Gen2 language {language} should pass shared validation"
+            );
+        }
     }
 
     #[test]

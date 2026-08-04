@@ -80,6 +80,13 @@ const VALID_LANGUAGE_CODES: &[&str] = &[
     "chinese_cht",
     "latin",
     "cyrillic",
+    "english",
+    "japanese",
+    "korean",
+    "telugu",
+    "kannada",
+    "chinese-simplified",
+    "simplified-chinese",
     "devanagari",
     "arabic",
     // ISO codes and established aliases accepted by the Sceptre backend that are
@@ -147,6 +154,40 @@ const VALID_LANGUAGE_CODES: &[&str] = &[
     "uz",
     "uzb",
     "vie",
+    "ku",
+    "kur",
+    "la",
+    "lat",
+    "oc",
+    "oci",
+    "pi",
+    "pli",
+    "te",
+    "tel",
+    "kn",
+    "kan",
+    "abq",
+    "ady",
+    "kbd",
+    "ava",
+    "dar",
+    "inh",
+    "che",
+    "lbe",
+    "lez",
+    "tab",
+    "tjk",
+    "ch_sim",
+    "ch-sim",
+    "rs_latin",
+    "rs-latin",
+    "rs_cyrillic",
+    "rs-cyrillic",
+    "jpn-vert",
+    "sr-latn",
+    "srp-latn",
+    "sr-cyrl",
+    "srp-cyrl",
     "zh-cn",
     "zh-hans",
     "chi",
@@ -300,12 +341,13 @@ pub(crate) fn validate_ocr_backend(backend: &str) -> Result<()> {
 #[cfg_attr(alef, alef(skip))]
 pub(crate) fn validate_language_code(code: &str) -> Result<()> {
     let code_lower = code.to_lowercase();
+    let code_normalized = code_lower.replace('_', "-");
 
     if code_lower == "all" || code_lower == "*" {
         return Ok(());
     }
 
-    if VALID_LANGUAGE_CODES.contains(&code_lower.as_str()) {
+    if VALID_LANGUAGE_CODES.contains(&code_lower.as_str()) || VALID_LANGUAGE_CODES.contains(&code_normalized.as_str()) {
         return Ok(());
     }
 

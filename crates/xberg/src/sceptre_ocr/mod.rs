@@ -1,8 +1,8 @@
-//! Native Sceptre OCR backend.
+//! Sceptre OCR backend.
 //!
 //! Sceptre runs CRAFT text detection followed by CRNN recognition through ONNX
-//! Runtime. Readers are initialized lazily and cached by their effective model
-//! and inference configuration.
+//! Runtime or the pure-Rust tract engine. Readers are initialized lazily and
+//! cached by their effective model and inference configuration.
 
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
@@ -16,6 +16,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::core::config::{ExecutionProviderType, OcrConfig};
 use crate::plugins::{OcrBackend, OcrBackendType, Plugin};
+use crate::sceptre_languages::{language_group, language_group_name, supported_language_aliases};
 use crate::types::internal::{ElementKind, InternalDocument, InternalElement};
 use crate::types::{
     BoundingBox, ExtractedDocument, FormatMetadata, Metadata, OcrBoundingGeometry, OcrConfidence, OcrElement,
@@ -39,6 +40,10 @@ const READER_CACHE_CAPACITY: usize = 4;
 // A transient overflow slot prevents requests from blocking when every cached
 // reader is active while still bounding heavyweight reader initialization. ~keep
 const READER_OVERFLOW_CAPACITY: usize = 1;
+// A Sceptre reader already parallelizes detection and recognition internally.
+// Admit one operation at a time so cached readers cannot multiply the process
+// thread budget during concurrent extraction. ~keep
+const EXECUTION_CAPACITY: usize = 1;
 
 type ReaderCell = Arc<ReaderSlot>;
 
@@ -132,12 +137,13 @@ impl ReaderCache {
 ///
 /// Reader construction resolves model files and creates inference sessions, so
 /// it is deferred until the first call for an effective configuration. The
-/// initialized reader can then be reused concurrently without holding the cache
-/// lock during inference.
+/// initialized reader is reused without holding the cache lock during inference;
+/// backend-wide admission prevents cached readers from oversubscribing the host.
 #[cfg_attr(alef, alef(skip))]
 pub struct SceptreOcrBackend {
     readers: Arc<Mutex<ReaderCache>>,
     overflow_slots: Arc<Semaphore>,
+    execution_slots: Arc<Semaphore>,
     #[cfg(auto_rotate)]
     orientation_detector: Arc<OnceCell<crate::doc_orientation::DocOrientationDetector>>,
 }
@@ -148,6 +154,7 @@ impl SceptreOcrBackend {
         Ok(Self {
             readers: Arc::new(Mutex::new(ReaderCache::new())),
             overflow_slots: Arc::new(Semaphore::new(READER_OVERFLOW_CAPACITY)),
+            execution_slots: Arc::new(Semaphore::new(EXECUTION_CAPACITY)),
             #[cfg(auto_rotate)]
             orientation_detector: Arc::new(OnceCell::new()),
         })
@@ -182,12 +189,21 @@ impl SceptreOcrBackend {
         let languages = effective_languages(config);
         let group = resolve_language_group(&languages)?;
         let mut sceptre_config = parse_sceptre_options(config)?;
-        if sceptre_config.model.backend != Backend::Ort {
-            return Err(ocr_error(concat!(
-                "Sceptre in Xberg 1.1 supports only the native `ort` backend; ",
-                "remove `model.backend` or set it to `ort`"
-            )));
+        if !has_explicit_model_backend(config) {
+            #[cfg(all(feature = "sceptre-ocr-tract", not(feature = "sceptre-ocr-ort")))]
+            {
+                sceptre_config.model.backend = Backend::Tract;
+            }
         }
+        validate_inference_backend(sceptre_config.model.backend)?;
+        let thread_budget = crate::core::config::concurrency::active_thread_budget();
+        sceptre_config.concurrency.max_threads = Some(
+            sceptre_config
+                .concurrency
+                .max_threads
+                .unwrap_or(thread_budget)
+                .clamp(1, thread_budget),
+        );
         sceptre_config.model.languages = vec![group];
         Ok((sceptre_config, languages))
     }
@@ -200,6 +216,10 @@ impl SceptreOcrBackend {
         let (sceptre_config, languages) = Self::effective_config(config)?;
         let cache_key = reader_cache_key(&sceptre_config)?;
         let reader_cell = self.reader_cell(&cache_key).await?;
+        let execution_permit = Arc::clone(&self.execution_slots)
+            .acquire_owned()
+            .await
+            .map_err(|error| ocr_error(format!("Failed to acquire Sceptre execution admission: {error}")))?;
         let rotation = RotationContext {
             #[cfg(auto_rotate)]
             detector: Arc::clone(&self.orientation_detector),
@@ -210,6 +230,7 @@ impl SceptreOcrBackend {
         };
 
         let output = tokio::task::spawn_blocking(move || {
+            let _execution_permit = execution_permit;
             run_blocking(image_bytes.as_slice(), sceptre_config, reader_cell, rotation)
         })
         .await
@@ -264,10 +285,7 @@ impl OcrBackend for SceptreOcrBackend {
     }
 
     fn supported_languages(&self) -> Vec<String> {
-        SUPPORTED_LANGUAGES
-            .iter()
-            .map(|language| (*language).to_string())
-            .collect()
+        supported_language_aliases().into_iter().map(str::to_string).collect()
     }
 }
 
@@ -540,6 +558,32 @@ fn parse_sceptre_options(config: &OcrConfig) -> Result<sceptre::OcrConfig> {
     Ok(parsed)
 }
 
+fn has_explicit_model_backend(config: &OcrConfig) -> bool {
+    config
+        .backend_options
+        .as_ref()
+        .and_then(serde_json::Value::as_object)
+        .and_then(|options| options.get("model"))
+        .and_then(serde_json::Value::as_object)
+        .is_some_and(|model| model.contains_key("backend"))
+}
+
+fn validate_inference_backend(backend: Backend) -> Result<()> {
+    match backend {
+        Backend::Ort if cfg!(feature = "sceptre-ocr-ort") => Ok(()),
+        Backend::Tract if cfg!(feature = "sceptre-ocr-tract") => Ok(()),
+        Backend::Ort => Err(ocr_error(
+            "Sceptre ORT inference is unavailable in this build; enable `sceptre-ocr-ort`",
+        )),
+        Backend::Tract => Err(ocr_error(
+            "Sceptre tract inference is unavailable in this build; enable `sceptre-ocr-tract`",
+        )),
+        _ => Err(ocr_error(
+            "The selected Sceptre inference backend is not supported by Xberg",
+        )),
+    }
+}
+
 fn parse_sceptre_section<T: serde::de::DeserializeOwned>(name: &str, value: &serde_json::Value) -> Result<T> {
     serde_json::from_value(value.clone()).map_err(|error| {
         ocr_error(format!(
@@ -574,7 +618,7 @@ fn resolve_language_group(languages: &[String]) -> Result<Language> {
             ocr_error(format!(
                 concat!(
                     "Sceptre does not support OCR language `{}`; choose an English, Latin, ",
-                    "simplified Chinese, Japanese, Korean, or Cyrillic language"
+                    "simplified Chinese, Japanese, Korean, Telugu, Kannada, or Cyrillic language"
                 ),
                 language
             ))
@@ -623,38 +667,11 @@ fn validate_auto_rotate_support(_config: &OcrConfig) -> Result<()> {
     Ok(())
 }
 
-fn language_group(language: &str) -> Option<Language> {
-    let normalized = language.trim().to_ascii_lowercase().replace('_', "-");
-    if ENGLISH_LANGUAGES.contains(&normalized.as_str()) {
-        Some(Language::English)
-    } else if LATIN_LANGUAGES.contains(&normalized.as_str()) {
-        Some(Language::Latin)
-    } else if CHINESE_LANGUAGES.contains(&normalized.as_str()) {
-        Some(Language::ChineseSimplified)
-    } else if JAPANESE_LANGUAGES.contains(&normalized.as_str()) {
-        Some(Language::Japanese)
-    } else if KOREAN_LANGUAGES.contains(&normalized.as_str()) {
-        Some(Language::Korean)
-    } else if CYRILLIC_LANGUAGES.contains(&normalized.as_str()) {
-        Some(Language::Cyrillic)
-    } else {
-        None
-    }
-}
-
-fn language_group_name(language: Language) -> &'static str {
-    match language {
-        Language::English => "english",
-        Language::Latin => "latin",
-        Language::ChineseSimplified => "simplified_chinese",
-        Language::Japanese => "japanese",
-        Language::Korean => "korean",
-        Language::Cyrillic => "cyrillic",
-    }
-}
-
 fn map_sceptre_error(error: sceptre::OcrError) -> XbergError {
-    ocr_error(format!("Sceptre OCR failed: {error}"))
+    XbergError::Ocr {
+        message: "Sceptre OCR operation failed".to_string(),
+        source: Some(Box::new(error)),
+    }
 }
 
 fn ocr_error(message: impl Into<String>) -> XbergError {
@@ -663,28 +680,6 @@ fn ocr_error(message: impl Into<String>) -> XbergError {
         source: None,
     }
 }
-
-const ENGLISH_LANGUAGES: &[&str] = &["en", "eng"];
-const LATIN_LANGUAGES: &[&str] = &[
-    "af", "afr", "az", "aze", "bs", "bos", "ca", "cat", "cs", "ces", "cze", "cy", "cym", "wel", "da", "dan", "de",
-    "deu", "ger", "es", "spa", "et", "est", "fr", "fra", "fre", "ga", "gle", "hr", "hrv", "hu", "hun", "id", "ind",
-    "is", "isl", "ice", "it", "ita", "lt", "lit", "lv", "lav", "mi", "mri", "mao", "ms", "msa", "may", "mt", "mlt",
-    "nl", "nld", "dut", "no", "nor", "pl", "pol", "pt", "por", "ro", "ron", "rum", "sk", "slk", "slo", "sl", "slv",
-    "sq", "sqi", "alb", "sv", "swe", "sw", "swa", "tl", "fil", "tr", "tur", "uz", "uzb", "vi", "vie",
-];
-const CHINESE_LANGUAGES: &[&str] = &["zh", "zh-cn", "zh-hans", "zho", "chi", "chs"];
-const JAPANESE_LANGUAGES: &[&str] = &["ja", "jpn"];
-const KOREAN_LANGUAGES: &[&str] = &["ko", "kor"];
-const CYRILLIC_LANGUAGES: &[&str] = &[
-    "be", "bel", "bg", "bul", "kk", "kaz", "ky", "kir", "mk", "mkd", "mac", "mn", "mon", "ru", "rus", "sr", "srp",
-    "tg", "tgk", "uk", "ukr",
-];
-const SUPPORTED_LANGUAGES: &[&str] = &[
-    "eng", "afr", "aze", "bos", "cat", "ces", "cym", "dan", "deu", "spa", "est", "fra", "gle", "hrv", "hun", "ind",
-    "isl", "ita", "lit", "lav", "mri", "msa", "mlt", "nld", "nor", "pol", "por", "ron", "slk", "slv", "sqi", "swe",
-    "swa", "fil", "tur", "uzb", "vie", "zho", "jpn", "kor", "bel", "bul", "kaz", "kir", "mkd", "mon", "rus", "srp",
-    "tgk", "ukr",
-];
 
 #[cfg(test)]
 mod tests {
@@ -712,21 +707,19 @@ mod tests {
         assert_eq!(language_group("de"), Some(Language::Latin));
         assert_eq!(language_group("zh_Hans"), Some(Language::ChineseSimplified));
         assert_eq!(language_group("jpn"), Some(Language::Japanese));
+        assert_eq!(language_group("jpn_vert"), Some(Language::Japanese));
         assert_eq!(language_group("kor"), Some(Language::Korean));
+        assert_eq!(language_group("tel"), Some(Language::Telugu));
+        assert_eq!(language_group("kan"), Some(Language::Kannada));
         assert_eq!(language_group("ukr"), Some(Language::Cyrillic));
         assert_eq!(language_group("ara"), None);
+        assert_eq!(language_group("cat"), None);
+        assert_eq!(language_group("kaz"), None);
     }
 
     #[test]
     fn shared_validation_should_accept_every_sceptre_language_alias() {
-        for language in ENGLISH_LANGUAGES
-            .iter()
-            .chain(LATIN_LANGUAGES)
-            .chain(CHINESE_LANGUAGES)
-            .chain(JAPANESE_LANGUAGES)
-            .chain(KOREAN_LANGUAGES)
-            .chain(CYRILLIC_LANGUAGES)
-        {
+        for language in supported_language_aliases() {
             assert!(
                 crate::core::config_validation::validate_language_code(language).is_ok(),
                 "Sceptre language alias {language} should pass shared validation"
@@ -741,6 +734,13 @@ mod tests {
             resolve_language_group(&languages).expect("compatible languages"),
             Language::Latin
         );
+    }
+
+    #[test]
+    fn should_normalize_easyocr_script_tokens() {
+        assert_eq!(language_group("CH_SIM"), Some(Language::ChineseSimplified));
+        assert_eq!(language_group("rs_latin"), Some(Language::Latin));
+        assert_eq!(language_group("rs-cyrillic"), Some(Language::Cyrillic));
     }
 
     #[test]
@@ -764,6 +764,46 @@ mod tests {
         assert_eq!(effective.recognition.batch_size, 4);
         assert_eq!(effective.concurrency.max_threads, Some(2));
         assert_eq!(effective.model.languages, vec![Language::Cyrillic]);
+    }
+
+    #[test]
+    fn should_propagate_xberg_thread_budget_when_unspecified() {
+        let (effective, _) = SceptreOcrBackend::effective_config(&OcrConfig::default()).expect("valid config");
+        assert_eq!(
+            effective.concurrency.max_threads,
+            Some(crate::core::config::concurrency::active_thread_budget())
+        );
+    }
+
+    #[test]
+    fn should_clamp_sceptre_threads_to_xberg_budget() {
+        let config = OcrConfig {
+            backend_options: Some(serde_json::json!({ "concurrency": { "max_threads": usize::MAX } })),
+            ..Default::default()
+        };
+        let (effective, _) = SceptreOcrBackend::effective_config(&config).expect("valid config");
+        assert_eq!(
+            effective.concurrency.max_threads,
+            Some(crate::core::config::concurrency::active_thread_budget())
+        );
+    }
+
+    #[cfg(all(feature = "sceptre-ocr-tract", not(feature = "sceptre-ocr-ort")))]
+    #[test]
+    fn tract_only_build_should_select_tract_by_default() {
+        let (effective, _) = SceptreOcrBackend::effective_config(&OcrConfig::default()).expect("valid config");
+        assert_eq!(effective.model.backend, Backend::Tract);
+    }
+
+    #[cfg(not(feature = "sceptre-ocr-tract"))]
+    #[test]
+    fn ort_only_build_should_reject_explicit_tract() {
+        let config = OcrConfig {
+            backend_options: Some(serde_json::json!({ "model": { "backend": "tract" } })),
+            ..Default::default()
+        };
+        let error = SceptreOcrBackend::effective_config(&config).expect_err("tract must require its feature");
+        assert!(error.to_string().contains("sceptre-ocr-tract"));
     }
 
     #[test]
@@ -1000,7 +1040,14 @@ mod tests {
             .await
             .expect_err("invalid image data must fail");
 
-        assert!(error.to_string().contains("Sceptre OCR failed"));
+        assert_eq!(error.to_string(), "OCR error: Sceptre OCR operation failed");
+        let XbergError::Ocr { source, .. } = error else {
+            panic!("invalid Sceptre image data must return an OCR error");
+        };
+        assert!(
+            source.is_some(),
+            "the Sceptre decode error must remain in the source chain"
+        );
     }
 
     #[test]

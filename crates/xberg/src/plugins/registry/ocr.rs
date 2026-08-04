@@ -30,13 +30,7 @@ pub struct OcrBackendRegistry {
     pub(super) backends: AHashMap<String, Arc<dyn OcrBackend>>,
 }
 
-#[cfg(all(
-    test,
-    feature = "sceptre-ocr",
-    not(target_arch = "wasm32"),
-    not(target_os = "android"),
-    not(target_os = "ios")
-))]
+#[cfg(all(test, sceptre_ocr, not(target_arch = "wasm32")))]
 mod sceptre_tests {
     use std::sync::Arc;
 
@@ -133,12 +127,7 @@ impl OcrBackendRegistry {
             }
         }
 
-        #[cfg(all(
-            feature = "sceptre-ocr",
-            not(target_arch = "wasm32"),
-            not(target_os = "android"),
-            not(target_os = "ios")
-        ))]
+        #[cfg(all(sceptre_ocr, not(target_arch = "wasm32")))]
         {
             use crate::sceptre_ocr::SceptreOcrBackend;
             tracing::info!("Registering Sceptre OCR backend");
