@@ -254,11 +254,11 @@ mod tests {
         let fixtures_root = crate_root.join("fixtures");
         // (manifest file stem, manifest `name`, expected fixture count, ocr_enabled).
         let cohorts = [
-            ("native-office-fast", "native-office-fast-v1", 8, false),
-            ("native-markup-fast", "native-markup-fast-v1", 8, false),
+            ("native-office-fast", "native-office-fast-v1", 16, false),
+            ("native-markup-fast", "native-markup-fast-v1", 16, false),
             ("native-ebook-fast", "native-ebook-fast-v1", 6, false),
             ("native-email-fast", "native-email-fast-v1", 6, false),
-            ("native-data-fast", "native-data-fast-v1", 6, false),
+            ("native-data-fast", "native-data-fast-v1", 12, false),
             ("ocr-images-fast", "ocr-images-fast-v1", 14, true),
             ("paddle-layout-quality-b4", "paddle-layout-quality-b4-v1", 12, true),
         ];
