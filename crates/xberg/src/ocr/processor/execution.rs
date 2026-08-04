@@ -388,6 +388,18 @@ const POLARITY_SAMPLE_STRIDE: i32 = 4;
 const RAW_IMAGE_SOURCE_DPI: i32 = 72;
 /// Source resolution retained when explicit DPI normalization fails.
 const PREPROCESSING_FALLBACK_SOURCE_DPI: i32 = 300;
+/// Pixel stride used to classify whether an image resembles a clean document page.
+const DEFAULT_PREPROCESSING_SAMPLE_STRIDE: usize = 4;
+/// Minimum normalized mean luminance for automatic document-page preprocessing.
+const CLEAN_PAGE_MEAN_LUMINANCE_THRESHOLD: f64 = 0.90;
+/// Normalized luminance at which a sampled pixel counts as near-white.
+const CLEAN_PAGE_LIGHT_PIXEL_THRESHOLD: f64 = 0.90;
+/// Minimum near-white sample fraction for automatic document-page preprocessing.
+const CLEAN_PAGE_LIGHT_PIXEL_FRACTION_THRESHOLD: f64 = 0.80;
+/// Maximum value of an 8-bit RGB channel.
+const RGB_CHANNEL_MAX: f64 = u8::MAX as f64;
+/// Number of channels in an RGB pixel.
+const RGB_CHANNEL_COUNT: usize = 3;
 
 struct PreparedOcrImage {
     data: Vec<u8>,
@@ -405,6 +417,15 @@ fn prepare_ocr_image(
     ci_debug_enabled: bool,
 ) -> PreparedOcrImage {
     let Some(preprocessing) = preprocessing else {
+        if should_apply_default_preprocessing(&rgb_data) {
+            return prepare_preprocessed_ocr_image(
+                rgb_data,
+                width,
+                height,
+                &crate::types::ImagePreprocessingConfig::default(),
+                ci_debug_enabled,
+            );
+        }
         return PreparedOcrImage {
             data: rgb_data,
             width,
@@ -415,6 +436,31 @@ fn prepare_ocr_image(
     };
 
     prepare_preprocessed_ocr_image(rgb_data, width, height, preprocessing, ci_debug_enabled)
+}
+
+/// Classify bright, page-like RGB images that benefit from the default OCR preprocessing path.
+fn should_apply_default_preprocessing(rgb_data: &[u8]) -> bool {
+    let mut luminance_sum = 0.0;
+    let mut light_pixels = 0usize;
+    let mut sample_count = 0usize;
+
+    for pixel in rgb_data
+        .chunks_exact(RGB_CHANNEL_COUNT)
+        .step_by(DEFAULT_PREPROCESSING_SAMPLE_STRIDE)
+    {
+        let luminance =
+            pixel.iter().map(|channel| f64::from(*channel)).sum::<f64>() / (RGB_CHANNEL_MAX * RGB_CHANNEL_COUNT as f64);
+        luminance_sum += luminance;
+        light_pixels += usize::from(luminance >= CLEAN_PAGE_LIGHT_PIXEL_THRESHOLD);
+        sample_count += 1;
+    }
+
+    if sample_count == 0 {
+        return false;
+    }
+    let sample_count = sample_count as f64;
+    luminance_sum / sample_count >= CLEAN_PAGE_MEAN_LUMINANCE_THRESHOLD
+        && light_pixels as f64 / sample_count >= CLEAN_PAGE_LIGHT_PIXEL_FRACTION_THRESHOLD
 }
 
 fn prepare_preprocessed_ocr_image(
@@ -1517,7 +1563,7 @@ mod tests {
     }
 
     #[test]
-    fn test_prepare_ocr_image_without_config_preserves_original_rgb() {
+    fn test_prepare_ocr_image_without_config_preserves_shadowed_rgb() {
         let rgb_data = vec![0, 1, 2, 3, 4, 5];
 
         let prepared = prepare_ocr_image(rgb_data.clone(), 2, 1, None, false);
@@ -1527,6 +1573,34 @@ mod tests {
         assert_eq!(prepared.height, 1);
         assert_eq!(prepared.source_dpi, RAW_IMAGE_SOURCE_DPI);
         assert!(!prepared.apply_pix_preprocessing);
+    }
+
+    #[test]
+    fn test_clean_white_rgb_selects_default_preprocessing() {
+        const SAMPLE_PIXEL_COUNT: usize = 16;
+        let rgb_data = vec![u8::MAX; SAMPLE_PIXEL_COUNT * RGB_CHANNEL_COUNT];
+
+        assert!(should_apply_default_preprocessing(&rgb_data));
+    }
+
+    #[test]
+    fn test_prepare_ocr_image_without_config_preprocesses_clean_white_rgb() {
+        const WIDTH: u32 = 4;
+        const HEIGHT: u32 = 4;
+        let rgb_data = vec![u8::MAX; WIDTH as usize * HEIGHT as usize * RGB_CHANNEL_COUNT];
+
+        let prepared = prepare_ocr_image(rgb_data, WIDTH, HEIGHT, None, false);
+
+        assert!(prepared.apply_pix_preprocessing);
+    }
+
+    #[test]
+    fn test_shadowed_rgb_skips_default_preprocessing() {
+        const SAMPLE_PIXEL_COUNT: usize = 16;
+        const SHADOWED_CHANNEL_VALUE: u8 = 128;
+        let rgb_data = vec![SHADOWED_CHANNEL_VALUE; SAMPLE_PIXEL_COUNT * RGB_CHANNEL_COUNT];
+
+        assert!(!should_apply_default_preprocessing(&rgb_data));
     }
 
     #[test]
