@@ -66,7 +66,7 @@ The Candle backends (GLM-OCR, TrOCR, DeepSeek-OCR, PaddleOCR-VL) ship compiled i
 | --- | --- | --- | --- |
 | **Tesseract** | Broad language and platform support; low runtime overhead; hierarchical hOCR output | Requires a system package and separately installed language data; less reliable on scene text and difficult scans | You need the default backend, WebAssembly support, or a small deployment footprint |
 | **PaddleOCR** | Strong recognition quality; mobile and server model tiers; GPU support; strong CJK coverage | Larger model downloads; server models can be slow and memory-intensive on CPU | Recognition quality is the priority, especially for CJK documents, and you can budget for the model/runtime cost |
-| **Sceptre** | Native CRAFT detection and CRNN recognition; fast CPU inference; six EasyOCR gen2 language groups | Native desktop/server targets only; CPU-only in Xberg 1.1; downloads models on first use | You need low-latency native OCR or EasyOCR-compatible language coverage without a Python runtime |
+| **Sceptre** | CRAFT detection and CRNN recognition; eight EasyOCR Gen2 language groups | CPU-only; tract mobile builds and opt-in worker-hosted WASM have larger artifacts | You need EasyOCR Gen2 recognition without a Python runtime |
 
 The remaining backends cover larger-model and hosted use cases:
 
@@ -145,17 +145,24 @@ PaddleOCR is bundled via the native Rust bindings and works out of the box since
 
 ### Sceptre
 
-Sceptre is included in published native desktop/server packages and the CLI. For a custom Rust build, enable the
-`sceptre-ocr` feature; add `auto-rotate` if you also need automatic orientation correction. Model files download
-automatically on first use.
+Sceptre is included in published native desktop/server packages and the CLI. These builds use ONNX Runtime and
+download checksum-pinned models to the Hugging Face cache on first use. For a custom desktop/server Rust build,
+enable `sceptre-ocr`; add `auto-rotate` if you also need automatic orientation correction.
 
 ```toml title="Cargo.toml"
 [dependencies]
-xberg = { version = "1.1", features = ["sceptre-ocr"] }
+xberg = { version = "1", features = ["sceptre-ocr"] }
 ```
 
-Sceptre is unavailable on WebAssembly, Android, and iOS in Xberg 1.1. Its Xberg integration uses the native ONNX
-Runtime backend and is CPU-only.
+Android and iOS builds use the pure-Rust tract engine through `sceptre-ocr-tract`; use `auto-rotate-tract` for
+orientation correction. Mobile builds exclude Sceptre's Hugging Face downloader. Resolve packaged application assets
+to accessible filesystem paths and set both `backend_options.model.detector_path` and
+`backend_options.model.recognizer_path`. WebAssembly support is excluded from the published default bundle because of
+model and runtime size. Source builds can enable the separate byte-fed class with
+`wasm-pack build crates/xberg-wasm --target web --features sceptre-wasm`; application code must instantiate and call
+that synchronous class inside its own Web Worker. The JavaScript host fetches the CRAFT and recognizer models and
+supplies their bytes.
+All Sceptre paths are CPU-only.
 
 :::tip[Tesseract marker extra]
 `pip install "xberg[tesseract]"` is available as a metadata-only marker to document a dependency on the Tesseract system package. It installs no Python packages — Tesseract itself must still be installed via your OS package manager (see above).
@@ -401,9 +408,39 @@ batch_size = 4
 max_threads = 2
 ```
 
-Sceptre 0.1.1 provides English, Latin, Simplified Chinese, Japanese, Korean, and Cyrillic EasyOCR gen2 recognition
-groups. Use ISO 639-1 or ISO 639-3 codes, such as `eng`, `deu`, `zho`, `jpn`, `kor`, or `rus`. Incompatible language
-group combinations fail validation before OCR starts.
+| Path | Purpose |
+| --- | --- |
+| `backend_options.detection.*` | CRAFT thresholds, canvas size, magnification, box size, and line grouping |
+| `backend_options.recognition.*` | Decoder, beam width, batch size, allow/block lists, contrast retry, and confidence filtering |
+| `backend_options.concurrency.max_threads` | Cap Sceptre's worker and inference thread pools |
+| `backend_options.model.cache_dir` | Override the Hugging Face cache root on desktop/server ORT builds |
+| `backend_options.model.registry_owner` | Use an approved mirror of the checksum-pinned model repositories |
+| `backend_options.model.detector_path` | Required CRAFT model path on Android/iOS tract builds |
+| `backend_options.model.recognizer_path` | Required selected Gen2 recognizer path on Android/iOS tract builds |
+
+Set languages with `ocr.language`; Xberg overrides `backend_options.model.languages`. Xberg also selects ORT or tract
+for the build target, so portable configuration should not set `backend_options.model.backend`.
+
+```toml title="xberg.toml (Android/iOS)"
+[ocr]
+backend = "sceptre"
+language = ["deu"]
+
+[ocr.backend_options.model]
+detector_path = "/app/models/craft_mlt_25k.onnx"
+recognizer_path = "/app/models/latin_g2.onnx"
+```
+
+The paths must be resolved by the application from its bundle or asset system before extraction starts.
+
+Sceptre provides all eight EasyOCR Gen2 recognition groups: `english`, `latin`, `chinese_simplified`, `japanese`,
+`korean`, `cyrillic`, `telugu`, and `kannada`. Xberg accepts group tokens and ISO aliases such as `en`/`eng`,
+`de`/`deu`, `zh`/`zho`, `ja`/`jpn`, `ko`/`kor`, `ru`/`rus`, `te`/`tel`, and `kn`/`kan`. English may be combined
+with one other group; two distinct non-English groups require different recognizers and fail validation before OCR.
+
+Sceptre emits line-level quadrilaterals and recognition confidence. It does not provide Tesseract's word/symbol
+hierarchy or a separate detection-confidence value. Tract inference uses a fixed CRAFT canvas and can require more
+memory than the default browser OCR path; run WebAssembly inference in a worker.
 
 ### Candle GLM-OCR
 
