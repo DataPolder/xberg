@@ -247,13 +247,14 @@
               class="w-full p-6 flex flex-col bg-app-red/10 border border-app-red rounded-[12px]"
             >
               <div class="space-y-1">
-                <p id="error-title" class="text-base font-semibold text-white">File too large for the in-browser demo</p>
+                <p id="error-title" class="text-base font-semibold text-white">
+                  File too large for the in-browser demo
+                </p>
                 <p id="error-desc" class="text-sm font-light text-white">
-                  This demo runs entirely in your browser via WebAssembly, so it's capped by the browser
-                  sandbox's memory limits — that's a constraint of the demo, not a problem with your file. For
-                  large or multi-page documents, use the CLI (`xberg extract &lt;file&gt;`) or API
-                  (`curl -F "files=@document.pdf" http://localhost:8000/extract`), which run natively without
-                  this ceiling.
+                  This demo runs entirely in your browser via WebAssembly, so it's capped by the browser sandbox's
+                  memory limits — that's a constraint of the demo, not a problem with your file. For large or
+                  multi-page documents, use the CLI (`xberg extract &lt;file&gt;`) or API (`curl -F
+                  "files=@document.pdf" http://localhost:8000/extract`), which run natively without this ceiling.
                 </p>
               </div>
             </div>

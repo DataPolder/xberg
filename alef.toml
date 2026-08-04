@@ -1,5 +1,5 @@
 [workspace]
-alef_version = "0.51.0"
+alef_version = "0.51.2"
 # -D warnings (emitted into every generated Rust binding as #![allow(...)]).
 extra_clippy_allows = ["redundant_field_names"]
 languages = [
@@ -817,6 +817,61 @@ visitor_callbacks = false
 # `libheif-sys` build.rs cannot cross-compile. Not part of the auto-generated
 # passthrough set, so it must be listed here.
 extra_features = ["full-no-heic"]
+# Feature list for the desktop `cfg(not(any(android,ios,windows,macos-x86_64)))`
+# core dep. Without this override the FFI crate inherits the global
+# `[[crates]].features`, whose first entry is `full` — that pulls `heic`
+# (`libheif-sys`, no pkg-config cross-compile support) and `candle-*` into the
+# swift-bundle's cross-compiled desktop dep, which broke Swift publishing in
+# v1.0.12. This is the v1.0.11 granular floor: `full` minus heic/candle. ~keep
+features = [
+  "pdf",
+  "ocr",
+  "paddle-ocr",
+  "paddle-ocr-types",
+  "layout-detection",
+  "layout-types",
+  "embeddings",
+  "embedding-presets",
+  "reranker",
+  "reranker-presets",
+  "sparse-embeddings",
+  "sparse-embedding-presets",
+  "late-interaction",
+  "late-interaction-presets",
+  "chunking",
+  "keywords-yake",
+  "keywords-rake",
+  "language-detection",
+  "html",
+  "tree-sitter",
+  "office",
+  "email",
+  "archives",
+  "stopwords",
+  "auto-rotate",
+  "auto-rotate-types",
+  "tokio-runtime",
+  "api",
+  "api-types",
+  "mcp",
+  "liter-llm",
+  "quality",
+  "svg",
+  "transcription",
+  "transcription-types",
+  "classification",
+  "captioning",
+  "ner-onnx",
+  "ner-llm",
+  "diff",
+  "markdown-footnotes",
+  "redaction",
+  "enrichment",
+  "heuristics",
+  "presets",
+  "structured",
+  "url-ingestion",
+]
 plugin_error_constructor = "xberg::XbergError::Plugin { message: msg, plugin_name: String::new() }"
 exclude_types = []
 exclude_functions = [
