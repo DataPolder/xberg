@@ -122,10 +122,19 @@ impl PostProcessor for CaptioningProcessor {
         let mut captured_usage: Vec<crate::types::LlmUsage> = Vec::new();
 
         while let Some(join_result) = join_set.join_next().await {
-            let (idx, outcome) = join_result.map_err(|e| crate::XbergError::ImageProcessing {
-                message: format!("captioning task failed to join: {e}"),
-                source: None,
-            })?;
+            let (idx, outcome) = match join_result {
+                Ok(value) => value,
+                Err(join_error) => {
+                    // A captioning task panicked. Record it and keep draining so the other
+                    // images' captions — and the image vec itself, taken out above — are not
+                    // lost by an early return before `result.images` is restored below.
+                    result.processing_warnings.push(crate::types::ProcessingWarning {
+                        source: std::borrow::Cow::Borrowed("captioning"),
+                        message: std::borrow::Cow::Owned(format!("captioning task panicked: {join_error}")),
+                    });
+                    continue;
+                }
+            };
 
             match outcome {
                 Ok((text, usage)) => {
