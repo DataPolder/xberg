@@ -1329,6 +1329,12 @@ impl BenchmarkRunner {
                     {
                         result.success = false;
                         result.error_kind = ErrorKind::EmptyContent;
+                        // Every success=false result must carry an error_message (enforced by
+                        // output.rs's result-state invariant), so record why we reclassified.
+                        result.error_message.get_or_insert_with(|| {
+                            "extraction produced no ground-truth token overlap (reclassified as empty content)"
+                                .to_string()
+                        });
                     }
 
                     result.quality = Some(quality);
@@ -1598,6 +1604,10 @@ mod tests {
         assert_eq!(quality.f1_score_text, 0.0);
         assert!(!result.success, "zero-overlap result must be reclassified as a failure");
         assert_eq!(result.error_kind, ErrorKind::EmptyContent);
+        assert!(
+            result.error_message.is_some(),
+            "a reclassified failure must carry an error_message (output.rs result-state invariant)"
+        );
     }
 
     #[tokio::test]
