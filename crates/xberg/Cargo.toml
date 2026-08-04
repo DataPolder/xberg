@@ -487,7 +487,9 @@ translation = ["liter-llm"]
 # tokio-runtime is required by chunk-classification's bounded-concurrency batch scheduler
 # (tokio::sync::Semaphore / tokio::task::JoinSet).
 classification = ["liter-llm", "tokio-runtime"]
-captioning = ["liter-llm"]
+# tokio-runtime powers captioning's bounded-concurrency scheduler (JoinSet), which
+# captions embedded images in parallel instead of one-at-a-time (#1378).
+captioning = ["liter-llm", "tokio-runtime"]
 qr-codes = ["dep:rqrr", "dep:image"] # Pure-Rust QR decoding via rqrr.
 
 # SVG support: parse, sanitize (strip external hrefs/JS/foreignObject), re-serialize,
