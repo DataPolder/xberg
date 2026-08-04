@@ -3,7 +3,7 @@
 // `types` is used by the OCR conversion helpers (`feature = "ocr"`) and by the
 // unused when only `ocr-pipeline` is on without `layout-detection`, as in the
 // WASM `ocr-wasm` feature set.
-#[cfg(any(feature = "ocr", all(feature = "ocr-pipeline", feature = "layout-detection")))]
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 use super::types;
 
 /// Convert an OCR-produced [`crate::types::internal::InternalDocument`] into a vec of [`types::PdfParagraph`]s
@@ -11,7 +11,7 @@ use super::types;
 ///
 /// Coordinates are in image-space (y=0 at top) and are flipped to PDF-space
 /// (y=0 at bottom) using `page_height_px`.
-#[cfg(feature = "ocr")]
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 #[allow(dead_code)]
 pub(crate) fn ocr_doc_to_paragraphs(
     doc: &crate::types::internal::InternalDocument,
@@ -29,6 +29,16 @@ pub(crate) fn ocr_doc_to_paragraphs(
 
     trace_conversion(doc, &result);
     result
+}
+
+/// Convert unstructured OCR text into page paragraphs without inventing geometry.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+pub(crate) fn ocr_text_to_paragraphs(text: &str) -> Vec<types::PdfParagraph> {
+    text.split("\n\n")
+        .map(str::trim)
+        .filter(|paragraph| !paragraph.is_empty())
+        .map(|paragraph| make_ocr_paragraph(paragraph.to_string(), Vec::new(), None))
+        .collect()
 }
 
 #[cfg(all(feature = "ocr", feature = "layout-detection"))]
@@ -306,7 +316,7 @@ fn promote_second_line_to_title(lines: &mut [types::PdfParagraph], hint_indices:
     }
 }
 
-#[cfg(feature = "ocr")]
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 fn trace_conversion(doc: &crate::types::internal::InternalDocument, result: &[types::PdfParagraph]) {
     tracing::debug!(
         input_elements = doc
@@ -320,7 +330,7 @@ fn trace_conversion(doc: &crate::types::internal::InternalDocument, result: &[ty
     );
 }
 
-#[cfg(feature = "ocr")]
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 fn make_ocr_block_paragraph(
     element: &crate::types::internal::InternalElement,
     page_height: f32,
@@ -334,7 +344,7 @@ fn make_ocr_block_paragraph(
     make_ocr_paragraph(element.text.clone(), lines, block_bbox)
 }
 
-#[cfg(feature = "ocr")]
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 fn make_ocr_line_paragraphs(
     element: &crate::types::internal::InternalElement,
     page_height: f32,
@@ -350,7 +360,7 @@ fn make_ocr_line_paragraphs(
         .collect()
 }
 
-#[cfg(feature = "ocr")]
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 fn pdf_block_bbox(element: &crate::types::internal::InternalElement, page_height: f32) -> Option<(f32, f32, f32, f32)> {
     element.bbox.as_ref().map(|bbox| {
         (
@@ -362,7 +372,7 @@ fn pdf_block_bbox(element: &crate::types::internal::InternalElement, page_height
     })
 }
 
-#[cfg(feature = "ocr")]
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 fn make_ocr_line_paragraph(
     text: &str,
     line_index: usize,
@@ -647,7 +657,7 @@ fn union_bboxes(lines: &[types::PdfParagraph]) -> Option<(f32, f32, f32, f32)> {
         .reduce(|a, b| (a.0.min(b.0), a.1.min(b.1), a.2.max(b.2), a.3.max(b.3)))
 }
 
-#[cfg(feature = "ocr")]
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 fn make_ocr_paragraph(
     text: String,
     lines: Vec<types::PdfLine>,
@@ -672,7 +682,7 @@ fn make_ocr_paragraph(
     }
 }
 
-#[cfg(feature = "ocr")]
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 fn make_ocr_pdf_line(
     text: &str,
     x: f32,

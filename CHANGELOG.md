@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- OCR-backed PDF extraction now preserves geometry-derived document structure without requiring
+  optional ML layout detection, including pages replaced by mixed native/OCR extraction.
+
 ## [1.0.12] - 2026-08-03
 
 ### Fixed
