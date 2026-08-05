@@ -7,14 +7,17 @@
 //! low-quality scans.
 
 use std::borrow::Cow;
+use std::sync::LazyLock;
 
 use async_trait::async_trait;
 use base64::Engine;
 use liter_llm::types::ContentPart;
 use liter_llm::{ChatCompletionRequest, ImageUrl, LlmClient, Message, UserContent, UserMessage};
+use regex::Regex;
 
 use crate::core::config::LlmConfig;
 use crate::plugins::{OcrBackend, OcrBackendType, Plugin};
+use crate::types::{BoundingBox, Formula};
 
 /// Default request timeout for VLM OCR when `vlm_config.timeout_secs` is unset.
 ///
@@ -81,10 +84,13 @@ impl OcrBackend for VlmOcrBackend {
 
         let (text, usage) = vlm_ocr(image_bytes, mime, lang_str, vlm_config, config.vlm_prompt.as_deref()).await?;
 
+        let formulas = extract_formulas(&text);
+
         Ok(crate::ExtractedDocument {
             content: text,
             mime_type: Cow::Borrowed("text/plain"),
             llm_usage: usage.map(|u| vec![u]),
+            formulas,
             ..Default::default()
         })
     }
@@ -282,6 +288,37 @@ fn normalize_vlm_model(model: &str, base_url: Option<&str>) -> String {
     model.to_string()
 }
 
+/// Matches LaTeX display-math blocks the model was instructed to emit via
+/// [`super::prompts::VLM_OCR_TEMPLATE`]: `$$...$$` and, for models that ignore the
+/// requested delimiter, the equivalent `\[...\]` form. `(?s)` makes `.` match
+/// newlines so multi-line formulas are captured as a single match, and the
+/// named groups let the surrounding delimiters be dropped without a separate
+/// strip step.
+static FORMULA_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?s)\$\$(?P<dollar>.+?)\$\$|\\\[(?P<bracket>.+?)\\\]")
+        .expect("VLM formula regex pattern is valid and should compile")
+});
+
+/// Extract LaTeX formulas from VLM OCR output text.
+///
+/// The VLM path has no layout detection, so recognized formulas have no known
+/// region on the page; `bbox` is left at [`BoundingBox::default`] (all-zero)
+/// rather than a fabricated position, and `page` is fixed at `1` since a single
+/// call always OCRs one page image.
+fn extract_formulas(text: &str) -> Vec<Formula> {
+    FORMULA_PATTERN
+        .captures_iter(text)
+        .filter_map(|caps| caps.name("dollar").or_else(|| caps.name("bracket")))
+        .map(|m| m.as_str().trim())
+        .filter(|latex| !latex.is_empty())
+        .map(|latex| Formula {
+            latex: latex.to_string(),
+            bbox: BoundingBox::default(),
+            page: 1,
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -389,6 +426,43 @@ mod tests {
             !prompt.contains("Extract all visible text"),
             "default template must NOT be used when custom prompt is set; got: {prompt}"
         );
+    }
+
+    /// Formulas returned by the VLM as `$$...$$` must be extracted with the
+    /// delimiters stripped and land in `ExtractedDocument.formulas` (via
+    /// `extract_formulas`, the function `process_image` uses to populate it).
+    /// Bbox has no known region on the VLM path, so it must be the honest
+    /// all-zero default rather than a fabricated position.
+    #[test]
+    fn test_extract_formulas_strips_delimiters_from_vlm_response() {
+        let text = "The quadratic formula is:\n\n$$x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}$$\n\nDone.";
+
+        let formulas = super::extract_formulas(text);
+
+        assert_eq!(formulas.len(), 1, "expected exactly one formula; got: {formulas:?}");
+        assert_eq!(formulas[0].latex, r"x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}");
+        assert!(!formulas[0].latex.contains("$$"), "delimiters must be stripped");
+        assert_eq!(formulas[0].bbox, crate::types::BoundingBox::default());
+        assert_eq!(formulas[0].page, 1);
+    }
+
+    /// Multiple formulas in one response must each be extracted independently.
+    #[test]
+    fn test_extract_formulas_handles_multiple_matches() {
+        let text = "$$a^2 + b^2 = c^2$$ and also $$E = mc^2$$";
+
+        let formulas = super::extract_formulas(text);
+
+        assert_eq!(formulas.len(), 2, "expected two formulas; got: {formulas:?}");
+        assert_eq!(formulas[0].latex, "a^2 + b^2 = c^2");
+        assert_eq!(formulas[1].latex, "E = mc^2");
+    }
+
+    /// Plain text with no math must yield no formulas.
+    #[test]
+    fn test_extract_formulas_returns_empty_when_no_math_present() {
+        let formulas = super::extract_formulas("Just a plain paragraph with no equations.");
+        assert!(formulas.is_empty(), "expected no formulas; got: {formulas:?}");
     }
 
     /// When vlm_prompt is None the built-in default template is used.
