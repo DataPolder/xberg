@@ -1151,7 +1151,7 @@ mod tests {
 
         // Shares the global reranker registry with `plugins::reranker`'s tests, so it takes the
         // same lock: without it, that module's `clear_reranker_backends` can wipe this backend
-        // between registration and the `rerank_async` call below.
+        // between registration and the `rerank_async` call below. ~keep
         let _guard = RerankerRegistryGuard::acquire();
         let name = "test-mock-reranker".to_string();
 

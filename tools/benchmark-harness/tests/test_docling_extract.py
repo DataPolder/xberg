@@ -12,6 +12,7 @@ import sys
 import types
 import unittest
 from pathlib import Path
+from typing import ClassVar
 from unittest import mock
 
 
@@ -73,7 +74,7 @@ class _Manager:
 
     last: _Manager | None = None
     # Sources listed here yield PARTIAL_SUCCESS instead of the index-based default.
-    partial_sources: set[str] = set()
+    partial_sources: ClassVar[set[str]] = set()
 
     def __init__(self, events: list[str], config: object) -> None:
         self.events = events

@@ -2031,7 +2031,7 @@ mod tests {
             output_format: OutputFormat,
         ) -> Result<BenchmarkResult> {
             // The first call is the one-time framework-level warmup (see `BenchmarkRunner::run`);
-            // every later call is a real measured iteration.
+            // every later call is a real measured iteration. ~keep
             let is_warmup_call = self.calls.fetch_add(1, Ordering::SeqCst) == 0;
             Ok(BenchmarkResult {
                 framework: self.name().to_string(),

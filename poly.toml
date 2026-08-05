@@ -152,6 +152,9 @@ faiure = "faiure"
 fith = "fith"
 flate = "flate"
 formated = "formated"
+# ISO 639-2/B bibliographic language codes, alongside their /T twins (fra, cym) in the OCR
+# language tables. Rewriting them to "free"/"well" would break language resolution. ~keep
+fre = "fre"
 headerr = "headerr"
 helo = "helo"
 hocr = "hocr"
@@ -202,6 +205,7 @@ tre = "tre"
 unparseable = "unparseable"
 utiliza = "utiliza"
 webui = "webui"
+wel = "wel"
 yor = "yor"
 
 [lint.typos.extend_identifiers]
@@ -372,6 +376,10 @@ enabled = true
 "e2e/**/*.py" = ["A001", "N801"]
 "packages/**" = ["comment", "doc-comment"]
 "packages/python/**/api.py" = ["RET504"]
+# alef-generated. `ProbeStatus.pass_` is the "check passed" doctor outcome; the trailing
+# underscore is codegen escaping the `pass` keyword, and S105 flags it purely on the name.
+# The file carries a DO-NOT-EDIT header, so the suppression has to live here. ~keep
+"packages/python/xberg/options.py" = ["S105"]
 "packages/python/build.py" = ["INP001"]
 "scripts/**/*.py" = [
   "B023",

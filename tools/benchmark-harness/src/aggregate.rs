@@ -4240,7 +4240,7 @@ mod tests {
     /// would have been computed against `seg2-high` (throughput_delta_mbs = 5.0 - 100.0 = -95.0),
     /// not its own segment's `seg1-high` (throughput_delta_mbs = 5.0 - 10.0 = -5.0).
     #[test]
-    fn deltas_vs_baseline_use_the_entrys_own_segment_baseline() {
+    fn deltas_vs_baseline_use_the_segment_baseline_of_their_own_entry() {
         let seg1_high = create_test_result("seg1-high", "pdf", OcrStatus::NotUsed, 1_000, 10_000_000.0, 5_000_000);
         let seg1_low = create_test_result("seg1-low", "pdf", OcrStatus::NotUsed, 1_000, 5_000_000.0, 8_000_000);
         let mut seg2_high = create_test_result("seg2-high", "pdf", OcrStatus::NotUsed, 1_000, 100_000_000.0, 2_000_000);

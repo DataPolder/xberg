@@ -465,7 +465,7 @@ impl SyncExtractor for HtmlExtractor {
         // The HTML conversion pass above emits only inline `![alt](src)` markdown and a URI
         // record — it never stores bytes — and correlating those back to the extracted images
         // would require threading image identity through that pass, so the elements are appended
-        // here instead of being placed in-flow.
+        // here instead of being placed in-flow. ~keep
         if should_extract_images {
             let image_html_options =
                 apply_content_filter_to_html_options(config.html_options.clone(), config.content_filter.as_ref());

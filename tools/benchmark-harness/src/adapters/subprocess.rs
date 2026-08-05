@@ -1601,7 +1601,7 @@ impl SubprocessAdapter {
             // `crates/xberg-cli/src/peak_memory.rs`). Surface it under the same
             // `_peak_memory_bytes` key the Python wrappers use so the memory comparison downstream
             // treats xberg identically to them instead of only ever trusting the sysinfo sampler
-            // for xberg.
+            // for xberg. ~keep
             if let (Some(obj), Some(mem)) = (flat.as_object_mut(), raw.get("peak_memory_bytes")) {
                 obj.insert("_peak_memory_bytes".to_string(), mem.clone());
             }
@@ -2429,7 +2429,7 @@ mod tests {
     fn test_parse_output_flattens_peak_memory_bytes_from_nested_xberg_envelope() {
         // Mirrors the real shape `xberg extract --format json` emits (see
         // `crates/xberg-cli/src/output.rs::ExtractEnvelope`): the document is nested under
-        // `result`, with `extraction_time_ms` and `peak_memory_bytes` as top-level siblings.
+        // `result`, with `extraction_time_ms` and `peak_memory_bytes` as top-level siblings. ~keep
         let adapter = SubprocessAdapter::new("test", "echo", vec![], vec![], vec!["pdf".to_string()]);
         let output = r#"{
             "result": {"content": "Hello, world!", "metadata": {}},

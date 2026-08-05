@@ -539,7 +539,7 @@ impl MarkdownExtractor {
                     // `ElementKind::Image` whose `image_index` actually resolves in `doc.images`.
                     // Plain-URL images have no bytes to attach, and a placeholder element with an
                     // unresolvable index is silently dropped by every renderer, so their
-                    // reference is preserved as visible text instead.
+                    // reference is preserved as visible text instead. ~keep
                     if let Some(mut image) = decoded_image {
                         image_counter += 1;
                         image.description = desc.map(str::to_string);

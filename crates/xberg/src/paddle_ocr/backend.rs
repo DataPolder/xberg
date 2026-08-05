@@ -481,7 +481,7 @@ impl PaddleOcrBackend {
             // Unreachable in practice: `effective_backend` already rejects a backend whose
             // feature is not compiled in before `initialize_engine` is ever called. This arm
             // only exists so the match stays exhaustive in a single-engine build, mirroring
-            // `xberg_paddle_ocr::inference::load_backend`'s catch-all.
+            // `xberg_paddle_ocr::inference::load_backend`'s catch-all. ~keep
             #[allow(unreachable_patterns)]
             other => {
                 return Err(crate::XbergError::Ocr {

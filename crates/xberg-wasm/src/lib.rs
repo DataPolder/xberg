@@ -20870,18 +20870,6 @@ pub async fn classify_chunks(result: JsValue, config: JsValue) -> Result<(), JsV
     Ok(result)
 }
 
-/// Probe the backends and settings in `config` and report what will actually
-/// execute on this host.
-///
-/// Runs no downloads and no billable API calls. Backends that are not compiled
-/// in or whose models are not cached report `Skip` rather than failing.
-#[wasm_bindgen]
-pub fn doctor(_config: WasmExtractionConfig) -> WasmDoctorReport {
-    compile_error!(
-        "alef cannot generate WASM binding for doctor; configure wasm.exclude_functions or make the return type fallible"
-    )
-}
-
 #[cfg(target_arch = "wasm32")]
 mod __alef_wasm_bridge_ocrbackend {
     use super::*;

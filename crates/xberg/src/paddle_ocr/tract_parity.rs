@@ -139,16 +139,20 @@ const CONFIDENCE_TOLERANCE: f32 = 1e-3;
 /// Minimum intersection-over-union required between an ORT box and its tract counterpart.
 ///
 /// Both engines now run the identical detection tensor, and every box on both parity pages and
-/// both model generations matches at IoU 1.000 exactly. The bound is not there to absorb a
-/// structural difference, and it is not tuned to what passes: it is slack for the one thing that
-/// legitimately can differ, which is a single pixel of the binarized mask. Measured over the four
+/// both model generations matches at IoU 1.000 exactly — the bound absorbs no structural
+/// difference and is deliberately not tuned down to the worst case that could still pass. What
+/// legitimately can differ is a single pixel of the binarized mask: measured over the four
 /// page/generation combinations here, the engines' raw probability maps differ by at most 5.0e-5
 /// (mean 2.4e-7), which flipped 1 of 307200 pixels across the 0.3 binarization threshold on the
-/// dense page and could flip a different one on another CPU. A one-pixel contour shift costs at
-/// most ~0.2 IoU on the smallest box either engine emits (roughly 9x8 map pixels), so 0.75 fails
-/// on any real move, split, or merge while tolerating that. Region *counts* are asserted equal
-/// separately, which is what actually catches a merge.
-const MIN_DETECTION_IOU: f32 = 0.75;
+/// dense page and could flip a different one on another CPU.
+///
+/// 0.90 leaves roughly 3% linear slack, which covers that on every box actually emitted here. It
+/// is *not* unconditionally safe: on the smallest box either engine produces (roughly 9x8 map
+/// pixels) a one-pixel contour shift can cost about 0.2 IoU and would trip this bound. That is
+/// the intended behavior — a box that small moving a whole pixel is worth a look, not a silently
+/// widened tolerance. If this fires on another CPU, diagnose the shift; do not relax the bound to
+/// make it pass. Region *counts* are asserted equal separately, which is what catches a merge.
+const MIN_DETECTION_IOU: f32 = 0.90;
 
 /// Load a parity page, or `None` when its content is unavailable and parity is not required.
 fn parity_page(page: &ParityPage) -> Option<image::RgbImage> {
@@ -663,7 +667,6 @@ fn should_load_distinct_engines_when_the_backend_is_named_explicitly() {
         .init_model_on(InferenceBackend::Tract, as_str(&model), INFERENCE_THREADS)
         .expect("explicit tract load must succeed");
 
-    // `Debug` on the nets reports the loaded backend's `name()`, which is the only externally
     // visible proof of which engine a net actually holds.
     let ort_debug = format!("{ort:?}");
     let tract_debug = format!("{tract:?}");

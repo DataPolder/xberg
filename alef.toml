@@ -807,6 +807,10 @@ exclude_functions = [
   "embed_sparse_async",
   "embed_multi_vector",
   "embed_multi_vector_async",
+  # Infallible return type; alef emits a compile_error! rather than a binding for it. Excluded
+  # here per that error's own remedy -- `xberg doctor` inspects host backends and model caches,
+  # neither of which exists in a browser. ~keep
+  "doctor",
 ]
 
 [crates.wasm.extra_dependencies]
