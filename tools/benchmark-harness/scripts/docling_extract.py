@@ -143,11 +143,24 @@ def extract_batch(
     # with ``file_paths``). ~keep
     for result in manager.convert_documents(sources=list(file_paths), options=options):
         item: dict[str, Any]
-        if result.status == ConversionStatus.SUCCESS:
+        # PARTIAL_SUCCESS means docling converted the document but hit recoverable problems on
+        # some pages; the DoclingDocument still carries real content. Rendering only SUCCESS
+        # scored those documents as empty, which understated docling in batch mode while the
+        # single-file path (``extract_sync``) renders them unconditionally. Render whenever a
+        # document is present and carry the degraded status through as metadata. ~keep
+        if result.document is not None and result.status in (
+            ConversionStatus.SUCCESS,
+            ConversionStatus.PARTIAL_SUCCESS,
+        ):
             content = _render(result.document, output_format)
+            metadata: dict[str, Any] = {"framework": "docling", "output_format": output_format}
+            if result.status != ConversionStatus.SUCCESS:
+                metadata["status"] = result.status.name
+                if result.errors:
+                    metadata["partial_errors"] = str(result.errors)
             item = {
                 "content": content,
-                "metadata": {"framework": "docling", "output_format": output_format},
+                "metadata": metadata,
                 "_peak_memory_bytes": _get_peak_memory_bytes(),
             }
         else:

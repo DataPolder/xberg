@@ -36,8 +36,9 @@ class _Status:
         self.name = name
 
 
-# The wrapper compares by identity against ConversionStatus.SUCCESS.
+# The wrapper compares by identity against ConversionStatus.SUCCESS / PARTIAL_SUCCESS.
 _SUCCESS = _Status("SUCCESS")
+_PARTIAL_SUCCESS = _Status("PARTIAL_SUCCESS")
 _FAILURE = _Status("FAILURE")
 
 
@@ -56,16 +57,23 @@ class _Document:
 
 
 class _Result:
-    def __init__(self, path: str, events: list[str], *, success: bool) -> None:
-        self.status = _SUCCESS if success else _FAILURE
+    def __init__(self, path: str, events: list[str], *, success: bool, partial: bool = False) -> None:
+        if partial:
+            self.status = _PARTIAL_SUCCESS
+        else:
+            self.status = _SUCCESS if success else _FAILURE
         self.document = _Document(path, events)
-        self.errors = [] if success else [f"failed:{path}"]
+        # A partially converted document still carries content, but docling also reports the
+        # recoverable problems it hit.
+        self.errors = [f"page-warning:{path}"] if partial else ([] if success else [f"failed:{path}"])
 
 
 class _Manager:
     """Stand-in for docling-jobkit's ``DoclingConverterManager``."""
 
     last: _Manager | None = None
+    # Sources listed here yield PARTIAL_SUCCESS instead of the index-based default.
+    partial_sources: set[str] = set()
 
     def __init__(self, events: list[str], config: object) -> None:
         self.events = events
@@ -83,7 +91,10 @@ class _Manager:
             self.events.append("convert_documents")
             for index, path in enumerate(self.sources):
                 self.events.append(f"yield:{path}")
-                yield _Result(path, self.events, success=index == 0)
+                if path in _Manager.partial_sources:
+                    yield _Result(path, self.events, success=False, partial=True)
+                else:
+                    yield _Result(path, self.events, success=index == 0)
 
         return stream()
 
@@ -91,7 +102,7 @@ class _Manager:
 def _jobkit_modules(events: list[str]) -> dict[str, types.ModuleType]:
     """Build the fake docling / docling-jobkit module tree the batch path imports lazily."""
     base_models = types.ModuleType("docling.datamodel.base_models")
-    base_models.ConversionStatus = types.SimpleNamespace(SUCCESS=_SUCCESS)
+    base_models.ConversionStatus = types.SimpleNamespace(SUCCESS=_SUCCESS, PARTIAL_SUCCESS=_PARTIAL_SUCCESS)
     base_models.OutputFormat = types.SimpleNamespace(MARKDOWN="md", TEXT="text")
 
     manager_mod = types.ModuleType("docling_jobkit.convert.manager")
@@ -181,6 +192,33 @@ class DoclingBatchConformanceTest(unittest.TestCase):
 
         assert payload["results"][0]["content"] == "text:only.pdf"
         assert "render_text:only.pdf" in events
+
+    def test_batch_renders_partial_success_content(self) -> None:
+        """PARTIAL_SUCCESS documents must be rendered, not scored as empty.
+
+        Docling reports PARTIAL_SUCCESS when a document converted but hit recoverable problems on
+        some pages; the DoclingDocument still carries real content. Discarding it scored those
+        documents as empty in batch mode while the single-file path rendered them normally, which
+        understated docling. The degraded status is carried through as metadata instead.
+        """
+        wrapper = _load_wrapper()
+        events: list[str] = []
+        _Manager.partial_sources = {"partial.pdf"}
+        try:
+            with (
+                mock.patch.dict(sys.modules, _jobkit_modules(events)),
+                mock.patch.object(wrapper, "_get_peak_memory_bytes", return_value=7),
+            ):
+                payload = wrapper.extract_batch(["partial.pdf"], ocr_enabled=False)
+        finally:
+            _Manager.partial_sources = set()
+
+        result = payload["results"][0]
+        assert result["content"] == "markdown:partial.pdf"
+        assert "error" not in result
+        assert result["metadata"]["status"] == "PARTIAL_SUCCESS"
+        assert result["metadata"]["partial_errors"] == "['page-warning:partial.pdf']"
+        assert result["metadata"]["output_format"] == "markdown"
 
 
 if __name__ == "__main__":
