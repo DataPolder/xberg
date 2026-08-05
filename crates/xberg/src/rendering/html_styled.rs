@@ -371,7 +371,15 @@ fn render_elements(doc: &InternalDocument, p: &str, buf: &mut String) {
             }
 
             ElementKind::Slide { number } => {
+                // `Slide` is a marker, not a container: there is no `SlideEnd` element kind, so
+                // an unbalanced opening tag would leave every slide deck's HTML malformed. Match
+                // the djot and comrak renderers, which emit a break followed by the slide title
+                // as a level-2 heading, and keep the `slide`/`data-slide` hooks for styling.
                 write!(buf, r#"<section class="{p}slide" data-slide="{number}">"#).unwrap();
+                if !elem.text.is_empty() {
+                    write!(buf, r#"<h2 class="{p}h {p}h2">{}</h2>"#, render_inline(doc, elem, p)).unwrap();
+                }
+                buf.push_str("</section>");
             }
 
             ElementKind::DefinitionTerm => {
