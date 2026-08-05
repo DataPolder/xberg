@@ -840,13 +840,17 @@ fn apply_page_content_format(
 }
 
 /// Extract `OcrElement` entries from OCR-typed internal elements.
+///
+/// An element without geometry is kept with a zero bounding box rather than
+/// discarded (#75): backends that report text without word boxes (VLM OCR, hOCR
+/// without `bbox` properties) would otherwise lose their recognised text entirely.
 fn build_ocr_elements(doc: &InternalDocument) -> Option<Vec<OcrElement>> {
     let ocr_elems: Vec<OcrElement> = doc
         .elements
         .iter()
         .filter_map(|elem| {
             if let ElementKind::OcrText { level } = elem.kind {
-                let geometry = elem.ocr_geometry.clone()?;
+                let geometry = elem.ocr_geometry.clone().unwrap_or_default();
                 let confidence = elem.ocr_confidence.clone().unwrap_or(OcrConfidence {
                     detection: None,
                     recognition: 0.0,
