@@ -194,6 +194,56 @@ jobs:
           cargo test --locked -p xberg-libwpd
         shell: bash
 
+  # `--no-default-features --features "ocr,auto-rotate-tract,..."` cargo commands elsewhere in
+  # this file are clippy-only (`--all-targets` compiles test targets but never runs them), so
+  # tests gated on the tract-only cfg combination (e.g. `sceptre_ocr::tests::
+  # tract_only_build_should_select_tract_by_default`, gated `not(feature = "sceptre-ocr-ort")`)
+  # have never actually executed in CI. This job runs them for real, under a feature set that
+  # is asserted ORT-free below. Scoped to the modules the tract features touch (sceptre_ocr,
+  # doc_orientation, layout, paddle_ocr) instead of the whole `--lib` suite -- the ORT-enabled
+  # `rust` job above already runs that suite, so re-running it wholesale here would just double
+  # CI time for no new coverage. ~keep
+  rust-tract-no-ort:
+    name: Rust tract-only (no-ORT)
+    if: github.repository == 'xberg-io/xberg' && github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    env:
+      TRACT_FEATURES: "ocr,auto-rotate-tract,layout-tract,sceptre-ocr-tract,paddle-ocr-tract"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Setup Rust
+        uses: xberg-io/actions/setup-rust@v1
+        with:
+          cache-key-prefix: rust-tract-no-ort
+          use-sccache: "true"
+
+      - name: Install system dependencies
+        uses: ./.github/actions/install-system-deps
+
+      - name: Setup Tesseract cache
+        uses: ./.github/actions/setup-tesseract-cache
+        with:
+          label: tract-no-ort
+
+      - name: Assert no ORT in the tract-only dependency graph
+        run: |
+          if cargo tree --locked -p xberg --no-default-features --features "${TRACT_FEATURES}" -e normal,build,dev \
+            | grep -qE '(^|[[:space:]])ort v[0-9]'; then
+            echo "::error::'ort' is present in the dependency graph for features [${TRACT_FEATURES}] -- this leg must stay ORT-free"
+            exit 1
+          fi
+        shell: bash
+
+      - name: Run no-ORT tract tests
+        run: |
+          cargo test --locked -p xberg --no-default-features --features "${TRACT_FEATURES}" --lib \
+            -- sceptre_ocr:: doc_orientation:: layout:: paddle_ocr::
+        shell: bash
+
   live-hf:
     name: Live HF preset tests
     if: github.repository == 'xberg-io/xberg' && github.actor != 'dependabot[bot]'

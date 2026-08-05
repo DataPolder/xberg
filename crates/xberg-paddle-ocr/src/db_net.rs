@@ -1,6 +1,7 @@
 use crate::{
     base_net::BaseNet,
     constants::{IMAGENET_MEAN_VALUES, IMAGENET_NORM_VALUES},
+    inference::{self, ModelBackend},
     ocr_error::OcrError,
     ocr_result::{self, TextBox},
     ocr_utils::OcrUtils,
@@ -8,37 +9,94 @@ use crate::{
 };
 use geo_clipper::{Clipper, EndType, JoinType};
 use geo_types::{Coord, LineString, Polygon};
-use ort::{inputs, session::SessionOutputs};
-use ort::{session::Session, value::Tensor};
+use std::borrow::Cow;
 use std::cmp::Ordering;
 
 const DB_DILATION_KERNEL_SIZE: u32 = 2;
 const BINARY_FOREGROUND: u8 = u8::MAX;
 
-#[derive(Debug)]
 pub struct DbNet {
-    session: Option<Session>,
-    input_names: Vec<String>,
+    backend: Option<Box<dyn ModelBackend>>,
+    /// Side length of the square canvas the detection input is padded into, when the model
+    /// was pinned to a fixed input shape. `None` means the model takes the resized page at
+    /// its exact extent -- today's `ort` behavior.
+    detection_canvas: Option<u32>,
+}
+
+impl std::fmt::Debug for DbNet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DbNet")
+            .field("initialized", &self.backend.is_some())
+            .field("detection_canvas", &self.detection_canvas)
+            .finish()
+    }
 }
 
 impl BaseNet for DbNet {
     fn new() -> Self {
         Self {
-            session: None,
-            input_names: Vec::new(),
+            backend: None,
+            detection_canvas: None,
         }
     }
 
-    fn set_input_names(&mut self, input_names: Vec<String>) {
-        self.input_names = input_names;
-    }
-
-    fn set_session(&mut self, session: Option<Session>) {
-        self.session = session;
+    fn set_backend(&mut self, backend: Option<Box<dyn ModelBackend>>) {
+        // A backend loaded through the plain `BaseNet` path is never pinned, so any canvas
+        // from a previous load is dropped here; `init_model_from_memory_with_canvas` re-sets
+        // it after this call.
+        self.detection_canvas = None;
+        self.backend = backend;
     }
 }
 
 impl DbNet {
+    /// Load the detection model from a file path, optionally pinning it to a fixed square
+    /// canvas. See [`DbNet::init_model_from_memory_with_canvas`].
+    pub fn init_model_with_canvas(
+        &mut self,
+        path: &str,
+        num_thread: usize,
+        detection_canvas: Option<u32>,
+    ) -> Result<(), OcrError> {
+        let model_bytes = std::fs::read(path)?;
+        self.init_model_from_memory_with_canvas(&model_bytes, num_thread, detection_canvas)
+    }
+
+    /// Load the detection model from ONNX bytes, optionally pinning its input to
+    /// `[1, 3, detection_canvas, detection_canvas]`.
+    ///
+    /// Pinning is a **`tract`-only** requirement: tract cannot shape-infer DBNet with a
+    /// symbolic H/W (the `Resize`-upsampled branch fails to unify against the FPN skip
+    /// connection at `Concat`), but loads fine against a concrete square input. `ort` shape-infers
+    /// the dynamic graph natively, so on `ort` the canvas is dropped here and both model loading
+    /// and preprocessing stay exactly as they are today.
+    ///
+    /// When a canvas is in force, [`DbNet::get_text_boxes`] pads (never stretches) the resized
+    /// page into the canvas top-left and crops the probability map back to the page extent, so
+    /// the box geometry is identical either way.
+    pub fn init_model_from_memory_with_canvas(
+        &mut self,
+        model_bytes: &[u8],
+        num_thread: usize,
+        detection_canvas: Option<u32>,
+    ) -> Result<(), OcrError> {
+        let backend_kind = inference::default_backend();
+        let detection_canvas = match backend_kind {
+            inference::Backend::Tract => detection_canvas.filter(|canvas| *canvas > 0),
+            inference::Backend::Ort => None,
+        };
+        let fixed_input = detection_canvas.map(|canvas| [1_usize, 3, canvas as usize, canvas as usize]);
+        let backend = inference::load_backend(
+            backend_kind,
+            model_bytes,
+            num_thread,
+            fixed_input.as_ref().map(|shape| &shape[..]),
+        )?;
+        self.set_backend(Some(backend));
+        self.detection_canvas = detection_canvas;
+        Ok(())
+    }
+
     pub fn get_text_boxes(
         &self,
         img_src: &image::RgbImage,
@@ -47,7 +105,7 @@ impl DbNet {
         box_thresh: f32,
         un_clip_ratio: f32,
     ) -> Result<Vec<TextBox>, OcrError> {
-        let Some(session) = &self.session else {
+        let Some(backend) = &self.backend else {
             return Err(OcrError::SessionNotInitialized);
         };
 
@@ -58,19 +116,21 @@ impl DbNet {
             image::imageops::FilterType::Triangle,
         );
 
-        let input_tensors =
-            OcrUtils::substract_mean_normalize(&src_resize, &IMAGENET_MEAN_VALUES, &IMAGENET_NORM_VALUES);
-
-        let tensor = Tensor::from_array(input_tensors)?;
-
-        #[allow(unsafe_code)]
-        let outputs = unsafe {
-            let session_ptr = session as *const Session as *mut Session;
-            (*session_ptr).run(inputs![self.input_names[0].as_str() => tensor])?
+        let input_tensors = match self.detection_canvas {
+            Some(canvas) => OcrUtils::substract_mean_normalize_padded(
+                &src_resize,
+                &IMAGENET_MEAN_VALUES,
+                &IMAGENET_NORM_VALUES,
+                canvas,
+            )?,
+            None => OcrUtils::substract_mean_normalize(&src_resize, &IMAGENET_MEAN_VALUES, &IMAGENET_NORM_VALUES),
         };
 
+        let (pred_shape, pred_data) = inference::run_flat(backend.as_ref(), input_tensors.into_dyn())?;
+        let pred_data = Self::crop_prediction_map(&pred_data, &pred_shape, src_resize.width(), src_resize.height())?;
+
         let text_boxes = Self::get_text_boxes_core(
-            &outputs,
+            &pred_data,
             src_resize.height(),
             src_resize.width(),
             &ScaleParam::new(
@@ -89,8 +149,47 @@ impl DbNet {
         Ok(text_boxes)
     }
 
+    /// Restrict a DBNet probability map to the top-left `width x height` content region.
+    ///
+    /// On the fixed-canvas path the map comes back at `canvas x canvas` while the page occupies
+    /// only the top-left corner. Cropping here means every downstream step -- binarize, dilate,
+    /// contour, score, and the `scale_width`/`scale_height` back-mapping in
+    /// [`DbNet::get_text_boxes_core`] -- sees exactly the map it sees on the unpinned path, and
+    /// anything the network fires in the padded region is dropped outright rather than clamped
+    /// onto the page edge. When the map already matches the page (every `ort` run) the input is
+    /// borrowed unchanged, so that path does no extra work.
+    fn crop_prediction_map<'a>(
+        pred_data: &'a [f32],
+        pred_shape: &[usize],
+        width: u32,
+        height: u32,
+    ) -> Result<Cow<'a, [f32]>, OcrError> {
+        let [.., map_height, map_width] = pred_shape else {
+            return Err(OcrError::inference(format!(
+                "DBNet output shape {pred_shape:?} has no spatial dimensions"
+            )));
+        };
+        let (width, height) = (width as usize, height as usize);
+        if *map_width == width && *map_height == height {
+            return Ok(Cow::Borrowed(pred_data));
+        }
+        if *map_width < width || *map_height < height || pred_data.len() < map_width * map_height {
+            return Err(OcrError::inference(format!(
+                "DBNet output map {map_width}x{map_height} ({} values) is smaller than the resized page {width}x{height}",
+                pred_data.len()
+            )));
+        }
+
+        let mut cropped = Vec::with_capacity(width * height);
+        for row in 0..height {
+            let start = row * map_width;
+            cropped.extend_from_slice(&pred_data[start..start + width]);
+        }
+        Ok(Cow::Owned(cropped))
+    }
+
     fn get_text_boxes_core(
-        output_tensor: &SessionOutputs,
+        pred_data: &[f32],
         rows: u32,
         cols: u32,
         s: &ScaleParam,
@@ -100,20 +199,11 @@ impl DbNet {
     ) -> Result<Vec<TextBox>, OcrError> {
         let max_side_thresh = 3.0;
 
-        let (_, red_data) = output_tensor.iter().next().ok_or_else(|| {
-            OcrError::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "No output tensors found in session output",
-            ))
-        })?;
-
-        let pred_data: Vec<f32> = red_data.try_extract_tensor::<f32>()?.1.to_vec();
-
-        let threshold_img = Self::binarize_predictions(&pred_data, rows, cols, box_thresh)?;
+        let threshold_img = Self::binarize_predictions(pred_data, rows, cols, box_thresh)?;
         let dilated_img = Self::dilate_db_mask(&threshold_img);
 
         let pred_img: image::ImageBuffer<image::Luma<f32>, Vec<f32>> =
-            image::ImageBuffer::from_vec(cols, rows, pred_data).ok_or_else(|| {
+            image::ImageBuffer::from_vec(cols, rows, pred_data.to_vec()).ok_or_else(|| {
                 OcrError::Io(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     format!(
@@ -437,6 +527,44 @@ impl DbNet {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn should_borrow_the_prediction_map_when_it_already_matches_the_page() {
+        let predictions: Vec<f32> = (0..6).map(|value| value as f32).collect();
+
+        let cropped = DbNet::crop_prediction_map(&predictions, &[1, 1, 2, 3], 3, 2).expect("shapes match");
+
+        assert!(matches!(cropped, Cow::Borrowed(_)), "matching shapes must not copy");
+        assert_eq!(cropped.as_ref(), predictions.as_slice());
+    }
+
+    #[test]
+    fn should_take_the_top_left_region_of_a_fixed_canvas_prediction_map() {
+        // 4x4 canvas map holding a 3x2 page in its top-left corner.
+        let predictions: Vec<f32> = (0..16).map(|value| value as f32).collect();
+
+        let cropped = DbNet::crop_prediction_map(&predictions, &[1, 1, 4, 4], 3, 2).expect("the page fits the canvas");
+
+        assert_eq!(cropped.as_ref(), &[0.0, 1.0, 2.0, 4.0, 5.0, 6.0]);
+    }
+
+    #[test]
+    fn should_reject_a_prediction_map_smaller_than_the_resized_page() {
+        let predictions = vec![0.0_f32; 4];
+
+        let error = DbNet::crop_prediction_map(&predictions, &[1, 1, 2, 2], 3, 2)
+            .expect_err("a 2x2 map cannot cover a 3x2 page");
+
+        assert!(matches!(error, OcrError::Inference { .. }));
+        assert!(error.to_string().contains("2x2"), "error was: {error}");
+    }
+
+    #[test]
+    fn should_reject_a_prediction_shape_without_spatial_dimensions() {
+        let error = DbNet::crop_prediction_map(&[0.0_f32], &[1], 1, 1).expect_err("rank 1 has no spatial dimensions");
+
+        assert!(matches!(error, OcrError::Inference { .. }));
+    }
 
     #[test]
     fn should_use_configured_db_threshold_when_binarizing_predictions() {

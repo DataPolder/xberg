@@ -29,6 +29,13 @@ pub(crate) fn parse_execution_provider_override(
     }
 }
 
+// Deliberately ungated (unlike `apply_execution_providers`, which has `ort::` types in its
+// signature): every ORT-capable subsystem calls this independently under its own feature
+// gate, and those gates are numerous and not owned by this module. A feature combination
+// that compiles no ORT-capable subsystem at all (e.g. `paddle-ocr-tract` alone, with no
+// `layout-detection`/`embeddings`/`auto-rotate`/etc.) legitimately calls neither function;
+// that is not a bug in either the caller or here. ~keep
+#[allow(dead_code)]
 pub(crate) fn execution_provider_override() -> Option<crate::core::config::acceleration::ExecutionProviderType> {
     std::env::var(XBERG_ORT_EP_ENV_VAR)
         .ok()
@@ -39,6 +46,7 @@ pub(crate) fn execution_provider_override() -> Option<crate::core::config::accel
 ///
 /// When the `ort-bundled` feature is enabled the ORT binaries are embedded via the
 /// official Microsoft release and no system library search is needed.
+#[allow(dead_code)]
 pub(crate) fn ensure_ort_available() {
     #[cfg(feature = "ort-bundled")]
     {
@@ -124,7 +132,7 @@ fn platform_candidates() -> &'static [&'static str] {
 #[cfg(any(
     feature = "layout-detection",
     feature = "embeddings",
-    feature = "paddle-ocr",
+    feature = "paddle-ocr-ort",
     feature = "auto-rotate",
     feature = "reranker",
     feature = "onnx-runtime",

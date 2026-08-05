@@ -17,17 +17,17 @@
 //! let hocr_word = element_to_hocr_word(&element);
 //! ```
 
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 use crate::types::OcrRotation;
 use crate::types::{OcrBoundingGeometry, OcrConfidence, OcrElement, OcrElementLevel};
 
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 use crate::error::{Result, XbergError};
 
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 use xberg_paddle_ocr::{DetailedTextBlock, TextBlock, WordBlock};
 
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 use super::table::HocrWord;
 
 /// Convert a PaddleOCR TextBlock to a unified OcrElement.
@@ -53,7 +53,7 @@ use super::table::HocrWord;
 /// - `angle_index` is outside the valid range (0-3)
 ///
 /// Returns `Ok(None)` if the detection is filtered out due to low `box_score`.
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 pub(crate) fn text_block_to_element(block: &TextBlock, page_number: u32) -> Result<Option<OcrElement>> {
     if block.box_score < 0.3 {
         return Ok(None);
@@ -96,14 +96,14 @@ pub(crate) fn text_block_to_element(block: &TextBlock, page_number: u32) -> Resu
 }
 
 /// Line and word elements derived from one PaddleOCR recognition block.
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 pub(crate) struct PaddleElementGroup {
     pub(crate) line: OcrElement,
     pub(crate) words: Vec<OcrElement>,
 }
 
 /// Convert detailed PaddleOCR output without mixing semantic line text and word geometry.
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 pub(crate) fn detailed_text_block_to_elements(
     block: &DetailedTextBlock,
     page_number: u32,
@@ -119,7 +119,7 @@ pub(crate) fn detailed_text_block_to_elements(
     Ok(Some(PaddleElementGroup { line, words }))
 }
 
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 fn word_block_to_element(
     word: &WordBlock,
     line: &OcrElement,
@@ -340,7 +340,7 @@ pub(crate) fn iterator_word_to_element(
 /// # Returns
 ///
 /// An `HocrWord` suitable for table reconstruction algorithms.
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 pub(crate) fn element_to_hocr_word(element: &OcrElement) -> HocrWord {
     let (left, top, width, height) = element.geometry.to_aabb();
 
@@ -368,7 +368,7 @@ pub(crate) fn element_to_hocr_word(element: &OcrElement) -> HocrWord {
 /// # Returns
 ///
 /// A vector of HocrWords filtered by confidence and element level.
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 pub(crate) fn elements_to_hocr_words(elements: &[OcrElement], min_confidence: f64) -> Vec<HocrWord> {
     let has_valid_words = elements
         .iter()
@@ -390,12 +390,12 @@ pub(crate) fn elements_to_hocr_words(elements: &[OcrElement], min_confidence: f6
 }
 
 /// Extension trait to add optional rotation to OcrElement builder.
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 trait OcrElementExt {
     fn with_rotation_opt(self, rotation: Option<OcrRotation>) -> Self;
 }
 
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 impl OcrElementExt for OcrElement {
     #[cfg_attr(alef, alef(skip))]
     fn with_rotation_opt(mut self, rotation: Option<OcrRotation>) -> Self {
@@ -433,7 +433,7 @@ mod tests {
         assert!(element.parent_id.is_some());
         assert_eq!(element.parent_id.as_ref().unwrap(), "p1_b1_par1_l2");
 
-        #[cfg(any(feature = "paddle-ocr", feature = "layout-detection"))]
+        #[cfg(any(paddle_ocr, feature = "layout-detection"))]
         {
             let (left, top, width, height) = element.geometry.to_aabb();
             assert_eq!((left, top, width, height), (100, 50, 80, 20));
@@ -443,7 +443,7 @@ mod tests {
         assert!(element.confidence.detection.is_none());
     }
 
-    #[cfg(feature = "paddle-ocr")]
+    #[cfg(paddle_ocr)]
     #[test]
     fn test_element_to_hocr_word() {
         let geometry = OcrBoundingGeometry::Rectangle {
@@ -465,7 +465,7 @@ mod tests {
         assert!((word.confidence - 92.5).abs() < 0.001);
     }
 
-    #[cfg(feature = "paddle-ocr")]
+    #[cfg(paddle_ocr)]
     #[test]
     fn test_quadrilateral_to_hocr_word() {
         let geometry = OcrBoundingGeometry::Quadrilateral {
@@ -484,7 +484,7 @@ mod tests {
         assert!((word.confidence - 88.0).abs() < 0.1);
     }
 
-    #[cfg(feature = "paddle-ocr")]
+    #[cfg(paddle_ocr)]
     #[test]
     fn test_elements_to_hocr_words_filtering() {
         let elements = vec![
@@ -529,7 +529,7 @@ mod tests {
         assert_eq!(words[0].text, "word1");
     }
 
-    #[cfg(feature = "paddle-ocr")]
+    #[cfg(paddle_ocr)]
     #[test]
     fn elements_to_hocr_words_prefers_words_over_lines_globally() {
         let elements = vec![
@@ -546,7 +546,7 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "paddle-ocr")]
+    #[cfg(paddle_ocr)]
     #[test]
     fn elements_to_hocr_words_falls_back_to_lines_when_words_are_absent() {
         let elements = vec![
@@ -562,7 +562,7 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "paddle-ocr")]
+    #[cfg(paddle_ocr)]
     #[test]
     fn elements_to_hocr_words_falls_back_to_lines_when_words_fail_confidence() {
         let elements = vec![
@@ -576,7 +576,7 @@ mod tests {
         assert_eq!(words[0].text, "fallback line");
     }
 
-    #[cfg(feature = "paddle-ocr")]
+    #[cfg(paddle_ocr)]
     fn table_input_element(text: &str, level: OcrElementLevel, confidence: f64) -> OcrElement {
         OcrElement::new(
             text,
@@ -591,7 +591,7 @@ mod tests {
         .with_level(level)
     }
 
-    #[cfg(feature = "paddle-ocr")]
+    #[cfg(paddle_ocr)]
     #[test]
     fn test_text_block_to_element() {
         use xberg_paddle_ocr::Point;
@@ -637,7 +637,7 @@ mod tests {
         assert!((rot.confidence.unwrap() - 0.99).abs() < 0.001);
     }
 
-    #[cfg(feature = "paddle-ocr")]
+    #[cfg(paddle_ocr)]
     #[test]
     fn detailed_text_block_preserves_line_and_word_geometry_separately() {
         use xberg_paddle_ocr::{Point, RecognizedWord, WordBlock};
@@ -692,7 +692,7 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "paddle-ocr")]
+    #[cfg(paddle_ocr)]
     #[test]
     fn test_text_block_to_element_malformed_box_points() {
         use xberg_paddle_ocr::Point;
@@ -714,7 +714,7 @@ mod tests {
         assert!(error_msg.contains("4"), "Error should mention required count");
     }
 
-    #[cfg(feature = "paddle-ocr")]
+    #[cfg(paddle_ocr)]
     #[test]
     fn test_text_block_to_element_invalid_angle_index() {
         use xberg_paddle_ocr::Point;

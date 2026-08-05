@@ -1,3 +1,4 @@
+#![cfg(feature = "ort")] // ~keep: this diagnostic drives the `ort` session API directly
 #![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Diagnostic test to trace PaddleOCR detection pipeline.
 //!

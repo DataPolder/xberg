@@ -443,7 +443,7 @@ impl InternalElement {
         feature = "ocr",
         feature = "office",
         feature = "pdf",
-        feature = "paddle-ocr",
+        paddle_ocr,
         feature = "xml",
         feature = "hwpx",
         feature = "quality",
@@ -469,7 +469,7 @@ impl InternalElement {
         any(
             feature = "ocr",
             feature = "pdf",
-            feature = "paddle-ocr",
+            paddle_ocr,
             feature = "xml",
             feature = "office"
         )
@@ -791,7 +791,7 @@ mod tests {
     #[cfg(any(
         feature = "ocr",
         feature = "pdf",
-        feature = "paddle-ocr",
+        paddle_ocr,
         feature = "xml",
         feature = "office"
     ))]

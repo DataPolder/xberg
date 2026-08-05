@@ -41,6 +41,12 @@
 ))]
 compile_error!("`sceptre-ocr-ort` supports desktop and server targets only; use `sceptre-ocr-tract` on mobile");
 
+#[cfg(all(
+    feature = "paddle-ocr-ort",
+    any(target_arch = "wasm32", target_os = "android", target_os = "ios")
+))]
+compile_error!("`paddle-ocr-ort` supports desktop and server targets only; use `paddle-ocr-tract` on mobile");
+
 pub mod cache;
 pub(crate) mod cache_dir;
 pub mod cancellation;
@@ -63,7 +69,7 @@ pub mod text;
 pub mod types;
 pub mod utils;
 
-#[cfg(any(feature = "ocr", feature = "pdf", feature = "paddle-ocr"))]
+#[cfg(any(feature = "ocr", feature = "pdf", paddle_ocr))]
 pub mod table_core;
 
 #[cfg(feature = "tower-service")]
@@ -140,7 +146,7 @@ pub mod ocr;
 pub mod doctor;
 
 #[cfg(any(
-    feature = "paddle-ocr",
+    paddle_ocr,
     feature = "embeddings",
     feature = "reranker",
     feature = "onnx-runtime",
@@ -161,7 +167,7 @@ pub(crate) mod model_download;
 #[cfg(any(layout_detection, auto_rotate))]
 pub(crate) mod inference;
 
-#[cfg(any(feature = "paddle-ocr", feature = "paddle-ocr-types"))]
+#[cfg(any(paddle_ocr, feature = "paddle-ocr-types"))]
 pub mod paddle_ocr;
 
 #[cfg(all(sceptre_ocr, not(target_arch = "wasm32")))]
@@ -369,9 +375,9 @@ pub use core::config::{HtmlOutputConfig, HtmlTheme};
 pub use rendering::StyledHtmlRenderer;
 
 #[cfg(feature = "paddle-ocr-types")]
-pub use paddle_ocr::{ModelPaths, PaddleLanguage, PaddleOcrConfig};
+pub use paddle_ocr::{ModelPaths, PaddleInferenceBackend, PaddleLanguage, PaddleOcrConfig};
 
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 pub use paddle_ocr::{ModelCacheStats, ModelManager, ModelManifestEntry, PaddleOcrBackend};
 
 pub use cache::CacheStats;

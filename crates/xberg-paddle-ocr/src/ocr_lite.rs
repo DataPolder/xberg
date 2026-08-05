@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use image::ImageBuffer;
 use imageproc::geometric_transformations::Projection;
+#[cfg(feature = "ort")]
 use ort::session::builder::SessionBuilder;
 use tracing;
 
@@ -88,9 +89,6 @@ pub struct PaddleOcrEngine {
     crnn_net: CrnnNet,
 }
 
-unsafe impl Send for PaddleOcrEngine {}
-unsafe impl Sync for PaddleOcrEngine {}
-
 impl Default for PaddleOcrEngine {
     fn default() -> Self {
         Self::new()
@@ -113,9 +111,9 @@ impl PaddleOcrEngine {
         rec_path: &str,
         num_thread: usize,
     ) -> Result<(), OcrError> {
-        self.db_net.init_model(det_path, num_thread, None)?;
-        self.angle_net.init_model(cls_path, num_thread, None)?;
-        self.crnn_net.init_model(rec_path, num_thread, None)?;
+        self.db_net.init_model(det_path, num_thread)?;
+        self.angle_net.init_model(cls_path, num_thread)?;
+        self.crnn_net.init_model(rec_path, num_thread)?;
         Ok(())
     }
 
@@ -127,13 +125,41 @@ impl PaddleOcrEngine {
         dict_path: &str,
         num_thread: usize,
     ) -> Result<(), OcrError> {
-        self.db_net.init_model(det_path, num_thread, None)?;
-        self.angle_net.init_model(cls_path, num_thread, None)?;
-        self.crnn_net
-            .init_model_dict_file(rec_path, num_thread, None, dict_path)?;
+        self.init_models_with_dict_and_canvas(det_path, cls_path, rec_path, dict_path, num_thread, None)
+    }
+
+    /// Initialize models with an explicit dictionary file, pinning text detection to a fixed
+    /// square canvas.
+    ///
+    /// `detection_canvas` is the side length of the square DBNet input, and is honoured **only
+    /// on the `tract` backend**, which cannot shape-infer DBNet with a symbolic H/W; `ort`
+    /// drops it and keeps its fully dynamic detection input (see
+    /// [`DbNet::init_model_from_memory_with_canvas`]). `None` is the unpinned default and is
+    /// exactly what [`Self::init_models_with_dict`] passes.
+    ///
+    /// The canvas must be at least as large as the `target_size` the caller later passes to
+    /// detection (`max_side_len + 2 * padding`, as computed by `detect_base_detailed`), because a
+    /// pinned tract plan accepts one shape and nothing else; detection returns an error rather
+    /// than silently distorting the page if the resized page does not fit.
+    ///
+    /// Recognition and angle classification are unaffected: their ONNX graphs carry no
+    /// dimension tract cannot resolve, and one unpinned plan is reused across shapes.
+    pub fn init_models_with_dict_and_canvas(
+        &mut self,
+        det_path: &str,
+        cls_path: &str,
+        rec_path: &str,
+        dict_path: &str,
+        num_thread: usize,
+        detection_canvas: Option<u32>,
+    ) -> Result<(), OcrError> {
+        self.db_net.init_model_with_canvas(det_path, num_thread, detection_canvas)?;
+        self.angle_net.init_model(cls_path, num_thread)?;
+        self.crnn_net.init_model_dict_file(rec_path, num_thread, dict_path)?;
         Ok(())
     }
 
+    #[cfg(feature = "ort")]
     pub fn init_models_custom(
         &mut self,
         det_path: &str,
@@ -141,9 +167,11 @@ impl PaddleOcrEngine {
         rec_path: &str,
         builder_fn: fn(SessionBuilder) -> Result<SessionBuilder, ort::Error>,
     ) -> Result<(), OcrError> {
-        self.db_net.init_model(det_path, 0, Some(builder_fn))?;
-        self.angle_net.init_model(cls_path, 0, Some(builder_fn))?;
-        self.crnn_net.init_model(rec_path, 0, Some(builder_fn))?;
+        self.db_net.init_model_with_ort_builder(det_path, 0, Some(builder_fn))?;
+        self.angle_net
+            .init_model_with_ort_builder(cls_path, 0, Some(builder_fn))?;
+        self.crnn_net
+            .init_model_with_ort_builder(rec_path, 0, Some(builder_fn))?;
         Ok(())
     }
 
@@ -152,6 +180,7 @@ impl PaddleOcrEngine {
     /// Combines `init_models_with_dict` and `init_models_custom`: loads the
     /// dictionary for the recognition model while applying a custom ORT
     /// session builder (e.g. for GPU execution providers).
+    #[cfg(feature = "ort")]
     pub fn init_models_with_dict_custom(
         &mut self,
         det_path: &str,
@@ -161,10 +190,12 @@ impl PaddleOcrEngine {
         num_thread: usize,
         builder_fn: Option<fn(SessionBuilder) -> Result<SessionBuilder, ort::Error>>,
     ) -> Result<(), OcrError> {
-        self.db_net.init_model(det_path, num_thread, builder_fn)?;
-        self.angle_net.init_model(cls_path, num_thread, builder_fn)?;
+        self.db_net
+            .init_model_with_ort_builder(det_path, num_thread, builder_fn)?;
+        self.angle_net
+            .init_model_with_ort_builder(cls_path, num_thread, builder_fn)?;
         self.crnn_net
-            .init_model_dict_file(rec_path, num_thread, builder_fn, dict_path)?;
+            .init_model_dict_file_with_ort_builder(rec_path, num_thread, builder_fn, dict_path)?;
         Ok(())
     }
 
@@ -175,12 +206,13 @@ impl PaddleOcrEngine {
         rec_bytes: &[u8],
         num_thread: usize,
     ) -> Result<(), OcrError> {
-        self.db_net.init_model_from_memory(det_bytes, num_thread, None)?;
-        self.angle_net.init_model_from_memory(cls_bytes, num_thread, None)?;
-        self.crnn_net.init_model_from_memory(rec_bytes, num_thread, None)?;
+        self.db_net.init_model_from_memory(det_bytes, num_thread)?;
+        self.angle_net.init_model_from_memory(cls_bytes, num_thread)?;
+        self.crnn_net.init_model_from_memory(rec_bytes, num_thread)?;
         Ok(())
     }
 
+    #[cfg(feature = "ort")]
     pub fn init_models_from_memory_custom(
         &mut self,
         det_bytes: &[u8],
@@ -188,9 +220,12 @@ impl PaddleOcrEngine {
         rec_bytes: &[u8],
         builder_fn: fn(SessionBuilder) -> Result<SessionBuilder, ort::Error>,
     ) -> Result<(), OcrError> {
-        self.db_net.init_model_from_memory(det_bytes, 0, Some(builder_fn))?;
-        self.angle_net.init_model_from_memory(cls_bytes, 0, Some(builder_fn))?;
-        self.crnn_net.init_model_from_memory(rec_bytes, 0, Some(builder_fn))?;
+        self.db_net
+            .init_model_from_memory_with_ort_builder(det_bytes, 0, Some(builder_fn))?;
+        self.angle_net
+            .init_model_from_memory_with_ort_builder(cls_bytes, 0, Some(builder_fn))?;
+        self.crnn_net
+            .init_model_from_memory_with_ort_builder(rec_bytes, 0, Some(builder_fn))?;
         Ok(())
     }
 

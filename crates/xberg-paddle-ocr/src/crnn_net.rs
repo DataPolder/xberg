@@ -1,12 +1,13 @@
 use ndarray::Array4;
-use ort::session::Session;
-use ort::value::Tensor;
-use ort::{inputs, session::builder::SessionBuilder};
 use std::collections::HashMap;
+
+#[cfg(feature = "ort")]
+use ort::session::builder::SessionBuilder;
 
 use crate::{
     base_net::BaseNet,
     constants::{CRNN_MEAN_VALUES, CRNN_NORM_VALUES},
+    inference::{self, ModelBackend},
     ocr_error::OcrError,
     ocr_result::{DetailedTextLine, RecognizedWord, TextLine},
     ocr_utils::OcrUtils,
@@ -57,39 +58,36 @@ impl RecognitionDictionaryLayout {
     }
 }
 
-#[derive(Debug)]
 pub struct CrnnNet {
-    session: Option<Session>,
+    backend: Option<Box<dyn ModelBackend>>,
     keys: Vec<String>,
-    input_names: Vec<String>,
+}
+
+impl std::fmt::Debug for CrnnNet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CrnnNet")
+            .field("initialized", &self.backend.is_some())
+            .field("keys", &self.keys.len())
+            .finish()
+    }
 }
 
 impl BaseNet for CrnnNet {
     fn new() -> Self {
         Self {
-            session: None,
+            backend: None,
             keys: Vec::new(),
-            input_names: Vec::new(),
         }
     }
 
-    fn set_input_names(&mut self, input_names: Vec<String>) {
-        self.input_names = input_names;
-    }
-
-    fn set_session(&mut self, session: Option<Session>) {
-        self.session = session;
+    fn set_backend(&mut self, backend: Option<Box<dyn ModelBackend>>) {
+        self.backend = backend;
     }
 }
 
 impl CrnnNet {
-    pub fn init_model(
-        &mut self,
-        path: &str,
-        num_thread: usize,
-        builder_fn: Option<fn(SessionBuilder) -> Result<SessionBuilder, ort::Error>>,
-    ) -> Result<(), OcrError> {
-        BaseNet::init_model(self, path, num_thread, builder_fn)?;
+    pub fn init_model(&mut self, path: &str, num_thread: usize) -> Result<(), OcrError> {
+        BaseNet::init_model(self, path, num_thread)?;
 
         self.keys = self.get_keys()?;
 
@@ -100,34 +98,83 @@ impl CrnnNet {
         &mut self,
         path: &str,
         num_thread: usize,
-        builder_fn: Option<fn(SessionBuilder) -> Result<SessionBuilder, ort::Error>>,
         dict_file_path: &str,
     ) -> Result<(), OcrError> {
-        BaseNet::init_model(self, path, num_thread, builder_fn)?;
+        BaseNet::init_model(self, path, num_thread)?;
 
         self.read_keys_from_file(dict_file_path)?;
 
         Ok(())
     }
 
-    pub fn init_model_from_memory(
-        &mut self,
-        model_bytes: &[u8],
-        num_thread: usize,
-        builder_fn: Option<fn(SessionBuilder) -> Result<SessionBuilder, ort::Error>>,
-    ) -> Result<(), OcrError> {
-        BaseNet::init_model_from_memory(self, model_bytes, num_thread, builder_fn)?;
+    pub fn init_model_from_memory(&mut self, model_bytes: &[u8], num_thread: usize) -> Result<(), OcrError> {
+        BaseNet::init_model_from_memory(self, model_bytes, num_thread)?;
 
         self.keys = self.get_keys()?;
 
         Ok(())
     }
 
-    fn get_keys(&mut self) -> Result<Vec<String>, OcrError> {
-        let session = self.session.as_ref().ok_or(OcrError::SessionNotInitialized)?;
+    /// Load onto the `ort` backend with a custom session builder (e.g. for GPU
+    /// execution providers), deriving the dictionary from the model's embedded
+    /// `"character"` metadata.
+    #[cfg(feature = "ort")]
+    pub fn init_model_with_ort_builder(
+        &mut self,
+        path: &str,
+        num_thread: usize,
+        builder_fn: Option<fn(SessionBuilder) -> Result<SessionBuilder, ort::Error>>,
+    ) -> Result<(), OcrError> {
+        BaseNet::init_model_with_ort_builder(self, path, num_thread, builder_fn)?;
 
-        let metadata = session.metadata()?;
-        let model_charater_list = metadata.custom("character").ok_or_else(|| {
+        self.keys = self.get_keys()?;
+
+        Ok(())
+    }
+
+    /// Load onto the `ort` backend with a custom session builder, reading the
+    /// dictionary from an explicit file instead of model metadata.
+    #[cfg(feature = "ort")]
+    pub fn init_model_dict_file_with_ort_builder(
+        &mut self,
+        path: &str,
+        num_thread: usize,
+        builder_fn: Option<fn(SessionBuilder) -> Result<SessionBuilder, ort::Error>>,
+        dict_file_path: &str,
+    ) -> Result<(), OcrError> {
+        BaseNet::init_model_with_ort_builder(self, path, num_thread, builder_fn)?;
+
+        self.read_keys_from_file(dict_file_path)?;
+
+        Ok(())
+    }
+
+    /// Load from ONNX bytes onto the `ort` backend with a custom session builder.
+    #[cfg(feature = "ort")]
+    pub fn init_model_from_memory_with_ort_builder(
+        &mut self,
+        model_bytes: &[u8],
+        num_thread: usize,
+        builder_fn: Option<fn(SessionBuilder) -> Result<SessionBuilder, ort::Error>>,
+    ) -> Result<(), OcrError> {
+        BaseNet::init_model_from_memory_with_ort_builder(self, model_bytes, num_thread, builder_fn)?;
+
+        self.keys = self.get_keys()?;
+
+        Ok(())
+    }
+
+    /// Read the CTC dictionary from the loaded model's embedded `"character"`
+    /// metadata.
+    ///
+    /// Only the `ort` backend can currently surface this ONNX metadata property (see
+    /// [`ModelBackend::custom_metadata`](crate::inference::ModelBackend::custom_metadata));
+    /// a `tract`-only build must load the dictionary from an explicit file via
+    /// [`Self::init_model_dict_file`].
+    fn get_keys(&mut self) -> Result<Vec<String>, OcrError> {
+        let backend = self.backend.as_ref().ok_or(OcrError::SessionNotInitialized)?;
+
+        let model_charater_list = backend.custom_metadata("character").ok_or_else(|| {
             OcrError::Io(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 "crnn_net character not found in metadata",
@@ -205,7 +252,7 @@ impl CrnnNet {
         part_imgs: &[&image::RgbImage],
         batch_size: u32,
     ) -> Result<Vec<DetailedTextLine>, OcrError> {
-        let session = self.session.as_ref().ok_or(OcrError::SessionNotInitialized)?;
+        let backend = self.backend.as_ref().ok_or(OcrError::SessionNotInitialized)?;
         let batch_size = (batch_size as usize).max(1);
 
         let mut indexed_widths: Vec<(usize, u32)> = part_imgs
@@ -259,25 +306,10 @@ impl CrnnNet {
                 }
             }
 
-            let input_tensor = Tensor::from_array(batch_data)?;
-
-            #[allow(unsafe_code)]
-            let outputs = unsafe {
-                let session_ptr = session as *const Session as *mut Session;
-                (*session_ptr).run(inputs![self.input_names[0].as_str() => input_tensor])?
-            };
-
-            let (_, output_value) = outputs.iter().next().ok_or_else(|| {
-                OcrError::Io(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "No output tensors found in batched CRNN session output",
-                ))
-            })?;
-
-            let (shape, flat_data) = output_value.try_extract_tensor::<f32>()?;
-            let batch_dim = *shape.first().unwrap_or(&1) as usize;
-            let timesteps = *shape.get(1).unwrap_or(&0) as usize;
-            let num_classes = *shape.get(2).unwrap_or(&0) as usize;
+            let (shape, flat_data) = inference::run_flat(backend.as_ref(), batch_data.into_dyn())?;
+            let batch_dim = *shape.first().unwrap_or(&1);
+            let timesteps = *shape.get(1).unwrap_or(&0);
+            let num_classes = *shape.get(2).unwrap_or(&0);
 
             for (batch_idx, item) in chunk.iter().enumerate().take(batch_dim.min(n)) {
                 let offset = batch_idx * timesteps * num_classes;
@@ -305,7 +337,7 @@ impl CrnnNet {
     }
 
     fn get_detailed_text_line(&self, img_src: &image::RgbImage) -> Result<DetailedTextLine, OcrError> {
-        let Some(session) = &self.session else {
+        let Some(backend) = &self.backend else {
             return Err(OcrError::SessionNotInitialized);
         };
 
@@ -321,36 +353,19 @@ impl CrnnNet {
 
         let input_tensors = OcrUtils::substract_mean_normalize(&src_resize, &CRNN_MEAN_VALUES, &CRNN_NORM_VALUES);
 
-        let input_tensors = Tensor::from_array(input_tensors)?;
-
-        #[allow(unsafe_code)]
-        let outputs = unsafe {
-            let session_ptr = session as *const Session as *mut Session;
-            (*session_ptr).run(inputs![self.input_names[0].as_str() => input_tensors])?
-        };
-
-        let (_, red_data) = outputs.iter().next().ok_or_else(|| {
-            OcrError::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "No output tensors found in CRNN session output",
-            ))
-        })?;
-
-        let (shape, src_data) = red_data.try_extract_tensor::<f32>()?;
-        let dimensions = shape;
-        let height = *dimensions.get(1).ok_or_else(|| {
+        let (shape, src_data) = inference::run_flat(backend.as_ref(), input_tensors.into_dyn())?;
+        let height = *shape.get(1).ok_or_else(|| {
             OcrError::Io(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "CRNN output tensor missing height dimension (index 1)",
             ))
-        })? as usize;
-        let width = *dimensions.get(2).ok_or_else(|| {
+        })?;
+        let width = *shape.get(2).ok_or_else(|| {
             OcrError::Io(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "CRNN output tensor missing width dimension (index 2)",
             ))
-        })? as usize;
-        let src_data: Vec<f32> = src_data.to_vec();
+        })?;
 
         Self::score_to_detailed_text_line(&src_data, height, width, &self.keys, height as f32)
     }

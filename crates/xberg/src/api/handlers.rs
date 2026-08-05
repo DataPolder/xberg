@@ -802,7 +802,7 @@ pub(crate) async fn cache_manifest_handler() -> Json<ManifestResponse> {
     #[allow(unused_mut)]
     let mut models: Vec<ManifestEntryResponse> = Vec::new();
 
-    #[cfg(feature = "paddle-ocr")]
+    #[cfg(paddle_ocr)]
     {
         models.extend(
             crate::paddle_ocr::ModelManager::manifest()
@@ -901,7 +901,7 @@ pub(crate) async fn cache_warm_handler(JsonApi(request): JsonApi<WarmRequest>) -
     #[allow(unused_mut)]
     let mut already_cached: Vec<String> = Vec::new();
 
-    #[cfg(feature = "paddle-ocr")]
+    #[cfg(paddle_ocr)]
     {
         let paddle_dir = cache_base.join("paddle-ocr");
         let manager = crate::paddle_ocr::ModelManager::new(paddle_dir);

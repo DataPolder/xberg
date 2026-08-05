@@ -724,7 +724,7 @@ impl OcrConfig {
     #[cfg(any(
         feature = "ocr",
         feature = "ocr-wasm",
-        feature = "paddle-ocr",
+        paddle_ocr,
         all(feature = "liter-llm", not(target_arch = "wasm32")),
     ))]
     pub(crate) fn effective_languages(&self) -> Vec<String> {
@@ -844,7 +844,7 @@ impl OcrConfig {
     /// duplicating the paddle-ocr conditional compilation block.
     #[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
     fn effective_pipeline_classical(&self) -> Option<OcrPipelineConfig> {
-        #[cfg(feature = "paddle-ocr")]
+        #[cfg(paddle_ocr)]
         {
             if self.backend != default_tesseract_backend() {
                 return None;
@@ -880,7 +880,7 @@ impl OcrConfig {
             })
         }
 
-        #[cfg(not(feature = "paddle-ocr"))]
+        #[cfg(not(paddle_ocr))]
         {
             None
         }
@@ -1128,7 +1128,7 @@ mod tests {
     fn test_effective_pipeline_default_tesseract_backend() {
         let config = OcrConfig::default();
         let result = config.effective_pipeline();
-        #[cfg(feature = "paddle-ocr")]
+        #[cfg(paddle_ocr)]
         {
             let pipeline = result.unwrap();
             assert_eq!(pipeline.stages.len(), 2);
@@ -1137,7 +1137,7 @@ mod tests {
             assert_eq!(pipeline.stages[1].backend, "paddleocr");
             assert_eq!(pipeline.stages[1].priority, 50);
         }
-        #[cfg(not(feature = "paddle-ocr"))]
+        #[cfg(not(paddle_ocr))]
         {
             assert!(result.is_none());
         }
@@ -1708,7 +1708,7 @@ mod tests {
         );
     }
 
-    #[cfg(all(feature = "ocr", feature = "paddle-ocr", feature = "pdf"))]
+    #[cfg(all(feature = "ocr", paddle_ocr, feature = "pdf"))]
     #[test]
     fn test_effective_pipeline_propagates_backend_options_to_primary_stage() {
         let config = OcrConfig {

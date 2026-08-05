@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 
 use crate::{
+    constants::DETECTION_CANVAS_PAD_PIXEL,
     ocr_error::OcrError,
     ocr_result::{Point, TextBox},
 };
@@ -53,6 +54,70 @@ impl OcrUtils {
         }
 
         input_tensor
+    }
+
+    /// Normalize an image into the **top-left** corner of a square `canvas x canvas` CHW
+    /// tensor, filling the right/bottom remainder with normalized blank background.
+    ///
+    /// Used by `DbNet` when detection is pinned to a fixed canvas (the `tract` path): the
+    /// image is *padded*, never stretched, so glyph aspect ratio is untouched and every real
+    /// content coordinate keeps the value it has in the unpadded tensor. Padding sits only at
+    /// right and bottom, so `ScaleParam`'s `scale_width`/`scale_height` back-mapping applies
+    /// unchanged.
+    ///
+    /// Content pixels use the identical `pixel * norm - mean * norm` formula as
+    /// [`Self::substract_mean_normalize`]; the padding uses that formula applied to
+    /// [`DETECTION_CANVAS_PAD_PIXEL`], so padding is exactly what an all-white region
+    /// normalizes to.
+    ///
+    /// Returns an error when the image does not fit the canvas -- the caller must size the
+    /// canvas from the same limit that drives `ScaleParam::get_scale_param`.
+    pub fn substract_mean_normalize_padded(
+        img_src: &image::RgbImage,
+        mean_vals: &[f32],
+        norm_vals: &[f32],
+        canvas: u32,
+    ) -> Result<Array4<f32>, OcrError> {
+        let cols = img_src.width() as usize;
+        let rows = img_src.height() as usize;
+        let canvas = canvas as usize;
+        if cols > canvas || rows > canvas {
+            return Err(OcrError::inference(format!(
+                "detection canvas {canvas}x{canvas} is smaller than the resized page {cols}x{rows}"
+            )));
+        }
+
+        let mut input_tensor = Array::zeros((1, 3, canvas, canvas));
+
+        let adjusted = [
+            mean_vals[0] * norm_vals[0],
+            mean_vals[1] * norm_vals[1],
+            mean_vals[2] * norm_vals[2],
+        ];
+
+        let raw = img_src.as_raw();
+
+        for ch in 0..3 {
+            let norm = norm_vals[ch];
+            let adj = adjusted[ch];
+            let plane = input_tensor
+                .slice_mut(ndarray::s![0, ch, .., ..])
+                .into_shape_with_order(canvas * canvas)
+                .expect("contiguous plane slice");
+            let plane_slice = plane.into_slice().expect("contiguous memory");
+
+            plane_slice.fill(DETECTION_CANVAS_PAD_PIXEL * norm - adj);
+
+            for row in 0..rows {
+                let source_row = row * cols * 3;
+                let destination = &mut plane_slice[row * canvas..row * canvas + cols];
+                for (col, out) in destination.iter_mut().enumerate() {
+                    *out = raw[source_row + col * 3 + ch] as f32 * norm - adj;
+                }
+            }
+        }
+
+        Ok(input_tensor)
     }
 
     /// Add white padding around the image, or borrow it unchanged when padding=0.
@@ -203,6 +268,89 @@ impl OcrUtils {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constants::{IMAGENET_MEAN_VALUES, IMAGENET_NORM_VALUES};
+
+    /// Value a white (blank-background) pixel normalizes to on channel `ch`.
+    fn normalized_white(ch: usize) -> f32 {
+        255.0 * IMAGENET_NORM_VALUES[ch] - IMAGENET_MEAN_VALUES[ch] * IMAGENET_NORM_VALUES[ch]
+    }
+
+    #[test]
+    fn should_blit_content_into_the_canvas_top_left_and_pad_right_and_bottom() {
+        let mut source = image::RgbImage::from_pixel(3, 2, image::Rgb([255, 255, 255]));
+        source.put_pixel(0, 0, image::Rgb([10, 20, 30]));
+        source.put_pixel(2, 1, image::Rgb([40, 50, 60]));
+        let canvas = 5_u32;
+
+        let unpadded = OcrUtils::substract_mean_normalize(&source, &IMAGENET_MEAN_VALUES, &IMAGENET_NORM_VALUES);
+        let padded =
+            OcrUtils::substract_mean_normalize_padded(&source, &IMAGENET_MEAN_VALUES, &IMAGENET_NORM_VALUES, canvas)
+                .expect("the source fits the canvas");
+
+        assert_eq!(padded.shape(), &[1, 3, canvas as usize, canvas as usize]);
+        for ch in 0..3 {
+            for row in 0..5 {
+                for col in 0..5 {
+                    let actual = padded[[0, ch, row, col]];
+                    if row < 2 && col < 3 {
+                        assert_eq!(
+                            actual,
+                            unpadded[[0, ch, row, col]],
+                            "content pixel ({row},{col}) on channel {ch} must be unchanged by padding"
+                        );
+                    } else {
+                        assert_eq!(
+                            actual,
+                            normalized_white(ch),
+                            "pad pixel ({row},{col}) on channel {ch} must carry normalized blank background"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn should_fill_padding_with_the_value_a_white_pixel_normalizes_to() {
+        let blank = image::RgbImage::from_pixel(1, 1, image::Rgb([255, 255, 255]));
+        let reference = OcrUtils::substract_mean_normalize(&blank, &IMAGENET_MEAN_VALUES, &IMAGENET_NORM_VALUES);
+
+        let content = image::RgbImage::from_pixel(1, 1, image::Rgb([0, 0, 0]));
+        let padded =
+            OcrUtils::substract_mean_normalize_padded(&content, &IMAGENET_MEAN_VALUES, &IMAGENET_NORM_VALUES, 4)
+                .expect("the source fits the canvas");
+
+        for ch in 0..3 {
+            assert_eq!(padded[[0, ch, 0, 3]], reference[[0, ch, 0, 0]]);
+            assert_eq!(padded[[0, ch, 3, 0]], reference[[0, ch, 0, 0]]);
+            assert_eq!(padded[[0, ch, 3, 3]], reference[[0, ch, 0, 0]]);
+        }
+    }
+
+    #[test]
+    fn should_reject_a_detection_canvas_smaller_than_the_resized_page() {
+        let source = image::RgbImage::new(64, 96);
+
+        let error =
+            OcrUtils::substract_mean_normalize_padded(&source, &IMAGENET_MEAN_VALUES, &IMAGENET_NORM_VALUES, 64)
+                .expect_err("a 96-row page cannot fit a 64x64 canvas");
+
+        assert!(matches!(error, OcrError::Inference { .. }));
+        assert!(error.to_string().contains("64x64"), "error was: {error}");
+    }
+
+    #[test]
+    fn should_match_unpadded_normalization_when_the_canvas_is_exactly_the_image() {
+        let mut source = image::RgbImage::from_pixel(2, 2, image::Rgb([7, 8, 9]));
+        source.put_pixel(1, 1, image::Rgb([200, 100, 50]));
+
+        let unpadded = OcrUtils::substract_mean_normalize(&source, &IMAGENET_MEAN_VALUES, &IMAGENET_NORM_VALUES);
+        let padded =
+            OcrUtils::substract_mean_normalize_padded(&source, &IMAGENET_MEAN_VALUES, &IMAGENET_NORM_VALUES, 2)
+                .expect("the source fits the canvas");
+
+        assert_eq!(padded, unpadded);
+    }
 
     #[test]
     fn test_rotate_crop_uses_longest_opposing_edges() {

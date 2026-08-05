@@ -143,6 +143,47 @@ PaddleOCR is bundled via the native Rust bindings and works out of the box since
 </TabItem>
 </Tabs>
 
+### PaddleOCR (tract backend)
+
+:::note[In progress]
+`paddle-ocr-tract` is under active development and not yet released. This section documents the target design.
+:::
+
+ONNX Runtime cannot link on `wasm32` or the Android x86_64 emulator. On those targets, enable `paddle-ocr-tract` instead of
+`paddle-ocr-ort` (or the `paddle-ocr` alias) to run PaddleOCR through the pure-Rust `tract` engine, with no ONNX Runtime in
+the dependency graph. It runs the same DBNet detector, CRNN recognizer, and PP-LCNet text-line orientation classifier.
+`paddle-ocr-tract` is included in `android-target`. See [Pure-Rust Inference (tract)](/concepts/tract-inference/#paddleocr)
+for how the engine handles PaddleOCR's shape requirements.
+
+```toml title="Cargo.toml"
+[dependencies]
+xberg = { version = "1", features = ["paddle-ocr-tract"] }
+```
+
+Do not enable both an ORT PaddleOCR feature and `paddle-ocr-tract` in the same build — as with `auto-rotate` /
+`auto-rotate-tract` and `layout-detection` / `layout-tract`, the ORT and tract variants of a feature are
+mutually exclusive.
+
+**Limitations on tract:**
+
+- **CPU-only.** GPU/execution-provider settings apply to the ONNX Runtime path only and are ignored on tract.
+- **Slower than ONNX Runtime.** tract trades throughput for portability on targets where ONNX Runtime cannot link at
+  all; see [Latency](/concepts/tract-inference/#latency) for measured ratios on other models.
+- **Detection runs on a fixed square canvas.** DBNet's shape cannot be left symbolic under tract, so each page is
+  padded to a `det_limit_side_len × det_limit_side_len` square (rounded up to a multiple of 32) before detection.
+  Aspect ratio is preserved and bounding-box coordinates are unaffected; the cost is computing over the padded area.
+
+Detection cost grows steeply with canvas size. Measured on macOS arm64 (single run, indicative, not a benchmark):
+
+| Model | 640² | 960² | 1280² |
+| --- | --- | --- | --- |
+| v6 det medium | 821 ms / 518 MiB | 1650 ms / 981 MiB | 4038 ms / 1652 MiB |
+| v2 det mobile | 140 ms / 90 MiB | 224 ms / 175 MiB | 706 ms / 306 MiB |
+
+`det_limit_side_len` defaults to `1024`, at which the medium detector extrapolates to roughly 2 s and ~1.1 GiB per page
+under tract. On tract targets, prefer the mobile detection tier and lower `det_limit_side_len` — around `640` — to keep
+per-page latency and memory in check. The ORT default is unchanged.
+
 ### Sceptre
 
 Sceptre is included in published native desktop/server packages and the CLI. These builds use ONNX Runtime and

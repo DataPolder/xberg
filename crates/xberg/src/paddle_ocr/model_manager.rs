@@ -17,20 +17,20 @@ use std::fs;
 #[cfg(test)]
 use std::path::Path;
 
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 use crate::error::XbergError;
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 use crate::model_download;
 
 /// HuggingFace repository containing PaddleOCR ONNX models.
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 const HF_REPO_ID: &str = "xberg-io/paddleocr-onnx-models";
 /// Immutable Hub revision containing the checksummed PaddleOCR model set.
-#[cfg(feature = "paddle-ocr")]
-const HF_REPO_REVISION: &str = "bfaf0b492cfc1dee0c73245fc5860bfdcf2c3443";
+#[cfg(paddle_ocr)]
+const HF_REPO_REVISION: &str = "bc5ec866cf0e798e667808dfa51b0ba8ad0dafc8";
 
 /// Shared model definition (detection and classification).
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 #[derive(Debug, Clone)]
 struct SharedModelDefinition {
     remote_filename: &'static str,
@@ -38,7 +38,7 @@ struct SharedModelDefinition {
 }
 
 /// Recognition model definition (per script family).
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 #[derive(Debug, Clone)]
 struct RecModelDefinition {
     script_family: &'static str,
@@ -50,7 +50,7 @@ struct RecModelDefinition {
 ///
 /// English and Chinese families are handled by v2 unified models.
 /// These 9 families use per-script models for scripts not covered by the unified model.
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 const REC_MODELS: &[RecModelDefinition] = &[
     RecModelDefinition {
         script_family: "latin",
@@ -100,7 +100,7 @@ const REC_MODELS: &[RecModelDefinition] = &[
 ];
 
 /// V2 detection model definition (tier-aware).
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 #[derive(Debug, Clone)]
 struct V2DetModelDefinition {
     tier: &'static str,
@@ -109,7 +109,7 @@ struct V2DetModelDefinition {
 }
 
 /// V2 recognition model definition (unified multilingual models).
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 #[derive(Debug, Clone)]
 struct V2RecModelDefinition {
     /// Engine pool key (e.g. "unified_server", "unified_mobile", "en_mobile").
@@ -121,7 +121,7 @@ struct V2RecModelDefinition {
 }
 
 /// V2 detection models: server (PP-OCRv5, 88MB) and mobile (PP-OCRv5, 4.7MB).
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 const V2_DET_MODELS: &[V2DetModelDefinition] = &[
     V2DetModelDefinition {
         tier: "server",
@@ -140,7 +140,7 @@ const V2_DET_MODELS: &[V2DetModelDefinition] = &[
 /// Note: `en_mobile` is kept for backward compatibility (direct `ensure_v2_rec_model("en_mobile")`
 /// callers) but is not used by the default resolution matrix — both English and Chinese mobile
 /// resolve to `unified_mobile`.
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 const V2_REC_MODELS: &[V2RecModelDefinition] = &[
     V2RecModelDefinition {
         model_key: "unified_server",
@@ -166,21 +166,21 @@ const V2_REC_MODELS: &[V2RecModelDefinition] = &[
 ];
 
 /// V2 text line orientation model (PP-LCNet, replaces old PPOCRv2 angle classifier).
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 const V2_CLS_MODEL: SharedModelDefinition = SharedModelDefinition {
     remote_filename: "v2/classifiers/PP-LCNet_x1_0_textline_ori.onnx",
     sha256_checksum: "1090f9f483a115f904beefe04acc9d28edf0c0b7b08cf0dd8d0ea59a9e0f2735",
 };
 
 /// V2 document orientation model (PP-LCNet, for page-level auto_rotate).
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 const V2_DOC_ORI_MODEL: SharedModelDefinition = SharedModelDefinition {
     remote_filename: "v2/classifiers/PP-LCNet_x1_0_doc_ori.onnx",
     sha256_checksum: "6b742aebce6f0f7f71f747931ac7becfc7c96c51641e14943b291eeb334e7947",
 };
 
 /// PP-OCRv6 detection model definition (script-agnostic, one per tier).
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 #[derive(Debug, Clone)]
 struct V6DetModelDefinition {
     tier: &'static str,
@@ -189,7 +189,7 @@ struct V6DetModelDefinition {
 }
 
 /// PP-OCRv6 recognition model definition (unified CJK+Latin+JA/KO, one per tier).
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 #[derive(Debug, Clone)]
 struct V6RecModelDefinition {
     tier: &'static str,
@@ -200,7 +200,7 @@ struct V6RecModelDefinition {
 }
 
 /// PP-OCRv6 detection models: medium (62MB), small (9.9MB), tiny (1.8MB).
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 const V6_DET_MODELS: &[V6DetModelDefinition] = &[
     V6DetModelDefinition {
         tier: "medium",
@@ -223,27 +223,27 @@ const V6_DET_MODELS: &[V6DetModelDefinition] = &[
 /// (output `[B,T,18710]`); tiny uses a reduced 6,904-char ~zh/en dict (output `[B,T,6906]`).
 /// CTC convention matches v5 (blank@0, dict@1..N, trailing space@N+1) — the decoder sizes
 /// itself from the dict, so no xberg-side shim is required.
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 const V6_REC_MODELS: &[V6RecModelDefinition] = &[
     V6RecModelDefinition {
         tier: "medium",
         remote_model: "v6/rec/medium/model.onnx",
         remote_dict: "v6/rec/medium/dict.txt",
-        model_sha256: "a04998165e24f41ec7983539a698df757036aa150824e61b1387e82d2daa26d7",
+        model_sha256: "b05d174d4f47ebea755aa3b63b85c176b3145b0a1ea1fbcc774f8f4751236b64",
         dict_sha256: "b5f2bfe2bdd9448429e3e82b51c789775d9b42f2403d082b00662eb77e401c5d",
     },
     V6RecModelDefinition {
         tier: "small",
         remote_model: "v6/rec/small/model.onnx",
         remote_dict: "v6/rec/small/dict.txt",
-        model_sha256: "1f96448a5939b72ccfe7b8e1635f7ee914d2ffa36c3c938ce6e1387a40b3daa1",
+        model_sha256: "0cc734c53747ea66968d286f6e6597fc1c91df121964ab4be5085c156fcac892",
         dict_sha256: "b5f2bfe2bdd9448429e3e82b51c789775d9b42f2403d082b00662eb77e401c5d",
     },
     V6RecModelDefinition {
         tier: "tiny",
         remote_model: "v6/rec/tiny/model.onnx",
         remote_dict: "v6/rec/tiny/dict.txt",
-        model_sha256: "98e63c179d7905b747272705ebca428b3cf6b759af713800ffdf7b3b6b428656",
+        model_sha256: "46c3df72875f0969a9a5e0bdc23ce685913f68ab96b9778e760962b0cb1b8ed4",
         dict_sha256: "c5cbe34ef40c29c4df07ed012bf96569cb69a2d2a01a07027e9f13cb832bd9cd",
     },
 ];
@@ -253,12 +253,12 @@ const V6_REC_MODELS: &[V6RecModelDefinition] = &[
 /// Korean uses its PP-OCRv5 script-specific recognizer because it retains
 /// materially better Hangul accuracy than the unified v6 export. ~keep
 /// Families outside this set fall back to the PP-OCRv5 per-script recognition models.
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 const V6_UNIFIED_FAMILIES: &[&str] = &["english", "chinese", "latin"];
 
 /// Maps a configured tier to an effective PP-OCRv6 tier. Legacy v5 tiers (`server`/`mobile`)
 /// and any unknown value fall back to `medium`, the v6 default.
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 fn effective_v6_tier(tier: &str) -> &str {
     match tier {
         "medium" | "small" | "tiny" => tier,
@@ -344,7 +344,7 @@ pub struct ModelCacheStats {
 /// The model manager ensures that PaddleOCR models are available locally,
 /// organized by model type. Shared models (det, cls) are downloaded once,
 /// while recognition models are downloaded per-script-family on demand.
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 #[cfg_attr(alef, alef(skip))]
 #[derive(Debug, Clone)]
 pub struct ModelManager {
@@ -353,14 +353,14 @@ pub struct ModelManager {
     cache_dir: PathBuf,
 }
 
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 impl Default for ModelManager {
     fn default() -> Self {
         Self::new(hf_hub::resolve_cache_dir())
     }
 }
 
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 fn artifact_size(remote_filename: &str) -> u64 {
     match remote_filename {
         "v2/det/server.onnx" => 88_047_983,
@@ -394,17 +394,17 @@ fn artifact_size(remote_filename: &str) -> u64 {
         "v6/det/medium/model.onnx" => 62_064_319,
         "v6/det/small/model.onnx" => 9_893_093,
         "v6/det/tiny/model.onnx" => 1_793_140,
-        "v6/rec/medium/model.onnx" => 76_613_673,
+        "v6/rec/medium/model.onnx" => 76_613_672,
         "v6/rec/medium/dict.txt" => 74_947,
-        "v6/rec/small/model.onnx" => 21_218_540,
+        "v6/rec/small/model.onnx" => 21_218_539,
         "v6/rec/small/dict.txt" => 74_947,
-        "v6/rec/tiny/model.onnx" => 4_484_068,
+        "v6/rec/tiny/model.onnx" => 4_484_067,
         "v6/rec/tiny/dict.txt" => 27_156,
         _ => unreachable!("missing pinned PaddleOCR artifact size for {remote_filename}"),
     }
 }
 
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 fn manifest_entry(remote_filename: String, sha256: &str) -> ModelManifestEntry {
     ModelManifestEntry {
         size_bytes: artifact_size(&remote_filename),
@@ -414,7 +414,7 @@ fn manifest_entry(remote_filename: String, sha256: &str) -> ModelManifestEntry {
     }
 }
 
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 impl ModelManager {
     /// Creates a new model manager with the specified cache directory.
     pub fn new(cache_dir: PathBuf) -> Self {
@@ -506,7 +506,7 @@ impl ModelManager {
     /// and [`Self::resolve_rec_model_versioned`] so doctor reports on exactly
     /// the files the runtime would request. Invalid version/tier/family
     /// combinations error the same way the runtime would.
-    #[cfg(feature = "paddle-ocr")]
+    #[cfg(paddle_ocr)]
     pub(crate) fn check_models_cached(
         &self,
         version: &str,
@@ -624,7 +624,7 @@ impl ModelManager {
 
     /// Whether a pinned artifact is present in the local HF cache and passes
     /// its checksum. Never downloads.
-    #[cfg(feature = "paddle-ocr")]
+    #[cfg(paddle_ocr)]
     fn cached_artifact_ok(&self, remote_filename: &str, sha256: &str) -> bool {
         let Ok(api) = model_download::hf_client(Some(&self.cache_dir)) else {
             return false;
@@ -884,7 +884,7 @@ impl ModelManager {
     }
 }
 
-#[cfg(all(test, feature = "paddle-ocr"))]
+#[cfg(all(test, paddle_ocr))]
 mod tests {
     use super::*;
     use tempfile::TempDir;
@@ -1155,7 +1155,7 @@ mod tests {
     }
 }
 
-#[cfg(all(test, feature = "paddle-ocr"))]
+#[cfg(all(test, paddle_ocr))]
 mod check_cached_tests {
     use super::*;
     use tempfile::TempDir;

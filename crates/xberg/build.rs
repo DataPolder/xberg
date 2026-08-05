@@ -36,4 +36,11 @@ fn main() {
     {
         println!("cargo::rustc-cfg=layout_detection");
     }
+
+    println!("cargo::rustc-check-cfg=cfg(paddle_ocr)");
+    if std::env::var_os("CARGO_FEATURE_PADDLE_OCR_ORT").is_some()
+        || std::env::var_os("CARGO_FEATURE_PADDLE_OCR_TRACT").is_some()
+    {
+        println!("cargo::rustc-cfg=paddle_ocr");
+    }
 }

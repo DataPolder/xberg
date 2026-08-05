@@ -172,10 +172,10 @@ fn atomic_publish_with_lock_timeout(
     fs::rename(tmp.path(), dst).map_err(|e| format!("Failed to publish model to {}: {e}", dst.display()))
 }
 
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 use crate::paddle_ocr::ModelManifestEntry;
 
-#[cfg(not(feature = "paddle-ocr"))]
+#[cfg(not(paddle_ocr))]
 #[cfg_attr(alef, alef(skip))]
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ModelManifestEntry {

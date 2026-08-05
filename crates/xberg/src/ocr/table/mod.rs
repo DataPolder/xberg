@@ -1,7 +1,7 @@
 /// TSV (tab-separated value) output parser for Tesseract word-level bounding boxes.
 pub mod tsv_parser;
 
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 pub(crate) use crate::table_core::HocrWord;
 pub(crate) use crate::table_core::{reconstruct_table, table_to_markdown};
 

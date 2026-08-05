@@ -40,7 +40,7 @@ fn test_documents_dir() -> PathBuf {
         .join("test_documents")
 }
 
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 fn test_cache_dir() -> PathBuf {
     std::env::temp_dir().join("xberg_gpu_test")
 }
@@ -111,7 +111,7 @@ fn assert_cuda_requested(captured: &Arc<Mutex<Vec<String>>>) {
     );
 }
 
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 mod paddle_ocr_cuda {
     use super::*;
     use xberg::core::config::OcrConfig;
@@ -340,7 +340,7 @@ mod embeddings_cuda {
     }
 }
 
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 mod doc_orientation_cuda {
     use super::*;
     use xberg::core::config::OcrConfig;
@@ -375,7 +375,7 @@ mod doc_orientation_cuda {
     }
 }
 
-#[cfg(feature = "paddle-ocr")]
+#[cfg(paddle_ocr)]
 mod e2e_cuda {
     use super::*;
     use xberg::core::config::OcrConfig;

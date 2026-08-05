@@ -39,7 +39,7 @@ const CACHE_WARM_TASK_TTL_MS: u64 = 30 * 60 * 1000;
 
 #[cfg(any(
     test,
-    feature = "paddle-ocr",
+    paddle_ocr,
     feature = "layout-detection",
     feature = "embeddings",
     feature = "ner-onnx"
@@ -54,7 +54,7 @@ enum CacheWarmDisposition {
 
 #[cfg(any(
     test,
-    feature = "paddle-ocr",
+    paddle_ocr,
     feature = "layout-detection",
     feature = "embeddings",
     feature = "ner-onnx"
@@ -403,7 +403,7 @@ impl XbergMcp {
         #[allow(unused_mut)]
         let mut entries: Vec<serde_json::Value> = Vec::new();
 
-        #[cfg(feature = "paddle-ocr")]
+        #[cfg(paddle_ocr)]
         {
             let manifest = crate::paddle_ocr::ModelManager::manifest();
             for entry in manifest {
@@ -487,7 +487,7 @@ impl XbergMcp {
         let mut downloaded: Vec<String> = Vec::new();
         let mut already_cached: Vec<String> = Vec::new();
 
-        #[cfg(feature = "paddle-ocr")]
+        #[cfg(paddle_ocr)]
         {
             let paddle_dir = cache_base.join("paddle-ocr");
             let manager = crate::paddle_ocr::ModelManager::new(paddle_dir);

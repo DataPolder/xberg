@@ -8,11 +8,14 @@
 //! plan and converts tensors at the boundary via engine-neutral `(shape, data)`,
 //! so no `ndarray` version needs to be shared between xberg and tract.
 //!
-//! tract resolves symbolic dimensions (batch, sequence, image height/width) from
-//! the concrete input at run time, so one plan serves every input size — the plan
-//! is built once at load. Models whose ONNX graph carries symbols tract cannot
-//! reconcile (e.g. the quantized TATR export's symbolic scale tensors) stay on
-//! ONNX Runtime; see the Phase-0 coverage matrix.
+//! Shape handling depends on how the plan is built. Left symbolic, a plan resolves
+//! batch/sequence/height/width from the concrete input at each call, so one plan
+//! serves every input size. Pinned via `with_input_fact`, a plan bakes that exact
+//! shape in as a constant and errors on any other shape at run time — some graphs
+//! (e.g. DBNet's FPN skip connections) only optimize when pinned, so this is not a
+//! free choice per model. Models whose ONNX graph carries symbols tract cannot
+//! reconcile either way (e.g. the quantized TATR export's symbolic scale tensors)
+//! stay on ONNX Runtime; see the Phase-0 coverage matrix.
 //!
 //! Since v5.0.0 (issue #1275).
 
@@ -279,7 +282,7 @@ fn resolve_model(repo: &str, filename: &str) -> Option<std::path::PathBuf> {
 #[cfg(all(
     test,
     any(
-        feature = "paddle-ocr",
+        paddle_ocr,
         feature = "layout-detection",
         auto_rotate,
         feature = "ner-onnx",
@@ -294,7 +297,7 @@ fn download_parity_model(repo: &str, filename: &str) -> std::path::PathBuf {
 #[cfg(all(
     test,
     not(any(
-        feature = "paddle-ocr",
+        paddle_ocr,
         feature = "layout-detection",
         auto_rotate,
         feature = "ner-onnx",

@@ -101,6 +101,32 @@ pub struct PaddleOcrConfig {
     /// (`"mobile"`) resolves to the v6 `"medium"` tier. Select `"pp-ocrv5"` to pin the
     /// legacy per-script/unified fleet.
     pub model_version: String,
+
+    /// Explicit inference engine choice.
+    ///
+    /// `None` (the default) resolves to the compiled default: `ort` when the
+    /// `paddle-ocr-ort` feature is compiled in, otherwise `tract`. An explicit choice
+    /// is validated against the compiled features when the OCR engine is constructed
+    /// (see `crate::paddle_ocr::backend::effective_backend`); requesting an engine
+    /// whose feature is not compiled in is a clear configuration error rather than a
+    /// silent fallback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inference_backend: Option<PaddleInferenceBackend>,
+}
+
+/// Which concrete ONNX inference engine PaddleOCR model loading uses.
+///
+/// Mirrors `sceptre::Backend` for the PaddleOCR backend: `Ort` is the native,
+/// full-featured path (acceleration/execution-provider hook, ONNX-embedded
+/// dictionary metadata); `Tract` is the pure-Rust, CPU-only path used on targets
+/// where `ort` cannot link (Android x86_64 emulator, WASM once wired).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PaddleInferenceBackend {
+    /// Native ONNX Runtime (requires the `paddle-ocr-ort` feature).
+    Ort,
+    /// Pure-Rust ONNX via `tract` (requires the `paddle-ocr-tract` feature).
+    Tract,
 }
 
 impl PaddleOcrConfig {
@@ -132,6 +158,7 @@ impl PaddleOcrConfig {
             drop_score: 0.5,
             model_tier: "mobile".to_string(),
             model_version: "pp-ocrv6".to_string(),
+            inference_backend: None,
         }
     }
 

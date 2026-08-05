@@ -107,7 +107,7 @@ impl OcrBackendRegistry {
             }
         }
 
-        #[cfg(feature = "paddle-ocr")]
+        #[cfg(paddle_ocr)]
         {
             use crate::paddle_ocr::PaddleOcrBackend;
             tracing::info!("Initializing PaddleOCR backend");

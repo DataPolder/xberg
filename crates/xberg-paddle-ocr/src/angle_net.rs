@@ -1,41 +1,35 @@
 use crate::{
     base_net::BaseNet,
     constants::{IMAGENET_MEAN_VALUES, IMAGENET_NORM_VALUES},
+    inference::{self, ModelBackend},
     ocr_error::OcrError,
     ocr_result::Angle,
     ocr_utils::OcrUtils,
-};
-
-use ort::{
-    inputs,
-    session::{Session, SessionOutputs},
-    value::Tensor,
 };
 
 const ANGLE_DST_WIDTH: u32 = 160;
 const ANGLE_DST_HEIGHT: u32 = 80;
 const ANGLE_COLS: usize = 2;
 
-#[derive(Debug)]
 pub struct AngleNet {
-    session: Option<Session>,
-    input_names: Vec<String>,
+    backend: Option<Box<dyn ModelBackend>>,
+}
+
+impl std::fmt::Debug for AngleNet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AngleNet")
+            .field("initialized", &self.backend.is_some())
+            .finish()
+    }
 }
 
 impl BaseNet for AngleNet {
     fn new() -> Self {
-        Self {
-            session: None,
-            input_names: Vec::new(),
-        }
+        Self { backend: None }
     }
 
-    fn set_input_names(&mut self, input_names: Vec<String>) {
-        self.input_names = input_names;
-    }
-
-    fn set_session(&mut self, session: Option<Session>) {
-        self.session = session;
+    fn set_backend(&mut self, backend: Option<Box<dyn ModelBackend>>) {
+        self.backend = backend;
     }
 }
 
@@ -72,7 +66,7 @@ impl AngleNet {
     }
 
     fn get_angle(&self, img_src: &image::RgbImage, cls_thresh: f32) -> Result<Angle, OcrError> {
-        let Some(session) = &self.session else {
+        let Some(backend) = &self.backend else {
             return Err(OcrError::SessionNotInitialized);
         };
 
@@ -86,15 +80,9 @@ impl AngleNet {
         let input_tensors =
             OcrUtils::substract_mean_normalize(&angle_img, &IMAGENET_MEAN_VALUES, &IMAGENET_NORM_VALUES);
 
-        let input_tensors = Tensor::from_array(input_tensors)?;
+        let (_, src_data) = inference::run_flat(backend.as_ref(), input_tensors.into_dyn())?;
 
-        #[allow(unsafe_code)]
-        let outputs = unsafe {
-            let session_ptr = session as *const Session as *mut Session;
-            (*session_ptr).run(inputs![self.input_names[0].as_str() => input_tensors])?
-        };
-
-        let mut angle = Self::score_to_angle(&outputs, ANGLE_COLS)?;
+        let mut angle = Self::score_to_angle(&src_data, ANGLE_COLS);
 
         if angle.score < cls_thresh {
             angle.index = 0;
@@ -103,16 +91,7 @@ impl AngleNet {
         Ok(angle)
     }
 
-    fn score_to_angle(output_tensor: &SessionOutputs, angle_cols: usize) -> Result<Angle, OcrError> {
-        let (_, red_data) = output_tensor.iter().next().ok_or_else(|| {
-            OcrError::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "No output tensors found in angle classification session output",
-            ))
-        })?;
-
-        let src_data: Vec<f32> = red_data.try_extract_tensor::<f32>()?.1.to_vec();
-
+    fn score_to_angle(src_data: &[f32], angle_cols: usize) -> Angle {
         let mut angle = Angle::default();
         let mut max_value = f32::MIN;
         let mut angle_index = 0;
@@ -126,6 +105,6 @@ impl AngleNet {
 
         angle.index = angle_index;
         angle.score = max_value;
-        Ok(angle)
+        angle
     }
 }

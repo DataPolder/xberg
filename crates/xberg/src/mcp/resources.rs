@@ -68,7 +68,7 @@ pub fn read_resource(uri: &str) -> Result<ReadResourceResult, ErrorData> {
             #[allow(unused_mut)]
             let mut entries: Vec<serde_json::Value> = Vec::new();
 
-            #[cfg(feature = "paddle-ocr")]
+            #[cfg(paddle_ocr)]
             {
                 let manifest = crate::paddle_ocr::ModelManager::manifest();
                 for entry in manifest {

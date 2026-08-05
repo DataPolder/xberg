@@ -193,11 +193,15 @@ candle-cuda = ["candle-ocr", "xberg-candle-ocr/cuda"]
 candle-metal = ["candle-ocr", "xberg-candle-ocr/metal"]
 candle-accelerate = ["candle-ocr", "xberg-candle-ocr/accelerate"]
 candle-mkl = ["candle-ocr", "xberg-candle-ocr/mkl"]
+# PaddleOCR keeps its historical feature as the zero-config native ORT mode. The
+# explicit engine features also support native parity benchmarks and mobile tract. ~keep
+paddle-ocr = ["paddle-ocr-ort"]
 # PaddleOCR via ONNX Runtime
 # Requires 'ocr' feature for shared conversion utilities and table reconstruction
-paddle-ocr = [
+paddle-ocr-ort = [
     "paddle-ocr-types",
     "dep:xberg-paddle-ocr",
+    "xberg-paddle-ocr/ort",
     "dep:sha2",
     "dep:image",
     "dep:hf-hub",
@@ -210,6 +214,30 @@ paddle-ocr = [
     "tokio-runtime",
     "ocr",
     "auto-rotate",
+]
+# paddle-ocr-tract: no-ORT sibling of `paddle-ocr` (issue #1275/#1354). Runs the PaddleOCR
+# detection/classification/recognition models through the pure-Rust `tract` engine instead
+# of ONNX Runtime, so it builds on no-ORT targets (Android x86_64 emulator). DBNet detection
+# requires a fixed-size canvas under tract (symbolic H/W fails Resize/Concat shape unification)
+# — see crate::paddle_ocr::backend and issue #1354 for the padding follow-up needed in
+# xberg-paddle-ocr. Deliberately omits `dep:ort`. `paddle-ocr-ort` stays the native default —
+# never enable both in one build.
+paddle-ocr-tract = [
+    "paddle-ocr-types",
+    "dep:xberg-paddle-ocr",
+    "xberg-paddle-ocr/tract",
+    "dep:sha2",
+    "dep:image",
+    "dep:hf-hub",
+    "dep:reqwest",
+    "dep:ureq",
+    "image-encode",
+    "dep:ndarray",
+    "html",
+    "tokio-runtime",
+    "ocr",
+    "auto-rotate-tract",
+    "tract",
 ]
 # Sceptre keeps its historical feature as the zero-config native ORT mode. The
 # explicit engine features also support native parity benchmarks and mobile tract. ~keep
@@ -626,11 +654,12 @@ wasm-target = [
 ]
 # android-target: no-ort-target plus native-Linux variants that work on Android ABI
 # (excel with tokio, native tree-sitter, Tesseract OCR, and API/MCP transport).
-# Excludes ORT-dependent ML (paddle-ocr, embeddings, reranker, transcription); document
-# orientation is provided by the pure-Rust `auto-rotate-tract` (tract) variant instead
-# of the ORT-backed `auto-rotate`, and layout detection (RT-DETR + table classifier
-# only — table structure recognition stays ORT-only, see `layout-tract`) by the
-# pure-Rust `layout-tract` variant instead of the ORT-backed `layout-detection`.
+# Excludes ORT-dependent ML (embeddings, reranker, transcription); document orientation
+# is provided by the pure-Rust `auto-rotate-tract` (tract) variant instead of the
+# ORT-backed `auto-rotate`, layout detection (RT-DETR + table classifier only — table
+# structure recognition stays ORT-only, see `layout-tract`) by the pure-Rust
+# `layout-tract` variant instead of the ORT-backed `layout-detection`, and PaddleOCR
+# by the pure-Rust `paddle-ocr-tract` variant instead of the ORT-backed `paddle-ocr`.
 android-target = [
     "no-ort-target",
     "excel",
@@ -639,6 +668,7 @@ android-target = [
     "sceptre-ocr-tract",
     "auto-rotate-tract",
     "layout-tract",
+    "paddle-ocr-tract",
     "api",
     "mcp",
     "liter-llm",
@@ -1129,8 +1159,9 @@ tokenizers = { version = "0.23", default-features = false, features = ["fancy-re
 # strictly opt-in via candle-cuda/metal/mkl/accelerate and must be enabled with platform awareness.
 # CI uses `--features full` which keeps GPU accel off.
 xberg-candle-ocr = { path = "../xberg-candle-ocr", version = "1.0.14", optional = true }
-# PaddleOCR via ONNX Runtime - not available on WASM (vendored from paddle-ocr-rs)
-xberg-paddle-ocr = { path = "../xberg-paddle-ocr", version = "1.0.14", optional = true }
+# PaddleOCR via ONNX Runtime or tract (vendored from paddle-ocr-rs). The backend is selected
+# by the enabling feature (`paddle-ocr-ort` / `paddle-ocr-tract`), never by a default.
+xberg-paddle-ocr = { path = "../xberg-paddle-ocr", version = "1.0.14", optional = true, default-features = false }
 
 # Desktop / server hosts (Linux + macOS, NOT Android): xberg's direct `ureq` client uses
 # ring-backed rustls plus `platform-verifier`, which trusts the OS certificate store
@@ -1160,8 +1191,9 @@ ureq = { version = "3.3", default-features = false, features = [
 ], optional = true }
 # Candle-based VLM OCR backends - pure-Rust transformer inference, not on WASM yet.
 xberg-candle-ocr = { path = "../xberg-candle-ocr", version = "1.0.14", optional = true }
-# PaddleOCR via ONNX Runtime - not available on WASM (vendored from paddle-ocr-rs)
-xberg-paddle-ocr = { path = "../xberg-paddle-ocr", version = "1.0.14", optional = true }
+# PaddleOCR via ONNX Runtime or tract (vendored from paddle-ocr-rs). The backend is selected
+# by the enabling feature (`paddle-ocr-ort` / `paddle-ocr-tract`), never by a default.
+xberg-paddle-ocr = { path = "../xberg-paddle-ocr", version = "1.0.14", optional = true, default-features = false }
 
 # tokio OS features (every native target, including Android and Windows): `process`, `fs`, and
 # `rt-multi-thread` all fail to compile on wasm32 — tokio's own wasm32 gate only allows

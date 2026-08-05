@@ -24,7 +24,7 @@ pub(super) fn lint_config(config: &ExtractionConfig) -> Vec<DoctorCheck> {
         ));
     }
 
-    #[cfg(feature = "paddle-ocr")]
+    #[cfg(paddle_ocr)]
     if ocr.backend == "paddle-ocr" || ocr.backend == "paddleocr" {
         let (_model, warnings) = crate::paddle_ocr::select_paddle_language(&ocr.effective_languages());
         for warning in warnings {
@@ -63,9 +63,9 @@ mod tests {
             ..ExtractionConfig::default()
         };
         let checks = lint_config(&config);
-        #[cfg(not(feature = "paddle-ocr"))]
+        #[cfg(not(paddle_ocr))]
         assert!(checks.is_empty());
-        #[cfg(feature = "paddle-ocr")]
+        #[cfg(paddle_ocr)]
         assert!(checks.iter().all(|c| c.status != crate::doctor::ProbeStatus::Fail));
     }
 }

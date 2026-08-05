@@ -28,7 +28,7 @@ pub(super) fn check_cache(_config: &ExtractionConfig) -> Vec<DoctorCheck> {
     checks
 }
 
-#[cfg(all(not(target_arch = "wasm32"), any(feature = "paddle-ocr", layout_detection)))]
+#[cfg(all(not(target_arch = "wasm32"), any(paddle_ocr, layout_detection)))]
 fn hf_stale_check() -> Option<DoctorCheck> {
     let stale = stale_hf_revisions();
     if stale.is_empty() {
@@ -44,7 +44,7 @@ fn hf_stale_check() -> Option<DoctorCheck> {
     ))
 }
 
-#[cfg(not(all(not(target_arch = "wasm32"), any(feature = "paddle-ocr", layout_detection))))]
+#[cfg(not(all(not(target_arch = "wasm32"), any(paddle_ocr, layout_detection))))]
 fn hf_stale_check() -> Option<DoctorCheck> {
     None
 }
@@ -197,10 +197,10 @@ fn unknown_dirs(base: &Path) -> Vec<String> {
 /// Pinned revisions are grouped per repository: layout pins models in both
 /// `layout-models` and `paddleocr-onnx-models`, so a revision valid for one
 /// repo must not be accepted for the other.
-#[cfg(all(not(target_arch = "wasm32"), any(feature = "paddle-ocr", layout_detection)))]
+#[cfg(all(not(target_arch = "wasm32"), any(paddle_ocr, layout_detection)))]
 fn stale_hf_revisions() -> Vec<String> {
     let mut pinned: std::collections::BTreeMap<String, Vec<&'static str>> = std::collections::BTreeMap::new();
-    #[cfg(feature = "paddle-ocr")]
+    #[cfg(paddle_ocr)]
     pinned
         .entry(hf_repo_dir("xberg-io/paddleocr-onnx-models"))
         .or_default()
@@ -219,12 +219,12 @@ fn stale_hf_revisions() -> Vec<String> {
 }
 
 /// The hf-hub on-disk directory name for a Hub repo id.
-#[cfg(all(not(target_arch = "wasm32"), any(feature = "paddle-ocr", layout_detection)))]
+#[cfg(all(not(target_arch = "wasm32"), any(paddle_ocr, layout_detection)))]
 fn hf_repo_dir(repo_id: &str) -> String {
     format!("models--{}", repo_id.replace('/', "--"))
 }
 
-#[cfg(all(not(target_arch = "wasm32"), any(feature = "paddle-ocr", layout_detection)))]
+#[cfg(all(not(target_arch = "wasm32"), any(paddle_ocr, layout_detection)))]
 fn collect_stale_revisions(stale: &mut Vec<String>, hf_cache: &Path, repo_dir: &str, pinned: &[&str]) {
     let Ok(revisions) = std::fs::read_dir(hf_cache.join(repo_dir).join("snapshots")) else {
         return;
@@ -303,7 +303,7 @@ mod tests {
         );
     }
 
-    #[cfg(all(not(target_arch = "wasm32"), any(feature = "paddle-ocr", layout_detection)))]
+    #[cfg(all(not(target_arch = "wasm32"), any(paddle_ocr, layout_detection)))]
     #[test]
     fn stale_revisions_are_matched_per_repository() {
         let hf = tempfile::tempdir().unwrap();
@@ -319,7 +319,7 @@ mod tests {
         assert_eq!(stale, vec!["models--org--alpha@aaa".to_string()]);
     }
 
-    #[cfg(all(not(target_arch = "wasm32"), any(feature = "paddle-ocr", layout_detection)))]
+    #[cfg(all(not(target_arch = "wasm32"), any(paddle_ocr, layout_detection)))]
     #[test]
     fn hf_repo_dir_follows_hub_layout() {
         assert_eq!(hf_repo_dir("xberg-io/layout-models"), "models--xberg-io--layout-models");

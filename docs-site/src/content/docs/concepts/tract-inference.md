@@ -22,7 +22,7 @@ feature sets (`layout-tract`, `auto-rotate-tract`).
 |---|---|---|
 | RT-DETR | Layout detection | Runs |
 | PP-LCNet | Table classifier, document-orientation, text-line orientation | Runs |
-| DBNet / CRNN / AngleNet | PaddleOCR detection / recognition / angle | Runs — see [PaddleOCR](#paddleocr) |
+| DBNet / CRNN / AngleNet | PaddleOCR detection / recognition / angle | In progress — see [PaddleOCR](#paddleocr) |
 | TATR | Table-structure recognition | ONNX Runtime only |
 | PP-DocLayout-V3 | Layout detection | ONNX Runtime only |
 | SLANeXt | Table-structure recognition | ONNX Runtime only |
@@ -79,10 +79,15 @@ cargo test --release -p xberg --no-default-features --features "layout-detection
 
 ## PaddleOCR
 
-DBNet and CRNN run on tract with excellent numeric parity to ONNX Runtime (max |Δ| below `3e-4`), but
-a tract plan is optimized for one input shape and errors on any other. DBNet resizes each page to
-content-dependent dimensions and CRNN batches by content-dependent width, so both see a new shape on
-most calls — unlike AngleNet and the layout CNNs, which use a fixed resolution. Running PaddleOCR
-detection and recognition on tract therefore needs a shape-keyed plan cache in the session (reload and
-re-optimize only on a shape miss), which is a planned follow-up. AngleNet, being fixed-shape, already
-runs on tract as-is.
+Shape handling on tract depends on how the plan is built. A plan left symbolic tolerates a new input
+shape on every call; a plan pinned via `with_input_fact` bakes that exact shape in as a constant and
+errors on any other. DBNet's FPN skip connections only optimize when pinned, so DBNet plans are
+necessarily shape-pinned — and DBNet resizes each page to content-dependent dimensions, so a pinned
+plan is a poor fit for pages of varying size. CRNN, which batches by content-dependent width, can be
+left symbolic and tolerate varying widths in one plan. AngleNet and the layout CNNs use a fixed
+resolution and need no special handling either way.
+
+Because a pinned plan corresponds to exactly one shape, a fixed canvas (resizing every page to one
+shape before DBNet runs) bounds the plan count to one by construction — no shape-keyed plan cache is
+required. Wiring DBNet, CRNN, and AngleNet into the tract seam under this scheme is in progress; none
+of the three runs on tract yet.

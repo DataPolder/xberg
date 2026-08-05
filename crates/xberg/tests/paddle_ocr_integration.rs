@@ -15,7 +15,7 @@
 //! deliberately narrowed to crate-internal visibility, which the rewritten
 //! suite below no longer needs.
 
-#![cfg(feature = "paddle-ocr")]
+#![cfg(paddle_ocr)]
 
 use std::path::PathBuf;
 

@@ -156,7 +156,7 @@ impl ApiError {
     ///
     /// Use when an upstream service (e.g., model download from HuggingFace) fails.
     #[cfg(any(
-        feature = "paddle-ocr",
+        paddle_ocr,
         feature = "layout-detection",
         feature = "embeddings",
         feature = "ner-onnx"

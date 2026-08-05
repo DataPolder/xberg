@@ -19,11 +19,18 @@
 #![allow(clippy::too_many_arguments)]
 #![allow(missing_docs)]
 
+#[cfg(not(any(feature = "ort", feature = "tract")))]
+compile_error!(
+    "xberg-paddle-ocr requires at least one inference backend feature: enable `ort` (native ONNX \
+     Runtime) or `tract` (pure-Rust ONNX, for wasm32 / the Android x86_64 emulator)."
+);
+
 pub mod angle_net;
 pub mod base_net;
 pub(crate) mod constants;
 pub mod crnn_net;
 pub mod db_net;
+pub(crate) mod inference;
 pub mod ocr_error;
 pub mod ocr_lite;
 pub mod ocr_result;

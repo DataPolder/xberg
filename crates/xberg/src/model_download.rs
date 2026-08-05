@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 #[cfg(any(
-    feature = "paddle-ocr",
+    paddle_ocr,
     layout_detection,
     auto_rotate,
     feature = "ner-onnx",
@@ -15,7 +15,7 @@ use std::time::Duration;
 ))]
 use sha2::{Digest, Sha256};
 #[cfg(any(
-    feature = "paddle-ocr",
+    paddle_ocr,
     layout_detection,
     auto_rotate,
     feature = "ner-onnx",
@@ -27,7 +27,7 @@ use sha2::{Digest, Sha256};
 ))]
 use std::io::{BufReader, Read};
 #[cfg(any(
-    feature = "paddle-ocr",
+    paddle_ocr,
     layout_detection,
     auto_rotate,
     feature = "ner-onnx",
@@ -39,7 +39,7 @@ use std::io::{BufReader, Read};
 ))]
 use std::path::Path;
 #[cfg(any(
-    feature = "paddle-ocr",
+    paddle_ocr,
     layout_detection,
     auto_rotate,
     feature = "ner-onnx",
@@ -63,7 +63,7 @@ const DEFAULT_MODEL_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(300);
 #[cfg(all(
     any(windows, test),
     any(
-        feature = "paddle-ocr",
+        paddle_ocr,
         layout_detection,
         auto_rotate,
         feature = "ner-onnx",
@@ -84,7 +84,7 @@ static QUARANTINE_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::Ato
     not(target_arch = "wasm32"),
     any(
         feature = "candle-paddleocr-vl",
-        feature = "paddle-ocr",
+        paddle_ocr,
         auto_rotate,
         layout_detection,
         feature = "transcription",
@@ -104,7 +104,7 @@ const HF_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
     not(target_arch = "wasm32"),
     any(
         feature = "candle-paddleocr-vl",
-        feature = "paddle-ocr",
+        paddle_ocr,
         auto_rotate,
         layout_detection,
         feature = "transcription",
@@ -129,7 +129,7 @@ const HF_MAX_RETRY_ATTEMPTS: usize = 2;
     not(target_arch = "wasm32"),
     any(
         feature = "candle-paddleocr-vl",
-        feature = "paddle-ocr",
+        paddle_ocr,
         auto_rotate,
         layout_detection,
         feature = "transcription",
@@ -146,7 +146,7 @@ struct Ipv4FirstResolver;
     not(target_arch = "wasm32"),
     any(
         feature = "candle-paddleocr-vl",
-        feature = "paddle-ocr",
+        paddle_ocr,
         auto_rotate,
         layout_detection,
         feature = "transcription",
@@ -179,7 +179,7 @@ impl reqwest::dns::Resolve for Ipv4FirstResolver {
     not(target_arch = "wasm32"),
     any(
         feature = "candle-paddleocr-vl",
-        feature = "paddle-ocr",
+        paddle_ocr,
         auto_rotate,
         layout_detection,
         feature = "transcription",
@@ -207,7 +207,7 @@ fn order_ipv4_first(addrs: &mut [std::net::SocketAddr]) {
     not(target_arch = "wasm32"),
     any(
         feature = "candle-paddleocr-vl",
-        feature = "paddle-ocr",
+        paddle_ocr,
         auto_rotate,
         layout_detection,
         feature = "transcription",
@@ -253,7 +253,7 @@ pub(crate) fn model_download_timeout() -> Duration {
 /// Match the boolean spellings accepted by the Python Hugging Face clients while
 /// honoring both the current and legacy environment variable names.
 #[cfg(any(
-    feature = "paddle-ocr",
+    paddle_ocr,
     layout_detection,
     auto_rotate,
     feature = "ner-onnx",
@@ -271,7 +271,7 @@ pub(crate) fn hf_offline_mode() -> bool {
 }
 
 #[cfg(any(
-    feature = "paddle-ocr",
+    paddle_ocr,
     layout_detection,
     auto_rotate,
     feature = "ner-onnx",
@@ -288,7 +288,7 @@ fn env_flag_enabled(value: &std::ffi::OsStr) -> bool {
 }
 
 #[cfg(any(
-    feature = "paddle-ocr",
+    paddle_ocr,
     layout_detection,
     auto_rotate,
     feature = "ner-onnx",
@@ -355,7 +355,7 @@ where
 /// the exact file, lets the first thread populate the cache while the rest wait and
 /// then get the warm copy; downloads of *different* files still run in parallel.
 #[cfg(any(
-    feature = "paddle-ocr",
+    paddle_ocr,
     layout_detection,
     auto_rotate,
     feature = "ner-onnx",
@@ -381,7 +381,7 @@ fn download_lock(key: &str) -> std::sync::Arc<std::sync::Mutex<()>> {
 #[cfg(all(
     not(target_arch = "wasm32"),
     any(
-        feature = "paddle-ocr",
+        paddle_ocr,
         layout_detection,
         auto_rotate,
         feature = "ner-onnx",
@@ -401,7 +401,7 @@ pub(crate) struct ArtifactFileLock {
 #[cfg(all(
     not(target_arch = "wasm32"),
     any(
-        feature = "paddle-ocr",
+        paddle_ocr,
         layout_detection,
         auto_rotate,
         feature = "ner-onnx",
@@ -423,7 +423,7 @@ impl Drop for ArtifactFileLock {
 #[cfg(all(
     not(target_arch = "wasm32"),
     any(
-        feature = "paddle-ocr",
+        paddle_ocr,
         layout_detection,
         auto_rotate,
         feature = "ner-onnx",
@@ -441,7 +441,7 @@ pub(crate) fn acquire_artifact_file_lock(path: &Path) -> Result<ArtifactFileLock
 #[cfg(all(
     not(target_arch = "wasm32"),
     any(
-        feature = "paddle-ocr",
+        paddle_ocr,
         layout_detection,
         auto_rotate,
         feature = "ner-onnx",
@@ -505,7 +505,7 @@ pub(crate) fn acquire_artifact_file_lock_with_timeout(
 #[cfg(all(
     not(target_arch = "wasm32"),
     any(
-        feature = "paddle-ocr",
+        paddle_ocr,
         layout_detection,
         auto_rotate,
         feature = "ner-onnx",
@@ -528,7 +528,7 @@ fn hf_artifact_lock_path(repo_id: &str, cache_dir: Option<&Path>, expected_sha25
 }
 
 #[cfg(any(
-    feature = "paddle-ocr",
+    paddle_ocr,
     layout_detection,
     auto_rotate,
     feature = "ner-onnx",
@@ -547,7 +547,7 @@ fn is_sha256_hex(value: &str) -> bool {
 #[cfg(all(
     not(target_arch = "wasm32"),
     any(
-        feature = "paddle-ocr",
+        paddle_ocr,
         layout_detection,
         auto_rotate,
         feature = "ner-onnx",
@@ -612,7 +612,7 @@ pub(crate) fn hf_cached_file(
 #[cfg(all(
     not(target_arch = "wasm32"),
     any(
-        feature = "paddle-ocr",
+        paddle_ocr,
         layout_detection,
         auto_rotate,
         feature = "ner-onnx",
@@ -747,7 +747,7 @@ pub(crate) fn hf_resolve_file(
 #[cfg(all(
     not(target_arch = "wasm32"),
     any(
-        feature = "paddle-ocr",
+        paddle_ocr,
         layout_detection,
         auto_rotate,
         feature = "ner-onnx",
@@ -769,7 +769,7 @@ pub(crate) fn hf_download_revision(repo_id: &str, remote_filename: &str, revisio
 #[cfg(all(
     not(target_arch = "wasm32"),
     any(
-        feature = "paddle-ocr",
+        paddle_ocr,
         layout_detection,
         auto_rotate,
         feature = "ner-onnx",
@@ -910,7 +910,7 @@ pub(crate) fn hf_force_download_revision(
 }
 
 #[cfg(any(
-    feature = "paddle-ocr",
+    paddle_ocr,
     layout_detection,
     auto_rotate,
     feature = "ner-onnx",
@@ -953,7 +953,7 @@ fn verified_cached_path(
 #[cfg(all(
     any(windows, test),
     any(
-        feature = "paddle-ocr",
+        paddle_ocr,
         layout_detection,
         auto_rotate,
         feature = "ner-onnx",
@@ -979,7 +979,7 @@ struct QuarantinedEntry {
 #[cfg(all(
     any(windows, test),
     any(
-        feature = "paddle-ocr",
+        paddle_ocr,
         layout_detection,
         auto_rotate,
         feature = "ner-onnx",
@@ -1045,7 +1045,7 @@ fn quarantine_hf_cache_entry(
 #[cfg(all(
     any(windows, test),
     any(
-        feature = "paddle-ocr",
+        paddle_ocr,
         layout_detection,
         auto_rotate,
         feature = "ner-onnx",
@@ -1072,7 +1072,7 @@ fn deterministic_hf_blob_path(snapshot: &Path, expected_sha256: &str) -> Option<
 #[cfg(all(
     any(windows, test),
     any(
-        feature = "paddle-ocr",
+        paddle_ocr,
         layout_detection,
         auto_rotate,
         feature = "ner-onnx",
@@ -1097,7 +1097,7 @@ fn hf_blob_belongs_to_snapshot(snapshot: &Path, blob: &Path) -> bool {
 #[cfg(all(
     any(windows, test),
     any(
-        feature = "paddle-ocr",
+        paddle_ocr,
         layout_detection,
         auto_rotate,
         feature = "ner-onnx",
@@ -1173,7 +1173,7 @@ fn restore_quarantined_entries(
 #[cfg(all(
     any(windows, test),
     any(
-        feature = "paddle-ocr",
+        paddle_ocr,
         layout_detection,
         auto_rotate,
         feature = "ner-onnx",
@@ -1217,7 +1217,7 @@ pub(crate) fn hf_cached_revision(
 #[cfg(all(
     not(target_arch = "wasm32"),
     any(
-        feature = "paddle-ocr",
+        paddle_ocr,
         layout_detection,
         auto_rotate,
         feature = "ner-onnx",
@@ -1298,7 +1298,7 @@ pub(crate) fn parse_sha256_manifest(content: &str) -> Result<Vec<(String, String
 /// Streams the file in 64 KiB chunks to avoid loading large model files (100MB+) entirely
 /// into memory. Returns `Ok(())` if the checksum matches or is empty (skip verification).
 #[cfg(any(
-    feature = "paddle-ocr",
+    paddle_ocr,
     layout_detection,
     auto_rotate,
     feature = "ner-onnx",
@@ -1344,7 +1344,7 @@ pub(crate) fn verify_sha256(path: &Path, expected: &str, label: &str) -> Result<
     test,
     not(target_arch = "wasm32"),
     any(
-        feature = "paddle-ocr",
+        paddle_ocr,
         layout_detection,
         auto_rotate,
         feature = "ner-onnx",
@@ -1836,7 +1836,7 @@ mod download_deadline_tests {
     not(target_arch = "wasm32"),
     any(
         feature = "candle-paddleocr-vl",
-        feature = "paddle-ocr",
+        paddle_ocr,
         auto_rotate,
         layout_detection,
         feature = "transcription",
@@ -1889,7 +1889,7 @@ mod hf_client_builder_tests {
 
 #[cfg(all(
     test,
-    any(feature = "paddle-ocr", layout_detection, auto_rotate, feature = "ner-onnx")
+    any(paddle_ocr, layout_detection, auto_rotate, feature = "ner-onnx")
 ))]
 mod tests {
     use super::*;
