@@ -160,6 +160,38 @@ pub(crate) fn build_style_map(root: roxmltree::Node) -> AHashMap<String, OdtStyl
     styles
 }
 
+/// Build a map from `text:list-style` name to whether that style is ordered
+/// (numbered) or unordered (bulleted).
+///
+/// A list style is ordered if any of its level definitions is a
+/// `text:list-level-style-number`; a style containing only
+/// `text:list-level-style-bullet` levels is unordered. Scans
+/// `office:automatic-styles` and `office:styles`, mirroring
+/// [`build_style_map`], since a list style directly applied to a `text:list`
+/// commonly lives in content.xml's automatic-styles while a shared/named one
+/// lives in styles.xml's `office:styles` (#104: previously every ODT list was
+/// hardcoded unordered regardless of its actual style).
+pub(crate) fn build_list_style_map(root: roxmltree::Node) -> AHashMap<String, bool> {
+    let mut styles = AHashMap::new();
+    for child in root.children() {
+        if child.tag_name().name() == "automatic-styles" || child.tag_name().name() == "styles" {
+            for style_node in child.children() {
+                if style_node.tag_name().name() == "list-style"
+                    && let Some(name) = style_node
+                        .attribute(("urn:oasis:names:tc:opendocument:xmlns:style:1.0", "name"))
+                        .or_else(|| style_node.attribute("style:name"))
+                {
+                    let ordered = style_node
+                        .children()
+                        .any(|level| level.tag_name().name() == "list-level-style-number");
+                    styles.insert(name.to_string(), ordered);
+                }
+            }
+        }
+    }
+    styles
+}
+
 /// Parsed metadata for a single `<text:changed-region>` from `<text:tracked-changes>`.
 pub(crate) struct OdtChangeRegion {
     author: Option<String>,
@@ -385,6 +417,103 @@ fn extract_frame_description(frame: roxmltree::Node) -> Option<String> {
     None
 }
 
+/// Process a single `draw:frame`: an embedded formula object takes priority,
+/// otherwise any `draw:image` inside is resolved against the pre-extracted
+/// image map (or emitted as a text placeholder when unresolvable).
+///
+/// Shared by the `"p"` arm (a frame nested in paragraph flow) and the
+/// top-level `"frame"` arm (a page-anchored frame, #100), so both paths stay
+/// in sync instead of drifting.
+fn handle_odt_frame(
+    frame: roxmltree::Node,
+    image_data: &AHashMap<String, (Vec<u8>, String)>,
+    formula_data: &AHashMap<String, String>,
+    builder: &mut InternalDocumentBuilder,
+) {
+    use crate::types::internal::{ElementKind, InternalElement};
+
+    let mut is_formula = false;
+    for frame_child in frame.children() {
+        if frame_child.tag_name().name() == "object" {
+            let obj_href = frame_child
+                .attribute(("http://www.w3.org/1999/xlink", "href"))
+                .or_else(|| frame_child.attribute("xlink:href"));
+            if let Some(href) = obj_href {
+                let normalized = href.trim_start_matches("./");
+                if let Some(formula_text) = formula_data.get(normalized) {
+                    builder.push_formula(formula_text, None, None);
+                    is_formula = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    if is_formula {
+        return;
+    }
+
+    for frame_child in frame.descendants() {
+        if frame_child.tag_name().name() != "image" {
+            continue;
+        }
+        let href = frame_child
+            .attribute(("http://www.w3.org/1999/xlink", "href"))
+            .or_else(|| frame_child.attribute("xlink:href"));
+
+        let description = extract_frame_description(frame).or_else(|| {
+            frame
+                .attribute(("urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0", "title"))
+                .or_else(|| frame.attribute("svg:title"))
+                .map(|s| s.to_string())
+        });
+
+        let extracted = href.and_then(|h| image_data.get(h).map(|(data, format)| (data.clone(), format.clone())));
+
+        if let Some((data, format)) = extracted {
+            let (image_kind, kind_confidence) =
+                crate::extraction::image_kind::classify(&data, &format, None, None, None, None, false);
+
+            let image = ExtractedImage {
+                data: Bytes::from(data),
+                format: Cow::Owned(format),
+                image_index: 0,
+                page_number: None,
+                width: None,
+                height: None,
+                colorspace: None,
+                bits_per_component: None,
+                is_mask: false,
+                description: description.clone(),
+                ocr_result: None,
+                bounding_box: None,
+                source_path: None,
+                image_kind: Some(image_kind),
+                kind_confidence: Some(kind_confidence),
+                cluster_id: None,
+                caption: None,
+                qr_codes: None,
+                data_base64: None,
+            };
+            let idx = builder.push_image(description.as_deref(), image, None, None);
+            if let Some(h) = href {
+                let mut attrs = AHashMap::with_capacity(1);
+                attrs.insert("src".to_string(), h.to_string());
+                builder.set_attributes(idx, attrs);
+            }
+        } else {
+            let text_val = description.as_deref().or(href).unwrap_or("");
+            let elem = InternalElement::text(ElementKind::Image { image_index: 0 }, text_val, 0);
+            let idx = builder.push_element(elem);
+            if let Some(h) = href {
+                let mut attrs = AHashMap::with_capacity(1);
+                attrs.insert("src".to_string(), h.to_string());
+                builder.set_attributes(idx, attrs);
+            }
+        }
+    }
+}
+
 /// Build an `InternalDocument` from ODT content.xml.
 ///
 /// Walks the XML tree and emits flat elements through `InternalDocumentBuilder`.
@@ -409,7 +538,13 @@ fn build_internal_document(
                 .map_err(|e| crate::error::XbergError::parsing(format!("Failed to read content.xml: {}", e)))?;
         }
         Err(_) => {
-            return Ok(InternalDocumentBuilder::new("odt").build());
+            // A ZIP without content.xml is not an ODF document at all (#112):
+            // there is no body to return, so `Ok` with an empty document would
+            // silently tell the caller "this is the document" for something
+            // that isn't one. Fail loudly instead.
+            return Err(crate::error::XbergError::parsing(
+                "ODT archive is missing content.xml; this is not a valid OpenDocument Text file",
+            ));
         }
     }
 
@@ -418,6 +553,22 @@ fn build_internal_document(
 
     let root = doc.root_element();
     let style_map = build_style_map(root);
+    let mut list_style_map = build_list_style_map(root);
+    // Named list styles (e.g. "L1") are commonly declared in styles.xml's
+    // shared `office:styles` rather than content.xml's automatic-styles
+    // (#104); merge them in without overriding a same-named style already
+    // found in content.xml.
+    if let Ok(mut styles_file) = archive.by_name("styles.xml") {
+        use std::io::Read;
+        let mut styles_xml = String::new();
+        if styles_file.read_to_string(&mut styles_xml).is_ok()
+            && let Ok(styles_doc) = Document::parse(&styles_xml)
+        {
+            for (name, ordered) in build_list_style_map(styles_doc.root_element()) {
+                list_style_map.entry(name).or_insert(ordered);
+            }
+        }
+    }
     let mut builder = InternalDocumentBuilder::new("odt");
 
     let mut tracked_changes_present = false;
@@ -434,6 +585,7 @@ fn build_internal_document(
                         text_elem,
                         &mut builder,
                         &style_map,
+                        &list_style_map,
                         &image_data,
                         &formula_data,
                         budget,
@@ -473,6 +625,7 @@ pub(crate) fn build_internal_elements(
     parent: roxmltree::Node,
     builder: &mut InternalDocumentBuilder,
     style_map: &AHashMap<String, OdtStyleProps>,
+    list_style_map: &AHashMap<String, bool>,
     image_data: &AHashMap<String, (Vec<u8>, String)>,
     formula_data: &AHashMap<String, String>,
     budget: &mut SecurityBudget,
@@ -483,6 +636,7 @@ pub(crate) fn build_internal_elements(
     use crate::types::internal::{ElementKind, InternalElement};
 
     let mut footnote_counter = 0u32;
+    let mut comment_counter = 0u32;
     let mut paragraph_index: usize = 0;
 
     for node in parent.children() {
@@ -546,103 +700,31 @@ pub(crate) fn build_internal_elements(
                 }
                 paragraph_index += 1;
             }
+            "frame" => {
+                // A `draw:frame` reached directly here (not via the "p" arm's
+                // descendant scan) is anchored to the page/paragraph rather
+                // than wrapped in a `text:p` — commonly `text:anchor-type="page"`
+                // (#100). It was previously invisible to this walker entirely.
+                handle_odt_frame(node, image_data, formula_data, builder);
+            }
             "p" => {
                 let mut footnote_markers: Vec<(String, String)> = Vec::new();
 
                 for desc in node.descendants() {
                     if desc.tag_name().name() == "frame" {
-                        let mut is_formula = false;
-                        for frame_child in desc.children() {
-                            if frame_child.tag_name().name() == "object" {
-                                let obj_href = frame_child
-                                    .attribute(("http://www.w3.org/1999/xlink", "href"))
-                                    .or_else(|| frame_child.attribute("xlink:href"));
-                                if let Some(href) = obj_href {
-                                    let normalized = href.trim_start_matches("./");
-                                    if let Some(formula_text) = formula_data.get(normalized) {
-                                        builder.push_formula(formula_text, None, None);
-                                        is_formula = true;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-
-                        if !is_formula {
-                            for frame_child in desc.descendants() {
-                                if frame_child.tag_name().name() == "image" {
-                                    let href = frame_child
-                                        .attribute(("http://www.w3.org/1999/xlink", "href"))
-                                        .or_else(|| frame_child.attribute("xlink:href"));
-
-                                    let description = extract_frame_description(desc).or_else(|| {
-                                        desc.attribute((
-                                            "urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0",
-                                            "title",
-                                        ))
-                                        .or_else(|| desc.attribute("svg:title"))
-                                        .map(|s| s.to_string())
-                                    });
-
-                                    let extracted = href.and_then(|h| {
-                                        image_data.get(h).map(|(data, format)| (data.clone(), format.clone()))
-                                    });
-
-                                    if let Some((data, format)) = extracted {
-                                        let (image_kind, kind_confidence) = crate::extraction::image_kind::classify(
-                                            &data, &format, None, None, None, None, false,
-                                        );
-
-                                        let image = ExtractedImage {
-                                            data: Bytes::from(data),
-                                            format: Cow::Owned(format),
-                                            image_index: 0,
-                                            page_number: None,
-                                            width: None,
-                                            height: None,
-                                            colorspace: None,
-                                            bits_per_component: None,
-                                            is_mask: false,
-                                            description: description.clone(),
-                                            ocr_result: None,
-                                            bounding_box: None,
-                                            source_path: None,
-                                            image_kind: Some(image_kind),
-                                            kind_confidence: Some(kind_confidence),
-                                            cluster_id: None,
-                                            caption: None,
-                                            qr_codes: None,
-                                            data_base64: None,
-                                        };
-                                        let idx = builder.push_image(description.as_deref(), image, None, None);
-                                        if let Some(h) = href {
-                                            let mut attrs = AHashMap::with_capacity(1);
-                                            attrs.insert("src".to_string(), h.to_string());
-                                            builder.set_attributes(idx, attrs);
-                                        }
-                                    } else {
-                                        let text_val = description.as_deref().or(href).unwrap_or("");
-                                        let elem =
-                                            InternalElement::text(ElementKind::Image { image_index: 0 }, text_val, 0);
-                                        let idx = builder.push_element(elem);
-                                        if let Some(h) = href {
-                                            let mut attrs = AHashMap::with_capacity(1);
-                                            attrs.insert("src".to_string(), h.to_string());
-                                            builder.set_attributes(idx, attrs);
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        handle_odt_frame(desc, image_data, formula_data, builder);
                     }
                 }
 
                 for child in node.descendants() {
                     if child.tag_name().name() == "note" {
-                        let _ = child
-                            .attribute(("urn:oasis:names:tc:opendocument:xmlns:text:1.0", "note-class"))
-                            .or_else(|| child.attribute("text:note-class"))
-                            .unwrap_or("footnote");
+                        // The key prefix carries the note class (#118): "fn"
+                        // for a footnote, "en" for an endnote. Both ref and
+                        // definition are keyed identically so a consumer can
+                        // tell the two apart from the anchor alone, since
+                        // `ContentLayer`/`ElementKind` have no separate
+                        // endnote variant to carry that distinction.
+                        let key_prefix = if odt_note_label(child) == "endnote" { "en" } else { "fn" };
                         let note_id = child
                             .attribute(("urn:oasis:names:tc:opendocument:xmlns:text:1.0", "id"))
                             .or_else(|| child.attribute("text:id"));
@@ -654,8 +736,8 @@ pub(crate) fn build_internal_elements(
                                 if !citation_trimmed.is_empty() {
                                     footnote_counter += 1;
                                     let key = note_id
-                                        .map(|id| id.to_string())
-                                        .unwrap_or_else(|| format!("fn{}", footnote_counter));
+                                        .map(|id| format!("{key_prefix}{id}"))
+                                        .unwrap_or_else(|| format!("{key_prefix}{footnote_counter}"));
                                     footnote_markers.push((citation_trimmed.to_string(), key.clone()));
                                     builder.push_footnote_ref(citation_trimmed, &key, None);
                                 }
@@ -665,11 +747,11 @@ pub(crate) fn build_internal_elements(
                             {
                                 let trimmed = note_text.trim();
                                 if !trimmed.is_empty() {
-                                    let key = note_id.map(|id| id.to_string()).unwrap_or_else(|| {
+                                    let key = note_id.map(|id| format!("{key_prefix}{id}")).unwrap_or_else(|| {
                                         if footnote_counter == 0 {
                                             footnote_counter += 1;
                                         }
-                                        format!("fn{}", footnote_counter)
+                                        format!("{key_prefix}{footnote_counter}")
                                     });
                                     let def_idx = builder.push_footnote_definition(trimmed, &key, None);
                                     builder.set_layer(def_idx, ContentLayer::Footnote);
@@ -677,6 +759,45 @@ pub(crate) fn build_internal_elements(
                             }
                         }
                     }
+                }
+
+                // Comments (`office:annotation`, #100). Structurally a comment
+                // is the same shape as a footnote (an inline marker plus an
+                // out-of-line body); reuse the footnote-ref/-definition
+                // machinery rather than adding a dedicated `ElementKind`.
+                for child in node.descendants() {
+                    if child.tag_name().name() != "annotation" {
+                        continue;
+                    }
+                    let creator = child
+                        .children()
+                        .find(|n| n.tag_name().name() == "creator")
+                        .and_then(|n| n.text())
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty());
+                    let body: String = child
+                        .children()
+                        .filter(|n| n.tag_name().name() == "p")
+                        .filter_map(extract_node_text)
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    if body.is_empty() {
+                        continue;
+                    }
+
+                    comment_counter += 1;
+                    let annotation_name = child
+                        .attribute(("urn:oasis:names:tc:opendocument:xmlns:office:1.0", "name"))
+                        .or_else(|| child.attribute("office:name"));
+                    let key = annotation_name
+                        .map(|name| format!("cmt{name}"))
+                        .unwrap_or_else(|| format!("cmt{comment_counter}"));
+                    let marker = creator.unwrap_or_else(|| format!("comment {comment_counter}"));
+                    builder.push_footnote_ref(&marker, &key, None);
+                    let def_idx = builder.push_footnote_definition(&body, &key, None);
+                    builder.set_layer(def_idx, ContentLayer::Footnote);
                 }
 
                 let (mut text, annotations, uris) = collect_odt_annotations(node, style_map);
@@ -725,19 +846,41 @@ pub(crate) fn build_internal_elements(
                 }
             }
             "list" => {
-                build_internal_list(node, builder);
+                build_internal_list(node, builder, list_style_map);
             }
             "section" => {
                 build_internal_elements(
                     node,
                     builder,
                     style_map,
+                    list_style_map,
                     image_data,
                     formula_data,
                     budget,
                     change_map,
                     revisions,
                 )?;
+            }
+            // Indexes (table of contents, illustration/table/object/user
+            // indexes, the alphabetical index, and the bibliography) wrap
+            // their rendered entries in `text:index-body`; without this arm
+            // they fell through to `_ => {}` and their content was dropped
+            // entirely (#100).
+            "table-of-content" | "illustration-index" | "table-index" | "object-index" | "user-index"
+            | "alphabetical-index" | "bibliography" => {
+                if let Some(index_body) = node.children().find(|n| n.tag_name().name() == "index-body") {
+                    build_internal_elements(
+                        index_body,
+                        builder,
+                        style_map,
+                        list_style_map,
+                        image_data,
+                        formula_data,
+                        budget,
+                        change_map,
+                        revisions,
+                    )?;
+                }
             }
             _ => {}
         }
@@ -746,8 +889,25 @@ pub(crate) fn build_internal_elements(
 }
 
 /// Build list structure from an ODT `text:list` element for InternalDocumentBuilder.
-fn build_internal_list(list_node: roxmltree::Node, builder: &mut InternalDocumentBuilder) {
-    builder.push_list(false);
+///
+/// Resolves the list's own `text:style-name` against `list_style_map` to
+/// determine whether it is ordered (numbered) or unordered (bulleted); a
+/// nested `text:list` resolves its own style-name independently rather than
+/// inheriting the parent's (#104: every ODT list was previously hardcoded
+/// unordered regardless of its actual style).
+fn build_internal_list(
+    list_node: roxmltree::Node,
+    builder: &mut InternalDocumentBuilder,
+    list_style_map: &AHashMap<String, bool>,
+) {
+    let ordered = list_node
+        .attribute(("urn:oasis:names:tc:opendocument:xmlns:text:1.0", "style-name"))
+        .or_else(|| list_node.attribute("text:style-name"))
+        .and_then(|name| list_style_map.get(name))
+        .copied()
+        .unwrap_or(false);
+
+    builder.push_list(ordered);
     for item in list_node.children() {
         if item.tag_name().name() == "list-item" {
             for child in item.children() {
@@ -756,12 +916,12 @@ fn build_internal_list(list_node: roxmltree::Node, builder: &mut InternalDocumen
                         if let Some(text) = extract_node_text(child) {
                             let trimmed = text.trim();
                             if !trimmed.is_empty() {
-                                builder.push_list_item(trimmed, false, vec![], None, None);
+                                builder.push_list_item(trimmed, ordered, vec![], None, None);
                             }
                         }
                     }
                     "list" => {
-                        build_internal_list(child, builder);
+                        build_internal_list(child, builder, list_style_map);
                     }
                     _ => {}
                 }
@@ -820,28 +980,55 @@ fn extract_odt_internal_headers_footers(
 /// Collect text and annotations from an ODT paragraph/heading node's children.
 ///
 /// Walks `<text:span>` children, resolves their `text:style-name` against the
-/// style map, and produces byte-offset `TextAnnotation`s.
+/// style map, and produces byte-offset `TextAnnotation`s. Delegates to
+/// [`collect_inline_run`], which recurses so that spans nested inside spans
+/// and `text:a` wrapping a styled `text:span` are not truncated (#93, #94).
 fn collect_odt_annotations(
     node: roxmltree::Node,
     style_map: &AHashMap<String, OdtStyleProps>,
 ) -> (String, Vec<crate::types::TextAnnotation>, Vec<ExtractedUri>) {
-    use crate::types::builder;
-    use crate::types::document_structure::{AnnotationKind, TextAnnotation};
-
     let mut text = String::new();
     let mut annotations = Vec::new();
     let mut uris = Vec::new();
 
+    collect_inline_run(node, style_map, &mut text, &mut annotations, &mut uris);
+
+    if text.is_empty()
+        && let Some(t) = node.text()
+    {
+        text = t.to_string();
+    }
+
+    (text, annotations, uris)
+}
+
+/// Recursively walk the inline children of a paragraph/heading/span/anchor
+/// node, accumulating flattened text plus byte-offset annotations.
+///
+/// Recursing (instead of reading only `child.text()`, which roxmltree
+/// resolves to just the first text-node child) is what lets this survive
+/// `text:span` nested inside `text:span` and `text:a` wrapping a styled
+/// `text:span` — both silently dropped everything past the first level
+/// before this fix (#93, #94).
+fn collect_inline_run(
+    node: roxmltree::Node,
+    style_map: &AHashMap<String, OdtStyleProps>,
+    text: &mut String,
+    annotations: &mut Vec<crate::types::TextAnnotation>,
+    uris: &mut Vec<ExtractedUri>,
+) {
+    use crate::types::builder;
+    use crate::types::document_structure::{AnnotationKind, TextAnnotation};
+
     for child in node.children() {
         match child.tag_name().name() {
             "span" => {
-                let span_text = child.text().unwrap_or("");
-                if span_text.is_empty() {
+                let start = text.len() as u32;
+                collect_inline_run(child, style_map, text, annotations, uris);
+                let end = text.len() as u32;
+                if end == start {
                     continue;
                 }
-                let start = text.len() as u32;
-                text.push_str(span_text);
-                let end = text.len() as u32;
 
                 let style_name = child
                     .attribute(("urn:oasis:names:tc:opendocument:xmlns:text:1.0", "style-name"))
@@ -883,50 +1070,52 @@ fn collect_odt_annotations(
             "line-break" => {
                 text.push('\n');
             }
-            "note" => {}
+            "note" | "annotation" | "annotation-end" => {
+                // Footnotes/endnotes are collected separately by the caller
+                // (dedicated marker + definition pass); comments are handled
+                // as their own elements (#100). Neither belongs inline here.
+            }
             "a" => {
-                let link_text = child.text().unwrap_or("");
-                if !link_text.is_empty() {
-                    let start = text.len() as u32;
-                    text.push_str(link_text);
-                    let end = text.len() as u32;
-                    let url = child
-                        .attribute(("http://www.w3.org/1999/xlink", "href"))
-                        .or_else(|| child.attribute("xlink:href"))
-                        .unwrap_or("");
-                    if !url.is_empty() {
-                        annotations.push(builder::link(start, end, url, None));
-                        let kind = if url.starts_with('#') {
-                            UriKind::Anchor
-                        } else if url.starts_with("mailto:") {
-                            UriKind::Email
-                        } else {
-                            UriKind::Hyperlink
-                        };
-                        uris.push(ExtractedUri {
-                            url: url.to_string(),
-                            label: Some(link_text.to_string()),
-                            page: None,
-                            kind,
-                        });
-                    }
+                let start = text.len() as u32;
+                collect_inline_run(child, style_map, text, annotations, uris);
+                let end = text.len() as u32;
+                if end == start {
+                    continue;
+                }
+
+                let url = child
+                    .attribute(("http://www.w3.org/1999/xlink", "href"))
+                    .or_else(|| child.attribute("xlink:href"))
+                    .unwrap_or("");
+                if !url.is_empty() {
+                    let link_text = text[start as usize..end as usize].to_string();
+                    annotations.push(builder::link(start, end, url, None));
+                    let kind = if url.starts_with('#') {
+                        UriKind::Anchor
+                    } else if url.starts_with("mailto:") {
+                        UriKind::Email
+                    } else {
+                        UriKind::Hyperlink
+                    };
+                    uris.push(ExtractedUri {
+                        url: url.to_string(),
+                        label: Some(link_text),
+                        page: None,
+                        kind,
+                    });
                 }
             }
             _ => {
                 if let Some(t) = child.text() {
                     text.push_str(t);
+                } else {
+                    // Unknown wrapper element (e.g. `text:ruby`,
+                    // `text:meta`): recurse rather than drop its subtree.
+                    collect_inline_run(child, style_map, text, annotations, uris);
                 }
             }
         }
     }
-
-    if text.is_empty()
-        && let Some(t) = node.text()
-    {
-        text = t.to_string();
-    }
-
-    (text, annotations, uris)
 }
 
 /// Extract table cells as `Vec<Vec<String>>` from an ODT table element.
@@ -969,32 +1158,61 @@ fn extract_row_cells(row_node: roxmltree::Node) -> Option<Vec<String>> {
     if row_cells.is_empty() { None } else { Some(row_cells) }
 }
 
-/// Extract text from a single XML node, handling spans and formatting
+/// Extract text from a single XML node, handling spans, formatting, and
+/// nested block content.
+///
+/// Used for contexts that can only carry a single flat string — table
+/// cells, list items, header/footer paragraphs, frame descriptions — where
+/// [`collect_odt_annotations`]'s richer element output has nowhere to go.
+///
+/// Recurses into every child rather than reading only `child.text()`, so
+/// spans/paragraphs/lists/tables nested arbitrarily deep are no longer
+/// silently dropped (#93, #117): a nested `text:list` or `text:table` is
+/// flattened inline instead of vanishing, and a `text:note` is rendered as a
+/// bracketed `[footnote: ...]`/`[endnote: ...]` aside (#118) instead of being
+/// lost outright. `office:annotation` (a comment) is intentionally skipped
+/// here — comments are extracted as their own elements from paragraph body
+/// text (#100) and would otherwise leak into cell/list-item text.
 ///
 /// # Arguments
 /// * `node` - The XML node to extract text from
 ///
 /// # Returns
 /// * `Option<String>` - The extracted text with formatting preserved
-fn extract_node_text(node: roxmltree::Node) -> Option<String> {
-    let mut text_parts = Vec::new();
+pub(crate) fn extract_node_text(node: roxmltree::Node) -> Option<String> {
+    let mut text_parts: Vec<String> = Vec::new();
 
     for child in node.children() {
         match child.tag_name().name() {
-            "span" => {
-                if let Some(text) = child.text() {
-                    text_parts.push(text.to_string());
-                }
-            }
             "tab" => {
                 text_parts.push("\t".to_string());
             }
             "line-break" => {
                 text_parts.push("\n".to_string());
             }
+            "annotation" | "annotation-end" => {}
+            "note" => {
+                if let Some(note_text) = extract_note_inline(child) {
+                    push_block_text(&mut text_parts, note_text);
+                }
+            }
+            "p" | "h" | "list" | "list-item" => {
+                if let Some(text) = extract_node_text(child) {
+                    push_block_text(&mut text_parts, text);
+                }
+            }
+            "table" => {
+                if let Some(text) = extract_table_inline(child) {
+                    push_block_text(&mut text_parts, text);
+                }
+            }
             _ => {
                 if let Some(text) = child.text() {
                     text_parts.push(text.to_string());
+                } else if child.has_children() {
+                    if let Some(text) = extract_node_text(child) {
+                        text_parts.push(text);
+                    }
                 }
             }
         }
@@ -1005,6 +1223,71 @@ fn extract_node_text(node: roxmltree::Node) -> Option<String> {
     } else {
         Some(text_parts.join(""))
     }
+}
+
+/// Append a block-level chunk of already-flattened text to `text_parts`,
+/// separating it from whatever preceded it with a newline so nested
+/// paragraphs/lists/tables/notes don't run into adjacent text (#117).
+fn push_block_text(text_parts: &mut Vec<String>, text: String) {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    if !text_parts.is_empty() {
+        text_parts.push("\n".to_string());
+    }
+    text_parts.push(trimmed.to_string());
+}
+
+/// Flatten a `text:note` (footnote or endnote) into an inline aside for
+/// contexts that cannot host a separate footnote element, such as a table
+/// cell or list item (#117). Labels the aside by `text:note-class` so
+/// footnotes and endnotes remain distinguishable even when flattened
+/// (#118).
+fn extract_note_inline(note: roxmltree::Node) -> Option<String> {
+    let label = odt_note_label(note);
+
+    let citation = note
+        .children()
+        .find(|n| n.tag_name().name() == "note-citation")
+        .and_then(extract_node_text)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let body = note
+        .children()
+        .find(|n| n.tag_name().name() == "note-body")
+        .and_then(extract_node_text)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    match (citation, body) {
+        (Some(c), Some(b)) => Some(format!("[{label} {c}: {b}]")),
+        (None, Some(b)) => Some(format!("[{label}: {b}]")),
+        (Some(c), None) => Some(format!("[{label} {c}]")),
+        (None, None) => None,
+    }
+}
+
+/// Resolve a `text:note`'s `text:note-class` to a human-readable label,
+/// defaulting to `"footnote"` per the ODF spec when the attribute is absent
+/// (#118).
+fn odt_note_label(note: roxmltree::Node) -> &'static str {
+    let note_class = note
+        .attribute(("urn:oasis:names:tc:opendocument:xmlns:text:1.0", "note-class"))
+        .or_else(|| note.attribute("text:note-class"))
+        .unwrap_or("footnote");
+    if note_class == "endnote" { "endnote" } else { "footnote" }
+}
+
+/// Flatten a nested `text:table` (a table inside a table cell or list item)
+/// into row-per-line, cell-joined inline text (#117). The outer flat-string
+/// contexts this feeds into cannot host a real nested `Table` element.
+fn extract_table_inline(table_node: roxmltree::Node) -> Option<String> {
+    let rows = extract_table_cells(table_node);
+    if rows.is_empty() {
+        return None;
+    }
+    Some(rows.iter().map(|row| row.join(" | ")).collect::<Vec<_>>().join("\n"))
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
@@ -1247,6 +1530,103 @@ mod tests {
         let result = extract_node_text(node);
         assert!(result.is_some());
         assert!(!result.unwrap().is_empty());
+    }
+
+    /// #118: `odt_note_label` must default to "footnote" and only report
+    /// "endnote" when `text:note-class="endnote"` is present. This is only
+    /// observable at the unit level — by the time a public `ExtractedDocument`
+    /// is built, the footnote/endnote anchor key has been resolved into a
+    /// node index and the "fn"/"en" prefix is no longer visible on the wire.
+    #[test]
+    fn test_odt_note_label_distinguishes_footnote_and_endnote() {
+        const NS: &str = r#"xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0""#;
+
+        let endnote_xml = format!(r#"<note {NS} text:note-class="endnote"/>"#);
+        let endnote_doc = roxmltree::Document::parse(&endnote_xml).unwrap();
+        assert_eq!(odt_note_label(endnote_doc.root_element()), "endnote");
+
+        let footnote_xml = format!(r#"<note {NS} text:note-class="footnote"/>"#);
+        let footnote_doc = roxmltree::Document::parse(&footnote_xml).unwrap();
+        assert_eq!(odt_note_label(footnote_doc.root_element()), "footnote");
+
+        let no_class_xml = "<note/>";
+        let no_class_doc = roxmltree::Document::parse(no_class_xml).unwrap();
+        assert_eq!(
+            odt_note_label(no_class_doc.root_element()),
+            "footnote",
+            "an absent text:note-class must default to footnote per the ODF spec"
+        );
+    }
+
+    /// #118: footnote and endnote anchor keys must use different prefixes
+    /// ("fn"/"en") so a `FootnoteRef`/`FootnoteDefinition` pair for an
+    /// endnote can never collide with, or be confused for, a footnote's.
+    #[tokio::test]
+    async fn test_odt_footnote_and_endnote_keys_use_distinct_prefixes() {
+        use std::io::Write;
+
+        let content_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content
+    xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+    xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">
+  <office:body>
+    <office:text>
+      <text:p>Body<text:note text:note-class="footnote" text:id="ftn1">
+        <text:note-citation>1</text:note-citation>
+        <text:note-body><text:p>a footnote</text:p></text:note-body>
+      </text:note><text:note text:note-class="endnote" text:id="ftn1">
+        <text:note-citation>i</text:note-citation>
+        <text:note-body><text:p>an endnote</text:p></text:note-body>
+      </text:note></text:p>
+    </office:text>
+  </office:body>
+</office:document-content>"#;
+
+        let mut buf = Vec::new();
+        {
+            let mut zip = zip::ZipWriter::new(Cursor::new(&mut buf));
+            let stored = zip::write::FileOptions::<()>::default().compression_method(zip::CompressionMethod::Stored);
+            zip.start_file("mimetype", stored).unwrap();
+            zip.write_all("application/vnd.oasis.opendocument.text".as_bytes())
+                .unwrap();
+            let deflated =
+                zip::write::FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+            zip.start_file("content.xml", deflated).unwrap();
+            zip.write_all(content_xml.as_bytes()).unwrap();
+            zip.finish().unwrap();
+        }
+
+        let mut archive = zip::ZipArchive::new(Cursor::new(buf)).unwrap();
+        let mut budget = SecurityBudget::from_config(&ExtractionConfig::default());
+        let doc = build_internal_document(&mut archive, &mut budget).expect("extraction should succeed");
+
+        use crate::types::internal::ElementKind;
+
+        let footnote_def_anchor = doc
+            .elements
+            .iter()
+            .find(|e| matches!(e.kind, ElementKind::FootnoteDefinition) && e.text == "a footnote")
+            .and_then(|e| e.anchor.clone())
+            .expect("expected a footnote definition anchored to 'a footnote'");
+        let endnote_def_anchor = doc
+            .elements
+            .iter()
+            .find(|e| matches!(e.kind, ElementKind::FootnoteDefinition) && e.text == "an endnote")
+            .and_then(|e| e.anchor.clone())
+            .expect("expected an endnote definition anchored to 'an endnote'");
+
+        assert!(
+            footnote_def_anchor.starts_with("fn"),
+            "footnote anchor key should use the 'fn' prefix, got {footnote_def_anchor:?}"
+        );
+        assert!(
+            endnote_def_anchor.starts_with("en"),
+            "endnote anchor key should use the 'en' prefix, got {endnote_def_anchor:?}"
+        );
+        assert_ne!(
+            footnote_def_anchor, endnote_def_anchor,
+            "a footnote and an endnote sharing the same text:id must not collide on anchor key"
+        );
     }
 
     /// Helper to load test ODT, extract with document structure, and return the structure.
