@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added Sceptre as an EasyOCR Gen2 backend using ONNX Runtime on desktop/server and tract on
+  Android/iOS, with a separate byte-fed WebAssembly API intended for Web Workers. Select it with
+  `ocr.backend = "sceptre"` or `--ocr-backend sceptre`; it returns line quadrilaterals and
+  recognition confidence, supports all eight Gen2 model groups, and accepts tuning under
+  `backend_options`.
+
+### Fixed
+
+- Image OCR benchmarks now score structural F1 only against genuinely structured Markdown ground
+  truth; scene-text fixtures remain text-only, and a dedicated structured image cohort covers
+  receipts, document pages, tables, and invoices.
+- Benchmark adapters now honor fixture OCR languages, partition batch-global backends into
+  homogeneous native batches, and record unsupported-language exclusions in provenance instead of
+  silently evaluating non-English documents with default English models.
+  
 ## [1.0.14] - 2026-08-04
 
 ### Fixed
