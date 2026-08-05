@@ -25,7 +25,10 @@ fn zip_with_app_xml(app_xml: &str) -> ZipArchive<Cursor<Vec<u8>>> {
     ZipArchive::new(zip.finish().unwrap()).unwrap()
 }
 
+// The two XLSX tests need the same gate as the import they use: the file compiles under
+// `office` alone, but `extract_xlsx_app_properties` only exists with `excel`.
 #[test]
+#[cfg(feature = "excel")]
 fn should_exclude_named_ranges_from_worksheet_names_using_heading_pairs() {
     // Real-world shape: 3 worksheets followed by 2 named ranges, with HeadingPairs
     // declaring the ("Worksheets", 3) then ("Named Ranges", 2) group boundaries.
@@ -63,6 +66,7 @@ fn should_exclude_named_ranges_from_worksheet_names_using_heading_pairs() {
 }
 
 #[test]
+#[cfg(feature = "excel")]
 fn should_return_all_titles_when_heading_pairs_absent_for_backward_compat() {
     let app_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"

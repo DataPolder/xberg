@@ -355,6 +355,12 @@ mod tests {
             .join("test_documents")
     }
 
+    /// Gated on `excel` as well as `office`: the payload is an .xlsx, so without the
+    /// excel extractor registered the recursive extraction correctly reports
+    /// `UnsupportedFormat` and produces no child. The test would then fail for a reason
+    /// that has nothing to do with OLE Package unwrapping, which is what it exists to
+    /// cover. Observed under `--features "email,office,ocr,transcription"`.
+    #[cfg(feature = "excel")]
     #[tokio::test]
     async fn test_ole_package_stream_extracted_as_embedded_xlsx() {
         let fixture = test_documents_dir().join("xlsx/excel_tiny_excel.xlsx");
