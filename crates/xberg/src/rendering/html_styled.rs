@@ -642,8 +642,14 @@ mod tests {
             out.contains(r#"<div class="kb-formula kb-math" data-math-style="display">$$x^2 + y^2 = z^2$$</div>"#),
             "unexpected formula markup: {out}"
         );
-        assert!(!out.contains("<pre"), "formula should not render as a code block: {out}");
-        assert!(!out.contains("<code"), "formula should not render as a code block: {out}");
+        assert!(
+            !out.contains("<pre"),
+            "formula should not render as a code block: {out}"
+        );
+        assert!(
+            !out.contains("<code"),
+            "formula should not render as a code block: {out}"
+        );
     }
 
     #[test]
@@ -656,7 +662,10 @@ mod tests {
             },
             &doc,
         );
-        assert!(out.contains("$$a &lt; b &amp; b &gt; c$$"), "escaped formula missing: {out}");
+        assert!(
+            out.contains("$$a &lt; b &amp; b &gt; c$$"),
+            "escaped formula missing: {out}"
+        );
         assert!(!out.contains("a < b & b > c"), "raw unescaped formula leaked: {out}");
     }
 

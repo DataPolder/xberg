@@ -168,6 +168,12 @@ impl DocumentStructureBuilder {
         self.push_body_node(content, page, None, vec![])
     }
 
+    /// Push a math formula node (LaTeX text).
+    pub(crate) fn push_formula(&mut self, text: &str, page: Option<u32>) -> NodeIndex {
+        let content = NodeContent::Formula { text: text.to_string() };
+        self.push_body_node(content, page, None, vec![])
+    }
+
     /// Push an image reference node.
     pub(crate) fn push_image(
         &mut self,

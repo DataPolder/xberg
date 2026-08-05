@@ -367,9 +367,35 @@ const BLOCK_ELEMENTS: &[&str] = &[
 ];
 
 /// Elements whose entire subtree should be skipped (no text extracted).
+///
+/// `math` is handled separately (see `render_math_element`): its subtree is
+/// converted to LaTeX rather than skipped, so it is deliberately absent here.
 const SKIP_ELEMENTS: &[&str] = &[
-    "head", "script", "style", "svg", "math", "video", "audio", "source", "track", "object", "embed", "iframe",
+    "head", "script", "style", "svg", "video", "audio", "source", "track", "object", "embed", "iframe",
 ];
+
+/// Convert a `<math>` element to LaTeX and append it to `output` as its own
+/// `$$...$$` block, isolated by blank lines so it survives the `\n\n` paragraph
+/// split callers use downstream. Never leaks raw MathML tag text: on conversion
+/// failure (budget exhaustion on hostile input) the element is silently dropped.
+fn render_math_element(node: roxmltree::Node<'_, '_>, output: &mut String, budget: &mut SecurityBudget) {
+    let Ok(latex) = crate::extraction::mathml::convert_mathml_node_to_latex(node, budget) else {
+        return;
+    };
+    let trimmed = latex.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    if budget.account_text(trimmed.len()).is_err() {
+        return;
+    }
+    if !output.is_empty() && !output.ends_with('\n') {
+        output.push('\n');
+    }
+    output.push_str("\n$$");
+    output.push_str(trimmed);
+    output.push_str("$$\n\n");
+}
 
 /// Extract text from XHTML content by traversing the XML tree directly.
 ///
@@ -537,6 +563,13 @@ fn visit_node_unbounded(node: roxmltree::Node<'_, '_>, output: &mut String) {
         }
         roxmltree::NodeType::Element => {
             let tag = node.tag_name().name().to_ascii_lowercase();
+            if tag == "math" {
+                // No budget is threaded through this (unbounded) traversal, so use
+                // a default-limits budget scoped to this one formula's conversion.
+                let mut budget = SecurityBudget::from_limits(&crate::extractors::security::SecurityLimits::default());
+                render_math_element(node, output, &mut budget);
+                return;
+            }
             if SKIP_ELEMENTS.iter().any(|&s| s == tag) {
                 return;
             }
@@ -597,6 +630,10 @@ fn visit_node_budgeted(node: roxmltree::Node<'_, '_>, output: &mut String, budge
         }
         roxmltree::NodeType::Element => {
             let tag = node.tag_name().name().to_ascii_lowercase();
+            if tag == "math" {
+                render_math_element(node, output, budget);
+                return;
+            }
             if SKIP_ELEMENTS.iter().any(|&s| s == tag) {
                 return;
             }
@@ -781,6 +818,44 @@ mod tests {
         assert!(result.contains("Chapter One"), "got: {result}");
         assert!(result.contains("This is paragraph text."), "got: {result}");
         assert!(!result.contains("Test"), "head title should be excluded, got: {result}");
+    }
+
+    #[test]
+    fn test_extract_text_from_xhtml_converts_math_to_latex() {
+        let xhtml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <body>
+    <p>Before</p>
+    <math xmlns="http://www.w3.org/1998/Math/MathML">
+      <mfrac><mn>1</mn><mn>2</mn></mfrac>
+    </math>
+    <p>After</p>
+  </body>
+</html>"#;
+        let result = extract_text_from_xhtml(xhtml);
+        assert!(result.contains("$$\\frac{1}{2}$$"), "got: {result}");
+        assert!(result.contains("Before"), "got: {result}");
+        assert!(result.contains("After"), "got: {result}");
+        assert!(
+            !result.contains("mfrac"),
+            "raw MathML tag names must not leak, got: {result}"
+        );
+        assert!(
+            !result.contains("mn"),
+            "raw MathML tag names must not leak, got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_extract_text_from_xhtml_budgeted_converts_math_to_latex() {
+        let xhtml = r#"<html xmlns="http://www.w3.org/1999/xhtml">
+  <body>
+    <math xmlns="http://www.w3.org/1998/Math/MathML"><msup><mi>x</mi><mn>2</mn></msup></math>
+  </body>
+</html>"#;
+        let mut budget = SecurityBudget::from_limits(&crate::extractors::security::SecurityLimits::default());
+        let result = extract_text_from_xhtml_budgeted(xhtml, &mut budget);
+        assert_eq!(result, "$$x^{2}$$");
     }
 
     #[test]

@@ -323,7 +323,15 @@ impl EpubExtractor {
                 let text = extract_text_from_xhtml_budgeted(sanitized, budget);
                 for paragraph in text.split("\n\n") {
                     let trimmed = paragraph.trim();
-                    if !trimmed.is_empty() {
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    // MathML subtrees are converted to LaTeX and isolated as their
+                    // own `$$...$$` block by `content::render_math_element`; route
+                    // those through `push_formula` instead of `push_paragraph`. ~keep
+                    if let Some(latex) = trimmed.strip_prefix("$$").and_then(|rest| rest.strip_suffix("$$")) {
+                        builder.push_formula(latex, None, None);
+                    } else {
                         builder.push_paragraph(trimmed, vec![], None, None);
                     }
                 }
@@ -376,6 +384,9 @@ impl EpubExtractor {
                         }
                         NodeContent::Code { text, language } => {
                             builder.push_code(text, language.as_deref(), None, None);
+                        }
+                        NodeContent::Formula { text } => {
+                            builder.push_formula(text, None, None);
                         }
                         NodeContent::Image { description, src, .. } => {
                             if let Some(img_src) = src

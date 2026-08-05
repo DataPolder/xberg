@@ -296,7 +296,7 @@ impl<'a, 'b> HtmlWalker<'a, 'b> {
         }
     }
 
-    fn handle_open_tag(&mut self, tag: &str, attrs_str: &str, _is_self_closing: bool) {
+    fn handle_open_tag(&mut self, tag: &str, attrs_str: &str, is_self_closing: bool) {
         match tag {
             "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
                 self.flush_paragraph();
@@ -494,6 +494,24 @@ impl<'a, 'b> HtmlWalker<'a, 'b> {
                 let close_tag = format!("</{tag}>");
                 if let Some(close_pos) = self.src[self.pos..].find(&close_tag) {
                     self.pos += close_pos + close_tag.len();
+                }
+            }
+            "math" => {
+                self.flush_paragraph();
+                if !is_self_closing {
+                    let close_tag = "</math>";
+                    if let Some(close_pos) = self.src[self.pos..].find(close_tag) {
+                        let inner = &self.src[self.pos..self.pos + close_pos];
+                        let raw_xml = if attrs_str.is_empty() {
+                            format!("<math>{inner}</math>")
+                        } else {
+                            format!("<math {attrs_str}>{inner}</math>")
+                        };
+                        self.pos += close_pos + close_tag.len();
+                        if let Some(latex) = convert_math_subtree_to_latex(&raw_xml) {
+                            self.builder.push_formula(&latex, None);
+                        }
+                    }
                 }
             }
             "hr" => {
@@ -809,6 +827,27 @@ impl<'a, 'b> HtmlWalker<'a, 'b> {
 }
 
 /// Split a tag body into (name, rest-of-attributes).
+/// Convert a raw `<math>...</math>` XHTML subtree to LaTeX via the shared
+/// MathML converter (`crate::extraction::mathml`, gated by the `office`
+/// feature). Returns `None` if the fragment fails to parse, converts to empty
+/// output, or the security budget is exhausted on hostile input.
+#[cfg(feature = "office")]
+fn convert_math_subtree_to_latex(raw_xml: &str) -> Option<String> {
+    let mut budget = crate::extractors::security::SecurityBudget::from_limits(
+        &crate::extractors::security::SecurityLimits::default(),
+    );
+    crate::extraction::mathml::convert_mathml_str_to_latex(raw_xml, &mut budget)
+        .ok()
+        .filter(|latex| !latex.trim().is_empty())
+}
+
+/// The `mathml` converter lives behind the `office` feature; without it, `math`
+/// elements are dropped rather than mangled into stray inline text.
+#[cfg(not(feature = "office"))]
+fn convert_math_subtree_to_latex(_raw_xml: &str) -> Option<String> {
+    None
+}
+
 fn split_tag_name(content: &str) -> (&str, &str) {
     let content = content.trim();
     if let Some(space_pos) = content.find(|c: char| c.is_ascii_whitespace()) {
@@ -1067,6 +1106,31 @@ mod tests {
             }
             other => panic!("Expected Code, got {:?}", other),
         }
+    }
+
+    #[test]
+    #[cfg(feature = "office")]
+    fn test_math_converts_to_latex_formula_node() {
+        let html = r#"<p>Before</p><math xmlns="http://www.w3.org/1998/Math/MathML"><mfrac><mn>1</mn><mn>2</mn></mfrac></math><p>After</p>"#;
+        let doc = build_document_structure(html);
+        assert!(doc.validate().is_ok());
+
+        let formula = doc
+            .nodes
+            .iter()
+            .find_map(|node| match &node.content {
+                NodeContent::Formula { text } => Some(text.clone()),
+                _ => None,
+            })
+            .expect("expected a Formula node");
+        assert_eq!(formula, "\\frac{1}{2}");
+
+        assert!(
+            doc.nodes
+                .iter()
+                .all(|node| !format!("{:?}", node.content).contains("mfrac")),
+            "raw MathML tag names must not leak into any node"
+        );
     }
 
     #[test]

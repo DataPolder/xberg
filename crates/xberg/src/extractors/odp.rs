@@ -96,7 +96,7 @@ fn build_internal_document(
     budget: &mut SecurityBudget,
 ) -> crate::error::Result<InternalDocument> {
     let image_data = pre_extract_images(archive);
-    let formula_data = pre_extract_formulas(archive);
+    let formula_data = pre_extract_formulas(archive, budget)?;
 
     let mut xml_content = String::new();
     match archive.by_name("content.xml") {
@@ -497,6 +497,57 @@ mod tests {
                 && doc.tables.iter().any(|t| t.cells.iter().flatten().any(|c| c == "B1")),
             "table cell text A1/B1 should be extracted"
         );
+    }
+
+    /// Confirms that ODP inherits the ODT formula (MathML→LaTeX) pipeline for
+    /// free, since it reuses `pre_extract_formulas`/`build_internal_elements`.
+    #[tokio::test]
+    async fn test_odp_extracts_embedded_formula_as_latex() {
+        let content_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content
+    xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+    xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0"
+    xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0"
+    xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+    xmlns:xlink="http://www.w3.org/1999/xlink">
+  <office:body>
+    <office:presentation><draw:page draw:name="Formula"><draw:frame><draw:text-box>
+      <text:p><draw:frame><draw:object xlink:href="./Object 1"/></draw:frame></text:p>
+    </draw:text-box></draw:frame></draw:page></office:presentation>
+  </office:body>
+</office:document-content>"#;
+        let formula_content_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<math xmlns="http://www.w3.org/1998/Math/MathML">
+  <msup><mi>x</mi><mn>2</mn></msup>
+</math>"#;
+
+        let mut buf = Vec::new();
+        {
+            let mut zip = zip::ZipWriter::new(Cursor::new(&mut buf));
+            let stored = zip::write::FileOptions::<()>::default().compression_method(zip::CompressionMethod::Stored);
+            zip.start_file("mimetype", stored).unwrap();
+            zip.write_all(ODP_MIME.as_bytes()).unwrap();
+
+            let deflated =
+                zip::write::FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+            zip.start_file("content.xml", deflated).unwrap();
+            zip.write_all(content_xml.as_bytes()).unwrap();
+            zip.start_file("Object 1/content.xml", deflated).unwrap();
+            zip.write_all(formula_content_xml.as_bytes()).unwrap();
+            zip.finish().unwrap();
+        }
+
+        let doc = OdpExtractor::new()
+            .extract_content(&buf, ODP_MIME, &ExtractionConfig::default())
+            .await
+            .expect("ODP extraction should succeed");
+
+        let formula = doc
+            .elements
+            .iter()
+            .find(|e| matches!(e.kind, ElementKind::Formula))
+            .expect("expected a Formula element");
+        assert_eq!(formula.text, "x^{2}");
     }
 
     #[tokio::test]

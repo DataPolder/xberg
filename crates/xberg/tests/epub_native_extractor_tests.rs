@@ -314,3 +314,42 @@ async fn test_native_epub_no_content_loss() {
 
     println!("✅ All EPUBs extracted successfully - no content loss!");
 }
+
+/// Tests that real embedded MathML (from the EPUB 3 accessibility/conformance
+/// test suite fixture) is converted to genuine LaTeX rather than being
+/// mangled into raw concatenated symbol text or leaking tag names.
+#[tokio::test]
+async fn test_native_epub_features_mathml_converts_to_latex() {
+    let test_file = get_test_epub_path("features.epub");
+    if !test_file.exists() {
+        println!("Skipping test: Test file not found at {:?}", test_file);
+        return;
+    }
+
+    let bytes = std::fs::read(&test_file).expect("Failed to read features.epub");
+    let extractor = EpubExtractor;
+    let config = ExtractionConfig::default();
+    let input = ExtractInput::from_bytes(bytes, "application/epub+zip", None);
+    let result = extractor
+        .extract(input, &config)
+        .await
+        .expect("Should extract features.epub successfully");
+
+    assert!(
+        result.content.contains("x=\\frac{"),
+        "Expected the quadratic-formula MathML to convert to a LaTeX \\frac, got: {}",
+        result.content
+    );
+    assert!(
+        result.content.contains("\\sum "),
+        "Expected the summation MathML to convert to \\sum, got: {}",
+        result.content
+    );
+    assert!(
+        !result.content.contains("mfrac") && !result.content.contains("munderover"),
+        "Raw MathML tag names must not leak into extracted content, got: {}",
+        result.content
+    );
+
+    println!("✅ EPUB MathML-to-LaTeX conversion test passed!");
+}

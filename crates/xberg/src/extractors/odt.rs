@@ -310,8 +310,16 @@ pub(crate) fn pre_extract_images(
 /// Pre-extract embedded formula objects (MathML) from the ODT archive.
 ///
 /// ODT stores formulas in subdirectories like `Object 1/content.xml` containing
-/// MathML markup. This function scans for those and converts them to text.
-pub(crate) fn pre_extract_formulas(archive: &mut zip::ZipArchive<Cursor<Vec<u8>>>) -> AHashMap<String, String> {
+/// MathML markup. This function scans for those and converts them to LaTeX via
+/// the shared [`crate::extraction::mathml`] converter.
+///
+/// Returns `Err` if the `SecurityBudget` is exhausted while converting a
+/// formula (matching the OMML converter's untrusted-input handling); this
+/// aborts the whole extraction rather than silently truncating a formula.
+pub(crate) fn pre_extract_formulas(
+    archive: &mut zip::ZipArchive<Cursor<Vec<u8>>>,
+    budget: &mut SecurityBudget,
+) -> crate::error::Result<AHashMap<String, String>> {
     use std::io::Read;
 
     let mut formulas = AHashMap::new();
@@ -326,7 +334,7 @@ pub(crate) fn pre_extract_formulas(archive: &mut zip::ZipArchive<Cursor<Vec<u8>>
         if let Ok(mut file) = archive.by_name(name) {
             let mut xml = String::new();
             if file.read_to_string(&mut xml).is_ok() && xml.contains("math") {
-                let text = extract_mathml_text(&xml);
+                let text = crate::extraction::mathml::convert_mathml_str_to_latex(&xml, budget)?;
                 if !text.is_empty() {
                     let dir = name.trim_end_matches("/content.xml");
                     formulas.insert(dir.to_string(), text.clone());
@@ -336,90 +344,7 @@ pub(crate) fn pre_extract_formulas(archive: &mut zip::ZipArchive<Cursor<Vec<u8>>
         }
     }
 
-    formulas
-}
-
-/// Convert MathML XML content to a plain-text representation.
-fn extract_mathml_text(xml: &str) -> String {
-    let Ok(doc) = Document::parse(xml) else {
-        return String::new();
-    };
-
-    let root = doc.root_element();
-    let mut tokens = Vec::new();
-    collect_mathml_tokens(root, &mut tokens);
-    tokens.join(" ")
-}
-
-/// Recursively collect text tokens from MathML elements.
-fn collect_mathml_tokens(node: roxmltree::Node, tokens: &mut Vec<String>) {
-    let tag = node.tag_name().name();
-    match tag {
-        "mi" | "mn" | "mo" | "ms" | "mtext" => {
-            if let Some(t) = node.text() {
-                let trimmed = t.trim();
-                if !trimmed.is_empty() {
-                    tokens.push(trimmed.to_string());
-                }
-            }
-        }
-        "mfrac" => {
-            let children: Vec<_> = node.children().filter(|c| c.is_element()).collect();
-            if children.len() == 2 {
-                let mut num = Vec::new();
-                collect_mathml_tokens(children[0], &mut num);
-                let mut den = Vec::new();
-                collect_mathml_tokens(children[1], &mut den);
-                if !num.is_empty() || !den.is_empty() {
-                    tokens.push(format!("({})/({})", num.join(" "), den.join(" ")));
-                    return;
-                }
-            }
-            for child in node.children() {
-                collect_mathml_tokens(child, tokens);
-            }
-        }
-        "msup" => {
-            let children: Vec<_> = node.children().filter(|c| c.is_element()).collect();
-            if children.len() == 2 {
-                let mut base = Vec::new();
-                collect_mathml_tokens(children[0], &mut base);
-                let mut exp = Vec::new();
-                collect_mathml_tokens(children[1], &mut exp);
-                tokens.push(format!("{}^{}", base.join(" "), exp.join(" ")));
-                return;
-            }
-            for child in node.children() {
-                collect_mathml_tokens(child, tokens);
-            }
-        }
-        "msub" => {
-            let children: Vec<_> = node.children().filter(|c| c.is_element()).collect();
-            if children.len() == 2 {
-                let mut base = Vec::new();
-                collect_mathml_tokens(children[0], &mut base);
-                let mut sub = Vec::new();
-                collect_mathml_tokens(children[1], &mut sub);
-                tokens.push(format!("{}_{}", base.join(" "), sub.join(" ")));
-                return;
-            }
-            for child in node.children() {
-                collect_mathml_tokens(child, tokens);
-            }
-        }
-        "msqrt" => {
-            let mut inner = Vec::new();
-            for child in node.children() {
-                collect_mathml_tokens(child, &mut inner);
-            }
-            tokens.push(format!("sqrt({})", inner.join(" ")));
-        }
-        _ => {
-            for child in node.children() {
-                collect_mathml_tokens(child, tokens);
-            }
-        }
-    }
+    Ok(formulas)
 }
 
 /// Extract description text from a `draw:frame` element by looking at
@@ -473,7 +398,7 @@ fn build_internal_document(
     budget: &mut SecurityBudget,
 ) -> crate::error::Result<InternalDocument> {
     let image_data = pre_extract_images(archive);
-    let formula_data = pre_extract_formulas(archive);
+    let formula_data = pre_extract_formulas(archive, budget)?;
 
     let mut xml_content = String::new();
 
