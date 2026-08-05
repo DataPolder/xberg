@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- New `xberg doctor` command and `doctor()` API probe the configured OCR backend, layout
+  detection, and caches, then report pass / warn / fail / skip with a one-line reason —
+  answering "is it my document or my environment?" before the first document, with no
+  downloads and no billable API calls. `xberg doctor --clean` removes stray files from
+  xberg-owned cache dirs; the shared Hugging Face cache is never modified. Custom OCR
+  backends can add their own diagnostics via the new `OcrBackend::probe` hook. (#1347)
 - Added Sceptre as an EasyOCR Gen2 backend using ONNX Runtime on desktop/server and tract on
   Android/iOS, with a separate byte-fed WebAssembly API intended for Web Workers. Select it with
   `ocr.backend = "sceptre"` or `--ocr-backend sceptre`; it returns line quadrilaterals and

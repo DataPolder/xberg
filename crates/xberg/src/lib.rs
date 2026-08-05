@@ -137,6 +137,8 @@ pub mod presets;
 #[cfg(any(feature = "ocr", feature = "ocr-wasm"))]
 pub mod ocr;
 
+pub mod doctor;
+
 #[cfg(any(
     feature = "paddle-ocr",
     feature = "embeddings",
@@ -429,6 +431,8 @@ pub fn detect_mime_type(path: String, check_exists: bool) -> crate::Result<Strin
 
 #[cfg(feature = "pdf")]
 pub use pdf::render::{pdf_page_count, render_pdf_page_to_png};
+
+pub use doctor::{DoctorCheck, DoctorReport, ProbeStatus, doctor};
 
 #[cfg_attr(alef, alef(skip))]
 pub use plugins::{

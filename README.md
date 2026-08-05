@@ -115,7 +115,7 @@ Point Xberg at anything — a PDF, a spreadsheet, a scanned image, an audio file
 | **Enrichment** | NER, keyword extraction (YAKE/RAKE), summarization, translation, redaction, page classification, QR detection, language detection, token reduction (TOON). |
 | **Structured extraction** | Schema-driven JSON straight from any document via local (Ollama, LM Studio, vLLM) or hosted LLMs — no prompt engineering. |
 | **6 output formats** | Plain text, Markdown, Djot, HTML, JSON tree, or Structured (JSON with OCR metadata and bounding boxes). |
-| **Runs anywhere** | Library, CLI (12 commands), REST API (`xberg serve`), MCP server, Docker, Helm — no GPU needed. Content-hash caching, parallel batch, per-file timeouts. |
+| **Runs anywhere** | Library, CLI (13 commands), REST API (`xberg serve`), MCP server, Docker, Helm — no GPU needed. Content-hash caching, parallel batch, per-file timeouts. |
 
 > Capabilities marked *requires a feature* are Cargo feature flags on the core crate (`url-ingestion`, `transcription`, `reranker`, layout/ORT). Prebuilt language packages and the Docker image bundle the common set; a from-source build enables only what you select.
 
@@ -278,7 +278,7 @@ Build from source as part of this workspace. See [C (FFI) README](https://github
 brew install xberg-io/tap/xberg
 ```
 
-12 commands: `extract`, `batch`, `detect`, `formats`, `version`, `cache` (stats/clear/manifest/warm), `serve`, `mcp`, `api`, `embed`, `chunk`, `completions`.
+13 commands: `extract`, `batch`, `detect`, `formats`, `version`, `cache` (stats/clear/manifest/warm), `doctor`, `serve`, `mcp`, `api`, `embed`, `chunk`, `completions`.
 
 See [CLI usage guide](https://docs.xberg.io/cli/usage/) for detailed documentation.
 
@@ -582,7 +582,7 @@ Schema validation. Temperature, top-p, frequency penalty tuning.
 ## CLI Reference
 
 <details>
-<summary><strong>All 12 commands</strong></summary>
+<summary><strong>All 13 commands</strong></summary>
 
 | Command | Subcommands | Purpose |
 |---------|-------------|---------|
@@ -592,6 +592,7 @@ Schema validation. Temperature, top-p, frequency penalty tuning.
 | `formats` | — | List all supported formats and MIME types |
 | `version` | — | Show Xberg version |
 | `cache` | `stats`, `clear`, `manifest`, `warm` | Manage extraction cache and models |
+| `doctor` | — | Probe configured backends and report what will actually execute |
 | `serve` | — | Start REST API server (default: <http://127.0.0.1:8000>) |
 | `mcp` | — | Start MCP server (stdio or HTTP transport) |
 | `api` | `schema` | Output OpenAPI 3.1 specification |
