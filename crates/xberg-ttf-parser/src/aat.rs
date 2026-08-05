@@ -393,8 +393,8 @@ impl<'a> LookupInner<'a> {
     fn value(&self, glyph_id: GlyphId) -> Option<u16> {
         match self {
             Self::Format1(values) => values.get(glyph_id.0),
-            Self::Format2(ref bsearch) => bsearch.get(glyph_id).map(|v| v.value),
-            Self::Format4(ref bsearch, data) => {
+            Self::Format2(bsearch) => bsearch.get(glyph_id).map(|v| v.value),
+            Self::Format4(bsearch, data) => {
                 // In format 4, LookupSegment contains an offset to a list of u16 values.
                 // One value for each glyph in the LookupSegment range.
                 let segment = bsearch.get(glyph_id)?;
@@ -402,7 +402,7 @@ impl<'a> LookupInner<'a> {
                 let offset = usize::from(segment.value) + u16::SIZE * usize::from(index);
                 Stream::read_at::<u16>(data, offset)
             }
-            Self::Format6(ref bsearch) => bsearch.get(glyph_id).map(|v| v.value),
+            Self::Format6(bsearch) => bsearch.get(glyph_id).map(|v| v.value),
             Self::Format8 {
                 first_glyph,
                 values,
