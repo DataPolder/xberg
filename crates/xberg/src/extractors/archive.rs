@@ -17,6 +17,9 @@ use async_trait::async_trait;
 use std::borrow::Cow;
 use std::io::Cursor;
 
+/// `ProcessingWarning::source` used for every degradation reported by the archive extractors.
+const ARCHIVE_WARNING_SOURCE: &str = "archive";
+
 /// Build an `InternalDocument` from archive metadata and text contents.
 ///
 /// Shared inner function — takes pre-computed children and warnings.
@@ -152,12 +155,32 @@ async fn build_archive_doc(
 ) -> InternalDocument {
     let mut children = Vec::new();
     let mut processing_warnings = Vec::new();
-    let mut filtered_count = 0u32;
+    let mut filtered_paths: Vec<String> = Vec::new();
+
+    // A non-directory entry that the archive index lists but whose bytes never made it
+    // into `file_bytes` failed to decompress (bad CRC, truncated deflate stream, ...).
+    // It is absent from the text contents *and* from `children`, so name it instead of
+    // letting the document look complete (#114, #115).
+    let unreadable_entries: Vec<String> = extraction_metadata
+        .file_list
+        .iter()
+        .filter(|entry| !entry.is_dir && !file_bytes.contains_key(&entry.path))
+        .map(|entry| entry.path.clone())
+        .collect();
+    if !unreadable_entries.is_empty() {
+        let message = format!(
+            "Skipped {} archive entr{} that could not be read: {}",
+            unreadable_entries.len(),
+            if unreadable_entries.len() == 1 { "y" } else { "ies" },
+            crate::core::diagnostics::format_entry_list(&unreadable_entries)
+        );
+        crate::core::diagnostics::push_warning(&mut processing_warnings, ARCHIVE_WARNING_SOURCE, message);
+    }
 
     if config.max_archive_depth > current_depth && !file_bytes.is_empty() {
         for (path, bytes) in &file_bytes {
             if is_archive_metadata_path(path) {
-                filtered_count += 1;
+                filtered_paths.push(path.clone());
                 continue;
             }
 
@@ -179,7 +202,7 @@ async fn build_archive_doc(
             };
 
             if file_mime == "application/octet-stream" {
-                filtered_count += 1;
+                filtered_paths.push(path.clone());
                 continue;
             }
 
@@ -204,15 +227,18 @@ async fn build_archive_doc(
         }
     }
 
-    if filtered_count > 0 {
-        processing_warnings.push(ProcessingWarning {
-            source: Cow::Borrowed("archive"),
-            message: Cow::Owned(format!(
-                "Filtered {} bookkeeping/binary entr{} (e.g. .DS_Store, __MACOSX, __pycache__, .pyc) from archive children",
-                filtered_count,
-                if filtered_count == 1 { "y" } else { "ies" }
-            )),
-        });
+    if !filtered_paths.is_empty() {
+        // `file_bytes` is a hash map, so its iteration order is not stable; sort so the
+        // warning text is deterministic for a given archive.
+        filtered_paths.sort();
+        let message = format!(
+            "Filtered {} bookkeeping/binary entr{} (e.g. .DS_Store, __MACOSX, __pycache__, .pyc) \
+             from archive children: {}",
+            filtered_paths.len(),
+            if filtered_paths.len() == 1 { "y" } else { "ies" },
+            crate::core::diagnostics::format_entry_list(&filtered_paths)
+        );
+        crate::core::diagnostics::push_warning(&mut processing_warnings, ARCHIVE_WARNING_SOURCE, message);
     }
 
     build_archive_doc_inner(
