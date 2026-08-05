@@ -1842,7 +1842,7 @@ mod tests {
     #[async_trait::async_trait]
     impl FrameworkAdapter for FailedWarmupAdapter {
         fn name(&self) -> &str {
-            "failed-warmup"
+            "xberg-failed-warmup"
         }
 
         fn supports_format(&self, file_type: &str) -> bool {
@@ -2475,7 +2475,7 @@ mod tests {
             document: PathBuf::from("document.pdf"),
             file_type: "pdf".to_string(),
             file_size: 3,
-            expected_frameworks: vec!["failed-warmup".to_string()],
+            expected_frameworks: vec!["xberg-failed-warmup".to_string()],
             metadata: HashMap::new(),
             ground_truth: None,
         };
@@ -2495,11 +2495,11 @@ mod tests {
         let mut runner = BenchmarkRunner::new(config, registry);
         runner.load_fixtures(&fixture_path).unwrap();
 
-        let error = runner.run(&["failed-warmup".to_string()]).await.unwrap_err();
+        let error = runner.run(&["xberg-failed-warmup".to_string()]).await.unwrap_err();
 
-        assert!(error.to_string().contains("warmup failed for 'failed-warmup'"));
+        assert!(error.to_string().contains("warmup failed for 'xberg-failed-warmup'"));
         assert!(error.to_string().contains("intentional warmup failure"));
-        assert!(!runner.cold_start_durations.contains_key("failed-warmup"));
+        assert!(!runner.cold_start_durations.contains_key("xberg-failed-warmup"));
         assert_eq!(teardown_calls.load(Ordering::SeqCst), 1);
     }
 

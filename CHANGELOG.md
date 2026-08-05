@@ -25,6 +25,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Benchmark adapters now honor fixture OCR languages, partition batch-global backends into
   homogeneous native batches, and record unsupported-language exclusions in provenance instead of
   silently evaluating non-English documents with default English models.
+  
+## [1.0.14] - 2026-08-04
+
+### Fixed
+
+- OpenWebUI-compatible endpoints (`PUT /process` and `POST /v1/convert/file`) now honor extraction
+  configuration. They previously cloned the server default, forced Markdown output, and ignored all
+  inbound parameters, so configuration passed through OpenWebUI had no effect. They now use the
+  server's configured defaults as the base and merge a per-request config — a multipart
+  `config`/`parameters` field, or the `X-Config` header — matching the `/extract` endpoint, keeping
+  Markdown as the default only when neither the server config nor the request selects a format.
+- Image captioning is now included in the official Docker images (`--features all`), and the server
+  emits a `ProcessingWarning` when a `captioning` config is supplied but the feature is compiled out,
+  instead of silently doing nothing (#1382).
+- Release builds no longer check out the `test_documents` benchmark submodule, so a benchmark-only
+  submodule update can no longer fail every publish build and ship a release with no assets (#1380).
+
+### Changed
+
+- Embedded-image captioning now runs with bounded concurrency (mirroring the image-OCR path) instead
+  of one VLM request at a time, reducing wall-clock time on image-heavy documents (#1378).
 
 ## [1.0.13] - 2026-08-04
 

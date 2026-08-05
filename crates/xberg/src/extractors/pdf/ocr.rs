@@ -1407,6 +1407,14 @@ fn analyze_container_markers(elements: &[crate::types::internal::InternalElement
     analysis
 }
 
+// Mirror of `crate::ocr::OCR_PROCESSED_IMAGE_{WIDTH,HEIGHT}_METADATA_KEY`, defined
+// locally because this PDF OCR path also compiles under `ocr-pipeline` (VLM OCR, e.g.
+// the `binstall` CLI) where the `ocr` module — gated on `ocr`/`ocr-wasm` — is absent.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+const OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY: &str = "ocr_processed_image_width";
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+const OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY: &str = "ocr_processed_image_height";
+
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 fn valid_ocr_layout_dimension(value: &serde_json::Value) -> Option<u32> {
     let value = value.as_f64()?;
@@ -1420,11 +1428,11 @@ fn valid_ocr_layout_dimension(value: &serde_json::Value) -> Option<u32> {
 fn processed_ocr_layout_dimensions(metadata: &crate::types::Metadata) -> Option<(u32, u32)> {
     let width = metadata
         .additional
-        .get(crate::ocr::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY)
+        .get(OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY)
         .and_then(valid_ocr_layout_dimension);
     let height = metadata
         .additional
-        .get(crate::ocr::OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY)
+        .get(OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY)
         .and_then(valid_ocr_layout_dimension);
 
     match (width, height) {
