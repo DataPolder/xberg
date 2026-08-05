@@ -531,7 +531,10 @@ mod tests {
 
         impl std::io::Write for Capture {
             fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-                self.0.lock().expect("log buffer poisoned").write(buf)
+                // `write_all`, not `write`: a partial write would silently truncate the
+                // captured log and turn this into an assertion failure with no explanation.
+                self.0.lock().expect("log buffer poisoned").write_all(buf)?;
+                Ok(buf.len())
             }
 
             fn flush(&mut self) -> std::io::Result<()> {
@@ -547,6 +550,14 @@ mod tests {
             .with_writer(move || capture.clone())
             .finish();
 
+        // `with_default` installs a *thread-local* subscriber, but `tracing`'s callsite
+        // interest cache is process-global. When these tests run in parallel with others
+        // that emit at a higher level, a callsite can retain a cached "not interested"
+        // verdict from before this subscriber existed, and the `debug!` events this test
+        // asserts on are then never emitted at all — which showed up as a rare, otherwise
+        // inexplicable failure under full-suite contention (#301). Forcing a rebuild makes
+        // the capture depend only on the subscriber we just installed.
+        tracing::callsite::rebuild_interest_cache();
         let value = tracing::subscriber::with_default(subscriber, body);
         let logs =
             String::from_utf8(buffer.lock().expect("log buffer poisoned").clone()).expect("log output must be UTF-8");
