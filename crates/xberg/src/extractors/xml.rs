@@ -11,6 +11,9 @@ use crate::types::metadata::Metadata;
 use ahash::AHashMap;
 use async_trait::async_trait;
 
+/// `ProcessingWarning::source` used for every degradation reported by this extractor.
+const XML_WARNING_SOURCE: &str = "xml";
+
 /// Decode raw XML bytes to a UTF-8 string, honoring the `<?xml encoding=...?>`
 /// declaration when present and falling back to charset detection otherwise.
 /// Strips a leading BOM.
@@ -160,10 +163,29 @@ fn build_internal_document(content: &[u8], mime_type: &str, budget: &mut Securit
                 }
             }
             Ok(Event::Eof) => break,
-            Err(_) => break,
+            // A malformed event ends the parse; everything after it is lost, so
+            // say so rather than returning a silently truncated document (#134).
+            Err(e) => {
+                crate::core::diagnostics::push_truncated_parse_warning(
+                    &mut doc.processing_warnings,
+                    XML_WARNING_SOURCE,
+                    "the XML element tree",
+                    &e,
+                );
+                break;
+            }
             _ => {}
         }
     }
+
+    // `check_end_names` is off, so a document cut off mid-tree never raises a parser
+    // error — it just reaches EOF with elements still on the stack. Report that rather
+    // than handing back a truncated tree that looks complete (#134).
+    crate::core::diagnostics::push_unclosed_elements_warning(
+        &mut doc.processing_warnings,
+        XML_WARNING_SOURCE,
+        &element_stack,
+    );
 
     Ok(doc)
 }
