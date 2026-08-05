@@ -515,7 +515,16 @@ pub fn derive_extraction_result(
     );
     resolve_relationships(&mut doc);
 
-    let content = crate::rendering::render_plain(&doc);
+    // A document produced by `From<ExtractedDocument> for InternalDocument` has no
+    // element tree, so `render_plain` yields nothing. Its already-extracted text lives in
+    // `pre_rendered_content` and must be returned verbatim rather than dropped. Only the
+    // empty rendering falls back, so a document that does have elements always wins.
+    let mut content = crate::rendering::render_plain(&doc);
+    if content.is_empty()
+        && let Some(pre_rendered) = doc.pre_rendered_content.as_ref()
+    {
+        content = pre_rendered.clone();
+    }
 
     let mime_type: Cow<'static, str> = if doc.mime_type != "application/octet-stream" {
         Cow::Owned(std::mem::take(&mut doc.mime_type))
@@ -539,8 +548,20 @@ pub fn derive_extraction_result(
                 Some(crate::rendering::render_djot(&doc))
             }
         }
-        crate::core::config::OutputFormat::Html => Some(crate::rendering::render_html(&doc)),
-        crate::core::config::OutputFormat::Json => Some(crate::rendering::render_json(&doc)),
+        crate::core::config::OutputFormat::Html => {
+            if doc.pre_rendered_content.is_some() && doc.metadata.output_format.as_deref() == Some("html") {
+                doc.pre_rendered_content.take()
+            } else {
+                Some(crate::rendering::render_html(&doc))
+            }
+        }
+        crate::core::config::OutputFormat::Json => {
+            if doc.pre_rendered_content.is_some() && doc.metadata.output_format.as_deref() == Some("json") {
+                doc.pre_rendered_content.take()
+            } else {
+                Some(crate::rendering::render_json(&doc))
+            }
+        }
         crate::core::config::OutputFormat::Structured => None,
         crate::core::config::OutputFormat::Custom(ref name) => {
             let registry = crate::plugins::registry::get_renderer_registry();
@@ -664,6 +685,12 @@ fn build_pages(doc: &InternalDocument) -> Option<Vec<PageContent>> {
             let mut tables = Vec::new();
             let mut image_indices = Vec::new();
             for elem in &elems {
+                // `render_plain` drops everything outside the body layer, so page content
+                // must drop it too — otherwise running headers and footers appear in
+                // `pages[n].content` but not in `result.content` for `OutputFormat::Plain`.
+                if !crate::rendering::common::is_body_element(elem) {
+                    continue;
+                }
                 if elem.kind.is_container_start() || elem.kind.is_container_end() {
                     continue;
                 }
