@@ -1597,6 +1597,14 @@ impl SubprocessAdapter {
             if let (Some(obj), Some(t)) = (flat.as_object_mut(), raw.get("extraction_time_ms")) {
                 obj.insert("_extraction_time_ms".to_string(), t.clone());
             }
+            // Xberg self-reports peak RSS the same way every competitor wrapper does (see
+            // `crates/xberg-cli/src/peak_memory.rs`). Surface it under the same
+            // `_peak_memory_bytes` key the Python wrappers use so the memory comparison downstream
+            // treats xberg identically to them instead of only ever trusting the sysinfo sampler
+            // for xberg.
+            if let (Some(obj), Some(mem)) = (flat.as_object_mut(), raw.get("peak_memory_bytes")) {
+                obj.insert("_peak_memory_bytes".to_string(), mem.clone());
+            }
             if let (Some(obj), Some(meta)) = (flat.as_object_mut(), inner.get("metadata"))
                 && let Some(ocr) = meta.get("ocr_used")
             {
@@ -2415,6 +2423,41 @@ mod tests {
         let parsed = result.unwrap();
         assert_eq!(parsed["content"], "Hello, world!");
         assert_eq!(parsed["_extraction_time_ms"], 42.5);
+    }
+
+    #[test]
+    fn test_parse_output_flattens_peak_memory_bytes_from_nested_xberg_envelope() {
+        // Mirrors the real shape `xberg extract --format json` emits (see
+        // `crates/xberg-cli/src/output.rs::ExtractEnvelope`): the document is nested under
+        // `result`, with `extraction_time_ms` and `peak_memory_bytes` as top-level siblings.
+        let adapter = SubprocessAdapter::new("test", "echo", vec![], vec![], vec!["pdf".to_string()]);
+        let output = r#"{
+            "result": {"content": "Hello, world!", "metadata": {}},
+            "extraction_time_ms": 42.5,
+            "peak_memory_bytes": 41631744
+        }"#;
+        let result = adapter.parse_output(output);
+        assert!(result.is_ok());
+        let parsed = result.unwrap();
+        assert_eq!(parsed["content"], "Hello, world!");
+        assert_eq!(parsed["_extraction_time_ms"], 42.5);
+        assert_eq!(parsed["_peak_memory_bytes"], 41_631_744);
+    }
+
+    #[test]
+    fn test_parse_output_omits_peak_memory_key_when_xberg_envelope_does_not_report_it() {
+        let adapter = SubprocessAdapter::new("test", "echo", vec![], vec![], vec!["pdf".to_string()]);
+        let output = r#"{
+            "result": {"content": "Hello, world!", "metadata": {}},
+            "extraction_time_ms": 42.5
+        }"#;
+        let result = adapter.parse_output(output);
+        assert!(result.is_ok());
+        let parsed = result.unwrap();
+        assert!(
+            parsed.get("_peak_memory_bytes").is_none(),
+            "must not fabricate a _peak_memory_bytes key when the subprocess never reported one"
+        );
     }
 
     #[test]

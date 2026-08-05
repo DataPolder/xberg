@@ -29,6 +29,14 @@ pub struct FrameworkSize {
     /// ML model size in bytes (auto-downloaded on first use: torch models, OCR weights, etc.)
     #[serde(default, skip_serializing_if = "is_zero")]
     pub model_bytes: u64,
+    /// `true` when [`Self::model_bytes`] is `0` because the model cache/store was missing or
+    /// empty at measurement time, rather than because a real measurement observed zero bytes of
+    /// models. Distinguishes "this framework genuinely ships no models" from "models were not
+    /// measured in this environment" (e.g. no ML pipeline has run yet on this machine to populate
+    /// the cache) — a reader comparing `model_bytes` across frameworks must be able to tell these
+    /// apart, since the second case silently understates the real installed footprint.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub model_size_unavailable: bool,
     /// Method used to measure (pip_package, npm_package, binary_size, jar_size, etc.)
     pub method: String,
     /// Human-readable description
@@ -41,6 +49,10 @@ pub struct FrameworkSize {
 
 fn is_zero(v: &u64) -> bool {
     *v == 0
+}
+
+fn is_false(v: &bool) -> bool {
+    !*v
 }
 
 /// Framework size measurement results
@@ -117,6 +129,7 @@ fn lookup_known_size(name: &str) -> Option<FrameworkSize> {
             package_bytes: *pkg,
             system_deps_bytes: *sys,
             model_bytes: *models,
+            model_size_unavailable: false,
             method: "known_size".to_string(),
             description: desc.to_string(),
             system_deps_detail: HashMap::new(),
@@ -159,6 +172,7 @@ pub fn measure_framework_sizes() -> Result<FrameworkSizes> {
                         package_bytes: pkg_size,
                         system_deps_bytes: 0,
                         model_bytes: 0,
+                        model_size_unavailable: false,
                         method: method.to_string(),
                         description: description.to_string(),
                         system_deps_detail: HashMap::new(),
@@ -210,6 +224,7 @@ pub fn measure_framework_sizes_strict() -> Result<FrameworkSizes> {
                         package_bytes: pkg_size,
                         system_deps_bytes: 0,
                         model_bytes: 0,
+                        model_size_unavailable: false,
                         method: method.to_string(),
                         description: description.to_string(),
                         system_deps_detail: HashMap::new(),
@@ -476,10 +491,24 @@ fn measure_xberg_framework_size(description: &str) -> Option<FrameworkSize> {
 
     let ffi_size = measure_native_ffi_libs();
 
-    let model_size = xberg_cache_base()
-        .filter(|dir| dir.exists())
-        .map(|dir| dir_size(&dir))
-        .unwrap_or(0);
+    let cache_base = xberg_cache_base();
+    let (model_size, model_size_unavailable) = measure_model_cache_size(cache_base.as_deref());
+    if model_size_unavailable {
+        // xberg's ML pipelines (layout, paddle-ocr, candle-*) always download real model weights
+        // on first use, so an observed `0` here can never be a genuine "no models" measurement —
+        // it means the cache directory is missing or empty *in this environment* (e.g. no ML
+        // pipeline has run yet on this machine to populate it). Reporting it silently as 0 would
+        // make xberg's installed footprint look smaller than it really is once ML features are
+        // used, so this is surfaced loudly instead of folded into `model_bytes` unremarked.
+        eprintln!(
+            "Xberg measurement WARNING: model cache at {} is missing or empty -- model_bytes=0 is \
+             NOT a verified measurement (ML model weights may simply not have been downloaded on \
+             this machine yet); size_bytes for this run excludes model weights",
+            cache_base
+                .as_deref()
+                .map_or_else(|| "<unresolved>".to_string(), |path| path.display().to_string())
+        );
+    }
 
     let package_bytes = binary_size + ffi_size;
     eprintln!(
@@ -496,18 +525,36 @@ fn measure_xberg_framework_size(description: &str) -> Option<FrameworkSize> {
         package_bytes,
         system_deps_bytes: 0,
         model_bytes: model_size,
+        model_size_unavailable,
         method: "binary_size".to_string(),
         description: description.to_string(),
         system_deps_detail: HashMap::new(),
     })
 }
 
+/// Computes the model cache size and whether that size is a genuine "zero" measurement.
+///
+/// Returns `(size_bytes, unavailable)`. `unavailable` is `true` whenever `size_bytes` is `0`
+/// because the directory could not be resolved, does not exist, or contains no files — as opposed
+/// to a directory that was actually walked and found to contain 0 bytes of models, which cannot
+/// happen for a populated xberg model cache in practice.
+fn measure_model_cache_size(dir: Option<&Path>) -> (u64, bool) {
+    let size = dir.filter(|candidate| candidate.exists()).map(dir_size).unwrap_or(0);
+    (size, size == 0)
+}
+
 /// Resolve the xberg model cache base directory, mirroring the core's
 /// `cache_dir::resolve_cache_base`: honor `XBERG_CACHE_DIR`, else the
-/// platform-appropriate global cache dir (`dirs::cache_dir()/xberg`).
+/// platform-appropriate global cache dir (`dirs::cache_dir()/xberg`), else a
+/// CWD-relative `.xberg` fallback.
 ///
 /// This must match the core, or the measured `model_bytes` is wrong — notably
 /// on macOS the cache lives at `~/Library/Caches/xberg`, not `~/.cache/xberg`.
+/// The final CWD fallback matters too: `crates/xberg/src/cache_dir.rs::resolve_cache_base` falls
+/// back to `<cwd>/.xberg` when no cache-dir env var is set and no home directory can be resolved
+/// (e.g. a minimal container with `HOME` unset) — this function previously returned `None` in
+/// that case, which silently reported `model_bytes: 0` when core would have written the cache to
+/// a directory this function never looked at. Adding the same fallback here closes that gap.
 fn xberg_cache_base() -> Option<PathBuf> {
     if let Ok(env_path) = std::env::var("XBERG_CACHE_DIR") {
         return Some(PathBuf::from(env_path));
@@ -535,7 +582,10 @@ fn xberg_cache_base() -> Option<PathBuf> {
         }
     }
 
-    None
+    // Mirror the core's final fallback so this measurement can't silently diverge from where
+    // xberg itself actually writes the model cache when no cache-dir env var or home directory
+    // can be resolved (see the doc comment above).
+    std::env::current_dir().ok().map(|cwd| cwd.join(".xberg"))
 }
 
 /// Measure binary size
@@ -1035,6 +1085,55 @@ mod tests {
 
         let size = dir_size(temp.path());
         assert_eq!(size, 11);
+    }
+
+    #[test]
+    fn model_cache_size_reports_unavailable_when_directory_missing() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let missing = temp.path().join("does-not-exist");
+
+        let (size, unavailable) = measure_model_cache_size(Some(&missing));
+
+        assert_eq!(size, 0);
+        assert!(
+            unavailable,
+            "a missing cache directory must be reported unavailable, not a measured zero"
+        );
+    }
+
+    #[test]
+    fn model_cache_size_reports_unavailable_when_directory_empty() {
+        let temp = tempfile::TempDir::new().unwrap();
+
+        let (size, unavailable) = measure_model_cache_size(Some(temp.path()));
+
+        assert_eq!(size, 0);
+        assert!(
+            unavailable,
+            "an empty cache directory must be reported unavailable, not a measured zero"
+        );
+    }
+
+    #[test]
+    fn model_cache_size_reports_unavailable_when_no_directory_resolved() {
+        let (size, unavailable) = measure_model_cache_size(None);
+
+        assert_eq!(size, 0);
+        assert!(
+            unavailable,
+            "an unresolved cache directory must be reported unavailable"
+        );
+    }
+
+    #[test]
+    fn model_cache_size_reports_available_when_directory_has_files() {
+        let temp = tempfile::TempDir::new().unwrap();
+        fs::write(temp.path().join("layout_model.onnx"), vec![0u8; 4096]).unwrap();
+
+        let (size, unavailable) = measure_model_cache_size(Some(temp.path()));
+
+        assert_eq!(size, 4096);
+        assert!(!unavailable, "a populated cache directory must be a real measurement");
     }
 
     #[test]
