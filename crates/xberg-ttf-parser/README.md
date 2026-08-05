@@ -1,17 +1,19 @@
 # xberg-ttf-parser
 
-A safe, zero-allocation parser for TrueType, OpenType and AAT fonts, vendored
-into Xberg from [ttf-parser](https://github.com/harfbuzz/ttf-parser) by Yevhenii
-Reizner and contributors.
+A safe, zero-allocation parser for TrueType, OpenType and AAT fonts. This is an
+xberg crate, vendored from [ttf-parser](https://github.com/harfbuzz/ttf-parser)
+by Yevhenii Reizner and contributors and maintained here as part of the xberg
+workspace.
 
-Vendored at upstream **v0.25.1** (dual MIT / Apache-2.0), plus the upstream
-fixes listed below. The vendored copy preserves both upstream licenses; see
-`LICENSE-MIT` and `LICENSE-APACHE`. See `ATTRIBUTIONS.md` at the repo root for
-full attribution details.
+Vendored at upstream **v0.25.1**, plus the upstream fixes listed below.
+
+Upstream is dual-licensed MIT or Apache-2.0. xberg takes the MIT option and
+ships this crate under MIT, retaining the upstream copyright notice in
+`LICENSE`. See `ATTRIBUTIONS.md` at the repo root for full attribution details.
 
 This crate exists because upstream is currently unmaintained: at the time of
 vendoring the last commit was 2025-11-22 and correctness fixes were sitting
-unreviewed. Vendoring lets Xberg carry those fixes without waiting on an
+unreviewed. Vendoring lets xberg carry those fixes without waiting on an
 upstream release.
 
 ## Carried upstream PRs
@@ -19,17 +21,17 @@ upstream release.
 Fixes applied on top of v0.25.1. Each row is an upstream pull request
 cherry-picked onto the vendored tree.
 
-| Upstream PR               | Commit     | Fix                                                                        |
-| ------------------------- | ---------- | -------------------------------------------------------------------------- |
-| [harfbuzz/ttf-parser#203] | `b422ac0`  | Document that `Face::style()` falls back to the `head` mac style bits      |
-| [harfbuzz/ttf-parser#207] | `52a9811`  | `Face::set_variation` returns `None` for an axis the face does not define  |
-| [harfbuzz/ttf-parser#216] | `9b9e55f`  | Read the `fvar` `HIDDEN_AXIS` flag from bit 0, not reserved bit 3          |
-| [harfbuzz/ttf-parser#222] | `3a585f1`  | Guard the CFF2 `blend` operator against an empty argument stack            |
-| [harfbuzz/ttf-parser#223] | `32439d2`  | Promote `avar` axis value mapping to `i32` so it cannot silently wrap      |
-| [harfbuzz/ttf-parser#224] | `dd2337b`  | Cap total component visits in `glyf` / `gvar` composite outlining          |
-| [harfbuzz/ttf-parser#225] | `99aa5e3`  | Cap total paint-graph node visits in COLRv1 painting                       |
-| [harfbuzz/ttf-parser#226] | `86daf57`  | Parse `loca` for a font carrying the maximum 65535 glyphs                  |
-| [harfbuzz/ttf-parser#228] | `023f8163` | Ignore the deprecated `dotsection` operator in CFF charstrings             |
+| Upstream PR               | Commit     | Fix                                                                       |
+| ------------------------- | ---------- | ------------------------------------------------------------------------- |
+| [harfbuzz/ttf-parser#203] | `b422ac0`  | Document that `Face::style()` falls back to the `head` mac style bits     |
+| [harfbuzz/ttf-parser#207] | `52a9811`  | `Face::set_variation` returns `None` for an axis the face does not define |
+| [harfbuzz/ttf-parser#216] | `9b9e55f`  | Read the `fvar` `HIDDEN_AXIS` flag from bit 0, not reserved bit 3         |
+| [harfbuzz/ttf-parser#222] | `3a585f1`  | Guard the CFF2 `blend` operator against an empty argument stack           |
+| [harfbuzz/ttf-parser#223] | `32439d2`  | Promote `avar` axis value mapping to `i32` so it cannot silently wrap     |
+| [harfbuzz/ttf-parser#224] | `dd2337b`  | Cap total component visits in `glyf` / `gvar` composite outlining         |
+| [harfbuzz/ttf-parser#225] | `99aa5e3`  | Cap total paint-graph node visits in COLRv1 painting                      |
+| [harfbuzz/ttf-parser#226] | `86daf57`  | Parse `loca` for a font carrying the maximum 65535 glyphs                 |
+| [harfbuzz/ttf-parser#228] | `023f8163` | Ignore the deprecated `dotsection` operator in CFF charstrings            |
 
 [harfbuzz/ttf-parser#203]: https://github.com/harfbuzz/ttf-parser/pull/203
 [harfbuzz/ttf-parser#207]: https://github.com/harfbuzz/ttf-parser/pull/207
@@ -47,11 +49,9 @@ conversion preserves the operator, so real-world fonts still carry it, and the
 affected glyphs are exactly the dot-bearing ones: `i`, `j`, `!` and `.`. Pages
 rendered from such a PDF silently lose those characters.
 
-Two picks carry an xberg-authored follow-up commit rather than landing alone:
-
-## 216 and #207 ship no test upstream and are both silently reversible, so each
-
-is followed by a regression test; #224's budget is charged per call, which does
+Two picks carry an xberg-authored follow-up commit rather than landing alone.
+Upstream #216 and #207 ship no test and are both silently reversible, so each is
+followed by a regression test. The #224 budget is charged per call, which does
 not bound the work inside a call, so it is followed by a per-record charge.
 
 The remaining open upstream PRs were evaluated and declined: #212 (skipping
@@ -61,9 +61,9 @@ would silently misalign glyph matching rather than fail closed), #214 (an
 `--no-default-features --features gvar-alloc`), and #172 and #174 (public API
 upstream has not accepted, with no caller in this workspace).
 
-### How it reaches the rest of the workspace
+## How it reaches the rest of the workspace
 
-Nothing in Xberg depends on `ttf-parser` directly. It arrives transitively
+Nothing in xberg depends on `ttf-parser` directly. It arrives transitively
 through `pdf_oxide` and `fontdb`, both of which request it by its crates.io
 name. Those are the only two consumers in `Cargo.lock`; the shaper in tree is
 `harfrust`, which does not use `ttf-parser` at all.
@@ -79,12 +79,15 @@ consumer.
 
 The shim is never published; it exists only to satisfy the patch matcher.
 
-### Modifications from upstream
+## Modifications from upstream
 
 The source is kept byte-identical to upstream wherever possible, so that future
 upstream fixes cherry-pick without conflict. The deliberate differences are:
 
-- Package renamed to `xberg-ttf-parser` with `[lib] name = "xberg_ttf_parser"`.
+- Package renamed to `xberg-ttf-parser` with `[lib] name = "xberg_ttf_parser"`,
+  inheriting the workspace version, edition and MIT license.
+- Migrated to edition 2024, which drops the redundant `ref` binding modifier in
+  ten match arms that already bind by implicit borrow.
 - Crate-level lint allows in `src/lib.rs` and `tests/tables/main.rs`, because the
   workspace lint set is stricter than upstream's CI. These are allowed rather
   than fixed: `div_ceil` and `is_multiple_of` postdate upstream's 1.63 MSRV, so
@@ -108,13 +111,13 @@ The public API is unchanged from upstream v0.25.1 except for `loca::Table`,
 which #226 widens from `u16` to `u32` counters. No crate in this workspace's
 dependency graph calls it.
 
-### Updating
+## Updating
 
 Cherry-pick the upstream commit onto `crates/xberg-ttf-parser/`, add a row to
 the table above, and run:
 
     cargo test -p xberg-ttf-parser --all-features
 
-### License
+## License
 
-Dual-licensed under MIT or Apache-2.0, matching upstream.
+MIT. See `LICENSE`.

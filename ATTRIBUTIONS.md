@@ -366,7 +366,9 @@ A safe, zero-allocation TrueType / OpenType / AAT font parser, vendored as the
 `xberg-ttf-parser` crate:
 
 - **Source**: <https://github.com/harfbuzz/ttf-parser>
-- **License**: MIT OR Apache-2.0
+- **License**: MIT OR Apache-2.0 upstream; xberg takes the MIT option and
+  redistributes the vendored crate under MIT, retaining the upstream copyright
+  notice in `crates/xberg-ttf-parser/LICENSE`.
 - **Author(s)**: Yevhenii Reizner, Khaled Hosny, Laurenz Stampfl, Caleb
   Maclennan and contributors
 - **Vendored Version**: 0.25.1, plus nine upstream pull requests carried on top:
