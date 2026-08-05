@@ -32,6 +32,95 @@ pub struct SupportedFormat {
 #[cfg(feature = "api")]
 pub(crate) const OCTET_STREAM_MIME_TYPE: &str = "application/octet-stream";
 pub(crate) const HTML_MIME_TYPE: &str = "text/html";
+
+/// Element names that identify a markup fragment as HTML rather than generic XML.
+///
+/// Deliberately conservative: every entry is an element that exists in HTML and is not a
+/// plausible root for the XML vocabularies this crate also extracts (DocBook, JATS, FB2,
+/// OPML, RSS). Ambiguous names shared with those vocabularies — `title`, `table`, `para`,
+/// `section`, `article`, `link`, `code` — are omitted on purpose, so a borderline document
+/// keeps its current XML routing instead of being silently rerouted.
+const HTML_FRAGMENT_ELEMENTS: &[&str] = &[
+    "a",
+    "b",
+    "blockquote",
+    "body",
+    "br",
+    "button",
+    "div",
+    "em",
+    "figcaption",
+    "figure",
+    "footer",
+    "form",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "head",
+    "header",
+    "hr",
+    "i",
+    "iframe",
+    "img",
+    "input",
+    "label",
+    "li",
+    "main",
+    "meta",
+    "nav",
+    "ol",
+    "option",
+    "p",
+    "pre",
+    "script",
+    "select",
+    "span",
+    "strong",
+    "style",
+    "table",
+    "tbody",
+    "td",
+    "textarea",
+    "tfoot",
+    "th",
+    "thead",
+    "tr",
+    "ul",
+];
+
+/// Return `true` when `trimmed` opens as HTML rather than as generic XML.
+///
+/// Recognises the two document preambles case-insensitively (`<!doctype html>` is at least
+/// as common in the wild as the uppercase spelling) and, for fragments that carry no
+/// preamble at all, the name of the first element.
+fn looks_like_html(trimmed: &str) -> bool {
+    let lowered_prefix: String = trimmed.chars().take(16).flat_map(char::to_lowercase).collect();
+    if lowered_prefix.starts_with("<!doctype html") || lowered_prefix.starts_with("<html") {
+        return true;
+    }
+
+    let Some(after_bracket) = trimmed.strip_prefix('<') else {
+        return false;
+    };
+    let name_length = after_bracket
+        .find(|character: char| !character.is_ascii_alphanumeric())
+        .unwrap_or(after_bracket.len());
+    let (name, rest) = after_bracket.split_at(name_length);
+    // Require the tag to actually close here, so `<tr:foo>` (a namespace prefix that happens
+    // to collide with an HTML name) stays XML.
+    if !matches!(
+        rest.chars().next(),
+        Some('>') | Some(' ') | Some('/') | Some('\t') | Some('\n') | Some('\r')
+    ) {
+        return false;
+    }
+
+    let name = name.to_ascii_lowercase();
+    HTML_FRAGMENT_ELEMENTS.contains(&name.as_str())
+}
 pub(crate) const PDF_MIME_TYPE: &str = "application/pdf";
 pub(crate) const PLAIN_TEXT_MIME_TYPE: &str = "text/plain";
 pub(crate) const POWER_POINT_MIME_TYPE: &str =
@@ -873,12 +962,17 @@ pub fn detect_mime_type_from_bytes(content: &[u8]) -> Result<String> {
             return Ok(JSON_MIME_TYPE.to_string());
         }
 
-        if trimmed.starts_with("<?xml") || trimmed.starts_with('<') {
-            return Ok(XML_MIME_TYPE.to_string());
+        // The HTML checks must precede the generic `<` fallback. They used to follow it,
+        // where `trimmed.starts_with('<')` matched every tag first and made them dead code
+        // (#235). HTML still routed correctly for whole documents only because `infer::get`
+        // recognises those earlier in this function; a bare fragment reached here and was
+        // typed `application/xml`, then handed to the XML extractor.
+        if !trimmed.starts_with("<?xml") && looks_like_html(trimmed) {
+            return Ok(HTML_MIME_TYPE.to_string());
         }
 
-        if trimmed.starts_with("<!DOCTYPE html") || trimmed.starts_with("<html") {
-            return Ok(HTML_MIME_TYPE.to_string());
+        if trimmed.starts_with("<?xml") || trimmed.starts_with('<') {
+            return Ok(XML_MIME_TYPE.to_string());
         }
 
         if trimmed.starts_with("%PDF") {
