@@ -574,7 +574,7 @@ fn validate_results(
             require(
                 matches!(
                     result.error_kind,
-                    ErrorKind::FrameworkError | ErrorKind::Timeout | ErrorKind::EmptyContent
+                    ErrorKind::FrameworkError | ErrorKind::Timeout | ErrorKind::EmptyContent | ErrorKind::ZeroOverlap
                 ),
                 format!(
                     "{}: optional result {index} has an infrastructure error",
@@ -986,6 +986,7 @@ fn error_kind_from_row(row: &PerFixtureRow, path: &Path) -> Result<ErrorKind> {
         None if row.success => Ok(ErrorKind::None),
         Some("FrameworkError") => Ok(ErrorKind::FrameworkError),
         Some("EmptyContent") => Ok(ErrorKind::EmptyContent),
+        Some("ZeroOverlap") => Ok(ErrorKind::ZeroOverlap),
         Some("Timeout") => Ok(ErrorKind::Timeout),
         Some("HarnessError") => Ok(ErrorKind::HarnessError),
         Some("ConfigSetupError") => Ok(ErrorKind::ConfigSetupError),
@@ -1385,7 +1386,7 @@ fn validate_aggregate(
             require(
                 row.error_kind
                     .as_deref()
-                    .is_some_and(|kind| matches!(kind, "FrameworkError" | "Timeout" | "EmptyContent")),
+                    .is_some_and(|kind| matches!(kind, "FrameworkError" | "Timeout" | "EmptyContent" | "ZeroOverlap")),
                 format!(
                     "{}: failed fixture rows: optional row has no accountable error kind",
                     path.display()
@@ -1431,7 +1432,8 @@ fn validate_aggregate(
                         && bucket.harness_errors == count_kind("HarnessError")
                         && bucket.config_setup_errors == count_kind("ConfigSetupError")
                         && bucket.timeouts == count_kind("Timeout")
-                        && bucket.empty_content == count_kind("EmptyContent"),
+                        && bucket.empty_content == count_kind("EmptyContent")
+                        && bucket.zero_overlap == count_kind("ZeroOverlap"),
                     format!("{key}: group failure counts do not match fixture rows for {file_type}"),
                 )?;
             }

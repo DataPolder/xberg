@@ -400,6 +400,7 @@ mod tests {
                 output_format: OutputFormat::Markdown,
             },
             fixed_batch_size: None,
+            coverage: None,
         }
     }
 

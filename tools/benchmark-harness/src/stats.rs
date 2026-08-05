@@ -61,7 +61,6 @@ pub(crate) fn sanitize_f64(v: f64) -> f64 {
 ///
 /// # Returns
 /// Tuple of (mean, sample_variance, standard_deviation)
-#[allow(dead_code)]
 pub(crate) fn calculate_variance(values: &[f64]) -> (f64, f64, f64) {
     let filtered: Vec<f64> = values
         .iter()

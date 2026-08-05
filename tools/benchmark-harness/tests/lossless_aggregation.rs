@@ -55,6 +55,7 @@ fn successful_result() -> BenchmarkResult {
             f1_score_text: 0.92,
             f1_score_numeric: 0.85,
             f1_score_layout: Some(0.78),
+            reading_order_score: Some(0.61),
             quality_score: 0.85,
             missing_tokens: vec![("invoice".to_string(), 2)],
             extra_tokens: vec![("garble".to_string(), 1)],
@@ -167,6 +168,7 @@ fn sample_provenance() -> RunProvenance {
             output_format: OutputFormat::Markdown,
         },
         fixed_batch_size: Some(8),
+        coverage: None,
     }
 }
 
@@ -289,6 +291,7 @@ fn consolidate_pipeline_preserves_every_per_fixture_field_for_a_successful_resul
     assert_eq!(row.f1_numeric, Some(0.85));
     assert_eq!(quality.f1_score_text, 0.92);
     assert_eq!(quality.f1_score_layout, Some(0.78));
+    assert_eq!(quality.reading_order_score, Some(0.61));
     assert_eq!(quality.missing_tokens, vec![("invoice".to_string(), 2)]);
     assert_eq!(quality.extra_tokens, vec![("garble".to_string(), 1)]);
 

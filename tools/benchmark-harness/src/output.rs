@@ -123,6 +123,10 @@ pub struct FrameworkExtensionStats {
     pub timeouts: usize,
     /// Number of extractions that returned empty content
     pub empty_content: usize,
+    /// Number of extractions that returned non-empty output sharing zero tokens with a
+    /// non-empty ground truth — distinct from `empty_content`.
+    #[serde(default)]
+    pub zero_overlap: usize,
     /// Unique framework error messages with occurrence counts
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub error_details: HashMap<String, usize>,
@@ -247,10 +251,14 @@ fn calculate_framework_stats(results: &[&BenchmarkResult]) -> FrameworkExtension
         .iter()
         .filter(|r| r.error_kind == ErrorKind::EmptyContent)
         .count();
+    let zero_overlap = results
+        .iter()
+        .filter(|r| r.error_kind == ErrorKind::ZeroOverlap)
+        .count();
 
     // Match aggregate/CLI semantics: only successful rows and framework-accountable failures
     // participate in the rate; harness and setup failures remain visible in their counters. ~keep
-    let accountable = successful + framework_errors + timeouts + empty_content;
+    let accountable = successful + framework_errors + timeouts + empty_content + zero_overlap;
     let success_rate = if accountable > 0 {
         successful as f64 / accountable as f64
     } else {
@@ -387,6 +395,7 @@ fn calculate_framework_stats(results: &[&BenchmarkResult]) -> FrameworkExtension
         config_setup_errors,
         timeouts,
         empty_content,
+        zero_overlap,
         error_details,
         success_rate,
         avg_duration_ms,
@@ -513,6 +522,7 @@ mod tests {
                 missing_tokens: vec![],
                 extra_tokens: vec![],
                 correct: false,
+                reading_order_score: None,
             }),
             iterations: vec![],
             statistics: None,
@@ -562,6 +572,7 @@ mod tests {
                 missing_tokens: vec![],
                 extra_tokens: vec![],
                 correct: false,
+                reading_order_score: None,
             };
             match field {
                 "f1_score_text" => quality.f1_score_text = value,
@@ -597,6 +608,7 @@ mod tests {
             missing_tokens: vec![],
             extra_tokens: vec![],
             correct: false,
+            reading_order_score: None,
         });
 
         write_json(&[result], &output_path).expect("generic writer remains backward-compatible");
@@ -893,6 +905,7 @@ mod tests {
             missing_tokens: vec![],
             extra_tokens: vec![],
             correct: false,
+            reading_order_score: None,
         });
 
         let mut result2 = create_benchmark_result("framework1", true, 150, Some(120), 1_000_000.0, 10_000_000);
@@ -904,6 +917,7 @@ mod tests {
             missing_tokens: vec![],
             extra_tokens: vec![],
             correct: true,
+            reading_order_score: None,
         });
 
         let results = vec![&result1, &result2];
@@ -926,6 +940,7 @@ mod tests {
             missing_tokens: vec![],
             extra_tokens: vec![],
             correct: false,
+            reading_order_score: None,
         });
 
         let results = vec![&result];
@@ -946,6 +961,7 @@ mod tests {
             missing_tokens: vec![],
             extra_tokens: vec![],
             correct: false,
+            reading_order_score: None,
         });
 
         // Failed result: create_benchmark_result forces quality to None for failures anyway,

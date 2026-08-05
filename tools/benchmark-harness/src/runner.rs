@@ -813,6 +813,7 @@ impl BenchmarkRunner {
                     ErrorKind::ConfigSetupError => 2,
                     ErrorKind::FrameworkError => 1,
                     ErrorKind::EmptyContent => 1,
+                    ErrorKind::ZeroOverlap => 1,
                     ErrorKind::None => 0,
                 })
                 .unwrap_or(ErrorKind::None)
@@ -1012,7 +1013,7 @@ impl BenchmarkRunner {
                         ErrorKind::Timeout => 4,
                         ErrorKind::HarnessError => 3,
                         ErrorKind::ConfigSetupError => 2,
-                        ErrorKind::FrameworkError | ErrorKind::EmptyContent => 1,
+                        ErrorKind::FrameworkError | ErrorKind::EmptyContent | ErrorKind::ZeroOverlap => 1,
                         ErrorKind::None => 0,
                     })
                     .unwrap_or(ErrorKind::None)
@@ -1364,24 +1365,27 @@ impl BenchmarkRunner {
 
                     // A result that reported success with no error yet produced zero token
                     // overlap against a non-empty ground truth is not a legitimately "perfect
-                    // failure" quality sample — it is empty-or-garbage output masquerading as a
+                    // failure" quality sample — it is non-empty garbage output masquerading as a
                     // successful extraction. Left as success=true, its 0.0 gets pooled into
                     // quality percentiles as a genuine (if terrible) score, which inflates
                     // competitor win margins instead of counting against their success rate.
-                    // Reclassify it as a framework-fault failure so it is excluded from quality
-                    // percentiles but still counted in coverage/failure stats. Guarded on
-                    // non-empty ground truth so empty-GT fixtures are never punished. ~keep
+                    // Reclassify it as a framework-fault failure (ErrorKind::ZeroOverlap, distinct
+                    // from ErrorKind::EmptyContent which means the framework produced no content
+                    // at all) so it is excluded from quality percentiles but still counted in
+                    // coverage/failure stats and still contributes its timing measurements (it did
+                    // run to completion — see `types::is_timing_eligible`). Guarded on non-empty
+                    // ground truth so empty-GT fixtures are never punished. ~keep
                     if result.success
                         && result.error_kind == ErrorKind::None
                         && !gt_text.trim().is_empty()
                         && quality.f1_score_text == 0.0
                     {
                         result.success = false;
-                        result.error_kind = ErrorKind::EmptyContent;
+                        result.error_kind = ErrorKind::ZeroOverlap;
                         // Every success=false result must carry an error_message (enforced by
                         // output.rs's result-state invariant), so record why we reclassified.
                         result.error_message.get_or_insert_with(|| {
-                            "extraction produced no ground-truth token overlap (reclassified as empty content)"
+                            "extraction produced no ground-truth token overlap (reclassified as zero overlap)"
                                 .to_string()
                         });
                     }
@@ -1486,6 +1490,15 @@ mod tests {
 
     struct FailedWarmupAdapter {
         teardown_calls: Arc<AtomicUsize>,
+    }
+
+    /// A non-xberg framework whose one-time warmup extraction fails, then succeeds on every
+    /// subsequent call. Used to exercise the non-fatal warmup-failure branch (`adapter.name()`
+    /// not starting with `"xberg"`) at runner.rs ~1159-1177, which was previously untested
+    /// (Defect S6) — the only existing warmup-failure test (`FailedWarmupAdapter` above) uses an
+    /// adapter literally named "xberg-failed-warmup" and only exercises the fatal branch.
+    struct NonFatalWarmupFailureAdapter {
+        calls: AtomicUsize,
     }
 
     struct TaskErrorAdapter {
@@ -1678,16 +1691,119 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn zero_overlap_result_is_reclassified_as_empty_content_failure() {
+    async fn zero_overlap_result_is_reclassified_as_zero_overlap_failure() {
         let result = run_scripted_quality_case("expected reference text", "totally unrelated garbage").await;
 
         let quality = result.quality.as_ref().expect("quality is still populated");
         assert_eq!(quality.f1_score_text, 0.0);
         assert!(!result.success, "zero-overlap result must be reclassified as a failure");
-        assert_eq!(result.error_kind, ErrorKind::EmptyContent);
+        assert_eq!(result.error_kind, ErrorKind::ZeroOverlap);
         assert!(
             result.error_message.is_some(),
             "a reclassified failure must carry an error_message (output.rs result-state invariant)"
+        );
+    }
+
+    /// Distinguishes the two failure kinds `EmptyContent` now overlaps with in name only: a
+    /// genuinely-empty result (no `extracted_text` at all, as adapters report it) is never routed
+    /// through the quality-based reclassification loop, so its `ErrorKind::EmptyContent` (set by
+    /// the adapter before the quality loop ever runs) is left untouched — proving it is not the
+    /// same code path as the zero-overlap-garbage case covered above.
+    #[tokio::test]
+    async fn genuinely_empty_result_keeps_empty_content_and_is_not_reclassified() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("document.pdf"), b"pdf").unwrap();
+        std::fs::write(temp.path().join("ground_truth.txt"), "expected reference text").unwrap();
+        let fixture_path = temp.path().join("fixture.json");
+        std::fs::write(
+            &fixture_path,
+            serde_json::json!({
+                "document": "document.pdf",
+                "file_type": "pdf",
+                "file_size": 3,
+                "ground_truth": {
+                    "text_file": "ground_truth.txt",
+                    "source": "manual"
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        struct EmptyContentAdapter;
+
+        #[async_trait::async_trait]
+        impl FrameworkAdapter for EmptyContentAdapter {
+            fn name(&self) -> &str {
+                "empty-content-adapter"
+            }
+
+            fn supports_format(&self, file_type: &str) -> bool {
+                file_type == "pdf"
+            }
+
+            fn supported_output_formats(&self) -> Vec<OutputFormat> {
+                vec![OutputFormat::Markdown]
+            }
+
+            async fn extract(
+                &self,
+                file_path: &Path,
+                _timeout: Duration,
+                _force_ocr: bool,
+                _ocr_language: Option<&str>,
+                output_format: OutputFormat,
+            ) -> Result<BenchmarkResult> {
+                Ok(BenchmarkResult {
+                    framework: self.name().to_string(),
+                    output_format,
+                    file_path: file_path.to_path_buf(),
+                    file_size: 1,
+                    success: false,
+                    error_message: Some("Framework returned empty content".to_string()),
+                    error_kind: ErrorKind::EmptyContent,
+                    duration: Duration::from_millis(1),
+                    extraction_duration: None,
+                    subprocess_overhead: None,
+                    metrics: PerformanceMetrics::default(),
+                    quality: None,
+                    iterations: vec![],
+                    statistics: None,
+                    cold_start_duration: None,
+                    file_extension: "pdf".to_string(),
+                    framework_capabilities: FrameworkCapabilities::default(),
+                    pdf_metadata: None,
+                    ocr_status: OcrStatus::NotUsed,
+                    extracted_text: None,
+                    system_load: None,
+                })
+            }
+        }
+
+        let mut registry = AdapterRegistry::new();
+        registry.register(Arc::new(EmptyContentAdapter)).unwrap();
+        let config = BenchmarkConfig {
+            benchmark_mode: BenchmarkMode::SingleFile,
+            measure_quality: true,
+            warmup_iterations: 0,
+            benchmark_iterations: 1,
+            ..Default::default()
+        };
+        let mut runner = BenchmarkRunner::new(config, registry);
+        runner.load_fixtures(&fixture_path).unwrap();
+
+        let mut results = runner.run(&["empty-content-adapter".to_string()]).await.unwrap();
+        let result = results.remove(0);
+
+        assert!(!result.success);
+        assert_eq!(
+            result.error_kind,
+            ErrorKind::EmptyContent,
+            "a genuinely empty result must not be swept into ZeroOverlap by the quality loop"
+        );
+        assert!(
+            result.quality.is_none(),
+            "quality is never computed when extracted_text is None"
         );
     }
 
@@ -1889,6 +2005,65 @@ mod tests {
         async fn teardown(&self) -> Result<()> {
             self.teardown_calls.fetch_add(1, Ordering::SeqCst);
             Ok(())
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl FrameworkAdapter for NonFatalWarmupFailureAdapter {
+        fn name(&self) -> &str {
+            "docling-flaky-warmup"
+        }
+
+        fn supports_format(&self, file_type: &str) -> bool {
+            file_type == "pdf"
+        }
+
+        fn supported_output_formats(&self) -> Vec<OutputFormat> {
+            vec![OutputFormat::Markdown]
+        }
+
+        async fn extract(
+            &self,
+            file_path: &Path,
+            _timeout: Duration,
+            _force_ocr: bool,
+            _ocr_language: Option<&str>,
+            output_format: OutputFormat,
+        ) -> Result<BenchmarkResult> {
+            // The first call is the one-time framework-level warmup (see `BenchmarkRunner::run`);
+            // every later call is a real measured iteration.
+            let is_warmup_call = self.calls.fetch_add(1, Ordering::SeqCst) == 0;
+            Ok(BenchmarkResult {
+                framework: self.name().to_string(),
+                output_format,
+                file_path: file_path.to_path_buf(),
+                file_size: 1,
+                success: !is_warmup_call,
+                error_message: is_warmup_call.then(|| "intentional non-fatal warmup failure".to_string()),
+                error_kind: if is_warmup_call {
+                    ErrorKind::FrameworkError
+                } else {
+                    ErrorKind::None
+                },
+                duration: Duration::from_millis(1),
+                extraction_duration: None,
+                subprocess_overhead: None,
+                metrics: PerformanceMetrics::default(),
+                quality: None,
+                iterations: vec![],
+                statistics: None,
+                cold_start_duration: None,
+                file_extension: "pdf".to_string(),
+                framework_capabilities: FrameworkCapabilities::default(),
+                pdf_metadata: None,
+                ocr_status: if is_warmup_call {
+                    OcrStatus::Unknown
+                } else {
+                    OcrStatus::NotUsed
+                },
+                extracted_text: if is_warmup_call { None } else { Some("ok".to_string()) },
+                system_load: None,
+            })
         }
     }
 
@@ -2501,6 +2676,64 @@ mod tests {
         assert!(error.to_string().contains("intentional warmup failure"));
         assert!(!runner.cold_start_durations.contains_key("xberg-failed-warmup"));
         assert_eq!(teardown_calls.load(Ordering::SeqCst), 1);
+    }
+
+    /// Defect S6 regression: the fatal-vs-non-fatal warmup split (runner.rs ~1159-1177) is fatal
+    /// only for `adapter.name().starts_with("xberg")`. The only existing warmup-failure test
+    /// (above) uses an adapter literally named "xberg-failed-warmup" and exercises just the fatal
+    /// branch — inverting the `starts_with("xberg")` condition would not fail any test before
+    /// this one. This proves the non-fatal branch: a non-xberg framework whose one-time warmup
+    /// fails must not abort the run, must still produce its measured result, and must be recorded
+    /// as having no cold-start sample rather than one silently fabricated or borrowed from
+    /// elsewhere.
+    #[tokio::test]
+    async fn non_fatal_warmup_failure_completes_run_with_no_cold_start_sample() {
+        use crate::fixture::Fixture;
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let document_path = temp_dir.path().join("document.pdf");
+        let fixture_path = temp_dir.path().join("fixture.json");
+        std::fs::write(&document_path, b"pdf").unwrap();
+        let fixture = Fixture {
+            document: PathBuf::from("document.pdf"),
+            file_type: "pdf".to_string(),
+            file_size: 3,
+            expected_frameworks: vec!["docling-flaky-warmup".to_string()],
+            metadata: HashMap::new(),
+            ground_truth: None,
+        };
+        std::fs::write(&fixture_path, serde_json::to_string(&fixture).unwrap()).unwrap();
+
+        let mut registry = AdapterRegistry::new();
+        registry
+            .register(Arc::new(NonFatalWarmupFailureAdapter {
+                calls: AtomicUsize::new(0),
+            }))
+            .unwrap();
+        let config = BenchmarkConfig {
+            benchmark_mode: BenchmarkMode::SingleFile,
+            warmup_iterations: 0,
+            benchmark_iterations: 1,
+            ..Default::default()
+        };
+        let mut runner = BenchmarkRunner::new(config, registry);
+        runner.load_fixtures(&fixture_path).unwrap();
+
+        let results = runner
+            .run(&["docling-flaky-warmup".to_string()])
+            .await
+            .expect("a non-fatal (non-xberg) warmup failure must not abort the run");
+
+        assert_eq!(results.len(), 1, "the measured iteration must still be recorded");
+        assert!(results[0].success, "the measured extraction itself succeeded");
+        assert!(
+            !runner.cold_start_durations.contains_key("docling-flaky-warmup"),
+            "a failed warmup must not record a cold-start sample"
+        );
+        assert_eq!(
+            results[0].cold_start_duration, None,
+            "the recorded result must not carry a fabricated or borrowed cold-start duration"
+        );
     }
 
     #[tokio::test]

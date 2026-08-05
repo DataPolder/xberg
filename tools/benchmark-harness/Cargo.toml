@@ -66,6 +66,7 @@ tikv-jemallocator = { version = "0.7", optional = true }
 tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+unicode-normalization = "0.1.25"
 url = { workspace = true }
 which = "8"
 xberg = { path = "../../crates/xberg", features = ["full"] }

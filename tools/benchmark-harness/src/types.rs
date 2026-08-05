@@ -194,6 +194,8 @@ pub enum OcrStatus {
 /// - **ConfigSetupError**: environment/dependency misconfiguration (missing models, torch module not available, etc.)
 /// - **Timeout**: extraction exceeded configured timeout
 /// - **EmptyContent**: framework ran but produced no content
+/// - **ZeroOverlap**: framework produced non-empty output that shares zero tokens with a
+///   non-empty ground truth
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorKind {
@@ -210,6 +212,11 @@ pub enum ErrorKind {
     Timeout,
     /// Framework returned empty or missing content (ran but produced nothing).
     EmptyContent,
+    /// Framework produced non-empty output that shares zero tokens with a non-empty ground
+    /// truth (i.e. it ran to completion but the content is unusable garbage, not genuinely
+    /// empty). Distinct from [`ErrorKind::EmptyContent`], which means the framework produced
+    /// no content at all. Both are framework-fault failures and both are timing-eligible.
+    ZeroOverlap,
     /// No error occurred
     #[default]
     None,
@@ -324,13 +331,33 @@ impl BenchmarkResult {
     }
 }
 
+/// Whether a result's timing/resource measurements are valid to pool into performance
+/// percentiles, independent of whether it counts as a quality success.
+///
+/// A result is timing-eligible if the framework actually ran to completion and produced output
+/// within the measured window. That holds for every `success == true` result, and also for a
+/// result reclassified as [`ErrorKind::ZeroOverlap`]: the framework really did run and really did
+/// produce output in that time, even though the output turned out to share no tokens with the
+/// ground truth. Gating eligibility on `success` alone would delete exactly the fast-but-garbage
+/// samples from a competitor's distribution, biasing its duration/throughput percentiles toward
+/// looking slower than it actually is relative to a framework (like xberg) that rarely produces
+/// zero-overlap output.
+pub(crate) fn is_timing_eligible(result: &BenchmarkResult) -> bool {
+    result.success || result.error_kind == ErrorKind::ZeroOverlap
+}
+
+/// Deduplicated performance samples for a group of results: one row per single-file success, or
+/// one anchor row per native batch (see [`BenchmarkResult::is_performance_sample`]). Timing
+/// eligibility (see [`is_timing_eligible`]) gates inclusion, not raw `success` — a zero-overlap
+/// result still contributes its duration/throughput/memory/cpu_seconds measurements even though
+/// it is excluded from quality percentiles elsewhere.
 pub(crate) fn successful_performance_samples<'a>(
     results: impl IntoIterator<Item = &'a BenchmarkResult>,
 ) -> Vec<&'a BenchmarkResult> {
     let mut batch_samples = std::collections::HashSet::new();
     let mut samples = Vec::new();
     for result in results {
-        if !result.success {
+        if !is_timing_eligible(result) {
             continue;
         }
         if let Some(sample_id) = result.framework_capabilities.batch_sample_id.as_deref() {
@@ -415,6 +442,16 @@ pub struct QualityMetrics {
     /// Whether the extraction is considered correct (quality_score >= 0.95).
     #[serde(default)]
     pub correct: bool,
+
+    /// Reading-order fidelity (0.0-1.0), via anchor-based Longest Increasing Subsequence.
+    ///
+    /// REPORT-ONLY: intentionally excluded from `quality_score`. `f1_score_text` is a
+    /// bag-of-tokens metric and cannot detect reading-order failure by construction; this
+    /// field exists to make that failure mode visible without re-baselining any published
+    /// score. See `quality::reading_order_score` for the algorithm. `None` means either
+    /// side was empty or too few unambiguous anchor tokens were found to report a number.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reading_order_score: Option<f64>,
 }
 
 /// Framework capability metadata
@@ -668,5 +705,115 @@ mod tests {
         assert_eq!(parsed.process_init_ms, 4.2);
         assert_eq!(parsed.first_parse_ms, 1171.0);
         assert_eq!(parsed.ort_session_and_inference_ms, Some(1171.0));
+    }
+
+    fn minimal_result(success: bool, error_kind: ErrorKind, duration_ms: u64, throughput_bps: f64) -> BenchmarkResult {
+        BenchmarkResult {
+            framework: "fw".to_string(),
+            output_format: OutputFormat::Markdown,
+            file_path: PathBuf::from("test.pdf"),
+            file_size: 1024,
+            success,
+            error_message: if success { None } else { Some("failed".to_string()) },
+            error_kind,
+            duration: Duration::from_millis(duration_ms),
+            extraction_duration: None,
+            subprocess_overhead: None,
+            metrics: PerformanceMetrics {
+                baseline_memory_bytes: 0,
+                peak_memory_bytes: 1_000_000,
+                peak_memory_delta_bytes: 1_000_000,
+                avg_cpu_percent: 50.0,
+                cpu_seconds: 1.0,
+                throughput_bytes_per_sec: throughput_bps,
+                p50_memory_bytes: 1_000_000,
+                p95_memory_bytes: 1_000_000,
+                p99_memory_bytes: 1_000_000,
+            },
+            quality: None,
+            iterations: vec![],
+            statistics: None,
+            cold_start_duration: None,
+            file_extension: "pdf".to_string(),
+            framework_capabilities: FrameworkCapabilities::default(),
+            pdf_metadata: None,
+            ocr_status: OcrStatus::NotUsed,
+            extracted_text: None,
+            system_load: None,
+        }
+    }
+
+    #[test]
+    fn error_kind_zero_overlap_round_trips_through_json() {
+        let json = serde_json::to_string(&ErrorKind::ZeroOverlap).expect("serialize ErrorKind::ZeroOverlap");
+        assert_eq!(json, "\"zero_overlap\"");
+
+        let parsed: ErrorKind = serde_json::from_str(&json).expect("deserialize ErrorKind::ZeroOverlap");
+        assert_eq!(parsed, ErrorKind::ZeroOverlap);
+    }
+
+    /// The Defect A fix: a zero-overlap result is not a quality success, but it is still
+    /// timing-eligible, so it must survive into the performance-sample set alongside genuine
+    /// successes. A genuinely-empty result (`ErrorKind::EmptyContent`) is not timing-eligible and
+    /// stays excluded, proving the two `success == false` cases are treated differently on
+    /// purpose rather than both being swept up by a broad `!success` check.
+    #[test]
+    fn successful_performance_samples_includes_zero_overlap_but_not_empty_content() {
+        let success = minimal_result(true, ErrorKind::None, 100, 1_000_000.0);
+        let zero_overlap = minimal_result(false, ErrorKind::ZeroOverlap, 200, 2_000_000.0);
+        let empty_content = minimal_result(false, ErrorKind::EmptyContent, 300, 3_000_000.0);
+
+        let results = [success, zero_overlap, empty_content];
+        let samples = successful_performance_samples(results.iter());
+
+        assert_eq!(
+            samples.len(),
+            2,
+            "expected the success and the zero-overlap result, got {samples:?}"
+        );
+        assert!(samples.iter().any(|r| r.error_kind == ErrorKind::None));
+        assert!(samples.iter().any(|r| r.error_kind == ErrorKind::ZeroOverlap));
+        assert!(!samples.iter().any(|r| r.error_kind == ErrorKind::EmptyContent));
+    }
+
+    #[test]
+    fn is_timing_eligible_matches_success_or_zero_overlap() {
+        assert!(is_timing_eligible(&minimal_result(true, ErrorKind::None, 100, 1.0)));
+        assert!(is_timing_eligible(&minimal_result(
+            false,
+            ErrorKind::ZeroOverlap,
+            100,
+            1.0
+        )));
+        assert!(!is_timing_eligible(&minimal_result(
+            false,
+            ErrorKind::EmptyContent,
+            100,
+            1.0
+        )));
+        assert!(!is_timing_eligible(&minimal_result(
+            false,
+            ErrorKind::FrameworkError,
+            100,
+            1.0
+        )));
+        assert!(!is_timing_eligible(&minimal_result(
+            false,
+            ErrorKind::HarnessError,
+            100,
+            1.0
+        )));
+        assert!(!is_timing_eligible(&minimal_result(
+            false,
+            ErrorKind::Timeout,
+            100,
+            1.0
+        )));
+        assert!(!is_timing_eligible(&minimal_result(
+            false,
+            ErrorKind::ConfigSetupError,
+            100,
+            1.0
+        )));
     }
 }

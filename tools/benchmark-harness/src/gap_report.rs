@@ -455,6 +455,7 @@ mod tests {
                 missing_tokens: vec![("widget".to_string(), 3)],
                 extra_tokens: vec![],
                 correct: combined >= 0.95,
+                reading_order_score: None,
             }),
             iterations: vec![],
             statistics: None,

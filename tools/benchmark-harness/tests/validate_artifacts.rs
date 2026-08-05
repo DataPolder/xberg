@@ -287,6 +287,7 @@ fn build_provenance(
             output_format: entry.output_format,
         },
         fixed_batch_size: batch.then_some(contract.batch_size),
+        coverage: None,
     }
 }
 
@@ -333,6 +334,7 @@ fn build_results(
                     missing_tokens: vec![],
                     extra_tokens: vec![],
                     correct: false,
+                    reading_order_score: None,
                 }),
                 iterations: (0..ITERATIONS)
                     .map(|index| IterationResult {
@@ -1047,6 +1049,8 @@ fn rejects_fabricated_aggregate_comparison() {
         value: 999.0,
         relative: 1.0,
         optional: false,
+        output_format: OutputFormat::Markdown,
+        mode: "single".to_string(),
     });
     let (_root, path) = write_aggregate(&aggregate);
 

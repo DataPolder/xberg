@@ -70,6 +70,7 @@ fn test_schema_version_2_8_0() {
             missing_tokens: vec![],
             extra_tokens: vec![],
             correct: true,
+            reading_order_score: None,
         }),
     )];
 
@@ -94,6 +95,7 @@ fn test_per_fixture_results_populated() {
                 missing_tokens: vec![],
                 extra_tokens: vec![],
                 correct: true,
+                reading_order_score: None,
             }),
         ),
         make_benchmark_result(
@@ -110,6 +112,7 @@ fn test_per_fixture_results_populated() {
                 missing_tokens: vec![],
                 extra_tokens: vec![],
                 correct: true,
+                reading_order_score: None,
             }),
         ),
     ];
@@ -149,6 +152,7 @@ fn test_plaintext_has_no_layout_percentiles() {
                 missing_tokens: vec![],
                 extra_tokens: vec![],
                 correct: true,
+                reading_order_score: None,
             }),
         ),
         make_benchmark_result(
@@ -165,6 +169,7 @@ fn test_plaintext_has_no_layout_percentiles() {
                 missing_tokens: vec![],
                 extra_tokens: vec![],
                 correct: true,
+                reading_order_score: None,
             }),
         ),
     ];
@@ -208,6 +213,7 @@ fn test_output_format_in_aggregation_key() {
                 missing_tokens: vec![],
                 extra_tokens: vec![],
                 correct: true,
+                reading_order_score: None,
             }),
         ),
         make_benchmark_result(
@@ -224,6 +230,7 @@ fn test_output_format_in_aggregation_key() {
                 missing_tokens: vec![],
                 extra_tokens: vec![],
                 correct: true,
+                reading_order_score: None,
             }),
         ),
     ];
@@ -254,6 +261,7 @@ fn test_plaintext_frameworks_excluded_from_sf1_ranking() {
                 missing_tokens: vec![],
                 extra_tokens: vec![],
                 correct: true,
+                reading_order_score: None,
             }),
         ),
         make_benchmark_result(
@@ -270,6 +278,7 @@ fn test_plaintext_frameworks_excluded_from_sf1_ranking() {
                 missing_tokens: vec![],
                 extra_tokens: vec![],
                 correct: true,
+                reading_order_score: None,
             }),
         ),
     ];
@@ -305,6 +314,7 @@ fn test_quality_percentiles_all_three() {
                 missing_tokens: vec![],
                 extra_tokens: vec![],
                 correct: true,
+                reading_order_score: None,
             }),
         ),
         make_benchmark_result(
@@ -321,6 +331,7 @@ fn test_quality_percentiles_all_three() {
                 missing_tokens: vec![],
                 extra_tokens: vec![],
                 correct: false,
+                reading_order_score: None,
             }),
         ),
         make_benchmark_result(
@@ -337,6 +348,7 @@ fn test_quality_percentiles_all_three() {
                 missing_tokens: vec![],
                 extra_tokens: vec![],
                 correct: true,
+                reading_order_score: None,
             }),
         ),
     ];
@@ -385,6 +397,7 @@ fn xberg_pdf_baseline_and_layout_keep_exact_tf1_sf1_by_format_and_in_rankings() 
             missing_tokens: vec![],
             extra_tokens: vec![],
             correct: false,
+            reading_order_score: None,
         }),
     );
     let layout = make_benchmark_result(
@@ -401,6 +414,7 @@ fn xberg_pdf_baseline_and_layout_keep_exact_tf1_sf1_by_format_and_in_rankings() 
             missing_tokens: vec![],
             extra_tokens: vec![],
             correct: false,
+            reading_order_score: None,
         }),
     );
 
@@ -538,6 +552,7 @@ fn test_pages_per_sec_and_cpu_seconds_populate_in_public_schema() {
             missing_tokens: vec![],
             extra_tokens: vec![],
             correct: true,
+            reading_order_score: None,
         }),
     );
     result.pdf_metadata = Some(PdfMetadata {
@@ -624,6 +639,7 @@ fn test_pareto_frontier_reaches_public_schema() {
             missing_tokens: vec![],
             extra_tokens: vec![],
             correct: true,
+            reading_order_score: None,
         }),
     );
     result.pdf_metadata = Some(PdfMetadata {

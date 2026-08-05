@@ -9,11 +9,17 @@
 //! # Percentile methodology
 //!
 //! All percentiles use the **R-7 interpolation** method (the default in R and
-//! NumPy) via [`crate::stats::percentile_r7`]. Three percentiles are reported
-//! per metric: **p50** (median), **p95**, and **p99**. Values that are `NaN`
-//! or `Inf` after interpolation are sanitized to `0.0` by
-//! [`crate::stats::sanitize_f64`] so that downstream JSON consumers never
-//! encounter non-finite floats.
+//! NumPy) via [`crate::stats::percentile_r7`]. Up to three percentiles are reported
+//! per metric: **p50** (median), **p95**, and **p99**. Real cohorts are often 4-8
+//! fixtures, at which R-7 interpolation for p95/p99 is effectively just reading off the
+//! maximum sample rather than a genuine tail percentile — so `p95`/`p99` are `None` when
+//! `sample_count` is below the statistically supported minimum for that percentile (see
+//! [`MIN_SAMPLES_FOR_P95`]/[`MIN_SAMPLES_FOR_P99`]), instead of fabricating a number that
+//! looks precise but isn't (Defect S1). Every [`Percentiles`] group also reports
+//! `sample_count` and `std_dev` so a reader can judge dispersion even when p95/p99 are
+//! suppressed. Values that are `NaN` or `Inf` after interpolation are sanitized to `0.0` by
+//! [`crate::stats::sanitize_f64`] so that downstream JSON consumers never encounter
+//! non-finite floats.
 //!
 //! Failed results (non-zero `error_kind`) are excluded from percentile
 //! calculations but still counted in `total_sample_count` to preserve the
@@ -247,6 +253,27 @@ pub struct ComparisonData {
     /// See [`ParetoPoint`] for the dominance rule and eligibility criteria.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pareto_frontier: Vec<ParetoPoint>,
+    /// Frameworks that were attempted (present in `by_framework_mode`) but produced no ranked
+    /// entry in one or more of `throughput_ranking`/`memory_ranking`/`cpu_seconds_ranking`/
+    /// `pages_per_sec_ranking`/`pareto_frontier`, with a human-readable reason.
+    ///
+    /// Every one of those rankings is gated on having at least one usable performance sample; a
+    /// framework whose every row failed or was reclassified simply has none, and used to vanish
+    /// from all five with nothing in this struct recording that it ran at all — a reader saw only
+    /// however many frameworks made it into the charts, with no way to tell a framework was
+    /// attempted and excluded from one that was never run. This makes that absence explicit
+    /// instead of silent (Defect S4). ~keep
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unranked_frameworks: Vec<UnrankedFramework>,
+}
+
+/// One framework excluded from a ranking, with why. See [`ComparisonData::unranked_frameworks`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnrankedFramework {
+    /// Framework:mode key, matching `RankedFramework.framework_mode`.
+    pub framework_mode: String,
+    /// Human-readable reason this framework produced no ranked entry.
+    pub reason: String,
 }
 
 /// One non-dominated point in the (pages/sec, SF1, peak-RSS) multi-objective comparison.
@@ -270,7 +297,14 @@ pub struct ParetoPoint {
     pub peak_memory_mb: f64,
 }
 
-/// A framework entry in a ranking
+/// A framework entry in a ranking.
+///
+/// For `throughput_ranking`, `memory_ranking`, `cpu_seconds_ranking`, and `pages_per_sec_ranking`,
+/// `rank` and `relative` are scoped to this entry's own `(output_format, mode)` segment (see
+/// [`Self::output_format`] and [`Self::mode`]) — `rank == 1` / `relative == 1.0` mean "best within
+/// this segment," not "best overall." Markdown vs plaintext serialization cost and single-file vs
+/// batch-amortized process overhead are not comparable, so these four rankings never pool across
+/// segments.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RankedFramework {
     /// Framework:mode key (e.g., "xberg-markdown-baseline:single" or "docling:markdown:single")
@@ -290,6 +324,15 @@ pub struct RankedFramework {
     /// i.e. contract-verified, which is correct for every pre-existing ranking entry).
     #[serde(default)]
     pub optional: bool,
+    /// Output format of the `(output_format, mode)` segment `rank`/`relative` are scoped to.
+    /// `#[serde(default)]` so aggregates produced before this field existed still deserialize.
+    #[serde(default)]
+    pub output_format: OutputFormat,
+    /// Mode ("single", "batch", "sync", "async") of the `(output_format, mode)` segment
+    /// `rank`/`relative` are scoped to. `#[serde(default)]` so aggregates produced before this
+    /// field existed still deserialize (defaults to `""`).
+    #[serde(default)]
+    pub mode: String,
 }
 
 /// Performance deltas relative to baseline (highest throughput framework)
@@ -336,14 +379,19 @@ pub struct ConsolidationMetadata {
 }
 
 /// Failure counts split by cause. Framework-fault kinds ([`ErrorKind::FrameworkError`],
-/// [`ErrorKind::EmptyContent`], [`ErrorKind::Timeout`]) are the framework's own fault — it was
-/// handed a supported document and failed — and penalize its quality/success rate (see
-/// [`is_framework_fault_failure`]). Infrastructure kinds ([`ErrorKind::HarnessError`],
-/// [`ErrorKind::ConfigSetupError`]) are our own harness's fault and never penalize a framework.
+/// [`ErrorKind::EmptyContent`], [`ErrorKind::ZeroOverlap`], [`ErrorKind::Timeout`]) are the
+/// framework's own fault — it was handed a supported document and failed — and penalize its
+/// quality/success rate (see [`is_framework_fault_failure`]). Infrastructure kinds
+/// ([`ErrorKind::HarnessError`], [`ErrorKind::ConfigSetupError`]) are our own harness's fault and
+/// never penalize a framework.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FailureCounts {
     pub framework_errors: usize,
     pub empty_content: usize,
+    /// Non-empty output that shared zero tokens with a non-empty ground truth — distinct from
+    /// `empty_content` (which means the framework produced no content at all).
+    #[serde(default)]
+    pub zero_overlap: usize,
     pub timeouts: usize,
     /// Sum of the framework-fault kinds above (these penalize the score).
     pub framework_fault_total: usize,
@@ -360,12 +408,13 @@ impl FailureCounts {
         match result.error_kind {
             ErrorKind::FrameworkError => self.framework_errors += 1,
             ErrorKind::EmptyContent => self.empty_content += 1,
+            ErrorKind::ZeroOverlap => self.zero_overlap += 1,
             ErrorKind::Timeout => self.timeouts += 1,
             ErrorKind::HarnessError => self.harness_errors += 1,
             ErrorKind::ConfigSetupError => self.config_setup_errors += 1,
             ErrorKind::None => {}
         }
-        self.framework_fault_total = self.framework_errors + self.empty_content + self.timeouts;
+        self.framework_fault_total = self.framework_errors + self.empty_content + self.zero_overlap + self.timeouts;
         self.infra_total = self.harness_errors + self.config_setup_errors;
     }
 }
@@ -452,6 +501,10 @@ pub struct PerformancePercentiles {
     pub timeouts: usize,
     /// Number of extractions that returned empty content
     pub empty_content: usize,
+    /// Number of extractions that returned non-empty output sharing zero tokens with a
+    /// non-empty ground truth — distinct from `empty_content` (v2.10.0+).
+    #[serde(default)]
+    pub zero_overlap: usize,
     /// Unique error messages with occurrence counts
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub error_details: HashMap<String, usize>,
@@ -553,15 +606,40 @@ pub struct QualityPercentiles {
     pub quality_score_p99: f64,
 }
 
-/// Percentile values for a metric
+/// Minimum sample count required to report a `p95` value without fabricating precision the
+/// sample can't support. R-7 interpolation places the percentile at index `p * (n - 1)`; below
+/// roughly `1 / (1 - p)` samples that index coincides with (or sits right next to) the maximum
+/// observed value, so the "percentile" is really just the largest sample or two wearing a
+/// statistical label. Real benchmark cohorts are frequently 4-8 fixtures — well under this
+/// threshold — so `p95` is `None` rather than a fabricated number there (Defect S1). ~keep
+pub const MIN_SAMPLES_FOR_P95: usize = 20;
+
+/// As [`MIN_SAMPLES_FOR_P95`], for `p99` (`1 / (1 - 0.99) = 100` samples). (Defect S1) ~keep
+pub const MIN_SAMPLES_FOR_P99: usize = 100;
+
+/// Percentile values for a metric.
+///
+/// `p95`/`p99` are suppressed (`None`) rather than fabricated when `sample_count` is below the
+/// statistically supported minimum for that percentile — see [`MIN_SAMPLES_FOR_P95`] and
+/// [`MIN_SAMPLES_FOR_P99`]. `sample_count` and `std_dev` are always reported so a reader can
+/// judge the underlying distribution (and how much to trust it) even when p95/p99 are
+/// suppressed. (Defect S1) ~keep
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Percentiles {
-    /// 50th percentile (median)
+    /// 50th percentile (median). `0.0` when `sample_count == 0`.
     pub p50: f64,
-    /// 95th percentile
-    pub p95: f64,
-    /// 99th percentile
-    pub p99: f64,
+    /// 95th percentile, or `None` when `sample_count < MIN_SAMPLES_FOR_P95`.
+    pub p95: Option<f64>,
+    /// 99th percentile, or `None` when `sample_count < MIN_SAMPLES_FOR_P99`.
+    pub p99: Option<f64>,
+    /// Number of values this percentile group was computed from.
+    #[serde(default)]
+    pub sample_count: usize,
+    /// Sample standard deviation (Bessel-corrected) of the underlying values. `0.0` for
+    /// `sample_count <= 1`. A dispersion measure that stays meaningful even when the sample
+    /// count is too small to support p95/p99.
+    #[serde(default)]
+    pub std_dev: f64,
 }
 
 /// Duration percentiles in milliseconds
@@ -605,6 +683,7 @@ pub fn aggregate_new_format(results: &[BenchmarkResult]) -> NewConsolidatedResul
                 cpu_seconds_ranking: Vec::new(),
                 deltas_vs_baseline: HashMap::new(),
                 pareto_frontier: Vec::new(),
+                unranked_frameworks: Vec::new(),
             },
             per_fixture_results: Vec::new(),
             metadata: ConsolidationMetadata {
@@ -911,8 +990,30 @@ fn is_framework_fault_failure(result: &BenchmarkResult) -> bool {
     !result.success
         && matches!(
             result.error_kind,
-            ErrorKind::FrameworkError | ErrorKind::EmptyContent | ErrorKind::Timeout
+            ErrorKind::FrameworkError | ErrorKind::EmptyContent | ErrorKind::ZeroOverlap | ErrorKind::Timeout
         )
+}
+
+/// Build a `Percentiles` group from a slice of values (need not be pre-sorted).
+///
+/// Suppresses `p95`/`p99` when `values.len()` is below the statistically supported minimum for
+/// that percentile (see [`MIN_SAMPLES_FOR_P95`]/[`MIN_SAMPLES_FOR_P99`]) instead of fabricating an
+/// interpolated number that is really just the maximum (or close to it). Always reports
+/// `sample_count` and `std_dev` so a reader can judge the distribution regardless. (Defect S1)
+/// ~keep
+fn build_percentiles(values: &[f64]) -> Percentiles {
+    let mut sorted = values.to_vec();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let sample_count = sorted.len();
+    let (_, _, std_dev) = crate::stats::calculate_variance(&sorted);
+
+    Percentiles {
+        p50: sanitize_f64(percentile_r7(&sorted, 0.50)),
+        p95: (sample_count >= MIN_SAMPLES_FOR_P95).then(|| sanitize_f64(percentile_r7(&sorted, 0.95))),
+        p99: (sample_count >= MIN_SAMPLES_FOR_P99).then(|| sanitize_f64(percentile_r7(&sorted, 0.99))),
+        sample_count,
+        std_dev: sanitize_f64(std_dev),
+    }
 }
 
 /// Calculate percentiles for a group of results
@@ -926,13 +1027,13 @@ fn calculate_percentiles(results: &[&BenchmarkResult]) -> PerformancePercentiles
     let framework_fault_failures = results.iter().filter(|r| is_framework_fault_failure(r)).count();
     let performance_samples = successful_performance_samples(results.iter().copied());
 
-    let mut durations: Vec<f64> = performance_samples
+    let durations: Vec<f64> = performance_samples
         .iter()
         .map(|r| r.duration.as_secs_f64() * 1000.0)
         .filter(|&v| !v.is_nan() && v.is_finite())
         .collect();
 
-    let mut throughputs: Vec<f64> = performance_samples
+    let throughputs: Vec<f64> = performance_samples
         .iter()
         .map(|r| r.metrics.throughput_bytes_per_sec / 1_000_000.0)
         .filter(|&v| v > 0.0 && v.is_finite())
@@ -948,90 +1049,60 @@ fn calculate_percentiles(results: &[&BenchmarkResult]) -> PerformancePercentiles
         })
         .count();
 
-    let mut memories: Vec<f64> = performance_samples
+    let memories: Vec<f64> = performance_samples
         .iter()
         .map(|r| r.metrics.peak_memory_bytes as f64 / 1_000_000.0)
         .filter(|&v| !v.is_nan() && v.is_finite())
         .collect();
 
-    let mut extraction_durations: Vec<f64> = successful
+    let extraction_durations: Vec<f64> = successful
         .iter()
         .filter_map(|r| r.extraction_duration.map(|d| d.as_secs_f64() * 1000.0))
         .filter(|&v| !v.is_nan() && v.is_finite())
         .collect();
 
-    let mut cpu_seconds_values: Vec<f64> = performance_samples
+    // `integrate_cpu_core_seconds` (monitoring.rs) returns exactly `0.0` when a process ran with
+    // fewer than 2 resource-sampler ticks — "below measurement resolution", not "measured zero
+    // CPU time" (zero core-seconds of CPU use is physically impossible for a process that ran to
+    // completion). Excluding that floor value here keeps it out of every percentile derived from
+    // `cpu_seconds_values`, not just the cross-framework ranking (see `build_comparison`'s
+    // `unranked_frameworks` bookkeeping for the ranking-level exclusion). (Defect S2) ~keep
+    let cpu_seconds_values: Vec<f64> = performance_samples
         .iter()
         .map(|r| r.metrics.cpu_seconds)
-        .filter(|&v| !v.is_nan() && v.is_finite() && v >= 0.0)
+        .filter(|&v| !v.is_nan() && v.is_finite() && v > 0.0)
         .collect();
 
-    let mut pages_per_sec_values = collect_pages_per_second(&successful);
+    let pages_per_sec_values = collect_pages_per_second(results);
 
-    durations.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    throughputs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    memories.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    extraction_durations.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    cpu_seconds_values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    pages_per_sec_values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-
-    let duration = Percentiles {
-        p50: sanitize_f64(percentile_r7(&durations, 0.50)),
-        p95: sanitize_f64(percentile_r7(&durations, 0.95)),
-        p99: sanitize_f64(percentile_r7(&durations, 0.99)),
-    };
-
-    let throughput = Percentiles {
-        p50: sanitize_f64(percentile_r7(&throughputs, 0.50)),
-        p95: sanitize_f64(percentile_r7(&throughputs, 0.95)),
-        p99: sanitize_f64(percentile_r7(&throughputs, 0.99)),
-    };
-
-    let memory = Percentiles {
-        p50: sanitize_f64(percentile_r7(&memories, 0.50)),
-        p95: sanitize_f64(percentile_r7(&memories, 0.95)),
-        p99: sanitize_f64(percentile_r7(&memories, 0.99)),
-    };
+    // `build_percentiles` sorts internally, so the raw (unsorted) vectors above are passed
+    // through as-is.
+    let duration = build_percentiles(&durations);
+    let throughput = build_percentiles(&throughputs);
+    let memory = build_percentiles(&memories);
 
     let extraction_duration = if !extraction_durations.is_empty() {
-        Some(Percentiles {
-            p50: sanitize_f64(percentile_r7(&extraction_durations, 0.50)),
-            p95: sanitize_f64(percentile_r7(&extraction_durations, 0.95)),
-            p99: sanitize_f64(percentile_r7(&extraction_durations, 0.99)),
-        })
+        Some(build_percentiles(&extraction_durations))
     } else {
         None
     };
 
-    let cpu_seconds = Percentiles {
-        p50: sanitize_f64(percentile_r7(&cpu_seconds_values, 0.50)),
-        p95: sanitize_f64(percentile_r7(&cpu_seconds_values, 0.95)),
-        p99: sanitize_f64(percentile_r7(&cpu_seconds_values, 0.99)),
-    };
+    let cpu_seconds = build_percentiles(&cpu_seconds_values);
 
     let pages_per_sec = if !pages_per_sec_values.is_empty() {
-        Some(Percentiles {
-            p50: sanitize_f64(percentile_r7(&pages_per_sec_values, 0.50)),
-            p95: sanitize_f64(percentile_r7(&pages_per_sec_values, 0.95)),
-            p99: sanitize_f64(percentile_r7(&pages_per_sec_values, 0.99)),
-        })
+        Some(build_percentiles(&pages_per_sec_values))
     } else {
         None
     };
 
-    // Approximate documents-per-process-invocation: 1:1 for single-file mode (each successful
-    // row is its own performance sample), or the modal batch size for native batches (deduped
-    // performance samples each represent one whole-batch process). See `PerformancePercentiles`
-    // doc comment. ~keep
-    let batch_size = if performance_samples.is_empty() {
-        None
-    } else {
-        Some(
-            (results.len() as f64 / performance_samples.len() as f64)
-                .round()
-                .max(1.0) as usize,
-        )
-    };
+    // Real per-invocation batch size, derived from actual batch membership
+    // (`framework_capabilities.batch_sample_id`) rather than the coarse
+    // `total_sample_count / performance_sample_count` ratio: that ratio is only correct when
+    // every eligible row is its own batch of one, and becomes a fiction whenever some rows are
+    // excluded from timing eligibility (see `is_timing_eligible`) for a reason unrelated to batch
+    // grouping — e.g. 10 single-file results with only 5 timing-eligible would report a
+    // fictitious batch_size of 2. (Defect S3) ~keep
+    let batch_size = compute_batch_size(results, &performance_samples);
 
     let system_load = aggregate_system_load(results);
 
@@ -1061,6 +1132,10 @@ fn calculate_percentiles(results: &[&BenchmarkResult]) -> PerformancePercentiles
     let empty_content = results
         .iter()
         .filter(|r| r.error_kind == ErrorKind::EmptyContent)
+        .count();
+    let zero_overlap = results
+        .iter()
+        .filter(|r| r.error_kind == ErrorKind::ZeroOverlap)
         .count();
 
     let mut error_details: HashMap<String, usize> = HashMap::new();
@@ -1142,6 +1217,7 @@ fn calculate_percentiles(results: &[&BenchmarkResult]) -> PerformancePercentiles
         config_setup_errors,
         timeouts,
         empty_content,
+        zero_overlap,
         error_details,
         throughput,
         memory,
@@ -1157,6 +1233,52 @@ fn calculate_percentiles(results: &[&BenchmarkResult]) -> PerformancePercentiles
     }
 }
 
+/// Real per-invocation batch size: the number of result rows sharing each performance sample's
+/// `batch_sample_id`, rather than `total_sample_count / performance_sample_count`. That ratio
+/// only equals true batch size when every row in `results` is timing-eligible (see
+/// [`crate::types::is_timing_eligible`]); once some rows are excluded from timing eligibility for
+/// a reason unrelated to batch grouping (e.g. `EmptyContent`), the ratio silently becomes the
+/// inverse timing-eligibility rate instead of a document count (Defect S3).
+///
+/// Returns `None` when there are no performance samples to derive a batch size from. Returns
+/// `Some(1)` when no performance sample carries a `batch_sample_id` (single-file mode). For
+/// native batches, returns the modal (most frequent) document count across the performance
+/// samples that do carry a `batch_sample_id` — every anchor row in a mixed batch/single-file
+/// group should report the same count in practice, but the mode is a defined, deterministic
+/// tie-break if it doesn't.
+fn compute_batch_size(results: &[&BenchmarkResult], performance_samples: &[&BenchmarkResult]) -> Option<usize> {
+    if performance_samples.is_empty() {
+        return None;
+    }
+
+    let batch_counts: Vec<usize> = performance_samples
+        .iter()
+        .map(
+            |sample| match sample.framework_capabilities.batch_sample_id.as_deref() {
+                Some(batch_id) => results
+                    .iter()
+                    .filter(|r| r.framework_capabilities.batch_sample_id.as_deref() == Some(batch_id))
+                    .count()
+                    .max(1),
+                None => 1,
+            },
+        )
+        .collect();
+
+    if batch_counts.iter().all(|&count| count == 1) {
+        return Some(1);
+    }
+
+    let mut frequency_by_count: HashMap<usize, usize> = HashMap::new();
+    for &count in &batch_counts {
+        *frequency_by_count.entry(count).or_insert(0) += 1;
+    }
+    frequency_by_count
+        .into_iter()
+        .max_by_key(|(count, frequency)| (*frequency, *count))
+        .map(|(count, _)| count)
+}
+
 /// Compute one pages/sec observation per performance sample (see [`successful_performance_samples`]).
 ///
 /// For a single-file result, this is simply `page_count / duration`. For a native batch, every
@@ -1166,10 +1288,13 @@ fn calculate_percentiles(results: &[&BenchmarkResult]) -> PerformancePercentiles
 /// is computed from summed bytes, not a single member row's byte count.
 ///
 /// Rows without a detected PDF page count (non-PDF files, or a PDF the harness could not size)
-/// are excluded rather than treated as zero.
-fn collect_pages_per_second(successful: &[&BenchmarkResult]) -> Vec<f64> {
+/// are excluded rather than treated as zero. Eligibility is timing-based (see
+/// [`crate::types::is_timing_eligible`]), not `success`-based, so a zero-overlap-flipped member
+/// row still contributes its page count to its batch's total — the same Defect-A fix applied to
+/// `duration`/`throughput`/`memory`/`cpu_seconds` above.
+fn collect_pages_per_second(results: &[&BenchmarkResult]) -> Vec<f64> {
     let mut batch_pages: HashMap<&str, u64> = HashMap::new();
-    for result in successful {
+    for result in results.iter().filter(|r| crate::types::is_timing_eligible(r)) {
         if let (Some(batch_id), Some(page_count)) = (
             result.framework_capabilities.batch_sample_id.as_deref(),
             result.pdf_metadata.as_ref().and_then(|metadata| metadata.page_count),
@@ -1178,7 +1303,7 @@ fn collect_pages_per_second(successful: &[&BenchmarkResult]) -> Vec<f64> {
         }
     }
 
-    successful_performance_samples(successful.iter().copied())
+    successful_performance_samples(results.iter().copied())
         .into_iter()
         .filter_map(|sample| {
             let duration_secs = sample.duration.as_secs_f64();
@@ -1320,6 +1445,7 @@ fn accountable_sample_count(performance: &PerformancePercentiles) -> usize {
         + performance.framework_errors
         + performance.timeouts
         + performance.empty_content
+        + performance.zero_overlap
 }
 
 /// Convert a reported quality percentile into a ranking value that also reflects extraction
@@ -1463,6 +1589,8 @@ fn build_shared_corpus_quality_ranking(
             value: *v,
             relative: if baseline_qual > 0.0 { *v / baseline_qual } else { 1.0 },
             optional: optional_keys.contains(k),
+            output_format: format,
+            mode: parse_aggregate_key(k).1.to_string(),
         })
         .collect()
 }
@@ -1478,6 +1606,73 @@ fn optional_aggregate_keys(cohort: Option<crate::bench_matrix::Cohort>) -> std::
         .filter(|entry| entry.optional)
         .map(|entry| entry.aggregate_key())
         .collect()
+}
+
+/// Which direction is "better" when sorting a ranking's raw values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SortDirection {
+    /// Higher value is better (e.g. throughput, pages/sec).
+    Descending,
+    /// Lower value is better (e.g. memory).
+    Ascending,
+}
+
+/// Group ranking candidates into deterministic `(output_format, mode)` segments. Markdown vs
+/// plaintext serialization cost and single-file vs batch-amortized process overhead are not
+/// comparable, so `throughput_ranking`, `memory_ranking`, `cpu_seconds_ranking`, and
+/// `pages_per_sec_ranking` are each computed within a segment, never pooled across one.
+/// `BTreeMap` keeps segment order deterministic when the caller flattens the map back to a
+/// `Vec<RankedFramework>`.
+fn group_by_segment<T>(
+    items: Vec<T>,
+    segment_of: impl Fn(&T) -> (OutputFormat, &str),
+) -> std::collections::BTreeMap<(String, String), Vec<T>> {
+    let mut segments: std::collections::BTreeMap<(String, String), Vec<T>> = std::collections::BTreeMap::new();
+    for item in items {
+        let (output_format, mode) = segment_of(&item);
+        segments
+            .entry((output_format.to_string(), mode.to_string()))
+            .or_default()
+            .push(item);
+    }
+    segments
+}
+
+/// Build a `(output_format, mode)`-segmented ranking: rank and `relative` are computed within
+/// each segment against that segment's own best value, never against a value from a different
+/// segment. The flat output is ordered by segment (deterministically, via `group_by_segment`'s
+/// `BTreeMap`), then by rank within each segment. Used for `throughput_ranking`, `memory_ranking`,
+/// and `pages_per_sec_ranking` (`cpu_seconds_ranking` has its own reference-value logic and is
+/// built separately). Non-finite values are dropped before ranking, matching the pooled behavior
+/// this replaces.
+fn build_segmented_ranking(
+    mut items: Vec<(String, f64, OutputFormat, String)>,
+    direction: SortDirection,
+    optional_keys: &std::collections::HashSet<String>,
+) -> Vec<RankedFramework> {
+    items.retain(|(_, value, ..)| value.is_finite());
+    let segments = group_by_segment(items, |(_, _, fmt, mode)| (*fmt, mode.as_str()));
+
+    let mut ranking = Vec::new();
+    for mut group in segments.into_values() {
+        match direction {
+            SortDirection::Descending => group.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0))),
+            SortDirection::Ascending => group.sort_by(|a, b| a.1.total_cmp(&b.1).then_with(|| a.0.cmp(&b.0))),
+        }
+        let best = group.first().map(|(_, value, ..)| *value).unwrap_or(1.0);
+        for (i, (key, value, output_format, mode)) in group.into_iter().enumerate() {
+            ranking.push(RankedFramework {
+                framework_mode: key.clone(),
+                rank: i + 1,
+                value,
+                relative: if best > 0.0 { value / best } else { 1.0 },
+                optional: optional_keys.contains(&key),
+                output_format,
+                mode,
+            });
+        }
+    }
+    ranking
 }
 
 pub(crate) fn comparison_for_cohort(
@@ -1533,9 +1728,15 @@ fn build_comparison(
     cohort: Option<crate::bench_matrix::Cohort>,
 ) -> ComparisonData {
     let optional_keys = optional_aggregate_keys(cohort);
-    let mut metrics: Vec<(String, f64, f64, OutputFormat)> = Vec::new();
-    let mut cpu_seconds_metrics: Vec<(String, f64)> = Vec::new();
-    let mut pages_per_sec_metrics: Vec<(String, f64)> = Vec::new();
+    // Key, value(s), output format, mode. `throughput_ranking`, `memory_ranking`,
+    // `cpu_seconds_ranking`, and `pages_per_sec_ranking` must never pool across
+    // `(output_format, mode)` segments — see `build_segmented_ranking`. ~keep
+    let mut metrics: Vec<(String, f64, f64, OutputFormat, String)> = Vec::new();
+    let mut cpu_seconds_metrics: Vec<(String, f64, OutputFormat, String)> = Vec::new();
+    let mut pages_per_sec_metrics: Vec<(String, f64, OutputFormat, String)> = Vec::new();
+    // Frameworks attempted (present in `by_framework_mode`) but excluded from a ranking below,
+    // recorded so the exclusion is never silent (Defect S4). ~keep
+    let mut unranked_frameworks: Vec<UnrankedFramework> = Vec::new();
 
     for (key, agg) in by_framework_mode {
         let Some(performance) = agg
@@ -1543,6 +1744,19 @@ fn build_comparison(
             .as_ref()
             .filter(|performance| performance.performance_sample_count > 0)
         else {
+            let total = agg
+                .overall_performance
+                .as_ref()
+                .map(|p| p.total_sample_count)
+                .unwrap_or(0);
+            unranked_frameworks.push(UnrankedFramework {
+                framework_mode: key.clone(),
+                reason: format!(
+                    "no usable performance samples ({total} total result(s), none timing-eligible); \
+                     excluded from throughput_ranking, memory_ranking, cpu_seconds_ranking, \
+                     pages_per_sec_ranking, and pareto_frontier"
+                ),
+            });
             continue;
         };
 
@@ -1551,72 +1765,91 @@ fn build_comparison(
             performance.throughput.p50,
             performance.memory.p50,
             agg.output_format,
+            agg.mode.clone(),
         ));
-        cpu_seconds_metrics.push((key.clone(), performance.cpu_seconds.p50));
+        // A `cpu_seconds.sample_count == 0` framework had every performance sample measure
+        // exactly `0.0` core-seconds — the monitoring-resolution floor (Defect S2), not a real
+        // measurement — and `build_percentiles`/`calculate_percentiles` already excluded those
+        // rows from the distribution. Exclude the framework from `cpu_seconds_ranking` too
+        // (it would otherwise report a fabricated `0.0` p50 and rank first), and record why
+        // instead of letting it silently vanish. It still appears in every other ranking, since
+        // only its CPU-time measurement is unusable. ~keep
+        if performance.cpu_seconds.sample_count > 0 {
+            cpu_seconds_metrics.push((
+                key.clone(),
+                performance.cpu_seconds.p50,
+                agg.output_format,
+                agg.mode.clone(),
+            ));
+        } else {
+            unranked_frameworks.push(UnrankedFramework {
+                framework_mode: key.clone(),
+                reason: "every performance sample measured 0.0 CPU-seconds (below monitoring \
+                          resolution, not a real measurement); excluded from cpu_seconds_ranking"
+                    .to_string(),
+            });
+        }
         if let Some(pages_per_sec) = &performance.pages_per_sec {
-            pages_per_sec_metrics.push((key.clone(), pages_per_sec.p50));
+            pages_per_sec_metrics.push((key.clone(), pages_per_sec.p50, agg.output_format, agg.mode.clone()));
         }
     }
 
-    let mut thr = metrics.clone();
-    thr.retain(|m| m.1.is_finite());
-    thr.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-    let baseline_thr = thr.first().map(|r| r.1).unwrap_or(1.0);
-    let throughput_ranking: Vec<RankedFramework> = thr
-        .iter()
-        .enumerate()
-        .map(|(i, (k, v, ..))| RankedFramework {
-            framework_mode: k.clone(),
-            rank: i + 1,
-            value: *v,
-            relative: if baseline_thr > 0.0 { *v / baseline_thr } else { 1.0 },
-            optional: optional_keys.contains(k),
-        })
-        .collect();
+    let throughput_ranking = build_segmented_ranking(
+        metrics
+            .iter()
+            .map(|(k, thr, _, fmt, mode)| (k.clone(), *thr, *fmt, mode.clone()))
+            .collect(),
+        SortDirection::Descending,
+        &optional_keys,
+    );
 
-    let mut mem = metrics.clone();
-    mem.retain(|m| m.2.is_finite());
-    mem.sort_by(|a, b| a.2.total_cmp(&b.2).then_with(|| a.0.cmp(&b.0)));
-    let baseline_mem = mem.first().map(|r| r.2).unwrap_or(1.0);
-    let memory_ranking: Vec<RankedFramework> = mem
-        .iter()
-        .enumerate()
-        .map(|(i, (k, _, v, _))| RankedFramework {
-            framework_mode: k.clone(),
-            rank: i + 1,
-            value: *v,
-            relative: if baseline_mem > 0.0 { *v / baseline_mem } else { 1.0 },
-            optional: optional_keys.contains(k),
-        })
-        .collect();
+    let memory_ranking = build_segmented_ranking(
+        metrics
+            .iter()
+            .map(|(k, _, mem, fmt, mode)| (k.clone(), *mem, *fmt, mode.clone()))
+            .collect(),
+        SortDirection::Ascending,
+        &optional_keys,
+    );
 
     let quality_ranking_markdown =
         build_shared_corpus_quality_ranking(by_framework_mode, OutputFormat::Markdown, &optional_keys);
     let quality_ranking_plaintext =
         build_shared_corpus_quality_ranking(by_framework_mode, OutputFormat::Plaintext, &optional_keys);
 
+    // The baseline for `deltas_vs_baseline` is the highest-throughput entry within each
+    // `(output_format, mode)` segment, not a single cross-segment winner — mirroring
+    // `throughput_ranking`'s own per-segment scoping (see `build_segmented_ranking`). ~keep
     let mut deltas_vs_baseline = HashMap::new();
-    if let Some(baseline) = thr.first() {
-        for (k, thr, mem_val, _) in &metrics {
-            if k != &baseline.0 {
-                deltas_vs_baseline.insert(
-                    k.clone(),
-                    DeltaMetrics {
-                        throughput_delta_mbs: thr - baseline.1,
-                        throughput_delta_percent: if baseline.1 > 0.0 {
-                            ((thr - baseline.1) / baseline.1) * 100.0
-                        } else {
-                            0.0
-                        },
-                        memory_delta_mb: mem_val - baseline.2,
-                        memory_delta_percent: if baseline.2 > 0.0 {
-                            ((mem_val - baseline.2) / baseline.2) * 100.0
-                        } else {
-                            0.0
-                        },
-                    },
-                );
+    let delta_segments = group_by_segment(metrics.clone(), |(_, _, _, fmt, mode)| (*fmt, mode.as_str()));
+    for group in delta_segments.values() {
+        let mut finite_by_throughput: Vec<&(String, f64, f64, OutputFormat, String)> =
+            group.iter().filter(|(_, thr, ..)| thr.is_finite()).collect();
+        finite_by_throughput.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        let Some(baseline) = finite_by_throughput.first().copied() else {
+            continue;
+        };
+        for (k, thr, mem_val, ..) in group {
+            if k == &baseline.0 {
+                continue;
             }
+            deltas_vs_baseline.insert(
+                k.clone(),
+                DeltaMetrics {
+                    throughput_delta_mbs: thr - baseline.1,
+                    throughput_delta_percent: if baseline.1 > 0.0 {
+                        ((thr - baseline.1) / baseline.1) * 100.0
+                    } else {
+                        0.0
+                    },
+                    memory_delta_mb: mem_val - baseline.2,
+                    memory_delta_percent: if baseline.2 > 0.0 {
+                        ((mem_val - baseline.2) / baseline.2) * 100.0
+                    } else {
+                        0.0
+                    },
+                },
+            );
         }
     }
 
@@ -1665,7 +1898,11 @@ fn build_comparison(
         }
     }
 
-    let build_ranking = |items: &mut Vec<(String, f64)>| -> Vec<RankedFramework> {
+    // Shared by the PDF quality/TF1/SF1 rankings only, which are pre-filtered to a single output
+    // format before calling and are NOT part of the `(output_format, mode)` segmentation this
+    // module applies to `throughput_ranking`/`memory_ranking`/`cpu_seconds_ranking`/
+    // `pages_per_sec_ranking` (see `build_segmented_ranking`) — out of scope for that defect. ~keep
+    let build_ranking = |items: &mut Vec<(String, f64)>, format: OutputFormat| -> Vec<RankedFramework> {
         items.retain(|(_, v)| v.is_finite());
         items.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
         let best = items.first().map(|r| r.1).unwrap_or(1.0);
@@ -1678,6 +1915,8 @@ fn build_comparison(
                 value: *v,
                 relative: if best > 0.0 { *v / best } else { 1.0 },
                 optional: optional_keys.contains(k),
+                output_format: format,
+                mode: parse_aggregate_key(k).1.to_string(),
             })
             .collect()
     };
@@ -1711,16 +1950,18 @@ fn build_comparison(
         .map(|(k, _, _, s, _)| (k.clone(), *s))
         .collect();
 
-    let pdf_quality_ranking_markdown = build_ranking(&mut pdf_qual_markdown);
-    let pdf_quality_ranking_plaintext = build_ranking(&mut pdf_qual_plaintext);
-    let pdf_tf1_ranking_markdown = build_ranking(&mut pdf_tf1_markdown);
-    let pdf_tf1_ranking_plaintext = build_ranking(&mut pdf_tf1_plaintext);
-    let pdf_sf1_ranking_markdown = build_ranking(&mut pdf_sf1_markdown);
+    let pdf_quality_ranking_markdown = build_ranking(&mut pdf_qual_markdown, OutputFormat::Markdown);
+    let pdf_quality_ranking_plaintext = build_ranking(&mut pdf_qual_plaintext, OutputFormat::Plaintext);
+    let pdf_tf1_ranking_markdown = build_ranking(&mut pdf_tf1_markdown, OutputFormat::Markdown);
+    let pdf_tf1_ranking_plaintext = build_ranking(&mut pdf_tf1_plaintext, OutputFormat::Plaintext);
+    let pdf_sf1_ranking_markdown = build_ranking(&mut pdf_sf1_markdown, OutputFormat::Markdown);
 
-    let pages_per_sec_ranking = build_ranking(&mut pages_per_sec_metrics);
+    // `pages_per_sec_ranking` must segment by `(output_format, mode)` like `throughput_ranking`
+    // above, so it uses `build_segmented_ranking` rather than the `build_ranking` closure (which
+    // stays reserved for the pre-filtered, single-format PDF quality/TF1/SF1 rankings). ~keep
+    let pages_per_sec_ranking =
+        build_segmented_ranking(pages_per_sec_metrics, SortDirection::Descending, &optional_keys);
 
-    cpu_seconds_metrics.retain(|(_, v)| v.is_finite());
-    cpu_seconds_metrics.sort_by(|a, b| a.1.total_cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
     // cpu_seconds is lower-is-better, so the natural baseline is the smallest value. But native
     // single-file frameworks (e.g. liteparse/xberg) routinely report exactly 0.0 core-seconds, and
     // a 0.0 baseline is undefined, and the old `if baseline > 0.0 { .. } else { 1.0 }` guard used to
@@ -1732,29 +1973,45 @@ fn build_comparison(
     // instead of the true (possibly-zero) minimum. This subsumes the old behavior when the true
     // positive row still gets a finite ratio against the smallest positive cost observed. Only when
     // literally every row is 0.0 does `reference` stay 0.0, in which case every row's `relative`
-    // degenerates to 0.0 (all tied for best) rather than the old, misleading all-`1.0`.
-    let reference_cpu_seconds = cpu_seconds_metrics
-        .iter()
-        .map(|(_, v)| *v)
-        .find(|v| *v > 0.0)
-        .unwrap_or_else(|| cpu_seconds_metrics.first().map(|(_, v)| *v).unwrap_or(0.0));
-    let cpu_seconds_ranking: Vec<RankedFramework> = cpu_seconds_metrics
-        .iter()
-        .enumerate()
-        .map(|(i, (k, v))| RankedFramework {
-            framework_mode: k.clone(),
-            rank: i + 1,
-            value: *v,
-            relative: if reference_cpu_seconds > 0.0 {
-                *v / reference_cpu_seconds
-            } else {
-                0.0
-            },
-            optional: optional_keys.contains(k),
-        })
-        .collect();
+    // degenerates to 0.0 (all tied for best) rather than the old, misleading all-`1.0`. The
+    // smallest-positive-or-fallback search runs independently within each `(output_format, mode)`
+    // segment, since `cpu_seconds_ranking` must never pool across segments either. ~keep
+    cpu_seconds_metrics.retain(|(_, v, ..)| v.is_finite());
+    let cpu_seconds_segments = group_by_segment(cpu_seconds_metrics, |(_, _, fmt, mode)| (*fmt, mode.as_str()));
+    let mut cpu_seconds_ranking: Vec<RankedFramework> = Vec::new();
+    for mut group in cpu_seconds_segments.into_values() {
+        group.sort_by(|a, b| a.1.total_cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
+        let reference_cpu_seconds = group
+            .iter()
+            .map(|(_, v, ..)| *v)
+            .find(|v| *v > 0.0)
+            .unwrap_or_else(|| group.first().map(|(_, v, ..)| *v).unwrap_or(0.0));
+        for (i, (k, v, fmt, mode)) in group.into_iter().enumerate() {
+            cpu_seconds_ranking.push(RankedFramework {
+                framework_mode: k.clone(),
+                rank: i + 1,
+                value: v,
+                relative: if reference_cpu_seconds > 0.0 {
+                    v / reference_cpu_seconds
+                } else {
+                    0.0
+                },
+                optional: optional_keys.contains(&k),
+                output_format: fmt,
+                mode,
+            });
+        }
+    }
 
     let pareto_frontier = build_pareto_frontier(by_framework_mode);
+
+    // `by_framework_mode` is a `HashMap`, so iteration order (and thus push order above) is
+    // nondeterministic; sort for reproducible output.
+    unranked_frameworks.sort_by(|a, b| {
+        a.framework_mode
+            .cmp(&b.framework_mode)
+            .then_with(|| a.reason.cmp(&b.reason))
+    });
 
     ComparisonData {
         throughput_ranking,
@@ -1770,6 +2027,7 @@ fn build_comparison(
         cpu_seconds_ranking,
         deltas_vs_baseline,
         pareto_frontier,
+        unranked_frameworks,
     }
 }
 
@@ -2094,9 +2352,60 @@ mod tests {
         assert_eq!(percentiles.successful_sample_count, 3);
         assert_eq!(percentiles.total_sample_count, 3);
         assert_eq!(percentiles.success_rate_percent, 100.0);
-        assert!(percentiles.duration.p50 > 0.0);
-        assert!(percentiles.throughput.p50 > 0.0);
-        assert!(percentiles.memory.p50 > 0.0);
+
+        // Exact values, not just truthiness: durations [100, 200, 300]ms, throughputs
+        // [1.0, 2.0, 3.0]MB/s, memory [10.0, 20.0, 30.0]MB, cpu_seconds fixed at 50.0.
+        assert_eq!(percentiles.duration.p50, 200.0);
+        assert_eq!(percentiles.duration.sample_count, 3);
+        assert_eq!(percentiles.duration.std_dev, 100.0);
+        assert_eq!(percentiles.throughput.p50, 2.0);
+        assert_eq!(percentiles.throughput.sample_count, 3);
+        assert_eq!(percentiles.throughput.std_dev, 1.0);
+        assert_eq!(percentiles.memory.p50, 20.0);
+        assert_eq!(percentiles.memory.sample_count, 3);
+        assert_eq!(percentiles.memory.std_dev, 10.0);
+        assert_eq!(percentiles.cpu_seconds.p50, 50.0);
+        assert_eq!(percentiles.cpu_seconds.sample_count, 3);
+        assert_eq!(percentiles.cpu_seconds.std_dev, 0.0);
+
+        // n=3 is far below MIN_SAMPLES_FOR_P95 (20): p95/p99 must be suppressed rather than
+        // fabricated as (nearly) the maximum sample (Defect S1) — this is the anti-pattern this
+        // test used to only check `p50 > 0.0` for.
+        assert_eq!(percentiles.duration.p95, None);
+        assert_eq!(percentiles.duration.p99, None);
+        assert_eq!(percentiles.throughput.p95, None);
+        assert_eq!(percentiles.throughput.p99, None);
+        assert_eq!(percentiles.memory.p95, None);
+        assert_eq!(percentiles.memory.p99, None);
+    }
+
+    /// Defect S1 boundary regression: `p95` must flip from suppressed to reported at exactly
+    /// `MIN_SAMPLES_FOR_P95` samples, and `p99` at exactly `MIN_SAMPLES_FOR_P99`. This pins down
+    /// the exact threshold rather than only exercising values comfortably above or below it.
+    #[test]
+    fn p95_p99_suppression_flips_at_exact_sample_thresholds() {
+        let build = |n: usize| -> Percentiles {
+            let values: Vec<f64> = (0..n).map(|i| i as f64).collect();
+            build_percentiles(&values)
+        };
+
+        let just_under_p95 = build(MIN_SAMPLES_FOR_P95 - 1);
+        assert_eq!(just_under_p95.sample_count, MIN_SAMPLES_FOR_P95 - 1);
+        assert_eq!(just_under_p95.p95, None);
+
+        let at_p95_threshold = build(MIN_SAMPLES_FOR_P95);
+        assert_eq!(at_p95_threshold.sample_count, MIN_SAMPLES_FOR_P95);
+        assert!(at_p95_threshold.p95.is_some());
+
+        let just_under_p99 = build(MIN_SAMPLES_FOR_P99 - 1);
+        assert_eq!(just_under_p99.sample_count, MIN_SAMPLES_FOR_P99 - 1);
+        assert_eq!(just_under_p99.p99, None);
+        // A sample count that supports p95 but not p99 must report one and suppress the other.
+        assert!(just_under_p99.p95.is_some());
+
+        let at_p99_threshold = build(MIN_SAMPLES_FOR_P99);
+        assert_eq!(at_p99_threshold.sample_count, MIN_SAMPLES_FOR_P99);
+        assert!(at_p99_threshold.p99.is_some());
     }
 
     #[test]
@@ -2492,8 +2801,11 @@ mod tests {
         assert!(percentiles.extraction_duration.is_some());
         let ext_dur = percentiles.extraction_duration.as_ref().unwrap();
         assert!((ext_dur.p50 - 120.0).abs() < 0.1);
-        assert!(ext_dur.p95 > 120.0);
-        assert!(ext_dur.p95 <= 160.0);
+        // n=3 is far below MIN_SAMPLES_FOR_P95 (20): p95/p99 must be suppressed rather than
+        // fabricated from an interpolation that is really just reading off the max (Defect S1).
+        assert_eq!(ext_dur.sample_count, 3);
+        assert_eq!(ext_dur.p95, None);
+        assert_eq!(ext_dur.p99, None);
     }
 
     #[test]
@@ -2638,8 +2950,12 @@ mod tests {
         assert!(percentiles.extraction_duration.is_some());
         let ext_dur = percentiles.extraction_duration.as_ref().unwrap();
         assert_eq!(ext_dur.p50, 80.0);
-        assert_eq!(ext_dur.p95, 80.0);
-        assert_eq!(ext_dur.p99, 80.0);
+        // n=1: p95/p99 would otherwise equal p50 (the single sample doubling as its own "tail"),
+        // which is exactly the fabricated-precision anti-pattern Defect S1 removes.
+        assert_eq!(ext_dur.sample_count, 1);
+        assert_eq!(ext_dur.p95, None);
+        assert_eq!(ext_dur.p99, None);
+        assert_eq!(ext_dur.std_dev, 0.0);
     }
 
     #[test]
@@ -2660,9 +2976,15 @@ mod tests {
 
         assert!(ext_dur.p50 >= 400.0 && ext_dur.p50 <= 410.0);
 
-        assert!(ext_dur.p95 > ext_dur.p50);
-
-        assert!(ext_dur.p99 > ext_dur.p95);
+        // n=100 clears both MIN_SAMPLES_FOR_P95 (20) and MIN_SAMPLES_FOR_P99 (100), so both
+        // percentiles are reported (Defect S1 only suppresses below-threshold groups).
+        assert_eq!(ext_dur.sample_count, 100);
+        let p95 = ext_dur.p95.expect("n=100 supports p95");
+        let p99 = ext_dur.p99.expect("n=100 supports p99");
+        assert!((p95 - 760.4).abs() < 0.01, "p95 = {p95}");
+        assert!((p99 - 792.08).abs() < 0.01, "p99 = {p99}");
+        assert!(p95 > ext_dur.p50);
+        assert!(p99 > p95);
     }
 
     /// Regression test for the plaintext/markdown quality-ranking pooling bug.
@@ -2689,6 +3011,7 @@ mod tests {
             missing_tokens: vec![],
             extra_tokens: vec![],
             correct: false,
+            reading_order_score: None,
         });
 
         // A plaintext-only competitor (e.g. Apache Tika): higher raw quality_score because it
@@ -2704,6 +3027,7 @@ mod tests {
             missing_tokens: vec![],
             extra_tokens: vec![],
             correct: false,
+            reading_order_score: None,
         });
 
         let results = vec![markdown_result, plaintext_result];
@@ -2811,6 +3135,7 @@ mod tests {
                 missing_tokens: vec![],
                 extra_tokens: vec![],
                 correct: false,
+                reading_order_score: None,
             });
         } else {
             result.error_message = Some("extraction failed".to_string());
@@ -2864,8 +3189,8 @@ mod tests {
 
     /// Mirrors runner.rs's quality-scoring-loop silent-zero reclassification: a result that
     /// started `success=true` / `ErrorKind::None` but scored `f1_score_text == 0.0` against a
-    /// non-empty ground truth is flipped to `success=false` / `ErrorKind::EmptyContent` before
-    /// it reaches aggregation. Aggregation must treat that flipped result exactly like any other
+    /// non-empty ground truth is flipped to `success=false` / `ErrorKind::ZeroOverlap` before it
+    /// reaches aggregation. Aggregation must treat that flipped result exactly like any other
     /// framework-fault failure: excluded from quality percentiles/rankings but counted against
     /// coverage/success-rate stats — never pooled as a legitimate 0.0 quality sample.
     #[test]
@@ -2873,7 +3198,7 @@ mod tests {
         let success = result_with_quality("fw", "pdf", 0.9, true);
         let mut reclassified = create_test_result("fw", "pdf", OcrStatus::NotUsed, 100, 1_000_000.0, 10_000_000);
         reclassified.success = false;
-        reclassified.error_kind = ErrorKind::EmptyContent;
+        reclassified.error_kind = ErrorKind::ZeroOverlap;
         reclassified.quality = Some(crate::types::QualityMetrics {
             f1_score_text: 0.0,
             f1_score_numeric: 0.0,
@@ -2882,20 +3207,24 @@ mod tests {
             missing_tokens: vec![],
             extra_tokens: vec![],
             correct: false,
+            reading_order_score: None,
         });
 
-        // FailureCounts::record treats the flipped result as a framework-fault failure.
+        // under zero_overlap (not empty_content — the two are now distinguishable).
         let mut counts = FailureCounts::default();
         counts.record(&reclassified);
-        assert_eq!(counts.empty_content, 1);
+        assert_eq!(counts.zero_overlap, 1);
+        assert_eq!(counts.empty_content, 0);
         assert_eq!(counts.framework_fault_total, 1);
         assert_eq!(counts.infra_total, 0);
 
         let refs = vec![&success, &reclassified];
         let percentiles = calculate_percentiles(&refs);
 
-        // Coverage/failure stats: the flipped result counts against the success rate.
-        assert_eq!(percentiles.empty_content, 1);
+        // Coverage/failure stats: the flipped result counts against the success rate, under
+        // zero_overlap rather than empty_content.
+        assert_eq!(percentiles.zero_overlap, 1);
+        assert_eq!(percentiles.empty_content, 0);
         assert_eq!(percentiles.success_rate_percent, 50.0);
 
         // Quality percentiles: only the genuine success contributes; the flipped 0.0 sample is
@@ -2906,6 +3235,52 @@ mod tests {
         // Quality ranking is coverage-adjusted: 0.9 * (1 accountable success / 2 accountable samples).
         let aggregated = aggregate_new_format(&[success, reclassified]);
         assert!((ranking_value(&aggregated.comparison.quality_ranking_markdown, "fw") - 0.45).abs() < 1e-9);
+    }
+
+    /// The Defect-A regression test: a zero-overlap-flipped result (`success = false`,
+    /// `error_kind = ZeroOverlap`) must still contribute its own duration/throughput/memory
+    /// measurements to the group's performance percentiles, because the framework really did run
+    /// to completion and really did produce output in that time — only its *quality* is
+    /// disqualified, not its *timing*. Before the fix, `successful_performance_samples` gated on
+    /// raw `success`, silently dropping this row from every speed distribution and biasing a
+    /// garbage-producing competitor's percentiles toward looking artificially slow.
+    #[test]
+    fn zero_overlap_result_still_contributes_its_performance_sample() {
+        let success = create_test_result("fw", "pdf", OcrStatus::NotUsed, 100, 1_000_000.0, 10_000_000);
+        let mut zero_overlap = create_test_result("fw", "pdf", OcrStatus::NotUsed, 200, 2_000_000.0, 20_000_000);
+        zero_overlap.success = false;
+        zero_overlap.error_kind = ErrorKind::ZeroOverlap;
+        zero_overlap.error_message = Some("zero ground-truth token overlap".to_string());
+
+        let refs = vec![&success, &zero_overlap];
+        let percentiles = calculate_percentiles(&refs);
+
+        assert_eq!(
+            percentiles.performance_sample_count, 2,
+            "the zero-overlap row must still count as a performance sample"
+        );
+        assert_eq!(
+            percentiles.successful_sample_count, 1,
+            "only the genuine success counts toward quality"
+        );
+        assert_eq!(percentiles.zero_overlap, 1);
+        assert_eq!(percentiles.success_rate_percent, 50.0);
+
+        // Duration percentiles computed over both [100ms, 200ms] via R-7 interpolation. n=2 is
+        // far below MIN_SAMPLES_FOR_P95, so p95/p99 are suppressed rather than fabricated
+        // (Defect S1) — only p50 is reported for a group this small.
+        assert_eq!(percentiles.duration.p50, 150.0);
+        assert_eq!(percentiles.duration.p95, None);
+        assert_eq!(percentiles.duration.p99, None);
+        assert_eq!(percentiles.duration.sample_count, 2);
+
+        // Throughput percentiles computed over both [1.0, 2.0] MB/s via R-7 interpolation.
+        assert_eq!(percentiles.throughput.p50, 1.5);
+        assert_eq!(percentiles.throughput.p95, None);
+        assert_eq!(percentiles.throughput.p99, None);
+
+        // Memory percentiles computed over both [10.0, 20.0] MB via R-7 interpolation.
+        assert_eq!(percentiles.memory.p50, 15.0);
     }
 
     /// The cohort failure roll-up must sum errors to the cohort total and break them out per
@@ -3081,8 +3456,11 @@ mod tests {
 
         let pages_per_sec = percentiles.pages_per_sec.expect("pages_per_sec must be populated");
         assert_eq!(pages_per_sec.p50, 10.0);
-        assert_eq!(pages_per_sec.p95, 10.0);
-        assert_eq!(pages_per_sec.p99, 10.0);
+        // n=1: p95/p99 suppressed rather than fabricated as equal to the single sample
+        // (Defect S1).
+        assert_eq!(pages_per_sec.sample_count, 1);
+        assert_eq!(pages_per_sec.p95, None);
+        assert_eq!(pages_per_sec.p99, None);
     }
 
     #[test]
@@ -3252,6 +3630,41 @@ mod tests {
         assert_eq!(percentiles.batch_size, Some(4));
     }
 
+    /// Defect S3 regression: in single-file mode, `batch_size` must reflect real batch grouping
+    /// (none — every row has no `batch_sample_id`) rather than the coarse `total_sample_count /
+    /// performance_sample_count` ratio. With 10 single-file results and only 5 timing-eligible
+    /// (5 reclassified to `EmptyContent`, which is not timing-eligible), the old ratio published a
+    /// fictitious `batch_size` of `round(10 / 5) == 2` — a framework that never batches anything
+    /// would report shipping 2 documents per invocation. It must report `Some(1)`.
+    #[test]
+    fn batch_size_is_one_for_single_file_mode_despite_partial_timing_eligibility() {
+        let mut results = Vec::new();
+        for _ in 0..5 {
+            results.push(create_test_result(
+                "framework1",
+                "pdf",
+                OcrStatus::NotUsed,
+                100,
+                1_000_000.0,
+                10_000_000,
+            ));
+        }
+        for _ in 0..5 {
+            let mut failed = create_test_result("framework1", "pdf", OcrStatus::NotUsed, 0, 0.0, 0);
+            failed.success = false;
+            failed.error_kind = ErrorKind::EmptyContent;
+            failed.error_message = Some("empty".to_string());
+            results.push(failed);
+        }
+
+        let refs: Vec<&BenchmarkResult> = results.iter().collect();
+        let percentiles = calculate_percentiles(&refs);
+
+        assert_eq!(percentiles.total_sample_count, 10);
+        assert_eq!(percentiles.performance_sample_count, 5);
+        assert_eq!(percentiles.batch_size, Some(1));
+    }
+
     #[test]
     fn system_load_aggregates_contention_across_results() {
         let mut idle = create_test_result(
@@ -3337,6 +3750,7 @@ mod tests {
             missing_tokens: vec![],
             extra_tokens: vec![],
             correct: false,
+            reading_order_score: None,
         });
         result
     }
@@ -3542,13 +3956,15 @@ mod tests {
         );
     }
 
-    /// Defect #6 regression: when several frameworks report `cpu_seconds == 0.0` (real for native
-    /// single-file liteparse/xberg), the old `relative` computation divided by that 0.0 baseline,
-    /// tripped the `else` branch, and gave *every* row (including materially slower positive-CPU
-    /// frameworks) `relative == 1.0`. `relative` must stay well-defined and distinguish the
-    /// positive-CPU rows from each other and from the 0.0-cost rows.
+    /// Defect S2 regression: `cpu_seconds == 0.0` is `integrate_cpu_core_seconds`'s
+    /// below-measurement-resolution floor (real for native single-file liteparse/xberg — see
+    /// `monitoring.rs`), not a legitimate "measured zero CPU time" sample. A framework whose only
+    /// row reports `0.0` must be excluded from `cpu_seconds_ranking` entirely (it would otherwise
+    /// win rank 1 with a physically impossible value) and recorded in `unranked_frameworks`
+    /// instead of vanishing silently. The remaining, genuinely-measured rows must still rank with
+    /// a well-defined `relative` scaled against the smallest positive value among them.
     #[test]
-    fn cpu_seconds_ranking_relative_is_well_defined_when_best_is_zero() {
+    fn cpu_seconds_ranking_excludes_zero_floor_and_records_it_as_unranked() {
         let mut zero_cost = create_test_result(
             "framework-zero-cost",
             "pdf",
@@ -3581,48 +3997,44 @@ mod tests {
 
         let aggregated = aggregate_new_format(&[zero_cost, light, heavy]);
         let ranking = &aggregated.comparison.cpu_seconds_ranking;
-        assert_eq!(ranking.len(), 3);
+
+        // Only the two genuinely-measured (positive) frameworks rank; the 0.0-floor framework is
+        // excluded, not ranked first.
+        assert_eq!(ranking.len(), 2);
+        assert!(!ranking.iter().any(|r| r.framework_mode.contains("framework-zero-cost")));
 
         let relatives: HashMap<&str, f64> = ranking
             .iter()
             .map(|r| (r.framework_mode.as_str(), r.relative))
             .collect();
-
-        // Not every row collapsed to 1.0 (the bug being fixed).
-        assert!(
-            relatives.values().any(|v| *v != 1.0),
-            "relative values must not all degenerate to 1.0 when the best cpu_seconds is 0.0: {relatives:?}"
-        );
-
-        let zero_relative = relatives
-            .iter()
-            .find(|(k, _)| k.contains("framework-zero-cost"))
-            .map(|(_, v)| *v)
-            .expect("zero-cost framework present");
-        let light_relative = relatives
+        let light_relative = *relatives
             .iter()
             .find(|(k, _)| k.contains("framework-light"))
-            .map(|(_, v)| *v)
+            .map(|(_, v)| v)
             .expect("light framework present");
-        let heavy_relative = relatives
+        let heavy_relative = *relatives
             .iter()
             .find(|(k, _)| k.contains("framework-heavy"))
-            .map(|(_, v)| *v)
+            .map(|(_, v)| v)
             .expect("heavy framework present");
-
-        // The true best (0.0 cost) is at or below the reference point (smallest positive value).
-        assert_eq!(zero_relative, 0.0);
-        // heavy == 4.0x -- distinct, finite, and ordered the same as their raw cpu_seconds.
         assert_eq!(light_relative, 1.0);
         assert_eq!(heavy_relative, 4.0);
-        assert!(heavy_relative > light_relative);
+
+        // The exclusion is recorded, not silent (Defect S4).
+        let unranked = &aggregated.comparison.unranked_frameworks;
+        let zero_cost_entry = unranked
+            .iter()
+            .find(|u| u.framework_mode.contains("framework-zero-cost"))
+            .expect("zero-cost framework must be recorded in unranked_frameworks");
+        assert!(zero_cost_entry.reason.contains("cpu_seconds_ranking"));
     }
 
-    /// Defect #6 regression, all-zero edge case: if literally every framework reports 0.0
-    /// cpu_seconds, there is no positive reference to scale against. Every row should land on a
-    /// single well-defined tied value (0.0), not the old blanket 1.0.
+    /// Defect S2 regression, all-zero edge case: if literally every framework's only row reports
+    /// `0.0` cpu_seconds, none of them clears the measurement floor, so `cpu_seconds_ranking` must
+    /// be empty and every framework must be recorded in `unranked_frameworks` — not silently
+    /// absent, and not falsely tied for first at `0.0`.
     #[test]
-    fn cpu_seconds_ranking_relative_all_zero_stays_well_defined() {
+    fn cpu_seconds_ranking_all_zero_floor_excludes_every_framework() {
         let mut a = create_test_result("framework-a", "pdf", OcrStatus::NotUsed, 1_000, 1_000_000.0, 10_000_000);
         a.metrics.cpu_seconds = 0.0;
         let mut b = create_test_result("framework-b", "pdf", OcrStatus::NotUsed, 1_000, 1_000_000.0, 10_000_000);
@@ -3630,8 +4042,12 @@ mod tests {
 
         let aggregated = aggregate_new_format(&[a, b]);
         let ranking = &aggregated.comparison.cpu_seconds_ranking;
-        assert_eq!(ranking.len(), 2);
-        assert!(ranking.iter().all(|r| r.relative == 0.0));
+        assert_eq!(ranking.len(), 0);
+
+        let unranked = &aggregated.comparison.unranked_frameworks;
+        assert!(unranked.iter().any(|u| u.framework_mode.contains("framework-a")));
+        assert!(unranked.iter().any(|u| u.framework_mode.contains("framework-b")));
+        assert!(unranked.iter().all(|u| u.reason.contains("cpu_seconds_ranking")));
     }
 
     /// Defect #8 regression: MinerU is marked `optional` (best-effort) in the release contract
@@ -3684,6 +4100,82 @@ mod tests {
         assert!(ocr.throughput_ranking[0].optional, "Tika is best-effort in OCR PDF");
     }
 
+    /// Defect S4 regression: a framework every one of whose results failed (or was reclassified)
+    /// has zero usable performance samples, so it used to vanish from `throughput_ranking`,
+    /// `memory_ranking`, `cpu_seconds_ranking`, and `pages_per_sec_ranking` with nothing in
+    /// `ComparisonData` recording it was attempted at all — a reader saw a chart with only the
+    /// working frameworks and no hint a fifth ran and produced nothing. It must instead be
+    /// recorded in `unranked_frameworks`, while a genuinely-working framework in the same cohort
+    /// is unaffected and still ranks normally.
+    #[test]
+    fn fully_failed_framework_is_recorded_in_unranked_frameworks_not_silently_dropped() {
+        let mut totally_failed = create_test_result(
+            "framework-totally-failed",
+            "pdf",
+            OcrStatus::NotUsed,
+            100,
+            1_000_000.0,
+            10_000_000,
+        );
+        totally_failed.success = false;
+        totally_failed.error_kind = ErrorKind::Timeout;
+        totally_failed.error_message = Some("timed out".to_string());
+
+        let working = create_test_result(
+            "framework-working",
+            "pdf",
+            OcrStatus::NotUsed,
+            100,
+            1_000_000.0,
+            10_000_000,
+        );
+
+        let aggregated = aggregate_new_format(&[totally_failed, working]);
+        let comparison = &aggregated.comparison;
+
+        // The fully-failed framework has no ranked entry anywhere...
+        assert!(
+            !comparison
+                .throughput_ranking
+                .iter()
+                .any(|r| r.framework_mode.contains("totally-failed"))
+        );
+        assert!(
+            !comparison
+                .memory_ranking
+                .iter()
+                .any(|r| r.framework_mode.contains("totally-failed"))
+        );
+        assert!(
+            !comparison
+                .cpu_seconds_ranking
+                .iter()
+                .any(|r| r.framework_mode.contains("totally-failed"))
+        );
+
+        // ...but its absence is recorded, not silent.
+        let entry = comparison
+            .unranked_frameworks
+            .iter()
+            .find(|u| u.framework_mode.contains("totally-failed"))
+            .expect("fully-failed framework must be recorded in unranked_frameworks");
+        assert!(entry.reason.contains("no usable performance samples"));
+
+        // The genuinely-working framework in the same cohort is unaffected.
+        assert!(
+            comparison
+                .throughput_ranking
+                .iter()
+                .any(|r| r.framework_mode.contains("framework-working"))
+        );
+        assert!(
+            !comparison
+                .unranked_frameworks
+                .iter()
+                .any(|u| u.framework_mode.contains("framework-working"))
+        );
+    }
+
     #[test]
     fn comparison_order_is_deterministic_when_metrics_tie() {
         let docling = create_test_result("docling", "pdf", OcrStatus::NotUsed, 1_000, 1_000_000.0, 10_000_000);
@@ -3696,6 +4188,148 @@ mod tests {
             serde_json::to_value(forward.comparison).unwrap(),
             serde_json::to_value(reverse.comparison).unwrap()
         );
+    }
+
+    /// Defect regression: a markdown-batch framework and a plaintext-single-file framework must
+    /// never be pooled into one `throughput_ranking`. Markdown serialization cost and
+    /// batch-amortized process overhead are not comparable to plaintext-single-file numbers, so
+    /// each framework here is the sole (and therefore winning) member of its own
+    /// `(output_format, mode)` segment. Under the old pooled logic, the higher-throughput
+    /// framework would have won rank 1 globally and the other would have been rank 2.
+    #[test]
+    fn throughput_ranking_never_pools_across_output_format_and_mode_segments() {
+        let markdown_batch = create_test_result(
+            "framework-a-batch",
+            "pdf",
+            OcrStatus::NotUsed,
+            1_000,
+            5_000_000.0,
+            10_000_000,
+        );
+        let mut plaintext_single =
+            create_test_result("framework-b", "pdf", OcrStatus::NotUsed, 1_000, 1_000_000.0, 10_000_000);
+        plaintext_single.output_format = OutputFormat::Plaintext;
+
+        let aggregated = aggregate_new_format(&[markdown_batch, plaintext_single]);
+        let ranking = &aggregated.comparison.throughput_ranking;
+        assert_eq!(ranking.len(), 2);
+
+        let markdown_entry = ranking
+            .iter()
+            .find(|r| r.framework_mode.contains("framework-a"))
+            .expect("markdown-batch entry present");
+        let plaintext_entry = ranking
+            .iter()
+            .find(|r| r.framework_mode.contains("framework-b"))
+            .expect("plaintext-single entry present");
+
+        assert_eq!(markdown_entry.rank, 1, "sole member of its segment must be rank 1");
+        assert_eq!(markdown_entry.relative, 1.0);
+        assert_eq!(markdown_entry.output_format, OutputFormat::Markdown);
+        assert_eq!(markdown_entry.mode, "batch");
+
+        assert_eq!(plaintext_entry.rank, 1, "sole member of its segment must be rank 1");
+        assert_eq!(plaintext_entry.relative, 1.0);
+        assert_eq!(plaintext_entry.output_format, OutputFormat::Plaintext);
+        assert_eq!(plaintext_entry.mode, "single");
+    }
+
+    /// Defect regression: `deltas_vs_baseline` must be computed against each entry's own
+    /// `(output_format, mode)` segment baseline, not a single cross-segment winner. `seg2-*` has
+    /// much higher raw throughput than `seg1-*`, so under the old pooled logic `seg1-low`'s delta
+    /// would have been computed against `seg2-high` (throughput_delta_mbs = 5.0 - 100.0 = -95.0),
+    /// not its own segment's `seg1-high` (throughput_delta_mbs = 5.0 - 10.0 = -5.0).
+    #[test]
+    fn deltas_vs_baseline_use_the_entrys_own_segment_baseline() {
+        let seg1_high = create_test_result("seg1-high", "pdf", OcrStatus::NotUsed, 1_000, 10_000_000.0, 5_000_000);
+        let seg1_low = create_test_result("seg1-low", "pdf", OcrStatus::NotUsed, 1_000, 5_000_000.0, 8_000_000);
+        let mut seg2_high = create_test_result("seg2-high", "pdf", OcrStatus::NotUsed, 1_000, 100_000_000.0, 2_000_000);
+        seg2_high.output_format = OutputFormat::Plaintext;
+        let mut seg2_low = create_test_result("seg2-low", "pdf", OcrStatus::NotUsed, 1_000, 50_000_000.0, 3_000_000);
+        seg2_low.output_format = OutputFormat::Plaintext;
+
+        let aggregated = aggregate_new_format(&[seg1_high, seg1_low, seg2_high, seg2_low]);
+        let deltas = &aggregated.comparison.deltas_vs_baseline;
+
+        let seg1_low_key = deltas
+            .keys()
+            .find(|k| k.contains("seg1-low"))
+            .cloned()
+            .expect("seg1-low delta present");
+        let seg1_delta = &deltas[&seg1_low_key];
+        assert_eq!(seg1_delta.throughput_delta_mbs, -5.0);
+        assert_eq!(seg1_delta.throughput_delta_percent, -50.0);
+        assert_eq!(seg1_delta.memory_delta_mb, 3.0);
+        assert_eq!(seg1_delta.memory_delta_percent, 60.0);
+
+        let seg2_low_key = deltas
+            .keys()
+            .find(|k| k.contains("seg2-low"))
+            .cloned()
+            .expect("seg2-low delta present");
+        let seg2_delta = &deltas[&seg2_low_key];
+        assert_eq!(seg2_delta.throughput_delta_mbs, -50.0);
+        assert_eq!(seg2_delta.throughput_delta_percent, -50.0);
+        assert_eq!(seg2_delta.memory_delta_mb, 1.0);
+        assert_eq!(seg2_delta.memory_delta_percent, 50.0);
+
+        assert!(
+            !deltas.keys().any(|k| k.contains("seg1-high")),
+            "the segment baseline itself must not get a delta entry"
+        );
+        assert!(
+            !deltas.keys().any(|k| k.contains("seg2-high")),
+            "the segment baseline itself must not get a delta entry"
+        );
+    }
+
+    /// Defect regression: `memory_ranking` (lower is better) must rank ascending independently
+    /// within each `(output_format, mode)` segment. `mem-b-low` has more memory than
+    /// `mem-a-low`'s segment, yet must still land at rank 1 in its own segment because it is the
+    /// smallest within `mem-b-*`.
+    #[test]
+    fn memory_ranking_segments_independently_by_output_format_and_mode() {
+        let mem_a_low = create_test_result("mem-a-low", "pdf", OcrStatus::NotUsed, 1_000, 1_000_000.0, 2_000_000);
+        let mem_a_high = create_test_result("mem-a-high", "pdf", OcrStatus::NotUsed, 1_000, 1_000_000.0, 9_000_000);
+        let mut mem_b_low = create_test_result("mem-b-low", "pdf", OcrStatus::NotUsed, 1_000, 1_000_000.0, 5_000_000);
+        mem_b_low.output_format = OutputFormat::Plaintext;
+        let mut mem_b_high =
+            create_test_result("mem-b-high", "pdf", OcrStatus::NotUsed, 1_000, 1_000_000.0, 20_000_000);
+        mem_b_high.output_format = OutputFormat::Plaintext;
+
+        let aggregated = aggregate_new_format(&[mem_a_low, mem_a_high, mem_b_low, mem_b_high]);
+        let ranking = &aggregated.comparison.memory_ranking;
+        assert_eq!(ranking.len(), 4);
+
+        let find = |needle: &str| {
+            ranking
+                .iter()
+                .find(|r| r.framework_mode.contains(needle))
+                .unwrap_or_else(|| panic!("expected a ranking entry containing {needle:?}, got {ranking:?}"))
+        };
+
+        let a_low = find("mem-a-low");
+        assert_eq!(a_low.rank, 1);
+        assert_eq!(a_low.value, 2.0);
+        assert_eq!(a_low.relative, 1.0);
+
+        let b_low = find("mem-b-low");
+        assert_eq!(
+            b_low.rank, 1,
+            "mem-b-low is the smallest within its own segment despite exceeding mem-a-low"
+        );
+        assert_eq!(b_low.value, 5.0);
+        assert_eq!(b_low.relative, 1.0);
+
+        let a_high = find("mem-a-high");
+        assert_eq!(a_high.rank, 2);
+        assert_eq!(a_high.value, 9.0);
+        assert_eq!(a_high.relative, 4.5);
+
+        let b_high = find("mem-b-high");
+        assert_eq!(b_high.rank, 2);
+        assert_eq!(b_high.value, 20.0);
+        assert_eq!(b_high.relative, 4.0);
     }
 
     /// A successful sample with zero throughput is dropped from the `throughput` percentile
@@ -3806,6 +4440,7 @@ mod tests {
             missing_tokens: vec![("foo".to_string(), 2)],
             extra_tokens: vec![("bar".to_string(), 1)],
             correct: false,
+            reading_order_score: None,
         });
         result.pdf_metadata = Some(PdfMetadata {
             has_text_layer: true,

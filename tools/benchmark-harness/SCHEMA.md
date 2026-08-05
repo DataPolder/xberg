@@ -88,36 +88,63 @@ Each entry contains:
 
 ## PerformancePercentiles
 
-Contains p50, p95, p99 for all metrics:
+Contains p50, p95, p99 for all metrics — see "Percentiles" immediately below for the p95/p99
+suppression and dispersion contract (v2.10.0+):
 
 ```json
 {
   "successful_sample_count": 42,
+  "performance_sample_count": 40, // process-level samples used for duration/throughput/memory/cpu_seconds (v2.7.0+); a native batch contributes one regardless of document cardinality
   "total_sample_count": 50,
   "framework_errors": 0,
   "harness_errors": 5,
   "timeouts": 3,
-  "empty_content": 0,
+  "empty_content": 0,       // framework produced no content at all
+  "zero_overlap": 0,        // framework produced non-empty output with zero token overlap vs a non-empty ground truth
   "error_details": {
     "error message": 2
   },
-  "duration": { "p50": 100.5, "p95": 150.2, "p99": 199.9 },
-  "throughput": { "p50": 5.2, "p95": 4.8, "p99": 3.1 },
-  "memory": { "p50": 150.0, "p95": 200.0, "p99": 250.0 },
-  "extraction_duration": { "p50": 80.0, "p95": 120.0, "p99": 160.0 }, // Optional
+  "duration": { "p50": 100.5, "p95": 150.2, "p99": null, "sample_count": 40, "std_dev": 22.1 },
+  "throughput": { "p50": 5.2, "p95": 4.8, "p99": 3.1, "sample_count": 40, "std_dev": 0.9 },
+  "memory": { "p50": 150.0, "p95": 200.0, "p99": 250.0, "sample_count": 40, "std_dev": 18.4 },
+  "extraction_duration": { "p50": 80.0, "p95": 120.0, "p99": 160.0, "sample_count": 40, "std_dev": 12.0 }, // Optional
   "quality": {
     /* QualityPercentiles */
   }, // Optional, if quality data available
   "success_rate_percent": 84.0,
-  "pages_per_sec": { "p50": 12.5, "p95": 8.0, "p99": 5.0 }, // Optional (v2.7.0+, PDF only)
-  "cpu_seconds": { "p50": 1.2, "p95": 2.1, "p99": 3.4 }, // v2.7.0+
-  "batch_size": 8, // Optional (v2.7.0+)
+  "pages_per_sec": { "p50": 12.5, "p95": 8.0, "p99": 5.0, "sample_count": 40, "std_dev": 1.1 }, // Optional (v2.7.0+, PDF only)
+  "cpu_seconds": { "p50": 1.2, "p95": 2.1, "p99": 3.4, "sample_count": 38, "std_dev": 0.6 }, // v2.7.0+
+  "batch_size": 8, // Optional (v2.7.0+; derived from real batch membership since v2.10.0+, see Migration)
   "system_load": {
     /* SystemLoadPercentiles */
   }, // Optional (v2.7.0+)
   "throughput_excluded_sample_count": 0 // v2.8.0+
 }
 ```
+
+## Percentiles (v2.10.0+ contract)
+
+Each metric (`duration`, `throughput`, `memory`, `extraction_duration`, `pages_per_sec`,
+`cpu_seconds`) is a `Percentiles` object:
+
+```json
+{ "p50": 100.5, "p95": 150.2, "p99": null, "sample_count": 40, "std_dev": 22.1 }
+```
+
+- **`p50`**: always reported (`0.0` when `sample_count == 0`).
+- **`p95`**: `null` when `sample_count < 20` (`MIN_SAMPLES_FOR_P95`).
+- **`p99`**: `null` when `sample_count < 100` (`MIN_SAMPLES_FOR_P99`).
+- **`sample_count`**: how many values this group was computed from.
+- **`std_dev`**: sample standard deviation (Bessel-corrected) of the underlying values; `0.0` for
+  `sample_count <= 1`.
+
+R-7 interpolation places a percentile at index `p * (sample_count - 1)`. Below roughly
+`1 / (1 - p)` samples that index coincides with (or sits immediately next to) the maximum observed
+value, so the "percentile" is really just the largest sample or two wearing a statistical label —
+real benchmark cohorts are frequently 4-8 fixtures, well under either threshold. `p95`/`p99` are
+`null` in that case instead of a fabricated number that looks precise but isn't, and `sample_count`
+/`std_dev` are always present so a reader can judge the underlying distribution regardless (see
+"Migration from v2.9.0 to v2.10.0").
 
 ## QualityPercentiles
 
@@ -178,7 +205,7 @@ The batch dedup that collapses a native batch to one `performance_sample_count` 
   "quality_score": 0.85,
   "correct": true,
   "success": true,
-  "error_kind": null, // "FrameworkError", "HarnessError", "Timeout", etc. if !success
+  "error_kind": null, // "FrameworkError", "HarnessError", "Timeout", "EmptyContent", "ZeroOverlap", etc. if !success
   "file_size": 45210, // v2.8.0+
   "throughput_bytes_per_sec": 361280.5, // v2.8.0+
   "avg_cpu_percent": 42.1, // v2.8.0+
@@ -240,9 +267,10 @@ Each `FailureCounts` object:
 ```json
 {
   "framework_errors": 0,     // framework hit a hard error on a supported document
-  "empty_content": 0,        // framework produced empty output for a supported document
+  "empty_content": 0,        // framework produced no content at all for a supported document
+  "zero_overlap": 0,         // framework produced non-empty output with zero token overlap vs a non-empty ground truth
   "timeouts": 0,             // framework exceeded the timeout on a supported document
-  "framework_fault_total": 0, // sum of the three above; these penalize quality + success rate
+  "framework_fault_total": 0, // sum of the four above; these penalize quality + success rate
   "harness_errors": 0,       // our harness failed (process crash, bad JSON): never penalizes
   "config_setup_errors": 0,  // our config/setup failed (missing deps): never penalizes
   "infra_total": 0           // sum of the two infrastructure kinds above
@@ -254,6 +282,39 @@ declares support for and failed — and are scored as quality 0 in the percentil
 failures are our harness's fault and are excluded from both the quality percentiles and the
 success-rate denominator. `total` counts every document; `by_framework_mode` and `by_file_type`
 partition the same failures by aggregate key and by file extension respectively.
+
+`empty_content` and `zero_overlap` are both framework-fault failures but mean different things:
+`empty_content` is a framework that produced no content at all (set directly by the adapter that
+ran it); `zero_overlap` is a framework that produced non-empty output that shares zero tokens with
+a non-empty ground truth (set by the runner's post-scoring reclassification — see "Zero-overlap
+reclassification" below). Both are excluded from quality percentiles and both still contribute
+their duration/throughput/memory/cpu_seconds/pages_per_sec measurements to `PerformancePercentiles`
+— see "Timing eligibility" below.
+
+### Zero-overlap reclassification
+
+A result that reports `success = true` / `error_kind = None` but whose text quality score
+(`f1_score_text`) is `0.0` against a non-empty ground truth is not a legitimate "perfect failure"
+quality sample — it is non-empty garbage output masquerading as a successful extraction. The runner
+reclassifies it to `success = false` / `error_kind = "ZeroOverlap"` before aggregation so it is
+excluded from quality percentiles/rankings but still counted against coverage/success-rate stats,
+exactly like any other framework-fault failure. Fixtures with an empty (post-trim) ground truth are
+never reclassified this way, since there is no signal to score against.
+
+### Timing eligibility
+
+`PerformancePercentiles.duration/throughput/memory/cpu_seconds/pages_per_sec` and
+`performance_sample_count` are computed over *timing-eligible* results, not strictly successful
+ones: a result is timing-eligible if `success == true`, or if it was reclassified to
+`error_kind == "ZeroOverlap"`. In both cases the framework actually ran to completion and produced
+output within the measured window, so the timing measurement is valid even though the *quality* is
+disqualified. Excluding zero-overlap results from timing (as if gated on raw `success`) would bias
+every framework's speed percentiles: a competitor that returns fast garbage on unsupported/degraded
+input would have its fastest samples silently dropped, inflating its measured duration and
+depressing its measured throughput relative to a framework that rarely produces zero-overlap
+output. `ErrorKind::EmptyContent` results remain excluded from timing, unchanged from prior
+behavior — a framework that produced literally nothing has no meaningful timing sample to
+contribute.
 
 ## FormatSupportMatrix (v2.9.0+)
 
@@ -276,6 +337,46 @@ aggregate cannot list a format that produced no result for any selected framewor
 maps each logical framework to observed file types absent from its declared capabilities; xberg is
 never listed because it is the full-corpus subject under test. Both fields default empty when older
 v2.9.0 aggregates are deserialized.
+
+## Migration from v2.9.0 to v2.10.0
+
+Additive only — no key-format change, no field removed or renamed. Fixes four statistical-integrity
+defects where a published number looked like a real measurement but was actually a harness
+artifact (tiny-n interpolation, a monitoring-resolution floor, a coarse ratio, or a silent
+disappearance).
+
+- **`Percentiles.p95`/`Percentiles.p99`** (nullable, was always-present `f64`; new
+  **`sample_count`** and **`std_dev`** fields): `p95` is `null` when the underlying sample count is
+  below `MIN_SAMPLES_FOR_P95` (20); `p99` is `null` below `MIN_SAMPLES_FOR_P99` (100). Real
+  benchmark cohorts are frequently 4-8 fixtures, at which R-7 interpolation for p95/p99 was
+  effectively just reading off the maximum sample rather than a genuine tail percentile — a single
+  outlier document silently became "the p99 tail." `sample_count` and `std_dev` are always present
+  so a reader can judge the underlying distribution's size and dispersion even when p95/p99 are
+  suppressed, and so a `0.0` `p50` on a degenerate (empty) group is distinguishable from a real
+  `0.0` measurement. This is a **breaking change for consumers that read `p95`/`p99` as a bare
+  number** — they must now handle `null`. See "Percentiles (v2.10.0+ contract)" above.
+- **`PerformancePercentiles.cpu_seconds`**: a `cpu_seconds` reading of exactly `0.0` is now treated
+  as "below measurement resolution" (the process ran with fewer than 2 resource-sampler ticks — see
+  `integrate_cpu_core_seconds` in `monitoring.rs`), not a real "zero CPU-seconds consumed"
+  measurement (physically impossible for a process that ran to completion). Such readings are
+  excluded from the `cpu_seconds` distribution entirely, so `cpu_seconds.sample_count` can be lower
+  than `performance_sample_count` for a framework whose runs are frequently too fast to sample.
+- **`PerformancePercentiles.batch_size`**: now derived from real batch membership
+  (`framework_capabilities.batch_sample_id`) instead of the coarse `total_sample_count /
+  performance_sample_count` ratio. That ratio was only correct when every eligible row was its own
+  batch of one; once some rows were excluded from timing eligibility for a reason unrelated to
+  batch grouping (e.g. `EmptyContent`), it silently reported the inverse timing-eligibility rate
+  instead of a document count — 10 single-file results with 5 timing-eligible used to publish a
+  fictitious `batch_size` of 2. Single-file mode now always reports `Some(1)`.
+- **`ComparisonData.unranked_frameworks`** (`UnrankedFramework[]`, new, defaults to `[]`): records
+  every framework attempted but excluded from a ranking, with why — see "UnrankedFramework
+  (v2.10.0+)" above. Covers both the pre-existing "zero performance samples" exclusion (previously
+  silent) and the new cpu_seconds-floor exclusion above.
+- **`ComparisonData.cpu_seconds_ranking`**: a framework whose every performance sample measured
+  `0.0` cpu_seconds is now excluded from this ranking (previously it could win rank 1 with that
+  physically impossible value, since ascending sort put `0.0` first) and recorded in
+  `unranked_frameworks` instead. The pre-existing smallest-positive-value `reference_cpu_seconds`
+  logic for `relative` is unchanged for the frameworks that remain.
 
 ## Migration from v2.7.0 to v2.8.0
 
@@ -363,7 +464,9 @@ predate it.
 - **`ComparisonData.pages_per_sec_ranking`** / **`cpu_seconds_ranking`** (`RankedFramework[]`):
   new rankings mirroring `throughput_ranking` and `memory_ranking` respectively — pages/sec
   ranked descending (higher is better), CPU-seconds ranked ascending (lower is better). Only
-  frameworks with at least one pages/sec observation appear in `pages_per_sec_ranking`.
+  frameworks with at least one pages/sec observation appear in `pages_per_sec_ranking`. Like
+  `throughput_ranking` and `memory_ranking`, both are scored within each `(output_format, mode)`
+  segment — see the `RankedFramework` section below.
 - **`ComparisonData.pareto_frontier`** (`ParetoPoint[]`): the non-dominated frontier over
   (pages/sec ↑, SF1 ↑, peak-RSS ↓) for markdown frameworks that carry both an SF1 term and a
   pages/sec observation (plaintext-only frameworks never carry SF1, so they are never eligible;
@@ -381,10 +484,10 @@ Contains all cross-framework rankings split by output format for quality metrics
 ```json
 {
   "throughput_ranking": [
-    /* RankedFramework[] */
+    /* RankedFramework[] — segmented by (output_format, mode), see below */
   ],
   "memory_ranking": [
-    /* RankedFramework[] */
+    /* RankedFramework[] — segmented by (output_format, mode), see below */
   ],
   "quality_ranking_markdown": [
     /* RankedFramework[] — markdown-only (combined quality with SF1 term) */
@@ -408,30 +511,74 @@ Contains all cross-framework rankings split by output format for quality metrics
     /* RankedFramework[] — markdown-only, never plaintext */
   ],
   "pages_per_sec_ranking": [
-    /* RankedFramework[] — descending, higher pages/sec first (v2.7.0+) */
+    /* RankedFramework[] — descending, higher pages/sec first (v2.7.0+); segmented by
+       (output_format, mode), see below */
   ],
   "cpu_seconds_ranking": [
-    /* RankedFramework[] — ascending, lower CPU-seconds first (v2.7.0+) */
+    /* RankedFramework[] — ascending, lower CPU-seconds first (v2.7.0+); segmented by
+       (output_format, mode), see below */
   ],
   "deltas_vs_baseline": {
     "<aggregate_key>": {
-      /* DeltaMetrics */
+      /* DeltaMetrics, computed against this entry's own (output_format, mode) segment's
+         highest-throughput row — not a single cross-segment baseline. The segment baseline row
+         itself gets no entry (see RankedFramework below for why segments exist). */
     }
   },
   "pareto_frontier": [
     /* ParetoPoint[] — non-dominated (pages/sec, SF1, peak-RSS) points, markdown only (v2.7.0+) */
+  ],
+  "unranked_frameworks": [
+    /* UnrankedFramework[] — attempted frameworks excluded from a ranking above, with why
+       (v2.10.0+, see below) */
   ]
 }
 ```
 
+### UnrankedFramework (v2.10.0+)
+
+A framework present in `by_framework_mode` (it ran) but absent from `throughput_ranking` /
+`memory_ranking` / `cpu_seconds_ranking` / `pages_per_sec_ranking` / `pareto_frontier`, because it
+had no usable performance sample for that ranking. Every one of those rankings is gated on having
+at least one performance sample; before this field existed, a framework whose every result failed
+or was reclassified (or whose cpu_seconds measurements all hit the monitoring-resolution floor —
+see "Migration from v2.9.0 to v2.10.0") simply vanished from the charts with nothing recording it
+was attempted. This makes that absence explicit:
+
+```json
+{
+  "framework_mode": "docling:markdown:single",
+  "reason": "no usable performance samples (12 total result(s), none timing-eligible); excluded from throughput_ranking, memory_ranking, cpu_seconds_ranking, pages_per_sec_ranking, and pareto_frontier"
+}
+```
+
+A framework can appear once for a total exclusion (as above) or, separately, for a
+`cpu_seconds_ranking`-only exclusion when it has usable performance samples for every other
+ranking but every one of its cpu_seconds readings was `0.0` (see "Migration from v2.9.0 to
+v2.10.0"); `reason` is free text, not a fixed enum, so read it rather than pattern-matching a
+specific wording.
+
 ### RankedFramework
+
+`throughput_ranking`, `memory_ranking`, `cpu_seconds_ranking`, and `pages_per_sec_ranking` are each
+ranked and scored **within** a framework's own `(output_format, mode)` segment, not globally —
+`"rank": 1` / `"relative": 1.0` mean "best among frameworks sharing this same output format and
+mode," not "best overall." A markdown row pays a serialization cost a plaintext row never incurs,
+and a native-batch row amortizes process startup over every document in the batch while a
+single-file row pays it once per document — pooling either pair together would rank frameworks on
+harness plumbing rather than real performance (mirroring why `quality_ranking_markdown` /
+`quality_ranking_plaintext` are already split by format above; see `shared_corpus_markdown` /
+`shared_corpus_plaintext` in `ConsolidationMetadata`). `output_format` and `mode` on each entry
+self-identify which segment `rank`/`relative` are scoped to.
 
 ```json
 {
   "framework_mode": "xberg-markdown-baseline:single",
   "rank": 1,
   "value": 95.5, // The metric value (duration, throughput, etc.)
-  "relative": 1.0 // Ratio relative to best (1.0 = best)
+  "relative": 1.0, // Ratio relative to the best value WITHIN this entry's own segment (1.0 = best)
+  "output_format": "markdown", // Which segment rank/relative are scoped to (v2.9.0+)
+  "mode": "single" // Which segment rank/relative are scoped to, e.g. "single"/"batch" (v2.9.0+)
 }
 ```
 
@@ -534,7 +681,9 @@ Competitor names carry no format information, so they continue to need it in the
 - Plaintext frameworks NEVER appear in `pdf_sf1_ranking_markdown`
 - Plaintext frameworks NEVER appear in `pdf_tf1_ranking_markdown` (they get their own `pdf_tf1_ranking_plaintext`)
 - SF1 and layout percentiles are `null` for plaintext output format
-- All performance rankings (speed, memory, throughput) include both formats without discrimination
+- Performance rankings (`throughput_ranking`, `memory_ranking`, `cpu_seconds_ranking`,
+  `pages_per_sec_ranking`) include both formats, but never pool them together: each is scored
+  within its own `(output_format, mode)` segment (v2.9.0+, see `RankedFramework` above)
 
 ## ConsolidationMetadata
 

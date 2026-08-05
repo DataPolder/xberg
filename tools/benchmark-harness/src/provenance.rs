@@ -124,6 +124,34 @@ pub struct TimingProvenance {
     pub output_format: OutputFormat,
 }
 
+/// Per-framework success-rate accounting captured after benchmark execution.
+///
+/// Recorded for every framework that produced results, not only the ones that
+/// fell below [`CoverageGateProvenance::min_success_rate`], so a reader can see
+/// that a framework underperformed instead of inferring it from an absence.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FrameworkCoverageProvenance {
+    pub framework: String,
+    pub successful: usize,
+    pub framework_failures: usize,
+    pub infrastructure_failures: usize,
+    pub success_rate: f64,
+}
+
+/// Outcome of the post-run minimum-success-rate gate.
+///
+/// The gate itself still fails the run (non-zero exit) when a framework falls
+/// below `min_success_rate`, but this record is written to disk alongside the
+/// rest of the artifact regardless of the outcome, so a failing run leaves a
+/// complete, inspectable result set instead of silently discarding it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CoverageGateProvenance {
+    pub min_success_rate: f64,
+    pub frameworks: Vec<FrameworkCoverageProvenance>,
+    pub passed: bool,
+    pub failing_frameworks: Vec<String>,
+}
+
 /// Sidecar metadata for a standard `run` invocation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunProvenance {
@@ -134,6 +162,10 @@ pub struct RunProvenance {
     pub frameworks: Vec<FrameworkProvenance>,
     pub timing: TimingProvenance,
     pub fixed_batch_size: Option<usize>,
+    /// Populated after execution, once results are available. `None` only for
+    /// provenance captured before execution has run (see [`RunProvenance::capture`]).
+    #[serde(default)]
+    pub coverage: Option<CoverageGateProvenance>,
 }
 
 /// Inputs used to capture a run's provenance before framework execution.
@@ -251,6 +283,7 @@ impl RunProvenance {
                 output_format: inputs.output_format,
             },
             fixed_batch_size: inputs.fixed_batch_size,
+            coverage: None,
         })
     }
 }

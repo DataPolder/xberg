@@ -266,7 +266,7 @@ filters unsupported fixtures; its final native batch may therefore contain fewer
 the configured batch size. Sharding cannot be combined with exact cohorts or fixed batch sizing.
 
 `--min-success-rate` counts successful results over successful results plus framework-accountable
-failures (`FrameworkError`, `Timeout`, and `EmptyContent`). Unsupported fixtures are filtered before
+failures (`FrameworkError`, `Timeout`, `EmptyContent`, and `ZeroOverlap`). Unsupported fixtures are filtered before
 execution. Infrastructure failures are reported separately and do not enter this rate; a framework
 with no accountable results still fails validation.
 

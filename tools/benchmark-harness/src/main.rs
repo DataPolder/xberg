@@ -102,7 +102,7 @@ fn parse_success_rate(value: &str) -> std::result::Result<f64, String> {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 struct FrameworkCoverage {
     framework: String,
     successful: usize,
@@ -111,10 +111,30 @@ struct FrameworkCoverage {
     success_rate: f64,
 }
 
-fn evaluate_framework_coverage<'a>(
+impl FrameworkCoverage {
+    /// Extractions that count toward the success rate: framework successes and framework-fault
+    /// failures. Infrastructure failures are excluded because they are not the framework's fault.
+    fn accountable(&self) -> usize {
+        self.successful + self.framework_failures
+    }
+
+    /// A framework with zero accountable results never demonstrated any success, regardless of
+    /// `min_success_rate`, so it always fails the gate rather than dividing by zero into a
+    /// misleadingly clean `0.0 >= 0.0`.
+    fn below_gate(&self, min_success_rate: f64) -> bool {
+        self.accountable() == 0 || self.success_rate < min_success_rate
+    }
+}
+
+/// Compute per-framework success-rate accounting for every framework present in `results`.
+///
+/// This never fails: every framework that produced at least one result is represented, including
+/// ones that fell below any success-rate threshold. Threshold enforcement is a separate step
+/// ([`FrameworkCoverage::below_gate`]) so callers can persist the full accounting before deciding
+/// whether to fail the run.
+fn compute_framework_coverage<'a>(
     results: impl IntoIterator<Item = (&'a str, bool, ErrorKind)>,
-    min_success_rate: f64,
-) -> std::result::Result<Vec<FrameworkCoverage>, String> {
+) -> Vec<FrameworkCoverage> {
     let mut counts = std::collections::BTreeMap::<String, (usize, usize, usize)>::new();
     for (framework, success, error_kind) in results {
         let entry = counts.entry(framework.to_string()).or_default();
@@ -122,7 +142,7 @@ fn evaluate_framework_coverage<'a>(
             entry.0 += 1;
         } else if matches!(
             error_kind,
-            ErrorKind::FrameworkError | ErrorKind::EmptyContent | ErrorKind::Timeout
+            ErrorKind::FrameworkError | ErrorKind::EmptyContent | ErrorKind::ZeroOverlap | ErrorKind::Timeout
         ) {
             entry.1 += 1;
         } else {
@@ -130,29 +150,26 @@ fn evaluate_framework_coverage<'a>(
         }
     }
 
-    let mut coverage = Vec::with_capacity(counts.len());
-    for (framework, (successful, framework_failures, infrastructure_failures)) in counts {
-        let accountable = successful + framework_failures;
-        if accountable == 0 {
-            return Err(format!(
-                "{framework} produced no accountable benchmark results; {infrastructure_failures} infrastructure failure(s) occurred"
-            ));
-        }
-        let success_rate = successful as f64 / accountable as f64;
-        if success_rate < min_success_rate {
-            return Err(format!(
-                "{framework} success rate {success_rate:.3} ({successful}/{accountable}) is below the required minimum {min_success_rate:.3}"
-            ));
-        }
-        coverage.push(FrameworkCoverage {
-            framework,
-            successful,
-            framework_failures,
-            infrastructure_failures,
-            success_rate,
-        });
-    }
-    Ok(coverage)
+    counts
+        .into_iter()
+        .map(
+            |(framework, (successful, framework_failures, infrastructure_failures))| {
+                let accountable = successful + framework_failures;
+                let success_rate = if accountable == 0 {
+                    0.0
+                } else {
+                    successful as f64 / accountable as f64
+                };
+                FrameworkCoverage {
+                    framework,
+                    successful,
+                    framework_failures,
+                    infrastructure_failures,
+                    success_rate,
+                }
+            },
+        )
+        .collect()
 }
 
 fn validate_framework_result_cardinality<'a, 'b>(
@@ -184,6 +201,92 @@ fn validate_framework_result_cardinality<'a, 'b>(
             ));
         }
     }
+    Ok(())
+}
+
+/// Writes `results.json`, `by-extension.json`, and `provenance.json` for a completed run, then
+/// evaluates the minimum-success-rate gate.
+///
+/// Artifacts are always written before the gate is checked: a run that falls below
+/// `min_success_rate` still leaves a complete, inspectable record on disk (including every other
+/// framework's results), instead of the whole artifact silently vanishing on the first
+/// underperforming framework. The gate outcome — threshold, per-framework accounting, and which
+/// frameworks failed it — is recorded in `provenance.coverage` before the provenance file is
+/// written. The gate itself is unchanged: a below-threshold run still returns `Err`, so the
+/// process still exits non-zero.
+fn write_run_artifacts_and_check_gate(
+    results: &[benchmark_harness::BenchmarkResult],
+    mut provenance: benchmark_harness::RunProvenance,
+    output: &std::path::Path,
+    min_success_rate: f64,
+) -> Result<()> {
+    use benchmark_harness::provenance::{CoverageGateProvenance, FrameworkCoverageProvenance};
+    use benchmark_harness::{write_by_extension_analysis, write_json};
+
+    let coverage = compute_framework_coverage(
+        results
+            .iter()
+            .map(|result| (result.framework.as_str(), result.success, result.error_kind)),
+    );
+    let failing_frameworks: Vec<String> = coverage
+        .iter()
+        .filter(|framework| framework.below_gate(min_success_rate))
+        .map(|framework| framework.framework.clone())
+        .collect();
+    let passed = failing_frameworks.is_empty();
+
+    provenance.coverage = Some(CoverageGateProvenance {
+        min_success_rate,
+        frameworks: coverage
+            .iter()
+            .map(|framework| FrameworkCoverageProvenance {
+                framework: framework.framework.clone(),
+                successful: framework.successful,
+                framework_failures: framework.framework_failures,
+                infrastructure_failures: framework.infrastructure_failures,
+                success_rate: framework.success_rate,
+            })
+            .collect(),
+        passed,
+        failing_frameworks: failing_frameworks.clone(),
+    });
+
+    for framework in &coverage {
+        if framework.framework_failures > 0 || framework.infrastructure_failures > 0 {
+            println!(
+                "  {}: {}/{} supported extractions succeeded ({:.1}% >= {:.1}% required); \
+                 {} infrastructure failure(s) excluded",
+                framework.framework,
+                framework.successful,
+                framework.accountable(),
+                framework.success_rate * 100.0,
+                min_success_rate * 100.0,
+                framework.infrastructure_failures,
+            );
+        }
+    }
+
+    let output_file = output.join("results.json");
+    write_json(results, &output_file)?;
+    println!("\nResults written to: {}", output_file.display());
+
+    let by_ext_file = output.join("by-extension.json");
+    write_by_extension_analysis(results, &by_ext_file)?;
+    println!("Per-extension analysis written to: {}", by_ext_file.display());
+
+    let provenance_file = output.join("provenance.json");
+    benchmark_harness::write_run_provenance(&provenance, &provenance_file)?;
+    println!("Run provenance written to: {}", provenance_file.display());
+
+    if !passed {
+        return Err(benchmark_harness::Error::Benchmark(format!(
+            "{} of {} framework(s) fell below the required minimum success rate {min_success_rate:.3}: {}",
+            failing_frameworks.len(),
+            coverage.len(),
+            failing_frameworks.join(", ")
+        )));
+    }
+
     Ok(())
 }
 
@@ -1086,43 +1189,11 @@ async fn main() -> Result<()> {
             )
             .map_err(benchmark_harness::Error::Benchmark)?;
 
-            let coverage = evaluate_framework_coverage(
-                results
-                    .iter()
-                    .map(|result| (result.framework.as_str(), result.success, result.error_kind)),
-                min_success_rate,
-            )
-            .map_err(benchmark_harness::Error::Benchmark)?;
-            for framework in coverage {
-                if framework.framework_failures > 0 || framework.infrastructure_failures > 0 {
-                    println!(
-                        "  {}: {}/{} supported extractions succeeded ({:.1}% >= {:.1}% required); \
-                         {} infrastructure failure(s) excluded",
-                        framework.framework,
-                        framework.successful,
-                        framework.successful + framework.framework_failures,
-                        framework.success_rate * 100.0,
-                        min_success_rate * 100.0,
-                        framework.infrastructure_failures,
-                    );
-                }
-            }
-
-            use benchmark_harness::{write_by_extension_analysis, write_json};
-
-            let output_file = output.join("results.json");
-            write_json(&results, &output_file)?;
-            println!("\nResults written to: {}", output_file.display());
-
-            let by_ext_file = output.join("by-extension.json");
-            write_by_extension_analysis(&results, &by_ext_file)?;
-            println!("Per-extension analysis written to: {}", by_ext_file.display());
-
-            let provenance_file = output.join("provenance.json");
-            benchmark_harness::write_run_provenance(&provenance, &provenance_file)?;
-            println!("Run provenance written to: {}", provenance_file.display());
-
-            Ok(())
+            // Writes results.json, by-extension.json, and provenance.json (recording the gate
+            // outcome for every framework) BEFORE evaluating min_success_rate. A run that falls
+            // below the threshold still leaves a complete, inspectable artifact on disk; only
+            // then does the process exit non-zero. ~keep
+            write_run_artifacts_and_check_gate(&results, provenance, &output, min_success_rate)
         }
         Commands::Consolidate {
             inputs,
@@ -1673,12 +1744,16 @@ fn format_size(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        Cli, Commands, XBERG_RUN_PIPELINES, cohort_contract_summary, evaluate_framework_coverage,
+        Cli, Commands, XBERG_RUN_PIPELINES, cohort_contract_summary, compute_framework_coverage,
         normalize_run_frameworks, parse_model_provenance, parse_pipeline_names, parse_sort_metric,
         selected_frameworks_use_tesseract, should_register_xberg_pipeline, tracing_filter,
-        validate_framework_result_cardinality,
+        validate_framework_result_cardinality, write_run_artifacts_and_check_gate,
     };
-    use benchmark_harness::types::ErrorKind;
+    use benchmark_harness::provenance::{
+        CorpusProvenance, FrameworkProvenance, RepositoryProvenance, RunProvenance, TimingProvenance,
+    };
+    use benchmark_harness::types::{ErrorKind, FrameworkCapabilities, OcrStatus, PerformanceMetrics};
+    use benchmark_harness::{BenchmarkMode, BenchmarkResult, OutputFormat};
     use clap::Parser;
 
     #[test]
@@ -1921,41 +1996,56 @@ mod tests {
 
     #[test]
     fn coverage_is_checked_per_framework_at_the_inclusive_boundary() {
-        let coverage = evaluate_framework_coverage(
-            [
-                ("healthy", true, ErrorKind::None),
-                ("healthy", false, ErrorKind::FrameworkError),
-                ("broken", false, ErrorKind::FrameworkError),
-            ],
-            0.5,
-        );
-        assert_eq!(
-            coverage.unwrap_err(),
-            "broken success rate 0.000 (0/1) is below the required minimum 0.500"
-        );
+        let coverage = compute_framework_coverage([
+            ("healthy", true, ErrorKind::None),
+            ("healthy", false, ErrorKind::FrameworkError),
+            ("broken", false, ErrorKind::FrameworkError),
+        ]);
+        // "broken" is below the 0.5 threshold and is reported instead of aborting the whole run.
+        let broken = coverage
+            .iter()
+            .find(|framework| framework.framework == "broken")
+            .unwrap();
+        assert_eq!(broken.success_rate, 0.0);
+        assert_eq!(broken.successful, 0);
+        assert_eq!(broken.framework_failures, 1);
+        assert!(broken.below_gate(0.5));
 
-        let boundary = evaluate_framework_coverage(
-            [
-                ("healthy", true, ErrorKind::None),
-                ("healthy", false, ErrorKind::Timeout),
-            ],
-            0.5,
-        )
-        .unwrap();
+        let boundary = compute_framework_coverage([
+            ("healthy", true, ErrorKind::None),
+            ("healthy", false, ErrorKind::Timeout),
+        ]);
         assert_eq!(boundary[0].success_rate, 0.5);
+        assert!(
+            !boundary[0].below_gate(0.5),
+            "0.5 rate meets an inclusive 0.5 threshold"
+        );
+    }
+
+    #[test]
+    fn coverage_counts_zero_overlap_as_a_framework_fault_failure() {
+        // ZeroOverlap is the runner's reclassification of non-empty-but-garbage output; it must
+        // count against the framework exactly like FrameworkError/EmptyContent/Timeout, not like
+        // an infrastructure failure.
+        let coverage = compute_framework_coverage([
+            ("framework", true, ErrorKind::None),
+            ("framework", false, ErrorKind::ZeroOverlap),
+        ]);
+        assert_eq!(coverage.len(), 1);
+        assert_eq!(coverage[0].successful, 1);
+        assert_eq!(coverage[0].framework_failures, 1);
+        assert_eq!(coverage[0].infrastructure_failures, 0);
+        assert_eq!(coverage[0].success_rate, 0.5);
     }
 
     #[test]
     fn coverage_excludes_infrastructure_failures_from_the_rate() {
-        let coverage = evaluate_framework_coverage(
-            [
-                ("framework", true, ErrorKind::None),
-                ("framework", false, ErrorKind::HarnessError),
-                ("framework", false, ErrorKind::ConfigSetupError),
-            ],
-            1.0,
-        )
-        .unwrap();
+        let coverage = compute_framework_coverage([
+            ("framework", true, ErrorKind::None),
+            ("framework", false, ErrorKind::HarnessError),
+            ("framework", false, ErrorKind::ConfigSetupError),
+        ]);
+        assert_eq!(coverage.len(), 1);
         assert_eq!(coverage[0].successful, 1);
         assert_eq!(coverage[0].framework_failures, 0);
         assert_eq!(coverage[0].infrastructure_failures, 2);
@@ -1963,12 +2053,189 @@ mod tests {
     }
 
     #[test]
-    fn coverage_rejects_runs_with_only_infrastructure_failures() {
-        let error = evaluate_framework_coverage([("framework", false, ErrorKind::HarnessError)], 0.0).unwrap_err();
+    fn coverage_records_but_does_not_abort_on_only_infrastructure_failures() {
+        let coverage = compute_framework_coverage([("framework", false, ErrorKind::HarnessError)]);
+        assert_eq!(coverage.len(), 1);
+        assert_eq!(coverage[0].successful, 0);
+        assert_eq!(coverage[0].framework_failures, 0);
+        assert_eq!(coverage[0].infrastructure_failures, 1);
+        assert_eq!(coverage[0].accountable(), 0);
+        assert_eq!(coverage[0].success_rate, 0.0);
+        // Zero accountable results always fails the gate, even at a 0.0 threshold, since the
+        // framework never demonstrated a single success.
+        assert!(coverage[0].below_gate(0.0));
+    }
+
+    /// Minimal `RunProvenance` for exercising `write_run_artifacts_and_check_gate` without a
+    /// full benchmark run.
+    fn sample_provenance() -> RunProvenance {
+        RunProvenance {
+            schema_version: 2,
+            harness_version: "test".to_string(),
+            repository: RepositoryProvenance {
+                commit: Some("0".repeat(40)),
+                dirty: Some(false),
+            },
+            corpus: CorpusProvenance {
+                cohort: None,
+                cohort_manifest_blake3: None,
+                ordered_fixtures: vec![],
+            },
+            frameworks: vec![FrameworkProvenance {
+                name: "healthy".to_string(),
+                version: "1.0.0".to_string(),
+                executable: None,
+                models: vec![],
+                batch_capability: None,
+                requested_workers: None,
+                effective_workers: None,
+                configured_thread_budget: None,
+                worker_semantics: "test".to_string(),
+                effective_warmup_iterations: 0,
+                eligible_documents: 1,
+                batch_partitions: None,
+                ocr_language_policy: Default::default(),
+            }],
+            timing: TimingProvenance {
+                mode: BenchmarkMode::SingleFile,
+                warmup_iterations: 0,
+                benchmark_iterations: 1,
+                timeout_ms: 1_000,
+                output_format: OutputFormat::Markdown,
+            },
+            fixed_batch_size: None,
+            coverage: None,
+        }
+    }
+
+    /// A minimal, valid `BenchmarkResult` row for a given framework/outcome.
+    fn sample_result(framework: &str, success: bool, error_kind: ErrorKind) -> BenchmarkResult {
+        BenchmarkResult {
+            framework: framework.to_string(),
+            output_format: OutputFormat::Markdown,
+            file_path: std::path::PathBuf::from(format!("/tmp/{framework}.pdf")),
+            file_size: 1,
+            success,
+            error_message: (!success).then(|| "synthetic failure".to_string()),
+            error_kind,
+            duration: std::time::Duration::from_millis(1),
+            extraction_duration: None,
+            subprocess_overhead: None,
+            metrics: PerformanceMetrics {
+                baseline_memory_bytes: 0,
+                peak_memory_bytes: 0,
+                peak_memory_delta_bytes: 0,
+                avg_cpu_percent: 0.0,
+                cpu_seconds: 0.0,
+                throughput_bytes_per_sec: 0.0,
+                p50_memory_bytes: 0,
+                p95_memory_bytes: 0,
+                p99_memory_bytes: 0,
+            },
+            quality: None,
+            iterations: vec![],
+            statistics: None,
+            cold_start_duration: None,
+            file_extension: "pdf".to_string(),
+            framework_capabilities: FrameworkCapabilities::default(),
+            pdf_metadata: None,
+            ocr_status: OcrStatus::Unknown,
+            extracted_text: None,
+            system_load: None,
+        }
+    }
+
+    #[test]
+    fn gate_failure_still_writes_every_framework_and_reports_failure() {
+        let temp = tempfile::tempdir().unwrap();
+        let output = temp.path().to_path_buf();
+
+        let results = vec![
+            sample_result("healthy", true, ErrorKind::None),
+            sample_result("broken", false, ErrorKind::FrameworkError),
+        ];
+
+        let outcome = write_run_artifacts_and_check_gate(&results, sample_provenance(), &output, 1.0);
+        assert!(outcome.is_err(), "the gate must still fail the command");
         assert_eq!(
-            error,
-            "framework produced no accountable benchmark results; 1 infrastructure failure(s) occurred"
+            outcome.unwrap_err().to_string(),
+            "Benchmark error: 1 of 2 framework(s) fell below the required minimum success rate 1.000: broken"
         );
+
+        let results_path = output.join("results.json");
+        assert!(
+            results_path.exists(),
+            "results.json must be written despite the gate failure"
+        );
+        let written: Vec<BenchmarkResult> = serde_json::from_str(&std::fs::read_to_string(&results_path).unwrap())
+            .expect("results.json must contain valid BenchmarkResult rows");
+        let mut frameworks: Vec<&str> = written.iter().map(|result| result.framework.as_str()).collect();
+        frameworks.sort_unstable();
+        assert_eq!(
+            frameworks,
+            ["broken", "healthy"],
+            "both frameworks' rows must survive the gate failure"
+        );
+
+        assert!(output.join("by-extension.json").exists());
+        assert!(output.join("provenance.json").exists());
+    }
+
+    #[test]
+    fn gate_failure_records_threshold_and_per_framework_coverage_in_provenance() {
+        let temp = tempfile::tempdir().unwrap();
+        let output = temp.path().to_path_buf();
+
+        let results = vec![
+            sample_result("healthy", true, ErrorKind::None),
+            sample_result("broken", true, ErrorKind::None),
+            sample_result("broken", false, ErrorKind::FrameworkError),
+        ];
+
+        let outcome = write_run_artifacts_and_check_gate(&results, sample_provenance(), &output, 0.75);
+        assert!(outcome.is_err());
+
+        let provenance: RunProvenance =
+            serde_json::from_str(&std::fs::read_to_string(output.join("provenance.json")).unwrap())
+                .expect("provenance.json must deserialize");
+        let gate = provenance.coverage.expect("coverage gate must be recorded");
+
+        assert_eq!(gate.min_success_rate, 0.75);
+        assert!(!gate.passed);
+        assert_eq!(gate.failing_frameworks, vec!["broken".to_string()]);
+
+        let mut frameworks = gate.frameworks;
+        frameworks.sort_by(|a, b| a.framework.cmp(&b.framework));
+        assert_eq!(frameworks.len(), 2);
+        assert_eq!(frameworks[0].framework, "broken");
+        assert_eq!(frameworks[0].successful, 1);
+        assert_eq!(frameworks[0].framework_failures, 1);
+        assert_eq!(frameworks[0].infrastructure_failures, 0);
+        assert_eq!(frameworks[0].success_rate, 0.5);
+        assert_eq!(frameworks[1].framework, "healthy");
+        assert_eq!(frameworks[1].successful, 1);
+        assert_eq!(frameworks[1].framework_failures, 0);
+        assert_eq!(frameworks[1].infrastructure_failures, 0);
+        assert_eq!(frameworks[1].success_rate, 1.0);
+    }
+
+    #[test]
+    fn gate_pass_writes_artifacts_and_reports_success() {
+        let temp = tempfile::tempdir().unwrap();
+        let output = temp.path().to_path_buf();
+
+        let results = vec![sample_result("healthy", true, ErrorKind::None)];
+
+        write_run_artifacts_and_check_gate(&results, sample_provenance(), &output, 1.0)
+            .expect("a fully successful run must pass the gate");
+
+        let provenance: RunProvenance =
+            serde_json::from_str(&std::fs::read_to_string(output.join("provenance.json")).unwrap()).unwrap();
+        let gate = provenance
+            .coverage
+            .expect("coverage gate must be recorded even on success");
+        assert!(gate.passed);
+        assert!(gate.failing_frameworks.is_empty());
     }
 
     #[test]
