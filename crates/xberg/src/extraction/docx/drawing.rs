@@ -20,6 +20,10 @@ pub struct Drawing {
     pub doc_properties: Option<DocProperties>,
     /// Relationship ID (`r:embed`) referencing the image part in the DOCX package.
     pub image_ref: Option<String>,
+    /// Text extracted from a text box hosted by this drawing (#81): either the
+    /// DrawingML `wps:txbx/w:txbxContent` path, or the VML `v:textbox/w:txbxContent`
+    /// fallback path parsed via [`parse_vml_pict`].
+    pub text_box_content: Option<String>,
 }
 
 /// Whether the drawing is inline or anchored.
@@ -45,13 +49,11 @@ pub struct Extent {
 
 impl Extent {
     /// Convert width to inches.
-    #[cfg(test)]
     pub(crate) fn width_inches(&self) -> f64 {
         self.cx as f64 / super::EMUS_PER_INCH as f64
     }
 
     /// Convert height to inches.
-    #[cfg(test)]
     pub(crate) fn height_inches(&self) -> f64 {
         self.cy as f64 / super::EMUS_PER_INCH as f64
     }
@@ -124,6 +126,7 @@ pub(crate) fn parse_drawing(reader: &mut Reader<&[u8]>) -> Drawing {
         extent: None,
         doc_properties: None,
         image_ref: None,
+        text_box_content: None,
     };
 
     let mut depth = 1;
@@ -175,6 +178,14 @@ pub(crate) fn parse_drawing(reader: &mut Reader<&[u8]>) -> Drawing {
                             drawing.image_ref = get_attr(e, b"embed").or_else(|| get_attr(e, b"link"));
                         }
                         depth += 1;
+                    }
+                    b"txbxContent" => {
+                        // Consumes through its own `</w:txbxContent>` end tag, so it
+                        // must not also increment `depth` (#81).
+                        let text = collect_txbx_content_text(reader);
+                        if !text.is_empty() {
+                            drawing.text_box_content = Some(text);
+                        }
                     }
                     b"wrapSquare" | b"wrapTight" | b"wrapTopAndBottom" | b"wrapThrough" => {
                         if let DrawingType::Anchored(ref mut anchor) = drawing.drawing_type {
@@ -316,6 +327,140 @@ fn get_attr_bool(e: &BytesStart, key: &[u8]) -> bool {
     get_attr(e, key).as_deref() == Some("1")
 }
 
+/// Collect visible text from a `<w:txbxContent>` subtree (#81): the paragraphs of a
+/// text box, reached either via the DrawingML `wps:txbx` path (from [`parse_drawing`])
+/// or the VML `v:textbox` fallback path (from [`parse_vml_pict`]).
+///
+/// Called with the reader positioned right after the `<w:txbxContent>` start tag;
+/// consumes events through the matching `</w:txbxContent>` end tag. Paragraphs are
+/// joined with newlines; `w:tab`/`w:br` become `\t`/`\n` within a paragraph, matching
+/// how the main body loop renders inline breaks.
+fn collect_txbx_content_text(reader: &mut Reader<&[u8]>) -> String {
+    let mut buf = Vec::new();
+    let mut depth = 1u32;
+    let mut paragraphs: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut in_text = false;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(ref e)) => match e.local_name().as_ref() {
+                b"txbxContent" => depth += 1,
+                b"t" => in_text = true,
+                _ => {}
+            },
+            Ok(Event::Empty(ref e)) => match e.local_name().as_ref() {
+                b"tab" => current.push('\t'),
+                b"br" => current.push('\n'),
+                _ => {}
+            },
+            Ok(Event::Text(e)) => {
+                if in_text && let Ok(text) = e.decode() {
+                    current.push_str(&text);
+                }
+            }
+            Ok(Event::End(ref e)) => match e.local_name().as_ref() {
+                b"t" => in_text = false,
+                b"p" => paragraphs.push(std::mem::take(&mut current)),
+                b"txbxContent" => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                _ => {}
+            },
+            Ok(Event::Eof) | Err(_) => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    if !current.is_empty() {
+        paragraphs.push(current);
+    }
+
+    paragraphs
+        .into_iter()
+        .filter(|p| !p.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Parse a `<v:textbox>` element (already open), looking for a nested
+/// `<w:txbxContent>` (#81). Consumes events through the matching `</v:textbox>` end
+/// tag regardless of whether a `w:txbxContent` was found.
+fn parse_vml_textbox(reader: &mut Reader<&[u8]>) -> Option<String> {
+    let mut buf = Vec::new();
+    let mut depth = 1u32;
+    let mut text: Option<String> = None;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(ref e)) => {
+                if e.local_name().as_ref() == b"txbxContent" {
+                    let collected = collect_txbx_content_text(reader);
+                    if !collected.is_empty() {
+                        text = Some(collected);
+                    }
+                } else {
+                    depth += 1;
+                }
+            }
+            Ok(Event::End(_)) => {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            Ok(Event::Eof) | Err(_) => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    text
+}
+
+/// Parse a `<w:pict>` VML fallback wrapper, extracting text-box content from a
+/// nested `<v:textbox><w:txbxContent>` if present (#81, #224).
+///
+/// Consumes events through the matching `</w:pict>` end tag regardless of whether a
+/// text box was found, so the caller's own event loop never sees `w:pict`'s inner
+/// `v:shape`/`w:p`/`w:r`/`w:t` events leak out as if they were ordinary body content.
+/// Returns `None` when no text box was found (nothing to attach to the document).
+pub(crate) fn parse_vml_pict(reader: &mut Reader<&[u8]>) -> Option<Drawing> {
+    let mut buf = Vec::new();
+    let mut depth = 1u32;
+    let mut text_box_content: Option<String> = None;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(ref e)) => {
+                if e.local_name().as_ref() == b"textbox" {
+                    text_box_content = parse_vml_textbox(reader);
+                } else {
+                    depth += 1;
+                }
+            }
+            Ok(Event::End(_)) => {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            Ok(Event::Eof) | Err(_) => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    text_box_content.map(|text| Drawing {
+        text_box_content: Some(text),
+        ..Default::default()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -336,6 +481,7 @@ mod tests {
                         extent: None,
                         doc_properties: None,
                         image_ref: None,
+                        text_box_content: None,
                     };
                 }
                 Err(_) => {
@@ -344,6 +490,7 @@ mod tests {
                         extent: None,
                         doc_properties: None,
                         image_ref: None,
+                        text_box_content: None,
                     };
                 }
                 _ => {}
@@ -633,6 +780,7 @@ mod tests {
                 description: Some("Test description".to_string()),
             }),
             image_ref: Some("rId5".to_string()),
+            text_box_content: None,
         };
 
         let json = serde_json::to_string(&drawing).expect("Failed to serialize");
