@@ -566,7 +566,10 @@ impl SecurityBudget {
     }
 
     /// Build with explicit defaults (no config available, e.g. internal call sites).
-    #[cfg(any(feature = "xml", all(test, feature = "office")))]
+    // `office` is here for the PPTX OMML sub-parse (#47): the roxmltree-based slide parser
+    // threads no budget of its own, so the nested quick-xml math reader has nothing to
+    // inherit and falls back to the default limits. ~keep
+    #[cfg(any(feature = "xml", feature = "office"))]
     pub(crate) fn with_defaults() -> Self {
         Self::from_limits(&SecurityLimits::default())
     }
