@@ -10852,6 +10852,26 @@ extension ProbeStatus {
     }
 }
 
+/// Which concrete ONNX inference engine PaddleOCR model loading uses.
+///
+/// Mirrors `sceptre::Backend` for the PaddleOCR backend: `Ort` is the native,
+/// full-featured path (acceleration/execution-provider hook, ONNX-embedded
+/// dictionary metadata); `Tract` is the pure-Rust, CPU-only path used on targets
+/// where `ort` cannot link (Android x86_64 emulator, WASM once wired).
+public enum PaddleInferenceBackend: String, Codable, Sendable, Hashable {
+    /// Native ONNX Runtime (requires the `paddle-ocr-ort` feature).
+    case ort
+    /// Pure-Rust ONNX via `tract` (requires the `paddle-ocr-tract` feature).
+    case tract
+}
+extension PaddleInferenceBackend {
+    func intoRust() throws -> RustBridge.PaddleInferenceBackend {
+        let data = try JSONEncoder().encode(self)
+        let json = String(data: data, encoding: .utf8) ?? "null"
+        return try RustBridge.paddleInferenceBackendFromJson(json)
+    }
+}
+
 /// Supported languages in PaddleOCR.
 ///
 /// Maps user-friendly language codes to paddle-ocr-rs language identifiers.
@@ -12345,6 +12365,10 @@ public func psmModeFromJson(_ json: String) throws -> PSMMode {
 public func probeStatusFromJson(_ json: String) throws -> ProbeStatus {
     let data = json.data(using: .utf8) ?? Data()
     return try JSONDecoder().decode(ProbeStatus.self, from: data)
+}
+public func paddleInferenceBackendFromJson(_ json: String) throws -> PaddleInferenceBackend {
+    let data = json.data(using: .utf8) ?? Data()
+    return try JSONDecoder().decode(PaddleInferenceBackend.self, from: data)
 }
 public func paddleLanguageFromJson(_ json: String) throws -> PaddleLanguage {
     let data = json.data(using: .utf8) ?? Data()

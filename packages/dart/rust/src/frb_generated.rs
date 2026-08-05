@@ -28,7 +28,7 @@
 
 use crate::*;
 use flutter_rust_bridge::for_generated::byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
-use flutter_rust_bridge::for_generated::{Lifetimeable, Lockable, transform_result_dco};
+use flutter_rust_bridge::for_generated::{transform_result_dco, Lifetimeable, Lockable};
 use flutter_rust_bridge::{Handler, IntoIntoDart};
 
 // Section: boilerplate
@@ -10194,6 +10194,7 @@ const _: fn() = || {
         let _: f64 = PaddleOcrConfig.drop_score;
         let _: String = PaddleOcrConfig.model_tier;
         let _: String = PaddleOcrConfig.model_version;
+        let _: Option<crate::PaddleInferenceBackend> = PaddleOcrConfig.inference_backend;
     }
     {
         let PageBoundary = None::<crate::PageBoundary>.unwrap();
@@ -17585,6 +17586,17 @@ impl SseDecode for Option<crate::OutputFormat> {
     }
 }
 
+impl SseDecode for Option<crate::PaddleInferenceBackend> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::PaddleInferenceBackend>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for Option<crate::PageClassificationConfig> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -18203,6 +18215,18 @@ impl SseDecode for crate::OutputFormat {
     }
 }
 
+impl SseDecode for crate::PaddleInferenceBackend {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::PaddleInferenceBackend::Ort,
+            1 => crate::PaddleInferenceBackend::Tract,
+            _ => unreachable!("Invalid variant for PaddleInferenceBackend: {}", inner),
+        };
+    }
+}
+
 impl SseDecode for crate::PaddleLanguage {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -18245,6 +18269,7 @@ impl SseDecode for crate::PaddleOcrConfig {
         let mut var_dropScore = <f64>::sse_decode(deserializer);
         let mut var_modelTier = <String>::sse_decode(deserializer);
         let mut var_modelVersion = <String>::sse_decode(deserializer);
+        let mut var_inferenceBackend = <Option<crate::PaddleInferenceBackend>>::sse_decode(deserializer);
         return crate::PaddleOcrConfig {
             language: var_language,
             cache_dir: var_cacheDir,
@@ -18259,6 +18284,7 @@ impl SseDecode for crate::PaddleOcrConfig {
             drop_score: var_dropScore,
             model_tier: var_modelTier,
             model_version: var_modelVersion,
+            inference_backend: var_inferenceBackend,
         };
     }
 }
@@ -25054,6 +25080,22 @@ impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<crate::OutputFormat>> for crat
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::PaddleInferenceBackend> {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self.0 {
+            crate::PaddleInferenceBackend::Ort => 0.into_dart(),
+            crate::PaddleInferenceBackend::Tract => 1.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for FrbWrapper<crate::PaddleInferenceBackend> {}
+impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<crate::PaddleInferenceBackend>> for crate::PaddleInferenceBackend {
+    fn into_into_dart(self) -> FrbWrapper<crate::PaddleInferenceBackend> {
+        self.into()
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::PaddleLanguage> {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         match self.0 {
@@ -25100,6 +25142,7 @@ impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::PaddleOcrConfig> {
             self.0.drop_score.into_into_dart().into_dart(),
             self.0.model_tier.into_into_dart().into_dart(),
             self.0.model_version.into_into_dart().into_dart(),
+            self.0.inference_backend.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -32079,6 +32122,16 @@ impl SseEncode for Option<crate::OutputFormat> {
     }
 }
 
+impl SseEncode for Option<crate::PaddleInferenceBackend> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::PaddleInferenceBackend>::sse_encode(value, serializer);
+        }
+    }
+}
+
 impl SseEncode for Option<crate::PageClassificationConfig> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -32640,6 +32693,22 @@ impl SseEncode for crate::OutputFormat {
     }
 }
 
+impl SseEncode for crate::PaddleInferenceBackend {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::PaddleInferenceBackend::Ort => 0,
+                crate::PaddleInferenceBackend::Tract => 1,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
 impl SseEncode for crate::PaddleLanguage {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -32686,6 +32755,7 @@ impl SseEncode for crate::PaddleOcrConfig {
         <f64>::sse_encode(self.drop_score, serializer);
         <String>::sse_encode(self.model_tier, serializer);
         <String>::sse_encode(self.model_version, serializer);
+        <Option<crate::PaddleInferenceBackend>>::sse_encode(self.inference_backend, serializer);
     }
 }
 
@@ -34339,7 +34409,7 @@ mod io {
     use super::*;
     use crate::*;
     use flutter_rust_bridge::for_generated::byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
-    use flutter_rust_bridge::for_generated::{Lifetimeable, Lockable, transform_result_dco};
+    use flutter_rust_bridge::for_generated::{transform_result_dco, Lifetimeable, Lockable};
     use flutter_rust_bridge::{Handler, IntoIntoDart};
 
     // Section: boilerplate
@@ -34644,7 +34714,7 @@ mod web {
     use flutter_rust_bridge::for_generated::byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
     use flutter_rust_bridge::for_generated::wasm_bindgen;
     use flutter_rust_bridge::for_generated::wasm_bindgen::prelude::*;
-    use flutter_rust_bridge::for_generated::{Lifetimeable, Lockable, transform_result_dco};
+    use flutter_rust_bridge::for_generated::{transform_result_dco, Lifetimeable, Lockable};
     use flutter_rust_bridge::{Handler, IntoIntoDart};
 
     // Section: boilerplate

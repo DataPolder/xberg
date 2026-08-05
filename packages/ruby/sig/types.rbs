@@ -2192,8 +2192,9 @@ def initialize: (?checks: Array[DoctorCheck]) -> void
         attr_accessor drop_score: Float?
         attr_accessor model_tier: String?
         attr_accessor model_version: String?
+        attr_accessor inference_backend: PaddleInferenceBackend?
 
-    def initialize: (?language: String, ?cache_dir: String, ?use_angle_cls: bool, ?enable_table_detection: bool, ?det_db_thresh: Float, ?det_db_box_thresh: Float, ?det_db_unclip_ratio: Float, ?det_limit_side_len: Integer, ?rec_batch_num: Integer, ?padding: Integer, ?drop_score: Float, ?model_tier: String, ?model_version: String) -> void
+    def initialize: (?language: String, ?cache_dir: String, ?use_angle_cls: bool, ?enable_table_detection: bool, ?det_db_thresh: Float, ?det_db_box_thresh: Float, ?det_db_unclip_ratio: Float, ?det_limit_side_len: Integer, ?rec_batch_num: Integer, ?padding: Integer, ?drop_score: Float, ?model_tier: String, ?model_version: String, ?inference_backend: PaddleInferenceBackend) -> void
     def with_cache_dir: (String path) -> PaddleOcrConfig
     def with_table_detection: (bool enable) -> PaddleOcrConfig
     def with_angle_cls: (bool enable) -> PaddleOcrConfig
@@ -2705,6 +2706,10 @@ def initialize: (?heading_style: HeadingStyle, ?list_indent_type: ListIndentType
 
     class ProbeStatus
         type value = :pass | :warn | :fail | :skip
+    end
+
+    class PaddleInferenceBackend
+        type value = :ort | :tract
     end
 
     class PaddleLanguage

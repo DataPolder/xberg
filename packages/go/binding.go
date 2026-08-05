@@ -3993,6 +3993,16 @@ const (
 	ProbeStatusSkip ProbeStatus = "skip"
 )
 
+// PaddleInferenceBackend is an enumeration type.
+type PaddleInferenceBackend string
+
+const (
+	// PaddleInferenceBackendOrt PaddleInferenceBackendOrt native ONNX Runtime (requires the `paddle-ocr-ort` feature).
+	PaddleInferenceBackendOrt PaddleInferenceBackend = "ort"
+	// PaddleInferenceBackendTract PaddleInferenceBackendTract pure-Rust ONNX via `tract` (requires the `paddle-ocr-tract` feature).
+	PaddleInferenceBackendTract PaddleInferenceBackend = "tract"
+)
+
 // PaddleLanguage is an enumeration type.
 type PaddleLanguage string
 
@@ -9822,6 +9832,15 @@ type PaddleOcrConfig struct {
 	// (`"mobile"`) resolves to the v6 `"medium"` tier. Select `"pp-ocrv5"` to pin the
 	// legacy per-script/unified fleet.
 	ModelVersion string `json:"model_version"`
+	// Explicit inference engine choice.
+	//
+	// `None` (the default) resolves to the compiled default: `ort` when the
+	// `paddle-ocr-ort` feature is compiled in, otherwise `tract`. An explicit choice
+	// is validated against the compiled features when the OCR engine is constructed
+	// (see `crate::paddle_ocr::backend::effective_backend`); requesting an engine
+	// whose feature is not compiled in is a clear configuration error rather than a
+	// silent fallback.
+	InferenceBackend *PaddleInferenceBackend `json:"inference_backend,omitempty"`
 }
 
 // ModelPaths combined paths to all models needed for OCR (backward compatibility).

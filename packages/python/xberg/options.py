@@ -45,6 +45,7 @@ from ._xberg import (
     OcrElementLevel,  # noqa: TC001
     OcrStrategy,  # noqa: TC001
     OutputFormat,  # noqa: TC001
+    PaddleInferenceBackend,  # noqa: TC001
     PiiCategory,  # noqa: TC001
     PreprocessingPreset,  # noqa: TC001
     RedactionStrategy,  # noqa: TC001
@@ -3537,6 +3538,10 @@ class PaddleOcrConfig:
 
     """Model generation: `"pp-ocrv6"` (default) or `"pp-ocrv5"`."""
 
+    inference_backend: PaddleInferenceBackend | str | None = None
+
+    """Explicit inference engine choice."""
+
 
 @dataclass(frozen=True, slots=True)
 class PdfMetadata:
@@ -4988,6 +4993,7 @@ def _from_native_paddle_ocr_config(native: Any) -> PaddleOcrConfig:
         drop_score=native.drop_score,
         model_tier=native.model_tier,
         model_version=native.model_version,
+        inference_backend=native.inference_backend,
     )
 
 

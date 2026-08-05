@@ -5056,6 +5056,15 @@ pub struct PaddleOcrConfig {
     /// (`"mobile"`) resolves to the v6 `"medium"` tier. Select `"pp-ocrv5"` to pin the
     /// legacy per-script/unified fleet.
     pub model_version: String,
+    /// Explicit inference engine choice.
+    ///
+    /// `None` (the default) resolves to the compiled default: `ort` when the
+    /// `paddle-ocr-ort` feature is compiled in, otherwise `tract`. An explicit choice
+    /// is validated against the compiled features when the OCR engine is constructed
+    /// (see `crate::paddle_ocr::backend::effective_backend`); requesting an engine
+    /// whose feature is not compiled in is a clear configuration error rather than a
+    /// silent fallback.
+    pub inference_backend: Option<PaddleInferenceBackend>,
 }
 
 /// Combined paths to all models needed for OCR (backward compatibility).
@@ -7431,6 +7440,20 @@ pub enum ProbeStatus {
     /// The check cannot run locally (e.g. model not cached, feature not compiled in);
     /// first real use decides, possibly after a download.
     Skip,
+}
+
+/// Which concrete ONNX inference engine PaddleOCR model loading uses.
+///
+/// Mirrors `sceptre::Backend` for the PaddleOCR backend: `Ort` is the native,
+/// full-featured path (acceleration/execution-provider hook, ONNX-embedded
+/// dictionary metadata); `Tract` is the pure-Rust, CPU-only path used on targets
+/// where `ort` cannot link (Android x86_64 emulator, WASM once wired).
+#[frb(mirror(PaddleInferenceBackend), unignore)]
+pub enum PaddleInferenceBackend {
+    /// Native ONNX Runtime (requires the `paddle-ocr-ort` feature).
+    Ort,
+    /// Pure-Rust ONNX via `tract` (requires the `paddle-ocr-tract` feature).
+    Tract,
 }
 
 /// Supported languages in PaddleOCR.
@@ -10489,6 +10512,7 @@ impl From<xberg::PaddleOcrConfig> for PaddleOcrConfig {
             drop_score: v.drop_score as _,
             model_tier: v.model_tier.into(),
             model_version: v.model_version.into(),
+            inference_backend: v.inference_backend.map(PaddleInferenceBackend::from),
         }
     }
 }
@@ -11847,6 +11871,15 @@ impl From<xberg::ProbeStatus> for ProbeStatus {
             xberg::ProbeStatus::Warn => ProbeStatus::Warn,
             xberg::ProbeStatus::Fail => ProbeStatus::Fail,
             xberg::ProbeStatus::Skip => ProbeStatus::Skip,
+        }
+    }
+}
+
+impl From<xberg::PaddleInferenceBackend> for PaddleInferenceBackend {
+    fn from(v: xberg::PaddleInferenceBackend) -> Self {
+        match v {
+            xberg::PaddleInferenceBackend::Ort => PaddleInferenceBackend::Ort,
+            xberg::PaddleInferenceBackend::Tract => PaddleInferenceBackend::Tract,
         }
     }
 }

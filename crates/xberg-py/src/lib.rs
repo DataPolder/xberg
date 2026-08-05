@@ -12409,6 +12409,16 @@ pub struct PaddleOcrConfig {
     /// legacy per-script/unified fleet.
     #[pyo3(get)]
     pub model_version: String,
+    /// Explicit inference engine choice.
+    ///
+    /// `None` (the default) resolves to the compiled default: `ort` when the
+    /// `paddle-ocr-ort` feature is compiled in, otherwise `tract`. An explicit choice
+    /// is validated against the compiled features when the OCR engine is constructed
+    /// (see `crate.paddle_ocr.backend.effective_backend`); requesting an engine
+    /// whose feature is not compiled in is a clear configuration error rather than a
+    /// silent fallback.
+    #[pyo3(get)]
+    pub inference_backend: Option<PaddleInferenceBackend>,
 }
 
 impl Default for PaddleOcrConfig {
@@ -12421,7 +12431,7 @@ impl Default for PaddleOcrConfig {
 impl PaddleOcrConfig {
     #[allow(clippy::too_many_arguments)]
     #[must_use]
-    #[pyo3(signature = (language=Self::default().language, use_angle_cls=Self::default().use_angle_cls, enable_table_detection=Self::default().enable_table_detection, det_db_thresh=Self::default().det_db_thresh, det_db_box_thresh=Self::default().det_db_box_thresh, det_db_unclip_ratio=Self::default().det_db_unclip_ratio, det_limit_side_len=Self::default().det_limit_side_len, rec_batch_num=Self::default().rec_batch_num, padding=Self::default().padding, drop_score=Self::default().drop_score, model_tier=Self::default().model_tier, model_version=Self::default().model_version, cache_dir=None))]
+    #[pyo3(signature = (language=Self::default().language, use_angle_cls=Self::default().use_angle_cls, enable_table_detection=Self::default().enable_table_detection, det_db_thresh=Self::default().det_db_thresh, det_db_box_thresh=Self::default().det_db_box_thresh, det_db_unclip_ratio=Self::default().det_db_unclip_ratio, det_limit_side_len=Self::default().det_limit_side_len, rec_batch_num=Self::default().rec_batch_num, padding=Self::default().padding, drop_score=Self::default().drop_score, model_tier=Self::default().model_tier, model_version=Self::default().model_version, cache_dir=None, inference_backend=None))]
     #[new]
     pub fn new(
         language: String,
@@ -12437,6 +12447,7 @@ impl PaddleOcrConfig {
         model_tier: String,
         model_version: String,
         cache_dir: Option<String>,
+        inference_backend: Option<PaddleInferenceBackend>,
     ) -> Self {
         Self {
             language,
@@ -12452,6 +12463,7 @@ impl PaddleOcrConfig {
             drop_score,
             model_tier,
             model_version,
+            inference_backend,
         }
     }
 
@@ -12484,6 +12496,8 @@ impl PaddleOcrConfig {
             model_tier: self.model_tier.clone(),
 
             model_version: self.model_version.clone(),
+
+            inference_backend: self.inference_backend.clone().map(Into::into),
 
             ..Default::default()
         };
@@ -12520,6 +12534,8 @@ impl PaddleOcrConfig {
 
             model_version: self.model_version.clone(),
 
+            inference_backend: self.inference_backend.clone().map(Into::into),
+
             ..Default::default()
         };
         core_self.with_table_detection(enable).into()
@@ -12554,6 +12570,8 @@ impl PaddleOcrConfig {
             model_tier: self.model_tier.clone(),
 
             model_version: self.model_version.clone(),
+
+            inference_backend: self.inference_backend.clone().map(Into::into),
 
             ..Default::default()
         };
@@ -12590,6 +12608,8 @@ impl PaddleOcrConfig {
 
             model_version: self.model_version.clone(),
 
+            inference_backend: self.inference_backend.clone().map(Into::into),
+
             ..Default::default()
         };
         core_self.with_det_db_thresh(threshold).into()
@@ -12624,6 +12644,8 @@ impl PaddleOcrConfig {
             model_tier: self.model_tier.clone(),
 
             model_version: self.model_version.clone(),
+
+            inference_backend: self.inference_backend.clone().map(Into::into),
 
             ..Default::default()
         };
@@ -12660,6 +12682,8 @@ impl PaddleOcrConfig {
 
             model_version: self.model_version.clone(),
 
+            inference_backend: self.inference_backend.clone().map(Into::into),
+
             ..Default::default()
         };
         core_self.with_det_db_unclip_ratio(ratio).into()
@@ -12694,6 +12718,8 @@ impl PaddleOcrConfig {
             model_tier: self.model_tier.clone(),
 
             model_version: self.model_version.clone(),
+
+            inference_backend: self.inference_backend.clone().map(Into::into),
 
             ..Default::default()
         };
@@ -12730,6 +12756,8 @@ impl PaddleOcrConfig {
 
             model_version: self.model_version.clone(),
 
+            inference_backend: self.inference_backend.clone().map(Into::into),
+
             ..Default::default()
         };
         core_self.with_rec_batch_num(batch_size).into()
@@ -12764,6 +12792,8 @@ impl PaddleOcrConfig {
             model_tier: self.model_tier.clone(),
 
             model_version: self.model_version.clone(),
+
+            inference_backend: self.inference_backend.clone().map(Into::into),
 
             ..Default::default()
         };
@@ -12800,6 +12830,8 @@ impl PaddleOcrConfig {
 
             model_version: self.model_version.clone(),
 
+            inference_backend: self.inference_backend.clone().map(Into::into),
+
             ..Default::default()
         };
         core_self.with_padding(padding).into()
@@ -12835,6 +12867,8 @@ impl PaddleOcrConfig {
 
             model_version: self.model_version.clone(),
 
+            inference_backend: self.inference_backend.clone().map(Into::into),
+
             ..Default::default()
         };
         core_self.with_model_tier(tier).into()
@@ -12869,6 +12903,8 @@ impl PaddleOcrConfig {
             model_tier: self.model_tier.clone(),
 
             model_version: self.model_version.clone(),
+
+            inference_backend: self.inference_backend.clone().map(Into::into),
 
             ..Default::default()
         };
@@ -21898,6 +21934,61 @@ impl ProbeStatus {
                 other => other.to_string(),
             })
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to serialize ProbeStatus: {e}")))
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        self.__str__()
+    }
+}
+
+#[derive(Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[pyclass(eq, eq_int, from_py_object)]
+pub enum PaddleInferenceBackend {
+    #[pyo3(name = "ORT")]
+    #[default]
+    Ort = 0,
+    #[pyo3(name = "TRACT")]
+    Tract = 1,
+}
+#[pymethods]
+impl PaddleInferenceBackend {
+    #[new]
+    fn __new__(value: pyo3::Bound<'_, pyo3::PyAny>) -> pyo3::PyResult<Self> {
+        use pyo3::prelude::*;
+        // Try to extract as string first
+        if let Ok(s) = value.extract::<&str>() {
+            let s_lower = s.to_lowercase();
+            match s_lower.as_str() {
+                "ort" => return Ok(Self::Ort),
+                "tract" => return Ok(Self::Tract),
+                _ => {}
+            }
+        }
+        // Try to extract as integer (by discriminant value)
+        if let Ok(n) = value.extract::<i32>() {
+            match n {
+                0 => return Ok(Self::Ort),
+                1 => return Ok(Self::Tract),
+                _ => {}
+            }
+        }
+        let type_name = stringify!(PaddleInferenceBackend);
+        Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "invalid value for {}: {:#?}. Expected variant name (str) or discriminant (int)",
+            type_name, value
+        )))
+    }
+
+    fn __str__(&self) -> PyResult<String> {
+        serde_json::to_value(self)
+            .map(|value| match value {
+                serde_json::Value::String(value) => value,
+                other => other.to_string(),
+            })
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to serialize PaddleInferenceBackend: {e}"))
+            })
     }
 
     fn __repr__(&self) -> PyResult<String> {
@@ -31406,6 +31497,7 @@ impl From<PaddleOcrConfig> for xberg::PaddleOcrConfig {
             drop_score: val.drop_score,
             model_tier: val.model_tier,
             model_version: val.model_version,
+            inference_backend: val.inference_backend.map(Into::into),
             ..Default::default()
         }
     }
@@ -31428,6 +31520,7 @@ impl From<xberg::PaddleOcrConfig> for PaddleOcrConfig {
             drop_score: val.drop_score,
             model_tier: val.model_tier.to_string(),
             model_version: val.model_version.to_string(),
+            inference_backend: val.inference_backend.map(Into::into),
         }
     }
 }
@@ -33083,6 +33176,24 @@ impl From<xberg::ProbeStatus> for ProbeStatus {
     }
 }
 
+impl From<PaddleInferenceBackend> for xberg::PaddleInferenceBackend {
+    fn from(val: PaddleInferenceBackend) -> Self {
+        match val {
+            PaddleInferenceBackend::Ort => Self::Ort,
+            PaddleInferenceBackend::Tract => Self::Tract,
+        }
+    }
+}
+
+impl From<xberg::PaddleInferenceBackend> for PaddleInferenceBackend {
+    fn from(val: xberg::PaddleInferenceBackend) -> Self {
+        match val {
+            xberg::PaddleInferenceBackend::Ort => Self::Ort,
+            xberg::PaddleInferenceBackend::Tract => Self::Tract,
+        }
+    }
+}
+
 impl From<xberg::PaddleLanguage> for PaddleLanguage {
     fn from(val: xberg::PaddleLanguage) -> Self {
         match val {
@@ -33696,6 +33807,7 @@ pub fn _xberg(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PresetCategory>()?;
     m.add_class::<PSMMode>()?;
     m.add_class::<ProbeStatus>()?;
+    m.add_class::<PaddleInferenceBackend>()?;
     m.add_class::<PaddleLanguage>()?;
     m.add_class::<LayoutClass>()?;
     m.add_class::<BrowserMode>()?;

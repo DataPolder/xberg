@@ -3406,6 +3406,7 @@ pub struct PaddleOcrConfig {
     pub drop_score: f32,
     pub model_tier: String,
     pub model_version: String,
+    pub inference_backend: Option<PaddleInferenceBackend>,
 }
 
 impl PaddleOcrConfig {
@@ -3448,6 +3449,7 @@ impl PaddleOcrConfig {
                 .get("model_version")
                 .and_then(|t| t.decode().ok())
                 .unwrap_or_default(),
+            inference_backend: opts.get("inference_backend").and_then(|t| t.decode().ok()),
         }
     }
 }
@@ -5294,6 +5296,19 @@ pub enum ProbeStatus {
 impl Default for ProbeStatus {
     fn default() -> Self {
         Self::Pass
+    }
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, rustler::NifUnitEnum)]
+pub enum PaddleInferenceBackend {
+    Ort,
+    Tract,
+}
+
+#[allow(clippy::derivable_impls)]
+impl Default for PaddleInferenceBackend {
+    fn default() -> Self {
+        Self::Ort
     }
 }
 
@@ -14887,6 +14902,7 @@ impl From<PaddleOcrConfig> for xberg::PaddleOcrConfig {
             drop_score: val.drop_score,
             model_tier: val.model_tier,
             model_version: val.model_version,
+            inference_backend: val.inference_backend.map(Into::into),
             ..Default::default()
         }
     }
@@ -14909,6 +14925,7 @@ impl From<xberg::PaddleOcrConfig> for PaddleOcrConfig {
             drop_score: val.drop_score,
             model_tier: val.model_tier.to_string(),
             model_version: val.model_version.to_string(),
+            inference_backend: val.inference_backend.map(Into::into),
         }
     }
 }
@@ -17418,6 +17435,24 @@ impl From<xberg::ProbeStatus> for ProbeStatus {
             xberg::ProbeStatus::Warn => Self::Warn,
             xberg::ProbeStatus::Fail => Self::Fail,
             xberg::ProbeStatus::Skip => Self::Skip,
+        }
+    }
+}
+
+impl From<PaddleInferenceBackend> for xberg::PaddleInferenceBackend {
+    fn from(val: PaddleInferenceBackend) -> Self {
+        match val {
+            PaddleInferenceBackend::Ort => Self::Ort,
+            PaddleInferenceBackend::Tract => Self::Tract,
+        }
+    }
+}
+
+impl From<xberg::PaddleInferenceBackend> for PaddleInferenceBackend {
+    fn from(val: xberg::PaddleInferenceBackend) -> Self {
+        match val {
+            xberg::PaddleInferenceBackend::Ort => Self::Ort,
+            xberg::PaddleInferenceBackend::Tract => Self::Tract,
         }
     }
 }

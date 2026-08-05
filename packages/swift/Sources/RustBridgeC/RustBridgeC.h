@@ -3942,6 +3942,21 @@ void *__swift_bridge__$Vec_ProbeStatus$get_mut(void *vec_ptr, uintptr_t index);
 uintptr_t __swift_bridge__$Vec_ProbeStatus$len(void *vec_ptr);
 void *__swift_bridge__$Vec_ProbeStatus$as_ptr(void *vec_ptr);
 
+typedef struct PaddleInferenceBackend PaddleInferenceBackend;
+void __swift_bridge__$PaddleInferenceBackend$_free(void *self);
+
+void *__swift_bridge__$Vec_PaddleInferenceBackend$new(void);
+void __swift_bridge__$Vec_PaddleInferenceBackend$drop(void *vec_ptr);
+void __swift_bridge__$Vec_PaddleInferenceBackend$push(void *vec_ptr,
+                                                      void *item_ptr);
+void *__swift_bridge__$Vec_PaddleInferenceBackend$pop(void *vec_ptr);
+void *__swift_bridge__$Vec_PaddleInferenceBackend$get(void *vec_ptr,
+                                                      uintptr_t index);
+void *__swift_bridge__$Vec_PaddleInferenceBackend$get_mut(void *vec_ptr,
+                                                          uintptr_t index);
+uintptr_t __swift_bridge__$Vec_PaddleInferenceBackend$len(void *vec_ptr);
+void *__swift_bridge__$Vec_PaddleInferenceBackend$as_ptr(void *vec_ptr);
+
 typedef struct PaddleLanguage PaddleLanguage;
 void __swift_bridge__$PaddleLanguage$_free(void *self);
 
@@ -5944,7 +5959,7 @@ void *__swift_bridge__$PaddleOcrConfig$new(
     bool enable_table_detection, float det_db_thresh, float det_db_box_thresh,
     float det_db_unclip_ratio, uint32_t det_limit_side_len,
     uint32_t rec_batch_num, uint32_t padding, float drop_score,
-    void *model_tier, void *model_version);
+    void *model_tier, void *model_version, void *inference_backend);
 void *__swift_bridge__$PaddleOcrConfig$language(void *self);
 void *__swift_bridge__$PaddleOcrConfig$cache_dir(void *self);
 bool __swift_bridge__$PaddleOcrConfig$use_angle_cls(void *self);
@@ -5958,6 +5973,7 @@ uint32_t __swift_bridge__$PaddleOcrConfig$padding(void *self);
 float __swift_bridge__$PaddleOcrConfig$drop_score(void *self);
 void *__swift_bridge__$PaddleOcrConfig$model_tier(void *self);
 void *__swift_bridge__$PaddleOcrConfig$model_version(void *self);
+void *__swift_bridge__$PaddleOcrConfig$inference_backend(void *self);
 struct __private__ResultPtrAndPtr
 __swift_bridge__$paddle_ocr_config_with_cache_dir_from_json(void *json,
                                                             void *path);
@@ -6290,6 +6306,7 @@ void *__swift_bridge__$BoundaryReason$to_string(void *self);
 void *__swift_bridge__$PresetCategory$to_string(void *self);
 void *__swift_bridge__$PSMMode$to_string(void *self);
 void *__swift_bridge__$ProbeStatus$to_string(void *self);
+void *__swift_bridge__$PaddleInferenceBackend$to_string(void *self);
 void *__swift_bridge__$PaddleLanguage$to_string(void *self);
 void *__swift_bridge__$LayoutClass$to_string(void *self);
 void *__swift_bridge__$BrowserMode$to_string(void *self);
@@ -6937,6 +6954,8 @@ __swift_bridge__$psm_mode_from_json(void *json);
 struct __private__ResultPtrAndPtr
 __swift_bridge__$probe_status_from_json(void *json);
 struct __private__ResultPtrAndPtr
+__swift_bridge__$paddle_inference_backend_from_json(void *json);
+struct __private__ResultPtrAndPtr
 __swift_bridge__$paddle_language_from_json(void *json);
 struct __private__ResultPtrAndPtr
 __swift_bridge__$layout_class_from_json(void *json);
@@ -7250,6 +7269,7 @@ void *__swift_bridge__$__alef_phantom_vec_chunking_reason(void);
 void *__swift_bridge__$__alef_phantom_vec_boundary_reason(void);
 void *__swift_bridge__$__alef_phantom_vec_preset_category(void);
 void *__swift_bridge__$__alef_phantom_vec_psm_mode(void);
+void *__swift_bridge__$__alef_phantom_vec_paddle_inference_backend(void);
 void *__swift_bridge__$__alef_phantom_vec_paddle_language(void);
 void *__swift_bridge__$__alef_phantom_vec_layout_class(void);
 typedef enum __swift_bridge__$ResultUIntAndString$Tag {

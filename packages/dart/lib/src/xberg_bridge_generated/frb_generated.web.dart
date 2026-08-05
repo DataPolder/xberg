@@ -806,6 +806,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   OutputFormat dco_decode_box_autoadd_output_format(dynamic raw);
 
   @protected
+  PaddleInferenceBackend dco_decode_box_autoadd_paddle_inference_backend(
+    dynamic raw,
+  );
+
+  @protected
   PageClassificationConfig dco_decode_box_autoadd_page_classification_config(
     dynamic raw,
   );
@@ -1896,6 +1901,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   OutputFormat? dco_decode_opt_box_autoadd_output_format(dynamic raw);
 
   @protected
+  PaddleInferenceBackend? dco_decode_opt_box_autoadd_paddle_inference_backend(
+    dynamic raw,
+  );
+
+  @protected
   PageClassificationConfig?
   dco_decode_opt_box_autoadd_page_classification_config(dynamic raw);
 
@@ -2070,6 +2080,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   OutputFormat dco_decode_output_format(dynamic raw);
+
+  @protected
+  PaddleInferenceBackend dco_decode_paddle_inference_backend(dynamic raw);
 
   @protected
   PaddleLanguage dco_decode_paddle_language(dynamic raw);
@@ -3127,6 +3140,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   OutputFormat sse_decode_box_autoadd_output_format(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PaddleInferenceBackend sse_decode_box_autoadd_paddle_inference_backend(
     SseDeserializer deserializer,
   );
 
@@ -4483,6 +4501,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  PaddleInferenceBackend? sse_decode_opt_box_autoadd_paddle_inference_backend(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   PageClassificationConfig?
   sse_decode_opt_box_autoadd_page_classification_config(
     SseDeserializer deserializer,
@@ -4725,6 +4748,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   OutputFormat sse_decode_output_format(SseDeserializer deserializer);
+
+  @protected
+  PaddleInferenceBackend sse_decode_paddle_inference_backend(
+    SseDeserializer deserializer,
+  );
 
   @protected
   PaddleLanguage sse_decode_paddle_language(SseDeserializer deserializer);
@@ -6118,6 +6146,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_output_format(
     OutputFormat self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_paddle_inference_backend(
+    PaddleInferenceBackend self,
     SseSerializer serializer,
   );
 
@@ -7868,6 +7902,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_opt_box_autoadd_paddle_inference_backend(
+    PaddleInferenceBackend? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_page_classification_config(
     PageClassificationConfig? self,
     SseSerializer serializer,
@@ -8178,6 +8218,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_output_format(OutputFormat self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_paddle_inference_backend(
+    PaddleInferenceBackend self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_paddle_language(

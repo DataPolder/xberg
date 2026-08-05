@@ -5636,6 +5636,21 @@ export declare enum OutputFormat {
 }
 
 /**
+ * Which concrete ONNX inference engine PaddleOCR model loading uses.
+ *
+ * Mirrors `sceptre::Backend` for the PaddleOCR backend: `Ort` is the native,
+ * full-featured path (acceleration/execution-provider hook, ONNX-embedded
+ * dictionary metadata); `Tract` is the pure-Rust, CPU-only path used on targets
+ * where `ort` cannot link (Android x86_64 emulator, WASM once wired).
+ */
+export declare enum PaddleInferenceBackend {
+  /** Native ONNX Runtime (requires the `paddle-ocr-ort` feature). */
+  Ort = "ort",
+  /** Pure-Rust ONNX via `tract` (requires the `paddle-ocr-tract` feature). */
+  Tract = "tract",
+}
+
+/**
  * Supported languages in PaddleOCR.
  *
  * Maps user-friendly language codes to paddle-ocr-rs language identifiers.
@@ -5757,6 +5772,17 @@ export interface PaddleOcrConfig {
    * legacy per-script/unified fleet.
    */
   readonly modelVersion?: string;
+  /**
+   * Explicit inference engine choice.
+   *
+   * `None` (the default) resolves to the compiled default: `ort` when the
+   * `paddle-ocr-ort` feature is compiled in, otherwise `tract`. An explicit choice
+   * is validated against the compiled features when the OCR engine is constructed
+   * (see `crate::paddle_ocr::backend::effective_backend`); requesting an engine
+   * whose feature is not compiled in is a clear configuration error rather than a
+   * silent fallback.
+   */
+  readonly inferenceBackend?: PaddleInferenceBackend;
 }
 
 /**

@@ -154,6 +154,22 @@ public sealed record PaddleOcrConfig {
   } = "";
 
   /// <summary>
+  /// Explicit inference engine choice.
+  ///
+  /// `None` (the default) resolves to the compiled default: `ort` when the
+  /// `paddle-ocr-ort` feature is compiled in, otherwise `tract`. An explicit
+  /// choice is validated against the compiled features when the OCR engine is
+  /// constructed (see `crate.paddle_ocr.backend.effective_backend`); requesting
+  /// an engine whose feature is not compiled in is a clear configuration error
+  /// rather than a silent fallback.
+  /// </summary>
+  [JsonPropertyName("inference_backend")]
+  public PaddleInferenceBackend
+      ? InferenceBackend {
+          get; init;
+        } = null;
+
+  /// <summary>
   /// Parse a <see cref="PaddleOcrConfig"/> from a JSON string.
   /// </summary>
   /// <exception cref="XbergException">When the JSON cannot be

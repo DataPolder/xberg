@@ -16308,6 +16308,18 @@ pub struct PaddleOcrConfig {
     #[php(prop, name = "modelVersion")]
     #[serde(alias = "modelVersion")]
     pub model_version: String,
+    /// Explicit inference engine choice.
+    ///
+    /// `None` (the default) resolves to the compiled default: `ort` when the
+    /// `paddle-ocr-ort` feature is compiled in, otherwise `tract`. An explicit choice
+    /// is validated against the compiled features when the OCR engine is constructed
+    /// (see `crate.paddle_ocr.backend.effective_backend`); requesting an engine
+    /// whose feature is not compiled in is a clear configuration error rather than a
+    /// silent fallback.
+    #[php(prop, name = "inferenceBackend")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "inferenceBackend")]
+    pub inference_backend: Option<String>,
 }
 
 impl Default for PaddleOcrConfig {
@@ -16338,6 +16350,7 @@ impl PaddleOcrConfig {
         dropScore: f32,
         modelTier: String,
         modelVersion: String,
+        inferenceBackend: Option<String>,
     ) -> Self {
         Self {
             language: language,
@@ -16353,6 +16366,7 @@ impl PaddleOcrConfig {
             drop_score: dropScore,
             model_tier: modelTier,
             model_version: modelVersion,
+            inference_backend: inferenceBackend,
         }
     }
 
@@ -16408,6 +16422,10 @@ impl PaddleOcrConfig {
         self.model_version.clone()
     }
 
+    pub fn get_inference_backend(&self) -> Option<String> {
+        self.inference_backend.clone().map(Into::into)
+    }
+
     pub fn with_cache_dir(&self, path: String) -> PaddleOcrConfig {
         #[allow(clippy::needless_update)]
         let core_self = xberg::PaddleOcrConfig {
@@ -16424,6 +16442,11 @@ impl PaddleOcrConfig {
             drop_score: self.drop_score,
             model_tier: self.model_tier.clone(),
             model_version: self.model_version.clone(),
+            inference_backend: self.inference_backend.as_deref().map(|s| match s {
+                "ort" => xberg::PaddleInferenceBackend::Ort,
+                "tract" => xberg::PaddleInferenceBackend::Tract,
+                _ => xberg::PaddleInferenceBackend::Ort,
+            }),
             ..Default::default()
         };
         core_self.with_cache_dir(std::path::PathBuf::from(path)).into()
@@ -16445,6 +16468,11 @@ impl PaddleOcrConfig {
             drop_score: self.drop_score,
             model_tier: self.model_tier.clone(),
             model_version: self.model_version.clone(),
+            inference_backend: self.inference_backend.as_deref().map(|s| match s {
+                "ort" => xberg::PaddleInferenceBackend::Ort,
+                "tract" => xberg::PaddleInferenceBackend::Tract,
+                _ => xberg::PaddleInferenceBackend::Ort,
+            }),
             ..Default::default()
         };
         core_self.with_table_detection(enable).into()
@@ -16466,6 +16494,11 @@ impl PaddleOcrConfig {
             drop_score: self.drop_score,
             model_tier: self.model_tier.clone(),
             model_version: self.model_version.clone(),
+            inference_backend: self.inference_backend.as_deref().map(|s| match s {
+                "ort" => xberg::PaddleInferenceBackend::Ort,
+                "tract" => xberg::PaddleInferenceBackend::Tract,
+                _ => xberg::PaddleInferenceBackend::Ort,
+            }),
             ..Default::default()
         };
         core_self.with_angle_cls(enable).into()
@@ -16487,6 +16520,11 @@ impl PaddleOcrConfig {
             drop_score: self.drop_score,
             model_tier: self.model_tier.clone(),
             model_version: self.model_version.clone(),
+            inference_backend: self.inference_backend.as_deref().map(|s| match s {
+                "ort" => xberg::PaddleInferenceBackend::Ort,
+                "tract" => xberg::PaddleInferenceBackend::Tract,
+                _ => xberg::PaddleInferenceBackend::Ort,
+            }),
             ..Default::default()
         };
         core_self.with_det_db_thresh(threshold).into()
@@ -16508,6 +16546,11 @@ impl PaddleOcrConfig {
             drop_score: self.drop_score,
             model_tier: self.model_tier.clone(),
             model_version: self.model_version.clone(),
+            inference_backend: self.inference_backend.as_deref().map(|s| match s {
+                "ort" => xberg::PaddleInferenceBackend::Ort,
+                "tract" => xberg::PaddleInferenceBackend::Tract,
+                _ => xberg::PaddleInferenceBackend::Ort,
+            }),
             ..Default::default()
         };
         core_self.with_det_db_box_thresh(threshold).into()
@@ -16529,6 +16572,11 @@ impl PaddleOcrConfig {
             drop_score: self.drop_score,
             model_tier: self.model_tier.clone(),
             model_version: self.model_version.clone(),
+            inference_backend: self.inference_backend.as_deref().map(|s| match s {
+                "ort" => xberg::PaddleInferenceBackend::Ort,
+                "tract" => xberg::PaddleInferenceBackend::Tract,
+                _ => xberg::PaddleInferenceBackend::Ort,
+            }),
             ..Default::default()
         };
         core_self.with_det_db_unclip_ratio(ratio).into()
@@ -16550,6 +16598,11 @@ impl PaddleOcrConfig {
             drop_score: self.drop_score,
             model_tier: self.model_tier.clone(),
             model_version: self.model_version.clone(),
+            inference_backend: self.inference_backend.as_deref().map(|s| match s {
+                "ort" => xberg::PaddleInferenceBackend::Ort,
+                "tract" => xberg::PaddleInferenceBackend::Tract,
+                _ => xberg::PaddleInferenceBackend::Ort,
+            }),
             ..Default::default()
         };
         core_self.with_det_limit_side_len(length).into()
@@ -16571,6 +16624,11 @@ impl PaddleOcrConfig {
             drop_score: self.drop_score,
             model_tier: self.model_tier.clone(),
             model_version: self.model_version.clone(),
+            inference_backend: self.inference_backend.as_deref().map(|s| match s {
+                "ort" => xberg::PaddleInferenceBackend::Ort,
+                "tract" => xberg::PaddleInferenceBackend::Tract,
+                _ => xberg::PaddleInferenceBackend::Ort,
+            }),
             ..Default::default()
         };
         core_self.with_rec_batch_num(batchSize).into()
@@ -16592,6 +16650,11 @@ impl PaddleOcrConfig {
             drop_score: self.drop_score,
             model_tier: self.model_tier.clone(),
             model_version: self.model_version.clone(),
+            inference_backend: self.inference_backend.as_deref().map(|s| match s {
+                "ort" => xberg::PaddleInferenceBackend::Ort,
+                "tract" => xberg::PaddleInferenceBackend::Tract,
+                _ => xberg::PaddleInferenceBackend::Ort,
+            }),
             ..Default::default()
         };
         core_self.with_drop_score(score).into()
@@ -16613,6 +16676,11 @@ impl PaddleOcrConfig {
             drop_score: self.drop_score,
             model_tier: self.model_tier.clone(),
             model_version: self.model_version.clone(),
+            inference_backend: self.inference_backend.as_deref().map(|s| match s {
+                "ort" => xberg::PaddleInferenceBackend::Ort,
+                "tract" => xberg::PaddleInferenceBackend::Tract,
+                _ => xberg::PaddleInferenceBackend::Ort,
+            }),
             ..Default::default()
         };
         core_self.with_padding(padding).into()
@@ -16634,6 +16702,11 @@ impl PaddleOcrConfig {
             drop_score: self.drop_score,
             model_tier: self.model_tier.clone(),
             model_version: self.model_version.clone(),
+            inference_backend: self.inference_backend.as_deref().map(|s| match s {
+                "ort" => xberg::PaddleInferenceBackend::Ort,
+                "tract" => xberg::PaddleInferenceBackend::Tract,
+                _ => xberg::PaddleInferenceBackend::Ort,
+            }),
             ..Default::default()
         };
         core_self.with_model_tier(tier).into()
@@ -16655,6 +16728,11 @@ impl PaddleOcrConfig {
             drop_score: self.drop_score,
             model_tier: self.model_tier.clone(),
             model_version: self.model_version.clone(),
+            inference_backend: self.inference_backend.as_deref().map(|s| match s {
+                "ort" => xberg::PaddleInferenceBackend::Ort,
+                "tract" => xberg::PaddleInferenceBackend::Tract,
+                _ => xberg::PaddleInferenceBackend::Ort,
+            }),
             ..Default::default()
         };
         core_self.with_model_version(version).into()
@@ -20789,6 +20867,16 @@ impl ProbeStatus {
     pub const WARN: &str = "Warn";
     pub const FAIL: &str = "Fail";
     pub const SKIP: &str = "Skip";
+}
+
+#[php_class]
+#[php(name = "Xberg\\PaddleInferenceBackend")]
+pub struct PaddleInferenceBackend {}
+
+#[php_impl]
+impl PaddleInferenceBackend {
+    pub const ORT: &str = "Ort";
+    pub const TRACT: &str = "Tract";
 }
 
 #[php_class]
@@ -30485,7 +30573,7 @@ impl From<xberg::DoctorReport> for DoctorReport {
 }
 
 #[allow(clippy::needless_update)]
-#[allow(clippy::redundant_closure, clippy::useless_conversion)]
+#[allow(clippy::useless_conversion)]
 impl From<PaddleOcrConfig> for xberg::PaddleOcrConfig {
     fn from(val: PaddleOcrConfig) -> Self {
         Self {
@@ -30502,6 +30590,11 @@ impl From<PaddleOcrConfig> for xberg::PaddleOcrConfig {
             drop_score: val.drop_score,
             model_tier: val.model_tier,
             model_version: val.model_version,
+            inference_backend: val.inference_backend.as_deref().map(|s| match s {
+                "ort" => xberg::PaddleInferenceBackend::Ort,
+                "tract" => xberg::PaddleInferenceBackend::Tract,
+                _ => xberg::PaddleInferenceBackend::Ort,
+            }),
             ..Default::default()
         }
     }
@@ -30524,6 +30617,12 @@ impl From<xberg::PaddleOcrConfig> for PaddleOcrConfig {
             drop_score: val.drop_score,
             model_tier: val.model_tier.to_string(),
             model_version: val.model_version.to_string(),
+            inference_backend: val.inference_backend.as_ref().map(|v| {
+                serde_json::to_value(v)
+                    .ok()
+                    .and_then(|s| s.as_str().map(String::from))
+                    .unwrap_or_default()
+            }),
         }
     }
 }
@@ -33649,7 +33748,7 @@ pub extern "C" fn get_module() -> *mut ::ext_php_rs::zend::ModuleEntry {
         ::ext_php_rs::zend::StaticModuleEntry::new();
     __EXT_PHP_RS_MODULE_ENTRY.get_or_init(|| {
         let builder =
-            ::ext_php_rs::builders::ModuleBuilder::new("xberg", "1.0.14").startup_function(__ext_php_rs_module_startup);
+            ::ext_php_rs::builders::ModuleBuilder::new("xberg", "1.1.0").startup_function(__ext_php_rs_module_startup);
         let builder = builder
             .class::<CacheStats>()
             .class::<AccelerationConfig>()
@@ -33936,6 +34035,7 @@ pub extern "C" fn get_module() -> *mut ::ext_php_rs::zend::ModuleEntry {
             .class::<PresetCategory>()
             .class::<PSMMode>()
             .class::<ProbeStatus>()
+            .class::<PaddleInferenceBackend>()
             .class::<PaddleLanguage>()
             .class::<LayoutClass>()
             .class::<BrowserMode>()

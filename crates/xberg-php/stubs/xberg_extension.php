@@ -7299,6 +7299,19 @@ namespace Xberg {
              * @var ?string
              */
             public readonly ?string $cacheDir = null,
+            /**
+             * Explicit inference engine choice.
+             *
+             * `None` (the default) resolves to the compiled default: `ort` when the
+             * `paddle-ocr-ort` feature is compiled in, otherwise `tract`. An explicit choice
+             * is validated against the compiled features when the OCR engine is constructed
+             * (see `crate::paddle_ocr::backend::effective_backend`); requesting an engine
+             * whose feature is not compiled in is a clear configuration error rather than a
+             * silent fallback.
+             *
+             * @var ?PaddleInferenceBackend
+             */
+            public readonly ?PaddleInferenceBackend $inferenceBackend = null,
         ) {}
 
         public function withCacheDir(string $path): PaddleOcrConfig
@@ -9009,6 +9022,12 @@ namespace Xberg {
         case Warn = 'warn';
         case Fail = 'fail';
         case Skip = 'skip';
+    }
+
+    enum PaddleInferenceBackend: string
+    {
+        case Ort = 'ort';
+        case Tract = 'tract';
     }
 
     enum PaddleLanguage: string

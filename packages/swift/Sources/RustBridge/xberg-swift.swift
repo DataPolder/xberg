@@ -1422,6 +1422,9 @@ public func psmModeFromJson<GenericIntoRustString: IntoRustString>(_ json: Gener
 public func probeStatusFromJson<GenericIntoRustString: IntoRustString>(_ json: GenericIntoRustString) throws -> ProbeStatus {
     try { let val = __swift_bridge__$probe_status_from_json({ let rustString = json.intoRustString(); rustString.isOwned = false; return rustString.ptr }()); if val.is_ok { return ProbeStatus(ptr: val.ok_or_err!) } else { throw RustString(ptr: val.ok_or_err!) } }()
 }
+public func paddleInferenceBackendFromJson<GenericIntoRustString: IntoRustString>(_ json: GenericIntoRustString) throws -> PaddleInferenceBackend {
+    try { let val = __swift_bridge__$paddle_inference_backend_from_json({ let rustString = json.intoRustString(); rustString.isOwned = false; return rustString.ptr }()); if val.is_ok { return PaddleInferenceBackend(ptr: val.ok_or_err!) } else { throw RustString(ptr: val.ok_or_err!) } }()
+}
 public func paddleLanguageFromJson<GenericIntoRustString: IntoRustString>(_ json: GenericIntoRustString) throws -> PaddleLanguage {
     try { let val = __swift_bridge__$paddle_language_from_json({ let rustString = json.intoRustString(); rustString.isOwned = false; return rustString.ptr }()); if val.is_ok { return PaddleLanguage(ptr: val.ok_or_err!) } else { throw RustString(ptr: val.ok_or_err!) } }()
 }
@@ -2336,6 +2339,9 @@ public func __alef_phantom_vec_preset_category() -> RustVec<PresetCategory> {
 }
 public func __alef_phantom_vec_psm_mode() -> RustVec<PSMMode> {
     RustVec(ptr: __swift_bridge__$__alef_phantom_vec_psm_mode())
+}
+public func __alef_phantom_vec_paddle_inference_backend() -> RustVec<PaddleInferenceBackend> {
+    RustVec(ptr: __swift_bridge__$__alef_phantom_vec_paddle_inference_backend())
 }
 public func __alef_phantom_vec_paddle_language() -> RustVec<PaddleLanguage> {
     RustVec(ptr: __swift_bridge__$__alef_phantom_vec_paddle_language())
@@ -22136,8 +22142,8 @@ public class PaddleOcrConfig: PaddleOcrConfigRefMut {
     }
 }
 extension PaddleOcrConfig {
-    public convenience init<GenericIntoRustString: IntoRustString>(_ language: GenericIntoRustString, _ cache_dir: Optional<GenericIntoRustString>, _ use_angle_cls: Bool, _ enable_table_detection: Bool, _ det_db_thresh: Float, _ det_db_box_thresh: Float, _ det_db_unclip_ratio: Float, _ det_limit_side_len: UInt32, _ rec_batch_num: UInt32, _ padding: UInt32, _ drop_score: Float, _ model_tier: GenericIntoRustString, _ model_version: GenericIntoRustString) {
-        self.init(ptr: __swift_bridge__$PaddleOcrConfig$new({ let rustString = language.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { if let rustString = optionalStringIntoRustString(cache_dir) { rustString.isOwned = false; return rustString.ptr } else { return nil } }(), use_angle_cls, enable_table_detection, det_db_thresh, det_db_box_thresh, det_db_unclip_ratio, det_limit_side_len, rec_batch_num, padding, drop_score, { let rustString = model_tier.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { let rustString = model_version.intoRustString(); rustString.isOwned = false; return rustString.ptr }()))
+    public convenience init<GenericIntoRustString: IntoRustString>(_ language: GenericIntoRustString, _ cache_dir: Optional<GenericIntoRustString>, _ use_angle_cls: Bool, _ enable_table_detection: Bool, _ det_db_thresh: Float, _ det_db_box_thresh: Float, _ det_db_unclip_ratio: Float, _ det_limit_side_len: UInt32, _ rec_batch_num: UInt32, _ padding: UInt32, _ drop_score: Float, _ model_tier: GenericIntoRustString, _ model_version: GenericIntoRustString, _ inference_backend: Optional<PaddleInferenceBackend>) {
+        self.init(ptr: __swift_bridge__$PaddleOcrConfig$new({ let rustString = language.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { if let rustString = optionalStringIntoRustString(cache_dir) { rustString.isOwned = false; return rustString.ptr } else { return nil } }(), use_angle_cls, enable_table_detection, det_db_thresh, det_db_box_thresh, det_db_unclip_ratio, det_limit_side_len, rec_batch_num, padding, drop_score, { let rustString = model_tier.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { let rustString = model_version.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { if let val = inference_backend { val.isOwned = false; return val.ptr } else { return nil } }()))
     }
 }
 public class PaddleOcrConfigRefMut: PaddleOcrConfigRef {
@@ -22203,6 +22209,10 @@ extension PaddleOcrConfigRef {
 
     public func modelVersion() -> RustString {
         RustString(ptr: __swift_bridge__$PaddleOcrConfig$model_version(ptr))
+    }
+
+    public func inferenceBackend() -> Optional<RustString> {
+        { let val = __swift_bridge__$PaddleOcrConfig$inference_backend(ptr); if val != nil { return RustString(ptr: val!) } else { return nil } }()
     }
 }
 extension PaddleOcrConfig: Vectorizable {
@@ -29803,6 +29813,86 @@ extension ProbeStatus: Vectorizable {
 
     public static func vecOfSelfLen(vecPtr: UnsafeMutableRawPointer) -> UInt {
         __swift_bridge__$Vec_ProbeStatus$len(vecPtr)
+    }
+}
+
+
+public class PaddleInferenceBackend: PaddleInferenceBackendRefMut {
+    public var isOwned: Bool = true
+
+    public override init(ptr: UnsafeMutableRawPointer) {
+        super.init(ptr: ptr)
+    }
+
+    deinit {
+        if isOwned {
+            __swift_bridge__$PaddleInferenceBackend$_free(ptr)
+        }
+    }
+}
+public class PaddleInferenceBackendRefMut: PaddleInferenceBackendRef {
+    public override init(ptr: UnsafeMutableRawPointer) {
+        super.init(ptr: ptr)
+    }
+}
+public class PaddleInferenceBackendRef {
+    public var ptr: UnsafeMutableRawPointer
+
+    public init(ptr: UnsafeMutableRawPointer) {
+        self.ptr = ptr
+    }
+}
+extension PaddleInferenceBackendRef {
+    public func to_string() -> RustString {
+        RustString(ptr: __swift_bridge__$PaddleInferenceBackend$to_string(ptr))
+    }
+}
+extension PaddleInferenceBackend: Vectorizable {
+    public static func vecOfSelfNew() -> UnsafeMutableRawPointer {
+        __swift_bridge__$Vec_PaddleInferenceBackend$new()
+    }
+
+    public static func vecOfSelfFree(vecPtr: UnsafeMutableRawPointer) {
+        __swift_bridge__$Vec_PaddleInferenceBackend$drop(vecPtr)
+    }
+
+    public static func vecOfSelfPush(vecPtr: UnsafeMutableRawPointer, value: PaddleInferenceBackend) {
+        __swift_bridge__$Vec_PaddleInferenceBackend$push(vecPtr, {value.isOwned = false; return value.ptr;}())
+    }
+
+    public static func vecOfSelfPop(vecPtr: UnsafeMutableRawPointer) -> Optional<Self> {
+        let pointer = __swift_bridge__$Vec_PaddleInferenceBackend$pop(vecPtr)
+        if pointer == nil {
+            return nil
+        } else {
+            return (PaddleInferenceBackend(ptr: pointer!) as! Self)
+        }
+    }
+
+    public static func vecOfSelfGet(vecPtr: UnsafeMutableRawPointer, index: UInt) -> Optional<PaddleInferenceBackendRef> {
+        let pointer = __swift_bridge__$Vec_PaddleInferenceBackend$get(vecPtr, index)
+        if pointer == nil {
+            return nil
+        } else {
+            return PaddleInferenceBackendRef(ptr: pointer!)
+        }
+    }
+
+    public static func vecOfSelfGetMut(vecPtr: UnsafeMutableRawPointer, index: UInt) -> Optional<PaddleInferenceBackendRefMut> {
+        let pointer = __swift_bridge__$Vec_PaddleInferenceBackend$get_mut(vecPtr, index)
+        if pointer == nil {
+            return nil
+        } else {
+            return PaddleInferenceBackendRefMut(ptr: pointer!)
+        }
+    }
+
+    public static func vecOfSelfAsPtr(vecPtr: UnsafeMutableRawPointer) -> UnsafePointer<PaddleInferenceBackendRef> {
+        UnsafePointer<PaddleInferenceBackendRef>(OpaquePointer(__swift_bridge__$Vec_PaddleInferenceBackend$as_ptr(vecPtr)))
+    }
+
+    public static func vecOfSelfLen(vecPtr: UnsafeMutableRawPointer) -> UInt {
+        __swift_bridge__$Vec_PaddleInferenceBackend$len(vecPtr)
     }
 }
 

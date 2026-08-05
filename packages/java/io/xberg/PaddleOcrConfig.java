@@ -30,7 +30,9 @@ public record PaddleOcrConfig(
     @JsonProperty("padding") int padding,
     @JsonProperty("drop_score") float dropScore,
     @JsonProperty("model_tier") String modelTier,
-    @JsonProperty("model_version") String modelVersion) {
+    @JsonProperty("model_version") String modelVersion,
+    @Nullable @JsonProperty("inference_backend")
+    PaddleInferenceBackend inferenceBackend) {
   /** Creates a new Builder for constructing instances of this record. */
   public static Builder builder() { return new Builder(); }
 
@@ -54,6 +56,9 @@ public record PaddleOcrConfig(
     @JsonProperty("drop_score") private float dropScore;
     @JsonProperty("model_tier") private String modelTier;
     @JsonProperty("model_version") private String modelVersion;
+    @JsonProperty("inference_backend")
+    @Nullable
+    private PaddleInferenceBackend inferenceBackend;
 
     /** Sets the language field. */
     @JsonProperty("language")
@@ -146,6 +151,14 @@ public record PaddleOcrConfig(
       return this;
     }
 
+    /** Sets the inferenceBackend field. */
+    @JsonProperty("inference_backend")
+    public Builder
+    withInferenceBackend(final @Nullable PaddleInferenceBackend value) {
+      this.inferenceBackend = value;
+      return this;
+    }
+
     /**
      * Constructs a PaddleOcrConfig instance from the builder's current state.
      */
@@ -153,7 +166,7 @@ public record PaddleOcrConfig(
       return new PaddleOcrConfig(
           language, cacheDir, useAngleCls, enableTableDetection, detDbThresh,
           detDbBoxThresh, detDbUnclipRatio, detLimitSideLen, recBatchNum,
-          padding, dropScore, modelTier, modelVersion);
+          padding, dropScore, modelTier, modelVersion, inferenceBackend);
     }
   }
   // CPD-ON

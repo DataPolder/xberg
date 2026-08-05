@@ -1406,6 +1406,15 @@ typedef struct XBERGOutputFormat XBERGOutputFormat;
  */
 typedef struct XBERGPSMMode XBERGPSMMode;
 /**
+ * Which concrete ONNX inference engine PaddleOCR model loading uses.
+ *
+ * Mirrors `sceptre::Backend` for the PaddleOCR backend: `Ort` is the native,
+ * full-featured path (acceleration/execution-provider hook, ONNX-embedded
+ * dictionary metadata); `Tract` is the pure-Rust, CPU-only path used on targets
+ * where `ort` cannot link (Android x86_64 emulator, WASM once wired).
+ */
+typedef struct XBERGPaddleInferenceBackend XBERGPaddleInferenceBackend;
+/**
  * Supported languages in PaddleOCR.
  *
  * Maps user-friendly language codes to paddle-ocr-rs language identifiers.

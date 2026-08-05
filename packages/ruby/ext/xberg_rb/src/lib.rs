@@ -20070,6 +20070,7 @@ pub struct PaddleOcrConfig {
     drop_score: f32,
     model_tier: String,
     model_version: String,
+    inference_backend: Option<PaddleInferenceBackend>,
 }
 
 unsafe impl IntoValueFromNative for PaddleOcrConfig {}
@@ -20164,6 +20165,9 @@ impl PaddleOcrConfig {
                 .get(ruby.to_symbol("model_version"))
                 .and_then(|v| String::try_convert(v).ok())
                 .unwrap_or_default(),
+            inference_backend: kwargs
+                .get(ruby.to_symbol("inference_backend"))
+                .and_then(|v| PaddleInferenceBackend::try_convert(v).ok()),
         })
     }
 
@@ -20219,6 +20223,10 @@ impl PaddleOcrConfig {
         self.model_version.clone()
     }
 
+    fn inference_backend(&self) -> Option<PaddleInferenceBackend> {
+        self.inference_backend.clone()
+    }
+
     fn with_cache_dir(&self, path: String) -> PaddleOcrConfig {
         #[allow(clippy::needless_update)]
         let core_self = xberg::PaddleOcrConfig {
@@ -20247,6 +20255,8 @@ impl PaddleOcrConfig {
             model_tier: self.model_tier.clone(),
 
             model_version: self.model_version.clone(),
+
+            inference_backend: self.inference_backend.clone().map(Into::into),
 
             ..Default::default()
         };
@@ -20282,6 +20292,8 @@ impl PaddleOcrConfig {
 
             model_version: self.model_version.clone(),
 
+            inference_backend: self.inference_backend.clone().map(Into::into),
+
             ..Default::default()
         };
         core_self.with_table_detection(enable).into()
@@ -20315,6 +20327,8 @@ impl PaddleOcrConfig {
             model_tier: self.model_tier.clone(),
 
             model_version: self.model_version.clone(),
+
+            inference_backend: self.inference_backend.clone().map(Into::into),
 
             ..Default::default()
         };
@@ -20350,6 +20364,8 @@ impl PaddleOcrConfig {
 
             model_version: self.model_version.clone(),
 
+            inference_backend: self.inference_backend.clone().map(Into::into),
+
             ..Default::default()
         };
         core_self.with_det_db_thresh(threshold).into()
@@ -20383,6 +20399,8 @@ impl PaddleOcrConfig {
             model_tier: self.model_tier.clone(),
 
             model_version: self.model_version.clone(),
+
+            inference_backend: self.inference_backend.clone().map(Into::into),
 
             ..Default::default()
         };
@@ -20418,6 +20436,8 @@ impl PaddleOcrConfig {
 
             model_version: self.model_version.clone(),
 
+            inference_backend: self.inference_backend.clone().map(Into::into),
+
             ..Default::default()
         };
         core_self.with_det_db_unclip_ratio(ratio).into()
@@ -20451,6 +20471,8 @@ impl PaddleOcrConfig {
             model_tier: self.model_tier.clone(),
 
             model_version: self.model_version.clone(),
+
+            inference_backend: self.inference_backend.clone().map(Into::into),
 
             ..Default::default()
         };
@@ -20486,6 +20508,8 @@ impl PaddleOcrConfig {
 
             model_version: self.model_version.clone(),
 
+            inference_backend: self.inference_backend.clone().map(Into::into),
+
             ..Default::default()
         };
         core_self.with_rec_batch_num(batch_size).into()
@@ -20519,6 +20543,8 @@ impl PaddleOcrConfig {
             model_tier: self.model_tier.clone(),
 
             model_version: self.model_version.clone(),
+
+            inference_backend: self.inference_backend.clone().map(Into::into),
 
             ..Default::default()
         };
@@ -20554,6 +20580,8 @@ impl PaddleOcrConfig {
 
             model_version: self.model_version.clone(),
 
+            inference_backend: self.inference_backend.clone().map(Into::into),
+
             ..Default::default()
         };
         core_self.with_padding(padding).into()
@@ -20588,6 +20616,8 @@ impl PaddleOcrConfig {
 
             model_version: self.model_version.clone(),
 
+            inference_backend: self.inference_backend.clone().map(Into::into),
+
             ..Default::default()
         };
         core_self.with_model_tier(tier).into()
@@ -20621,6 +20651,8 @@ impl PaddleOcrConfig {
             model_tier: self.model_tier.clone(),
 
             model_version: self.model_version.clone(),
+
+            inference_backend: self.inference_backend.clone().map(Into::into),
 
             ..Default::default()
         };
@@ -26844,6 +26876,48 @@ impl magnus::TryConvert for ProbeStatus {
 
 unsafe impl IntoValueFromNative for ProbeStatus {}
 unsafe impl TryConvertOwned for ProbeStatus {}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PaddleInferenceBackend {
+    Ort,
+    Tract,
+}
+
+impl Default for PaddleInferenceBackend {
+    fn default() -> Self {
+        Self::Ort
+    }
+}
+
+impl magnus::IntoValue for PaddleInferenceBackend {
+    fn into_value_with(self, handle: &Ruby) -> magnus::Value {
+        let sym = match self {
+            PaddleInferenceBackend::Ort => "ort",
+            PaddleInferenceBackend::Tract => "tract",
+        };
+        handle.to_symbol(sym).into_value_with(handle)
+    }
+}
+
+impl magnus::TryConvert for PaddleInferenceBackend {
+    fn try_convert(val: magnus::Value) -> Result<Self, magnus::Error> {
+        let s: String = magnus::TryConvert::try_convert(val)?;
+        // Accept the serde wire name (snake_case), the PascalCase Rust variant name,
+        // and a lowercase fallback so fixtures written in any of those styles work.
+        match s.as_str() {
+            "ort" | "Ort" => Ok(PaddleInferenceBackend::Ort),
+            "tract" | "Tract" => Ok(PaddleInferenceBackend::Tract),
+            other => Err(magnus::Error::new(
+                unsafe { Ruby::get_unchecked() }.exception_arg_error(),
+                format!("invalid PaddleInferenceBackend value: {other}"),
+            )),
+        }
+    }
+}
+
+unsafe impl IntoValueFromNative for PaddleInferenceBackend {}
+unsafe impl TryConvertOwned for PaddleInferenceBackend {}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum PaddleLanguage {
@@ -36163,6 +36237,7 @@ impl From<PaddleOcrConfig> for xberg::PaddleOcrConfig {
             drop_score: val.drop_score,
             model_tier: val.model_tier,
             model_version: val.model_version,
+            inference_backend: val.inference_backend.map(Into::into),
             ..Default::default()
         }
     }
@@ -36185,6 +36260,7 @@ impl From<xberg::PaddleOcrConfig> for PaddleOcrConfig {
             drop_score: val.drop_score,
             model_tier: val.model_tier.to_string(),
             model_version: val.model_version.to_string(),
+            inference_backend: val.inference_backend.map(Into::into),
         }
     }
 }
@@ -38588,6 +38664,24 @@ impl From<xberg::ProbeStatus> for ProbeStatus {
             xberg::ProbeStatus::Warn => Self::Warn,
             xberg::ProbeStatus::Fail => Self::Fail,
             xberg::ProbeStatus::Skip => Self::Skip,
+        }
+    }
+}
+
+impl From<PaddleInferenceBackend> for xberg::PaddleInferenceBackend {
+    fn from(val: PaddleInferenceBackend) -> Self {
+        match val {
+            PaddleInferenceBackend::Ort => Self::Ort,
+            PaddleInferenceBackend::Tract => Self::Tract,
+        }
+    }
+}
+
+impl From<xberg::PaddleInferenceBackend> for PaddleInferenceBackend {
+    fn from(val: xberg::PaddleInferenceBackend) -> Self {
+        match val {
+            xberg::PaddleInferenceBackend::Ort => Self::Ort,
+            xberg::PaddleInferenceBackend::Tract => Self::Tract,
         }
     }
 }
@@ -42417,6 +42511,8 @@ fn ruby_init(ruby: &Ruby) -> Result<(), Error> {
     class.define_method("model_tier", method!(PaddleOcrConfig::model_tier, 0))?;
 
     class.define_method("model_version", method!(PaddleOcrConfig::model_version, 0))?;
+
+    class.define_method("inference_backend", method!(PaddleOcrConfig::inference_backend, 0))?;
 
     class.define_method("with_cache_dir", method!(PaddleOcrConfig::with_cache_dir, 1))?;
 

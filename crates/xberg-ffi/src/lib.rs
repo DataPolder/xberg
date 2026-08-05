@@ -716,6 +716,15 @@ fn probe_status_from_i32_rs(v: i32) -> Option<xberg::ProbeStatus> {
 }
 
 #[allow(dead_code)]
+fn paddle_inference_backend_from_i32_rs(v: i32) -> Option<xberg::PaddleInferenceBackend> {
+    match v {
+        0 => Some(xberg::PaddleInferenceBackend::Ort),
+        1 => Some(xberg::PaddleInferenceBackend::Tract),
+        _ => None,
+    }
+}
+
+#[allow(dead_code)]
 fn paddle_language_from_i32_rs(v: i32) -> Option<xberg::PaddleLanguage> {
     match v {
         0 => Some(xberg::PaddleLanguage::English),
@@ -35120,6 +35129,25 @@ pub unsafe extern "C" fn xberg_paddle_ocr_config_model_version(
     }
 }
 
+#[cfg(feature = "paddle-ocr-types")]
+/// Get the `inference_backend` field from a `PaddleOcrConfig`.
+/// # Safety
+/// Pointer must be a valid handle returned by this library.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn xberg_paddle_ocr_config_inference_backend(
+    ptr: *const xberg::PaddleOcrConfig,
+) -> *mut xberg::PaddleInferenceBackend {
+    if ptr.is_null() {
+        return std::ptr::null_mut();
+    }
+    // SAFETY: null check above guarantees ptr is a valid pointer.
+    let obj = unsafe { &*ptr };
+    match &obj.inference_backend {
+        Some(val) => Box::into_raw(Box::new(*val)),
+        None => std::ptr::null_mut(),
+    }
+}
+
 /// Sets a custom Hugging Face Hub cache root for model files.
 /// \param path Path to cache directory
 /// \note SAFETY: Caller must ensure all pointer arguments are valid or null. Returned pointers must be
@@ -42623,6 +42651,49 @@ pub unsafe extern "C" fn xberg_probe_status_from_str(name: *const c_char) -> i32
     }
 }
 
+/// Convert an integer to a `PaddleInferenceBackend` variant. Returns -1 on invalid input.
+/// # Safety
+/// Caller must ensure all pointer arguments are valid or null.
+/// Returned pointers must be freed with the appropriate free function.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn xberg_paddle_inference_backend_from_i32(value: i32) -> i32 {
+    match value {
+        0 => 0, // Ort
+        1 => 1, // Tract
+        _ => {
+            set_last_error(1, "Invalid PaddleInferenceBackend variant");
+            -1
+        }
+    }
+}
+
+/// Convert a `PaddleInferenceBackend` serde wire value (C string) to its integer discriminant. Returns -1 on invalid input.
+/// # Safety
+/// Caller must ensure `ptr` is a valid pointer to a `c_char` or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn xberg_paddle_inference_backend_from_str(name: *const c_char) -> i32 {
+    if name.is_null() {
+        set_last_error(1, "Null pointer passed for enum name");
+        return -1;
+    }
+    // SAFETY: null check above guarantees name is a valid pointer; string is valid UTF-8 from caller.
+    let s = match unsafe { CStr::from_ptr(name) }.to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            set_last_error(1, "Invalid UTF-8 in enum name");
+            return -1;
+        }
+    };
+    match s {
+        "ort" => 0,
+        "tract" => 1,
+        _ => {
+            set_last_error(1, "Unknown PaddleInferenceBackend variant");
+            -1
+        }
+    }
+}
+
 /// Convert an integer to a `PaddleLanguage` variant. Returns -1 on invalid input.
 /// # Safety
 /// Caller must ensure all pointer arguments are valid or null.
@@ -47200,6 +47271,74 @@ pub unsafe extern "C" fn xberg_probe_status_to_string(ptr: *const xberg::ProbeSt
         Ok(cs) => cs.into_raw(),
         Err(_) => {
             set_last_error(1, "ProbeStatus variant contained interior NUL byte");
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Free a heap-allocated `PaddleInferenceBackend` returned by a pointer-returning FFI function.
+/// # Safety
+/// Pointer must have been returned by this library, or be null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn xberg_paddle_inference_backend_free(ptr: *mut xberg::PaddleInferenceBackend) {
+    if !ptr.is_null() {
+        // SAFETY: ptr was allocated by Box::into_raw; caller ensures no aliases.
+        unsafe {
+            drop(Box::from_raw(ptr));
+        }
+    }
+}
+
+/// Serialize a heap-allocated `PaddleInferenceBackend` to a JSON string.
+/// # Safety
+/// `ptr` must be a valid, non-null pointer returned by a `xberg` function.
+/// The returned string must be freed with `xberg_free_string`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn xberg_paddle_inference_backend_to_json(
+    ptr: *const xberg::PaddleInferenceBackend,
+) -> *mut c_char {
+    if ptr.is_null() {
+        set_last_error(1, "Null pointer passed to xberg_paddle_inference_backend_to_json");
+        return std::ptr::null_mut();
+    }
+    // SAFETY: null check above guarantees ptr is valid; no mutable aliases held.
+    let val = unsafe { &*ptr };
+    match serde_json::to_string(val) {
+        Ok(s) => match CString::new(s) {
+            Ok(cs) => cs.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        },
+        Err(e) => {
+            set_last_error(2, &e.to_string());
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Render a heap-allocated `PaddleInferenceBackend` as its string representation
+/// (the unit-variant name as serialized by serde — e.g. `"completed"`,
+/// without surrounding JSON quotes).
+/// # Safety
+/// `ptr` must be a valid, non-null pointer returned by a `xberg` function.
+/// The returned string must be freed with `xberg_free_string`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn xberg_paddle_inference_backend_to_string(
+    ptr: *const xberg::PaddleInferenceBackend,
+) -> *mut c_char {
+    if ptr.is_null() {
+        set_last_error(1, "Null pointer passed to xberg_paddle_inference_backend_to_string");
+        return std::ptr::null_mut();
+    }
+    // SAFETY: null check above guarantees ptr is valid; no mutable aliases held.
+    let val = unsafe { &*ptr };
+    let s: String = serde_json::to_value(val)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .unwrap_or_default();
+    match CString::new(s) {
+        Ok(cs) => cs.into_raw(),
+        Err(_) => {
+            set_last_error(1, "PaddleInferenceBackend variant contained interior NUL byte");
             std::ptr::null_mut()
         }
     }

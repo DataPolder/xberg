@@ -51,12 +51,6 @@ exclude = [
   ".claude-plugin/marketplace.json",
   ".agents/plugins/marketplace.json",
   ".ai-rulez-generated.json",
-  # Vendored from RazrFalcon/ttf-parser. Kept byte-close to upstream so cherry-picks still
-  # apply, so poly must not rewrite it -- `uncomment --fix` strips upstream's explanatory
-  # comments (and its `/*! .. */` module docs, which `remove_docs = false` does not guard),
-  # leaving truncated sentences and unannotated hex test vectors. ~keep
-  "crates/xberg-ttf-parser/src/**",
-  "crates/xberg-ttf-parser/tests/**",
 ]
 
 [lint.markdown.rumdl]
@@ -152,9 +146,6 @@ faiure = "faiure"
 fith = "fith"
 flate = "flate"
 formated = "formated"
-# ISO 639-2/B bibliographic language codes, alongside their /T twins (fra, cym) in the OCR
-# language tables. Rewriting them to "free"/"well" would break language resolution. ~keep
-fre = "fre"
 headerr = "headerr"
 helo = "helo"
 hocr = "hocr"
@@ -166,7 +157,6 @@ kreuzberg = "kreuzberg"
 layrnorm = "layrnorm"
 legt = "legt"
 loca = "loca"
-trak = "trak"
 markitdown = "markitdown"
 ment = "ment"
 mis = "mis"
@@ -201,11 +191,11 @@ threed = "threed"
 ths = "ths"
 thw = "thw"
 traineddata = "traineddata"
+trak = "trak"
 tre = "tre"
 unparseable = "unparseable"
 utiliza = "utiliza"
 webui = "webui"
-wel = "wel"
 yor = "yor"
 
 [lint.typos.extend_identifiers]
@@ -376,10 +366,6 @@ enabled = true
 "e2e/**/*.py" = ["A001", "N801"]
 "packages/**" = ["comment", "doc-comment"]
 "packages/python/**/api.py" = ["RET504"]
-# alef-generated. `ProbeStatus.pass_` is the "check passed" doctor outcome; the trailing
-# underscore is codegen escaping the `pass` keyword, and S105 flags it purely on the name.
-# The file carries a DO-NOT-EDIT header, so the suppression has to live here. ~keep
-"packages/python/xberg/options.py" = ["S105"]
 "packages/python/build.py" = ["INP001"]
 "scripts/**/*.py" = [
   "B023",

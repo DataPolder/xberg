@@ -3575,6 +3575,7 @@ mod ffi {
             drop_score: f32,
             model_tier: String,
             model_version: String,
+            inference_backend: Option<PaddleInferenceBackend>,
         ) -> PaddleOcrConfig;
         fn language(&self) -> String;
         #[swift_bridge(swift_name = "cacheDir")]
@@ -3600,6 +3601,8 @@ mod ffi {
         fn model_tier(&self) -> String;
         #[swift_bridge(swift_name = "modelVersion")]
         fn model_version(&self) -> String;
+        #[swift_bridge(swift_name = "inferenceBackend")]
+        fn inference_backend(&self) -> Option<String>;
     }
 
     #[cfg(feature = "paddle-ocr-types")]
@@ -4479,6 +4482,12 @@ mod ffi {
 
     extern "Rust" {
         type ProbeStatus;
+        fn to_string(&self) -> String;
+    }
+
+    #[cfg(feature = "paddle-ocr-types")]
+    extern "Rust" {
+        type PaddleInferenceBackend;
         fn to_string(&self) -> String;
     }
 
@@ -5404,6 +5413,8 @@ mod ffi {
         fn psm_mode_from_json(json: String) -> Result<PSMMode, String>;
         #[swift_bridge(swift_name = "probeStatusFromJson")]
         fn probe_status_from_json(json: String) -> Result<ProbeStatus, String>;
+        #[swift_bridge(swift_name = "paddleInferenceBackendFromJson")]
+        fn paddle_inference_backend_from_json(json: String) -> Result<PaddleInferenceBackend, String>;
         #[swift_bridge(swift_name = "paddleLanguageFromJson")]
         fn paddle_language_from_json(json: String) -> Result<PaddleLanguage, String>;
         #[swift_bridge(swift_name = "layoutClassFromJson")]
@@ -6819,6 +6830,20 @@ mod ffi {
         // trying to construct or manipulate Vec<T> of opaque types.
         //
         // These declarations are paired with phantom_impl functions below the bridge module.
+        fn __alef_phantom_vec_paddle_inference_backend() -> Vec<PaddleInferenceBackend>;
+    }
+
+    #[cfg(feature = "paddle-ocr-types")]
+    extern "Rust" {
+        // Phantom Vec<T> functions: swift-bridge-build must emit the full Vec support
+        // C ABI symbols (__swift_bridge__$Vec_T$new, drop, push, pop, get, get_mut, as_ptr, len)
+        // which the auto-generated Swift Vec<T> conformances reference.
+        //
+        // swift-bridge 0.1.59 only emits these when Vec<T> appears as a return type
+        // in an extern block. Without these phantom functions, Swift linker fails when
+        // trying to construct or manipulate Vec<T> of opaque types.
+        //
+        // These declarations are paired with phantom_impl functions below the bridge module.
         fn __alef_phantom_vec_paddle_language() -> Vec<PaddleLanguage>;
     }
 
@@ -8054,6 +8079,11 @@ pub fn __alef_phantom_vec_psm_mode() -> Vec<PSMMode> {
 }
 #[doc(hidden)]
 pub fn __alef_phantom_vec_probe_status() -> Vec<ProbeStatus> {
+    Vec::new()
+}
+#[cfg(feature = "paddle-ocr-types")]
+#[doc(hidden)]
+pub fn __alef_phantom_vec_paddle_inference_backend() -> Vec<PaddleInferenceBackend> {
     Vec::new()
 }
 #[cfg(feature = "paddle-ocr-types")]
@@ -17818,6 +17848,7 @@ impl PaddleOcrConfig {
         drop_score: f32,
         model_tier: String,
         model_version: String,
+        inference_backend: Option<PaddleInferenceBackend>,
     ) -> PaddleOcrConfig {
         let mut __target: xberg::PaddleOcrConfig = ::std::default::Default::default();
         {
@@ -17872,6 +17903,7 @@ impl PaddleOcrConfig {
                 __target.model_version = t;
             }
         }
+        // alef: inference_backend (PaddleInferenceBackend) is an enum; reverse From not generated — left at default
         PaddleOcrConfig(__target)
     }
     pub fn language(&self) -> String {
@@ -17939,6 +17971,12 @@ impl PaddleOcrConfig {
     }
     pub fn model_version(&self) -> String {
         self.0.model_version.clone()
+    }
+    pub fn inference_backend(&self) -> Option<String> {
+        self.0
+            .inference_backend
+            .clone()
+            .map(|w| PaddleInferenceBackend::from(w).to_string())
     }
 }
 
@@ -21809,6 +21847,29 @@ impl ProbeStatus {
     }
 }
 
+pub enum PaddleInferenceBackend {
+    Ort,
+    Tract,
+}
+
+impl From<xberg::PaddleInferenceBackend> for PaddleInferenceBackend {
+    fn from(val: xberg::PaddleInferenceBackend) -> Self {
+        match val {
+            xberg::PaddleInferenceBackend::Ort => Self::Ort,
+            xberg::PaddleInferenceBackend::Tract => Self::Tract,
+        }
+    }
+}
+
+impl PaddleInferenceBackend {
+    pub fn to_string(&self) -> String {
+        match self {
+            Self::Ort => "ort".to_string(),
+            Self::Tract => "tract".to_string(),
+        }
+    }
+}
+
 pub enum PaddleLanguage {
     English,
     Chinese,
@@ -24736,6 +24797,11 @@ pub fn psm_mode_from_json(json: String) -> Result<PSMMode, String> {
 pub fn probe_status_from_json(json: String) -> Result<ProbeStatus, String> {
     serde_json::from_str::<xberg::ProbeStatus>(&json)
         .map(ProbeStatus::from)
+        .map_err(|e| e.to_string())
+}
+pub fn paddle_inference_backend_from_json(json: String) -> Result<PaddleInferenceBackend, String> {
+    serde_json::from_str::<xberg::PaddleInferenceBackend>(&json)
+        .map(PaddleInferenceBackend::from)
         .map_err(|e| e.to_string())
 }
 pub fn paddle_language_from_json(json: String) -> Result<PaddleLanguage, String> {

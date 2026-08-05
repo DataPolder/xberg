@@ -40,7 +40,8 @@ defmodule Xberg.PaddleOcrConfig do
   padding: non_neg_integer(),
   drop_score: float(),
   model_tier: String.t() | nil,
-  model_version: String.t() | nil
+  model_version: String.t() | nil,
+  inference_backend: String.t() | nil | nil
   }
 
   defstruct language: nil,
@@ -55,7 +56,8 @@ defmodule Xberg.PaddleOcrConfig do
   padding: 0,
   drop_score: 0.0,
   model_tier: nil,
-  model_version: nil
+  model_version: nil,
+  inference_backend: nil
 
   defimpl Jason.Encoder do
     @doc false

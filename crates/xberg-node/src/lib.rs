@@ -7016,6 +7016,17 @@ pub struct JsPaddleOcrConfig {
     #[napi(js_name = "modelVersion")]
     #[serde(rename = "modelVersion")]
     pub model_version: Option<String>,
+    /// Explicit inference engine choice.
+    ///
+    /// `None` (the default) resolves to the compiled default: `ort` when the
+    /// `paddle-ocr-ort` feature is compiled in, otherwise `tract`. An explicit choice
+    /// is validated against the compiled features when the OCR engine is constructed
+    /// (see `crate.paddle_ocr.backend.effective_backend`); requesting an engine
+    /// whose feature is not compiled in is a clear configuration error rather than a
+    /// silent fallback.
+    #[napi(js_name = "inferenceBackend")]
+    #[serde(rename = "inferenceBackend")]
+    pub inference_backend: Option<JsPaddleInferenceBackend>,
 }
 
 /// Sets a custom Hugging Face Hub cache root for model files.
@@ -10061,6 +10072,28 @@ pub enum JsProbeStatus {
 impl Default for JsProbeStatus {
     fn default() -> Self {
         Self::Pass
+    }
+}
+
+/// Which concrete ONNX inference engine PaddleOCR model loading uses.
+///
+/// Mirrors `sceptre.Backend` for the PaddleOCR backend: `Ort` is the native,
+/// full-featured path (acceleration/execution-provider hook, ONNX-embedded
+/// dictionary metadata); `Tract` is the pure-Rust, CPU-only path used on targets
+/// where `ort` cannot link (Android x86_64 emulator, WASM once wired).
+#[napi(string_enum = "snake_case", js_name = "PaddleInferenceBackend")]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub enum JsPaddleInferenceBackend {
+    /// Native ONNX Runtime (requires the `paddle-ocr-ort` feature).
+    Ort,
+    /// Pure-Rust ONNX via `tract` (requires the `paddle-ocr-tract` feature).
+    Tract,
+}
+
+#[allow(clippy::derivable_impls)]
+impl Default for JsPaddleInferenceBackend {
+    fn default() -> Self {
+        Self::Ort
     }
 }
 
@@ -21307,6 +21340,7 @@ impl From<JsPaddleOcrConfig> for xberg::PaddleOcrConfig {
         if let Some(__v) = val.model_version {
             __result.model_version = __v;
         }
+        __result.inference_backend = val.inference_backend.map(Into::into);
         __result
     }
 }
@@ -21328,6 +21362,7 @@ impl From<xberg::PaddleOcrConfig> for JsPaddleOcrConfig {
             drop_score: Some(val.drop_score as f64),
             model_tier: Some(val.model_tier.to_string()),
             model_version: Some(val.model_version.to_string()),
+            inference_backend: val.inference_backend.map(Into::into),
         }
     }
 }
@@ -25189,6 +25224,24 @@ impl From<xberg::ProbeStatus> for JsProbeStatus {
             xberg::ProbeStatus::Warn => Self::Warn,
             xberg::ProbeStatus::Fail => Self::Fail,
             xberg::ProbeStatus::Skip => Self::Skip,
+        }
+    }
+}
+
+impl From<JsPaddleInferenceBackend> for xberg::PaddleInferenceBackend {
+    fn from(val: JsPaddleInferenceBackend) -> Self {
+        match val {
+            JsPaddleInferenceBackend::Ort => Self::Ort,
+            JsPaddleInferenceBackend::Tract => Self::Tract,
+        }
+    }
+}
+
+impl From<xberg::PaddleInferenceBackend> for JsPaddleInferenceBackend {
+    fn from(val: xberg::PaddleInferenceBackend) -> Self {
+        match val {
+            xberg::PaddleInferenceBackend::Ort => Self::Ort,
+            xberg::PaddleInferenceBackend::Tract => Self::Tract,
         }
     }
 }

@@ -3,10 +3,12 @@
 
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
-import '../native_loader.dart';
+import 'package:xberg/src/native_loader.dart';
 import 'dart:ffi';
 import 'dart:isolate';
 import 'dart:io';
+import 'dart:core' as _DartCore;
+import 'dart:core';
 import 'dart:async';
 import 'dart:convert';
 import 'frb_generated.dart';
@@ -21,88 +23,187 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   static final instance = RustLib._();
 
   RustLib._();
-
-  /// Resolve the prebuilt native library from this package's own installed
-  /// location so the load works from any working directory and under hardened
-  /// runtimes. Returns `null` to defer to flutter_rust_bridge's default loader.
+  /// Resolve the prebuilt native library from environment variable,
+  /// package-relative location, or defer to flutter_rust_bridge's default loader.
+  /// Returns `null` to defer to flutter_rust_bridge's default loader.
   ///
-  /// Resolution order:
-  /// 1. `$nativeLibDirEnv` env var override (dev/test path, no network).
-  /// 2. Published pub.dev packages stage natives under `lib/src/native/<rid>/`
-  ///    (e.g. `macos-arm64`, `linux-x64`).
-  /// 3. For local FRB-dev builds the dylib is emitted into
-  ///    `lib/src/xberg_bridge_generated/`; that path is searched next.
-  /// 4. The versioned user-cache directory (`nativeCachedLibPath()`); on a cache
-  ///    miss the native is downloaded and cached (`nativeDownloadAndCacheLibrary()`).
+  /// Checks in order:
+  /// 1. FRB_DART_LOAD_EXTERNAL_LIBRARY_NATIVE_LIB_DIR environment variable
+  ///    (allows test harnesses to point to development build paths)
+  /// 2. Package-installed location with RID subdirectory (lib/src/native/<rid>/)
+  ///    (for published pub.dev packages with platform-specific bundled native libraries)
+  /// 3. Package-installed location (lib/src/xberg_bridge_generated/)
+  ///    (legacy fallback for development or packages without per-platform binaries)
+  /// 4. Versioned user cache populated by `dart run xberg:download_libs`
+  ///    (`<cache>/xberg/<version>/<rid>/`), shared with the download script
+  ///    via `nativeCachedLibPath()` in `native_loader.dart`.
+  /// 5. Throws a StateError naming the expected release asset URL, the
+  ///    download command, and the env-var override (never a silent null miss).
   static Future<ExternalLibrary?> _alefResolveExternalLibrary() async {
     try {
-      final envDir = Platform.environment[nativeLibDirEnv];
-      if (envDir != null && envDir.isNotEmpty) {
-        final envUri = Uri.directory(envDir);
-        for (final name in _alefHostLibNames()) {
-          final libPath = envUri.resolve(name).toFilePath();
-          if (File(libPath).existsSync() || Directory(libPath).existsSync()) {
-            return ExternalLibrary.open(libPath);
-          }
+      const candidates = <String>[
+        // macOS: framework bundle (preferred modern packaging)
+        'xberg_dart.framework',
+        // macOS: bare dylib fallback
+        'libxberg_dart.dylib',
+        // Linux
+        'libxberg_dart.so',
+        // Windows
+        'xberg_dart.dll',
+      ];
+
+      // Helper to open a native library by absolute path.
+      // Normalizes path to absolute to avoid hardened-runtime "relative path rejected" errors.
+      ExternalLibrary? tryOpenAbsolute(String libPath) {
+        try {
+          final absPath = File(libPath).absolute.path;
+          return ExternalLibrary.open(absPath);
+        } catch (_) {
+          return null;
         }
       }
 
-      final packageRoot = await Isolate.resolvePackageUri(
-        Uri.parse('package:xberg/xberg.dart'),
-      );
-      if (packageRoot != null) {
-        final libNames = _alefHostLibNames();
-        final searchDirs = <Uri>[
-          if (_alefHostRid() != null)
-          packageRoot.resolve('src/native/${_alefHostRid()}/'),
-          packageRoot.resolve('src/xberg_bridge_generated/'),
-        ];
-        for (final dir in searchDirs) {
-          for (final name in libNames) {
-            final libPath = dir.resolve(name).toFilePath();
-            if (File(libPath).existsSync() || Directory(libPath).existsSync()) {
-              return ExternalLibrary.open(libPath);
+      bool candidateExists(String libPath) {
+        return File(libPath).existsSync() || Directory(libPath).existsSync();
+      }
+
+      // Check FRB_DART_LOAD_EXTERNAL_LIBRARY_NATIVE_LIB_DIR env var first.
+      // This allows test harnesses to override library location for development.
+      final envDir = Platform.environment['FRB_DART_LOAD_EXTERNAL_LIBRARY_NATIVE_LIB_DIR'];
+      if (envDir != null && envDir.isNotEmpty) {
+        final absEnvDir = Directory(envDir).absolute.path;
+        final libDir = Directory(absEnvDir);
+        if (libDir.existsSync()) {
+          for (final candidate in candidates) {
+            final libPath = '$absEnvDir/$candidate';
+            if (candidateExists(libPath)) {
+              final result = tryOpenAbsolute(libPath);
+              if (result != null) return result;
             }
           }
         }
       }
 
-      final cachedPath = nativeCachedLibPath();
-      if (cachedPath != null && File(cachedPath).existsSync()) {
-        return ExternalLibrary.open(cachedPath);
+      // Compute RID (runtime identifier) from platform and architecture using Abi.current().
+      // This is more reliable than parsing Platform.version.
+      String? computeRid() {
+        final abi = Abi.current();
+        final os = Platform.operatingSystem;
+
+        // Map from (os, Abi) to RID string.
+        String? ridFromAbi() {
+          if (os == 'linux') {
+            if (abi == Abi.linuxX64) return 'linux-x64';
+            if (abi == Abi.linuxArm64) return 'linux-arm64';
+          } else if (os == 'macos') {
+            if (abi == Abi.macosX64) return 'macos-x64';
+            if (abi == Abi.macosArm64) return 'macos-arm64';
+          } else if (os == 'windows') {
+            if (abi == Abi.windowsX64) return 'windows-x64';
+            if (abi == Abi.windowsArm64) return 'windows-arm64';
+          }
+          return null;
+        }
+
+        return ridFromAbi();
       }
 
-      final downloadedPath = await nativeDownloadAndCacheLibrary();
-      return ExternalLibrary.open(downloadedPath);
+      final rid = computeRid();
+      if (rid != null) {
+        final packageRoot =
+        await Isolate.resolvePackageUri(_DartCore.Uri.parse('package:xberg/xberg.dart'));
+        if (packageRoot != null) {
+          final ridDir = packageRoot.resolve('src/native/$rid/');
+          for (final candidate in candidates) {
+            final libPath = ridDir.resolve(candidate).toFilePath();
+            if (candidateExists(libPath)) {
+              final result = tryOpenAbsolute(libPath);
+              if (result != null) return result;
+            }
+          }
+        }
+      }
+
+      // Check legacy package-installed location as fallback.
+      final packageRoot =
+      await Isolate.resolvePackageUri(_DartCore.Uri.parse('package:xberg/xberg.dart'));
+      if (packageRoot != null) {
+        final libDir = packageRoot.resolve('src/xberg_bridge_generated/');
+        for (final candidate in candidates) {
+          final libPath = libDir.resolve(candidate).toFilePath();
+          if (candidateExists(libPath)) {
+            final result = tryOpenAbsolute(libPath);
+            if (result != null) return result;
+          }
+        }
+      }
+
+      // As a last resort, resolve the running test/script's package root via
+      // `Platform.script` and search standard RID-relative locations there.
+      // Critical on macOS: `Directory.current` under hardened-runtime `dart` is
+      // the dart binary's own bin dir (relative-path dlopen rejected), whereas
+      // `Platform.script` resolves to the running .dart file's absolute URI,
+      // from which we can walk up to find the package root (the dir containing
+      // `pubspec.yaml`) and look for the bundled native library at standard
+      // paths. This handles the case where `Isolate.resolvePackageUri`
+      // resolution did not yield the actual staging location (e.g., a path
+      // dependency in local development, or a test_app whose host package
+      // contains the native lib directly rather than via the bridged package).
+      try {
+        final scriptPath = Platform.script.toFilePath();
+        var dir = File(scriptPath).absolute.parent;
+        while (dir.parent.path != dir.path
+          && !File('${dir.path}/pubspec.yaml').existsSync()) {
+          dir = dir.parent;
+        }
+        if (File('${dir.path}/pubspec.yaml').existsSync()) {
+          final rid = computeRid();
+          final absRootPath = dir.absolute.path;
+          final searchRoots = <String>[
+            if (rid != null) '$absRootPath/lib/src/native/$rid',
+            '$absRootPath/lib',
+            absRootPath,
+          ];
+          for (final root in searchRoots) {
+            final absRoot = Directory(root).absolute.path;
+            for (final candidate in candidates) {
+              final libPath = '$absRoot/$candidate';
+              if (candidateExists(libPath)) {
+                final result = tryOpenAbsolute(libPath);
+                if (result != null) return result;
+              }
+            }
+          }
+        }
+      } catch (_) {
+        // fall through to default loader
+      }
+
+      // Versioned user cache populated by `dart run xberg:download_libs`.
+      // Shares its cache-path logic with the download script via
+      // `nativeCachedLibPath()` so the two can never disagree on the location.
+      final cachedLibPath = nativeCachedLibPath();
+      if (cachedLibPath != null && candidateExists(cachedLibPath)) {
+        final result = tryOpenAbsolute(cachedLibPath);
+        if (result != null) return result;
+      }
     } catch (_) {
-      // Fall through to the default loader on any resolution failure.
+      // Fall through to the descriptive miss below on any resolution failure.
     }
-    return null;
-  }
 
-  /// Map the host platform to the pub.dev native staging RID. Returns `null`
-  /// for unrecognized host triples so the FRB-dev fallback path runs instead.
-  static String? _alefHostRid() {
-    final abi = Abi.current();
-    if (abi == Abi.macosArm64) return 'macos-arm64';
-    if (abi == Abi.macosX64) return 'macos-x64';
-    if (abi == Abi.linuxArm64) return 'linux-arm64';
-    if (abi == Abi.linuxX64) return 'linux-x64';
-    if (abi == Abi.windowsArm64) return 'windows-arm64';
-    if (abi == Abi.windowsX64) return 'windows-x64';
-    return null;
-  }
-
-  static List<String> _alefHostLibNames() {
-    // The Dart-binding Rust crate is `{stem}-dart` (per the cargo manifest
-    // template), which produces a cdylib named `lib{stem}_dart.{ext}` on Unix
-    // and `{stem}_dart.dll` on Windows. On macOS, pub.dev-published packages
-    // may ship the binary as a Framework bundle (preferred modern packaging)
-    // — list that first so the loader finds it before the bare dylib.
-    if (Platform.isMacOS)
-    return const ['xberg_dart.framework', 'libxberg_dart.dylib'];
-    if (Platform.isWindows) return const ['xberg_dart.dll'];
-    return const ['libxberg_dart.so'];
+    // Nothing bundled and nothing staged in the cache: fail loudly rather than
+    // let flutter_rust_bridge attempt a doomed relative-path dlopen. Name the
+    // exact release asset, the fetch command, and the env-var override so the
+    // consumer can recover.
+    final rid = nativeComputeRid() ?? Platform.operatingSystem;
+    throw StateError(
+      'Native library for xberg ($rid) was not found. '
+      'Expected it in the versioned cache (${nativeCacheDir() ?? '<unresolved cache dir>'}) '
+      'or bundled with the package. Download it with '
+      '`dart run xberg:download_libs`, which fetches '
+      '${nativeAssetUrlBase()}.tar.gz and verifies its SHA-256, '
+      'or point \$nativeLibDirEnv at a directory containing the native library.',
+    );
   }
 
   /// Initialize flutter_rust_bridge
@@ -12861,6 +12962,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PaddleInferenceBackend dco_decode_box_autoadd_paddle_inference_backend(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_paddle_inference_backend(raw);
+  }
+
+  @protected
   PageClassificationConfig dco_decode_box_autoadd_page_classification_config(
     dynamic raw,
   ) {
@@ -16765,6 +16874,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PaddleInferenceBackend? dco_decode_opt_box_autoadd_paddle_inference_backend(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null
+    ? null
+    : dco_decode_box_autoadd_paddle_inference_backend(raw);
+  }
+
+  @protected
   PageClassificationConfig?
   dco_decode_opt_box_autoadd_page_classification_config(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
@@ -17142,6 +17261,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PaddleInferenceBackend dco_decode_paddle_inference_backend(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return PaddleInferenceBackend.values[raw as int];
+  }
+
+  @protected
   PaddleLanguage dco_decode_paddle_language(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return PaddleLanguage.values[raw as int];
@@ -17151,8 +17276,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   PaddleOcrConfig dco_decode_paddle_ocr_config(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 13)
-    throw Exception('unexpected arr length: expect 13 but see ${arr.length}');
+    if (arr.length != 14)
+    throw Exception('unexpected arr length: expect 14 but see ${arr.length}');
     return PaddleOcrConfig(
       language: dco_decode_String(arr[0]),
       cacheDir: dco_decode_opt_String(arr[1]),
@@ -17167,6 +17292,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       dropScore: dco_decode_f_64(arr[10]),
       modelTier: dco_decode_String(arr[11]),
       modelVersion: dco_decode_String(arr[12]),
+      inferenceBackend: dco_decode_opt_box_autoadd_paddle_inference_backend(
+        arr[13],
+      ),
     );
   }
 
@@ -20140,6 +20268,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_output_format(deserializer));
+  }
+
+  @protected
+  PaddleInferenceBackend sse_decode_box_autoadd_paddle_inference_backend(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_paddle_inference_backend(deserializer));
   }
 
   @protected
@@ -25635,6 +25771,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PaddleInferenceBackend? sse_decode_opt_box_autoadd_paddle_inference_backend(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_paddle_inference_backend(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   PageClassificationConfig?
   sse_decode_opt_box_autoadd_page_classification_config(
     SseDeserializer deserializer,
@@ -26331,6 +26480,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PaddleInferenceBackend sse_decode_paddle_inference_backend(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return PaddleInferenceBackend.values[inner];
+  }
+
+  @protected
   PaddleLanguage sse_decode_paddle_language(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var inner = sse_decode_i_32(deserializer);
@@ -26353,6 +26511,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_dropScore = sse_decode_f_64(deserializer);
     var var_modelTier = sse_decode_String(deserializer);
     var var_modelVersion = sse_decode_String(deserializer);
+    var var_inferenceBackend =
+    sse_decode_opt_box_autoadd_paddle_inference_backend(deserializer);
     return PaddleOcrConfig(
       language: var_language,
       cacheDir: var_cacheDir,
@@ -26367,6 +26527,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       dropScore: var_dropScore,
       modelTier: var_modelTier,
       modelVersion: var_modelVersion,
+      inferenceBackend: var_inferenceBackend,
     );
   }
 
@@ -29963,6 +30124,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_output_format(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_paddle_inference_backend(
+    PaddleInferenceBackend self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_paddle_inference_backend(self, serializer);
   }
 
   @protected
@@ -34412,6 +34582,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_opt_box_autoadd_paddle_inference_backend(
+    PaddleInferenceBackend? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_paddle_inference_backend(self, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_opt_box_autoadd_page_classification_config(
     PageClassificationConfig? self,
     SseSerializer serializer,
@@ -35117,6 +35300,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_paddle_inference_backend(
+    PaddleInferenceBackend self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
+  }
+
+  @protected
   void sse_encode_paddle_language(
     PaddleLanguage self,
     SseSerializer serializer,
@@ -35144,6 +35336,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_f_64(self.dropScore, serializer);
     sse_encode_String(self.modelTier, serializer);
     sse_encode_String(self.modelVersion, serializer);
+    sse_encode_opt_box_autoadd_paddle_inference_backend(
+      self.inferenceBackend,
+      serializer,
+    );
   }
 
   @protected

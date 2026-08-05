@@ -1436,6 +1436,15 @@ typedef struct XBERGOutputFormat XBERGOutputFormat;
  */
 typedef struct XBERGPSMMode XBERGPSMMode;
 /**
+ * Which concrete ONNX inference engine PaddleOCR model loading uses.
+ *
+ * Mirrors `sceptre::Backend` for the PaddleOCR backend: `Ort` is the native,
+ * full-featured path (acceleration/execution-provider hook, ONNX-embedded
+ * dictionary metadata); `Tract` is the pure-Rust, CPU-only path used on targets
+ * where `ort` cannot link (Android x86_64 emulator, WASM once wired).
+ */
+typedef struct XBERGPaddleInferenceBackend XBERGPaddleInferenceBackend;
+/**
  * Supported languages in PaddleOCR.
  *
  * Maps user-friendly language codes to paddle-ocr-rs language identifiers.
@@ -16984,6 +16993,14 @@ char *xberg_paddle_ocr_config_model_tier(const XBERGPaddleOcrConfig *ptr);
 char *xberg_paddle_ocr_config_model_version(const XBERGPaddleOcrConfig *ptr);
 
 /**
+ * Get the `inference_backend` field from a `PaddleOcrConfig`.
+ * # Safety
+ * Pointer must be a valid handle returned by this library.
+ */
+XBERGPaddleInferenceBackend *
+xberg_paddle_ocr_config_inference_backend(const XBERGPaddleOcrConfig *ptr);
+
+/**
  * Sets a custom Hugging Face Hub cache root for model files.
  * \param path Path to cache directory
  * \note SAFETY: Caller must ensure all pointer arguments are valid or null.
@@ -19617,6 +19634,20 @@ int32_t xberg_probe_status_from_i32(int32_t value);
 int32_t xberg_probe_status_from_str(const char *name);
 
 /**
+ * Convert an integer to a `PaddleInferenceBackend` variant. Returns -1 on
+ * invalid input. # Safety Caller must ensure all pointer arguments are valid or
+ * null. Returned pointers must be freed with the appropriate free function.
+ */
+int32_t xberg_paddle_inference_backend_from_i32(int32_t value);
+
+/**
+ * Convert a `PaddleInferenceBackend` serde wire value (C string) to its integer
+ * discriminant. Returns -1 on invalid input. # Safety Caller must ensure `ptr`
+ * is a valid pointer to a `c_char` or null.
+ */
+int32_t xberg_paddle_inference_backend_from_str(const char *name);
+
+/**
  * Convert an integer to a `PaddleLanguage` variant. Returns -1 on invalid
  * input. # Safety Caller must ensure all pointer arguments are valid or null.
  * Returned pointers must be freed with the appropriate free function.
@@ -21331,6 +21362,33 @@ char *xberg_probe_status_to_json(const XBERGProbeStatus *ptr);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_probe_status_to_string(const XBERGProbeStatus *ptr);
+
+/**
+ * Free a heap-allocated `PaddleInferenceBackend` returned by a
+ * pointer-returning FFI function. # Safety Pointer must have been returned by
+ * this library, or be null.
+ */
+void xberg_paddle_inference_backend_free(XBERGPaddleInferenceBackend *ptr);
+
+/**
+ * Serialize a heap-allocated `PaddleInferenceBackend` to a JSON string.
+ * # Safety
+ * `ptr` must be a valid, non-null pointer returned by a `xberg` function.
+ * The returned string must be freed with `xberg_free_string`.
+ */
+char *
+xberg_paddle_inference_backend_to_json(const XBERGPaddleInferenceBackend *ptr);
+
+/**
+ * Render a heap-allocated `PaddleInferenceBackend` as its string representation
+ * (the unit-variant name as serialized by serde — e.g. `"completed"`,
+ * without surrounding JSON quotes).
+ * # Safety
+ * `ptr` must be a valid, non-null pointer returned by a `xberg` function.
+ * The returned string must be freed with `xberg_free_string`.
+ */
+char *xberg_paddle_inference_backend_to_string(
+    const XBERGPaddleInferenceBackend *ptr);
 
 /**
  * Free a heap-allocated `LayoutClass` returned by a pointer-returning FFI
