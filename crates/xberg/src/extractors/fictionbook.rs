@@ -15,13 +15,12 @@
 use crate::OutputFormat;
 use crate::Result;
 use crate::core::config::ExtractionConfig;
-use crate::extraction::cells_to_markdown;
 use crate::extractors::security::SecurityBudget;
 use crate::plugins::{InternalDocumentExtractor, Plugin};
 use crate::types::internal::InternalDocument;
 use crate::types::internal_builder::InternalDocumentBuilder;
 use crate::types::uri::ExtractedUri;
-use crate::types::{ExtractedImage, Metadata, Table};
+use crate::types::{ExtractedImage, Metadata};
 use async_trait::async_trait;
 use base64::Engine;
 use bytes::Bytes;
@@ -447,46 +446,6 @@ impl FictionBookExtractor {
         Ok(table)
     }
 
-    /// Extract all tables from the FictionBook body.
-    fn extract_tables_from_body(data: &[u8], budget: &mut SecurityBudget) -> Result<Vec<Table>> {
-        let mut reader = EntityReader::from_bytes(data);
-        let mut tables = Vec::new();
-        let mut table_index = 0;
-
-        loop {
-            budget.step()?;
-            match reader.read_event() {
-                Ok(Event::Start(e)) => {
-                    budget.enter()?;
-                    let name = e.name();
-                    let tag = crate::utils::xml_tag_name(name.as_ref());
-                    if tag == "table"
-                        && let Ok(cells) = Self::extract_table(&mut reader, budget)
-                        && !cells.is_empty()
-                    {
-                        let markdown = cells_to_markdown(&cells);
-                        tables.push(Table {
-                            cells,
-                            markdown,
-                            page_number: table_index + 1,
-                            bounding_box: None,
-                            ..Default::default()
-                        });
-                        table_index += 1;
-                    }
-                }
-                Ok(Event::End(_)) => {
-                    budget.leave();
-                }
-                Ok(Event::Eof) => break,
-                Err(_) => break,
-                _ => {}
-            }
-        }
-
-        Ok(tables)
-    }
-
     /// Extract embedded images from `<binary>` elements in FictionBook XML.
     ///
     /// FB2 embeds images as base64-encoded data inside `<binary>` elements with
@@ -687,7 +646,20 @@ impl FictionBookExtractor {
     }
 
     /// Build an `InternalDocument` from FictionBook XML content.
-    fn build_internal_document(data: &[u8], budget: &mut SecurityBudget) -> Result<InternalDocument> {
+    ///
+    /// `images` are extracted separately (see `extract_binary_images`) because FB2 stores
+    /// image bytes in top-level `<binary>` elements that are typically located after
+    /// `</body>` and referenced from the body only indirectly via `<image l:href="#id"/>`.
+    /// Correlating those references to their binary payload while preserving in-flow
+    /// position would require a larger two-pass refactor, so images are appended as
+    /// elements at the end of the document instead of being dropped. Tables, in contrast,
+    /// are nested directly inside `<body>` and are parsed in place below, preserving their
+    /// original position in the document flow.
+    fn build_internal_document(
+        data: &[u8],
+        images: Vec<ExtractedImage>,
+        budget: &mut SecurityBudget,
+    ) -> Result<InternalDocument> {
         let mut reader = EntityReader::from_bytes(data);
         let mut builder = InternalDocumentBuilder::new("fictionbook");
 
@@ -704,7 +676,13 @@ impl FictionBookExtractor {
                     let name = e.name();
                     let tag = crate::utils::xml_tag_name(name.as_ref());
 
-                    if tag == "body" {
+                    if tag == "table" {
+                        if let Ok(cells) = Self::extract_table(&mut reader, budget)
+                            && !cells.is_empty()
+                        {
+                            builder.push_table_from_cells(&cells, None, None);
+                        }
+                    } else if tag == "body" {
                         let mut is_notes = false;
                         for a in e.attributes().flatten() {
                             let attr_name = String::from_utf8_lossy(a.key.as_ref());
@@ -800,6 +778,13 @@ impl FictionBookExtractor {
                 Err(_) => break,
                 _ => {}
             }
+        }
+
+        // Images cannot be positioned in-flow (see doc comment above); append them at the end of
+        // the document instead of dropping them silently.
+        for image in images {
+            let description = image.description.clone();
+            builder.push_image(description.as_deref(), image, None, None);
         }
 
         Ok(builder.build())
@@ -974,21 +959,12 @@ impl InternalDocumentExtractor for FictionBookExtractor {
 
         let metadata = Self::extract_metadata(content, &mut budget)?;
 
-        let tables = Self::extract_tables_from_body(content, &mut budget)?;
         let images = Self::extract_binary_images(content, &mut budget)?;
         let links = Self::extract_links(content, &mut budget)?;
 
-        let mut doc = Self::build_internal_document(content, &mut budget)?;
+        let mut doc = Self::build_internal_document(content, images, &mut budget)?;
         doc.mime_type = mime_type.to_string();
         doc.metadata = metadata;
-
-        for table in tables {
-            doc.push_table(table);
-        }
-
-        for image in images {
-            doc.push_image(image);
-        }
 
         for uri in links {
             doc.push_uri(uri);
@@ -1317,29 +1293,112 @@ mod tests {
         assert!(links.is_empty());
     }
 
-    #[test]
-    fn test_fictionbook_tables() {
+    /// Regression test for the bug where extracted tables never reached rendered output:
+    /// `extract_content` used the raw `InternalDocument::push_table`, which only records the
+    /// table data without creating a matching `ElementKind::Table` element, so renderers that
+    /// walk `doc.elements` (all of them) never emitted the table. See
+    /// `crate::types::internal_builder::InternalDocumentBuilder::push_table` for the correct API.
+    #[tokio::test]
+    async fn test_fictionbook_tables_render_in_markdown_output() {
         let fb2 = br#"<?xml version="1.0" encoding="UTF-8"?>
 <FictionBook>
-  <description>
-    <title-info><lang>en</lang></title-info>
-  </description>
   <body>
     <section>
+      <p>Intro paragraph.</p>
       <table>
         <tr><th>Name</th><th>Age</th></tr>
         <tr><td>Alice</td><td>30</td></tr>
         <tr><td>Bob</td><td>25</td></tr>
       </table>
+      <p>Outro paragraph.</p>
     </section>
   </body>
 </FictionBook>"#;
 
-        let tables = FictionBookExtractor::extract_tables_from_body(fb2, &mut SecurityBudget::with_defaults())
-            .expect("Table extraction failed");
-        assert_eq!(tables.len(), 1);
-        assert_eq!(tables[0].cells.len(), 3);
-        assert_eq!(tables[0].cells[0], vec!["Name", "Age"]);
-        assert_eq!(tables[0].cells[1], vec!["Alice", "30"]);
+        let extractor = FictionBookExtractor::new();
+        let mut config = ExtractionConfig::default();
+        config.output_format = OutputFormat::Markdown;
+
+        let doc = extractor
+            .extract_content(fb2, "application/x-fictionbook+xml", &config)
+            .await
+            .expect("extraction should succeed");
+
+        assert_eq!(doc.tables.len(), 1);
+        assert_eq!(doc.tables[0].cells.len(), 3);
+        assert_eq!(doc.tables[0].cells[0], vec!["Name", "Age"]);
+        assert_eq!(doc.tables[0].cells[1], vec!["Alice", "30"]);
+        assert_eq!(doc.tables[0].cells[2], vec!["Bob", "25"]);
+
+        let markdown = doc
+            .pre_rendered_content
+            .clone()
+            .expect("markdown output should have been pre-rendered");
+
+        assert!(
+            markdown.contains("Alice")
+                && markdown.contains("30")
+                && markdown.contains("Bob")
+                && markdown.contains("25")
+                && markdown.contains("Name"),
+            "table cell values missing from rendered markdown output: {markdown}"
+        );
+
+        let intro_pos = markdown.find("Intro paragraph").expect("intro paragraph present");
+        let table_pos = markdown.find("Alice").expect("table cell present");
+        let outro_pos = markdown.find("Outro paragraph").expect("outro paragraph present");
+        assert!(
+            intro_pos < table_pos && table_pos < outro_pos,
+            "table should be positioned in document flow between the two paragraphs: {markdown}"
+        );
+
+        let table_element_count = doc
+            .elements
+            .iter()
+            .filter(|e| matches!(e.kind, crate::types::internal::ElementKind::Table { .. }))
+            .count();
+        assert_eq!(
+            table_element_count, 1,
+            "expected exactly one Table element in {:?}",
+            doc.elements
+        );
+    }
+
+    /// Regression test: embedded `<binary>` images must also produce a renderable
+    /// `ElementKind::Image` element, not just an entry in `doc.images` that nothing references.
+    #[tokio::test]
+    async fn test_fictionbook_images_produce_image_element() {
+        let png_b64 =
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwADhQGAWjR9awAAAABJRU5ErkJggg==";
+        let fb2 = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<FictionBook>
+  <body><section><p>Content with image.</p></section></body>
+  <binary id="cover.png" content-type="image/png">{}</binary>
+</FictionBook>"#,
+            png_b64
+        );
+
+        let extractor = FictionBookExtractor::new();
+        let doc = extractor
+            .extract_content(
+                fb2.as_bytes(),
+                "application/x-fictionbook+xml",
+                &ExtractionConfig::default(),
+            )
+            .await
+            .expect("extraction should succeed");
+
+        assert_eq!(doc.images.len(), 1);
+        let image_element_count = doc
+            .elements
+            .iter()
+            .filter(|e| matches!(e.kind, crate::types::internal::ElementKind::Image { .. }))
+            .count();
+        assert_eq!(
+            image_element_count, 1,
+            "expected one Image element in {:?}",
+            doc.elements
+        );
     }
 }

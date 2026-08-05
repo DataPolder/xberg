@@ -21,6 +21,8 @@ use crate::extractors::security::SecurityBudget;
 #[cfg(feature = "office")]
 use crate::plugins::{InternalDocumentExtractor, Plugin};
 #[cfg(feature = "office")]
+use crate::types::Metadata;
+#[cfg(feature = "office")]
 use crate::types::document_structure::{AnnotationKind, TextAnnotation};
 #[cfg(feature = "office")]
 use crate::types::internal::InternalDocument;
@@ -30,8 +32,6 @@ use crate::types::internal::{RelationshipKind, RelationshipTarget};
 use crate::types::internal_builder::InternalDocumentBuilder;
 #[cfg(feature = "office")]
 use crate::types::uri::ExtractedUri;
-#[cfg(feature = "office")]
-use crate::types::{Metadata, Table};
 #[cfg(feature = "office")]
 use ahash::AHashMap;
 #[cfg(feature = "office")]
@@ -376,97 +376,6 @@ impl RstExtractor {
         let first = trimmed.chars().next().unwrap();
         trimmed.chars().all(|c| c == first)
             && matches!(first, '=' | '-' | '~' | '+' | '^' | '"' | '`' | '#' | '*' | '/')
-    }
-
-    /// Extract tables from RST content.
-    ///
-    /// Identifies and extracts both simple and grid tables.
-    fn extract_tables(content: &str) -> Vec<Table> {
-        let mut tables = Vec::new();
-        let lines: Vec<&str> = content.lines().collect();
-        let mut i = 0;
-
-        while i < lines.len() {
-            let line = lines[i];
-            let trimmed = line.trim();
-
-            if Self::is_simple_table_separator(trimmed) {
-                let start = i;
-                let mut table_lines = Vec::new();
-                table_lines.push(lines[i]);
-                i += 1;
-                while i < lines.len() {
-                    let tl = lines[i].trim();
-                    if tl.is_empty() {
-                        break;
-                    }
-                    table_lines.push(lines[i]);
-                    i += 1;
-                    if Self::is_simple_table_separator(tl) {
-                        break;
-                    }
-                }
-                let cells = Self::parse_simple_table_cells(&table_lines);
-                if !cells.is_empty() {
-                    let markdown = Self::cells_to_markdown(&cells);
-                    tables.push(Table {
-                        cells,
-                        markdown,
-                        page_number: 1,
-                        bounding_box: None,
-                        ..Default::default()
-                    });
-                }
-                let _ = start;
-                continue;
-            }
-
-            if trimmed.starts_with('+')
-                && trimmed.ends_with('+')
-                && trimmed.contains('-')
-                && let Some(table) = Self::parse_grid_table(&lines, &mut i)
-            {
-                tables.push(table);
-                continue;
-            }
-
-            i += 1;
-        }
-
-        tables
-    }
-
-    /// Parse a grid table from lines.
-    fn parse_grid_table(lines: &[&str], i: &mut usize) -> Option<Table> {
-        let mut cells = Vec::new();
-        let mut row = Vec::new();
-
-        while *i < lines.len() && (lines[*i].contains('|') || lines[*i].trim().starts_with('+')) {
-            let line = lines[*i].trim_matches(|c: char| c == '|' || c == '+');
-            if !line.is_empty() {
-                let cell_content = line.split('|').map(|s| s.trim().to_string()).collect::<Vec<_>>();
-                row.extend(cell_content);
-
-                if !row.is_empty() {
-                    cells.push(row.clone());
-                    row.clear();
-                }
-            }
-            *i += 1;
-        }
-
-        if cells.is_empty() {
-            return None;
-        }
-
-        let markdown = Self::cells_to_markdown(&cells);
-        Some(Table {
-            cells,
-            markdown,
-            page_number: 1,
-            bounding_box: None,
-            ..Default::default()
-        })
     }
 
     /// Strip RST inline markup from text and produce annotations with byte offsets
@@ -1264,41 +1173,6 @@ impl RstExtractor {
         }
         ranges
     }
-
-    /// Convert table cells to markdown format.
-    fn cells_to_markdown(cells: &[Vec<String>]) -> String {
-        if cells.is_empty() {
-            return String::new();
-        }
-
-        let mut md = String::new();
-
-        md.push('|');
-        for cell in &cells[0] {
-            md.push(' ');
-            md.push_str(cell);
-            md.push_str(" |");
-        }
-        md.push('\n');
-
-        md.push('|');
-        for _ in &cells[0] {
-            md.push_str(" --- |");
-        }
-        md.push('\n');
-
-        for row in &cells[1..] {
-            md.push('|');
-            for cell in row {
-                md.push(' ');
-                md.push_str(cell);
-                md.push_str(" |");
-            }
-            md.push('\n');
-        }
-
-        md
-    }
 }
 
 #[cfg(feature = "office")]
@@ -1367,15 +1241,14 @@ impl InternalDocumentExtractor for RstExtractor {
 
         let (_extracted_text, metadata) = Self::extract_text_and_metadata(&text);
 
-        let tables = Self::extract_tables(&text);
-
+        // Tables are parsed in place inside `build_internal_document` (via
+        // `push_table_from_cells`), which produces correctly-positioned table elements. A second
+        // `extract_tables` pass used to raw-push the same tables again, adding an unreferenced
+        // (and, for grid tables, less accurate) entry to `doc.tables` for every table without
+        // contributing anything to rendered output.
         let mut doc = Self::build_internal_document(&text, inject_placeholders);
         doc.mime_type = mime_type.to_string();
         doc.metadata = metadata;
-
-        for table in tables {
-            doc.push_table(table);
-        }
 
         tracing::debug!(
             element_count = doc.elements.len(),
@@ -1484,22 +1357,6 @@ Second paragraph.
     }
 
     #[test]
-    fn test_cells_to_markdown_format() {
-        let cells = vec![
-            vec!["Name".to_string(), "Age".to_string()],
-            vec!["Alice".to_string(), "30".to_string()],
-            vec!["Bob".to_string(), "25".to_string()],
-        ];
-
-        let markdown = RstExtractor::cells_to_markdown(&cells);
-        assert!(markdown.contains("Name"));
-        assert!(markdown.contains("Age"));
-        assert!(markdown.contains("Alice"));
-        assert!(markdown.contains("Bob"));
-        assert!(markdown.contains("---"));
-    }
-
-    #[test]
     fn test_rst_extractor_default() {
         let extractor = RstExtractor;
         assert_eq!(extractor.name(), "rst-extractor");
@@ -1510,6 +1367,32 @@ Second paragraph.
         let extractor = RstExtractor::new();
         assert!(extractor.initialize().is_ok());
         assert!(extractor.shutdown().is_ok());
+    }
+
+    /// Regression test: the trait-level `extract_content` used to additionally re-push every
+    /// table via the raw, element-less `InternalDocument::push_table`, on top of the correctly
+    /// created table element from `build_internal_document`. That created a duplicate,
+    /// unreferenced (and sometimes incomplete, since the removed `extract_tables` grid-table
+    /// parser was less accurate) entry in `doc.tables` for every table without changing
+    /// rendered output. Assert there is exactly one table, not two.
+    #[tokio::test]
+    async fn test_rst_table_is_not_duplicated_in_structured_output() {
+        let rst = b"Intro.\n\n===== =====\nName  Age\n===== =====\nAlice 30\n===== =====\n\nOutro.\n";
+        let extractor = RstExtractor::new();
+        let config = ExtractionConfig::default();
+
+        let doc = extractor
+            .extract_content(rst, "text/x-rst", &config)
+            .await
+            .expect("extraction should succeed");
+
+        assert_eq!(doc.tables.len(), 1, "table should not be duplicated: {:?}", doc.tables);
+        let table_element_count = doc
+            .elements
+            .iter()
+            .filter(|e| matches!(e.kind, crate::types::internal::ElementKind::Table { .. }))
+            .count();
+        assert_eq!(table_element_count, 1);
     }
 
     #[test]

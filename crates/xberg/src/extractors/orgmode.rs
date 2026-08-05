@@ -186,72 +186,6 @@ impl OrgModeExtractor {
         }
     }
 
-    /// Extract tables from an Org document.
-    ///
-    /// Recursively walks the tree and extracts table elements,
-    /// converting them to Table structs with markdown format.
-    fn extract_tables(org: &Org) -> Vec<Table> {
-        let mut tables = Vec::new();
-        Self::extract_tables_from_tree(org, &mut tables);
-        tables
-    }
-
-    /// Recursively extract tables from an Org tree node and its subtrees.
-    fn extract_tables_from_tree(org: &Org, tables: &mut Vec<Table>) {
-        let lines = org.content_as_ref();
-        if !lines.is_empty() {
-            let mut in_table = false;
-            let mut current_table: Vec<Vec<String>> = Vec::new();
-
-            for line in lines {
-                let trimmed = line.trim();
-
-                if trimmed.starts_with('|') && trimmed.ends_with('|') {
-                    in_table = true;
-
-                    let cells: Vec<String> = trimmed
-                        .split('|')
-                        .map(|cell| cell.trim().to_string())
-                        .filter(|cell| !cell.is_empty())
-                        .collect();
-
-                    if !cells.is_empty() {
-                        current_table.push(cells);
-                    }
-                } else if in_table {
-                    if !current_table.is_empty() {
-                        let markdown = Self::cells_to_markdown(&current_table);
-                        tables.push(Table {
-                            cells: current_table.clone(),
-                            markdown,
-                            page_number: 1,
-                            bounding_box: None,
-                            ..Default::default()
-                        });
-                        current_table.clear();
-                    }
-                    in_table = false;
-                }
-            }
-
-            if !current_table.is_empty() {
-                let markdown = Self::cells_to_markdown(&current_table);
-                tables.push(Table {
-                    cells: current_table,
-                    markdown,
-                    page_number: 1,
-                    bounding_box: None,
-                    ..Default::default()
-                });
-            }
-        }
-
-        let subtrees = org.subtrees_as_ref();
-        for subtree in subtrees {
-            Self::extract_tables_from_tree(subtree, tables);
-        }
-    }
-
     /// Strip OrgMode inline markup from text and produce annotations with byte offsets.
     ///
     /// Handles: `*bold*`, `/italic/`, `_underline_`, `=verbatim=`, `~code~`,
@@ -1040,15 +974,13 @@ impl InternalDocumentExtractor for OrgModeExtractor {
 
         let (metadata, _extracted_content) = Self::extract_metadata_and_content(&org_text, &org);
 
-        let tables = Self::extract_tables(&org);
-
+        // Tables are parsed in place inside `build_internal_document` (see `push_org_table`),
+        // which produces correctly-positioned table elements. A second `extract_tables` tree walk
+        // used to raw-push the same tables again, doubling `counts.tables` in structured output
+        // without contributing anything to rendered output.
         let mut doc = Self::build_internal_document(&org_text);
         doc.mime_type = mime_type.to_string();
         doc.metadata = metadata;
-
-        for table in tables {
-            doc.push_table(table);
-        }
 
         tracing::debug!(
             element_count = doc.elements.len(),
@@ -1170,6 +1102,31 @@ mod tests {
 
         assert!(content.contains("First paragraph"));
         assert!(content.contains("Second paragraph"));
+    }
+
+    /// Regression test: the trait-level `extract_content` used to additionally re-push every
+    /// table via the raw, element-less `InternalDocument::push_table`, on top of the correctly
+    /// created table element from `build_internal_document`'s `push_org_table`. That created a
+    /// duplicate, unreferenced entry in `doc.tables` for every table without changing rendered
+    /// output. Assert there is exactly one table, not two.
+    #[tokio::test]
+    async fn test_orgmode_table_is_not_duplicated_in_structured_output() {
+        let org_text = b"| Name | Age |\n| Alice | 30 |\n";
+        let extractor = OrgModeExtractor::new();
+        let config = ExtractionConfig::default();
+
+        let doc = extractor
+            .extract_content(org_text, "text/x-org", &config)
+            .await
+            .expect("extraction should succeed");
+
+        assert_eq!(doc.tables.len(), 1, "table should not be duplicated: {:?}", doc.tables);
+        let table_element_count = doc
+            .elements
+            .iter()
+            .filter(|e| matches!(e.kind, crate::types::internal::ElementKind::Table { .. }))
+            .count();
+        assert_eq!(table_element_count, 1);
     }
 
     #[test]

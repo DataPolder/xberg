@@ -200,6 +200,7 @@ impl MdxExtractor {
         let mut in_image = false;
         let mut image_alt = String::new();
         let mut image_url: Option<String> = None;
+        let mut image_counter: u32 = 0;
         let mut footnote_def_label: Option<String> = None;
         let mut footnote_def_text = String::new();
 
@@ -488,32 +489,39 @@ impl MdxExtractor {
                 Event::End(TagEnd::Image) => {
                     in_image = false;
                     let trimmed = image_alt.trim();
-                    let desc = if trimmed.is_empty() { "" } else { trimmed };
-                    {
-                        use crate::types::document_structure::ContentLayer;
-                        use crate::types::internal::{ElementKind, InternalElement, InternalElementId};
-                        let kind = ElementKind::Image { image_index: u32::MAX };
-                        let id = InternalElementId::generate(kind.discriminant(), desc, None, 0);
-                        b.push_element(InternalElement {
-                            id,
-                            kind,
-                            text: desc.to_string(),
-                            depth: 0,
-                            page: None,
-                            bbox: None,
-                            layer: ContentLayer::Body,
-                            annotations: Vec::new(),
-                            attributes: None,
-                            anchor: None,
-                            ocr_geometry: None,
-                            ocr_confidence: None,
-                            ocr_rotation: None,
-                        });
+                    let desc = if trimmed.is_empty() { None } else { Some(trimmed) };
+
+                    let url = image_url.take().filter(|u| !u.is_empty());
+                    let decoded_image = url
+                        .as_deref()
+                        .filter(|u| u.starts_with("data:image/"))
+                        .and_then(|u| crate::extractors::markdown_utils::decode_data_uri_image(u, image_counter));
+
+                    // Data-URI images are decoded here so the builder can emit an
+                    // `ElementKind::Image` whose `image_index` actually resolves in `doc.images`.
+                    // Plain-URL images have no bytes to attach, and a placeholder element with an
+                    // unresolvable index is silently dropped by every renderer, so their
+                    // reference is preserved as visible text instead.
+                    if let Some(mut image) = decoded_image {
+                        image_counter += 1;
+                        image.description = desc.map(str::to_string);
+                        b.push_image(desc, image, None, None);
+                    } else {
+                        let display = match (&url, desc) {
+                            (Some(u), Some(d)) => format!("[Image: {d} ({u})]"),
+                            (Some(u), None) => format!("[Image: {u}]"),
+                            (None, Some(d)) => format!("[Image: {d}]"),
+                            (None, None) => String::new(),
+                        };
+                        if !display.is_empty() {
+                            b.push_paragraph(&display, vec![], None, None);
+                        }
                     }
-                    if let Some(url) = image_url.take().filter(|u| !u.is_empty()) {
+
+                    if let Some(url) = url {
                         b.push_uri(ExtractedUri {
                             url,
-                            label: if desc.is_empty() { None } else { Some(desc.to_string()) },
+                            label: desc.map(str::to_string),
                             page: None,
                             kind: UriKind::Image,
                         });
@@ -685,20 +693,14 @@ impl InternalDocumentExtractor for MdxExtractor {
         let parser = Parser::new_ext(&clean_markdown, options);
         let events: Vec<Event> = parser.collect();
 
-        let mut extracted_images = Vec::new();
-        let _ = super::markdown_utils::extract_text_from_events(&events, &mut extracted_images);
-
         let raw_jsx = jsx_blocks_buf.unwrap_or_default();
 
+        // Images (including data-URI decoding) are handled in-line inside
+        // `build_internal_document`, which pushes a correctly-indexed image element for each
+        // one, so no separate extraction/push pass is needed here.
         let mut doc = Self::build_internal_document(&events, &yaml, &raw_jsx);
         doc.mime_type = mime_type.to_string();
         doc.metadata = metadata;
-
-        if !extracted_images.is_empty() {
-            for image in extracted_images {
-                doc.push_image(image);
-            }
-        }
 
         Ok(doc)
     }
@@ -948,6 +950,44 @@ Final paragraph.
         assert!(!result.tables.is_empty());
         let table = &result.tables[0];
         assert_eq!(table.cells[0].len(), 2);
+    }
+
+    /// Regression test: `build_internal_document` used to create an `ElementKind::Image`
+    /// placeholder with a sentinel `image_index: u32::MAX` for every image, then a separate pass
+    /// in `extract_content` pushed the actual bytes via the raw, non-index-patching
+    /// `InternalDocument::push_image`. The placeholder's index was never fixed up, so every
+    /// renderer (which looks images up by walking `ElementKind::Image` elements) silently
+    /// dropped the image from rendered output even though `doc.images` had the data. Images are
+    /// now decoded and pushed in a single step with a correct index.
+    #[tokio::test]
+    async fn test_mdx_data_uri_image_renders_in_output() {
+        let png_b64 =
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
+        let content = format!("Intro.\n\n![a photo](data:image/png;base64,{png_b64})\n\nOutro.\n");
+
+        let extractor = MdxExtractor::new();
+        let doc = extractor
+            .extract_content(content.as_bytes(), "text/mdx", &ExtractionConfig::default())
+            .await
+            .expect("extraction should succeed");
+
+        assert_eq!(doc.images.len(), 1);
+        let image_element_count = doc
+            .elements
+            .iter()
+            .filter(|e| matches!(e.kind, crate::types::internal::ElementKind::Image { .. }))
+            .count();
+        assert_eq!(
+            image_element_count, 1,
+            "expected one Image element in {:?}",
+            doc.elements
+        );
+
+        let markdown = crate::rendering::render_markdown(&doc);
+        assert!(
+            markdown.contains("a photo"),
+            "image description missing from rendered markdown: {markdown}"
+        );
     }
 
     #[tokio::test]

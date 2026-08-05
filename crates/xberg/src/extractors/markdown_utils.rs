@@ -6,6 +6,7 @@
 use crate::types::ExtractedImage;
 use base64::Engine;
 use bytes::Bytes;
+#[cfg(test)]
 use pulldown_cmark::{Event, Tag, TagEnd};
 use std::borrow::Cow;
 
@@ -26,6 +27,11 @@ use std::borrow::Cow;
 /// # Returns
 ///
 /// A `String` containing the extracted plain text.
+///
+/// Only used by tests: production callers (the Markdown and MDX extractors) now decode images
+/// in-line while building the `InternalDocument`, so their `ElementKind::Image` elements stay
+/// correctly linked to `doc.images` (see the extractors' `build_internal_document`).
+#[cfg(test)]
 pub(crate) fn extract_text_from_events(events: &[Event], images: &mut Vec<ExtractedImage>) -> String {
     let mut text = String::new();
     let mut link_url: Option<String> = None;

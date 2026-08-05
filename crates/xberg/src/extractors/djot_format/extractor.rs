@@ -3,7 +3,6 @@
 //! Implements the DocumentExtractor and Plugin traits for Djot markup files.
 
 use super::super::annotation_utils::adjust_annotations_for_trim;
-use super::parsing::extract_tables_from_events;
 use crate::Result;
 use crate::core::config::ExtractionConfig;
 use crate::plugins::{InternalDocumentExtractor, Plugin};
@@ -65,6 +64,10 @@ impl DjotExtractor {
         let mut in_footnote = false;
         let mut footnote_label = String::new();
         let mut footnote_text = String::new();
+        let mut table_rows: Vec<Vec<String>> = Vec::new();
+        let mut table_row: Vec<String> = Vec::new();
+        let mut table_cell = String::new();
+        let mut in_table_cell = false;
 
         let mut annotation_starts: Vec<(u8, u32, Option<String>)> = Vec::new();
 
@@ -421,8 +424,34 @@ impl DjotExtractor {
                 Event::FootnoteReference(name) => {
                     b.push_footnote_ref(name, name, None);
                 }
+                Event::Start(Container::Table, _) => {
+                    table_rows.clear();
+                }
+                Event::Start(Container::TableRow { .. }, _) => {
+                    table_row.clear();
+                }
+                Event::Start(Container::TableCell { .. }, _) => {
+                    table_cell.clear();
+                    in_table_cell = true;
+                }
+                Event::End(Container::TableCell { .. }) if in_table_cell => {
+                    in_table_cell = false;
+                    table_row.push(std::mem::take(&mut table_cell).trim().to_string());
+                }
+                Event::End(Container::TableRow { .. }) => {
+                    if !table_row.is_empty() {
+                        table_rows.push(std::mem::take(&mut table_row));
+                    }
+                }
+                Event::End(Container::Table) => {
+                    if !table_rows.is_empty() {
+                        b.push_table_from_cells(&std::mem::take(&mut table_rows), None, None);
+                    }
+                }
                 Event::Str(s) => {
-                    if in_image {
+                    if in_table_cell {
+                        table_cell.push_str(s);
+                    } else if in_image {
                         image_alt.push_str(s);
                     } else if in_footnote {
                         footnote_text.push_str(s);
@@ -537,15 +566,9 @@ impl InternalDocumentExtractor for DjotExtractor {
         let parser = Parser::new(&remaining_content);
         let events: Vec<Event> = parser.collect();
 
-        let tables = extract_tables_from_events(&events);
-
         let mut doc = Self::build_internal_document(&events);
         doc.mime_type = mime_type.to_string();
         doc.metadata = metadata;
-
-        for table in tables {
-            doc.push_table(table);
-        }
 
         Ok(doc)
     }
@@ -612,6 +635,56 @@ mod tests {
         assert!(result.content.contains("This is a paragraph"));
         assert!(result.content.contains("bold"));
         assert!(result.content.contains("italic"));
+    }
+
+    /// Regression test for the bug where extracted tables never reached rendered output:
+    /// `extract_content` used to extract tables via a separate `extract_tables_from_events`
+    /// pass and re-push them with the raw, element-less `InternalDocument::push_table`, which
+    /// only records the table data without creating a matching `ElementKind::Table` element.
+    /// Since every renderer walks `doc.elements`, the table content was silently dropped. Tables
+    /// are now parsed in place inside `build_internal_document`, preserving both their document
+    /// position and producing a proper element.
+    #[tokio::test]
+    async fn test_djot_tables_render_in_output() {
+        let content = b"Intro paragraph.\n\n| Name | Age |\n|------|-----|\n| Alice | 30 |\n\nOutro paragraph.";
+        let extractor = DjotExtractor::new();
+        let config = ExtractionConfig::default();
+
+        let doc = extractor
+            .extract_content(content, "text/djot", &config)
+            .await
+            .expect("extraction should succeed");
+
+        assert_eq!(doc.tables.len(), 1);
+        assert_eq!(doc.tables[0].cells[0], vec!["Name", "Age"]);
+        assert_eq!(doc.tables[0].cells[1], vec!["Alice", "30"]);
+
+        let table_element_count = doc
+            .elements
+            .iter()
+            .filter(|e| matches!(e.kind, crate::types::internal::ElementKind::Table { .. }))
+            .count();
+        assert_eq!(
+            table_element_count, 1,
+            "expected exactly one Table element in {:?}",
+            doc.elements
+        );
+
+        let result =
+            crate::extraction::derive::derive_extraction_result(doc, true, crate::core::config::OutputFormat::Markdown);
+        assert!(
+            result.content.contains("Alice") && result.content.contains("30"),
+            "table content missing from rendered output: {}",
+            result.content
+        );
+        let intro_pos = result.content.find("Intro paragraph").expect("intro present");
+        let table_pos = result.content.find("Alice").expect("table content present");
+        let outro_pos = result.content.find("Outro paragraph").expect("outro present");
+        assert!(
+            intro_pos < table_pos && table_pos < outro_pos,
+            "table should be positioned in document flow: {}",
+            result.content
+        );
     }
 
     #[tokio::test]

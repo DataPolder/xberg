@@ -6,12 +6,14 @@ use crate::extractors::SyncExtractor;
 use crate::extractors::security::SecurityBudget;
 use crate::plugins::{InternalDocumentExtractor, Plugin};
 use crate::text::utf8_validation;
+#[cfg(test)]
+use crate::types::Table;
 use crate::types::document_structure::TextAnnotation;
 use crate::types::extraction::ExtractedImage;
 use crate::types::internal::InternalDocument;
 use crate::types::internal_builder::InternalDocumentBuilder;
 use crate::types::uri::{ExtractedUri, classify_uri};
-use crate::types::{HtmlMetadata, Metadata, Table};
+use crate::types::{HtmlMetadata, Metadata};
 use async_trait::async_trait;
 use bytes::Bytes;
 use html_to_markdown_rs::InlineImageFormat;
@@ -380,7 +382,12 @@ impl SyncExtractor for HtmlExtractor {
         let html_options =
             apply_content_filter_to_html_options(config.html_options.clone(), config.content_filter.as_ref());
 
-        let (content_text, html_metadata, table_data, doc_structure) =
+        // `_table_data` is intentionally unused: it comes from the same conversion pass as
+        // `doc_structure`, whose `map_document_structure` already creates the table elements and
+        // their `doc.tables` entries. Converting it a second time only added duplicate,
+        // unreferenced entries to `doc.tables` (and double-counted cells against the security
+        // budget) without adding anything to rendered output.
+        let (content_text, html_metadata, _table_data, doc_structure) =
             crate::extraction::html::convert_html_to_markdown_with_tables(
                 &html,
                 html_options,
@@ -388,25 +395,6 @@ impl SyncExtractor for HtmlExtractor {
             )?;
 
         let mut budget = SecurityBudget::from_config(config);
-
-        let mut tables: Vec<Table> = Vec::with_capacity(table_data.len());
-        for (i, t) in table_data.into_iter().enumerate() {
-            let grid = &t.grid;
-            budget.add_cells(grid.cells.len())?;
-            let cells = crate::extraction::grid_flatten::flatten_positioned_cells(
-                grid.rows as usize,
-                grid.cells
-                    .iter()
-                    .map(|c| (c.row, c.row_span, c.col_span, c.content.clone())),
-            );
-            tables.push(Table {
-                cells,
-                markdown: t.markdown,
-                page_number: (i + 1) as u32,
-                bounding_box: None,
-                ..Default::default()
-            });
-        }
 
         let meta_title = html_metadata.as_ref().and_then(|m| m.title.clone());
         let meta_authors = html_metadata
@@ -469,12 +457,15 @@ impl SyncExtractor for HtmlExtractor {
         doc.mime_type = mime_type.to_string();
         doc.pre_rendered_content = pre_rendered;
 
-        for table in tables {
-            doc.push_table(table);
-        }
-
         let should_extract_images = config.needs_image_data();
 
+        // Images extracted here (with binary data and OCR eligibility) each need a matching
+        // `ElementKind::Image` element: every renderer resolves images by walking elements, not
+        // by reading `doc.images` directly, so a raw `push_image` alone silently drops them.
+        // The HTML conversion pass above emits only inline `![alt](src)` markdown and a URI
+        // record — it never stores bytes — and correlating those back to the extracted images
+        // would require threading image identity through that pass, so the elements are appended
+        // here instead of being placed in-flow.
         if should_extract_images {
             let image_html_options =
                 apply_content_filter_to_html_options(config.html_options.clone(), config.content_filter.as_ref());
@@ -523,7 +514,14 @@ impl SyncExtractor for HtmlExtractor {
                     qr_codes: None,
                     data_base64: None,
                 };
-                doc.push_image(extracted);
+                let description = extracted.description.clone();
+                let image_index = doc.push_image(extracted);
+                let text = description.unwrap_or_default();
+                doc.push_element(crate::types::internal::InternalElement::text(
+                    crate::types::internal::ElementKind::Image { image_index },
+                    text,
+                    0,
+                ));
             }
         }
 
@@ -788,6 +786,78 @@ mod tests {
         assert_eq!(table.cells[0], vec!["Name", "Age"]);
         assert_eq!(table.cells[1], vec!["Alice", "30"]);
         assert_eq!(table.cells[2], vec!["Bob", "25"]);
+    }
+
+    /// Regression test: `extract_sync` used to additionally re-push every table via the raw,
+    /// element-less `InternalDocument::push_table`, on top of the correctly-created table
+    /// element from `map_document_structure`. That created a duplicate, unreferenced entry in
+    /// `doc.tables` for every table (and double-counted cells against the security budget)
+    /// without changing rendered output. Assert there is exactly one table, not two.
+    #[tokio::test]
+    async fn test_html_extractor_table_is_not_duplicated_in_structured_output() {
+        let html = r#"
+            <html>
+                <body>
+                    <table>
+                        <tr><th>Name</th><th>Age</th></tr>
+                        <tr><td>Alice</td><td>30</td></tr>
+                    </table>
+                </body>
+            </html>
+        "#;
+
+        let extractor = HtmlExtractor::new();
+        let config = ExtractionConfig::default();
+        let result = extractor
+            .extract_content(html.as_bytes(), "text/html", &config)
+            .await
+            .unwrap();
+        let result =
+            crate::extraction::derive::derive_extraction_result(result, true, crate::core::config::OutputFormat::Plain);
+
+        assert_eq!(
+            result.tables.len(),
+            1,
+            "table should not be duplicated: {:?}",
+            result.tables
+        );
+    }
+
+    /// Regression test: extracted inline image bytes must be reachable from a matching
+    /// `ElementKind::Image` element, otherwise renderers silently drop the image (and any OCR
+    /// content attached to it) since they look images up by walking elements, not `doc.images`
+    /// directly.
+    #[tokio::test]
+    async fn test_html_extractor_inline_image_produces_image_element() {
+        let png_b64 =
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
+        let html = format!(r#"<html><body><img src="data:image/png;base64,{png_b64}" alt="a photo"></body></html>"#);
+
+        let config = ExtractionConfig {
+            images: Some(crate::core::config::ImageExtractionConfig {
+                extract_images: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let extractor = HtmlExtractor::new();
+        let doc = extractor
+            .extract_content(html.as_bytes(), "text/html", &config)
+            .await
+            .expect("extraction should succeed");
+
+        assert_eq!(doc.images.len(), 1, "expected one extracted image in {:?}", doc.images);
+        let image_element_count = doc
+            .elements
+            .iter()
+            .filter(|e| matches!(e.kind, crate::types::internal::ElementKind::Image { .. }))
+            .count();
+        assert_eq!(
+            image_element_count, 1,
+            "expected one Image element in {:?}",
+            doc.elements
+        );
     }
 
     #[tokio::test]
