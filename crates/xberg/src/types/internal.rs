@@ -250,17 +250,30 @@ pub struct InternalDocument {
 }
 
 impl From<crate::types::extraction::ExtractedDocument> for InternalDocument {
-    /// Lossy conversion used at FFI/trait-bridge boundaries where a foreign-language
-    /// plugin returns the public `ExtractedDocument` shape but the canonical Rust trait
+    /// Conversion used at FFI/trait-bridge boundaries where a foreign-language plugin
+    /// returns the public `ExtractedDocument` shape but the canonical Rust trait
     /// signature requires an `InternalDocument`. The text content is stashed in
     /// `pre_rendered_content` so the pipeline returns it verbatim instead of trying
     /// to re-render from a non-existent element tree.
+    ///
+    /// Every field with an exact `InternalDocument` destination is carried over. The
+    /// conversion is still lossy for the derived-only parts of the public shape — the
+    /// flat element list, the relationship graph, and `DocumentStructure` cannot be
+    /// reconstructed from `ExtractedDocument`, which is why `pre_rendered_content`
+    /// carries the text.
     fn from(result: crate::types::extraction::ExtractedDocument) -> Self {
         let mut doc = Self::new(result.mime_type.as_ref());
         doc.mime_type = result.mime_type.into_owned();
         doc.metadata = result.metadata;
         doc.tables = result.tables;
         doc.images = result.images.unwrap_or_default();
+        doc.uris = result.uris.unwrap_or_default();
+        doc.children = result.children;
+        doc.annotations = result.annotations;
+        doc.processing_warnings = result.processing_warnings;
+        doc.llm_usage = result.llm_usage;
+        doc.prebuilt_pages = result.pages;
+        doc.prebuilt_ocr_elements = result.ocr_elements;
         doc.revisions = result.revisions;
         doc.form_fields = result.form_fields;
         doc.formulas = result.formulas;
