@@ -18,7 +18,7 @@
 //! use xberg::extraction::excel::read_excel_file;
 //!
 //! # fn example() -> xberg::Result<()> {
-//! let workbook = read_excel_file("data.xlsx")?;
+//! let (workbook, _warnings) = read_excel_file("data.xlsx")?;
 //!
 //! println!("Sheet count: {}", workbook.sheets.len());
 //! for sheet in &workbook.sheets {
@@ -27,16 +27,17 @@
 //! # Ok(())
 //! # }
 //! ```
-use calamine::{Data, DataRef, Range, Reader, open_workbook_auto};
+use calamine::{Data, DataRef, Range, Reader, SheetVisible, open_workbook_auto};
 use std::collections::HashMap;
 use std::fmt::Write as FmtWrite;
 use std::io::{Cursor, Read, Seek};
 use std::path::Path;
 
+use crate::core::diagnostics::push_warning;
 use crate::error::{Result, XbergError};
 use crate::extraction::capacity;
 use crate::types::revisions::{DocumentRevision, RevisionDelta, RevisionKind};
-use crate::types::{ExcelSheet, ExcelWorkbook};
+use crate::types::{ExcelSheet, ExcelWorkbook, ProcessingWarning};
 
 /// Maximum number of cells in a Range's bounding box before we consider it pathological.
 /// This threshold is set to prevent OOM when processing files with sparse data at extreme
@@ -45,6 +46,13 @@ use crate::types::{ExcelSheet, ExcelWorkbook};
 /// 100 million cells at ~64 bytes each = ~6.4 GB, which is a reasonable upper limit.
 const MAX_BOUNDING_BOX_CELLS: u64 = 100_000_000;
 
+/// Maximum number of formula/hyperlink/comment entries recorded per sheet in
+/// `ExcelWorkbook::metadata` before the list is truncated. Keeps the metadata
+/// map bounded for a pathological sheet with tens of thousands of formulas or
+/// hyperlinks (xberg-io/xberg#89); this is a defensive cap, not a
+/// user-configurable limit.
+const MAX_METADATA_ENTRIES_PER_SHEET: usize = 200;
+
 #[cfg(feature = "office")]
 use crate::extraction::office_metadata::{
     extract_core_properties, extract_custom_properties, extract_xlsx_app_properties,
@@ -52,8 +60,16 @@ use crate::extraction::office_metadata::{
 #[cfg(feature = "office")]
 use serde_json::Value;
 
-pub(crate) fn read_excel_file(file_path: &str) -> Result<ExcelWorkbook> {
+/// Result of reading a spreadsheet: the parsed workbook plus any
+/// [`ProcessingWarning`]s accumulated while reading it (a sheet that failed
+/// to parse, a worksheet range that could not be read, or output truncated
+/// against an internal safety cap). See the module doc on
+/// `core::diagnostics` for the warning convention this follows.
+pub(crate) type ExcelReadResult = (ExcelWorkbook, Vec<ProcessingWarning>);
+
+pub(crate) fn read_excel_file(file_path: &str) -> Result<ExcelReadResult> {
     let lower_path = file_path.to_lowercase();
+    let mut warnings: Vec<ProcessingWarning> = Vec::new();
 
     #[cfg(feature = "office")]
     let office_metadata = if lower_path.ends_with(".xlsx")
@@ -73,23 +89,35 @@ pub(crate) fn read_excel_file(file_path: &str) -> Result<ExcelWorkbook> {
         let file = std::fs::File::open(file_path)?;
         let workbook = calamine::Xlsx::new(std::io::BufReader::new(file))
             .map_err(|e| XbergError::parsing(format!("Failed to parse XLSX: {}", e)))?;
-        let mut result = process_xlsx_workbook(workbook, office_metadata)?;
+        let mut result = process_xlsx_workbook(workbook, office_metadata, &mut warnings)?;
         result.revisions = extract_xlsx_revisions_from_file(file_path);
-        return Ok(result);
+        if let Some(comments) = extract_xlsx_comments_from_file(file_path) {
+            result.metadata.insert("comments".to_owned(), comments);
+        }
+        return Ok((result, warnings));
     }
 
     if lower_path.ends_with(".xlam") {
         let file = std::fs::File::open(file_path)?;
         match calamine::Xlsx::new(std::io::BufReader::new(file)) {
             Ok(workbook) => {
-                return process_xlsx_workbook(workbook, office_metadata);
+                let result = process_xlsx_workbook(workbook, office_metadata, &mut warnings)?;
+                return Ok((result, warnings));
             }
-            Err(_) => {
-                return Ok(ExcelWorkbook {
-                    sheets: vec![],
-                    metadata: office_metadata.unwrap_or_default(),
-                    revisions: None,
-                });
+            Err(e) => {
+                push_warning(
+                    &mut warnings,
+                    "excel",
+                    format!("Workbook could not be parsed as XLSX and no sheets were extracted ({e})"),
+                );
+                return Ok((
+                    ExcelWorkbook {
+                        sheets: vec![],
+                        metadata: office_metadata.unwrap_or_default(),
+                        revisions: None,
+                    },
+                    warnings,
+                ));
             }
         }
     }
@@ -98,14 +126,23 @@ pub(crate) fn read_excel_file(file_path: &str) -> Result<ExcelWorkbook> {
         let file = std::fs::File::open(file_path)?;
         match calamine::Xls::new(std::io::BufReader::new(file)) {
             Ok(workbook) => {
-                return process_workbook(workbook, office_metadata);
+                let result = process_workbook(workbook, office_metadata, &mut warnings)?;
+                return Ok((result, warnings));
             }
-            Err(_) => {
-                return Ok(ExcelWorkbook {
-                    sheets: vec![],
-                    metadata: office_metadata.unwrap_or_default(),
-                    revisions: None,
-                });
+            Err(e) => {
+                push_warning(
+                    &mut warnings,
+                    "excel",
+                    format!("Workbook could not be parsed as XLS and no sheets were extracted ({e})"),
+                );
+                return Ok((
+                    ExcelWorkbook {
+                        sheets: vec![],
+                        metadata: office_metadata.unwrap_or_default(),
+                        revisions: None,
+                    },
+                    warnings,
+                ));
             }
         }
     }
@@ -114,7 +151,8 @@ pub(crate) fn read_excel_file(file_path: &str) -> Result<ExcelWorkbook> {
         let file = std::fs::File::open(file_path)?;
         let workbook = calamine::Xlsb::new(std::io::BufReader::new(file))
             .map_err(|e| XbergError::parsing(format!("Failed to parse XLSB: {}", e)))?;
-        return process_workbook(workbook, office_metadata);
+        let result = process_workbook(workbook, office_metadata, &mut warnings)?;
+        return Ok((result, warnings));
     }
 
     let workbook = match open_workbook_auto(Path::new(file_path)) {
@@ -132,10 +170,13 @@ pub(crate) fn read_excel_file(file_path: &str) -> Result<ExcelWorkbook> {
         Err(e) => return Err(XbergError::parsing(format!("Failed to parse Excel file: {}", e))),
     };
 
-    process_workbook(workbook, office_metadata)
+    let result = process_workbook(workbook, office_metadata, &mut warnings)?;
+    Ok((result, warnings))
 }
 
-pub(crate) fn read_excel_bytes(data: &[u8], file_extension: &str) -> Result<ExcelWorkbook> {
+pub(crate) fn read_excel_bytes(data: &[u8], file_extension: &str) -> Result<ExcelReadResult> {
+    let mut warnings: Vec<ProcessingWarning> = Vec::new();
+
     #[cfg(feature = "office")]
     let office_metadata = match file_extension.to_lowercase().as_str() {
         ".xlsx" | ".xlsm" | ".xlam" | ".xltm" => extract_xlsx_office_metadata_from_bytes(data).ok(),
@@ -150,49 +191,81 @@ pub(crate) fn read_excel_bytes(data: &[u8], file_extension: &str) -> Result<Exce
             let cursor = Cursor::new(data);
             let workbook =
                 calamine::Xlsx::new(cursor).map_err(|e| XbergError::parsing(format!("Failed to parse XLSX: {}", e)))?;
-            let mut result = process_xlsx_workbook(workbook, office_metadata)?;
+            let mut result = process_xlsx_workbook(workbook, office_metadata, &mut warnings)?;
             result.revisions = extract_xlsx_revisions_from_bytes(data);
-            Ok(result)
+            if let Some(comments) = extract_xlsx_comments_from_bytes(data) {
+                result.metadata.insert("comments".to_owned(), comments);
+            }
+            Ok((result, warnings))
         }
         ".xlam" => {
             let cursor = Cursor::new(data);
             match calamine::Xlsx::new(cursor) {
-                Ok(workbook) => process_xlsx_workbook(workbook, office_metadata),
-                Err(_) => Ok(ExcelWorkbook {
-                    sheets: vec![],
-                    metadata: office_metadata.unwrap_or_default(),
-                    revisions: None,
-                }),
+                Ok(workbook) => {
+                    let result = process_xlsx_workbook(workbook, office_metadata, &mut warnings)?;
+                    Ok((result, warnings))
+                }
+                Err(e) => {
+                    push_warning(
+                        &mut warnings,
+                        "excel",
+                        format!("Workbook could not be parsed as XLSX and no sheets were extracted ({e})"),
+                    );
+                    Ok((
+                        ExcelWorkbook {
+                            sheets: vec![],
+                            metadata: office_metadata.unwrap_or_default(),
+                            revisions: None,
+                        },
+                        warnings,
+                    ))
+                }
             }
         }
         ".xls" => {
             let cursor = Cursor::new(data);
             let workbook =
                 calamine::Xls::new(cursor).map_err(|e| XbergError::parsing(format!("Failed to parse XLS: {}", e)))?;
-            process_workbook(workbook, office_metadata)
+            let result = process_workbook(workbook, office_metadata, &mut warnings)?;
+            Ok((result, warnings))
         }
         ".xla" => {
             let cursor = Cursor::new(data);
             match calamine::Xls::new(cursor) {
-                Ok(workbook) => process_workbook(workbook, office_metadata),
-                Err(_) => Ok(ExcelWorkbook {
-                    sheets: vec![],
-                    metadata: office_metadata.unwrap_or_default(),
-                    revisions: None,
-                }),
+                Ok(workbook) => {
+                    let result = process_workbook(workbook, office_metadata, &mut warnings)?;
+                    Ok((result, warnings))
+                }
+                Err(e) => {
+                    push_warning(
+                        &mut warnings,
+                        "excel",
+                        format!("Workbook could not be parsed as XLS and no sheets were extracted ({e})"),
+                    );
+                    Ok((
+                        ExcelWorkbook {
+                            sheets: vec![],
+                            metadata: office_metadata.unwrap_or_default(),
+                            revisions: None,
+                        },
+                        warnings,
+                    ))
+                }
             }
         }
         ".xlsb" => {
             let cursor = Cursor::new(data);
             let workbook =
                 calamine::Xlsb::new(cursor).map_err(|e| XbergError::parsing(format!("Failed to parse XLSB: {}", e)))?;
-            process_workbook(workbook, office_metadata)
+            let result = process_workbook(workbook, office_metadata, &mut warnings)?;
+            Ok((result, warnings))
         }
         ".ods" => {
             let cursor = Cursor::new(data);
             let workbook =
                 calamine::Ods::new(cursor).map_err(|e| XbergError::parsing(format!("Failed to parse ODS: {}", e)))?;
-            process_workbook(workbook, office_metadata)
+            let result = process_workbook(workbook, office_metadata, &mut warnings)?;
+            Ok((result, warnings))
         }
         _ => Err(XbergError::parsing(format!(
             "Unsupported file extension: {}",
@@ -210,20 +283,35 @@ pub(crate) fn read_excel_bytes(data: &[u8], file_extension: &str) -> Result<Exce
 fn process_xlsx_workbook<RS: Read + Seek>(
     mut workbook: calamine::Xlsx<RS>,
     office_metadata: Option<HashMap<String, String>>,
+    warnings: &mut Vec<ProcessingWarning>,
 ) -> Result<ExcelWorkbook> {
     let sheet_names = workbook.sheet_names();
     let mut sheets = Vec::with_capacity(sheet_names.len());
+    let mut extra_metadata: HashMap<String, String> = HashMap::new();
 
     for name in &sheet_names {
-        match process_xlsx_sheet_safe(&mut workbook, name) {
+        match process_xlsx_sheet_safe(&mut workbook, name, warnings) {
             Ok(sheet) => sheets.push(sheet),
             Err(e) => {
                 tracing::warn!("Failed to process sheet '{}': {}", name, e);
+                push_warning(
+                    warnings,
+                    "excel",
+                    format!("Sheet '{name}' could not be processed and was skipped ({e})"),
+                );
             }
+        }
+
+        if let Some(formulas) = collect_sheet_formulas(&mut workbook, name) {
+            extra_metadata.insert(format!("formulas_{name}"), formulas);
+        }
+        if let Some(hyperlinks) = collect_sheet_hyperlinks(&mut workbook, name) {
+            extra_metadata.insert(format!("hyperlinks_{name}"), hyperlinks);
         }
     }
 
-    let metadata = extract_metadata(&workbook, &sheet_names, office_metadata);
+    let mut metadata = extract_metadata(&workbook, &sheet_names, office_metadata);
+    metadata.extend(extra_metadata);
     Ok(ExcelWorkbook {
         sheets,
         metadata,
@@ -235,7 +323,11 @@ fn process_xlsx_workbook<RS: Read + Seek>(
 ///
 /// This function streams cells to compute the actual bounding box without allocating
 /// a full Range, then only creates the Range if the bounding box is within safe limits.
-fn process_xlsx_sheet_safe<RS: Read + Seek>(workbook: &mut calamine::Xlsx<RS>, sheet_name: &str) -> Result<ExcelSheet> {
+fn process_xlsx_sheet_safe<RS: Read + Seek>(
+    workbook: &mut calamine::Xlsx<RS>,
+    sheet_name: &str,
+    warnings: &mut Vec<ProcessingWarning>,
+) -> Result<ExcelSheet> {
     match classify_xlsx_sheet_shape(workbook, sheet_name)? {
         XlsxSheetShape::Empty => return Ok(empty_excel_sheet(sheet_name)),
         XlsxSheetShape::Dense => {}
@@ -244,7 +336,7 @@ fn process_xlsx_sheet_safe<RS: Read + Seek>(workbook: &mut calamine::Xlsx<RS>, s
             if cells.is_empty() {
                 return Ok(empty_excel_sheet(sheet_name));
             }
-            return process_sparse_sheet_from_cells(sheet_name, cells, row_min, row_max, col_min, col_max);
+            return process_sparse_sheet_from_cells(sheet_name, cells, row_min, row_max, col_min, col_max, warnings);
         }
     }
 
@@ -252,7 +344,7 @@ fn process_xlsx_sheet_safe<RS: Read + Seek>(workbook: &mut calamine::Xlsx<RS>, s
         .worksheet_range(sheet_name)
         .map_err(|e| XbergError::parsing(format!("Failed to parse sheet '{}': {}", sheet_name, e)))?;
 
-    Ok(process_sheet(sheet_name, &range))
+    Ok(process_sheet(sheet_name, &range, warnings))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -357,6 +449,7 @@ fn process_sparse_sheet_from_cells(
     row_max: u32,
     col_min: u32,
     col_max: u32,
+    warnings: &mut Vec<ProcessingWarning>,
 ) -> Result<ExcelSheet> {
     let cell_count = cells.len();
     let bb_rows = (row_max - row_min + 1) as usize;
@@ -453,6 +546,17 @@ fn process_sparse_sheet_from_cells(
             cols.len()
         )
         .expect("write to String cannot fail");
+
+        push_warning(
+            warnings,
+            "excel",
+            format!(
+                "Sheet '{sheet_name}' output truncated to {display_rows}x{display_cols} of {}x{} \
+                 non-empty rows/columns (internal sparse-sheet output cap)",
+                rows.len(),
+                cols.len()
+            ),
+        );
     }
 
     Ok(ExcelSheet {
@@ -465,22 +569,22 @@ fn process_sparse_sheet_from_cells(
     })
 }
 
-fn process_workbook<RS, R>(mut workbook: R, office_metadata: Option<HashMap<String, String>>) -> Result<ExcelWorkbook>
+fn process_workbook<RS, R>(
+    mut workbook: R,
+    office_metadata: Option<HashMap<String, String>>,
+    warnings: &mut Vec<ProcessingWarning>,
+) -> Result<ExcelWorkbook>
 where
     RS: std::io::Read + std::io::Seek,
     R: Reader<RS>,
+    // Forwarded from `process_named_sheets`, which names the cause in its warning.
+    R::Error: std::fmt::Display,
 {
     let sheet_names = workbook.sheet_names();
+    let (sheets, extra_metadata) = process_named_sheets(&mut workbook, &sheet_names, warnings);
 
-    let mut sheets = Vec::with_capacity(sheet_names.len());
-
-    for name in &sheet_names {
-        if let Ok(range) = workbook.worksheet_range(name) {
-            sheets.push(process_sheet(name, &range));
-        }
-    }
-
-    let metadata = extract_metadata(&workbook, &sheet_names, office_metadata);
+    let mut metadata = extract_metadata(&workbook, &sheet_names, office_metadata);
+    metadata.extend(extra_metadata);
 
     Ok(ExcelWorkbook {
         sheets,
@@ -489,8 +593,56 @@ where
     })
 }
 
+/// Read each named sheet's range and formulas from a generic calamine `Reader`
+/// (xls/xlsb/ods — the XLSX path has its own bounding-box-aware
+/// `process_xlsx_sheet_safe`). Split out from [`process_workbook`] so a sheet
+/// name that the backend cannot resolve to a range can be exercised directly
+/// in tests without needing a corrupt on-disk fixture (xberg-io/xberg#103):
+/// pass a real, open workbook plus a sheet-name list containing a name the
+/// backend doesn't recognize, and the failure is real `calamine::Reader`
+/// behavior, not test-only scaffolding.
+///
+/// A worksheet range that fails to read is skipped with a warning naming the
+/// sheet instead of silently dropped, mirroring the XLSX-side handling in
+/// [`process_xlsx_workbook`].
+fn process_named_sheets<RS, R>(
+    workbook: &mut R,
+    sheet_names: &[String],
+    warnings: &mut Vec<ProcessingWarning>,
+) -> (Vec<ExcelSheet>, HashMap<String, String>)
+where
+    RS: std::io::Read + std::io::Seek,
+    R: Reader<RS>,
+    // The warning names the failure cause, so the reader's error type has to be
+    // renderable. Every concrete calamine reader (Xlsx, Xls, Ods) satisfies this.
+    R::Error: std::fmt::Display,
+{
+    let mut sheets = Vec::with_capacity(sheet_names.len());
+    let mut extra_metadata: HashMap<String, String> = HashMap::new();
+
+    for name in sheet_names {
+        match workbook.worksheet_range(name) {
+            Ok(range) => sheets.push(process_sheet(name, &range, warnings)),
+            Err(e) => {
+                tracing::warn!("Failed to read worksheet range '{}': {}", name, e);
+                push_warning(
+                    warnings,
+                    "excel",
+                    format!("Sheet '{name}' worksheet range could not be read and was skipped ({e})"),
+                );
+            }
+        }
+
+        if let Some(formulas) = collect_sheet_formulas(workbook, name) {
+            extra_metadata.insert(format!("formulas_{name}"), formulas);
+        }
+    }
+
+    (sheets, extra_metadata)
+}
+
 #[inline]
-fn process_sheet(name: &str, range: &Range<Data>) -> ExcelSheet {
+fn process_sheet(name: &str, range: &Range<Data>, warnings: &mut Vec<ProcessingWarning>) -> ExcelSheet {
     let (rows, cols) = range.get_size();
     let cell_count = range.used_cells().count();
 
@@ -507,7 +659,7 @@ fn process_sheet(name: &str, range: &Range<Data>) -> ExcelSheet {
             table_cells: None,
         }
     } else {
-        let (markdown, table_cells) = generate_markdown_and_cells(name, range, estimated_capacity);
+        let (markdown, table_cells) = generate_markdown_and_cells(name, range, estimated_capacity, warnings);
         ExcelSheet {
             name: name.to_owned(),
             markdown,
@@ -526,7 +678,12 @@ fn process_sheet(name: &str, range: &Range<Data>) -> ExcelSheet {
 /// was previously done in `sheets_to_tables()`.
 ///
 /// Returns (markdown, table_cells) where table_cells is a 2D vector of strings.
-fn generate_markdown_and_cells(sheet_name: &str, range: &Range<Data>, capacity: usize) -> (String, Vec<Vec<String>>) {
+fn generate_markdown_and_cells(
+    sheet_name: &str,
+    range: &Range<Data>,
+    capacity: usize,
+    warnings: &mut Vec<ProcessingWarning>,
+) -> (String, Vec<Vec<String>>) {
     const MAX_REASONABLE_ROWS: usize = 100_000;
 
     let (declared_rows, _declared_cols) = range.get_size();
@@ -542,6 +699,14 @@ fn generate_markdown_and_cells(sheet_name: &str, range: &Range<Data>, capacity: 
                 "## {}\n\n*Sheet has extreme declared dimensions ({} rows) with minimal actual data ({} cells). Skipping to prevent OOM.*",
                 sheet_name, declared_rows, actual_cell_count
             ).unwrap();
+            push_warning(
+                warnings,
+                "excel",
+                format!(
+                    "Sheet '{sheet_name}' declared {declared_rows} rows but only {actual_cell_count} cells \
+                     contain data; sheet content was skipped to avoid excessive memory use"
+                ),
+            );
             return (result, Vec::new());
         }
     }
@@ -692,6 +857,90 @@ fn escape_markdown_into(buffer: &mut String, s: &str) {
     }
 }
 
+/// Render a zero-based column index as spreadsheet column letters, e.g.
+/// `0 -> "A"`, `25 -> "Z"`, `26 -> "AA"`.
+fn column_letters(mut col: u32) -> String {
+    let mut letters = Vec::new();
+    loop {
+        let rem = (col % 26) as u8;
+        letters.push(b'A' + rem);
+        if col < 26 {
+            break;
+        }
+        col = col / 26 - 1;
+    }
+    letters.reverse();
+    // SAFETY-free: every byte pushed above is in b'A'..=b'Z', which is valid UTF-8. ~keep
+    String::from_utf8(letters).unwrap_or_default()
+}
+
+/// Render a zero-based `(row, col)` position as an A1-style cell reference
+/// relative to the enumerated range (matching the convention already used by
+/// `extractors::excel::scan_for_dde_warnings`, which reports positions
+/// relative to the extracted `table_cells` grid rather than absolute sheet
+/// coordinates).
+fn cell_reference(row: u32, col: u32) -> String {
+    format!("{}{}", column_letters(col), row + 1)
+}
+
+/// Collect non-empty formulas from a sheet as `"<cell_ref>=<formula>"` entries
+/// joined by `"; "`. Works across every calamine `Reader` (xlsx/xls/xlsb/ods)
+/// since `worksheet_formula` is part of the shared trait. Returns `None` when
+/// the sheet has no formulas or the backend cannot report them.
+fn collect_sheet_formulas<RS, R>(workbook: &mut R, sheet_name: &str) -> Option<String>
+where
+    RS: Read + Seek,
+    R: Reader<RS>,
+{
+    let range = workbook.worksheet_formula(sheet_name).ok()?;
+    let mut entries = Vec::new();
+
+    'outer: for (row_idx, row) in range.rows().enumerate() {
+        for (col_idx, formula) in row.iter().enumerate() {
+            if formula.is_empty() {
+                continue;
+            }
+            entries.push(format!(
+                "{}={}",
+                cell_reference(row_idx as u32, col_idx as u32),
+                formula
+            ));
+            if entries.len() >= MAX_METADATA_ENTRIES_PER_SHEET {
+                break 'outer;
+            }
+        }
+    }
+
+    if entries.is_empty() {
+        None
+    } else {
+        Some(entries.join("; "))
+    }
+}
+
+/// Collect hyperlinks from an XLSX sheet as `"<anchor>=<target>"` entries
+/// joined by `"; "`. XLSX-only: hyperlink relationships are not part of the
+/// shared calamine `Reader` trait. Returns `None` when the sheet has no
+/// hyperlinks or the relationships cannot be read.
+fn collect_sheet_hyperlinks<RS: Read + Seek>(workbook: &mut calamine::Xlsx<RS>, sheet_name: &str) -> Option<String> {
+    let hyperlinks = workbook.hyperlinks_by_sheet_name(sheet_name).ok()?;
+    if hyperlinks.is_empty() {
+        return None;
+    }
+
+    let entries: Vec<String> = hyperlinks
+        .iter()
+        .take(MAX_METADATA_ENTRIES_PER_SHEET)
+        .map(|link| {
+            let target = link.target.as_deref().or(link.location.as_deref()).unwrap_or("");
+            let anchor = cell_reference(link.range.start.0, link.range.start.1);
+            format!("{anchor}={target}")
+        })
+        .collect();
+
+    Some(entries.join("; "))
+}
+
 fn extract_metadata<RS, R>(
     workbook: &R,
     sheet_names: &[String],
@@ -722,6 +971,26 @@ where
     metadata.insert("sheet_names".to_owned(), sheet_names_str);
 
     let _workbook_metadata = workbook.metadata();
+
+    let defined_names = workbook.defined_names();
+    if !defined_names.is_empty() {
+        let joined = defined_names
+            .iter()
+            .map(|(name, formula)| format!("{name}={formula}"))
+            .collect::<Vec<_>>()
+            .join("; ");
+        metadata.insert("defined_names".to_owned(), joined);
+    }
+
+    let hidden_sheets: Vec<&str> = workbook
+        .sheets_metadata()
+        .iter()
+        .filter(|sheet| !matches!(sheet.visible, SheetVisible::Visible))
+        .map(|sheet| sheet.name.as_str())
+        .collect();
+    if !hidden_sheets.is_empty() {
+        metadata.insert("hidden_sheets".to_owned(), hidden_sheets.join(", "));
+    }
 
     if let Some(office_meta) = office_metadata {
         for (key, value) in office_meta {
@@ -993,6 +1262,106 @@ fn parse_revision_headers_xml(xml_bytes: &[u8]) -> Result<Vec<DocumentRevision>>
     Ok(revisions)
 }
 
+/// Extract cell comments from an in-memory `.xlsx`/`.xlsm`/`.xltm` blob.
+///
+/// Returns `None` when the archive contains no `xl/comments*.xml` parts (the
+/// common case: most workbooks have no cell comments) or cannot be opened as
+/// a ZIP. Otherwise returns every comment found across all comment parts as
+/// `"<cell_ref>: <text>"` entries joined by `"; "`.
+///
+/// Comments are *not* attributed to a specific sheet here: resolving which
+/// `xl/comments<N>.xml` part belongs to which worksheet requires walking
+/// `xl/worksheets/_rels/sheetN.xml.rels`, which is a follow-up (xberg-io/xberg#89).
+/// The cell reference in each entry is still enough to locate the comment
+/// inside the workbook.
+fn extract_xlsx_comments_from_bytes(data: &[u8]) -> Option<String> {
+    let cursor = Cursor::new(data);
+    let mut archive = zip::ZipArchive::new(cursor).ok()?;
+    extract_xlsx_comments_from_archive(&mut archive)
+}
+
+/// Extract cell comments from an `.xlsx`/`.xlsm`/`.xltm` file on disk. Same
+/// semantics as [`extract_xlsx_comments_from_bytes`].
+fn extract_xlsx_comments_from_file(file_path: &str) -> Option<String> {
+    let file = std::fs::File::open(file_path).ok()?;
+    let mut archive = zip::ZipArchive::new(file).ok()?;
+    extract_xlsx_comments_from_archive(&mut archive)
+}
+
+/// Core comment-part scanner shared by the file and bytes paths.
+fn extract_xlsx_comments_from_archive<R: Read + Seek>(archive: &mut zip::ZipArchive<R>) -> Option<String> {
+    let mut comment_parts: Vec<String> = Vec::new();
+    for i in 0..archive.len() {
+        let name = archive.by_index(i).ok()?.name().to_string();
+        if name.starts_with("xl/comments") && name.ends_with(".xml") {
+            comment_parts.push(name);
+        }
+    }
+    if comment_parts.is_empty() {
+        return None;
+    }
+    comment_parts.sort();
+
+    let mut entries = Vec::new();
+    for part in comment_parts {
+        let xml_bytes = {
+            let mut entry = match archive.by_name(&part) {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            let mut buf = Vec::new();
+            if entry.read_to_end(&mut buf).is_err() {
+                continue;
+            }
+            buf
+        };
+        if let Ok(parsed) = parse_comments_xml(&xml_bytes) {
+            entries.extend(parsed);
+        } else {
+            tracing::warn!(part = %part, "failed to parse worksheet comments part");
+        }
+    }
+
+    if entries.is_empty() {
+        None
+    } else {
+        Some(entries.join("; "))
+    }
+}
+
+/// Parse a single `xl/comments<N>.xml` part into `"<cell_ref>: <text>"`
+/// strings, one per `<comment>` element with non-empty text. A comment's text
+/// may be split across multiple `<r><t>` runs (rich text); these are
+/// concatenated in document order.
+fn parse_comments_xml(xml_bytes: &[u8]) -> Result<Vec<String>> {
+    let xml_str = crate::text::utf8_validation::from_utf8(xml_bytes)
+        .map_err(|e| XbergError::parsing(format!("invalid UTF-8 in comments.xml: {e}")))?;
+
+    let doc = roxmltree::Document::parse(xml_str)
+        .map_err(|e| XbergError::parsing(format!("failed to parse comments.xml: {e}")))?;
+
+    const SPREADSHEETML_NS: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+
+    let mut entries = Vec::new();
+    for node in doc.descendants() {
+        if !node.has_tag_name((SPREADSHEETML_NS, "comment")) {
+            continue;
+        }
+        let cell_ref = node.attribute("ref").unwrap_or("");
+        let text: String = node
+            .descendants()
+            .filter(|n| n.has_tag_name((SPREADSHEETML_NS, "t")))
+            .filter_map(|n| n.text())
+            .collect();
+        let text = text.trim();
+        if !text.is_empty() {
+            entries.push(format!("{cell_ref}: {text}"));
+        }
+    }
+
+    Ok(entries)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1104,7 +1473,8 @@ mod tests {
     #[test]
     fn test_process_sheet_empty() {
         let range: Range<Data> = Range::empty();
-        let sheet = process_sheet("EmptySheet", &range);
+        let mut warnings = Vec::new();
+        let sheet = process_sheet("EmptySheet", &range, &mut warnings);
 
         assert_eq!(sheet.name, "EmptySheet");
         assert_eq!(sheet.row_count, 0);
@@ -1118,7 +1488,8 @@ mod tests {
         let mut range: Range<Data> = Range::new((0, 0), (0, 0));
         range.set_value((0, 0), Data::String("Single Cell".to_owned()));
 
-        let sheet = process_sheet("Sheet1", &range);
+        let mut warnings = Vec::new();
+        let sheet = process_sheet("Sheet1", &range, &mut warnings);
 
         assert_eq!(sheet.name, "Sheet1");
         assert_eq!(sheet.row_count, 1);
@@ -1137,7 +1508,8 @@ mod tests {
         range.set_value((2, 0), Data::String("Bob".to_owned()));
         range.set_value((2, 1), Data::Int(25));
 
-        let sheet = process_sheet("People", &range);
+        let mut warnings = Vec::new();
+        let sheet = process_sheet("People", &range, &mut warnings);
 
         assert_eq!(sheet.name, "People");
         assert_eq!(sheet.row_count, 3);
@@ -1151,7 +1523,8 @@ mod tests {
     #[test]
     fn test_generate_markdown_and_cells_empty() {
         let range: Range<Data> = Range::empty();
-        let (markdown, cells) = generate_markdown_and_cells("Test", &range, 100);
+        let mut warnings = Vec::new();
+        let (markdown, cells) = generate_markdown_and_cells("Test", &range, 100, &mut warnings);
 
         assert!(markdown.contains("## Test"));
         assert!(cells.is_empty());
@@ -1167,7 +1540,8 @@ mod tests {
         range.set_value((1, 1), Data::String("B".to_owned()));
         range.set_value((1, 2), Data::String("C".to_owned()));
 
-        let (markdown, cells) = generate_markdown_and_cells("Sheet1", &range, 200);
+        let mut warnings = Vec::new();
+        let (markdown, cells) = generate_markdown_and_cells("Sheet1", &range, 200, &mut warnings);
 
         assert!(markdown.contains("## Sheet1"));
         assert!(markdown.contains("Col1"));
@@ -1184,7 +1558,8 @@ mod tests {
         range.set_value((1, 0), Data::String("X".to_owned()));
         range.set_value((1, 2), Data::String("Z".to_owned()));
 
-        let (markdown, cells) = generate_markdown_and_cells("Sparse", &range, 200);
+        let mut warnings = Vec::new();
+        let (markdown, cells) = generate_markdown_and_cells("Sparse", &range, 200, &mut warnings);
 
         assert!(markdown.contains("X"));
         assert!(markdown.contains("Z"));
@@ -1231,7 +1606,8 @@ mod tests {
         range.set_value((1, 0), Data::String("A".to_owned()));
         range.set_value((1, 1), Data::String("B".to_owned()));
 
-        let (markdown, _cells) = generate_markdown_and_cells("Test", &range, 100);
+        let mut warnings = Vec::new();
+        let (markdown, _cells) = generate_markdown_and_cells("Test", &range, 100, &mut warnings);
 
         let lines: Vec<&str> = markdown.lines().collect();
         assert!(lines[0].contains("## Test"));
@@ -1249,7 +1625,8 @@ mod tests {
             }
         }
 
-        let sheet = process_sheet("Data", &range);
+        let mut warnings = Vec::new();
+        let sheet = process_sheet("Data", &range, &mut warnings);
 
         assert_eq!(sheet.row_count, 10);
         assert_eq!(sheet.col_count, 5);
@@ -1342,7 +1719,8 @@ mod tests {
             classify_xlsx_sheet_shape(&mut workbook, "Sheet1").unwrap(),
             XlsxSheetShape::Dense
         );
-        let sheet = process_xlsx_sheet_safe(&mut workbook, "Sheet1").unwrap();
+        let mut warnings = Vec::new();
+        let sheet = process_xlsx_sheet_safe(&mut workbook, "Sheet1", &mut warnings).unwrap();
 
         assert_eq!(sheet.row_count, 2);
         assert_eq!(sheet.col_count, 2);
@@ -1378,7 +1756,8 @@ mod tests {
             classify_xlsx_sheet_shape(&mut workbook, "Sheet1").unwrap(),
             XlsxSheetShape::Sparse
         );
-        let sheet = process_xlsx_sheet_safe(&mut workbook, "Sheet1").unwrap();
+        let mut warnings = Vec::new();
+        let sheet = process_xlsx_sheet_safe(&mut workbook, "Sheet1", &mut warnings).unwrap();
 
         assert_eq!(sheet.row_count, 1_048_575);
         assert_eq!(sheet.col_count, 16_384);
@@ -1579,12 +1958,421 @@ mod tests {
             "2024-03-01T12:00:00Z",
         )]);
 
-        let workbook = read_excel_bytes(&xlsx, ".xlsx").expect("should parse workbook");
+        let (workbook, _warnings) = read_excel_bytes(&xlsx, ".xlsx").expect("should parse workbook");
         let revisions = workbook
             .revisions
             .as_ref()
             .expect("revisions should be Some after full extraction");
         assert_eq!(revisions.len(), 1);
         assert_eq!(revisions[0].author.as_deref(), Some("Carol"));
+    }
+
+    /// Build a minimal in-memory `.xlsx` zip from a caller-supplied `<workbook>`
+    /// inner body (the `<sheets>`/`<definedNames>` elements) and workbook-rels
+    /// relationships, plus any additional zip parts (worksheet XML, worksheet
+    /// relationships, comment parts). `[Content_Types].xml`/`_rels/.rels` mirror
+    /// `make_xlsx_with_worksheet`'s already-proven-working shape.
+    fn make_xlsx(workbook_body: &str, workbook_rels_body: &str, extra_parts: &[(&str, Vec<u8>)]) -> Vec<u8> {
+        use std::io::Write;
+        use zip::write::{SimpleFileOptions, ZipWriter};
+
+        let mut buffer = Vec::new();
+        {
+            let mut zip = ZipWriter::new(Cursor::new(&mut buffer));
+            let options = SimpleFileOptions::default();
+
+            zip.start_file("[Content_Types].xml", options).unwrap();
+            zip.write_all(
+                br#"<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Override PartName="/xl/workbook.xml"
+    ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml"
+    ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>"#,
+            )
+            .unwrap();
+
+            zip.start_file("_rels/.rels", options).unwrap();
+            zip.write_all(
+                br#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
+    Target="xl/workbook.xml"/>
+</Relationships>"#,
+            )
+            .unwrap();
+
+            zip.start_file("xl/workbook.xml", options).unwrap();
+            let workbook_xml = format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+                 <workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" \
+                 xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">\
+                 {workbook_body}</workbook>"
+            );
+            zip.write_all(workbook_xml.as_bytes()).unwrap();
+
+            zip.start_file("xl/_rels/workbook.xml.rels", options).unwrap();
+            let rels_xml = format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+                 <Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\
+                 {workbook_rels_body}</Relationships>"
+            );
+            zip.write_all(rels_xml.as_bytes()).unwrap();
+
+            for (path, data) in extra_parts {
+                zip.start_file(*path, options).unwrap();
+                zip.write_all(data).unwrap();
+            }
+
+            zip.finish().unwrap();
+        }
+        buffer
+    }
+
+    const WORKSHEET_REL: &str = r#"<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>"#;
+
+    /// xberg-io/xberg#84: a sheet declared in `workbook.xml`/`workbook.xml.rels`
+    /// whose worksheet part is missing from the zip must not silently vanish —
+    /// the workbook must come back with the readable sheets plus a warning
+    /// naming the one that failed.
+    #[test]
+    fn should_warn_when_xlsx_sheet_part_is_missing() {
+        let sheet1_xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="A1"/>
+  <sheetData>
+    <row r="1"><c r="A1" t="inlineStr"><is><t>Present</t></is></c></row>
+  </sheetData>
+</worksheet>"#;
+
+        let bytes = make_xlsx(
+            r#"<sheets><sheet name="Good" sheetId="1" r:id="rId1"/><sheet name="Missing" sheetId="2" r:id="rId2"/></sheets>"#,
+            &format!(
+                "{WORKSHEET_REL}\
+                 <Relationship Id=\"rId2\" \
+                 Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" \
+                 Target=\"worksheets/sheet2.xml\"/>"
+            ),
+            &[("xl/worksheets/sheet1.xml", sheet1_xml.to_vec())],
+        );
+
+        let (workbook, warnings) =
+            read_excel_bytes(&bytes, ".xlsx").expect("a workbook with one missing sheet part must still parse");
+
+        assert_eq!(workbook.sheets.len(), 1, "only the readable sheet must be kept");
+        assert_eq!(workbook.sheets[0].name, "Good");
+
+        let sheet_warnings: Vec<_> = warnings.iter().filter(|w| w.source == "excel").collect();
+        assert_eq!(
+            sheet_warnings.len(),
+            1,
+            "expected exactly one warning for the unreadable sheet, got: {warnings:?}"
+        );
+        assert!(
+            sheet_warnings[0].message.contains("Missing"),
+            "warning must name the failed sheet: {}",
+            sheet_warnings[0].message
+        );
+    }
+
+    /// xberg-io/xberg#222: a sheet whose declared dimensions vastly exceed its
+    /// actual data is skipped to avoid an OOM allocation; that skip must be
+    /// visible to the caller as a warning naming the sheet and the cap, not
+    /// only as text buried in the sheet's own markdown.
+    #[test]
+    fn should_warn_when_sheet_declared_dimensions_greatly_exceed_actual_data() {
+        let sheet1_xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="A1:A100002"/>
+  <sheetData>
+    <row r="1"><c r="A1" t="inlineStr"><is><t>Start</t></is></c></row>
+    <row r="100002"><c r="A100002" t="inlineStr"><is><t>End</t></is></c></row>
+  </sheetData>
+</worksheet>"#;
+
+        let bytes = make_xlsx(
+            r#"<sheets><sheet name="Huge" sheetId="1" r:id="rId1"/></sheets>"#,
+            WORKSHEET_REL,
+            &[("xl/worksheets/sheet1.xml", sheet1_xml.to_vec())],
+        );
+
+        let (workbook, warnings) = read_excel_bytes(&bytes, ".xlsx").expect("workbook must parse");
+
+        assert_eq!(workbook.sheets.len(), 1);
+        assert!(
+            workbook.sheets[0].markdown.contains("Skipping to prevent OOM"),
+            "sheet content must note the OOM-avoidance skip: {}",
+            workbook.sheets[0].markdown
+        );
+
+        let truncation_warnings: Vec<_> = warnings
+            .iter()
+            .filter(|w| w.source == "excel" && w.message.contains("declared"))
+            .collect();
+        assert_eq!(
+            truncation_warnings.len(),
+            1,
+            "expected exactly one 'declared dimensions' warning, got: {warnings:?}"
+        );
+        assert!(truncation_warnings[0].message.contains("Huge"));
+        assert!(truncation_warnings[0].message.contains("100002"));
+    }
+
+    /// xberg-io/xberg#222: a sparse sheet whose non-empty rows/columns exceed the
+    /// internal display cap must warn, naming the sheet and the actual vs.
+    /// displayed size, in addition to the existing in-markdown truncation notice.
+    #[test]
+    fn should_warn_when_sparse_sheet_output_is_truncated() {
+        let cells: Vec<((u32, u32), Data)> = (0..1500u32)
+            .map(|row| ((row, 0u32), Data::String(format!("v{row}"))))
+            .collect();
+
+        let mut warnings = Vec::new();
+        let sheet = process_sparse_sheet_from_cells("Big", cells, 0, 1499, 0, 0, &mut warnings)
+            .expect("sparse sheet construction must succeed");
+
+        assert_eq!(sheet.row_count, 1500);
+        assert!(
+            sheet.markdown.contains("Truncated: showing 1000x1"),
+            "markdown must retain the existing truncation notice: {}",
+            sheet.markdown
+        );
+
+        let truncation_warnings: Vec<_> = warnings.iter().filter(|w| w.source == "excel").collect();
+        assert_eq!(
+            truncation_warnings.len(),
+            1,
+            "expected exactly one truncation warning, got: {warnings:?}"
+        );
+        assert!(truncation_warnings[0].message.contains("Big"));
+        assert!(truncation_warnings[0].message.contains("1000x1"));
+    }
+
+    /// xberg-io/xberg#119: a hidden or very-hidden sheet must be flagged in
+    /// workbook metadata so a caller can tell it apart from a visible sheet;
+    /// its content is still extracted, not dropped.
+    #[test]
+    fn should_record_hidden_sheets_in_workbook_metadata() {
+        let sheet1_xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="A1"/>
+  <sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Visible</t></is></c></row></sheetData>
+</worksheet>"#;
+        let sheet2_xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="A1"/>
+  <sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Secret</t></is></c></row></sheetData>
+</worksheet>"#;
+
+        let bytes = make_xlsx(
+            r#"<sheets><sheet name="Visible" sheetId="1" r:id="rId1"/><sheet name="Hidden" sheetId="2" state="hidden" r:id="rId2"/></sheets>"#,
+            &format!(
+                "{WORKSHEET_REL}\
+                 <Relationship Id=\"rId2\" \
+                 Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" \
+                 Target=\"worksheets/sheet2.xml\"/>"
+            ),
+            &[
+                ("xl/worksheets/sheet1.xml", sheet1_xml.to_vec()),
+                ("xl/worksheets/sheet2.xml", sheet2_xml.to_vec()),
+            ],
+        );
+
+        let (workbook, _warnings) = read_excel_bytes(&bytes, ".xlsx").expect("workbook must parse");
+
+        assert_eq!(workbook.sheets.len(), 2, "hidden sheet content must still be extracted");
+        assert_eq!(
+            workbook.metadata.get("hidden_sheets").map(String::as_str),
+            Some("Hidden")
+        );
+        let hidden_sheet = workbook.sheets.iter().find(|s| s.name == "Hidden").unwrap();
+        assert!(hidden_sheet.markdown.contains("Secret"));
+    }
+
+    /// xberg-io/xberg#89 / #119: non-empty cell formulas must be recoverable from
+    /// the workbook, not silently discarded once calamine resolves them to a
+    /// cached value.
+    #[test]
+    fn should_record_sheet_formulas_in_workbook_metadata() {
+        let sheet1_xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="A1:B1"/>
+  <sheetData>
+    <row r="1">
+      <c r="A1"><f>SUM(B1:B1)</f><v>5</v></c>
+      <c r="B1"><v>5</v></c>
+    </row>
+  </sheetData>
+</worksheet>"#;
+
+        let bytes = make_xlsx(
+            r#"<sheets><sheet name="Calc" sheetId="1" r:id="rId1"/></sheets>"#,
+            WORKSHEET_REL,
+            &[("xl/worksheets/sheet1.xml", sheet1_xml.to_vec())],
+        );
+
+        let (workbook, _warnings) = read_excel_bytes(&bytes, ".xlsx").expect("workbook must parse");
+
+        assert_eq!(
+            workbook.metadata.get("formulas_Calc").map(String::as_str),
+            Some("A1=SUM(B1:B1)")
+        );
+    }
+
+    /// xberg-io/xberg#89: cell hyperlinks must be recoverable, not dropped —
+    /// calamine 0.36 exposes them via `hyperlinks_by_sheet_name`, superseding the
+    /// "not accessible through the crate" limitation this module used to document.
+    #[test]
+    fn should_record_sheet_hyperlinks_in_workbook_metadata() {
+        let sheet1_xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <dimension ref="A1"/>
+  <sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Visit</t></is></c></row></sheetData>
+  <hyperlinks><hyperlink ref="A1" r:id="rId1"/></hyperlinks>
+</worksheet>"#;
+        let sheet1_rels = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"
+    Target="https://example.com/" TargetMode="External"/>
+</Relationships>"#;
+
+        let bytes = make_xlsx(
+            r#"<sheets><sheet name="Links" sheetId="1" r:id="rId1"/></sheets>"#,
+            WORKSHEET_REL,
+            &[
+                ("xl/worksheets/sheet1.xml", sheet1_xml.to_vec()),
+                ("xl/worksheets/_rels/sheet1.xml.rels", sheet1_rels.to_vec()),
+            ],
+        );
+
+        let (workbook, _warnings) = read_excel_bytes(&bytes, ".xlsx").expect("workbook must parse");
+
+        assert_eq!(
+            workbook.metadata.get("hyperlinks_Links").map(String::as_str),
+            Some("A1=https://example.com/")
+        );
+    }
+
+    /// xberg-io/xberg#89: workbook-level defined names must be recoverable.
+    #[test]
+    fn should_record_defined_names_in_workbook_metadata() {
+        let sheet1_xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="A1"/>
+  <sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Value</t></is></c></row></sheetData>
+</worksheet>"#;
+
+        let bytes = make_xlsx(
+            r#"<sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets><definedNames><definedName name="MyRange">Sheet1!$A$1</definedName></definedNames>"#,
+            WORKSHEET_REL,
+            &[("xl/worksheets/sheet1.xml", sheet1_xml.to_vec())],
+        );
+
+        let (workbook, _warnings) = read_excel_bytes(&bytes, ".xlsx").expect("workbook must parse");
+
+        assert_eq!(
+            workbook.metadata.get("defined_names").map(String::as_str),
+            Some("MyRange=Sheet1!$A$1")
+        );
+    }
+
+    /// xberg-io/xberg#89: a `<comment>` element's rich-text runs must be
+    /// concatenated into one string, keyed by cell reference.
+    #[test]
+    fn should_parse_comment_text_and_cell_ref_from_comments_xml() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<comments xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <authors><author>Alice</author></authors>
+  <commentList>
+    <comment ref="B2" authorId="0"><text><r><t>Needs review</t></r></text></comment>
+  </commentList>
+</comments>"#;
+
+        let entries = parse_comments_xml(xml).expect("comments.xml must parse");
+        assert_eq!(entries, vec!["B2: Needs review".to_string()]);
+    }
+
+    /// xberg-io/xberg#89: comments must be surfaced end-to-end through
+    /// `read_excel_bytes`, not just parsed in isolation.
+    #[test]
+    fn should_surface_comments_in_full_xlsx_extraction() {
+        let sheet1_xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="A1"/>
+  <sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Value</t></is></c></row></sheetData>
+</worksheet>"#;
+        let comments_xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<comments xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <authors><author>Alice</author></authors>
+  <commentList>
+    <comment ref="A1" authorId="0"><text><r><t>Check this</t></r></text></comment>
+  </commentList>
+</comments>"#;
+
+        let bytes = make_xlsx(
+            r#"<sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets>"#,
+            WORKSHEET_REL,
+            &[
+                ("xl/worksheets/sheet1.xml", sheet1_xml.to_vec()),
+                ("xl/comments1.xml", comments_xml.to_vec()),
+            ],
+        );
+
+        let (workbook, _warnings) = read_excel_bytes(&bytes, ".xlsx").expect("workbook must parse");
+
+        assert_eq!(
+            workbook.metadata.get("comments").map(String::as_str),
+            Some("A1: Check this")
+        );
+    }
+
+    /// xberg-io/xberg#103: `process_named_sheets` (the xls/xlsb/ods worksheet-range
+    /// loop shared via `process_workbook`) must warn on a sheet name the backend
+    /// cannot resolve, instead of silently dropping it. Uses a real on-disk `.xls`
+    /// fixture plus one name that does not exist in it, so the `Err` this exercises
+    /// is genuine `calamine::Reader::worksheet_range` behavior, not test-only
+    /// scaffolding.
+    #[test]
+    fn should_warn_when_named_sheet_range_cannot_be_read() {
+        let fixture_path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test_documents/xls/test_excel.xls");
+        let Ok(bytes) = std::fs::read(&fixture_path) else {
+            eprintln!("skipping: fixture not present at {fixture_path:?}");
+            return;
+        };
+
+        let mut workbook =
+            calamine::Xls::new(Cursor::new(bytes.as_slice())).expect("fixture must parse as a valid XLS workbook");
+        let real_names = Reader::sheet_names(&workbook);
+        assert!(!real_names.is_empty(), "fixture must have at least one real sheet");
+
+        let mut names = real_names.clone();
+        names.push("Definitely-Not-A-Real-Sheet".to_owned());
+
+        let mut warnings = Vec::new();
+        let (sheets, _extra_metadata) = process_named_sheets(&mut workbook, &names, &mut warnings);
+
+        assert_eq!(
+            sheets.len(),
+            real_names.len(),
+            "only the real sheets should be processed"
+        );
+        assert_eq!(
+            warnings.len(),
+            1,
+            "expected exactly one warning for the unresolvable sheet name, got: {warnings:?}"
+        );
+        assert_eq!(warnings[0].source, "excel");
+        assert!(
+            warnings[0].message.contains("Definitely-Not-A-Real-Sheet"),
+            "warning must name the failed sheet: {}",
+            warnings[0].message
+        );
     }
 }
