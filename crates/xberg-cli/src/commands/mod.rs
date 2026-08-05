@@ -20,6 +20,7 @@ pub mod doctor;
 #[cfg(feature = "embeddings")]
 pub mod embed;
 pub mod extract;
+pub mod formats;
 #[cfg(feature = "ner-onnx")]
 pub mod ner;
 pub mod overrides;
@@ -44,6 +45,7 @@ pub use embed::embed_command;
 pub use extract::{
     BatchInputFormat, ExtractInputSource, batch_command, extract_command, load_batch_input_manifest, uri_to_local_path,
 };
+pub use formats::compiled_in_formats;
 #[cfg(feature = "api")]
 pub use server::serve_command;
 #[cfg(feature = "mcp")]

@@ -326,7 +326,11 @@ static EXTRACTORS_INITIALIZED: OnceCell<()> = OnceCell::new();
 /// This function is called automatically on first extraction operation.
 /// It's safe to call multiple times - registration only happens once,
 /// unless the registry was cleared, in which case extractors are re-registered.
-pub(crate) fn ensure_initialized() -> Result<()> {
+///
+/// Public so a caller that wants to *inspect* the registry — rather than extract —
+/// can populate it directly. Without this the only way to trigger registration is to
+/// run a real extraction, which `xberg formats` would otherwise have to fake (#233).
+pub fn ensure_initialized() -> Result<()> {
     EXTRACTORS_INITIALIZED.get_or_try_init(register_default_extractors)?;
 
     let registry = get_document_extractor_registry();

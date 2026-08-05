@@ -82,8 +82,8 @@ use commands::serve_command;
 ))]
 use commands::warm_command;
 use commands::{
-    BatchInputFormat, batch_command, clear_command, doctor_command, extract_command, load_config, manifest_command,
-    stats_command, validate_file_exists, validate_output_dir,
+    BatchInputFormat, batch_command, clear_command, compiled_in_formats, doctor_command, extract_command, load_config,
+    manifest_command, stats_command, validate_file_exists, validate_output_dir,
 };
 #[cfg(feature = "core-cli")]
 use commands::{chunk_command, validate_chunk_params};
@@ -757,7 +757,9 @@ fn main() -> Result<()> {
         }
 
         Commands::Formats { format } => {
-            let formats = xberg::core::mime::list_supported_formats();
+            // Resolved against the extractor registry rather than the core's static catalogue,
+            // so this reports what the binary can actually extract. See `commands::formats`.
+            let formats = compiled_in_formats()?;
             match format {
                 WireFormat::Text => {
                     println!("{:<15} {}", style::label("EXTENSION"), style::label("MIME TYPE"));
