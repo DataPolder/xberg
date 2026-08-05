@@ -154,16 +154,36 @@ impl InternalDocumentExtractor for CsvExtractor {
     }
 }
 
+/// Maximum number of non-blank lines sampled by [`detect_delimiter`].
+///
+/// Widened from the original 10-line sample (xberg-io/xberg#164): a short
+/// sample is easily dominated by a handful of narrow leading rows (e.g. a
+/// title block) and picks the wrong delimiter for the rest of the file.
+const DELIMITER_SAMPLE_LINES: usize = 50;
+
 /// Auto-detect CSV delimiter using consistency-based approach.
 /// Tests each candidate delimiter and picks the one producing the most
 /// consistent column count across sample lines.
+///
+/// Blank lines and `#`-prefixed comment lines are skipped when building the
+/// sample so spacer rows and leading comments don't dilute the consistency
+/// score used to pick the delimiter.
 fn detect_delimiter(text: &str) -> char {
     const CANDIDATES: &[char] = &[',', '\t', '|', ';'];
     let mut best_delimiter = ',';
     let mut best_score = 0usize;
 
+    let sample: String = text
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            !trimmed.is_empty() && !trimmed.starts_with('#')
+        })
+        .take(DELIMITER_SAMPLE_LINES)
+        .collect::<Vec<_>>()
+        .join("\n");
+
     for &candidate in CANDIDATES {
-        let sample: String = text.lines().take(10).collect::<Vec<_>>().join("\n");
         let rows = parse_csv(&sample, candidate);
         if rows.len() < 2 {
             continue;
@@ -205,7 +225,7 @@ fn parse_csv(text: &str, delimiter: char) -> Vec<Vec<String>> {
             }
         } else {
             match c {
-                '"' => {
+                '"' if current_field.is_empty() => {
                     in_quotes = true;
                 }
                 c if c == delimiter => {
@@ -218,17 +238,15 @@ fn parse_csv(text: &str, delimiter: char) -> Vec<Vec<String>> {
                     }
                     current_row.push(current_field.clone());
                     current_field.clear();
-                    if !current_row.iter().all(|f| f.is_empty()) {
-                        rows.push(current_row);
-                    }
+                    // A genuinely blank line (e.g. a spacer row mid-file) must be kept as its
+                    // own row so subsequent row indices don't shift (xberg-io/xberg#164).
+                    rows.push(current_row);
                     current_row = Vec::new();
                 }
                 '\n' => {
                     current_row.push(current_field.clone());
                     current_field.clear();
-                    if !current_row.iter().all(|f| f.is_empty()) {
-                        rows.push(current_row);
-                    }
+                    rows.push(current_row);
                     current_row = Vec::new();
                 }
                 _ => {
@@ -240,9 +258,7 @@ fn parse_csv(text: &str, delimiter: char) -> Vec<Vec<String>> {
 
     if !current_field.is_empty() || !current_row.is_empty() {
         current_row.push(current_field);
-        if !current_row.iter().all(|f| f.is_empty()) {
-            rows.push(current_row);
-        }
+        rows.push(current_row);
     }
 
     rows

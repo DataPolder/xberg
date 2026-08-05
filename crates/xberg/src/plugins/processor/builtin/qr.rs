@@ -66,6 +66,32 @@ impl PostProcessor for QrCodeProcessor {
             let codes = detect_qr_codes(image.data.as_ref(), Some(image.format.as_ref()));
             image.qr_codes = Some(codes);
         }
+
+        // Decoded payloads previously only landed on `ExtractedImage::qr_codes`, which nothing
+        // in `rendering/` reads — the text never reached `content` (xberg-io/xberg#156). Append
+        // it as its own section so it is at least present in the document's text output.
+        //
+        // Caveat: this processor runs at the `Middle` stage, after chunking has already split
+        // `content` (see `run_pipeline` in `core/pipeline/mod.rs`), so this section is not
+        // reflected in `chunks`/embeddings. Reaching those would require decoding QR codes
+        // earlier in the pipeline (alongside image OCR, before chunking), which is a larger
+        // change to shared pipeline code outside this processor's scope.
+        let payloads: Vec<String> = images
+            .iter()
+            .filter_map(|image| image.qr_codes.as_deref())
+            .flatten()
+            .map(|code| code.payload.clone())
+            .collect();
+
+        if !payloads.is_empty() {
+            result.content.push_str("\n\n## QR Codes\n\n");
+            for payload in &payloads {
+                result.content.push_str("- ");
+                result.content.push_str(payload);
+                result.content.push('\n');
+            }
+        }
+
         Ok(())
     }
 
