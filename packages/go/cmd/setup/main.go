@@ -41,7 +41,7 @@ import (
 )
 
 const (
-	moduleVersion = "1.0.14"
+	moduleVersion     = "1.0.14"
 	repoURL           = "https://github.com/xberg-io/xberg"
 	assetPrefix       = "xberg"
 	ffiLibName        = "xberg_ffi"

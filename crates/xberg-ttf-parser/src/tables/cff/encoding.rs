@@ -98,11 +98,10 @@ impl Encoding<'_> {
     }
 
     pub fn code_to_gid(&self, charset: &Charset, code: u8) -> Option<GlyphId> {
-        if !self.supplemental.is_empty() {
-            if let Some(ref s) = self.supplemental.into_iter().find(|s| s.code == code) {
+        if !self.supplemental.is_empty()
+            && let Some(ref s) = self.supplemental.into_iter().find(|s| s.code == code) {
                 return charset.sid_to_gid(s.name);
             }
-        }
 
         let index = usize::from(code);
         match self.kind {

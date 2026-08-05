@@ -191,33 +191,29 @@ impl<'a> ValueRecord<'a> {
             record.y_advance = s.read::<i16>()?;
         }
 
-        if flags.x_placement_device() {
-            if let Some(offset) = s.read::<Option<Offset16>>()? {
+        if flags.x_placement_device()
+            && let Some(offset) = s.read::<Option<Offset16>>()? {
                 record.x_placement_device =
                     table_data.get(offset.to_usize()..).and_then(Device::parse)
             }
-        }
 
-        if flags.y_placement_device() {
-            if let Some(offset) = s.read::<Option<Offset16>>()? {
+        if flags.y_placement_device()
+            && let Some(offset) = s.read::<Option<Offset16>>()? {
                 record.y_placement_device =
                     table_data.get(offset.to_usize()..).and_then(Device::parse)
             }
-        }
 
-        if flags.x_advance_device() {
-            if let Some(offset) = s.read::<Option<Offset16>>()? {
+        if flags.x_advance_device()
+            && let Some(offset) = s.read::<Option<Offset16>>()? {
                 record.x_advance_device =
                     table_data.get(offset.to_usize()..).and_then(Device::parse)
             }
-        }
 
-        if flags.y_advance_device() {
-            if let Some(offset) = s.read::<Option<Offset16>>()? {
+        if flags.y_advance_device()
+            && let Some(offset) = s.read::<Option<Offset16>>()? {
                 record.y_advance_device =
                     table_data.get(offset.to_usize()..).and_then(Device::parse)
             }
-        }
 
         Some(record)
     }

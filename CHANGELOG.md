@@ -44,7 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exponential work. Both now carry a total visit budget.
 - Fonts at the maximum 65535 glyphs now parse. The glyph offset table needs 65536 entries at that
   size, which overflowed a counter and dropped the table, leaving the font with no outlines at all.
-  
+
 ## [1.0.14] - 2026-08-04
 
 ### Fixed

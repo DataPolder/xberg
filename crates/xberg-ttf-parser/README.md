@@ -48,7 +48,9 @@ affected glyphs are exactly the dot-bearing ones: `i`, `j`, `!` and `.`. Pages
 rendered from such a PDF silently lose those characters.
 
 Two picks carry an xberg-authored follow-up commit rather than landing alone:
-#216 and #207 ship no test upstream and are both silently reversible, so each
+
+## 216 and #207 ship no test upstream and are both silently reversible, so each
+
 is followed by a regression test; #224's budget is charged per call, which does
 not bound the work inside a call, so it is followed by a per-record charge.
 
@@ -59,7 +61,7 @@ would silently misalign glyph matching rather than fail closed), #214 (an
 `--no-default-features --features gvar-alloc`), and #172 and #174 (public API
 upstream has not accepted, with no caller in this workspace).
 
-## How it reaches the rest of the workspace
+### How it reaches the rest of the workspace
 
 Nothing in Xberg depends on `ttf-parser` directly. It arrives transitively
 through `pdf_oxide` and `fontdb`, both of which request it by its crates.io
@@ -77,7 +79,7 @@ consumer.
 
 The shim is never published; it exists only to satisfy the patch matcher.
 
-## Modifications from upstream
+### Modifications from upstream
 
 The source is kept byte-identical to upstream wherever possible, so that future
 upstream fixes cherry-pick without conflict. The deliberate differences are:
@@ -106,13 +108,13 @@ The public API is unchanged from upstream v0.25.1 except for `loca::Table`,
 which #226 widens from `u16` to `u32` counters. No crate in this workspace's
 dependency graph calls it.
 
-## Updating
+### Updating
 
 Cherry-pick the upstream commit onto `crates/xberg-ttf-parser/`, add a row to
 the table above, and run:
 
     cargo test -p xberg-ttf-parser --all-features
 
-## License
+### License
 
 Dual-licensed under MIT or Apache-2.0, matching upstream.

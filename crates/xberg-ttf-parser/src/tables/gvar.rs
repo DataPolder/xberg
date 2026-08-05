@@ -244,12 +244,11 @@ impl<'a> VariationTuples<'a> {
 
         for tuple in self.as_mut_slice() {
             if let Some(ref mut set_points) = tuple.set_points {
-                if set_points.next()? {
-                    if let Some((x_delta, y_delta)) = tuple.deltas.next() {
+                if set_points.next()?
+                    && let Some((x_delta, y_delta)) = tuple.deltas.next() {
                         x += x_delta;
                         y += y_delta;
                     }
-                }
             } else {
                 if let Some((x_delta, y_delta)) = tuple.deltas.next() {
                     x += x_delta;
@@ -1479,8 +1478,8 @@ fn infer_deltas(
         let mut last_point = None;
         let mut deltas = tuple.deltas.clone();
         for (point, is_set) in points.clone().zip(points_set.clone()) {
-            if is_set {
-                if let Some((x_delta, y_delta)) = deltas.next() {
+            if is_set
+                && let Some((x_delta, y_delta)) = deltas.next() {
                     last_point = Some(PointAndDelta {
                         x: point.x,
                         y: point.y,
@@ -1488,7 +1487,6 @@ fn infer_deltas(
                         y_delta,
                     });
                 }
-            }
 
             if point.last_point {
                 break;

@@ -284,11 +284,10 @@ impl<'a> AxisValueSubtable<'a> {
     /// Note: this will always return false for format 4 subtables as they may contain multiple
     /// axes.
     pub fn contains(&self, value: Fixed) -> bool {
-        if let Some(subtable_value) = self.value() {
-            if subtable_value.0 == value.0 {
+        if let Some(subtable_value) = self.value()
+            && subtable_value.0 == value.0 {
                 return true;
             }
-        }
 
         if let Self::Format2(AxisValueSubtableFormat2 {
             range_min_value,

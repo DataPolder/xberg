@@ -139,6 +139,8 @@ preserve-patterns = ["SAFETY", "SPDX", "Copyright", "License", "licensed under",
 # flate2 crate + PDF FlateDecode filter (THE ORIGINAL BUG: flate -> flat)
 # Corpus fixture identifier preserves this source filename spelling. ~keep
 Availabilty = "Availabilty"
+# OpenType index-to-location table name, not a truncated "local". ~keep
+loca = "loca"
 flate = "flate"
 delocate = "delocate"
 thw = "thw"

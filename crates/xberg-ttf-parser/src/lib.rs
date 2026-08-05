@@ -1511,16 +1511,15 @@ impl<'a> Face<'a> {
     /// This method is affected by variation axes.
     #[inline]
     pub fn ascender(&self) -> i16 {
-        if let Some(os_2) = self.tables.os2 {
-            if os_2.use_typographic_metrics() {
+        if let Some(os_2) = self.tables.os2
+            && os_2.use_typographic_metrics() {
                 let value = os_2.typographic_ascender();
                 return self.apply_metrics_variation(Tag::from_bytes(b"hasc"), value);
             }
-        }
 
         let mut value = self.tables.hhea.ascender;
-        if value == 0 {
-            if let Some(os_2) = self.tables.os2 {
+        if value == 0
+            && let Some(os_2) = self.tables.os2 {
                 value = os_2.typographic_ascender();
                 if value == 0 {
                     value = os_2.windows_ascender();
@@ -1529,7 +1528,6 @@ impl<'a> Face<'a> {
                     value = self.apply_metrics_variation(Tag::from_bytes(b"hasc"), value);
                 }
             }
-        }
 
         value
     }
@@ -1539,16 +1537,15 @@ impl<'a> Face<'a> {
     /// This method is affected by variation axes.
     #[inline]
     pub fn descender(&self) -> i16 {
-        if let Some(os_2) = self.tables.os2 {
-            if os_2.use_typographic_metrics() {
+        if let Some(os_2) = self.tables.os2
+            && os_2.use_typographic_metrics() {
                 let value = os_2.typographic_descender();
                 return self.apply_metrics_variation(Tag::from_bytes(b"hdsc"), value);
             }
-        }
 
         let mut value = self.tables.hhea.descender;
-        if value == 0 {
-            if let Some(os_2) = self.tables.os2 {
+        if value == 0
+            && let Some(os_2) = self.tables.os2 {
                 value = os_2.typographic_descender();
                 if value == 0 {
                     value = os_2.windows_descender();
@@ -1557,7 +1554,6 @@ impl<'a> Face<'a> {
                     value = self.apply_metrics_variation(Tag::from_bytes(b"hdsc"), value);
                 }
             }
-        }
 
         value
     }
@@ -1575,17 +1571,16 @@ impl<'a> Face<'a> {
     /// This method is affected by variation axes.
     #[inline]
     pub fn line_gap(&self) -> i16 {
-        if let Some(os_2) = self.tables.os2 {
-            if os_2.use_typographic_metrics() {
+        if let Some(os_2) = self.tables.os2
+            && os_2.use_typographic_metrics() {
                 let value = os_2.typographic_line_gap();
                 return self.apply_metrics_variation(Tag::from_bytes(b"hlgp"), value);
             }
-        }
 
         let mut value = self.tables.hhea.line_gap;
         // For line gap, we have to check that ascender or descender are 0, not line gap itself.
-        if self.tables.hhea.ascender == 0 || self.tables.hhea.descender == 0 {
-            if let Some(os_2) = self.tables.os2 {
+        if (self.tables.hhea.ascender == 0 || self.tables.hhea.descender == 0)
+            && let Some(os_2) = self.tables.os2 {
                 if os_2.typographic_ascender() != 0 || os_2.typographic_descender() != 0 {
                     value = os_2.typographic_line_gap();
                     value = self.apply_metrics_variation(Tag::from_bytes(b"hlgp"), value);
@@ -1593,7 +1588,6 @@ impl<'a> Face<'a> {
                     value = 0;
                 }
             }
-        }
 
         value
     }
@@ -1986,12 +1980,11 @@ impl<'a> Face<'a> {
 
             if self.is_variable() {
                 // Ignore variation offset when `hvar` is not set.
-                if let Some(hvar) = self.tables.hvar {
-                    if let Some(offset) = hvar.left_side_bearing_offset(glyph_id, self.coords()) {
+                if let Some(hvar) = self.tables.hvar
+                    && let Some(offset) = hvar.left_side_bearing_offset(glyph_id, self.coords()) {
                         // We can't use `round()` in `no_std`, so this is the next best thing.
                         bearing += offset + 0.5;
                     }
-                }
             }
 
             i16::try_num_from(bearing)
@@ -2014,12 +2007,11 @@ impl<'a> Face<'a> {
 
             if self.is_variable() {
                 // Ignore variation offset when `vvar` is not set.
-                if let Some(vvar) = self.tables.vvar {
-                    if let Some(offset) = vvar.top_side_bearing_offset(glyph_id, self.coords()) {
+                if let Some(vvar) = self.tables.vvar
+                    && let Some(offset) = vvar.top_side_bearing_offset(glyph_id, self.coords()) {
                         // We can't use `round()` in `no_std`, so this is the next best thing.
                         bearing += offset + 0.5;
                     }
-                }
             }
 
             i16::try_num_from(bearing)
@@ -2042,12 +2034,11 @@ impl<'a> Face<'a> {
 
             if self.is_variable() {
                 // Ignore variation offset when `vvar` is not set.
-                if let Some(vvar) = self.tables.vvar {
-                    if let Some(offset) = vvar.vertical_origin_offset(glyph_id, self.coords()) {
+                if let Some(vvar) = self.tables.vvar
+                    && let Some(offset) = vvar.vertical_origin_offset(glyph_id, self.coords()) {
                         // We can't use `round()` in `no_std`, so this is the next best thing.
                         origin += offset + 0.5;
                     }
-                }
             }
 
             i16::try_num_from(origin)
@@ -2219,11 +2210,10 @@ impl<'a> Face<'a> {
         glyph_id: GlyphId,
         pixels_per_em: u16,
     ) -> Option<RasterGlyphImage> {
-        if let Some(table) = self.tables.sbix {
-            if let Some(strike) = table.best_strike(pixels_per_em) {
+        if let Some(table) = self.tables.sbix
+            && let Some(strike) = table.best_strike(pixels_per_em) {
                 return strike.get(glyph_id);
             }
-        }
         if let Some(bdat) = self.tables.bdat {
             return bdat.get(glyph_id, pixels_per_em);
         }

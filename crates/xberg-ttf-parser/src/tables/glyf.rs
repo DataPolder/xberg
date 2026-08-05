@@ -478,8 +478,8 @@ fn outline_impl(
             // components be re-walked for free.
             *budget = budget.checked_sub(1)?;
 
-            if let Some(range) = loca_table.glyph_range(comp.glyph_id) {
-                if let Some(glyph_data) = glyf_table.get(range) {
+            if let Some(range) = loca_table.glyph_range(comp.glyph_id)
+                && let Some(glyph_data) = glyf_table.get(range) {
                     let transform = Transform::combine(builder.transform, comp.transform);
                     let mut b = Builder::new(transform, builder.bbox, builder.builder);
                     outline_impl(loca_table, glyf_table, glyph_data, depth + 1, budget, &mut b)?;
@@ -487,7 +487,6 @@ fn outline_impl(
                     // Take updated bbox.
                     builder.bbox = b.bbox;
                 }
-            }
         }
     }
 

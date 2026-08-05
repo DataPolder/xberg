@@ -63,40 +63,34 @@ impl<'a> Table<'a> {
 
         let mut table = Table::default();
 
-        if let Some(offset) = glyph_class_def_offset {
-            if let Some(subdata) = data.get(offset.to_usize()..) {
+        if let Some(offset) = glyph_class_def_offset
+            && let Some(subdata) = data.get(offset.to_usize()..) {
                 table.glyph_classes = ClassDefinition::parse(subdata);
             }
-        }
 
-        if let Some(offset) = mark_attach_class_def_offset {
-            if let Some(subdata) = data.get(offset.to_usize()..) {
+        if let Some(offset) = mark_attach_class_def_offset
+            && let Some(subdata) = data.get(offset.to_usize()..) {
                 table.mark_attach_classes = ClassDefinition::parse(subdata);
             }
-        }
 
-        if let Some(offset) = mark_glyph_sets_def_offset {
-            if let Some(subdata) = data.get(offset.to_usize()..) {
+        if let Some(offset) = mark_glyph_sets_def_offset
+            && let Some(subdata) = data.get(offset.to_usize()..) {
                 let mut s = Stream::new(subdata);
                 let format = s.read::<u16>()?;
-                if format == 1 {
-                    if let Some(count) = s.read::<u16>() {
-                        if let Some(array) = s.read_array16::<Offset32>(count) {
+                if format == 1
+                    && let Some(count) = s.read::<u16>()
+                        && let Some(array) = s.read_array16::<Offset32>(count) {
                             table.mark_glyph_coverage_offsets = Some((subdata, array));
                         }
-                    }
-                }
             }
-        }
 
         #[cfg(feature = "variable-fonts")]
         {
-            if let Some(offset) = var_store_offset {
-                if let Some(subdata) = data.get(offset.to_usize()..) {
+            if let Some(offset) = var_store_offset
+                && let Some(subdata) = data.get(offset.to_usize()..) {
                     let s = Stream::new(subdata);
                     table.variation_store = ItemVariationStore::parse(s);
                 }
-            }
         }
 
         Some(table)

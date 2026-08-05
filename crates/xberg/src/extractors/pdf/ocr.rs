@@ -1407,7 +1407,6 @@ fn analyze_container_markers(elements: &[crate::types::internal::InternalElement
     analysis
 }
 
-// Mirror of `crate::ocr::OCR_PROCESSED_IMAGE_{WIDTH,HEIGHT}_METADATA_KEY`, defined
 // locally because this PDF OCR path also compiles under `ocr-pipeline` (VLM OCR, e.g.
 // the `binstall` CLI) where the `ocr` module — gated on `ocr`/`ocr-wasm` — is absent.
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
