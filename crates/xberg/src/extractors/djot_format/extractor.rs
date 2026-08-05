@@ -438,15 +438,11 @@ impl DjotExtractor {
                     in_table_cell = false;
                     table_row.push(std::mem::take(&mut table_cell).trim().to_string());
                 }
-                Event::End(Container::TableRow { .. }) => {
-                    if !table_row.is_empty() {
-                        table_rows.push(std::mem::take(&mut table_row));
-                    }
+                Event::End(Container::TableRow { .. }) if !table_row.is_empty() => {
+                    table_rows.push(std::mem::take(&mut table_row));
                 }
-                Event::End(Container::Table) => {
-                    if !table_rows.is_empty() {
-                        b.push_table_from_cells(&std::mem::take(&mut table_rows), None, None);
-                    }
+                Event::End(Container::Table) if !table_rows.is_empty() => {
+                    b.push_table_from_cells(&std::mem::take(&mut table_rows), None, None);
                 }
                 Event::Str(s) => {
                     if in_table_cell {
