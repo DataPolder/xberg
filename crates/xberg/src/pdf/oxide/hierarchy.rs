@@ -11,6 +11,10 @@
 use std::collections::HashMap;
 
 use super::OxideDocument;
+// Inline-script rejoining measures baselines and character origins in raw page
+// coordinates, so it needs the strict page-axis predicate, not the
+// rotation-agnostic writing-mode one.
+use super::span_geometry::is_horizontal_ltr;
 use crate::pdf::error::Result;
 use crate::pdf::hierarchy::SegmentData;
 
@@ -321,10 +325,6 @@ fn is_compact_horizontal_ascii_span(span: &pdf_oxide::layout::TextSpan) -> bool 
             character.is_ascii_alphanumeric() || matches!(character, '+' | '-' | '=' | '(' | ')' | ',' | '.')
         })
         && is_horizontal_ltr(span)
-}
-
-fn is_horizontal_ltr(span: &pdf_oxide::layout::TextSpan) -> bool {
-    span.wmode == 0 && !span.rtl_draw_logical && span.rotation_degrees.abs() <= f32::EPSILON
 }
 
 fn has_valid_span_geometry(span: &pdf_oxide::layout::TextSpan) -> bool {

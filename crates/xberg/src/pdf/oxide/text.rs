@@ -1,6 +1,9 @@
 //! PDF text extraction using the pdf_oxide backend.
 
 use super::OxideDocument;
+use super::span_geometry::{
+    has_same_rotation, is_horizontal_ltr, is_ltr_writing_mode, upright_advance_extent, upright_cross_extent,
+};
 use crate::core::config::{ExtractionConfig, PageConfig};
 use crate::pdf::error::{PdfError, Result};
 use crate::pdf::metadata::PdfExtractionMetadata;
@@ -422,10 +425,16 @@ struct OrderedSpan<'a> {
     glue_to_previous: bool,
 }
 
-fn spans_overlap_vertically(first: &pdf_oxide::layout::TextSpan, second: &pdf_oxide::layout::TextSpan) -> bool {
-    let overlap_start = first.bbox.y.max(second.bbox.y);
-    let overlap_end = (first.bbox.y + first.bbox.height).min(second.bbox.y + second.bbox.height);
-    overlap_end > overlap_start
+/// Do the two spans share a line?
+///
+/// Measured on each span's own cross axis so that a 90-degree rotated pair,
+/// whose shared baseline is a page-x column rather than a page-y row, is still
+/// recognised as one line. Identical to the previous page-y test for unrotated
+/// spans. Only meaningful for spans of equal rotation; callers check that.
+fn spans_overlap_on_cross_axis(first: &pdf_oxide::layout::TextSpan, second: &pdf_oxide::layout::TextSpan) -> bool {
+    let (first_low, first_high) = upright_cross_extent(first);
+    let (second_low, second_high) = upright_cross_extent(second);
+    first_high.min(second_high) > first_low.max(second_low)
 }
 
 fn is_short_inline_fragment(span: &pdf_oxide::layout::TextSpan) -> bool {
@@ -445,10 +454,14 @@ fn has_rtl_or_bidi_content(text: &str) -> bool {
         .any(|character| pdf_oxide::text::is_rtl_text(character as u32))
 }
 
-fn is_horizontal_ltr(span: &pdf_oxide::layout::TextSpan) -> bool {
-    span.wmode == 0 && !span.rtl_draw_logical && span.rotation_degrees.abs() <= f32::EPSILON
-}
-
+/// Find the parent word a short detached fragment should rejoin.
+///
+/// Gated on the writing mode only (`wmode` / `rtl_draw_logical`). Rotation is
+/// deliberately *not* a reason to refuse the join: a rotated table header is
+/// horizontal LTR text painted along a rotated baseline, and refusing to anchor
+/// its fragments is what leaves rotated tables glued and word-reversed
+/// (GitHub #1358). The candidate must still carry the *same* rotation as the
+/// fragment, and all gap arithmetic runs in that rotation's upright frame.
 fn find_inline_fragment_anchor(
     index: usize,
     spans: &[pdf_oxide::layout::TextSpan],
@@ -457,25 +470,27 @@ fn find_inline_fragment_anchor(
     let span = &spans[index];
     if span.split_boundary_before
         || !is_short_inline_fragment(span)
-        || !is_horizontal_ltr(span)
+        || !is_ltr_writing_mode(span)
         || has_rtl_or_bidi_content(&span.text)
     {
         return None;
     }
 
+    let (span_start, _) = upright_advance_extent(span);
     let search_start = index.saturating_sub(MAX_INLINE_FRAGMENT_ANCHOR_LOOKBACK);
     (search_start..index)
         .filter(|candidate_index| anchors[*candidate_index].is_none())
         .filter_map(|candidate_index| {
             let candidate = &spans[candidate_index];
-            if !is_horizontal_ltr(candidate)
+            if !is_ltr_writing_mode(candidate)
                 || has_rtl_or_bidi_content(&candidate.text)
-                || !spans_overlap_vertically(candidate, span)
-                || (candidate.rotation_degrees - span.rotation_degrees).abs() > f32::EPSILON
+                || !has_same_rotation(candidate, span)
+                || !spans_overlap_on_cross_axis(candidate, span)
             {
                 return None;
             }
-            let gap = span.bbox.x - (candidate.bbox.x + candidate.bbox.width);
+            let (_, candidate_end) = upright_advance_extent(candidate);
+            let gap = span_start - candidate_end;
             let tolerance = candidate.font_size.max(span.font_size) * INLINE_FRAGMENT_GAP_RATIO;
             (gap >= -tolerance && gap <= tolerance).then_some((candidate_index, gap.abs()))
         })
@@ -499,10 +514,12 @@ fn order_spans_with_inline_fragments(spans: &[pdf_oxide::layout::TextSpan]) -> V
     }
     for attached in &mut children {
         attached.sort_by(|first, second| {
-            spans[*first]
-                .bbox
-                .x
-                .partial_cmp(&spans[*second].bbox.x)
+            // Along each fragment's own advance axis, so rotated fragments are
+            // re-inserted in reading order rather than page-x order.
+            let (first_start, _) = upright_advance_extent(&spans[*first]);
+            let (second_start, _) = upright_advance_extent(&spans[*second]);
+            first_start
+                .partial_cmp(&second_start)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
     }
@@ -536,14 +553,32 @@ fn append_span_separator(
     }
 
     let span = current.span;
-    let y_gap = (previous.bbox.y - span.bbox.y).abs();
+
+    // A change of text-matrix rotation is a hard block boundary. pdf_oxide lifts
+    // rotated runs out of the horizontal flow and appends them as their own
+    // blocks, and the two bboxes are flattened onto different axes, so no gap
+    // arithmetic across the boundary is meaningful. This is also what keeps an
+    // upright running footer readable on a page whose body is rotated.
+    if !has_same_rotation(previous, span) {
+        text.push_str("\n\n");
+        return;
+    }
+
+    // Everything below runs in the pair's shared upright frame: identical to the
+    // raw page axes when the pair is unrotated, axis-swapped when it is not.
+    let (previous_start, previous_end) = upright_advance_extent(previous);
+    let (span_start, _) = upright_advance_extent(span);
+    let (previous_baseline, _) = upright_cross_extent(previous);
+    let (span_baseline, _) = upright_cross_extent(span);
+    let baseline_gap = (previous_baseline - span_baseline).abs();
+
     let reset_threshold = previous.font_size.max(span.font_size) * ROW_RESET_MIN_BACKTRACK_EMS;
-    let is_horizontal_ltr_pair = is_horizontal_ltr(previous)
-        && is_horizontal_ltr(span)
+    let is_ltr_pair = is_ltr_writing_mode(previous)
+        && is_ltr_writing_mode(span)
         && !has_rtl_or_bidi_content(&previous.text)
         && !has_rtl_or_bidi_content(&span.text);
-    if allow_ltr_row_resets && is_horizontal_ltr_pair && span.bbox.x < previous.bbox.x - reset_threshold {
-        if y_gap > paragraph_gap_threshold {
+    if allow_ltr_row_resets && is_ltr_pair && span_start < previous_start - reset_threshold {
+        if baseline_gap > paragraph_gap_threshold {
             text.push_str("\n\n");
         } else {
             text.push('\n');
@@ -558,13 +593,12 @@ fn append_span_separator(
         return;
     }
 
-    let previous_end_x = previous.bbox.x + previous.bbox.width;
     let effective_height = span.bbox.height.max(previous.bbox.height).max(span.font_size * 0.5);
-    if y_gap < effective_height * 0.5 {
-        if span.bbox.x - previous_end_x > span.font_size * 0.15 {
+    if baseline_gap < effective_height * 0.5 {
+        if span_start - previous_end > span.font_size * 0.15 {
             text.push(' ');
         }
-    } else if y_gap > paragraph_gap_threshold {
+    } else if baseline_gap > paragraph_gap_threshold {
         text.push_str("\n\n");
     } else {
         text.push('\n');
@@ -997,6 +1031,100 @@ mod tests {
         next.split_boundary_before = true;
 
         assert_eq!(assemble_page_text(&[previous, next]), "first second");
+    }
+
+    /// A span painted with a rotated text matrix. `x`/`y` stay page-space (that
+    /// is what pdf_oxide reports); `width` is the glyph-advance run along the
+    /// rotated baseline and `height` the font extent across it.
+    fn rotated_span(text: &str, x: f32, y: f32, width: f32, height: f32, rotation_degrees: f32) -> TextSpan {
+        let mut span = span_with_width(text, x, y, width, height, height);
+        span.rotation_degrees = rotation_degrees;
+        span
+    }
+
+    /// #1358 / #294 — a detached fragment of a rotated word must rejoin its
+    /// parent instead of being stranded at the end of the run.
+    ///
+    /// Revert check (expect RED): restore the `rotation_degrees.abs() <=
+    /// f32::EPSILON` term in `span_geometry::is_ltr_writing_mode`'s callers —
+    /// i.e. use `is_horizontal_ltr` again in `find_inline_fragment_anchor` — and
+    /// this asserts `"MotorcrafPremiumt"`.
+    #[test]
+    fn should_rejoin_detached_fragment_of_rotated_word_when_rotation_matches() {
+        let spans = vec![
+            rotated_span("Motorcraf", 400.0, 100.0, 45.0, 10.0, 90.0),
+            rotated_span("Premium", 400.0, 155.0, 40.0, 10.0, 90.0),
+            rotated_span("t", 400.0, 145.0, 5.0, 10.0, 90.0),
+        ];
+
+        assert_eq!(assemble_page_text(&spans), "Motorcraft Premium");
+    }
+
+    /// #1358 / #294 — the anchor must still refuse to bridge two different
+    /// rotations, so a rotated fragment never steals an upright parent.
+    #[test]
+    fn should_not_anchor_fragment_across_differing_rotations() {
+        let spans = vec![
+            span_with_width("Motorcraf", 400.0, 100.0, 45.0, 10.0, 10.0),
+            rotated_span("t", 445.0, 100.0, 5.0, 10.0, 90.0),
+        ];
+
+        assert_eq!(find_inline_fragment_anchor(1, &spans, &[None, None]), None);
+    }
+
+    /// #1358 / #293 — a sideways table reads down its own rows, not across
+    /// them: words on one rotated line are space-joined and the next rotated
+    /// line starts a new line.
+    ///
+    /// Revert check (expect RED): restore the page-axis `y_gap` / `bbox.x`
+    /// arithmetic in `append_span_separator` and this asserts
+    /// `"Enginecoolant\n\n18.6\n\nquarts"` — every word of a line glued, every
+    /// line boundary turned into a paragraph break.
+    #[test]
+    fn should_read_rotated_table_rows_along_their_own_axis() {
+        let spans = vec![
+            rotated_span("Engine", 400.0, 100.0, 30.0, 10.0, 90.0),
+            rotated_span("coolant", 400.0, 132.0, 32.0, 10.0, 90.0),
+            rotated_span("18.6", 388.0, 100.0, 22.0, 10.0, 90.0),
+            rotated_span("quarts", 388.0, 124.0, 30.0, 10.0, 90.0),
+        ];
+
+        assert_eq!(assemble_page_text(&spans), "Engine coolant\n18.6 quarts");
+    }
+
+    /// #1358 / #293 — the mixed page. A whole-page rotation transform would fix
+    /// the rotated body and break the upright running footer; only a per-run
+    /// frame reads both correctly, with a hard block break between them.
+    ///
+    /// Revert check (expect RED): with the page-axis arithmetic restored this
+    /// asserts `"Enginecoolant\n\n18.6\n\nquarts\n\nPage 264"`.
+    #[test]
+    fn should_read_rotated_body_and_upright_footer_on_same_page() {
+        let spans = vec![
+            rotated_span("Engine", 400.0, 100.0, 30.0, 10.0, 90.0),
+            rotated_span("coolant", 400.0, 132.0, 32.0, 10.0, 90.0),
+            rotated_span("18.6", 388.0, 100.0, 22.0, 10.0, 90.0),
+            rotated_span("quarts", 388.0, 124.0, 30.0, 10.0, 90.0),
+            span_with_width("Page", 60.0, 40.0, 25.0, 10.0, 10.0),
+            span_with_width("264", 88.0, 40.0, 15.0, 10.0, 10.0),
+        ];
+
+        assert_eq!(assemble_page_text(&spans), "Engine coolant\n18.6 quarts\n\nPage 264");
+    }
+
+    /// #1358 — upright pages must be byte-identical after the change. Two
+    /// wrapped body lines plus a paragraph break, all rotation 0.
+    #[test]
+    fn should_not_change_upright_page_assembly() {
+        let spans = vec![
+            span_with_width("Engine", 60.0, 700.0, 30.0, 10.0, 10.0),
+            span_with_width("coolant", 92.0, 700.0, 32.0, 10.0, 10.0),
+            span_with_width("18.6", 60.0, 688.0, 22.0, 10.0, 10.0),
+            span_with_width("quarts", 84.0, 688.0, 30.0, 10.0, 10.0),
+            span_with_width("Next", 60.0, 640.0, 25.0, 10.0, 10.0),
+        ];
+
+        assert_eq!(assemble_page_text(&spans), "Engine coolant\n18.6 quarts\n\nNext");
     }
 
     #[test]
