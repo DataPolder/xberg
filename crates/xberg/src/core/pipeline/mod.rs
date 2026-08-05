@@ -41,15 +41,58 @@ fn processors_without_captioning(
     )
 }
 
+/// Values produced by the captioning prepass that have no `InternalDocument`
+/// destination and therefore cannot be merged back onto `doc`.
+///
+/// The prepass runs the captioning post-processor against a full
+/// `ExtractedDocument` derived from `doc`, but the pipeline then re-derives the
+/// final result from `doc`. Fields the derivation does not read back are carried
+/// here and re-applied to the derived result instead of being discarded.
+#[derive(Debug, Default)]
+struct CaptioningCarryOver {
+    /// Content authored by the prepass processor, when it rewrote `content`.
+    content: Option<String>,
+    /// Named entities produced by the prepass processor.
+    entities: Option<Vec<crate::types::Entity>>,
+}
+
+impl CaptioningCarryOver {
+    fn apply(self, result: &mut ExtractedDocument) {
+        if let Some(content) = self.content {
+            result.content = content;
+        }
+        if self.entities.is_some() {
+            result.entities = self.entities;
+        }
+    }
+}
+
+/// Whether the prepass changed any image description, including by adding or
+/// removing images. A change invalidates the extractor's pre-rendered content.
+fn image_descriptions_changed(
+    before: &[crate::types::ExtractedImage],
+    after: Option<&Vec<crate::types::ExtractedImage>>,
+) -> bool {
+    let after = match after {
+        Some(images) => images.as_slice(),
+        None => &[],
+    };
+    before.len() != after.len()
+        || before
+            .iter()
+            .zip(after)
+            .any(|(retained, captioned)| retained.description != captioned.description)
+}
+
 async fn run_captioning_prepass(
     doc: &mut InternalDocument,
     config: &ExtractionConfig,
     include_structure: bool,
     pp_config: &Option<&crate::core::config::PostProcessorConfig>,
     middle_processors: &std::sync::Arc<Vec<PostProcessorHandle>>,
-) -> Result<()> {
+) -> Result<CaptioningCarryOver> {
     if config.captioning.is_none() {
-        return Ok(());
+        return Ok(CaptioningCarryOver::default());
     }
 
     let captioning_processors = std::sync::Arc::new(
@@ -67,7 +110,7 @@ async fn run_captioning_prepass(
             source: std::borrow::Cow::Borrowed("captioning"),
             message: std::borrow::Cow::Borrowed("captioning feature not enabled — rebuild with --features captioning"),
         });
-        return Ok(());
+        return Ok(CaptioningCarryOver::default());
     }
 
     crate::extraction::derive::resolve_relationships(doc);
@@ -77,6 +120,8 @@ async fn run_captioning_prepass(
         config.output_format.clone(),
     );
 
+    let content_before = caption_result.content.clone();
+
     execute_processor_stages(
         &mut caption_result,
         config,
@@ -85,21 +130,26 @@ async fn run_captioning_prepass(
     )
     .await?;
 
-    if let Some(captioned_images) = caption_result.images.as_ref() {
-        let mut description_changed = false;
-        for (retained, captioned) in doc.images.iter_mut().zip(captioned_images) {
-            description_changed |= retained.description != captioned.description;
-            retained.description = captioned.description.clone();
-            retained.caption = captioned.caption.clone();
-        }
-        if description_changed {
-            doc.pre_rendered_content = None;
-        }
+    // Merge the prepass result back. Everything the processor produced that the
+    // derivation re-reads goes onto `doc`; the rest is carried to the derived
+    // result. Previously only description/caption, warnings and usage survived.
+    let description_changed = image_descriptions_changed(&doc.images, caption_result.images.as_ref());
+    // Replace the image vec wholesale instead of zipping it against `doc.images`:
+    // a processor that adds or removes an image made `zip` truncate to the shorter
+    // side, dropping added images and mis-pairing the rest.
+    doc.images = caption_result.images.take().unwrap_or_default();
+    if description_changed {
+        doc.pre_rendered_content = None;
     }
-    doc.processing_warnings = caption_result.processing_warnings;
-    doc.llm_usage = caption_result.llm_usage;
+    doc.metadata = std::mem::take(&mut caption_result.metadata);
+    doc.uris = caption_result.uris.take().unwrap_or_default();
+    doc.processing_warnings = std::mem::take(&mut caption_result.processing_warnings);
+    doc.llm_usage = caption_result.llm_usage.take();
 
-    Ok(())
+    Ok(CaptioningCarryOver {
+        content: (caption_result.content != content_before).then(|| std::mem::take(&mut caption_result.content)),
+        entities: caption_result.entities.take(),
+    })
 }
 
 /// Run the post-processing pipeline on an `InternalDocument`.
@@ -187,8 +237,10 @@ pub async fn run_pipeline(mut doc: InternalDocument, config: &ExtractionConfig) 
     };
 
     let include_structure = config.include_document_structure;
+    let mut captioning_carry_over = CaptioningCarryOver::default();
     if let Some((_, middle_processors, _)) = &processor_stages {
-        run_captioning_prepass(&mut doc, config, include_structure, &pp_config, middle_processors).await?;
+        captioning_carry_over =
+            run_captioning_prepass(&mut doc, config, include_structure, &pp_config, middle_processors).await?;
     }
 
     #[cfg(feature = "chunking")]
@@ -237,6 +289,7 @@ pub async fn run_pipeline(mut doc: InternalDocument, config: &ExtractionConfig) 
     let mut result =
         crate::extraction::derive::derive_extraction_result(doc, include_structure, config.output_format.clone());
     result.internal_document = doc_for_elements;
+    captioning_carry_over.apply(&mut result);
 
     #[cfg(feature = "html")]
     if let Some(html) = styled_html_prerender {
