@@ -67,6 +67,7 @@ impl std::fmt::Debug for CrnnNet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CrnnNet")
             .field("initialized", &self.backend.is_some())
+            .field("backend", &self.backend.as_ref().map(|backend| backend.name()))
             .field("keys", &self.keys.len())
             .finish()
     }
@@ -101,6 +102,27 @@ impl CrnnNet {
         dict_file_path: &str,
     ) -> Result<(), OcrError> {
         BaseNet::init_model(self, path, num_thread)?;
+
+        self.read_keys_from_file(dict_file_path)?;
+
+        Ok(())
+    }
+
+    /// Load the recognition model onto an explicitly chosen backend, reading the CTC
+    /// dictionary from `dict_file_path`.
+    ///
+    /// The explicit dictionary is what makes this backend-neutral: only `ort` can surface the
+    /// model's embedded `"character"` metadata (see [`Self::get_keys`]), so a `tract` load must
+    /// be given the dictionary out of band. Both engines then decode against the same key list,
+    /// which is a precondition for comparing their decoded text.
+    pub fn init_model_dict_file_on(
+        &mut self,
+        backend: crate::inference::Backend,
+        path: &str,
+        num_thread: usize,
+        dict_file_path: &str,
+    ) -> Result<(), OcrError> {
+        BaseNet::init_model_on(self, backend, path, num_thread)?;
 
         self.read_keys_from_file(dict_file_path)?;
 

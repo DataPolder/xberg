@@ -27,6 +27,7 @@ impl std::fmt::Debug for DbNet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DbNet")
             .field("initialized", &self.backend.is_some())
+            .field("backend", &self.backend.as_ref().map(|backend| backend.name()))
             .field("detection_canvas", &self.detection_canvas)
             .finish()
     }
@@ -58,8 +59,20 @@ impl DbNet {
         num_thread: usize,
         detection_canvas: Option<u32>,
     ) -> Result<(), OcrError> {
+        self.init_model_with_canvas_on(inference::default_backend(), path, num_thread, detection_canvas)
+    }
+
+    /// Load the detection model from a file path onto an explicitly chosen backend. See
+    /// [`DbNet::init_model_from_memory_with_canvas_on`].
+    pub fn init_model_with_canvas_on(
+        &mut self,
+        backend: inference::Backend,
+        path: &str,
+        num_thread: usize,
+        detection_canvas: Option<u32>,
+    ) -> Result<(), OcrError> {
         let model_bytes = std::fs::read(path)?;
-        self.init_model_from_memory_with_canvas(&model_bytes, num_thread, detection_canvas)
+        self.init_model_from_memory_with_canvas_on(backend, &model_bytes, num_thread, detection_canvas)
     }
 
     /// Load the detection model from ONNX bytes, optionally pinning its input to
@@ -80,7 +93,27 @@ impl DbNet {
         num_thread: usize,
         detection_canvas: Option<u32>,
     ) -> Result<(), OcrError> {
-        let backend_kind = inference::default_backend();
+        self.init_model_from_memory_with_canvas_on(
+            inference::default_backend(),
+            model_bytes,
+            num_thread,
+            detection_canvas,
+        )
+    }
+
+    /// Load the detection model from ONNX bytes onto an explicitly chosen backend, applying
+    /// the same canvas rules as [`DbNet::init_model_from_memory_with_canvas`].
+    ///
+    /// [`inference::default_backend`] resolves at compile time and prefers `ort`, so in a build
+    /// with both engines compiled in this is the only way to reach `tract` — and therefore the
+    /// only way the pinned-canvas code path runs at all in such a build.
+    pub fn init_model_from_memory_with_canvas_on(
+        &mut self,
+        backend_kind: inference::Backend,
+        model_bytes: &[u8],
+        num_thread: usize,
+        detection_canvas: Option<u32>,
+    ) -> Result<(), OcrError> {
         let detection_canvas = match backend_kind {
             inference::Backend::Tract => detection_canvas.filter(|canvas| *canvas > 0),
             inference::Backend::Ort => None,

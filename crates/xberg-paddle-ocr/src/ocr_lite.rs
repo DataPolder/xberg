@@ -153,9 +153,40 @@ impl PaddleOcrEngine {
         num_thread: usize,
         detection_canvas: Option<u32>,
     ) -> Result<(), OcrError> {
-        self.db_net.init_model_with_canvas(det_path, num_thread, detection_canvas)?;
-        self.angle_net.init_model(cls_path, num_thread)?;
-        self.crnn_net.init_model_dict_file(rec_path, num_thread, dict_path)?;
+        self.init_models_with_dict_and_canvas_on(
+            crate::inference::default_backend(),
+            det_path,
+            cls_path,
+            rec_path,
+            dict_path,
+            num_thread,
+            detection_canvas,
+        )
+    }
+
+    /// Initialize all three models on an explicitly chosen inference backend.
+    ///
+    /// [`crate::inference::default_backend`] resolves at compile time and prefers `ort`
+    /// whenever the `ort` feature is on. A build that compiles both engines — the native
+    /// cross-engine parity configuration — therefore cannot reach `tract` through
+    /// [`Self::init_models_with_dict_and_canvas`]; it would silently construct an `ort` engine
+    /// and drop `detection_canvas` on the floor. Callers that mean a specific engine must say
+    /// so here.
+    pub fn init_models_with_dict_and_canvas_on(
+        &mut self,
+        backend: crate::inference::Backend,
+        det_path: &str,
+        cls_path: &str,
+        rec_path: &str,
+        dict_path: &str,
+        num_thread: usize,
+        detection_canvas: Option<u32>,
+    ) -> Result<(), OcrError> {
+        self.db_net
+            .init_model_with_canvas_on(backend, det_path, num_thread, detection_canvas)?;
+        self.angle_net.init_model_on(backend, cls_path, num_thread)?;
+        self.crnn_net
+            .init_model_dict_file_on(backend, rec_path, num_thread, dict_path)?;
         Ok(())
     }
 

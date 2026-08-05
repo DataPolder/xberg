@@ -466,13 +466,7 @@ impl InternalElement {
     /// Set the content layer.
     #[cfg(all(
         test,
-        any(
-            feature = "ocr",
-            feature = "pdf",
-            paddle_ocr,
-            feature = "xml",
-            feature = "office"
-        )
+        any(feature = "ocr", feature = "pdf", paddle_ocr, feature = "xml", feature = "office")
     ))]
     pub(crate) fn with_layer(mut self, layer: ContentLayer) -> Self {
         self.layer = layer;
@@ -788,13 +782,7 @@ mod tests {
         assert!(!element.should_render_image_ocr());
     }
 
-    #[cfg(any(
-        feature = "ocr",
-        feature = "pdf",
-        paddle_ocr,
-        feature = "xml",
-        feature = "office"
-    ))]
+    #[cfg(any(feature = "ocr", feature = "pdf", paddle_ocr, feature = "xml", feature = "office"))]
     #[test]
     fn test_internal_element_builder_pattern() {
         let elem = InternalElement::text(ElementKind::Heading { level: 2 }, "Methods", 1)

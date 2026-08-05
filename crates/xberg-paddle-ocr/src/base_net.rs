@@ -1,4 +1,4 @@
-use crate::inference::{self, ModelBackend};
+use crate::inference::{self, Backend, ModelBackend};
 use crate::ocr_error::OcrError;
 
 #[cfg(feature = "ort")]
@@ -18,8 +18,31 @@ pub trait BaseNet {
 
     /// Load a model from ONNX bytes onto the compile-time default backend.
     fn init_model_from_memory(&mut self, model_bytes: &[u8], num_thread: usize) -> Result<(), OcrError> {
-        // TODO(#1354): pin per Phase 0 spike outcome (currently no PaddleOCR model is pinned).
-        let backend = inference::load_backend(inference::default_backend(), model_bytes, num_thread, None)?;
+        self.init_model_from_memory_on(inference::default_backend(), model_bytes, num_thread)
+    }
+
+    /// Load a model from a file path onto an explicitly chosen backend.
+    ///
+    /// See [`Self::init_model_from_memory_on`] for why an explicit choice exists at all.
+    fn init_model_on(&mut self, backend: Backend, path: &str, num_thread: usize) -> Result<(), OcrError> {
+        let model_bytes = std::fs::read(path)?;
+        self.init_model_from_memory_on(backend, &model_bytes, num_thread)
+    }
+
+    /// Load a model from ONNX bytes onto an explicitly chosen backend.
+    ///
+    /// [`inference::default_backend`] resolves at compile time and prefers `ort` whenever the
+    /// `ort` feature is on, so a build with **both** engines compiled in (the native
+    /// cross-engine parity configuration, and any consumer that lets its caller pick per
+    /// request) cannot reach `tract` through the default path at all. Selecting the engine per
+    /// load is the only way to exercise both in one binary.
+    fn init_model_from_memory_on(
+        &mut self,
+        backend: Backend,
+        model_bytes: &[u8],
+        num_thread: usize,
+    ) -> Result<(), OcrError> {
+        let backend = inference::load_backend(backend, model_bytes, num_thread, None)?;
         self.set_backend(Some(backend));
         Ok(())
     }

@@ -27,8 +27,11 @@ mod tensor;
 #[cfg(inference_ort)]
 mod ort_backend;
 // — so there it is `cfg(test)`-only, keeping non-test builds dead-code-clean.
+// `pub(crate)` so sibling modules can reuse the `cfg(test)` parity helpers
+// (`parity_required` / `resolve_model` / `PARITY_REPO`) rather than re-deriving the
+// cache-lookup-and-fail-loudly contract; see `crate::paddle_ocr::tract_parity`.
 #[cfg(all(feature = "tract", any(not(inference_ort), test)))]
-mod tract_backend;
+pub(crate) mod tract_backend;
 
 pub(crate) use backend::{InferenceBackend, InferenceSession};
 pub(crate) use tensor::InferenceTensor;

@@ -761,7 +761,8 @@ pub(crate) fn hf_download(repo_id: &str, remote_filename: &str) -> Result<PathBu
 
 /// Resolve a pinned model artifact from the standard Hugging Face cache, falling
 /// back to the network only on a cache miss.
-#[cfg(all(not(target_arch = "wasm32"), layout_detection))]
+#[cfg(all(not(target_arch = "wasm32"), any(layout_detection, paddle_ocr)))]
+#[allow(dead_code)]
 pub(crate) fn hf_download_revision(repo_id: &str, remote_filename: &str, revision: &str) -> Result<PathBuf, String> {
     hf_download_at_revision(repo_id, remote_filename, Some(revision))
 }
@@ -1887,10 +1888,7 @@ mod hf_client_builder_tests {
     }
 }
 
-#[cfg(all(
-    test,
-    any(paddle_ocr, layout_detection, auto_rotate, feature = "ner-onnx")
-))]
+#[cfg(all(test, any(paddle_ocr, layout_detection, auto_rotate, feature = "ner-onnx")))]
 mod tests {
     use super::*;
 

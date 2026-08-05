@@ -44,8 +44,8 @@ image = { workspace = true }
 imageproc = { version = "0.27", default-features = false }
 ndarray = "0.17"
 ort = { workspace = true, features = ["ndarray"], optional = true }
-tract-onnx = { workspace = true, optional = true }
 # Workspace dependencies
 serde = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+tract-onnx = { workspace = true, optional = true }

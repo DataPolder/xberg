@@ -543,7 +543,9 @@ impl PaddleOcrBackend {
             #[allow(unreachable_patterns)]
             other => {
                 return Err(crate::XbergError::Ocr {
-                    message: format!("PaddleOCR backend {other:?} is not compiled in (enable the matching cargo feature)"),
+                    message: format!(
+                        "PaddleOCR backend {other:?} is not compiled in (enable the matching cargo feature)"
+                    ),
                     source: None,
                 });
             }
@@ -616,7 +618,13 @@ impl PaddleOcrBackend {
             );
         }
 
-        ocr_engine.init_models_with_dict_and_canvas(
+        // Selected explicitly rather than via `init_models_with_dict_and_canvas`: that entry
+        // point takes `xberg_paddle_ocr`'s compile-time default engine, which prefers `ort`
+        // whenever `paddle-ocr-ort` is also compiled in. In a dual-engine build (native
+        // cross-engine parity) the default would hand this function an `ort` engine and
+        // discard `detection_canvas`, so a caller asking for tract would silently get ORT.
+        ocr_engine.init_models_with_dict_and_canvas_on(
+            xberg_paddle_ocr::InferenceBackend::Tract,
             det_model_path,
             cls_model_path,
             rec_model_path,
@@ -1272,8 +1280,68 @@ mod tests {
             "v6/small/latin/cpu/ort"
         );
         assert_ne!(
-            engine_pool_key("v6", "small", "latin", Some(&first_gpu), PaddleInferenceBackend::Ort, None),
-            engine_pool_key("v6", "small", "latin", Some(&second_gpu), PaddleInferenceBackend::Ort, None)
+            engine_pool_key(
+                "v6",
+                "small",
+                "latin",
+                Some(&first_gpu),
+                PaddleInferenceBackend::Ort,
+                None
+            ),
+            engine_pool_key(
+                "v6",
+                "small",
+                "latin",
+                Some(&second_gpu),
+                PaddleInferenceBackend::Ort,
+                None
+            )
+        );
+    }
+
+    #[test]
+    fn detection_canvas_covers_the_scale_target_including_padding() {
+        let mut config = PaddleOcrConfig::new("en");
+        config.det_limit_side_len = 1024;
+        config.padding = 10;
+
+        // 1024 + 2*10 = 1044, rounded up to the next multiple of 32.
+        assert_eq!(detection_canvas(&config), 1056);
+
+        // `padding` is added to the scale target, so a larger padding must widen the canvas:
+        // ignoring it here would build a 1024 plan for a 1056-wide page.
+        config.padding = 25;
+        assert_eq!(detection_canvas(&config), 1088);
+    }
+
+    #[test]
+    fn detection_canvas_stays_within_bounds_for_out_of_range_configs() {
+        let mut config = PaddleOcrConfig::new("en");
+        config.det_limit_side_len = 0;
+        config.padding = 0;
+        assert_eq!(detection_canvas(&config), MIN_DETECTION_CANVAS);
+
+        config.det_limit_side_len = u32::MAX;
+        config.padding = u32::MAX;
+        assert_eq!(detection_canvas(&config), MAX_DETECTION_CANVAS.next_multiple_of(32));
+    }
+
+    #[test]
+    fn detection_canvas_applies_only_to_the_tract_backend() {
+        let config = PaddleOcrConfig::new("en");
+
+        assert_eq!(detection_canvas_for(&config, PaddleInferenceBackend::Ort), None);
+        assert_eq!(
+            detection_canvas_for(&config, PaddleInferenceBackend::Tract),
+            Some(detection_canvas(&config))
+        );
+    }
+
+    #[test]
+    fn engine_pool_key_distinguishes_detection_canvases() {
+        assert_ne!(
+            engine_pool_key("v6", "small", "latin", None, PaddleInferenceBackend::Tract, Some(1056)),
+            engine_pool_key("v6", "small", "latin", None, PaddleInferenceBackend::Tract, Some(1088))
         );
     }
 

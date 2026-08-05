@@ -37,6 +37,12 @@ pub mod ocr_result;
 pub mod ocr_utils;
 pub mod scale_param;
 
+/// Which concrete ONNX engine a model is loaded onto.
+///
+/// Re-exported so callers can pin an engine per load instead of taking
+/// `inference::default_backend`'s compile-time choice, which always prefers `ort` when the
+/// `ort` feature is on and so makes `tract` unreachable in a dual-engine build.
+pub use inference::Backend as InferenceBackend;
 pub use ocr_error::OcrError;
 pub use ocr_lite::PaddleOcrEngine;
 pub use ocr_result::{

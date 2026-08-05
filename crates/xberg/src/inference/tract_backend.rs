@@ -224,8 +224,8 @@ mod conversion_tests {
 /// HF repository holding the PP-LCNet classifiers compared here. Referenced by the
 /// orientation byte-entry test and the ORT-parity `mod tests`, so it is only live
 /// when one of those compiles.
-#[cfg(all(test, any(auto_rotate, inference_ort)))]
-const PARITY_REPO: &str = "xberg-io/paddleocr-onnx-models";
+#[cfg(all(test, any(auto_rotate, inference_ort, paddle_ocr)))]
+pub(crate) const PARITY_REPO: &str = "xberg-io/paddleocr-onnx-models";
 
 /// HF repository holding the layout detectors (RT-DETR, PP-DocLayout-V3). Referenced by
 /// the RT-DETR byte-entry test and the ORT-parity `mod tests`, so it is only live when
@@ -237,7 +237,7 @@ const LAYOUT_REPO: &str = "xberg-io/layout-models";
 /// so a missing model is a hard failure, not a silent skip — otherwise these tests
 /// could pass by comparing (or exercising) nothing.
 #[cfg(test)]
-fn parity_required() -> bool {
+pub(crate) fn parity_required() -> bool {
     std::env::var_os("XBERG_REQUIRE_TRACT_PARITY").is_some()
 }
 
@@ -269,7 +269,7 @@ fn cached_model(suffix: &str) -> Option<std::path::PathBuf> {
 /// and coverage is not required — the self-skip case that keeps the suite runnable
 /// offline without ever passing vacuously in CI.
 #[cfg(test)]
-fn resolve_model(repo: &str, filename: &str) -> Option<std::path::PathBuf> {
+pub(crate) fn resolve_model(repo: &str, filename: &str) -> Option<std::path::PathBuf> {
     if let Some(path) = cached_model(filename) {
         return Some(path);
     }

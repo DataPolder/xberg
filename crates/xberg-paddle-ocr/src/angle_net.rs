@@ -19,6 +19,7 @@ impl std::fmt::Debug for AngleNet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AngleNet")
             .field("initialized", &self.backend.is_some())
+            .field("backend", &self.backend.as_ref().map(|backend| backend.name()))
             .finish()
     }
 }

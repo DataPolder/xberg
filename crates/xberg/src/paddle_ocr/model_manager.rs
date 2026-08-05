@@ -27,7 +27,7 @@ use crate::model_download;
 const HF_REPO_ID: &str = "xberg-io/paddleocr-onnx-models";
 /// Immutable Hub revision containing the checksummed PaddleOCR model set.
 #[cfg(paddle_ocr)]
-const HF_REPO_REVISION: &str = "bc5ec866cf0e798e667808dfa51b0ba8ad0dafc8";
+pub(crate) const HF_REPO_REVISION: &str = "bc5ec866cf0e798e667808dfa51b0ba8ad0dafc8";
 
 /// Shared model definition (detection and classification).
 #[cfg(paddle_ocr)]

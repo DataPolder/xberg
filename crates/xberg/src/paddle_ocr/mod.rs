@@ -42,6 +42,14 @@ mod backend;
 mod config;
 pub(crate) mod model_manager;
 
+/// Cross-engine (ORT vs tract) parity coverage for the classical PaddleOCR models.
+///
+/// Needs *both* engines linked into one binary, which is exactly the
+/// `paddle-ocr-ort` + `paddle-ocr-tract` combination — see the module docs for the
+/// full command line.
+#[cfg(all(test, feature = "paddle-ocr-ort", feature = "paddle-ocr-tract"))]
+mod tract_parity;
+
 #[cfg(paddle_ocr)]
 pub use backend::PaddleOcrBackend;
 pub use config::{PaddleInferenceBackend, PaddleLanguage, PaddleOcrConfig};
