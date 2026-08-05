@@ -1152,6 +1152,17 @@ fn blocks_to_paragraphs(
                 .is_some_and(|next| (next.baseline_y - line.baseline_y).abs() <= INLINE_STYLE_BASELINE_TOLERANCE);
             let is_list = starts_new_line
                 && (looks_like_list_item(&line.text) || (has_same_line_follower && is_bare_list_marker(&line.text)));
+            // A numbered section heading always begins a new element. Without this
+            // term a run of same-size, same-weight, evenly-spaced headings
+            // ("1.3 Gasinstallatie", "1.4 Elektrische installatie", ...) yields no
+            // break signal at all: `looks_like_list_item` deliberately returns
+            // `false` for numbered section headings, so recognising the line as a
+            // heading removes the only boundary this grouper would otherwise see,
+            // and the whole run collapses into one paragraph. `is_numbered_section_heading`
+            // (not the looser `starts_with_section_number`) is used deliberately so
+            // prose beginning with a bare year — "2024 was een druk jaar" — does not
+            // break its paragraph. See #1386. ~keep
+            let starts_section = starts_new_line && super::classify::is_numbered_section_heading(&line.text);
             let crossed_gap = paragraph_gap_ys.iter().any(|&gap_y| {
                 let (upper, lower) = if prev.baseline_y > line.baseline_y {
                     (prev.baseline_y, line.baseline_y)
@@ -1160,7 +1171,7 @@ fn blocks_to_paragraphs(
                 };
                 gap_y < upper && gap_y > lower
             });
-            font_change || role_change || bold_change || is_list || crossed_gap
+            font_change || role_change || bold_change || is_list || starts_section || crossed_gap
         };
 
         if should_break && !current_lines.is_empty() {
@@ -5803,6 +5814,103 @@ mod tests {
             &[],
         );
         assert_eq!(paragraphs[0].heading_level, Some(2));
+    }
+
+    /// Helper: a body-tier segment occupying its own visual line at `baseline_y`.
+    fn body_line_seg(text: &str, baseline_y: f32) -> SegmentData {
+        SegmentData {
+            text: text.to_string(),
+            x: 72.0,
+            y: baseline_y - 11.0,
+            width: 200.0,
+            height: 11.0,
+            font_size: 11.0,
+            is_bold: false,
+            is_italic: false,
+            is_monospace: false,
+            baseline_y,
+            assigned_role: None,
+        }
+    }
+
+    /// All segment text of a paragraph, joined in order.
+    fn paragraph_segment_text(para: &PdfParagraph) -> String {
+        para.lines
+            .iter()
+            .flat_map(|line| line.segments.iter())
+            .map(|s| s.text.trim())
+            .filter(|t| !t.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// Regression for #1386 (defect #290). Four consecutive numbered subsection
+    /// headings share a font size, a weight and an even one-line-height spacing,
+    /// so `font_change`, `role_change`, `bold_change` and `crossed_gap` are all
+    /// false — and `looks_like_list_item` deliberately returns `false` for
+    /// numbered section headings, removing the last boundary. Before the fix the
+    /// grouper emitted ONE paragraph with all four headings concatenated.
+    #[test]
+    fn consecutive_numbered_section_headings_are_separate_paragraphs() {
+        let segments = vec![
+            body_line_seg("1.3 Gasinstallatie", 700.0),
+            body_line_seg("1.4 Elektrische installatie", 686.0),
+            body_line_seg("1.5 Waterinstallatie", 672.0),
+            body_line_seg("1.6 Ventilatie", 658.0),
+        ];
+
+        let paragraphs = blocks_to_paragraphs(segments, &[(11.0, None)], &[]);
+
+        assert_eq!(paragraphs.len(), 4, "each numbered subsection heading must be its own element");
+        assert_eq!(paragraph_segment_text(&paragraphs[0]), "1.3 Gasinstallatie");
+        assert_eq!(paragraph_segment_text(&paragraphs[1]), "1.4 Elektrische installatie");
+        assert_eq!(paragraph_segment_text(&paragraphs[2]), "1.5 Waterinstallatie");
+        assert_eq!(paragraph_segment_text(&paragraphs[3]), "1.6 Ventilatie");
+    }
+
+    /// End-to-end through the grouper AND `merge_continuation_paragraphs`: no
+    /// heading ends in `.?!:;`, so the merge pass would re-join the run the
+    /// grouper just split unless it also guards on numbered section starts.
+    #[test]
+    fn consecutive_numbered_section_headings_survive_continuation_merge() {
+        let segments = vec![
+            body_line_seg("1.3 Gasinstallatie", 700.0),
+            body_line_seg("1.4 Elektrische installatie", 686.0),
+            body_line_seg("1.5 Waterinstallatie", 672.0),
+            body_line_seg("1.6 Ventilatie", 658.0),
+        ];
+
+        let paragraphs = segments_to_paragraphs(segments, &[(11.0, None)], &[]);
+
+        assert_eq!(
+            paragraphs.len(),
+            4,
+            "the continuation merge must not re-join numbered section headings"
+        );
+    }
+
+    /// The over-fire guard for #1386: a two-line prose paragraph whose second
+    /// line opens with a bare year must stay ONE paragraph. The looser
+    /// `starts_with_section_number` returns `true` for "2024 was een druk jaar";
+    /// the fix deliberately uses `is_numbered_section_heading`, which does not.
+    #[test]
+    fn prose_starting_with_a_year_stays_one_paragraph() {
+        let segments = vec![
+            body_line_seg("Het bestuur meldt", 700.0),
+            body_line_seg("2024 was een druk jaar", 686.0),
+        ];
+
+        let paragraphs = segments_to_paragraphs(segments, &[(11.0, None)], &[]);
+
+        assert_eq!(
+            paragraphs.len(),
+            1,
+            "prose beginning with a bare year is not a section heading"
+        );
+        assert_eq!(
+            paragraph_segment_text(&paragraphs[0]),
+            "Het bestuur meldt 2024 was een druk jaar"
+        );
     }
 
     /// Helper: create a segment with positional data.
