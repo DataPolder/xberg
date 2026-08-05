@@ -29,6 +29,10 @@ use serde_yaml_ng::Value as YamlValue;
 /// assert!(remaining.contains("# Content"));
 /// ```
 pub(crate) fn extract_frontmatter(content: &str) -> (Option<YamlValue>, String) {
+    if content.starts_with("+++") {
+        return extract_toml_frontmatter(content);
+    }
+
     if !content.starts_with("---") {
         return (None, content.to_string());
     }
@@ -84,6 +88,71 @@ pub(crate) fn extract_frontmatter(content: &str) -> (Option<YamlValue>, String) 
         }
     } else {
         (None, content.to_string())
+    }
+}
+
+/// Extract TOML frontmatter (`+++...+++`), as used by Hugo and Zola.
+///
+/// TOML frontmatter is delimited by a `+++` line at the very start of the document and a
+/// matching `+++` line on its own. The parsed TOML table is converted into a
+/// [`YamlValue`] so downstream code (`extract_metadata_from_yaml`) needs no TOML-specific
+/// path.
+///
+/// Returns `(None, content)` unchanged if the closing delimiter is missing or the TOML
+/// fails to parse, mirroring the YAML frontmatter fallback behavior.
+fn extract_toml_frontmatter(content: &str) -> (Option<YamlValue>, String) {
+    let rest = &content[3..];
+
+    let Some(newline_after_open) = rest.find('\n') else {
+        return (None, content.to_string());
+    };
+
+    // Anything after `+++` on the opening line (other than whitespace) means this isn't a
+    // bare delimiter, so treat it as ordinary content rather than frontmatter.
+    if !rest[..newline_after_open].trim().is_empty() {
+        return (None, content.to_string());
+    }
+
+    let body_start = newline_after_open + 1;
+    let body = &rest[body_start..];
+
+    let Some(close_pos) = body.lines().position(|line| line.trim_end() == "+++") else {
+        return (None, content.to_string());
+    };
+
+    let toml_str: String = body.lines().take(close_pos).collect::<Vec<_>>().join("\n");
+
+    // Recompute the byte offset of the remaining content after the closing delimiter line,
+    // since `lines()` does not preserve line-ending byte widths.
+    let mut offset = 0usize;
+    for line in body.lines().take(close_pos + 1) {
+        offset += line.len() + 1;
+    }
+    let remaining = if offset < body.len() { &body[offset..] } else { "" };
+
+    match toml::from_str::<toml::Value>(&toml_str) {
+        Ok(value) => (Some(toml_value_to_yaml(&value)), remaining.to_string()),
+        Err(_) => (None, content.to_string()),
+    }
+}
+
+/// Convert a parsed TOML value into the equivalent [`YamlValue`] so TOML and YAML
+/// frontmatter can share a single metadata-extraction path.
+fn toml_value_to_yaml(value: &toml::Value) -> YamlValue {
+    match value {
+        toml::Value::String(s) => YamlValue::String(s.clone()),
+        toml::Value::Integer(i) => YamlValue::Number((*i).into()),
+        toml::Value::Float(f) => YamlValue::Number(serde_yaml_ng::Number::from(*f)),
+        toml::Value::Boolean(b) => YamlValue::Bool(*b),
+        toml::Value::Datetime(dt) => YamlValue::String(dt.to_string()),
+        toml::Value::Array(arr) => YamlValue::Sequence(arr.iter().map(toml_value_to_yaml).collect()),
+        toml::Value::Table(table) => {
+            let mut map = serde_yaml_ng::Mapping::new();
+            for (k, v) in table {
+                map.insert(YamlValue::String(k.clone()), toml_value_to_yaml(v));
+            }
+            YamlValue::Mapping(map)
+        }
     }
 }
 

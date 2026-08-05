@@ -262,6 +262,120 @@ fn push_link_uris_from_annotations(annotations: &[TextAnnotation], text: &str, b
 ///
 /// This function normalizes all three issues. Only called when `pre_rendered_content`
 /// is about to be stored as the Markdown output of an HTML extraction.
+/// Matches a `<math>...</math>` subtree (case-insensitive, spanning newlines) anywhere in
+/// raw HTML, mirroring the allowlist already used by `extraction::html::structure` for
+/// EPUB/email content.
+#[cfg(feature = "office")]
+static MATH_TAG_RE: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| regex::Regex::new(r"(?is)<math\b[^>]*>.*?</math>").unwrap());
+
+/// Matches the `<!-- MathML: ... -->` comment that `html-to-markdown-rs` emits inline for
+/// every `<math>` element it converts (see `handle_math` in that crate). The comment
+/// serializes the raw MathML XML and leaks straight into `pre_rendered_content`/plain text
+/// output; it carries no value once the equation has been recovered as LaTeX below, so it
+/// is stripped.
+static MATHML_COMMENT_RE: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| regex::Regex::new(r"(?is)<!--\s*MathML:.*?-->\s*").unwrap());
+
+/// Recover MathML equations as LaTeX `Formula` elements (issue #129).
+///
+/// `html-to-markdown-rs`'s `DocumentStructure` has no dedicated node kind for `<math>`
+/// content: a `<math>` outside a paragraph is dropped entirely by its structure walker, and
+/// one nested inside a paragraph is flattened into concatenated token text (`mn`/`mo`/`mi`
+/// text with no operators). The library's markdown/plain-text conversion pass additionally
+/// leaks a raw `<!-- MathML: ... -->` comment into the rendered output. Neither problem can
+/// be fixed inside the extractor's mapped `DocumentStructure`, since the information is
+/// already lost by the time it gets there — so this re-scans the original HTML directly,
+/// using the same MathML-to-LaTeX converter the EPUB/email HTML structure builder already
+/// calls (`crate::extraction::mathml::convert_mathml_str_to_latex`), and appends one
+/// `ElementKind::Formula` element per recovered equation.
+fn recover_mathml_formulas(html: &str, doc: &mut InternalDocument) {
+    doc.pre_rendered_content = doc
+        .pre_rendered_content
+        .take()
+        .map(|content| MATHML_COMMENT_RE.replace_all(&content, "").into_owned());
+
+    #[cfg(feature = "office")]
+    {
+        let mut budget = crate::extractors::security::SecurityBudget::from_limits(
+            &crate::extractors::security::SecurityLimits::default(),
+        );
+        for m in MATH_TAG_RE.find_iter(html) {
+            if let Ok(latex) = crate::extraction::mathml::convert_mathml_str_to_latex(m.as_str(), &mut budget)
+                && !latex.trim().is_empty()
+            {
+                doc.push_element(crate::types::internal::InternalElement::text(
+                    crate::types::internal::ElementKind::Formula,
+                    latex,
+                    0,
+                ));
+            }
+        }
+    }
+
+    // MathML-to-LaTeX conversion needs `roxmltree`, gated behind the `office` feature (see
+    // `crate::extraction::mathml`). Without it, equations are dropped rather than mangled.
+    #[cfg(not(feature = "office"))]
+    let _ = html;
+}
+
+/// Matches a `<caption>...</caption>` element's inner content (case-insensitive, spanning
+/// newlines), wherever it appears in the raw HTML.
+static TABLE_CAPTION_RE: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| regex::Regex::new(r"(?is)<caption\b[^>]*>(.*?)</caption>").unwrap());
+
+/// Matches any HTML tag, used to strip inline markup out of a captured `<caption>` body.
+static ANY_TAG_RE: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| regex::Regex::new(r"(?is)<[^>]+>").unwrap());
+
+/// Recover `<table><caption>` text as a paragraph immediately preceding its table (issue
+/// #146).
+///
+/// `html-to-markdown-rs`'s `TableGrid` (the structure the extractor's `HC::Table { grid }`
+/// arm consumes) has no caption field at all, so a table's caption text never reaches
+/// `map_document_structure` through the normal walk — it is dropped before the extractor
+/// ever sees it. This re-scans the original HTML for `<caption>` elements (in document
+/// order) and inserts one immediately before its corresponding `Table` element, so the
+/// caption text at least reaches the element stream rather than vanishing outright.
+///
+/// This is a best-effort, order-based correlation (Nth caption -> Nth table): it has no way
+/// to know a `<table>` had no `<caption>` at all when a *later* table does, since that
+/// association is exactly the information the upstream library discards. For the common
+/// case (each table has at most one caption, in document order) this is correct.
+fn recover_table_captions(html: &str, doc: &mut InternalDocument) {
+    let captions: Vec<String> = TABLE_CAPTION_RE
+        .captures_iter(html)
+        .filter_map(|c| c.get(1).map(|m| m.as_str()))
+        .map(|inner| ANY_TAG_RE.replace_all(inner, "").trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if captions.is_empty() {
+        return;
+    }
+
+    let table_positions: Vec<usize> = doc
+        .elements
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| matches!(e.kind, crate::types::internal::ElementKind::Table { .. }))
+        .map(|(i, _)| i)
+        .collect();
+
+    for (pos, caption) in table_positions
+        .iter()
+        .zip(captions.iter())
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+    {
+        doc.elements.insert(
+            *pos,
+            crate::types::internal::InternalElement::text(crate::types::internal::ElementKind::Paragraph, caption, 0),
+        );
+    }
+}
+
 pub(crate) fn normalize_html_markdown(raw: String) -> String {
     let lines: Vec<&str> = raw.lines().collect();
     let mut pass1: Vec<String> = Vec::with_capacity(lines.len());
@@ -456,6 +570,8 @@ impl SyncExtractor for HtmlExtractor {
         };
         doc.mime_type = mime_type.to_string();
         doc.pre_rendered_content = pre_rendered;
+        recover_mathml_formulas(&html, &mut doc);
+        recover_table_captions(&html, &mut doc);
 
         let should_extract_images = config.needs_image_data();
 

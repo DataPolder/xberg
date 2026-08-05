@@ -95,7 +95,27 @@ impl MarkdownExtractor {
     }
 
     /// Build an `InternalDocument` from pulldown-cmark events and optional YAML frontmatter.
+    ///
+    /// Kept as a 2-argument function for existing callers (e.g. the Jupyter notebook
+    /// extractor's Markdown cell rendering) that have no JSX blocks to record. See
+    /// [`Self::build_internal_document_with_jsx`] for the MDX entry point.
     pub(crate) fn build_internal_document(events: &[Event], yaml: &Option<serde_yaml_ng::Value>) -> InternalDocument {
+        Self::build_internal_document_with_jsx(events, yaml, &[])
+    }
+
+    /// Build an `InternalDocument` from pulldown-cmark events and optional YAML frontmatter.
+    ///
+    /// This is the single shared event-stream builder for both the Markdown and MDX
+    /// extractors (see issue #273: the two used to be a ~470-line copy-paste fork that
+    /// drifted, silently dropping math/inline-HTML/superscript/subscript/definition-list
+    /// support in `.mdx` files). `raw_jsx_blocks` carries MDX-specific stripped JSX
+    /// fragments to be recorded as raw blocks; pass an empty slice for plain Markdown
+    /// (that's what [`Self::build_internal_document`] does).
+    pub(crate) fn build_internal_document_with_jsx(
+        events: &[Event],
+        yaml: &Option<serde_yaml_ng::Value>,
+        raw_jsx_blocks: &[String],
+    ) -> InternalDocument {
         use crate::types::builder;
         use crate::types::document_structure::TextAnnotation;
         let mut b = InternalDocumentBuilder::new("markdown");
@@ -114,6 +134,12 @@ impl MarkdownExtractor {
                 .collect();
             if !entries.is_empty() {
                 b.push_metadata_block(&entries, None);
+            }
+        }
+
+        for jsx in raw_jsx_blocks {
+            if !jsx.trim().is_empty() {
+                b.push_raw_block("jsx", jsx, None);
             }
         }
 
@@ -707,7 +733,7 @@ impl MarkdownExtractor {
                 Event::FootnoteReference(name) => {
                     b.push_footnote_ref(name, name, None);
                 }
-                Event::Html(s) | Event::InlineHtml(s) => {
+                Event::InlineHtml(s) => {
                     if in_heading {
                         heading_text.push_str(s);
                     } else if in_table_cell {
@@ -720,6 +746,30 @@ impl MarkdownExtractor {
                         def_buf.push_str(s);
                     } else if in_paragraph {
                         paragraph_text.push_str(s);
+                    }
+                }
+                // Block-level raw HTML (e.g. a bare `<div>...</div>` between blank lines) is
+                // emitted by pulldown-cmark with no enclosing paragraph/heading/etc. buffer open.
+                // It used to be silently dropped in that case; it is now recorded as a raw block
+                // so callers can recover it. See issue #135.
+                Event::Html(s) => {
+                    if in_heading {
+                        heading_text.push_str(s);
+                    } else if in_table_cell {
+                        current_cell.push_str(s);
+                    } else if in_list_item {
+                        list_item_text.push_str(s);
+                    } else if footnote_def_label.is_some() {
+                        footnote_def_text.push_str(s);
+                    } else if in_def_title || in_def_desc {
+                        def_buf.push_str(s);
+                    } else if in_paragraph {
+                        paragraph_text.push_str(s);
+                    } else {
+                        let trimmed = s.trim();
+                        if !trimmed.is_empty() {
+                            b.push_raw_block("html", trimmed, None);
+                        }
                     }
                 }
                 Event::TaskListMarker(checked) if in_list_item => {
