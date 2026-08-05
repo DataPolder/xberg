@@ -31,21 +31,3 @@ pub(crate) const CRNN_MEAN_VALUES: [f32; 3] = [127.5, 127.5, 127.5];
 ///
 /// Used by `CrnnNet` (text recognition).
 pub(crate) const CRNN_NORM_VALUES: [f32; 3] = [1.0 / 127.5, 1.0 / 127.5, 1.0 / 127.5];
-
-/// Source pixel value that fills the right/bottom padding when detection input is blitted
-/// into a fixed square canvas (the `tract` detection path -- see `DbNet::detection_canvas`).
-///
-/// White, run through the *same* `pixel * norm - mean * norm` formula as real pixels, so the
-/// padding lands on exactly the value `DbNet`'s normalization already produces for blank page
-/// background. Two reasons this is the right blank:
-///
-/// - DBNet is trained on document/scene pages whose background is white, so a white region is
-///   what the network has learned to score as "no text".
-/// - This crate already pads detection input with white
-///   (`OcrUtils::make_padding`, applied by `PaddleOcrEngine::detect_base_detailed` before
-///   scaling), so canvas padding is indistinguishable from padding DBNet already sees today.
-///
-/// Filling with the post-normalization zero point instead (raw ~124/116/104 mid-gray) would
-/// draw a high-contrast straight edge down the content boundary of a white page, which DBNet
-/// can score as a stroke and turn into a spurious box.
-pub(crate) const DETECTION_CANVAS_PAD_PIXEL: f32 = 255.0;

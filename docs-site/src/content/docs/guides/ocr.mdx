@@ -169,11 +169,13 @@ mutually exclusive.
 - **CPU-only.** GPU/execution-provider settings apply to the ONNX Runtime path only and are ignored on tract.
 - **Slower than ONNX Runtime.** tract trades throughput for portability on targets where ONNX Runtime cannot link at
   all; see [Latency](/concepts/tract-inference/#latency) for measured ratios on other models.
-- **Detection runs on a fixed square canvas.** DBNet's shape cannot be left symbolic under tract, so each page is
-  padded to a `det_limit_side_len × det_limit_side_len` square (rounded up to a multiple of 32) before detection.
-  Aspect ratio is preserved and bounding-box coordinates are unaffected; the cost is computing over the padded area.
+- **Detection builds a plan per page shape.** DBNet's shape cannot be left symbolic under tract, so its plan is pinned
+  to the exact dimensions each page resizes to and cached (four plans, least-recently-used eviction). Pages of a
+  document nearly always share one extent, so the plan is built once; a new extent costs one build. Detection results
+  are identical to the ONNX Runtime path — see
+  [PaddleOCR under tract](/concepts/tract-inference/#paddleocr) for why the page is never padded into a fixed canvas.
 
-Detection cost grows steeply with canvas size. Measured on macOS arm64 (single run, indicative, not a benchmark):
+Detection cost grows steeply with page size. Measured on macOS arm64 (single run, indicative, not a benchmark):
 
 | Model | 640² | 960² | 1280² |
 | --- | --- | --- | --- |

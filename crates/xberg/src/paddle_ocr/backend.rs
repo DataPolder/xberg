@@ -85,45 +85,12 @@ fn init_cell_for_key<T>(pool: &InitPool<T>, key: &str) -> std::result::Result<In
     Ok(cell)
 }
 
-/// Side length of the square canvas a tract-backed detection model is pinned to.
-///
-/// Derived entirely from the existing detection knobs — there is deliberately no new config
-/// knob. `PaddleOcrEngine::detect_*` pads the page by `padding` on every side and *then*
-/// scales the result so its long side reaches `det_limit_side_len + 2 * padding`, flooring
-/// both dimensions to a multiple of 32. This returns the smallest 32-aligned side length that
-/// is guaranteed to hold any page that configuration can produce.
-///
-/// Note this is **not** `det_limit_side_len.next_multiple_of(32)`: `padding` (default 10,
-/// documented range 0..=100) is added to the scale target, so ignoring it under-sizes the
-/// canvas — `det_limit_side_len = 1024` with `padding = 25` scales the long side to 1056,
-/// which a 1024 canvas cannot hold. A pinned tract plan bakes its shape in as a constant and
-/// rejects every other shape, so an under-sized canvas is a hard runtime failure, not a
-/// quality regression.
-fn detection_canvas(config: &PaddleOcrConfig) -> u32 {
-    config
-        .det_limit_side_len
-        .saturating_add(config.padding.saturating_mul(2))
-        .clamp(MIN_DETECTION_CANVAS, MAX_DETECTION_CANVAS)
-        .next_multiple_of(DETECTION_CANVAS_ALIGNMENT)
-}
-
-/// The detection canvas that applies to `backend`, or `None` when the backend takes a fully
-/// dynamic detection input. Only tract needs (and tolerates) a pinned shape; ORT keeps today's
-/// behavior exactly.
-fn detection_canvas_for(config: &PaddleOcrConfig, backend: PaddleInferenceBackend) -> Option<u32> {
-    match backend {
-        PaddleInferenceBackend::Ort => None,
-        PaddleInferenceBackend::Tract => Some(detection_canvas(config)),
-    }
-}
-
 fn engine_pool_key(
     version: &str,
     tier: &str,
     model_key: &str,
     accel: Option<&crate::core::config::acceleration::AccelerationConfig>,
     backend: PaddleInferenceBackend,
-    detection_canvas: Option<u32>,
 ) -> String {
     use crate::core::config::acceleration::ExecutionProviderType;
 
@@ -141,24 +108,10 @@ fn engine_pool_key(
         PaddleInferenceBackend::Ort => "ort",
         PaddleInferenceBackend::Tract => "tract",
     };
-    // A pinned detection canvas is baked into the engine at load time, so two configs that
-    // resolve to different canvases must not share one pooled engine.
-    let canvas_key = match detection_canvas {
-        Some(canvas) => format!("/{canvas}"),
-        None => String::new(),
-    };
-    format!("{version}/{tier}/{model_key}/{accel_key}/{backend_key}{canvas_key}")
+    format!("{version}/{tier}/{model_key}/{accel_key}/{backend_key}")
 }
 
 const INFERENCE_THREAD_COUNT: usize = 1;
-/// DBNet downsamples by 32, and `ScaleParam::get_scale_param` floors both detection
-/// dimensions to a multiple of 32; the pinned canvas follows the same alignment.
-const DETECTION_CANVAS_ALIGNMENT: u32 = 32;
-/// Canvas bounds, matching `PaddleOcrConfig::with_det_limit_side_len`'s 64..=4096 clamp plus
-/// `with_padding`'s 0..=100 on each side. Deserialized configs bypass those builder clamps, so
-/// the bound is re-applied here rather than trusted.
-const MIN_DETECTION_CANVAS: u32 = 64;
-const MAX_DETECTION_CANVAS: u32 = 4096 + 2 * 100;
 const ORIENTATION_CONFIDENCE_METADATA_KEY: &str = "orientation_confidence";
 const VERTICAL_TEXT_MIN_ASPECT_RATIO: f32 = 1.5;
 const VERTICAL_COLUMN_MIN_OVERLAP_RATIO: f32 = 0.5;
@@ -408,8 +361,7 @@ impl PaddleOcrBackend {
         let version = &config.model_version;
         let backend = Self::effective_backend(config)?;
         let resolved = model_manager.resolve_rec_model_versioned(version, family, tier)?;
-        let detection_canvas = detection_canvas_for(config, backend);
-        let pool_key = engine_pool_key(version, tier, &resolved.model_key, accel, backend, detection_canvas);
+        let pool_key = engine_pool_key(version, tier, &resolved.model_key, accel, backend);
 
         let init_cell = init_cell_for_key(engine_pool, &pool_key).map_err(|error| crate::XbergError::Plugin {
             message: format!("Failed to acquire engine pool lock: {error}"),
@@ -417,15 +369,7 @@ impl PaddleOcrBackend {
         })?;
         let engine = init_cell.get_or_try_init(|| -> Result<Arc<PaddleOcrEngine>> {
             let shared = Self::get_or_init_shared_paths(model_manager, shared_paths, config)?;
-            Self::initialize_engine(
-                family,
-                tier,
-                &resolved,
-                &shared,
-                accel.cloned(),
-                backend,
-                detection_canvas,
-            )
+            Self::initialize_engine(family, tier, &resolved, &shared, accel.cloned(), backend)
         })?;
 
         Ok(Arc::clone(engine))
@@ -477,9 +421,8 @@ impl PaddleOcrBackend {
         shared: &SharedModelPaths,
         accel: Option<crate::core::config::acceleration::AccelerationConfig>,
         backend: PaddleInferenceBackend,
-        detection_canvas: Option<u32>,
     ) -> Result<Arc<PaddleOcrEngine>> {
-        tracing::info!(family, model_key = %resolved.model_key, tier, ?backend, ?detection_canvas, "Initializing PaddleOCR engine");
+        tracing::info!(family, model_key = %resolved.model_key, tier, ?backend, "Initializing PaddleOCR engine");
 
         let mut ocr_engine = PaddleOcrEngine::new();
         let det_model_path = Self::find_onnx_model(&shared.det_model)?;
@@ -527,7 +470,6 @@ impl PaddleOcrBackend {
                 rec_model_path,
                 dict_path,
                 accel.as_ref(),
-                detection_canvas,
             )
             .map_err(|error| crate::XbergError::Ocr {
                 message: format!(
@@ -593,15 +535,15 @@ impl PaddleOcrBackend {
     /// acceleration request is logged and ignored rather than treated as an error —
     /// mirroring `sceptre_ocr::validate_acceleration`'s CPU-only stance for tract targets.
     ///
-    /// Detection is pinned to a fixed square canvas: tract cannot shape-infer DBNet with a
+    /// Detection needs no shape configuration here. tract cannot shape-infer DBNet with a
     /// symbolic input H/W (the `Resize`-upsampled extent fails to unify against the FPN skip
     /// connection at `Concat`; see the Phase 0 spike note in
-    /// `docs-site/src/content/docs/concepts/tract-inference.md`), but loads fine against a
-    /// concrete `[1, 3, canvas, canvas]` input. `xberg-paddle-ocr` pads (never stretches) the
-    /// resized page into the canvas top-left, so bbox back-mapping is unchanged. A pinned tract
-    /// plan accepts exactly one shape, which is why the canvas is a single fixed size rather
-    /// than a shape-keyed plan cache. `AngleNet`/`CrnnNet` stay unpinned — their graphs carry
-    /// no dimension tract cannot resolve, and one plan is reused across shapes.
+    /// `docs-site/src/content/docs/concepts/tract-inference.md`), so `xberg-paddle-ocr` builds
+    /// a DBNet plan per page extent and caches it. Pinning to the page's own extent — rather
+    /// than padding every page into one fixed canvas — is what keeps tract detection numerically
+    /// equal to ORT: DBNet's squeeze-and-excitation blocks average over the whole input, so a
+    /// padded canvas shifts the probability map across the entire page. `AngleNet`/`CrnnNet`
+    /// stay unpinned; their graphs carry no dimension tract cannot resolve.
     #[cfg(feature = "paddle-ocr-tract")]
     fn init_engine_tract(
         ocr_engine: &mut PaddleOcrEngine,
@@ -610,7 +552,6 @@ impl PaddleOcrBackend {
         rec_model_path: &str,
         dict_path: &str,
         accel: Option<&crate::core::config::acceleration::AccelerationConfig>,
-        detection_canvas: Option<u32>,
     ) -> std::result::Result<(), xberg_paddle_ocr::OcrError> {
         if accel.is_some() {
             tracing::debug!(
@@ -618,19 +559,18 @@ impl PaddleOcrBackend {
             );
         }
 
-        // Selected explicitly rather than via `init_models_with_dict_and_canvas`: that entry
-        // point takes `xberg_paddle_ocr`'s compile-time default engine, which prefers `ort`
-        // whenever `paddle-ocr-ort` is also compiled in. In a dual-engine build (native
-        // cross-engine parity) the default would hand this function an `ort` engine and
-        // discard `detection_canvas`, so a caller asking for tract would silently get ORT.
-        ocr_engine.init_models_with_dict_and_canvas_on(
+        // Selected explicitly rather than via `init_models_with_dict`: that entry point takes
+        // `xberg_paddle_ocr`'s compile-time default engine, which prefers `ort` whenever
+        // `paddle-ocr-ort` is also compiled in. In a dual-engine build (native cross-engine
+        // parity) the default would hand this function an `ort` engine, so a caller asking for
+        // tract would silently get ORT.
+        ocr_engine.init_models_with_dict_on(
             xberg_paddle_ocr::InferenceBackend::Tract,
             det_model_path,
             cls_model_path,
             rec_model_path,
             dict_path,
             INFERENCE_THREAD_COUNT,
-            detection_canvas,
         )
     }
 
@@ -1276,80 +1216,20 @@ mod tests {
         };
 
         assert_eq!(
-            engine_pool_key("v6", "small", "latin", None, PaddleInferenceBackend::Ort, None),
+            engine_pool_key("v6", "small", "latin", None, PaddleInferenceBackend::Ort),
             "v6/small/latin/cpu/ort"
         );
         assert_ne!(
-            engine_pool_key(
-                "v6",
-                "small",
-                "latin",
-                Some(&first_gpu),
-                PaddleInferenceBackend::Ort,
-                None
-            ),
-            engine_pool_key(
-                "v6",
-                "small",
-                "latin",
-                Some(&second_gpu),
-                PaddleInferenceBackend::Ort,
-                None
-            )
-        );
-    }
-
-    #[test]
-    fn detection_canvas_covers_the_scale_target_including_padding() {
-        let mut config = PaddleOcrConfig::new("en");
-        config.det_limit_side_len = 1024;
-        config.padding = 10;
-
-        // 1024 + 2*10 = 1044, rounded up to the next multiple of 32.
-        assert_eq!(detection_canvas(&config), 1056);
-
-        // `padding` is added to the scale target, so a larger padding must widen the canvas:
-        // ignoring it here would build a 1024 plan for a 1056-wide page.
-        config.padding = 25;
-        assert_eq!(detection_canvas(&config), 1088);
-    }
-
-    #[test]
-    fn detection_canvas_stays_within_bounds_for_out_of_range_configs() {
-        let mut config = PaddleOcrConfig::new("en");
-        config.det_limit_side_len = 0;
-        config.padding = 0;
-        assert_eq!(detection_canvas(&config), MIN_DETECTION_CANVAS);
-
-        config.det_limit_side_len = u32::MAX;
-        config.padding = u32::MAX;
-        assert_eq!(detection_canvas(&config), MAX_DETECTION_CANVAS.next_multiple_of(32));
-    }
-
-    #[test]
-    fn detection_canvas_applies_only_to_the_tract_backend() {
-        let config = PaddleOcrConfig::new("en");
-
-        assert_eq!(detection_canvas_for(&config, PaddleInferenceBackend::Ort), None);
-        assert_eq!(
-            detection_canvas_for(&config, PaddleInferenceBackend::Tract),
-            Some(detection_canvas(&config))
-        );
-    }
-
-    #[test]
-    fn engine_pool_key_distinguishes_detection_canvases() {
-        assert_ne!(
-            engine_pool_key("v6", "small", "latin", None, PaddleInferenceBackend::Tract, Some(1056)),
-            engine_pool_key("v6", "small", "latin", None, PaddleInferenceBackend::Tract, Some(1088))
+            engine_pool_key("v6", "small", "latin", Some(&first_gpu), PaddleInferenceBackend::Ort),
+            engine_pool_key("v6", "small", "latin", Some(&second_gpu), PaddleInferenceBackend::Ort)
         );
     }
 
     #[test]
     fn engine_pool_key_distinguishes_inference_backends() {
         assert_ne!(
-            engine_pool_key("v6", "small", "latin", None, PaddleInferenceBackend::Ort, None),
-            engine_pool_key("v6", "small", "latin", None, PaddleInferenceBackend::Tract, Some(1056))
+            engine_pool_key("v6", "small", "latin", None, PaddleInferenceBackend::Ort),
+            engine_pool_key("v6", "small", "latin", None, PaddleInferenceBackend::Tract)
         );
     }
 

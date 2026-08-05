@@ -9,125 +9,168 @@ use crate::{
 };
 use geo_clipper::{Clipper, EndType, JoinType};
 use geo_types::{Coord, LineString, Polygon};
-use std::borrow::Cow;
 use std::cmp::Ordering;
+use std::sync::{Arc, Mutex};
 
 const DB_DILATION_KERNEL_SIZE: u32 = 2;
 const BINARY_FOREGROUND: u8 = u8::MAX;
 
+/// How many shape-pinned detection plans stay resident at once.
+///
+/// Each plan owns a full copy of the optimized network, so the cache is deliberately small.
+/// A document's pages nearly all resize to the same extent, and both orientations of one page
+/// size plus a couple of odd pages still fit; overflow evicts the least recently used plan,
+/// costing a rebuild only if that extent comes back.
+const DETECTION_PLAN_CACHE_CAPACITY: usize = 4;
+
+/// `(height, width)` of a DBNet input — the key a shape-pinned plan is built for.
+type InputShape = (usize, usize);
+
+/// How a loaded DBNet is executed.
+enum Detector {
+    /// One plan that accepts any input shape, reused for every page (`ort`).
+    ShapeAgnostic(Arc<dyn ModelBackend>),
+    /// Plans built per concrete input shape, on demand (`tract`).
+    ShapePinned(ShapePinnedPlans),
+}
+
+/// Lazily built, shape-keyed DBNet plans for a backend that needs a concrete input shape.
+///
+/// The model bytes are retained so a plan can be built for whatever extent a page resizes to.
+/// Every plan is built for the page's **exact** resized extent — never for a larger canvas the
+/// page is padded into, which is what an earlier revision of this file did.
+///
+/// Padding is not a valid substitute, and not because of border effects. Both PaddleOCR
+/// detection backbones are PP-LCNets carrying `GlobalAveragePool` squeeze-and-excitation blocks
+/// (10 in PP-OCRv5 `det/mobile`, 8 in PP-OCRv6 `det/tiny`) that reduce over the *whole* spatial
+/// extent, so enlarging the input rescales every channel gate and perturbs the probability map
+/// across the entire page. Measured on a 791x1024 scan resized to 480x640: padding it into a
+/// 640x640 canvas moved the map by up to 0.77 (mean 2.6e-3), spread evenly over the content
+/// rather than concentrated at the padding seam, which flipped 827 of 307200 pixels across
+/// DBNet's binarization threshold and merged two text lines into one region. Running the same
+/// page at 480x640 on both engines instead leaves a max difference of 5.0e-5 (mean 2.4e-7) and
+/// identical boxes. No pad value, margin, or edge-replication scheme fixes this — any padding at all
+/// changes the global average.
+struct ShapePinnedPlans {
+    backend: inference::Backend,
+    model_bytes: Vec<u8>,
+    num_thread: usize,
+    /// Most-recently-used first, capped at [`DETECTION_PLAN_CACHE_CAPACITY`].
+    plans: Mutex<Vec<(InputShape, Arc<dyn ModelBackend>)>>,
+}
+
+impl ShapePinnedPlans {
+    /// Retain the bytes for later, failing now if they are not a model this backend can read.
+    fn new(backend: inference::Backend, model_bytes: Vec<u8>, num_thread: usize) -> Result<Self, OcrError> {
+        inference::validate_model(backend, &model_bytes)?;
+        Ok(Self {
+            backend,
+            model_bytes,
+            num_thread,
+            plans: Mutex::new(Vec::new()),
+        })
+    }
+
+    /// The plan for `shape`, built and cached on first use.
+    fn plan_for(&self, shape: InputShape) -> Result<Arc<dyn ModelBackend>, OcrError> {
+        let mut plans = self
+            .plans
+            .lock()
+            .map_err(|_| OcrError::inference("the DBNet plan cache lock is poisoned"))?;
+
+        if let Some(index) = plans.iter().position(|(cached, _)| *cached == shape) {
+            let entry = plans.remove(index);
+            let plan = Arc::clone(&entry.1);
+            plans.insert(0, entry);
+            return Ok(plan);
+        }
+
+        // Built while holding the lock on purpose: concurrent pages of one document ask for the
+        // same extent, so serializing here builds that plan once instead of once per thread.
+        let plan: Arc<dyn ModelBackend> = Arc::from(inference::load_backend(
+            self.backend,
+            &self.model_bytes,
+            self.num_thread,
+            Some(&[1, 3, shape.0, shape.1]),
+        )?);
+        plans.insert(0, (shape, Arc::clone(&plan)));
+        plans.truncate(DETECTION_PLAN_CACHE_CAPACITY);
+        Ok(plan)
+    }
+
+    /// Number of plans currently resident, or `None` while another thread holds the cache.
+    fn resident_plan_count(&self) -> Option<usize> {
+        self.plans.try_lock().ok().map(|plans| plans.len())
+    }
+}
+
 pub struct DbNet {
-    backend: Option<Box<dyn ModelBackend>>,
-    /// Side length of the square canvas the detection input is padded into, when the model
-    /// was pinned to a fixed input shape. `None` means the model takes the resized page at
-    /// its exact extent -- today's `ort` behavior.
-    detection_canvas: Option<u32>,
+    detector: Option<Detector>,
 }
 
 impl std::fmt::Debug for DbNet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (backend, resident_plans) = match &self.detector {
+            None => (None, None),
+            Some(Detector::ShapeAgnostic(backend)) => (Some(backend.name()), None),
+            Some(Detector::ShapePinned(plans)) => (Some(plans.backend.name()), plans.resident_plan_count()),
+        };
         f.debug_struct("DbNet")
-            .field("initialized", &self.backend.is_some())
-            .field("backend", &self.backend.as_ref().map(|backend| backend.name()))
-            .field("detection_canvas", &self.detection_canvas)
+            .field("initialized", &self.detector.is_some())
+            .field("backend", &backend)
+            .field("shape_pinned", &matches!(self.detector, Some(Detector::ShapePinned(_))))
+            .field("resident_plans", &resident_plans)
             .finish()
     }
 }
 
 impl BaseNet for DbNet {
     fn new() -> Self {
-        Self {
-            backend: None,
-            detection_canvas: None,
-        }
+        Self { detector: None }
     }
 
     fn set_backend(&mut self, backend: Option<Box<dyn ModelBackend>>) {
-        // A backend loaded through the plain `BaseNet` path is never pinned, so any canvas
-        // from a previous load is dropped here; `init_model_from_memory_with_canvas` re-sets
-        // it after this call.
-        self.detection_canvas = None;
-        self.backend = backend;
+        self.detector = backend.map(|backend| Detector::ShapeAgnostic(Arc::from(backend)));
+    }
+
+    /// Overridden because DBNet is the one net whose plan may have to be shape-pinned.
+    ///
+    /// The default implementation builds a single shape-agnostic plan, which `tract` cannot do
+    /// for DBNet at all: its FPN skip connections fail to unify under a symbolic H/W. Such a
+    /// backend instead keeps the bytes here and builds a plan per page extent on first use, so
+    /// it runs the identical tensor `ort` runs (see [`ShapePinnedPlans`]).
+    fn init_model_from_memory_on(
+        &mut self,
+        backend: inference::Backend,
+        model_bytes: &[u8],
+        num_thread: usize,
+    ) -> Result<(), OcrError> {
+        if backend.requires_concrete_input_shape() {
+            self.detector = Some(Detector::ShapePinned(ShapePinnedPlans::new(
+                backend,
+                model_bytes.to_vec(),
+                num_thread,
+            )?));
+            return Ok(());
+        }
+        let backend = inference::load_backend(backend, model_bytes, num_thread, None)?;
+        self.set_backend(Some(backend));
+        Ok(())
     }
 }
 
 impl DbNet {
-    /// Load the detection model from a file path, optionally pinning it to a fixed square
-    /// canvas. See [`DbNet::init_model_from_memory_with_canvas`].
-    pub fn init_model_with_canvas(
-        &mut self,
-        path: &str,
-        num_thread: usize,
-        detection_canvas: Option<u32>,
-    ) -> Result<(), OcrError> {
-        self.init_model_with_canvas_on(inference::default_backend(), path, num_thread, detection_canvas)
-    }
-
-    /// Load the detection model from a file path onto an explicitly chosen backend. See
-    /// [`DbNet::init_model_from_memory_with_canvas_on`].
-    pub fn init_model_with_canvas_on(
-        &mut self,
-        backend: inference::Backend,
-        path: &str,
-        num_thread: usize,
-        detection_canvas: Option<u32>,
-    ) -> Result<(), OcrError> {
-        let model_bytes = std::fs::read(path)?;
-        self.init_model_from_memory_with_canvas_on(backend, &model_bytes, num_thread, detection_canvas)
-    }
-
-    /// Load the detection model from ONNX bytes, optionally pinning its input to
-    /// `[1, 3, detection_canvas, detection_canvas]`.
+    /// The plan that runs a `width x height` detection input.
     ///
-    /// Pinning is a **`tract`-only** requirement: tract cannot shape-infer DBNet with a
-    /// symbolic H/W (the `Resize`-upsampled branch fails to unify against the FPN skip
-    /// connection at `Concat`), but loads fine against a concrete square input. `ort` shape-infers
-    /// the dynamic graph natively, so on `ort` the canvas is dropped here and both model loading
-    /// and preprocessing stay exactly as they are today.
-    ///
-    /// When a canvas is in force, [`DbNet::get_text_boxes`] pads (never stretches) the resized
-    /// page into the canvas top-left and crops the probability map back to the page extent, so
-    /// the box geometry is identical either way.
-    pub fn init_model_from_memory_with_canvas(
-        &mut self,
-        model_bytes: &[u8],
-        num_thread: usize,
-        detection_canvas: Option<u32>,
-    ) -> Result<(), OcrError> {
-        self.init_model_from_memory_with_canvas_on(
-            inference::default_backend(),
-            model_bytes,
-            num_thread,
-            detection_canvas,
-        )
-    }
-
-    /// Load the detection model from ONNX bytes onto an explicitly chosen backend, applying
-    /// the same canvas rules as [`DbNet::init_model_from_memory_with_canvas`].
-    ///
-    /// [`inference::default_backend`] resolves at compile time and prefers `ort`, so in a build
-    /// with both engines compiled in this is the only way to reach `tract` — and therefore the
-    /// only way the pinned-canvas code path runs at all in such a build.
-    pub fn init_model_from_memory_with_canvas_on(
-        &mut self,
-        backend_kind: inference::Backend,
-        model_bytes: &[u8],
-        num_thread: usize,
-        detection_canvas: Option<u32>,
-    ) -> Result<(), OcrError> {
-        let detection_canvas = match backend_kind {
-            inference::Backend::Tract => detection_canvas.filter(|canvas| *canvas > 0),
-            inference::Backend::Ort => None,
-        };
-        let fixed_input = detection_canvas.map(|canvas| [1_usize, 3, canvas as usize, canvas as usize]);
-        let backend = inference::load_backend(
-            backend_kind,
-            model_bytes,
-            num_thread,
-            fixed_input.as_ref().map(|shape| &shape[..]),
-        )?;
-        self.set_backend(Some(backend));
-        self.detection_canvas = detection_canvas;
-        Ok(())
+    /// A shape-agnostic backend hands back its single plan; a shape-pinned one builds (or
+    /// reuses) the plan for exactly this extent, which is what makes the two paths run the
+    /// same tensor and produce the same probability map.
+    fn plan_for(&self, height: u32, width: u32) -> Result<Arc<dyn ModelBackend>, OcrError> {
+        match &self.detector {
+            None => Err(OcrError::SessionNotInitialized),
+            Some(Detector::ShapeAgnostic(backend)) => Ok(Arc::clone(backend)),
+            Some(Detector::ShapePinned(plans)) => plans.plan_for((height as usize, width as usize)),
+        }
     }
 
     pub fn get_text_boxes(
@@ -138,10 +181,6 @@ impl DbNet {
         box_thresh: f32,
         un_clip_ratio: f32,
     ) -> Result<Vec<TextBox>, OcrError> {
-        let Some(backend) = &self.backend else {
-            return Err(OcrError::SessionNotInitialized);
-        };
-
         let src_resize = image::imageops::resize(
             img_src,
             scale.dst_width,
@@ -149,18 +188,12 @@ impl DbNet {
             image::imageops::FilterType::Triangle,
         );
 
-        let input_tensors = match self.detection_canvas {
-            Some(canvas) => OcrUtils::substract_mean_normalize_padded(
-                &src_resize,
-                &IMAGENET_MEAN_VALUES,
-                &IMAGENET_NORM_VALUES,
-                canvas,
-            )?,
-            None => OcrUtils::substract_mean_normalize(&src_resize, &IMAGENET_MEAN_VALUES, &IMAGENET_NORM_VALUES),
-        };
+        let input_tensor =
+            OcrUtils::substract_mean_normalize(&src_resize, &IMAGENET_MEAN_VALUES, &IMAGENET_NORM_VALUES);
 
-        let (pred_shape, pred_data) = inference::run_flat(backend.as_ref(), input_tensors.into_dyn())?;
-        let pred_data = Self::crop_prediction_map(&pred_data, &pred_shape, src_resize.width(), src_resize.height())?;
+        let plan = self.plan_for(src_resize.height(), src_resize.width())?;
+        let (pred_shape, pred_data) = inference::run_flat(plan.as_ref(), input_tensor.into_dyn())?;
+        Self::check_prediction_extent(&pred_shape, pred_data.len(), src_resize.width(), src_resize.height())?;
 
         let text_boxes = Self::get_text_boxes_core(
             &pred_data,
@@ -182,43 +215,31 @@ impl DbNet {
         Ok(text_boxes)
     }
 
-    /// Restrict a DBNet probability map to the top-left `width x height` content region.
+    /// Reject a probability map whose spatial extent is not the resized page's.
     ///
-    /// On the fixed-canvas path the map comes back at `canvas x canvas` while the page occupies
-    /// only the top-left corner. Cropping here means every downstream step -- binarize, dilate,
-    /// contour, score, and the `scale_width`/`scale_height` back-mapping in
-    /// [`DbNet::get_text_boxes_core`] -- sees exactly the map it sees on the unpinned path, and
-    /// anything the network fires in the padded region is dropped outright rather than clamped
-    /// onto the page edge. When the map already matches the page (every `ort` run) the input is
-    /// borrowed unchanged, so that path does no extra work.
-    fn crop_prediction_map<'a>(
-        pred_data: &'a [f32],
+    /// DBNet is fully convolutional and returns its map at the input extent, on every engine,
+    /// so this always holds -- but it is checked rather than assumed. Downstream the map is
+    /// wrapped in an `ImageBuffer` sized from the *page*, and the `scale_width`/`scale_height`
+    /// back-mapping in [`DbNet::get_text_boxes_core`] assumes the two agree; a silent mismatch
+    /// would put boxes in the wrong place instead of failing.
+    fn check_prediction_extent(
         pred_shape: &[usize],
+        value_count: usize,
         width: u32,
         height: u32,
-    ) -> Result<Cow<'a, [f32]>, OcrError> {
+    ) -> Result<(), OcrError> {
         let [.., map_height, map_width] = pred_shape else {
             return Err(OcrError::inference(format!(
                 "DBNet output shape {pred_shape:?} has no spatial dimensions"
             )));
         };
         let (width, height) = (width as usize, height as usize);
-        if *map_width == width && *map_height == height {
-            return Ok(Cow::Borrowed(pred_data));
-        }
-        if *map_width < width || *map_height < height || pred_data.len() < map_width * map_height {
+        if *map_width != width || *map_height != height || value_count < width * height {
             return Err(OcrError::inference(format!(
-                "DBNet output map {map_width}x{map_height} ({} values) is smaller than the resized page {width}x{height}",
-                pred_data.len()
+                "DBNet returned a {map_width}x{map_height} map ({value_count} values) for a {width}x{height} page"
             )));
         }
-
-        let mut cropped = Vec::with_capacity(width * height);
-        for row in 0..height {
-            let start = row * map_width;
-            cropped.extend_from_slice(&pred_data[start..start + width]);
-        }
-        Ok(Cow::Owned(cropped))
+        Ok(())
     }
 
     fn get_text_boxes_core(
@@ -561,32 +582,48 @@ impl DbNet {
 mod tests {
     use super::*;
 
+    /// A shape-pinned backend defers building its plan until a page extent is known, so the
+    /// model bytes are the only thing it can reject at load time — and it must, or a bad model
+    /// would surface mid-extraction instead of where every other model failure is reported.
+    #[cfg(feature = "tract")]
     #[test]
-    fn should_borrow_the_prediction_map_when_it_already_matches_the_page() {
-        let predictions: Vec<f32> = (0..6).map(|value| value as f32).collect();
+    fn should_reject_a_malformed_model_at_load_time_on_a_shape_pinned_backend() {
+        let mut detector = DbNet::new();
 
-        let cropped = DbNet::crop_prediction_map(&predictions, &[1, 1, 2, 3], 3, 2).expect("shapes match");
+        let error = detector
+            .init_model_from_memory_on(inference::Backend::Tract, b"not an ONNX model", 1)
+            .expect_err("garbage bytes are not a loadable model");
 
-        assert!(matches!(cropped, Cow::Borrowed(_)), "matching shapes must not copy");
-        assert_eq!(cropped.as_ref(), predictions.as_slice());
+        assert!(matches!(error, OcrError::Inference { .. }), "error was: {error}");
+        assert!(
+            format!("{detector:?}").contains("initialized: false"),
+            "a failed load must leave the detector uninitialized: {detector:?}"
+        );
     }
 
     #[test]
-    fn should_take_the_top_left_region_of_a_fixed_canvas_prediction_map() {
-        // 4x4 canvas map holding a 3x2 page in its top-left corner.
-        let predictions: Vec<f32> = (0..16).map(|value| value as f32).collect();
+    fn should_accept_a_prediction_map_at_the_page_extent() {
+        let predictions: Vec<f32> = (0..6).map(|value| value as f32).collect();
 
-        let cropped = DbNet::crop_prediction_map(&predictions, &[1, 1, 4, 4], 3, 2).expect("the page fits the canvas");
+        DbNet::check_prediction_extent(&[1, 1, 2, 3], predictions.len(), 3, 2).expect("shapes match");
+    }
 
-        assert_eq!(cropped.as_ref(), &[0.0, 1.0, 2.0, 4.0, 5.0, 6.0]);
+    #[test]
+    fn should_reject_a_prediction_map_that_is_not_the_page_extent() {
+        // What a plan pinned to the wrong shape would return: a canvas-sized map for a
+        // smaller page. Cropping it back would silently mis-place every box.
+        let error =
+            DbNet::check_prediction_extent(&[1, 1, 4, 4], 16, 3, 2).expect_err("a 4x4 map is not a 3x2 page's map");
+
+        assert!(matches!(error, OcrError::Inference { .. }));
+        assert!(error.to_string().contains("4x4 map"), "error was: {error}");
+        assert!(error.to_string().contains("3x2 page"), "error was: {error}");
     }
 
     #[test]
     fn should_reject_a_prediction_map_smaller_than_the_resized_page() {
-        let predictions = vec![0.0_f32; 4];
-
-        let error = DbNet::crop_prediction_map(&predictions, &[1, 1, 2, 2], 3, 2)
-            .expect_err("a 2x2 map cannot cover a 3x2 page");
+        let error =
+            DbNet::check_prediction_extent(&[1, 1, 2, 2], 4, 3, 2).expect_err("a 2x2 map cannot cover a 3x2 page");
 
         assert!(matches!(error, OcrError::Inference { .. }));
         assert!(error.to_string().contains("2x2"), "error was: {error}");
@@ -594,7 +631,7 @@ mod tests {
 
     #[test]
     fn should_reject_a_prediction_shape_without_spatial_dimensions() {
-        let error = DbNet::crop_prediction_map(&[0.0_f32], &[1], 1, 1).expect_err("rank 1 has no spatial dimensions");
+        let error = DbNet::check_prediction_extent(&[1], 1, 1, 1).expect_err("rank 1 has no spatial dimensions");
 
         assert!(matches!(error, OcrError::Inference { .. }));
     }

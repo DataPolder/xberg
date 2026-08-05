@@ -30,15 +30,15 @@
 //! - **Recognition** and **classification** run on byte-identical inputs through unpinned plans
 //!   on both engines, so their decoded text and predicted class are compared for exact equality;
 //!   only the float confidences carry a tolerance.
-//! - **Detection** cannot be compared coordinate-for-coordinate. tract cannot shape-infer DBNet
-//!   with a symbolic H/W (the `Resize`-upsampled branch fails to unify against the FPN skip
-//!   connection at `Concat`), so its plan is pinned to a square canvas and the page is padded
-//!   into it. Padding changes the receptive-field context at the page edges, which perturbs the
-//!   probability map, which shifts contour extraction by a pixel or two. Boxes are therefore
-//!   matched as a *set*, by intersection-over-union, exactly as ADR 0027 prescribes for this
-//!   situation — and end-to-end results are compared as word multisets rather than as ordered
-//!   lines, because a sub-pixel box shift can reorder line grouping without changing a
-//!   single recognized character.
+//! - **Detection** runs the same tensor on both engines. tract cannot shape-infer DBNet with a
+//!   symbolic H/W (the `Resize`-upsampled branch fails to unify against the FPN skip connection
+//!   at `Concat`), so its plan is pinned — but pinned to the page's *own* resized extent, not to
+//!   a canvas the page is padded into. That distinction is load-bearing and was the subject of
+//!   the issue #1354 follow-up: DBNet's squeeze-and-excitation blocks average over the whole
+//!   input, so padding shifts the probability map across the entire page rather than only at the
+//!   seam. Boxes are still matched as a *set*, by intersection-over-union, as ADR 0027
+//!   prescribes — and end-to-end results as word multisets rather than ordered lines, because a
+//!   one-pixel box shift can reorder line grouping without changing a recognized character.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -113,39 +113,12 @@ const DENSE_PAGE: ParityPage = ParityPage {
 /// Every page. Used by the stages that are at full parity on all of them.
 const PARITY_PAGES: &[ParityPage] = &[SPARSE_PAGE, DENSE_PAGE];
 
-/// Pages on which detection parity is an established, enforced property.
-const SPARSE_PAGES: &[ParityPage] = &[SPARSE_PAGE];
-
-/// Pages on which detection parity is currently **known to fail** — see
-/// [`should_detect_the_same_regions_on_a_text_dense_page`].
-const DENSE_PAGES: &[ParityPage] = &[DENSE_PAGE];
-
-/// Reason string shared by the two `#[ignore]`d dense-page tests.
-///
-/// Measured on `layout_parser_ocr.jpg` (791x1024) with PP-OCRv5 detection: ORT finds 59 regions,
-/// tract 58, and the worst ORT->tract IoU is 0.022 — a region with effectively no counterpart,
-/// which is a structural disagreement, not the pixel-level jitter the canvas padding explains.
-/// End to end that costs 29 words (430 vs 401). Recognition and classification are unaffected:
-/// on the same page and the same crops both engines decode identically (0 of 59 v5 crops and 0
-/// of 67 v6 crops differ) and classify identically (max |Δconfidence| 2.8e-6), which localizes
-/// the defect to DBNet under the pinned square canvas rather than to tract generally.
-const DENSE_PAGE_DETECTION_DEFECT: &str = "issue #1354 follow-up: DBNet detection under the pinned tract canvas \
-     diverges from ORT on text-dense pages (ORT 59 vs tract 58 regions, worst IoU 0.022, 29 words lost end to \
-     end on layout_parser_ocr.jpg). Recognition and classification are at full parity on the same page, so the \
-     defect is isolated to the padded detection path. Un-ignore once DBNet parity is fixed — do not relax the \
-     IoU bound to make this pass.";
-
 /// Long-side target handed to [`ScaleParam::get_scale_param`] for the detector-level tests.
 const DETECTION_TARGET_SIDE: u32 = 640;
-/// Square canvas the tract detection plan is pinned to. Must be >= the scaled page extent;
-/// an 800x200 page at a 640 target scales to 640x160, which fits.
-const DETECTION_CANVAS: u32 = 640;
-/// Long-side limit for the end-to-end engine tests. `PaddleOcrEngine::detect` pads by
-/// `E2E_PADDING` on every side *before* scaling to this target, so the canvas below has to
-/// cover `E2E_MAX_SIDE_LEN + 2 * E2E_PADDING`, mirroring production's `detection_canvas`.
+/// Long-side limit for the end-to-end engine tests, and the white margin
+/// `PaddleOcrEngine::detect` adds on every side before scaling to it.
 const E2E_MAX_SIDE_LEN: u32 = 640;
 const E2E_PADDING: u32 = 10;
-const E2E_DETECTION_CANVAS: u32 = (E2E_MAX_SIDE_LEN + 2 * E2E_PADDING).next_multiple_of(32);
 
 const BOX_SCORE_THRESHOLD: f32 = 0.5;
 const BOX_THRESHOLD: f32 = 0.3;
@@ -165,14 +138,17 @@ const CONFIDENCE_TOLERANCE: f32 = 1e-3;
 
 /// Minimum intersection-over-union required between an ORT box and its tract counterpart.
 ///
-/// Not a float-precision tolerance — it absorbs a structural difference. The tract detector sees
-/// the page padded into a square canvas, so pixels near the page edge have different neighbours
-/// than they do in ORT's exactly-sized input; the resulting probability map differs slightly, and
-/// contour extraction plus the unclip expansion turn that into a box edge that can land a pixel
-/// or two elsewhere. On the parity page an IoU of 0.90 leaves roughly a 3% linear slack on a
-/// text-line box, which comfortably covers observed jitter while still failing loudly if a box
-/// moves, splits, or merges.
-const MIN_DETECTION_IOU: f32 = 0.90;
+/// Both engines now run the identical detection tensor, and every box on both parity pages and
+/// both model generations matches at IoU 1.000 exactly. The bound is not there to absorb a
+/// structural difference, and it is not tuned to what passes: it is slack for the one thing that
+/// legitimately can differ, which is a single pixel of the binarized mask. Measured over the four
+/// page/generation combinations here, the engines' raw probability maps differ by at most 5.0e-5
+/// (mean 2.4e-7), which flipped 1 of 307200 pixels across the 0.3 binarization threshold on the
+/// dense page and could flip a different one on another CPU. A one-pixel contour shift costs at
+/// most ~0.2 IoU on the smallest box either engine emits (roughly 9x8 map pixels), so 0.75 fails
+/// on any real move, split, or merge while tolerating that. Region *counts* are asserted equal
+/// separately, which is what actually catches a merge.
+const MIN_DETECTION_IOU: f32 = 0.75;
 
 /// Load a parity page, or `None` when its content is unavailable and parity is not required.
 fn parity_page(page: &ParityPage) -> Option<image::RgbImage> {
@@ -243,7 +219,7 @@ fn as_str(path: &Path) -> &str {
 fn load_detector(backend: InferenceBackend, model: &Path) -> DbNet {
     let mut detector = DbNet::new();
     detector
-        .init_model_with_canvas_on(backend, as_str(model), INFERENCE_THREADS, Some(DETECTION_CANVAS))
+        .init_model_on(backend, as_str(model), INFERENCE_THREADS)
         .unwrap_or_else(|error| panic!("{backend:?} must load the detection model {model:?}: {error}"));
     detector
 }
@@ -509,23 +485,11 @@ fn should_predict_the_same_textline_orientation_class_on_both_engines() {
     );
 }
 
-/// Detection is the one stage where the two engines do not see the same tensor: tract's plan is
-/// pinned to a square canvas and the page is padded into it. Boxes are therefore compared as a
-/// set, by IoU, never coordinate-for-coordinate.
+/// Detection on every parity page, including the text-dense scan that reproduced the issue
+/// #1354 follow-up defect. Boxes are compared as a set, by IoU, never coordinate-for-coordinate.
 #[test]
-fn should_detect_the_same_regions_on_both_engines_within_the_canvas_padding_tolerance() {
-    compare_detection_over(SPARSE_PAGES);
-}
-
-/// The same comparison on a text-dense scan. Ignored, not deleted and not weakened: it encodes
-/// the exact reproduction of a real defect, and the moment DBNet parity is fixed this is the
-/// test that proves it.
-#[test]
-#[ignore = "issue #1354 follow-up: DBNet detection under the pinned tract canvas diverges from ORT on \
-            text-dense pages; see DENSE_PAGE_DETECTION_DEFECT"]
-fn should_detect_the_same_regions_on_a_text_dense_page() {
-    eprintln!("{DENSE_PAGE_DETECTION_DEFECT}");
-    compare_detection_over(DENSE_PAGES);
+fn should_detect_the_same_regions_on_both_engines() {
+    compare_detection_over(PARITY_PAGES);
 }
 
 fn compare_detection_over(pages: &[ParityPage]) {
@@ -559,7 +523,7 @@ fn compare_detection_over(pages: &[ParityPage]) {
                 tract_boxes.len(),
                 ort_boxes.len(),
                 "{scope}: engines disagree on how many regions exist (ORT {} vs tract {}) — \
-                 a split or merged region, not padding jitter",
+                 a split or merged region",
                 ort_boxes.len(),
                 tract_boxes.len()
             );
@@ -596,18 +560,7 @@ fn compare_detection_over(pages: &[ParityPage]) {
 /// nothing about whether tract reads the page correctly.
 #[test]
 fn should_recognize_the_same_word_multiset_end_to_end_on_both_engines() {
-    compare_end_to_end_over(SPARSE_PAGES);
-}
-
-/// End-to-end on the text-dense scan. Ignored for the same reason as
-/// [`should_detect_the_same_regions_on_a_text_dense_page`] — this failure is downstream of that
-/// one, since recognition itself is at full parity on this page's crops.
-#[test]
-#[ignore = "issue #1354 follow-up: downstream of the dense-page DBNet detection divergence \
-            (430 vs 401 words); see DENSE_PAGE_DETECTION_DEFECT"]
-fn should_recognize_the_same_word_multiset_end_to_end_on_a_text_dense_page() {
-    eprintln!("{DENSE_PAGE_DETECTION_DEFECT}");
-    compare_end_to_end_over(DENSE_PAGES);
+    compare_end_to_end_over(PARITY_PAGES);
 }
 
 fn compare_end_to_end_over(pages: &[ParityPage]) {
@@ -630,14 +583,13 @@ fn compare_end_to_end_over(pages: &[ParityPage]) {
             let build = |backend: InferenceBackend| {
                 let mut engine = PaddleOcrEngine::new();
                 engine
-                    .init_models_with_dict_and_canvas_on(
+                    .init_models_with_dict_on(
                         backend,
                         as_str(&detection),
                         as_str(&classifier),
                         as_str(&recognition),
                         as_str(&dictionary),
                         INFERENCE_THREADS,
-                        Some(E2E_DETECTION_CANVAS),
                     )
                     .unwrap_or_else(|error| panic!("{scope}: {backend:?} engine init: {error}"));
                 engine

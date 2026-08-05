@@ -22,7 +22,7 @@ feature sets (`layout-tract`, `auto-rotate-tract`).
 |---|---|---|
 | RT-DETR | Layout detection | Runs |
 | PP-LCNet | Table classifier, document-orientation, text-line orientation | Runs |
-| DBNet / CRNN / AngleNet | PaddleOCR detection / recognition / angle | In progress — see [PaddleOCR](#paddleocr) |
+| DBNet / CRNN / AngleNet | PaddleOCR detection / recognition / angle | Runs — see [PaddleOCR](#paddleocr) |
 | TATR | Table-structure recognition | ONNX Runtime only |
 | PP-DocLayout-V3 | Layout detection | ONNX Runtime only |
 | SLANeXt | Table-structure recognition | ONNX Runtime only |
@@ -82,12 +82,23 @@ cargo test --release -p xberg --no-default-features --features "layout-detection
 Shape handling on tract depends on how the plan is built. A plan left symbolic tolerates a new input
 shape on every call; a plan pinned via `with_input_fact` bakes that exact shape in as a constant and
 errors on any other. DBNet's FPN skip connections only optimize when pinned, so DBNet plans are
-necessarily shape-pinned — and DBNet resizes each page to content-dependent dimensions, so a pinned
-plan is a poor fit for pages of varying size. CRNN, which batches by content-dependent width, can be
-left symbolic and tolerate varying widths in one plan. AngleNet and the layout CNNs use a fixed
-resolution and need no special handling either way.
+necessarily shape-pinned — and DBNet resizes each page to content-dependent dimensions, so one plan
+cannot serve every page.
 
-Because a pinned plan corresponds to exactly one shape, a fixed canvas (resizing every page to one
-shape before DBNet runs) bounds the plan count to one by construction — no shape-keyed plan cache is
-required. Wiring DBNet, CRNN, and AngleNet into the tract seam under this scheme is in progress; none
-of the three runs on tract yet.
+Because a pinned plan corresponds to exactly one shape, padding every page into one fixed square
+canvas would bound the plan count to one by construction. That is not what Xberg does, and the
+reason is a measured one: both detection backbones are PP-LCNets carrying `GlobalAveragePool`
+squeeze-and-excitation blocks (10 in PP-OCRv5 `det/mobile`, 8 in PP-OCRv6 `det/tiny`) which reduce
+over the **whole** spatial extent. Enlarging the input therefore rescales every channel gate and
+shifts the probability map across the entire page, not just near the padding seam. On a 791×1024
+scan resized to 480×640, padding it into a 640×640 canvas moved the map by up to 0.77 (mean 2.6e-3),
+flipping 827 of 307 200 pixels across DBNet's 0.3 binarization threshold and merging two text lines
+into one region — 59 detected regions became 58, and 29 words were lost end to end.
+
+DBNet plans are therefore pinned to each page's **own** resized extent and cached by shape (four
+resident plans, least-recently-used eviction). A document's pages nearly all resize to the same
+extent, so the cache is built once and reused; a new extent costs one plan build. With the extents
+equal, the two engines agree to 5.0e-5 on the probability map and produce identical detection boxes,
+which is what `xberg`'s `paddle_ocr::tract_parity` suite asserts. CRNN, which batches by
+content-dependent width, is left symbolic and tolerates varying widths in one plan; AngleNet and the
+layout CNNs use a fixed resolution and need no special handling either way.

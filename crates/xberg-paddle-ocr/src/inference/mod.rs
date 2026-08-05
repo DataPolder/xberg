@@ -37,6 +37,43 @@ pub enum Backend {
     Tract,
 }
 
+impl Backend {
+    /// Short backend name, matching [`ModelBackend::name`] for a model loaded onto it.
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Ort => "ort",
+            Self::Tract => "tract",
+        }
+    }
+
+    /// Whether a plan for this backend can only run at the one input shape it was built for.
+    ///
+    /// `tract` optimizes a graph against concrete facts; DBNet's FPN skip connections do not
+    /// unify under a symbolic H/W, so a DBNet plan has to be pinned to a concrete input shape
+    /// (see [`tract_backend`](self::tract_backend)). `ort` shape-infers the dynamic graph at
+    /// run time and reuses one session for every page.
+    pub(crate) fn requires_concrete_input_shape(self) -> bool {
+        match self {
+            Self::Ort => false,
+            Self::Tract => true,
+        }
+    }
+}
+
+/// Check that `model_bytes` is a model `backend` can load, without building a runnable plan.
+///
+/// A backend that needs a concrete input shape cannot build its plan until the first page's
+/// extent is known; without this check a corrupt or unsupported detection model would surface
+/// mid-extraction rather than at load time, where every other model failure is reported.
+pub(crate) fn validate_model(backend: Backend, model_bytes: &[u8]) -> Result<(), OcrError> {
+    let _ = model_bytes;
+    match backend {
+        #[cfg(feature = "tract")]
+        Backend::Tract => tract_backend::parse_only(model_bytes),
+        _ => Ok(()),
+    }
+}
+
 /// The compile-time default backend for the plain (non-customized) `init_model*`
 /// call sites: `ort` when it is compiled in, preserving today's behavior exactly;
 /// otherwise `tract`, so a `tract`-only build stays usable through the same API.

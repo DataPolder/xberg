@@ -71,9 +71,11 @@ Legend: ✅ prebuilt shipped · ❌ not shipped · — not applicable
    recognition, textline-orientation classification) also runs on tract via `paddle-ocr-tract`, enabled
    for `android-target` only so far (not yet `wasm-target`). tract is substantially slower than
    multi-threaded ORT for these models — roughly 11-19x on models measured to date — and PaddleOCR
-   detection cost grows steeply with the fixed square canvas tract renders (sized from
-   `det_limit_side_len`): the `medium` detection tier measured ~821 ms / 518 MiB at 640², ~1650 ms /
-   981 MiB at 960², and ~4038 ms / 1652 MiB at 1280² (macOS arm64, single run, indicative), with the
+   detection cost grows steeply with the page size tract renders (bounded by `det_limit_side_len`;
+   the DBNet plan is pinned to each page's own resized extent and cached by shape, so detection
+   results match ONNX Runtime exactly): the `medium` detection tier measured ~821 ms / 518 MiB at
+   640², ~1650 ms / 981 MiB at 960², and ~4038 ms / 1652 MiB at 1280² (macOS arm64, single run,
+   indicative), with the
    `mobile` tier 5-6x cheaper at every size. On tract targets, prefer the `mobile` detection tier with a
    lower `det_limit_side_len` (~640); the ORT-path default of 1024 is unchanged. TATR, SLANeXT, and
    PP-DocLayout-V3 remain ONNX Runtime-only.

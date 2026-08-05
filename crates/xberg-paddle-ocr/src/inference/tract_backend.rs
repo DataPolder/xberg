@@ -41,8 +41,8 @@ impl TractBackend {
     ///
     /// `fixed_input` pins the model's input tensor to a concrete shape before
     /// optimization, for graphs tract cannot shape-infer with a symbolic H/W (e.g. a
-    /// U-net with `Resize`-upsampled skip connections). Every current call site in
-    /// this crate passes `None`.
+    /// U-net with `Resize`-upsampled skip connections). `DbNet` passes the exact extent
+    /// the page resized to; the other nets pass `None`.
     pub(crate) fn load(model_bytes: &[u8], fixed_input: Option<&[usize]>) -> Result<Self, OcrError> {
         let mut inference_model = onnx()
             .model_for_read(&mut &model_bytes[..])
@@ -61,6 +61,18 @@ impl TractBackend {
             .map_err(|error| tract_error("build the runnable tract plan", error))?;
         Ok(Self { model })
     }
+}
+
+/// Parse ONNX bytes and discard the result, to fail a malformed model at load time.
+///
+/// Callers that build their runnable plan lazily (per input shape) have nothing else to check
+/// at load time; parsing is the cheap half of [`TractBackend::load`] -- optimization is what
+/// costs, and it is what depends on the shape.
+pub(crate) fn parse_only(model_bytes: &[u8]) -> Result<(), OcrError> {
+    onnx()
+        .model_for_read(&mut &model_bytes[..])
+        .map(|_| ())
+        .map_err(|error| tract_error("parse the ONNX model", error))
 }
 
 impl ModelBackend for TractBackend {
