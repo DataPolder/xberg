@@ -332,9 +332,15 @@ fn render_elements(doc: &InternalDocument, p: &str, buf: &mut String) {
             }
 
             ElementKind::Formula => {
+                // Math, not code: emit LaTeX in `$$...$$` display-math delimiters inside a
+                // math-classed element, matching the `dollar_math`/`display_math` convention
+                // used by the comrak and djot renderers. KaTeX/MathJax auto-render both pick
+                // up `$$...$$` by default, so this is renderable as-is once such a script is
+                // present on the page; without one it degrades to visible LaTeX source rather
+                // than a misleading monospace code block.
                 write!(
                     buf,
-                    r#"<pre class="{p}pre {p}formula"><code class="{p}code">{}</code></pre>"#,
+                    r#"<div class="{p}formula {p}math" data-math-style="display">$${}$$</div>"#,
                     esc(&elem.text)
                 )
                 .unwrap();
@@ -620,6 +626,38 @@ mod tests {
         assert!(out.contains(r#"class="my-doc""#), "custom prefix missing: {out}");
         assert!(out.contains(r#"class="my-p""#), "custom prefix on p missing: {out}");
         assert!(!out.contains("kb-"), "old prefix still present: {out}");
+    }
+
+    #[test]
+    fn formula_emits_dollar_math_not_code_block() {
+        let doc = make_doc(ElementKind::Formula, "x^2 + y^2 = z^2");
+        let out = render(
+            HtmlOutputConfig {
+                embed_css: false,
+                ..Default::default()
+            },
+            &doc,
+        );
+        assert!(
+            out.contains(r#"<div class="kb-formula kb-math" data-math-style="display">$$x^2 + y^2 = z^2$$</div>"#),
+            "unexpected formula markup: {out}"
+        );
+        assert!(!out.contains("<pre"), "formula should not render as a code block: {out}");
+        assert!(!out.contains("<code"), "formula should not render as a code block: {out}");
+    }
+
+    #[test]
+    fn formula_escapes_html_special_characters() {
+        let doc = make_doc(ElementKind::Formula, "a < b & b > c");
+        let out = render(
+            HtmlOutputConfig {
+                embed_css: false,
+                ..Default::default()
+            },
+            &doc,
+        );
+        assert!(out.contains("$$a &lt; b &amp; b &gt; c$$"), "escaped formula missing: {out}");
+        assert!(!out.contains("a < b & b > c"), "raw unescaped formula leaked: {out}");
     }
 
     #[test]
