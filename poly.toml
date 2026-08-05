@@ -51,6 +51,12 @@ exclude = [
   ".claude-plugin/marketplace.json",
   ".agents/plugins/marketplace.json",
   ".ai-rulez-generated.json",
+  # Vendored from RazrFalcon/ttf-parser. Kept byte-close to upstream so cherry-picks still
+  # apply, so poly must not rewrite it -- `uncomment --fix` strips upstream's explanatory
+  # comments (and its `/*! .. */` module docs, which `remove_docs = false` does not guard),
+  # leaving truncated sentences and unannotated hex test vectors. ~keep
+  "crates/xberg-ttf-parser/src/**",
+  "crates/xberg-ttf-parser/tests/**",
 ]
 
 [lint.markdown.rumdl]
