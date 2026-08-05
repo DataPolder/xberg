@@ -834,6 +834,65 @@ test_cs!(
     rect(10, 20, 40, 60)
 );
 
+// Direct pin for the bug this vendored fix addresses: a charstring is byte-
+// identical in outline and bounding box whether or not it carries
+// `dotsection` between its path segments. If the interpreter ever again
+// treats the operator as a path terminator, an unknown-operator abort, or
+// anything other than a pure no-op, this comparison diverges.
+#[test]
+fn dotsection_produces_identical_outline_to_charstring_without_it() {
+    let with_dotsection = gen_cff(
+        &[],
+        &[],
+        &[
+            CFFInt(10),
+            CFFInt(20),
+            UInt8(operator::MOVE_TO),
+            CFFInt(30),
+            CFFInt(0),
+            UInt8(operator::HORIZONTAL_LINE_TO),
+            UInt8(12),
+            UInt8(0), // dotsection
+            CFFInt(0),
+            CFFInt(30),
+            UInt8(operator::VERTICAL_LINE_TO),
+            UInt8(operator::ENDCHAR),
+        ],
+    );
+    let without_dotsection = gen_cff(
+        &[],
+        &[],
+        &[
+            CFFInt(10),
+            CFFInt(20),
+            UInt8(operator::MOVE_TO),
+            CFFInt(30),
+            CFFInt(0),
+            UInt8(operator::HORIZONTAL_LINE_TO),
+            CFFInt(0),
+            CFFInt(30),
+            UInt8(operator::VERTICAL_LINE_TO),
+            UInt8(operator::ENDCHAR),
+        ],
+    );
+
+    let with_table = cff::Table::parse(&with_dotsection).unwrap();
+    let mut with_builder = Builder(String::new());
+    let with_rect = with_table
+        .outline(GlyphId(0), &mut with_builder)
+        .expect("dotsection must not abort the charstring");
+
+    let without_table = cff::Table::parse(&without_dotsection).unwrap();
+    let mut without_builder = Builder(String::new());
+    let without_rect = without_table.outline(GlyphId(0), &mut without_builder).unwrap();
+
+    assert_eq!(
+        with_builder.0, without_builder.0,
+        "dotsection must not alter the outline path"
+    );
+    assert_eq!(with_rect, without_rect, "dotsection must not alter the bounding box");
+}
+
 test_cs_err!(
     reserved_operator,
     &[CFFInt(10), UInt8(2), UInt8(operator::ENDCHAR),],
