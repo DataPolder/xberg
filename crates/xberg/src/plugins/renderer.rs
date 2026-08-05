@@ -135,6 +135,7 @@ pub fn clear_renderers() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::plugins::registry::test_support::RendererRegistryGuard;
 
     struct MockRenderer {
         format: &'static str,
@@ -154,6 +155,7 @@ mod tests {
 
     #[test]
     fn register_list_unregister_roundtrip() {
+        let _guard = RendererRegistryGuard::acquire();
         register_renderer(Arc::new(MockRenderer { format: "test-fmt-a" })).unwrap();
         assert!(list_renderers().unwrap().contains(&"test-fmt-a".to_string()));
 
@@ -163,15 +165,13 @@ mod tests {
 
     #[test]
     fn register_list_clear_list_roundtrip() {
+        // The guard restores the built-in renderers on both entry and exit, so this test can
+        // clear the registry outright without stranding later tests with an empty one.
+        let _guard = RendererRegistryGuard::acquire();
         register_renderer(Arc::new(MockRenderer { format: "test-fmt-b" })).unwrap();
         assert!(list_renderers().unwrap().contains(&"test-fmt-b".to_string()));
 
         clear_renderers().unwrap();
         assert!(list_renderers().unwrap().is_empty());
-
-        use crate::plugins::registry::get_renderer_registry;
-        let registry = get_renderer_registry();
-        let mut registry = registry.write();
-        registry.reset_to_defaults().unwrap();
     }
 }

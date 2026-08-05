@@ -79,6 +79,7 @@ mod tests {
     use crate::Result;
     use crate::core::config::ExtractionConfig;
     use crate::plugins::Plugin;
+    use crate::plugins::registry::test_support::DocumentExtractorRegistryGuard;
     use async_trait::async_trait;
 
     struct MockExtractor {
@@ -378,14 +379,6 @@ mod tests {
         assert_eq!(result.mime_type, "application/json");
     }
 
-    /// Unique MIME type per test to avoid collisions in the shared global registry.
-    fn unique_mime(suffix: &str) -> String {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let id = COUNTER.fetch_add(1, Ordering::SeqCst);
-        format!("application/x-test-{suffix}-{id}")
-    }
-
     struct LifecycleMock {
         mime: String,
     }
@@ -423,25 +416,27 @@ mod tests {
 
     #[test]
     fn register_list_unregister_roundtrip() {
-        let mime = unique_mime("rlu");
+        let _guard = DocumentExtractorRegistryGuard::acquire();
+        let mime = "application/x-mock-rlu".to_string();
         let extractor = Arc::new(LifecycleMock { mime: mime.clone() });
 
         register_document_extractor(Arc::clone(&extractor) as Arc<dyn DocumentExtractor>).unwrap();
-        assert!(list_document_extractors().unwrap().contains(&mime));
+        assert_eq!(list_document_extractors().unwrap(), vec![mime.clone()]);
 
         unregister_document_extractor(&mime).unwrap();
-        assert!(!list_document_extractors().unwrap().contains(&mime));
+        assert!(list_document_extractors().unwrap().is_empty());
     }
 
     #[test]
     fn register_list_clear_list_roundtrip() {
-        let mime = unique_mime("rlcl");
+        let _guard = DocumentExtractorRegistryGuard::acquire();
+        let mime = "application/x-mock-rlcl".to_string();
         let extractor = Arc::new(LifecycleMock { mime: mime.clone() });
 
         register_document_extractor(Arc::clone(&extractor) as Arc<dyn DocumentExtractor>).unwrap();
-        assert!(list_document_extractors().unwrap().contains(&mime));
+        assert_eq!(list_document_extractors().unwrap(), vec![mime]);
 
         clear_document_extractors().unwrap();
-        assert!(!list_document_extractors().unwrap().contains(&mime));
+        assert!(list_document_extractors().unwrap().is_empty());
     }
 }

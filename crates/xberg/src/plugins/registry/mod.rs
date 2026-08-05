@@ -140,6 +140,98 @@ pub fn get_renderer_registry() -> Arc<RwLock<RendererRegistry>> {
     RENDERER_REGISTRY.clone()
 }
 
+/// Setup/teardown support for tests that exercise a process-global plugin registry.
+///
+/// Each global registry is shared mutable state for the whole test binary, and every plugin type
+/// exposes a `clear_*` function that wipes all of it. Tests for one registry live in several
+/// modules, so unique per-test plugin names are not enough on their own: a `clear_*` call can
+/// land between another test's registration and the assertion that reads the registry back, and a
+/// test that panics mid-way leaves its plugin registered for whatever runs next. Both failure
+/// modes are order- and timing-dependent, so they surface as flakes rather than reproducible
+/// breaks.
+#[cfg(test)]
+pub(crate) mod test_support {
+    /// Defines a guard type that serializes access to one global registry and leaves it empty on
+    /// both entry and exit.
+    ///
+    /// Each registry gets its own lock, so tests for unrelated plugin types still run in
+    /// parallel with each other.
+    macro_rules! registry_guard {
+        ($guard:ident, $lock:ident, $clear:path, $what:literal) => {
+            /// Holds this registry's lock for the lifetime of a test and leaves the registry
+            /// empty both on entry and on exit, so every test sees a known-empty registry no
+            /// matter what ran before it — and a failing assertion cannot leak a registration.
+            pub(crate) struct $guard(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
+
+            impl $guard {
+                pub(crate) fn acquire() -> Self {
+                    static $lock: std::sync::Mutex<()> = std::sync::Mutex::new(());
+                    // A test that panics while holding the lock poisons it. The guarded data is
+                    // `()`, so there is no inconsistent state to protect against and recovering
+                    // is correct.
+                    let lock = $lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                    $clear().expect(concat!($what, " registry setup must succeed"));
+                    Self(lock)
+                }
+            }
+
+            impl Drop for $guard {
+                fn drop(&mut self) {
+                    // Runs before the inner `MutexGuard` field is dropped, so teardown still
+                    // holds the lock and cannot race the next test's setup.
+                    let cleared = $clear();
+                    // Panicking inside `drop` while the thread is already unwinding aborts the
+                    // process and hides the assertion failure that caused it, so only surface a
+                    // teardown error when the test itself passed.
+                    if !std::thread::panicking() {
+                        cleared.expect(concat!($what, " registry teardown must succeed"));
+                    }
+                }
+            }
+        };
+    }
+
+    registry_guard!(
+        RerankerRegistryGuard,
+        RERANKER_REGISTRY_LOCK,
+        crate::plugins::clear_reranker_backends,
+        "reranker"
+    );
+    registry_guard!(
+        EmbeddingRegistryGuard,
+        EMBEDDING_REGISTRY_LOCK,
+        crate::plugins::clear_embedding_backends,
+        "embedding"
+    );
+    registry_guard!(
+        TokenizerRegistryGuard,
+        TOKENIZER_REGISTRY_LOCK,
+        crate::plugins::clear_tokenizer_backends,
+        "tokenizer"
+    );
+    // The renderer registry is the one global registry seeded with built-ins, so its guard
+    // restores those defaults instead of leaving it empty — an empty renderer registry would
+    // break every later test that renders through the global registry.
+    registry_guard!(
+        RendererRegistryGuard,
+        RENDERER_REGISTRY_LOCK,
+        reset_renderers_to_defaults,
+        "renderer"
+    );
+
+    fn reset_renderers_to_defaults() -> crate::Result<()> {
+        let registry = super::get_renderer_registry();
+        let mut registry = registry.write();
+        registry.reset_to_defaults()
+    }
+    registry_guard!(
+        DocumentExtractorRegistryGuard,
+        DOCUMENT_EXTRACTOR_REGISTRY_LOCK,
+        crate::plugins::clear_document_extractors,
+        "document extractor"
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

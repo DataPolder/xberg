@@ -1114,10 +1114,10 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn plugin_backend_rerank_roundtrip() {
         use crate::core::config::RerankerConfig;
+        use crate::plugins::registry::test_support::RerankerRegistryGuard;
         use crate::plugins::{Plugin, RerankerBackend, register_reranker_backend, unregister_reranker_backend};
         use async_trait::async_trait;
         use std::sync::Arc;
-        use std::sync::atomic::{AtomicU64, Ordering};
 
         struct MockPlugin {
             name: String,
@@ -1149,9 +1149,11 @@ mod tests {
             }
         }
 
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let id = COUNTER.fetch_add(1, Ordering::SeqCst);
-        let name = format!("test-mock-reranker-{id}");
+        // Shares the global reranker registry with `plugins::reranker`'s tests, so it takes the
+        // same lock: without it, that module's `clear_reranker_backends` can wipe this backend
+        // between registration and the `rerank_async` call below.
+        let _guard = RerankerRegistryGuard::acquire();
+        let name = "test-mock-reranker".to_string();
 
         register_reranker_backend(Arc::new(MockPlugin { name: name.clone() })).unwrap();
 
