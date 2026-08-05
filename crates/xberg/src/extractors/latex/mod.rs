@@ -465,11 +465,20 @@ impl LatexExtractor {
                         i = new_i;
                         continue;
                     }
-                    "tabular" => {
-                        let (env_content, new_i) = collect_environment(&lines, i, "tabular");
+                    "tabular" | "longtable" | "tabularx" | "tabulary" => {
+                        let (env_content, new_i) = collect_environment(&lines, i, &env_name);
                         let cells = Self::parse_tabular_cells(&env_content);
                         if !cells.is_empty() {
-                            b.push_table_from_cells(&cells, None, None);
+                            let caption = Self::extract_caption(&env_content);
+                            let label = Self::extract_label(&env_content);
+                            let idx = b.push_table_from_cells(&cells, None, None);
+                            if let Some(lbl) = label {
+                                b.set_anchor(idx, &lbl);
+                            }
+                            if let Some(cap) = caption {
+                                let cap_idx = b.push_paragraph(&cap, vec![], None, None);
+                                b.push_relationship(cap_idx, RelationshipTarget::Index(idx), RelationshipKind::Caption);
+                            }
                         }
                         i = new_i;
                         continue;
@@ -628,11 +637,20 @@ impl LatexExtractor {
                         i = new_i;
                         continue;
                     }
-                    "tabular" => {
-                        let (env_content, new_i) = collect_environment(lines, i, "tabular");
+                    "tabular" | "longtable" | "tabularx" | "tabulary" => {
+                        let (env_content, new_i) = collect_environment(lines, i, &env_name);
                         let cells = Self::parse_tabular_cells(&env_content);
                         if !cells.is_empty() {
-                            b.push_table_from_cells(&cells, None, None);
+                            let caption = Self::extract_caption(&env_content);
+                            let label = Self::extract_label(&env_content);
+                            let idx = b.push_table_from_cells(&cells, None, None);
+                            if let Some(lbl) = label {
+                                b.set_anchor(idx, &lbl);
+                            }
+                            if let Some(cap) = caption {
+                                let cap_idx = b.push_paragraph(&cap, vec![], None, None);
+                                b.push_relationship(cap_idx, RelationshipTarget::Index(idx), RelationshipKind::Caption);
+                            }
                         }
                         i = new_i;
                         continue;
@@ -965,16 +983,19 @@ impl LatexExtractor {
         }
     }
 
-    /// Parse tabular cells from environment content.
+    /// Parse table cells from `tabular`, `longtable`, `tabularx`, or
+    /// `tabulary` environment content.
+    ///
+    /// All four environments share the same `&`-separated cell / `\\`-terminated
+    /// row grid; they differ only in their column-spec argument syntax (already
+    /// stripped out by [`collect_environment`]) and in `longtable`'s extra
+    /// page-break markers (`\endhead`, `\endfoot`, ...), which are skipped via
+    /// [`utilities::is_table_structural_line`].
     fn parse_tabular_cells(content: &str) -> Vec<Vec<String>> {
         let mut rows = Vec::new();
         for line in content.lines() {
             let trimmed = line.trim();
-            if trimmed.starts_with("\\hline")
-                || trimmed.is_empty()
-                || trimmed.contains("\\begin{tabular}")
-                || trimmed.contains("\\end{tabular}")
-            {
+            if utilities::is_table_structural_line(trimmed) {
                 continue;
             }
             let row_str = trimmed.replace("\\\\", "").replace("\\hline", "");
