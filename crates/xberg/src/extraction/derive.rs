@@ -22,12 +22,17 @@ use crate::types::ocr_elements::{OcrConfidence, OcrElement};
 use crate::types::page::PageContent;
 use crate::types::tables::Table;
 
+/// Cap on how many unresolvable keys a single warning names before it summarises
+/// the rest as a count, so a badly broken document cannot produce an unbounded
+/// message.
+const MAX_REPORTED_UNRESOLVED_KEYS: usize = 10;
+
 /// Resolve `RelationshipTarget::Key` entries to `RelationshipTarget::Index`.
 ///
 /// Builds an anchor index from elements with non-`None` anchors, then resolves
-/// each key-based relationship target. Unresolvable keys are logged and skipped
-/// (the relationship is left as `Key` — it will be excluded from the final
-/// `DocumentStructure` relationships).
+/// each key-based relationship target. Unresolvable keys are skipped — the
+/// relationship is left as `Key` and excluded from the final `DocumentStructure`
+/// relationships — and reported in one `ProcessingWarning` naming them.
 pub(crate) fn resolve_relationships(doc: &mut InternalDocument) {
     let mut anchor_map: AHashMap<&str, u32> = AHashMap::new();
     for (idx, elem) in doc.elements.iter().enumerate() {
@@ -39,6 +44,7 @@ pub(crate) fn resolve_relationships(doc: &mut InternalDocument) {
         }
     }
 
+    let mut unresolved: Vec<String> = Vec::new();
     for rel in &mut doc.relationships {
         if let RelationshipTarget::Key(ref key) = rel.target {
             match anchor_map.get(key.as_str()) {
@@ -47,9 +53,36 @@ pub(crate) fn resolve_relationships(doc: &mut InternalDocument) {
                 }
                 None => {
                     log::debug!("Unresolvable relationship key: {}", key);
+                    unresolved.push(key.clone());
                 }
             }
         }
+    }
+
+    if !unresolved.is_empty() {
+        unresolved.sort();
+        unresolved.dedup();
+        let total = unresolved.len();
+        unresolved.truncate(MAX_REPORTED_UNRESOLVED_KEYS);
+        let listed = unresolved.join(", ");
+        let suffix = if total > unresolved.len() {
+            format!(" (and {} more)", total - unresolved.len())
+        } else {
+            String::new()
+        };
+        // One warning for the document rather than one per key: cross-references usually
+        // break as a set, and a per-key warning would flood `processing_warnings` on a
+        // large document. Previously this was `log::debug!` only, so a citation or
+        // cross-reference that failed to resolve vanished from `DocumentStructure` with
+        // no diagnostic at all (#74).
+        crate::core::diagnostics::push_warning(
+            &mut doc.processing_warnings,
+            "relationships",
+            format!(
+                "{total} cross-reference target(s) could not be resolved and were dropped from the \
+                 document structure: {listed}{suffix}"
+            ),
+        );
     }
 }
 
@@ -1086,6 +1119,60 @@ mod tests {
         assert!(ds.validate().is_ok());
         assert_eq!(ds.relationships.len(), 1);
         assert_eq!(ds.relationships[0].kind, RelationshipKind::FootnoteReference);
+    }
+
+    /// Regression test for #74: an unresolvable relationship key used to disappear at
+    /// `log::debug!` only, so a cross-reference or citation whose target was never
+    /// extracted vanished from `DocumentStructure` with no diagnostic at all — the
+    /// caller could not distinguish "this document has no cross-references" from
+    /// "this document's cross-references were silently dropped".
+    #[test]
+    fn should_warn_when_a_relationship_key_cannot_be_resolved() {
+        let mut doc = make_doc("markdown");
+        doc.push_element(InternalElement::text(ElementKind::Paragraph, "See [ref].", 0));
+        doc.push_relationship(Relationship {
+            source: 0,
+            target: RelationshipTarget::Key("missing-anchor".to_string()),
+            kind: RelationshipKind::CrossReference,
+        });
+
+        resolve_relationships(&mut doc);
+
+        assert_eq!(
+            doc.processing_warnings.len(),
+            1,
+            "one warning per document, not per key"
+        );
+        let warning = &doc.processing_warnings[0];
+        assert_eq!(warning.source, "relationships");
+        assert_eq!(
+            warning.message,
+            "1 cross-reference target(s) could not be resolved and were dropped from the \
+             document structure: missing-anchor"
+        );
+    }
+
+    /// A resolvable key must stay silent — the warning above is only meaningful if the
+    /// common case does not also emit it.
+    #[test]
+    fn should_not_warn_when_every_relationship_key_resolves() {
+        let mut doc = make_doc("markdown");
+        doc.push_element(InternalElement::text(ElementKind::Paragraph, "See note.", 0));
+        doc.push_element(InternalElement::text(ElementKind::FootnoteDefinition, "The note.", 0).with_anchor("fn1"));
+        doc.push_relationship(Relationship {
+            source: 0,
+            target: RelationshipTarget::Key("fn1".to_string()),
+            kind: RelationshipKind::FootnoteReference,
+        });
+
+        resolve_relationships(&mut doc);
+
+        assert!(
+            doc.processing_warnings.is_empty(),
+            "a resolvable key must not warn; got {:?}",
+            doc.processing_warnings
+        );
+        assert_eq!(doc.relationships[0].target, RelationshipTarget::Index(1));
     }
 
     #[test]
