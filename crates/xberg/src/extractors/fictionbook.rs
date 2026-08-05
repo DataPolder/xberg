@@ -28,6 +28,9 @@ use quick_xml::events::Event;
 
 use crate::utils::xml_utils::EntityReader;
 
+/// `ProcessingWarning::source` used for every degradation reported by this extractor.
+const FICTIONBOOK_WARNING_SOURCE: &str = "fictionbook";
+
 /// FictionBook document extractor.
 ///
 /// Supports FictionBook 2.0 format with proper section hierarchy and inline formatting.
@@ -662,6 +665,7 @@ impl FictionBookExtractor {
     ) -> Result<InternalDocument> {
         let mut reader = EntityReader::from_bytes(data);
         let mut builder = InternalDocumentBuilder::new("fictionbook");
+        let mut parse_warnings: Vec<crate::types::ProcessingWarning> = Vec::new();
 
         let mut in_body = false;
         let mut is_notes_body = false;
@@ -775,7 +779,18 @@ impl FictionBookExtractor {
                     }
                 }
                 Ok(Event::Eof) => break,
-                Err(_) => break,
+                // Bailing out here abandons every remaining section of the book. Returning
+                // `Ok` with a half-read body and no warning is what #133 reports; name the
+                // loss and keep the sections that were already collected.
+                Err(e) => {
+                    crate::core::diagnostics::push_truncated_parse_warning(
+                        &mut parse_warnings,
+                        FICTIONBOOK_WARNING_SOURCE,
+                        "the FictionBook body",
+                        &e,
+                    );
+                    break;
+                }
                 _ => {}
             }
         }
@@ -787,7 +802,11 @@ impl FictionBookExtractor {
             builder.push_image(description.as_deref(), image, None, None);
         }
 
-        Ok(builder.build())
+        let mut doc = builder.build();
+        for warning in parse_warnings {
+            crate::core::diagnostics::push_warning_deduped(&mut doc.processing_warnings, warning);
+        }
+        Ok(doc)
     }
 
     /// Extract paragraph text with annotation tracking for inline formatting.
