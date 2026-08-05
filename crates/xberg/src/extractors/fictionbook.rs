@@ -1316,8 +1316,10 @@ mod tests {
 </FictionBook>"#;
 
         let extractor = FictionBookExtractor::new();
-        let mut config = ExtractionConfig::default();
-        config.output_format = OutputFormat::Markdown;
+        let config = ExtractionConfig {
+            output_format: OutputFormat::Markdown,
+            ..Default::default()
+        };
 
         let doc = extractor
             .extract_content(fb2, "application/x-fictionbook+xml", &config)

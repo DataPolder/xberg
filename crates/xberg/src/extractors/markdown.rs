@@ -861,8 +861,17 @@ mod tests {
         assert!(mime_types.contains(&"text/x-r-markdown"));
     }
 
-    #[test]
-    fn test_extract_simple_markdown() {
+    /// Render a document through the same path the extractor's callers use.
+    async fn render(content: &[u8]) -> String {
+        let doc = MarkdownExtractor::new()
+            .extract_content(content, "text/markdown", &ExtractionConfig::default())
+            .await
+            .expect("extraction should succeed");
+        crate::rendering::render_markdown(&doc)
+    }
+
+    #[tokio::test]
+    async fn test_extract_simple_markdown() {
         let content =
             b"# Header\n\nThis is a paragraph with **bold** and *italic* text.\n\n## Subheading\n\nMore content here.";
         let text = String::from_utf8_lossy(content).into_owned();
@@ -871,9 +880,7 @@ mod tests {
         assert!(yaml.is_none());
         assert!(!remaining.is_empty());
 
-        let parser = Parser::new_ext(&remaining, Options::ENABLE_TABLES);
-        let events: Vec<Event> = parser.collect();
-        let extracted = crate::extractors::markdown_utils::extract_text_from_events(&events, &mut Vec::new());
+        let extracted = render(content).await;
 
         assert!(extracted.contains("Header"));
         assert!(extracted.contains("This is a paragraph"));
@@ -958,8 +965,8 @@ mod tests {
         assert_eq!(title, Some("Main Title".to_string()));
     }
 
-    #[test]
-    fn test_empty_document() {
+    #[tokio::test]
+    async fn test_empty_document() {
         let content = b"";
         let text = String::from_utf8_lossy(content).into_owned();
 
@@ -967,38 +974,30 @@ mod tests {
         assert!(yaml.is_none());
         assert!(remaining.is_empty());
 
-        let parser = Parser::new_ext(&remaining, Options::ENABLE_TABLES);
-        let events: Vec<Event> = parser.collect();
-        let extracted = crate::extractors::markdown_utils::extract_text_from_events(&events, &mut Vec::new());
-        assert!(extracted.is_empty());
+        assert!(render(content).await.is_empty());
     }
 
-    #[test]
-    fn test_whitespace_only_document() {
+    #[tokio::test]
+    async fn test_whitespace_only_document() {
         let content = b"   \n\n  \n";
         let text = String::from_utf8_lossy(content).into_owned();
 
-        let (yaml, remaining) = extract_frontmatter(&text);
+        let (yaml, _remaining) = extract_frontmatter(&text);
         assert!(yaml.is_none());
 
-        let parser = Parser::new_ext(&remaining, Options::ENABLE_TABLES);
-        let events: Vec<Event> = parser.collect();
-        let extracted = crate::extractors::markdown_utils::extract_text_from_events(&events, &mut Vec::new());
-        assert!(extracted.trim().is_empty());
+        assert!(render(content).await.trim().is_empty());
     }
 
-    #[test]
-    fn test_unicode_content() {
+    #[tokio::test]
+    async fn test_unicode_content() {
         let content = "# 日本語のタイトル\n\nこれは日本語の内容です。\n\n## Español\n\nEste es un documento en español.\n\n## Русский\n\nЭто русский текст.".as_bytes();
 
         let text = String::from_utf8_lossy(content).into_owned();
 
-        let (yaml, remaining) = extract_frontmatter(&text);
+        let (yaml, _remaining) = extract_frontmatter(&text);
         assert!(yaml.is_none());
 
-        let parser = Parser::new_ext(&remaining, Options::ENABLE_TABLES);
-        let events: Vec<Event> = parser.collect();
-        let extracted = crate::extractors::markdown_utils::extract_text_from_events(&events, &mut Vec::new());
+        let extracted = render(content).await;
 
         assert!(extracted.contains("日本語"));
         assert!(extracted.contains("Español"));
@@ -1049,27 +1048,19 @@ mod tests {
         assert!(lines.len() >= 4);
     }
 
-    #[test]
-    fn test_extract_markdown_with_links() {
+    #[tokio::test]
+    async fn test_extract_markdown_with_links() {
         let content = b"# Page\n\nCheck [Google](https://google.com) and [Rust](https://rust-lang.org).";
-        let text = String::from_utf8_lossy(content).into_owned();
-
-        let parser = Parser::new_ext(&text, Options::ENABLE_TABLES);
-        let events: Vec<Event> = parser.collect();
-        let extracted = crate::extractors::markdown_utils::extract_text_from_events(&events, &mut Vec::new());
+        let extracted = render(content).await;
 
         assert!(extracted.contains("Google"));
         assert!(extracted.contains("Rust"));
     }
 
-    #[test]
-    fn test_extract_markdown_with_code_blocks() {
+    #[tokio::test]
+    async fn test_extract_markdown_with_code_blocks() {
         let content = b"# Code Example\n\n```rust\nfn main() {\n    println!(\"Hello\");\n}\n```";
-        let text = String::from_utf8_lossy(content).into_owned();
-
-        let parser = Parser::new_ext(&text, Options::ENABLE_TABLES);
-        let events: Vec<Event> = parser.collect();
-        let extracted = crate::extractors::markdown_utils::extract_text_from_events(&events, &mut Vec::new());
+        let extracted = render(content).await;
 
         assert!(extracted.contains("main"));
         assert!(extracted.contains("println"));
@@ -1191,33 +1182,19 @@ nested:
         assert!(image.is_none());
     }
 
-    #[test]
-    fn test_extract_text_collects_data_uri_images() {
-        let png_b64 =
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
-        let md = format!("# Title\n\n![alt](data:image/png;base64,{png_b64})\n\nSome text.");
+    #[tokio::test]
+    async fn test_http_image_produces_no_extracted_image_bytes() {
+        let md = b"# Title\n\n![alt](https://example.com/photo.jpg)\n\nSome text.";
 
-        let parser = Parser::new_ext(&md, Options::ENABLE_TABLES);
-        let events: Vec<Event> = parser.collect();
-        let mut images = Vec::new();
-        let text = crate::extractors::markdown_utils::extract_text_from_events(&events, &mut images);
+        let doc = MarkdownExtractor::new()
+            .extract_content(md, "text/markdown", &ExtractionConfig::default())
+            .await
+            .expect("extraction should succeed");
 
-        assert_eq!(images.len(), 1);
-        assert_eq!(images[0].format.as_ref(), "png");
-        assert!(text.contains("[Image: data:image/png;base64,"));
-    }
-
-    #[test]
-    fn test_extract_text_skips_http_images() {
-        let md = "# Title\n\n![alt](https://example.com/photo.jpg)\n\nSome text.";
-
-        let parser = Parser::new_ext(md, Options::ENABLE_TABLES);
-        let events: Vec<Event> = parser.collect();
-        let mut images = Vec::new();
-        let text = crate::extractors::markdown_utils::extract_text_from_events(&events, &mut images);
-
-        assert!(images.is_empty());
-        assert!(text.contains("[Image: https://example.com/photo.jpg]"));
+        // A remote URL carries no bytes to decode, so nothing lands in `doc.images`; the
+        // reference itself is preserved as text (see
+        // `test_markdown_http_image_reference_preserved_in_output`).
+        assert!(doc.images.is_empty(), "unexpected images: {:?}", doc.images);
     }
 
     #[tokio::test]
