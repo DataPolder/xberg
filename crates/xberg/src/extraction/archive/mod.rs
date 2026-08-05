@@ -48,8 +48,65 @@ pub struct ArchiveEntry {
 }
 
 /// Common text file extensions that should be extracted from archives.
+///
+/// #113: the original list only covered a handful of formats, so real
+/// plain-text members (source code, config files, alternate markup/data
+/// formats) were treated as binary and skipped. Widened to cover the text
+/// families xberg already extracts elsewhere in the pipeline.
 pub(crate) const TEXT_EXTENSIONS: &[&str] = &[
-    ".txt", ".md", ".json", ".xml", ".html", ".csv", ".log", ".yaml", ".toml",
+    ".txt",
+    ".md",
+    ".markdown",
+    ".json",
+    ".jsonl",
+    ".ndjson",
+    ".xml",
+    ".html",
+    ".htm",
+    ".csv",
+    ".tsv",
+    ".log",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".ini",
+    ".cfg",
+    ".conf",
+    ".properties",
+    ".env",
+    ".rst",
+    ".adoc",
+    ".tex",
+    ".sql",
+    ".rs",
+    ".py",
+    ".js",
+    ".mjs",
+    ".cjs",
+    ".ts",
+    ".tsx",
+    ".jsx",
+    ".go",
+    ".java",
+    ".kt",
+    ".rb",
+    ".php",
+    ".c",
+    ".h",
+    ".cpp",
+    ".cc",
+    ".hpp",
+    ".cs",
+    ".swift",
+    ".sh",
+    ".bash",
+    ".zsh",
+    ".ps1",
+    ".css",
+    ".scss",
+    ".less",
+    ".svg",
+    ".gitignore",
 ];
 
 /// Decode an archive text member's bytes to a string, detecting the charset
@@ -82,6 +139,49 @@ mod tests {
 
     fn default_limits() -> SecurityLimits {
         SecurityLimits::default()
+    }
+
+    /// Regression for #113: real text members with extensions absent from the
+    /// original narrow allowlist (source code, `.ini`/`.env` config, `.yml`,
+    /// `.rst`) must be extracted, not skipped as binary.
+    #[test]
+    fn test_extract_zip_text_content_includes_widened_extensions() {
+        let mut cursor = Cursor::new(Vec::new());
+        {
+            let mut zip = ZipWriter::new(&mut cursor);
+            let options = FileOptions::<'_, ()>::default();
+
+            zip.start_file("main.rs", options).unwrap();
+            zip.write_all(b"fn main() {}").unwrap();
+
+            zip.start_file("settings.ini", options).unwrap();
+            zip.write_all(b"[core]\nkey=value").unwrap();
+
+            zip.start_file(".env", options).unwrap();
+            zip.write_all(b"API_KEY=secret").unwrap();
+
+            zip.start_file("pipeline.yml", options).unwrap();
+            zip.write_all(b"steps: []").unwrap();
+
+            zip.start_file("notes.rst", options).unwrap();
+            zip.write_all(b"Title\n=====").unwrap();
+
+            zip.finish().unwrap();
+        }
+
+        let bytes = cursor.into_inner();
+        let contents = extract_zip_text_content(&bytes, &default_limits()).unwrap();
+
+        assert_eq!(
+            contents.len(),
+            5,
+            "all five widened-extension members should be extracted: {contents:?}"
+        );
+        assert_eq!(contents.get("main.rs").unwrap(), "fn main() {}");
+        assert_eq!(contents.get("settings.ini").unwrap(), "[core]\nkey=value");
+        assert_eq!(contents.get(".env").unwrap(), "API_KEY=secret");
+        assert_eq!(contents.get("pipeline.yml").unwrap(), "steps: []");
+        assert_eq!(contents.get("notes.rst").unwrap(), "Title\n=====");
     }
 
     #[test]
