@@ -36,7 +36,10 @@ fn should_window_input_that_exceeds_the_single_call_word_budget() {
         "a 3000-word document must be windowed, got {} window(s)",
         windows.len()
     );
-    assert_eq!(windows[0].byte_offset, 0, "the first window must start at the source head");
+    assert_eq!(
+        windows[0].byte_offset, 0,
+        "the first window must start at the source head"
+    );
 }
 
 #[test]

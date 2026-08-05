@@ -67,11 +67,7 @@ pub(crate) fn warning(source: &'static str, message: impl Into<String>) -> Proce
 
 /// Record `message` against `source`, collapsing an exact repeat of the same
 /// `(source, message)` pair.
-pub(crate) fn push_warning(
-    accumulated: &mut Vec<ProcessingWarning>,
-    source: &'static str,
-    message: impl Into<String>,
-) {
+pub(crate) fn push_warning(accumulated: &mut Vec<ProcessingWarning>, source: &'static str, message: impl Into<String>) {
     push_warning_deduped(accumulated, warning(source, message));
 }
 

@@ -97,7 +97,10 @@ async fn should_render_org_table_identically_to_the_builder() {
         extracted.tables[0].markdown, expected,
         "an Org table must serialise exactly like the same cells from any other source"
     );
-    assert_eq!(extracted.tables[0].markdown, "| Name | Age |\n| --- | --- |\n| Alice | 30 |\n");
+    assert_eq!(
+        extracted.tables[0].markdown,
+        "| Name | Age |\n| --- | --- |\n| Alice | 30 |\n"
+    );
 }
 
 /// A pipe typed into an Org cell must be escaped on the way out — the OrgMode
@@ -130,6 +133,9 @@ async fn should_escape_pipes_coming_from_an_org_table() {
             .char_indices()
             .filter(|(i, c)| *c == '|' && (*i == 0 || !line[..*i].ends_with('\\')))
             .count();
-        assert_eq!(bare_pipes, 3, "a two-column row must have exactly 3 unescaped pipes: {line}");
+        assert_eq!(
+            bare_pipes, 3,
+            "a two-column row must have exactly 3 unescaped pipes: {line}"
+        );
     }
 }

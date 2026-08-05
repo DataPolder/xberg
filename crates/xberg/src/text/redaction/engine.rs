@@ -643,7 +643,12 @@ fn compile_ner_terms(entities: &[Entity], config: &RedactionConfig) -> Vec<(PiiC
     let mut allowed_custom: HashSet<String> = config
         .ner
         .as_ref()
-        .map(|ner| ner.custom_labels.iter().map(|l| l.trim().to_ascii_lowercase()).collect())
+        .map(|ner| {
+            ner.custom_labels
+                .iter()
+                .map(|l| l.trim().to_ascii_lowercase())
+                .collect()
+        })
         .unwrap_or_default();
     for category in &config.categories {
         if let PiiCategory::Custom(label) = category {
@@ -725,10 +730,7 @@ fn is_word_char(character: char) -> bool {
 }
 
 /// Scan `text` with pre-compiled `(category, regex)` pairs.
-fn scan_regexes<'a>(
-    text: &str,
-    matchers: impl Iterator<Item = (PiiCategory, &'a regex::Regex)>,
-) -> Vec<PatternMatch> {
+fn scan_regexes<'a>(text: &str, matchers: impl Iterator<Item = (PiiCategory, &'a regex::Regex)>) -> Vec<PatternMatch> {
     let mut out = Vec::new();
     for (category, regex) in matchers {
         for m in regex.find_iter(text) {

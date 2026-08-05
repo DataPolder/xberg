@@ -744,7 +744,11 @@ mod tests {
     /// xberg-io/xberg#163: a line break inside a cell must not end the row.
     #[test]
     fn should_replace_cell_line_breaks_with_a_break_tag() {
-        let cells = vec![vec!["H".to_string()], vec!["x\ny".to_string()], vec!["p\r\nq".to_string()]];
+        let cells = vec![
+            vec!["H".to_string()],
+            vec!["x\ny".to_string()],
+            vec!["p\r\nq".to_string()],
+        ];
         let out = render_table_markdown(&cells);
         assert_eq!(out, "| H |\n| --- |\n| x<br>y |\n| p<br>q |\n");
         assert_eq!(out.lines().count(), 4, "embedded newlines must not add rows: {out}");

@@ -275,7 +275,10 @@ mod tests {
 
     #[test]
     fn merge_windowed_entities_collapses_overlap_duplicates() {
-        let merged = merge_windowed_entities(&[0, 90], vec![vec![person(100, 103, "Ada")], vec![person(10, 13, "Ada")]]);
+        let merged = merge_windowed_entities(
+            &[0, 90],
+            vec![vec![person(100, 103, "Ada")], vec![person(10, 13, "Ada")]],
+        );
         assert_eq!(merged.len(), 1, "same span from two windows must collapse: {merged:?}");
         assert_eq!((merged[0].start, merged[0].end), (100, 103));
     }

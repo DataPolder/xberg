@@ -81,26 +81,26 @@ fn redacted_document() -> ExtractedDocument {
     let mut document = ExtractedDocument::default();
     document.content = format!("{SUBJECT} works at {EMPLOYER}.");
     document.tables = vec![Table {
-            cells: vec![vec!["Employee".to_string(), SUBJECT.to_string()]],
-            markdown: format!("| Employee | {SUBJECT} |"),
-            page_number: 1,
-            bounding_box: None,
-            ..Default::default()
-        }];
+        cells: vec![vec!["Employee".to_string(), SUBJECT.to_string()]],
+        markdown: format!("| Employee | {SUBJECT} |"),
+        page_number: 1,
+        bounding_box: None,
+        ..Default::default()
+    }];
     document.chunks = Some(vec![chunk(&format!("Chunk mentions {SUBJECT}."))]);
     document.pages = Some(vec![page(&format!("Page mentions {EMPLOYER}."))]);
     document.form_fields = vec![PdfFormField {
-            name: "employee".to_string(),
-            full_name: "form.employee".to_string(),
-            field_type: FormFieldType::Text,
-            value: Some(SUBJECT.to_string()),
-            default_value: None,
-            flags: 0,
-            page: None,
-            bbox: None,
-            max_length: None,
-            tooltip: None,
-        }];
+        name: "employee".to_string(),
+        full_name: "form.employee".to_string(),
+        field_type: FormFieldType::Text,
+        value: Some(SUBJECT.to_string()),
+        default_value: None,
+        flags: 0,
+        page: None,
+        bbox: None,
+        max_length: None,
+        tooltip: None,
+    }];
     document.metadata.title = Some(format!("Personnel file: {SUBJECT}"));
     document.metadata.authors = Some(vec![SUBJECT.to_string()]);
     document.metadata.created_by = Some(SUBJECT.to_string());
@@ -122,7 +122,10 @@ fn should_redact_ner_person_in_metadata_title() {
 #[test]
 fn should_redact_ner_person_in_metadata_authors_and_created_by() {
     let document = redacted_document();
-    assert_eq!(document.metadata.authors.as_deref(), Some([MASK.to_string()].as_slice()));
+    assert_eq!(
+        document.metadata.authors.as_deref(),
+        Some([MASK.to_string()].as_slice())
+    );
     assert_eq!(document.metadata.created_by.as_deref(), Some(MASK));
 }
 

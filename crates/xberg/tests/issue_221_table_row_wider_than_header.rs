@@ -41,7 +41,10 @@ fn should_keep_every_cell_when_row_is_wider_than_header() {
         markdown, "| A | B |  |\n| --- | --- | --- |\n| 1 | 2 | 3 |\n",
         "row wider than the header must keep every cell"
     );
-    assert!(markdown.contains(" 3 "), "the overflow cell must not be dropped: {markdown}");
+    assert!(
+        markdown.contains(" 3 "),
+        "the overflow cell must not be dropped: {markdown}"
+    );
 }
 
 #[test]
@@ -51,8 +54,7 @@ fn should_keep_every_cell_when_row_is_much_wider_than_header() {
     let markdown = render(&cells);
 
     assert_eq!(
-        markdown,
-        "| only |  |  |  |\n| --- | --- | --- | --- |\n| a | b | c | d |\n",
+        markdown, "| only |  |  |  |\n| --- | --- | --- | --- |\n| a | b | c | d |\n",
         "all four cells must survive a single-column header"
     );
 }
@@ -64,8 +66,7 @@ fn should_pad_rows_narrower_than_the_widest_row() {
     let markdown = render(&cells);
 
     assert_eq!(
-        markdown,
-        "| H1 | H2 | H3 |\n| --- | --- | --- |\n| R1C1 | R1C2 |  |\n| R2C1 | R2C2 | R2C3 |\n",
+        markdown, "| H1 | H2 | H3 |\n| --- | --- | --- |\n| R1C1 | R1C2 |  |\n| R2C1 | R2C2 | R2C3 |\n",
         "short rows are padded so every line has the same column count"
     );
 }

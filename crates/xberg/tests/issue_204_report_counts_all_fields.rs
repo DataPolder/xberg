@@ -50,12 +50,12 @@ fn should_count_findings_from_every_field_not_only_content() {
     document.content = format!("{SUBJECT} signed.");
     document.formatted_content = Some(format!("**{SUBJECT}** signed."));
     document.tables = vec![Table {
-            cells: vec![vec![SUBJECT.to_string()]],
-            markdown: String::new(),
-            page_number: 1,
-            bounding_box: None,
-            ..Default::default()
-        }];
+        cells: vec![vec![SUBJECT.to_string()]],
+        markdown: String::new(),
+        page_number: 1,
+        bounding_box: None,
+        ..Default::default()
+    }];
     document.pages = Some(vec![page(&format!("Page names {SUBJECT}."))]);
     document.metadata.title = Some(SUBJECT.to_string());
 

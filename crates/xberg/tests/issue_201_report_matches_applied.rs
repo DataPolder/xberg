@@ -53,12 +53,12 @@ fn should_report_exactly_as_many_findings_as_replacements_applied() {
     let mut document = ExtractedDocument::default();
     document.content = format!("{SUBJECT} mailed qq-user@invalid.example and {SUBJECT} replied.");
     document.tables = vec![Table {
-            cells: vec![vec!["Owner".to_string(), SUBJECT.to_string()]],
-            markdown: String::new(),
-            page_number: 1,
-            bounding_box: None,
-            ..Default::default()
-        }];
+        cells: vec![vec!["Owner".to_string(), SUBJECT.to_string()]],
+        markdown: String::new(),
+        page_number: 1,
+        bounding_box: None,
+        ..Default::default()
+    }];
     document.metadata.title = Some(format!("Case file: {SUBJECT}"));
     let entities = vec![person(SUBJECT, 0, SUBJECT.len() as u32)];
 
