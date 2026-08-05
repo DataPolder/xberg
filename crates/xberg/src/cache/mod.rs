@@ -524,7 +524,6 @@ mod tests {
 
     /// Capture `tracing` output emitted on this thread while `body` runs.
     fn capture_logs<T>(body: impl FnOnce() -> T) -> (T, String) {
-        use std::io::Write as _;
         use std::sync::{Arc, Mutex};
 
         #[derive(Clone)]

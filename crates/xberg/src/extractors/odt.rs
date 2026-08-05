@@ -633,7 +633,6 @@ pub(crate) fn build_internal_elements(
     revisions: &mut Vec<DocumentRevision>,
 ) -> crate::error::Result<()> {
     use crate::types::document_structure::ContentLayer;
-    use crate::types::internal::{ElementKind, InternalElement};
 
     let mut footnote_counter = 0u32;
     let mut comment_counter = 0u32;
