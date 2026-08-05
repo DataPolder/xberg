@@ -158,7 +158,7 @@ pub fn extract_xlsx_app_properties<R: Read + std::io::Seek>(archive: &mut ZipArc
 
     let root = doc.root_element();
 
-    let worksheet_names = extract_titles_of_parts(root);
+    let worksheet_names = titles_for_heading(root, "worksheet");
 
     Ok(XlsxAppProperties {
         application: super::parse_xml_text(root, "Application"),
@@ -188,7 +188,7 @@ pub fn extract_pptx_app_properties<R: Read + std::io::Seek>(archive: &mut ZipArc
 
     let root = doc.root_element();
 
-    let slide_titles = extract_titles_of_parts(root);
+    let slide_titles = titles_for_heading(root, "slide");
 
     let presentation_format = super::parse_xml_text(root, "PresentationFormat");
 
@@ -211,26 +211,91 @@ pub fn extract_pptx_app_properties<R: Read + std::io::Seek>(archive: &mut ZipArc
     })
 }
 
-/// Extract titles from TitlesOfParts vt:vector element
+/// Parse every `vt:lpstr` under `TitlesOfParts`'s `vt:vector`, in document order.
 ///
-/// Handles the vt:vector/vt:lpstr structure used for worksheet/slide names.
-fn extract_titles_of_parts(root: Node) -> Vec<String> {
+/// `TitlesOfParts` is a single flat vector that concatenates *several* logical groups
+/// (e.g. worksheet names followed by named ranges, or theme names followed by slide
+/// titles); the group boundaries are declared separately in the sibling `HeadingPairs`
+/// element (see [`parse_heading_pairs`]). Entries are kept in raw form (including empty
+/// strings) here so that slicing by `HeadingPairs` counts stays correctly aligned;
+/// filtering happens after slicing in [`titles_for_heading`].
+fn parse_titles_of_parts_raw(root: Node) -> Vec<String> {
     let mut titles = Vec::new();
 
     if let Some(titles_node) = root.descendants().find(|n| n.has_tag_name("TitlesOfParts"))
         && let Some(vector_node) = titles_node.descendants().find(|n| n.has_tag_name("vector"))
     {
-        for lpstr_node in vector_node.descendants().filter(|n| n.has_tag_name("lpstr")) {
-            if let Some(text) = lpstr_node.text() {
-                let text = text.trim();
-                if !text.is_empty() {
-                    titles.push(text.to_string());
-                }
-            }
+        for lpstr_node in vector_node.children().filter(|n| n.has_tag_name("lpstr")) {
+            titles.push(lpstr_node.text().unwrap_or("").trim().to_string());
         }
     }
 
     titles
+}
+
+/// Parse `HeadingPairs` into an ordered list of `(group name, entry count)` pairs.
+///
+/// `HeadingPairs` is a `vt:vector` of `vt:variant` pairs: a name (`vt:lpstr`, e.g.
+/// `"Worksheets"` or `"Named Ranges"`) immediately followed by a count (`vt:i4`) of how
+/// many consecutive entries in `TitlesOfParts` belong to that group. Malformed or
+/// incomplete pairs are skipped rather than aborting the whole parse.
+fn parse_heading_pairs(root: Node) -> Vec<(String, usize)> {
+    let Some(heading_node) = root.descendants().find(|n| n.has_tag_name("HeadingPairs")) else {
+        return Vec::new();
+    };
+    let Some(vector_node) = heading_node.descendants().find(|n| n.has_tag_name("vector")) else {
+        return Vec::new();
+    };
+
+    let variants: Vec<Node> = vector_node.children().filter(|n| n.has_tag_name("variant")).collect();
+
+    let mut pairs = Vec::new();
+    let mut iter = variants.into_iter();
+    while let (Some(name_variant), Some(count_variant)) = (iter.next(), iter.next()) {
+        let name = name_variant
+            .children()
+            .find(|n| n.has_tag_name("lpstr"))
+            .and_then(|n| n.text())
+            .map(|s| s.trim().to_string());
+        let count = count_variant
+            .children()
+            .find(|n| n.has_tag_name("i4"))
+            .and_then(|n| n.text())
+            .and_then(|s| s.trim().parse::<usize>().ok());
+
+        if let (Some(name), Some(count)) = (name, count) {
+            pairs.push((name, count));
+        }
+    }
+
+    pairs
+}
+
+/// Return the `TitlesOfParts` entries belonging to the `HeadingPairs` group whose name
+/// contains `needle` (case-insensitive), e.g. `"worksheet"` or `"slide"`.
+///
+/// Falls back to returning all non-empty titles when `HeadingPairs` is absent, matching
+/// the pre-#231 behavior for documents that omit it. When `HeadingPairs` is present but no
+/// group name matches `needle`, returns an empty list rather than guessing.
+fn titles_for_heading(root: Node, needle: &str) -> Vec<String> {
+    let titles = parse_titles_of_parts_raw(root);
+    let pairs = parse_heading_pairs(root);
+
+    if pairs.is_empty() {
+        return titles.into_iter().filter(|t| !t.is_empty()).collect();
+    }
+
+    let mut offset = 0usize;
+    for (name, count) in &pairs {
+        let start = offset.min(titles.len());
+        let end = (offset + count).min(titles.len());
+        if name.to_lowercase().contains(needle) {
+            return titles[start..end].iter().filter(|t| !t.is_empty()).cloned().collect();
+        }
+        offset = end;
+    }
+
+    Vec::new()
 }
 
 #[cfg(test)]
@@ -374,7 +439,58 @@ mod tests {
         </Properties>"#;
 
         let doc = roxmltree::Document::parse(xml).unwrap();
-        let titles = extract_titles_of_parts(doc.root_element());
+        let titles = titles_for_heading(doc.root_element(), "worksheet");
         assert_eq!(titles, Vec::<String>::new());
+    }
+
+    #[test]
+    fn test_titles_for_heading_slices_by_heading_pairs() {
+        let xml = r#"<Properties xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
+            <HeadingPairs>
+                <vt:vector size="4" baseType="variant">
+                    <vt:variant><vt:lpstr>Worksheets</vt:lpstr></vt:variant>
+                    <vt:variant><vt:i4>2</vt:i4></vt:variant>
+                    <vt:variant><vt:lpstr>Named Ranges</vt:lpstr></vt:variant>
+                    <vt:variant><vt:i4>1</vt:i4></vt:variant>
+                </vt:vector>
+            </HeadingPairs>
+            <TitlesOfParts>
+                <vt:vector size="3" baseType="lpstr">
+                    <vt:lpstr>Sheet1</vt:lpstr>
+                    <vt:lpstr>Sheet2</vt:lpstr>
+                    <vt:lpstr>Print_Area</vt:lpstr>
+                </vt:vector>
+            </TitlesOfParts>
+        </Properties>"#;
+
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        assert_eq!(
+            titles_for_heading(doc.root_element(), "worksheet"),
+            vec!["Sheet1".to_string(), "Sheet2".to_string()]
+        );
+        assert_eq!(
+            titles_for_heading(doc.root_element(), "named range"),
+            vec!["Print_Area".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_titles_for_heading_no_match_returns_empty() {
+        let xml = r#"<Properties xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
+            <HeadingPairs>
+                <vt:vector size="2" baseType="variant">
+                    <vt:variant><vt:lpstr>Fonts Used</vt:lpstr></vt:variant>
+                    <vt:variant><vt:i4>1</vt:i4></vt:variant>
+                </vt:vector>
+            </HeadingPairs>
+            <TitlesOfParts>
+                <vt:vector size="1" baseType="lpstr">
+                    <vt:lpstr>Arial</vt:lpstr>
+                </vt:vector>
+            </TitlesOfParts>
+        </Properties>"#;
+
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        assert_eq!(titles_for_heading(doc.root_element(), "slide"), Vec::<String>::new());
     }
 }
