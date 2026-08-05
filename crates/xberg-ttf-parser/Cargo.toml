@@ -2,7 +2,12 @@
 name = "xberg-ttf-parser"
 version.workspace = true
 edition.workspace = true
-rust-version.workspace = true
+# Deliberately NOT inherited from the workspace. This crate is vendored from
+# harfbuzz/ttf-parser (whose own MSRV was 1.63) and uses no language or stdlib
+# feature newer than the floor below — the workspace's higher pin came from
+# other crates and would otherwise be imposed on every downstream consumer.
+# Verified: `cargo +1.88 check -p xberg-ttf-parser` builds clean. ~keep
+rust-version = "1.88"
 authors.workspace = true
 description = "Safe, zero-allocation TrueType/OpenType/AAT font parser for Xberg (vendored from harfbuzz/ttf-parser)"
 license.workspace = true

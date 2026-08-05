@@ -59,6 +59,9 @@ Font parsing starts with a [`Face`].
 // `#[allow]`s that every cherry-pick would then conflict on. ~keep
 #![allow(dead_code)]
 #![allow(unused_variables)]
+// `mismatched_lifetime_syntaxes` postdates the crate's 1.88 MSRV floor, so
+// toolchains at the floor warn on the allow itself. Suppress that first. ~keep
+#![allow(unknown_lints)]
 #![allow(mismatched_lifetime_syntaxes)]
 #![allow(clippy::manual_div_ceil)]
 #![allow(clippy::manual_is_multiple_of)]
