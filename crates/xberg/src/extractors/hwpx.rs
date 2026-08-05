@@ -13,6 +13,7 @@ use crate::core::config::ExtractionConfig;
 use crate::extractors::security::ZipBombValidator;
 use crate::plugins::{InternalDocumentExtractor, Plugin};
 use crate::types::ExtractedImage;
+use crate::types::document_structure::{AnnotationKind, ContentLayer, TextAnnotation};
 use crate::types::internal::InternalDocument;
 use crate::types::internal_builder::InternalDocumentBuilder;
 
@@ -67,6 +68,14 @@ fn mime_to_format(mime: &str) -> Cow<'static, str> {
         "image/gif" => Cow::Borrowed("gif"),
         "image/bmp" => Cow::Borrowed("bmp"),
         "image/webp" => Cow::Borrowed("webp"),
+        // HWPX embeds vector/legacy Windows metafiles (WMF/EMF) and SVG far more often
+        // than other office formats — `unhwp`'s resource guesser (hwpx/mod.rs
+        // `guess_mime_type`) returns these three MIME strings, and previously every one
+        // of them fell through to the generic "bin" bucket, discarding the real format
+        // (#120).
+        "image/svg+xml" => Cow::Borrowed("svg"),
+        "image/x-wmf" => Cow::Borrowed("wmf"),
+        "image/x-emf" => Cow::Borrowed("emf"),
         _ => Cow::Borrowed("bin"),
     }
 }
@@ -108,23 +117,50 @@ fn build_hwpx_internal_document(doc: unhwp::model::Document, mime_type: &str) ->
     }
 
     let mut image_index: usize = 0;
+    let mut footnote_counter: u32 = 0;
 
     for section in &doc.sections {
+        // Section headers/footers (`unhwp::model::Section::header`/`footer`) previously
+        // went unread entirely — only `section.content` was visited (#96).
+        if let Some(header_paragraphs) = &section.header {
+            push_header_footer_paragraphs(
+                &mut builder,
+                header_paragraphs,
+                ContentLayer::Header,
+                &mut footnote_counter,
+            );
+        }
+        if let Some(footer_paragraphs) = &section.footer {
+            push_header_footer_paragraphs(
+                &mut builder,
+                footer_paragraphs,
+                ContentLayer::Footer,
+                &mut footnote_counter,
+            );
+        }
+
         for block in &section.content {
             match block {
                 unhwp::model::Block::Paragraph(p) => {
-                    if p.style.is_heading() && p.has_text_content() {
-                        let text = p.plain_text();
-                        let trimmed = text.trim();
+                    // `Paragraph::has_text_content()` does not count `InlineContent::Equation`
+                    // (see `unhwp::model::paragraph`), so an equation-only paragraph (no
+                    // surrounding prose) would otherwise be dropped here before its LaTeX
+                    // ever reached `build_paragraph_content` (#98).
+                    let has_equation = p
+                        .content
+                        .iter()
+                        .any(|c| matches!(c, unhwp::model::InlineContent::Equation(_)));
+                    let (text, annotations) = build_paragraph_content(&mut builder, p, &mut footnote_counter);
+                    let (trimmed, adjusted) = trim_text_and_annotations(&text, annotations);
+                    if p.style.is_heading() && (p.has_text_content() || has_equation) {
                         if !trimmed.is_empty() {
-                            builder.push_heading(p.style.heading_level, trimmed, None, None);
+                            let idx = builder.push_heading(p.style.heading_level, trimmed, None, None);
+                            if !adjusted.is_empty() {
+                                builder.set_annotations(idx, adjusted);
+                            }
                         }
-                    } else if p.has_text_content() {
-                        let text = p.plain_text();
-                        let trimmed = text.trim();
-                        if !trimmed.is_empty() {
-                            builder.push_paragraph(trimmed, vec![], None, None);
-                        }
+                    } else if (p.has_text_content() || has_equation) && !trimmed.is_empty() {
+                        builder.push_paragraph(trimmed, adjusted, None, None);
                     }
 
                     for inline in &p.content {
@@ -159,12 +195,15 @@ fn build_hwpx_internal_document(doc: unhwp::model::Document, mime_type: &str) ->
                 }
                 unhwp::model::Block::Table(t) => {
                     if !t.rows.is_empty() {
-                        let cells: Vec<Vec<String>> = t
-                            .rows
-                            .iter()
-                            .map(|row| row.cells.iter().map(|cell| cell.plain_text()).collect())
-                            .collect();
-                        builder.push_table_from_cells(&cells, None, None);
+                        let mut cells: Vec<Vec<String>> = Vec::with_capacity(t.rows.len());
+                        for row in &t.rows {
+                            let mut row_cells = Vec::with_capacity(row.cells.len());
+                            for cell in &row.cells {
+                                row_cells.push(cell_plain_text(&mut builder, cell, &mut footnote_counter));
+                            }
+                            cells.push(row_cells);
+                        }
+                        push_table(&mut builder, cells, t.has_header);
                     }
                 }
             }
@@ -172,6 +211,157 @@ fn build_hwpx_internal_document(doc: unhwp::model::Document, mime_type: &str) ->
     }
 
     builder.build()
+}
+
+/// Push a header's or footer's paragraphs, tagging every element with the given
+/// `ContentLayer` so downstream filters (`include_headers`/`include_footers`) can find
+/// them (#96 — these were previously not read from `unhwp`'s model at all).
+fn push_header_footer_paragraphs(
+    builder: &mut InternalDocumentBuilder,
+    paragraphs: &[unhwp::model::Paragraph],
+    layer: ContentLayer,
+    footnote_counter: &mut u32,
+) {
+    for p in paragraphs {
+        let (text, annotations) = build_paragraph_content(builder, p, footnote_counter);
+        let (trimmed, adjusted) = trim_text_and_annotations(&text, annotations);
+        if trimmed.is_empty() {
+            continue;
+        }
+        let idx = builder.push_paragraph(trimmed, adjusted, None, None);
+        builder.set_layer(idx, layer);
+    }
+}
+
+/// Builds a paragraph's flattened text plus byte-offset annotations from its inline
+/// content, and records footnote definitions as a side effect.
+///
+/// This replaces the previous reliance on `Paragraph::plain_text()`, which silently
+/// dropped footnote text (`InlineContent::Footnote` fell through `plain_text()`'s
+/// catch-all arm) and hyperlink targets (only the anchor text survived) (#97), and
+/// rendered equations as their raw HWP script instead of the LaTeX `unhwp` already
+/// computes (#98).
+fn build_paragraph_content(
+    builder: &mut InternalDocumentBuilder,
+    p: &unhwp::model::Paragraph,
+    footnote_counter: &mut u32,
+) -> (String, Vec<TextAnnotation>) {
+    let mut text = String::new();
+    let mut annotations = Vec::new();
+
+    for item in &p.content {
+        match item {
+            unhwp::model::InlineContent::Text(run) => text.push_str(&run.text),
+            unhwp::model::InlineContent::LineBreak => text.push('\n'),
+            unhwp::model::InlineContent::Link { text: link_text, url } => {
+                let start = text.len() as u32;
+                text.push_str(link_text);
+                let end = text.len() as u32;
+                if start < end {
+                    annotations.push(TextAnnotation {
+                        start,
+                        end,
+                        kind: AnnotationKind::Link {
+                            url: url.clone(),
+                            title: None,
+                        },
+                    });
+                }
+            }
+            unhwp::model::InlineContent::Equation(eq) => {
+                // `unhwp::equation::to_latex` converts HWP's own EQEdit script DSL
+                // (not MathML/OMML — HWP equations use a distinct script format) to
+                // LaTeX. The parser leaves `Equation.latex` unset (only `unhwp`'s own
+                // Markdown renderer calls `to_latex`), so it is invoked directly here
+                // instead of duplicating a second HWP-script-to-LaTeX converter (#98).
+                let latex = eq
+                    .latex
+                    .clone()
+                    .unwrap_or_else(|| unhwp::equation::to_latex(&eq.script));
+                text.push('$');
+                text.push_str(&latex);
+                text.push('$');
+            }
+            unhwp::model::InlineContent::Footnote(note_text) => {
+                *footnote_counter += 1;
+                let key = format!("hwpx-fn{footnote_counter}");
+                text.push_str(&format!("[^{footnote_counter}]"));
+                if !note_text.trim().is_empty() {
+                    let idx = builder.push_footnote_definition(note_text.trim(), &key, None);
+                    builder.set_layer(idx, ContentLayer::Footnote);
+                }
+            }
+            unhwp::model::InlineContent::Image(_) => {
+                // Images are extracted separately by the caller, which has access to
+                // `doc.resources` for the binary payload.
+            }
+        }
+    }
+
+    (text, annotations)
+}
+
+/// Trims leading/trailing whitespace from `text` and shifts `annotations`' byte
+/// offsets to match, dropping any annotation that fell entirely within the trimmed
+/// prefix. Byte offsets are computed against the untrimmed text in
+/// `build_paragraph_content`, so trimming without this adjustment would silently
+/// misalign every annotation.
+fn trim_text_and_annotations(text: &str, annotations: Vec<TextAnnotation>) -> (&str, Vec<TextAnnotation>) {
+    let trimmed = text.trim();
+    let trim_start = (text.len() - text.trim_start().len()) as u32;
+    let trimmed_len = trimmed.len() as u32;
+
+    let adjusted = annotations
+        .into_iter()
+        .filter_map(|mut annotation| {
+            if annotation.end <= trim_start {
+                return None;
+            }
+            annotation.start = annotation.start.saturating_sub(trim_start).min(trimmed_len);
+            annotation.end = annotation.end.saturating_sub(trim_start).min(trimmed_len);
+            if annotation.start >= annotation.end {
+                None
+            } else {
+                Some(annotation)
+            }
+        })
+        .collect();
+
+    (trimmed, adjusted)
+}
+
+/// Flattens a table cell's paragraphs to a single string for the cell grid, still
+/// routing through `build_paragraph_content` so footnotes/links/equations inside a
+/// cell are captured rather than silently dropped by `TableCell::plain_text()` (#120).
+fn cell_plain_text(
+    builder: &mut InternalDocumentBuilder,
+    cell: &unhwp::model::TableCell,
+    footnote_counter: &mut u32,
+) -> String {
+    let mut lines = Vec::with_capacity(cell.content.len());
+    for p in &cell.content {
+        let (text, _annotations) = build_paragraph_content(builder, p, footnote_counter);
+        lines.push(text.trim().to_string());
+    }
+    lines.join("\n")
+}
+
+/// Pushes a table, setting `Table::columns` from the first row when `unhwp` reports a
+/// header row — previously always `None` regardless of `has_header` (#120). Note:
+/// `unhwp`'s HWPX parser currently sets `has_header` on every non-empty table
+/// (`hwpx/section.rs::parse_table`), so this is best-effort until that upstream signal
+/// is more precise; it is still strictly more informative than never populating
+/// `columns` at all.
+fn push_table(builder: &mut InternalDocumentBuilder, cells: Vec<Vec<String>>, has_header: bool) -> u32 {
+    let markdown = crate::rendering::common::render_table_markdown(&cells);
+    let columns = if has_header { cells.first().cloned() } else { None };
+    let table = crate::types::Table {
+        cells,
+        markdown,
+        columns,
+        ..Default::default()
+    };
+    builder.push_table(table, None, None)
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
@@ -217,6 +407,244 @@ impl InternalDocumentExtractor for HwpxExtractor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::internal::ElementKind;
+    use unhwp::model::{
+        Block, Document, Equation, InlineContent, Paragraph, Section, Table, TableCell, TableRow, TextRun,
+    };
+
+    #[test]
+    fn test_mime_to_format_maps_svg_wmf_emf() {
+        assert_eq!(mime_to_format("image/svg+xml"), Cow::Borrowed("svg"));
+        assert_eq!(mime_to_format("image/x-wmf"), Cow::Borrowed("wmf"));
+        assert_eq!(mime_to_format("image/x-emf"), Cow::Borrowed("emf"));
+        assert_eq!(mime_to_format("image/png"), Cow::Borrowed("png"));
+        assert_eq!(mime_to_format("application/octet-stream"), Cow::Borrowed("bin"));
+    }
+
+    #[test]
+    fn test_section_header_and_footer_are_extracted() {
+        let mut doc = Document::new();
+        let mut section = Section::new(0);
+        section.header = Some(vec![Paragraph::text("Confidential Draft")]);
+        section.footer = Some(vec![Paragraph::text("Page footer text")]);
+        doc.sections.push(section);
+
+        let internal = build_hwpx_internal_document(doc, "application/haansofthwpx");
+
+        let header = internal
+            .elements
+            .iter()
+            .find(|e| e.layer == ContentLayer::Header)
+            .expect("header element must be present");
+        assert_eq!(header.text, "Confidential Draft");
+
+        let footer = internal
+            .elements
+            .iter()
+            .find(|e| e.layer == ContentLayer::Footer)
+            .expect("footer element must be present");
+        assert_eq!(footer.text, "Page footer text");
+    }
+
+    #[test]
+    fn test_footnote_produces_marker_and_definition() {
+        let mut doc = Document::new();
+        let mut section = Section::new(0);
+        let mut p = Paragraph::new();
+        p.push_text(TextRun::new("See "));
+        p.content.push(InlineContent::Footnote("The note body.".to_string()));
+        p.push_text(TextRun::new(" done"));
+        section.content.push(Block::Paragraph(p));
+        doc.sections.push(section);
+
+        let internal = build_hwpx_internal_document(doc, "application/haansofthwpx");
+
+        let body = internal
+            .elements
+            .iter()
+            .find(|e| e.kind == ElementKind::Paragraph)
+            .expect("body paragraph must be present");
+        assert_eq!(body.text, "See [^1] done");
+
+        let definition = internal
+            .elements
+            .iter()
+            .find(|e| e.kind == ElementKind::FootnoteDefinition)
+            .expect("footnote definition element must be present");
+        assert_eq!(definition.text, "The note body.");
+        assert_eq!(definition.layer, ContentLayer::Footnote);
+    }
+
+    #[test]
+    fn test_link_produces_link_annotation_with_correct_offsets() {
+        let mut doc = Document::new();
+        let mut section = Section::new(0);
+        let mut p = Paragraph::new();
+        p.push_text(TextRun::new("Go to "));
+        p.content.push(InlineContent::Link {
+            text: "our site".to_string(),
+            url: "https://example.com".to_string(),
+        });
+        section.content.push(Block::Paragraph(p));
+        doc.sections.push(section);
+
+        let internal = build_hwpx_internal_document(doc, "application/haansofthwpx");
+
+        let elem = internal
+            .elements
+            .iter()
+            .find(|e| e.kind == ElementKind::Paragraph)
+            .expect("paragraph must be present");
+        assert_eq!(elem.text, "Go to our site");
+        assert_eq!(elem.annotations.len(), 1);
+        let annotation = &elem.annotations[0];
+        assert_eq!(annotation.start, 6);
+        assert_eq!(annotation.end, 14);
+        assert_eq!(
+            annotation.kind,
+            AnnotationKind::Link {
+                url: "https://example.com".to_string(),
+                title: None,
+            }
+        );
+    }
+
+    #[test]
+    fn test_equation_is_converted_to_latex_via_unhwp() {
+        let mut doc = Document::new();
+        let mut section = Section::new(0);
+        let mut p = Paragraph::new();
+        p.push_text(TextRun::new("Result: "));
+        p.content.push(InlineContent::Equation(Equation::new("FRAC{a}{b}")));
+        section.content.push(Block::Paragraph(p));
+        doc.sections.push(section);
+
+        let internal = build_hwpx_internal_document(doc, "application/haansofthwpx");
+
+        let elem = internal
+            .elements
+            .iter()
+            .find(|e| e.kind == ElementKind::Paragraph)
+            .expect("paragraph must be present");
+        assert_eq!(elem.text, "Result: $\\frac{a}{b}$");
+    }
+
+    #[test]
+    fn test_equation_only_paragraph_is_not_dropped() {
+        let mut doc = Document::new();
+        let mut section = Section::new(0);
+        let mut p = Paragraph::new();
+        p.content.push(InlineContent::Equation(Equation::new("FRAC{a}{b}")));
+        section.content.push(Block::Paragraph(p));
+        doc.sections.push(section);
+
+        let internal = build_hwpx_internal_document(doc, "application/haansofthwpx");
+
+        let elem = internal
+            .elements
+            .iter()
+            .find(|e| e.kind == ElementKind::Paragraph)
+            .expect("equation-only paragraph must still be emitted (#98)");
+        assert_eq!(elem.text, "$\\frac{a}{b}$");
+    }
+
+    #[test]
+    fn test_table_header_row_populates_columns_and_cell_content() {
+        let mut doc = Document::new();
+        let mut section = Section::new(0);
+
+        let mut table = Table::new();
+        table.has_header = true;
+        let mut header_row = TableRow::new();
+        header_row.cells.push(TableCell::text("Name"));
+        header_row.cells.push(TableCell::text("Age"));
+        table.rows.push(header_row);
+        let mut data_row = TableRow::new();
+        data_row.cells.push(TableCell::text("Alice"));
+        data_row.cells.push(TableCell::text("30"));
+        table.rows.push(data_row);
+
+        section.content.push(Block::Table(table));
+        doc.sections.push(section);
+
+        let internal = build_hwpx_internal_document(doc, "application/haansofthwpx");
+
+        let table_elem = internal
+            .elements
+            .iter()
+            .find(|e| matches!(e.kind, ElementKind::Table { .. }))
+            .expect("table element must be present");
+        let ElementKind::Table { table_index } = table_elem.kind else {
+            unreachable!()
+        };
+        let extracted_table = &internal.tables[table_index as usize];
+        assert_eq!(
+            extracted_table.columns,
+            Some(vec!["Name".to_string(), "Age".to_string()])
+        );
+        assert_eq!(
+            extracted_table.cells,
+            vec![
+                vec!["Name".to_string(), "Age".to_string()],
+                vec!["Alice".to_string(), "30".to_string()],
+            ]
+        );
+    }
+
+    #[test]
+    fn test_table_without_header_leaves_columns_unset() {
+        let mut doc = Document::new();
+        let mut section = Section::new(0);
+
+        let mut table = Table::new();
+        table.has_header = false;
+        let mut row = TableRow::new();
+        row.cells.push(TableCell::text("A"));
+        table.rows.push(row);
+
+        section.content.push(Block::Table(table));
+        doc.sections.push(section);
+
+        let internal = build_hwpx_internal_document(doc, "application/haansofthwpx");
+
+        let table_elem = internal
+            .elements
+            .iter()
+            .find(|e| matches!(e.kind, ElementKind::Table { .. }))
+            .expect("table element must be present");
+        let ElementKind::Table { table_index } = table_elem.kind else {
+            unreachable!()
+        };
+        assert_eq!(internal.tables[table_index as usize].columns, None);
+    }
+
+    #[test]
+    fn test_table_cell_footnote_is_extracted_not_dropped() {
+        let mut doc = Document::new();
+        let mut section = Section::new(0);
+
+        let mut table = Table::new();
+        let mut row = TableRow::new();
+        let mut cell = TableCell::new();
+        let mut cell_para = Paragraph::new();
+        cell_para.content.push(InlineContent::Footnote("cell note".to_string()));
+        cell_para.push_text(TextRun::new("cell body"));
+        cell.content.push(cell_para);
+        row.cells.push(cell);
+        table.rows.push(row);
+
+        section.content.push(Block::Table(table));
+        doc.sections.push(section);
+
+        let internal = build_hwpx_internal_document(doc, "application/haansofthwpx");
+
+        let definition = internal
+            .elements
+            .iter()
+            .find(|e| e.kind == ElementKind::FootnoteDefinition)
+            .expect("footnote inside a table cell must still produce a definition");
+        assert_eq!(definition.text, "cell note");
+    }
 
     #[test]
     fn test_hwpx_extractor_plugin_interface() {
