@@ -71,12 +71,13 @@ unsafe extern "C" fn extractor_extract(
             .into_owned()
     };
     if let Ok(input_value) = serde_json::from_str::<serde_json::Value>(&input_json)
-        && let Some(bytes) = input_value.get("bytes").and_then(serde_json::Value::as_array) {
-            state.received_len.store(bytes.len(), Ordering::SeqCst);
-            if let Some(last) = bytes.last().and_then(serde_json::Value::as_u64) {
-                state.received_last_byte.store(last as u8, Ordering::SeqCst);
-            }
+        && let Some(bytes) = input_value.get("bytes").and_then(serde_json::Value::as_array)
+    {
+        state.received_len.store(bytes.len(), Ordering::SeqCst);
+        if let Some(last) = bytes.last().and_then(serde_json::Value::as_u64) {
+            state.received_last_byte.store(last as u8, Ordering::SeqCst);
         }
+    }
     unsafe { *out_result = std::ptr::null_mut() };
     let msg = std::ffi::CString::new("stub").unwrap();
     unsafe { *out_error = msg.into_raw() };

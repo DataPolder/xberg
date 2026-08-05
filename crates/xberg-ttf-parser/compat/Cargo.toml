@@ -10,7 +10,7 @@
 
 [package]
 name = "ttf-parser"
-version = "0.25.1"
+version = "1.1.0"
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true

@@ -48691,12 +48691,13 @@ pub unsafe extern "C" fn xberg_doctor(config: *const xberg::ExtractionConfig) ->
 /// `out_error` must be null or a valid writable `*mut *mut c_char` pointer.
 unsafe fn ffi_set_out_error(out_error: *mut *mut std::ffi::c_char, msg: &str) {
     if !out_error.is_null()
-        && let Ok(cs) = std::ffi::CString::new(msg) {
-            // SAFETY: out_error is non-null; caller must free this string.
-            unsafe {
-                *out_error = cs.into_raw();
-            }
+        && let Ok(cs) = std::ffi::CString::new(msg)
+    {
+        // SAFETY: out_error is non-null; caller must free this string.
+        unsafe {
+            *out_error = cs.into_raw();
         }
+    }
 }
 
 /// VTable for C plugin bridges implementing the `OcrBackend` trait.
