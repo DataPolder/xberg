@@ -5861,7 +5861,11 @@ mod tests {
 
         let paragraphs = blocks_to_paragraphs(segments, &[(11.0, None)], &[]);
 
-        assert_eq!(paragraphs.len(), 4, "each numbered subsection heading must be its own element");
+        assert_eq!(
+            paragraphs.len(),
+            4,
+            "each numbered subsection heading must be its own element"
+        );
         assert_eq!(paragraph_segment_text(&paragraphs[0]), "1.3 Gasinstallatie");
         assert_eq!(paragraph_segment_text(&paragraphs[1]), "1.4 Elektrische installatie");
         assert_eq!(paragraph_segment_text(&paragraphs[2]), "1.5 Waterinstallatie");

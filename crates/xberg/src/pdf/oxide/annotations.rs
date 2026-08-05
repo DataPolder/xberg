@@ -4,7 +4,7 @@
 //! extracting content text, bounding boxes, and link URIs.
 
 use super::OxideDocument;
-use crate::types::{BoundingBox, PdfAnnotation, PdfAnnotationType};
+use crate::types::{BoundingBox, PdfAnnotation, PdfAnnotationType, ProcessingWarning};
 
 /// Extract annotations from all pages of a PDF document using pdf_oxide.
 ///
@@ -21,17 +21,21 @@ use crate::types::{BoundingBox, PdfAnnotation, PdfAnnotationType};
 ///
 /// # Returns
 ///
-/// A `Vec<PdfAnnotation>` containing all successfully extracted annotations.
-pub(crate) fn extract_annotations(doc: &mut OxideDocument) -> Vec<PdfAnnotation> {
+/// A `Vec<PdfAnnotation>` containing all successfully extracted annotations, and a
+/// `Vec<ProcessingWarning>` describing any pages whose annotations could not be
+/// read (issue #72). When the document's page count itself cannot be determined,
+/// annotations are empty and a single warning is returned.
+pub(crate) fn extract_annotations(doc: &mut OxideDocument) -> (Vec<PdfAnnotation>, Vec<ProcessingWarning>) {
     let page_count = match doc.doc.page_count() {
         Ok(count) => count,
         Err(e) => {
             tracing::debug!("pdf_oxide: failed to get page count for annotations: {e}");
-            return Vec::new();
+            return (Vec::new(), vec![page_count_failure_warning(&e)]);
         }
     };
 
     let mut annotations = Vec::new();
+    let mut warnings = Vec::new();
 
     for page_index in 0..page_count {
         let page_number = (page_index + 1) as u32;
@@ -40,6 +44,7 @@ pub(crate) fn extract_annotations(doc: &mut OxideDocument) -> Vec<PdfAnnotation>
             Ok(annots) => annots,
             Err(e) => {
                 tracing::debug!(page = page_index, "pdf_oxide: failed to get annotations: {e}");
+                warnings.push(page_annotations_failure_warning(page_number, &e));
                 continue;
             }
         };
@@ -72,7 +77,29 @@ pub(crate) fn extract_annotations(doc: &mut OxideDocument) -> Vec<PdfAnnotation>
         }
     }
 
-    annotations
+    (annotations, warnings)
+}
+
+/// Build the warning for issue #72's document-wide failure mode: the page count
+/// itself could not be determined, so no page could even be attempted.
+fn page_count_failure_warning(error: &pdf_oxide::Error) -> ProcessingWarning {
+    ProcessingWarning {
+        source: std::borrow::Cow::Borrowed("pdf_annotations"),
+        message: std::borrow::Cow::Owned(format!(
+            "annotation extraction failed: could not determine page count ({error}); no annotations were extracted"
+        )),
+    }
+}
+
+/// Build the warning for issue #72's per-page failure mode: annotations on one
+/// page could not be read, but the rest of the document is still processed.
+fn page_annotations_failure_warning(page_number: u32, error: &pdf_oxide::Error) -> ProcessingWarning {
+    ProcessingWarning {
+        source: std::borrow::Cow::Borrowed("pdf_annotations"),
+        message: std::borrow::Cow::Owned(format!(
+            "annotation extraction failed for page {page_number}: {error}; annotations on this page were skipped"
+        )),
+    }
 }
 
 /// Map a pdf_oxide annotation subtype to Xberg's `PdfAnnotationType`.
@@ -110,6 +137,37 @@ fn extract_annotation_content(annot: &pdf_oxide::Annotation) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Issue #72: a document-wide page-count failure must produce a
+    /// `ProcessingWarning` (not just a `tracing::debug!` line the caller can
+    /// never see) naming the root cause.
+    #[test]
+    fn test_page_count_failure_warning_names_root_cause() {
+        let error = pdf_oxide::Error::InvalidPdf("corrupt xref".to_string());
+        let warning = page_count_failure_warning(&error);
+
+        assert_eq!(warning.source.as_ref(), "pdf_annotations");
+        assert_eq!(
+            warning.message.as_ref(),
+            "annotation extraction failed: could not determine page count (Invalid PDF: corrupt xref); \
+             no annotations were extracted"
+        );
+    }
+
+    /// Issue #72: a single page's annotation-read failure must produce a
+    /// `ProcessingWarning` naming that page, while extraction continues.
+    #[test]
+    fn test_page_annotations_failure_warning_names_page() {
+        let error = pdf_oxide::Error::InvalidPdf("malformed /Annots array".to_string());
+        let warning = page_annotations_failure_warning(3, &error);
+
+        assert_eq!(warning.source.as_ref(), "pdf_annotations");
+        assert_eq!(
+            warning.message.as_ref(),
+            "annotation extraction failed for page 3: Invalid PDF: malformed /Annots array; \
+             annotations on this page were skipped"
+        );
+    }
 
     #[test]
     fn test_map_annotation_subtype_text() {

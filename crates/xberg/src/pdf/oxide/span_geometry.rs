@@ -134,7 +134,10 @@ mod tests {
         let span = rotated_span(100.0, 700.0, 40.0, 10.0, 90.0);
 
         assert!(is_ltr_writing_mode(&span), "rotated text is still horizontal LTR text");
-        assert!(!is_horizontal_ltr(&span), "rotated text is not painted on the page axis");
+        assert!(
+            !is_horizontal_ltr(&span),
+            "rotated text is not painted on the page axis"
+        );
         assert!(!is_unrotated(&span));
     }
 

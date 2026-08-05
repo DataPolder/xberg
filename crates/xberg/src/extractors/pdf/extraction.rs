@@ -21,6 +21,8 @@ pub(crate) type PdfExtractionPhaseResult = (
     Option<Vec<PdfAnnotation>>,
     Option<Vec<crate::types::ExtractedImage>>,
     Vec<crate::types::PdfFormField>,
+    Vec<crate::types::ProcessingWarning>,
+    Option<Vec<String>>,
 );
 
 #[cfg(feature = "layout-detection")]
@@ -171,8 +173,11 @@ pub(crate) fn extract_all_from_oxide_document(
         (Vec::new(), None)
     };
 
+    let mut extraction_warnings: Vec<crate::types::ProcessingWarning> = Vec::new();
+
     let annotations = if config.pdf_options.as_ref().is_some_and(|opts| opts.extract_annotations) {
-        let extracted = crate::pdf::oxide::annotations::extract_annotations(&mut doc);
+        let (extracted, annotation_warnings) = crate::pdf::oxide::annotations::extract_annotations(&mut doc);
+        extraction_warnings.extend(annotation_warnings);
         if extracted.is_empty() { None } else { Some(extracted) }
     } else {
         None
@@ -183,12 +188,13 @@ pub(crate) fn extract_all_from_oxide_document(
 
     let (images, image_positions) = if images_extraction_enabled || ocr_inline_images {
         let max_images = config.images.as_ref().and_then(|i| i.max_images_per_page);
-        let extracted =
+        let (extracted, image_warnings) =
             crate::pdf::oxide::images::extract_images_with_data(&mut doc, max_images, config.cancel_token.as_ref())
                 .map_err(|e| crate::error::XbergError::Parsing {
                     message: format!("pdf_oxide image extraction failed: {e}"),
                     source: None,
                 })?;
+        extraction_warnings.extend(image_warnings);
 
         let positions: Vec<(u32, u32)> = extracted
             .iter()
@@ -301,10 +307,20 @@ pub(crate) fn extract_all_from_oxide_document(
     let has_font_encoding_issues = false;
 
     let form_fields = if config.pdf_options.as_ref().is_none_or(|opts| opts.extract_form_fields) {
-        crate::pdf::oxide::forms::extract_form_fields(&mut doc)
+        let (fields, form_warnings) = crate::pdf::oxide::forms::extract_form_fields(&mut doc);
+        extraction_warnings.extend(form_warnings);
+        fields
     } else {
         Vec::new()
     };
+
+    // Issue #66: `/PageLabels` (roman-numeral front matter, per-section
+    // numbering, ...). `None` when the document defines none, which is the
+    // common case.
+    let page_labels = crate::pdf::oxide::metadata::extract_page_labels_all(&mut doc).unwrap_or_else(|e| {
+        tracing::debug!("page label extraction failed: {e}");
+        None
+    });
 
     Ok((
         pdf_metadata,
@@ -317,6 +333,8 @@ pub(crate) fn extract_all_from_oxide_document(
         annotations,
         images,
         form_fields,
+        extraction_warnings,
+        page_labels,
     ))
 }
 

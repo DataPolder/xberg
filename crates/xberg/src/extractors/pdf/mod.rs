@@ -165,6 +165,43 @@ fn inject_unrepresented_table_elements(doc: &mut InternalDocument, allow_injecti
     }
 }
 
+/// Surface filled AcroForm/XFA field values in rendered content (issue #64).
+///
+/// `doc.form_fields` already reaches the typed `ExtractedDocument.form_fields`
+/// API, but nothing renders it into `content`. For the plain-text path this is
+/// usually harmless: `oxide::text`'s `append_missing_widget_values` already
+/// splices Widget `/V` values into the flat native text before it is chopped
+/// into `Paragraph` elements. But the *structured* path (Markdown/HTML/Djot,
+/// built from `pdf::oxide::hierarchy`'s span segments) never sees that
+/// splice — a filled, non-flattened form renders with none of its entered
+/// values.
+///
+/// Follows `inject_unrepresented_table_elements`'s pattern: push one
+/// `ElementKind::Paragraph` per field that has a non-empty value and isn't
+/// already present verbatim somewhere in the document (the containment check
+/// is what keeps the plain-text path, which already has the value, from
+/// getting a duplicate).
+fn inject_unrepresented_form_field_elements(doc: &mut InternalDocument, form_fields: &[crate::types::PdfFormField]) {
+    for field in form_fields {
+        let Some(value) = field.value.as_ref().filter(|v| !v.is_empty()) else {
+            continue;
+        };
+        if doc.elements.iter().any(|element| element.text.contains(value.as_str())) {
+            continue;
+        }
+        let display_name = if field.full_name.is_empty() {
+            field.name.as_str()
+        } else {
+            field.full_name.as_str()
+        };
+        doc.push_element(InternalElement::text(
+            ElementKind::Paragraph,
+            &format!("{display_name}: {value}"),
+            0,
+        ));
+    }
+}
+
 /// Pages to OCR under `OcrStrategy::ScannedPages`, 1-indexed.
 ///
 /// The union of detected scans and pages failing the text-quality gate, so never
@@ -651,6 +688,8 @@ impl PdfExtractor {
             pdf_annotations,
             mut extracted_images,
             pdf_form_fields,
+            mut pdf_extraction_warnings,
+            pdf_page_labels,
         ) = extract_all_from_oxide_document(
             oxide_document,
             config,
@@ -1190,6 +1229,8 @@ impl PdfExtractor {
         #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
         doc.processing_warnings.append(&mut ocr_fallback_warnings);
 
+        doc.processing_warnings.append(&mut pdf_extraction_warnings);
+
         // Surface a hard layout-inference failure (e.g. CoreML kernel error) so
         // degraded no-layout output is never silent to the caller (#1344). Runs
         // whenever layout-detection is on, independent of OCR.
@@ -1238,6 +1279,20 @@ impl PdfExtractor {
             serde_json::Value::String(extraction_method.as_str().to_string()),
         );
 
+        // Issue #66: `/PageLabels` — one display label per page, index-aligned
+        // with `pdf_metadata.page_structure`/`PageBoundary::page_number`.
+        // `PdfMetadata` is an alef-listed type (no new public fields), so this
+        // rides in `additional` instead.
+        if let Some(labels) = pdf_page_labels {
+            doc.metadata
+                .additional
+                .insert(std::borrow::Cow::Borrowed("page_labels"), serde_json::json!(labels));
+        }
+
+        // Issue #64: surface filled field values in rendered content for
+        // output shapes (Markdown/HTML/Djot) that the plain-text widget
+        // splice in `oxide::text` never touches.
+        inject_unrepresented_form_field_elements(&mut doc, &pdf_form_fields);
         doc.form_fields = pdf_form_fields;
 
         #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]

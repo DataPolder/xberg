@@ -134,12 +134,17 @@ fn extract_text_fast_path(doc: &mut OxideDocument) -> Result<PdfTextExtractionRe
         .page_count()
         .map_err(|e| PdfError::TextExtractionFailed(format!("Failed to get page count: {}", e)))?;
 
+    // Issue #67: default-off optional-content (OCG/layer) groups per
+    // `/OCProperties/D` (ISO 32000-1:2008 §8.11.4). Computed once per
+    // document; empty for the common case of no `/OCProperties`.
+    let excluded_layers = pdf_oxide::optional_content::compute_default_off_ocgs(&doc.doc);
+
     let mut content = String::new();
     let mut total_sample_size = 0usize;
     let mut sample_count = 0;
 
     for page_idx in 0..page_count {
-        let page_text = extract_page_text_column_aware(&mut doc.doc, page_idx)?;
+        let page_text = extract_page_text_column_aware(&mut doc.doc, page_idx, &excluded_layers)?;
 
         let page_size = page_text.len();
 
@@ -176,6 +181,9 @@ fn extract_text_with_tracking(doc: &mut OxideDocument, config: &PageConfig) -> R
         .page_count()
         .map_err(|e| PdfError::TextExtractionFailed(format!("Failed to get page count: {}", e)))?;
 
+    // Issue #67: see `extract_text_fast_path` for rationale.
+    let excluded_layers = pdf_oxide::optional_content::compute_default_off_ocgs(&doc.doc);
+
     let mut content = String::new();
     let mut boundaries = Vec::with_capacity(page_count);
     let mut page_contents = if config.extract_pages {
@@ -190,7 +198,7 @@ fn extract_text_with_tracking(doc: &mut OxideDocument, config: &PageConfig) -> R
     for page_idx in 0..page_count {
         let page_number = page_idx + 1;
 
-        let page_text = extract_page_text_column_aware(&mut doc.doc, page_idx)?;
+        let page_text = extract_page_text_column_aware(&mut doc.doc, page_idx, &excluded_layers)?;
 
         let page_size = page_text.len();
 
@@ -785,19 +793,58 @@ pub(crate) fn reorder_sparse_two_column_page(spans: &mut [pdf_oxide::layout::Tex
     true
 }
 
+/// Build a page's `PageText` (spans + derived chars + dimensions), honouring
+/// optional-content (OCG/layer) visibility (issue #67).
+///
+/// `PdfDocument::extract_page_text_with_options` always treats every layer as
+/// visible; a default-OFF `/OCProperties` layer that mirrors the page's content
+/// (a common PDF-authoring pattern for redlines/translations/print-vs-screen
+/// variants) then contributes a second, hidden-in-every-viewer copy of the page
+/// text. When `excluded_layers` is non-empty, this instead calls pdf_oxide's
+/// filtered span extraction so the surfaced text matches what any viewer
+/// actually renders. An empty set is byte-identical to the unfiltered call.
+fn page_text_with_options_excluding_layers(
+    doc: &pdf_oxide::PdfDocument,
+    page_index: usize,
+    excluded_layers: &std::collections::HashSet<String>,
+) -> pdf_oxide::error::Result<pdf_oxide::layout::PageText> {
+    if excluded_layers.is_empty() {
+        return doc.extract_page_text_with_options(page_index, ReadingOrder::ColumnAware);
+    }
+
+    let spans = doc.extract_spans_filtered_with_reading_order(
+        page_index,
+        ReadingOrder::ColumnAware,
+        excluded_layers.clone(),
+        Default::default(),
+    )?;
+    let chars: Vec<pdf_oxide::layout::TextChar> = spans.iter().flat_map(|s| s.to_chars()).collect();
+    let (_, _, page_width, page_height) = doc.get_page_media_box(page_index)?;
+
+    Ok(pdf_oxide::layout::PageText {
+        spans,
+        chars,
+        page_width,
+        page_height,
+    })
+}
+
 /// Extract text from one page with column-aware ordering and guarded repairs.
 ///
 /// Applies sparse-column and glyph-fragmentation repairs before assembling the
 /// page text.
-fn extract_page_text_column_aware(doc: &mut pdf_oxide::PdfDocument, page_index: usize) -> Result<String> {
+fn extract_page_text_column_aware(
+    doc: &mut pdf_oxide::PdfDocument,
+    page_index: usize,
+    excluded_layers: &std::collections::HashSet<String>,
+) -> Result<String> {
     let widgets = collect_widget_field_values(doc, page_index);
 
     let mut page_text_data = super::guard_oxide_panic(
         || {
-            doc.extract_page_text_with_options(page_index, ReadingOrder::ColumnAware)
-                .map_err(|e| {
-                    PdfError::TextExtractionFailed(format!("Page {} text extraction failed: {}", page_index + 1, e))
-                })
+            page_text_with_options_excluding_layers(doc, page_index, excluded_layers).map_err(|e| {
+                PdfError::TextExtractionFailed(format!("Page {} text extraction failed: {}", page_index + 1, e))
+            })
         },
         |panic| {
             PdfError::TextExtractionFailed(format!(

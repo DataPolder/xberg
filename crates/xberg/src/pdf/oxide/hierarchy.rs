@@ -735,6 +735,214 @@ pub(crate) fn extract_all_segments(doc: &mut OxideDocument) -> Result<(Vec<Vec<S
     Ok((all_pages, false))
 }
 
+/// Extract `/Alt` (alternate description) text for `Figure` structure elements,
+/// grouped by 0-based page index, in structure-tree document order (issue #62).
+///
+/// Tagged PDFs attach accessibility alt text to `Figure` structure elements via
+/// the `/Alt` entry (ISO 32000-1:2008 §14.9.3), not to the image XObject itself.
+/// Since the structure tree has no direct MCID/OBJR link back to a specific
+/// `PdfImage` handle that callers can match on, this returns per-page alt-text
+/// slots in tree order; callers pair the Nth `Figure` on a page with the Nth
+/// image extracted from that page (both walk the page in document/paint order),
+/// which holds for the common one-image-per-figure case.
+///
+/// Returns an empty map when the document has no `/StructTreeRoot`, no `/Pages`,
+/// or either could not be read; this is not an error, most PDFs are untagged.
+///
+/// # Implementation note
+///
+/// This walks the raw `/StructTreeRoot` dictionary directly via `pdf_oxide`'s
+/// low-level `Object`/`ObjectRef` accessors rather than `PdfDocument::structure_tree()`.
+/// The latter is built for reading-order/heading detection and deliberately skips
+/// parsing `/A` and `/Alt` (pdf_oxide's `structure::parser` module never populates
+/// `StructElem::alt_text`), so it cannot be used here.
+pub(crate) fn extract_figure_alt_text_by_page(doc: &mut OxideDocument) -> HashMap<u32, Vec<Option<String>>> {
+    let mut by_page: HashMap<u32, Vec<Option<String>>> = HashMap::new();
+
+    let Ok(catalog) = doc.doc.catalog() else {
+        return by_page;
+    };
+    let Some(catalog_dict) = catalog.as_dict() else {
+        return by_page;
+    };
+
+    let page_id_map = build_page_id_map(doc, catalog_dict);
+    if page_id_map.is_empty() {
+        return by_page;
+    }
+
+    let Some(struct_root_obj) = catalog_dict.get("StructTreeRoot") else {
+        return by_page;
+    };
+    let struct_root = resolve_pdf_object(doc, struct_root_obj);
+    let Some(struct_root_dict) = struct_root.as_dict() else {
+        return by_page;
+    };
+
+    if let Some(k_obj) = struct_root_dict.get("K") {
+        walk_struct_kids(doc, k_obj, &page_id_map, None, &mut by_page, 0);
+    }
+
+    by_page
+}
+
+/// Depth cap for `/Pages` and `/StructTreeRoot` tree walks, guarding against
+/// cyclic or pathologically deep object graphs in untrusted PDF input.
+const MAX_PDF_OBJECT_TREE_DEPTH: usize = 128;
+
+/// Resolve `obj` to its underlying value if it is an indirect reference,
+/// otherwise clone it. Unresolvable references degrade to `Object::Null`.
+fn resolve_pdf_object(doc: &OxideDocument, obj: &pdf_oxide::object::Object) -> pdf_oxide::object::Object {
+    match obj.as_reference() {
+        Some(object_ref) => doc
+            .doc
+            .load_object(object_ref)
+            .unwrap_or(pdf_oxide::object::Object::Null),
+        None => obj.clone(),
+    }
+}
+
+/// Build a map from PDF object id to 0-based page index by walking the
+/// `/Pages` tree from the document catalog, in the same left-to-right,
+/// depth-first order `page_count()`/`get_page(idx)` use. Generation numbers
+/// are ignored (a `/Pg` reference and the corresponding `/Pages` leaf always
+/// share the same object id per ISO 32000-1:2008 §7.3.10).
+fn build_page_id_map(
+    doc: &OxideDocument,
+    catalog_dict: &HashMap<String, pdf_oxide::object::Object>,
+) -> HashMap<u32, u32> {
+    let mut map = HashMap::new();
+    let Some(pages_obj) = catalog_dict.get("Pages") else {
+        return map;
+    };
+    let Some(pages_ref) = pages_obj.as_reference() else {
+        return map;
+    };
+
+    let mut index = 0u32;
+    let mut visited = std::collections::HashSet::new();
+    walk_pages_tree(doc, pages_ref, &mut map, &mut index, &mut visited, 0);
+    map
+}
+
+fn walk_pages_tree(
+    doc: &OxideDocument,
+    node_ref: pdf_oxide::object::ObjectRef,
+    map: &mut HashMap<u32, u32>,
+    index: &mut u32,
+    visited: &mut std::collections::HashSet<u32>,
+    depth: usize,
+) {
+    if depth > MAX_PDF_OBJECT_TREE_DEPTH || !visited.insert(node_ref.id) {
+        return;
+    }
+    let Ok(node_obj) = doc.doc.load_object(node_ref) else {
+        return;
+    };
+    let Some(node_dict) = node_obj.as_dict() else {
+        return;
+    };
+
+    match node_dict.get("Kids").map(|kids_obj| resolve_pdf_object(doc, kids_obj)) {
+        Some(pdf_oxide::object::Object::Array(kids)) => {
+            for kid in &kids {
+                if let Some(kid_ref) = kid.as_reference() {
+                    walk_pages_tree(doc, kid_ref, map, index, visited, depth + 1);
+                }
+            }
+        }
+        _ => {
+            // No /Kids (or an unresolvable one): this is a leaf page node.
+            map.insert(node_ref.id, *index);
+            *index += 1;
+        }
+    }
+}
+
+/// Walk a `/K` value of a structure element (or `StructTreeRoot`): a single
+/// structure-element dict/reference, or an array mixing structure elements,
+/// MCID integers, and marked-content-reference dicts. Only structure-element
+/// entries (dicts carrying `/S`) are descended into.
+fn walk_struct_kids(
+    doc: &OxideDocument,
+    k_obj: &pdf_oxide::object::Object,
+    page_id_map: &HashMap<u32, u32>,
+    inherited_page: Option<u32>,
+    by_page: &mut HashMap<u32, Vec<Option<String>>>,
+    depth: usize,
+) {
+    if depth > MAX_PDF_OBJECT_TREE_DEPTH {
+        return;
+    }
+    match resolve_pdf_object(doc, k_obj) {
+        pdf_oxide::object::Object::Array(items) => {
+            for item in &items {
+                walk_struct_elem(doc, item, page_id_map, inherited_page, by_page, depth + 1);
+            }
+        }
+        resolved @ pdf_oxide::object::Object::Dictionary(_) => {
+            walk_struct_elem_resolved(doc, &resolved, page_id_map, inherited_page, by_page, depth + 1);
+        }
+        _ => {}
+    }
+}
+
+fn walk_struct_elem(
+    doc: &OxideDocument,
+    elem_obj: &pdf_oxide::object::Object,
+    page_id_map: &HashMap<u32, u32>,
+    inherited_page: Option<u32>,
+    by_page: &mut HashMap<u32, Vec<Option<String>>>,
+    depth: usize,
+) {
+    let resolved = resolve_pdf_object(doc, elem_obj);
+    walk_struct_elem_resolved(doc, &resolved, page_id_map, inherited_page, by_page, depth);
+}
+
+/// Core of the structure-element walk: records `/Alt` for `Figure` elements,
+/// then recurses into `/K` with the page inherited down for descendants that
+/// omit their own `/Pg` (ISO 32000-1:2008 §14.7.2, Table 323).
+fn walk_struct_elem_resolved(
+    doc: &OxideDocument,
+    resolved: &pdf_oxide::object::Object,
+    page_id_map: &HashMap<u32, u32>,
+    inherited_page: Option<u32>,
+    by_page: &mut HashMap<u32, Vec<Option<String>>>,
+    depth: usize,
+) {
+    if depth > MAX_PDF_OBJECT_TREE_DEPTH {
+        return;
+    }
+    let Some(dict) = resolved.as_dict() else {
+        return;
+    };
+    // Marked-content references and OBJR dicts have no /S; only real
+    // structure elements do (ISO 32000-1:2008 §14.7.2).
+    let Some(struct_type) = dict.get("S").and_then(|s| s.as_name()) else {
+        return;
+    };
+
+    let own_page = dict
+        .get("Pg")
+        .and_then(|pg| pg.as_reference())
+        .and_then(|pg_ref| page_id_map.get(&pg_ref.id).copied());
+    let effective_page = own_page.or(inherited_page);
+
+    if struct_type == "Figure"
+        && let Some(page) = effective_page
+    {
+        let alt_text = dict
+            .get("Alt")
+            .and_then(|alt| alt.as_string())
+            .and_then(super::metadata::decode_pdf_string);
+        by_page.entry(page).or_default().push(alt_text);
+    }
+
+    if let Some(k_obj) = dict.get("K") {
+        walk_struct_kids(doc, k_obj, page_id_map, effective_page, by_page, depth + 1);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use pdf_oxide::document::ReadingOrder;

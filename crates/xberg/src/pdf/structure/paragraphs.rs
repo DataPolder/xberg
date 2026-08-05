@@ -489,7 +489,11 @@ mod tests {
         ];
         merge_continuation_paragraphs(&mut paragraphs);
 
-        assert_eq!(paragraphs.len(), 3, "roman and ALL-CAPS numbered headings must not merge");
+        assert_eq!(
+            paragraphs.len(),
+            3,
+            "roman and ALL-CAPS numbered headings must not merge"
+        );
         assert_eq!(first_line_text(&paragraphs[0]), "III. Scope");
         assert_eq!(first_line_text(&paragraphs[1]), "IV. Results");
         assert_eq!(first_line_text(&paragraphs[2]), "5. CONCLUSIONS");
