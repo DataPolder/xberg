@@ -56,6 +56,15 @@ pub struct ExtractEnvelope {
     pub result: ExtractedDocument,
     /// Wall-clock time for the extraction call in milliseconds.
     pub extraction_time_ms: f64,
+    /// Self-reported peak resident-set size (RSS) in bytes for this process, measured via
+    /// `getrusage(RUSAGE_SELF)` (see [`crate::peak_memory`]).
+    ///
+    /// The benchmark harness reads this as `_peak_memory_bytes` (see
+    /// `tools/benchmark-harness/src/adapters/subprocess.rs::parse_output`), the same field every
+    /// competitor wrapper self-reports via `resource.getrusage(...).ru_maxrss`, so both sides of a
+    /// memory comparison use the same kernel-tracked high-water mark instead of two different
+    /// estimators (one kernel-based, one sampling-based).
+    pub peak_memory_bytes: u64,
     /// Per-stage cold-start timing breakdown, present only when stage timing was requested via
     /// the `XBERG_EMIT_STAGE_TIMING` environment variable.
     #[serde(skip_serializing_if = "Option::is_none")]

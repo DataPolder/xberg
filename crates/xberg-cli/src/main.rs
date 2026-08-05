@@ -63,6 +63,7 @@ mod commands;
 mod input;
 mod logging;
 mod output;
+mod peak_memory;
 mod style;
 
 use anyhow::{Context, Result};

@@ -153,9 +153,13 @@ pub fn extract_command(
             print!("{}", result.content);
         }
         WireFormat::Json => {
+            // `getrusage` reports the peak for the process's whole lifetime, so the exact sample
+            // point doesn't matter as long as it's after the work being measured.
+            let peak_memory_bytes = crate::peak_memory::peak_memory_bytes().unwrap_or(0);
             let envelope = ExtractEnvelope {
                 result,
                 extraction_time_ms,
+                peak_memory_bytes,
                 stage_timings,
             };
             println!(

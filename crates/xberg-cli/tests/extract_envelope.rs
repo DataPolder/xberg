@@ -106,6 +106,43 @@ fn test_extract_json_has_result_and_timing() {
 }
 
 #[test]
+fn test_extract_json_includes_plausible_peak_memory_bytes() {
+    build_binary();
+
+    let pdf = pdf_fixture();
+    if !fixture_exists(&pdf) {
+        eprintln!("SKIP: PDF fixture not found at {}", pdf.display());
+        return;
+    }
+
+    let output = Command::new(xberg_bin())
+        .args(["extract", &pdf.to_string_lossy(), "--format", "json"])
+        .output()
+        .expect("failed to run xberg extract");
+
+    assert!(
+        output.status.success(),
+        "extract exited non-zero: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).expect("stdout is not valid JSON");
+
+    let peak_memory_bytes = json
+        .get("peak_memory_bytes")
+        .and_then(|v| v.as_u64())
+        .expect("'peak_memory_bytes' must be present and an unsigned integer");
+    // A process that just loaded and ran the xberg extraction pipeline has allocated at least a
+    // few MB of RSS (binary text/data pages alone exceed this); a plausible lower bound catches
+    // a field that's present but stubbed to 0.
+    const PLAUSIBLE_MIN_PEAK_MEMORY_BYTES: u64 = 1_000_000;
+    assert!(
+        peak_memory_bytes >= PLAUSIBLE_MIN_PEAK_MEMORY_BYTES,
+        "peak_memory_bytes must be plausible (>= {PLAUSIBLE_MIN_PEAK_MEMORY_BYTES}), got {peak_memory_bytes}"
+    );
+}
+
+#[test]
 fn test_batch_json_has_results_and_timing() {
     build_binary();
 
