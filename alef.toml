@@ -3869,6 +3869,9 @@ package_manager = ["cargo"]
 features = { ocr = true, async = true, plugin_system = true, embeddings = true, code_intelligence = true }
 # The FFI README's quick-start examples are C code, and `docs-site/src/snippets/`
 # only maintains one such set under `c/` (shared with the e2e C consumer) rather
+# than a duplicate `ffi/` directory. `snippet_language` (alef >=0.54.1) points
+# the README's `include_snippet(language)` calls at that directory while leaving
+# `language == "ffi"` intact for template branching (installation steps, etc.). ~keep
 snippet_language = "c"
 snippets = { basic_extraction = "getting-started/basic_usage.md", batch_processing = "getting-started/extract_with_ocr.md", ocr_configuration = "ocr/ocr_extraction.md", table_extraction = "metadata/tables.md" }
 
