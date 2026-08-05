@@ -137,21 +137,19 @@ fn build_hwp_internal_document(hwp_doc: &HwpDocument) -> InternalDocument {
 /// Maps the parsed `SummaryInformation` stream to the common `Metadata` DTO (#105).
 fn build_metadata(summary: Option<&SummaryInfo>) -> Option<Metadata> {
     let summary = summary?;
-    let mut metadata = Metadata::default();
+    let mut metadata = Metadata {
+        title: summary.title.clone(),
+        subject: summary.subject.clone(),
+        authors: summary.author.as_ref().map(|author| vec![author.clone()]),
+        // HWP stores keywords as a single free-form string rather than a delimited
+        // list, unlike most other formats' `Metadata::keywords: Vec<String>` — kept as
+        // one entry rather than guessing a delimiter and splitting it incorrectly.
+        keywords: summary.keywords.as_ref().map(|keywords| vec![keywords.clone()]),
+        created_at: summary.created.clone(),
+        modified_at: summary.modified.clone(),
+        ..Default::default()
+    };
 
-    metadata.title = summary.title.clone();
-    metadata.subject = summary.subject.clone();
-    if let Some(author) = &summary.author {
-        metadata.authors = Some(vec![author.clone()]);
-    }
-    // HWP stores keywords as a single free-form string rather than a delimited
-    // list, unlike most other formats' `Metadata::keywords: Vec<String>` — kept as
-    // one entry rather than guessing a delimiter and splitting it incorrectly.
-    if let Some(keywords) = &summary.keywords {
-        metadata.keywords = Some(vec![keywords.clone()]);
-    }
-    metadata.created_at = summary.created.clone();
-    metadata.modified_at = summary.modified.clone();
     if let Some(last_author) = &summary.last_author {
         metadata.additional.insert(
             Cow::Borrowed("last_author"),
