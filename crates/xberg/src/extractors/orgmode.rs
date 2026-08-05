@@ -881,32 +881,15 @@ impl OrgModeExtractor {
     }
 
     /// Convert table cells to markdown format.
+    ///
+    /// Delegates to the crate's single table renderer
+    /// ([`crate::rendering::common::render_table_markdown`]) so an Org table
+    /// serialises identically to the same table from any other source
+    /// (xberg-io/xberg#220). Org cells may legitimately contain `|` (escaped as
+    /// `\vert` in the source, but literal after unescaping), which this copy
+    /// emitted raw and thereby split into extra columns (xberg-io/xberg#163).
     fn cells_to_markdown(cells: &[Vec<String>]) -> String {
-        if cells.is_empty() {
-            return String::new();
-        }
-
-        let mut md = String::new();
-
-        for (row_idx, row) in cells.iter().enumerate() {
-            md.push('|');
-            for cell in row {
-                md.push(' ');
-                md.push_str(cell);
-                md.push_str(" |");
-            }
-            md.push('\n');
-
-            if row_idx == 0 && cells.len() > 1 {
-                md.push('|');
-                for _ in row {
-                    md.push_str(" --- |");
-                }
-                md.push('\n');
-            }
-        }
-
-        md
+        crate::rendering::common::render_table_markdown(cells)
     }
 }
 

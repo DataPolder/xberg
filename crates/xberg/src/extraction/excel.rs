@@ -410,11 +410,7 @@ fn process_sparse_sheet_from_cells(
             .get(&(first_row, col))
             .map(|d| format_cell_to_string(d))
             .unwrap_or_default();
-        if cell_str.contains('|') || cell_str.contains('\\') {
-            escape_markdown_into(&mut markdown, &cell_str);
-        } else {
-            markdown.push_str(&cell_str);
-        }
+        escape_markdown_into(&mut markdown, &cell_str);
         header_cells.push(cell_str);
     }
     markdown.push_str(" |\n");
@@ -440,11 +436,7 @@ fn process_sparse_sheet_from_cells(
                 .get(&(row, col))
                 .map(|d| format_cell_to_string(d))
                 .unwrap_or_default();
-            if cell_str.contains('|') || cell_str.contains('\\') {
-                escape_markdown_into(&mut markdown, &cell_str);
-            } else {
-                markdown.push_str(&cell_str);
-            }
+            escape_markdown_into(&mut markdown, &cell_str);
             row_cells_vec.push(cell_str);
         }
         markdown.push_str(" |\n");
@@ -589,12 +581,7 @@ fn generate_markdown_and_cells(sheet_name: &str, range: &Range<Data>, capacity: 
             markdown.push_str(" | ");
         }
         let cell_str = format_cell_to_string(cell);
-
-        if cell_str.contains('|') || cell_str.contains('\\') {
-            escape_markdown_into(&mut markdown, &cell_str);
-        } else {
-            markdown.push_str(&cell_str);
-        }
+        escape_markdown_into(&mut markdown, &cell_str);
         header_cells.push(cell_str);
     }
     markdown.push_str(" |\n");
@@ -618,12 +605,7 @@ fn generate_markdown_and_cells(sheet_name: &str, range: &Range<Data>, capacity: 
             }
             let cell_str = if let Some(cell) = row.get(i) {
                 let cell_str = format_cell_to_string(cell);
-
-                if cell_str.contains('|') || cell_str.contains('\\') {
-                    escape_markdown_into(&mut markdown, &cell_str);
-                } else {
-                    markdown.push_str(&cell_str);
-                }
+                escape_markdown_into(&mut markdown, &cell_str);
                 cell_str
             } else {
                 String::new()
@@ -670,12 +652,41 @@ fn format_cell_to_string(data: &Data) -> String {
     }
 }
 
+/// Stand-in for a line break inside a spreadsheet cell (Alt+Enter). A raw
+/// newline would end the markdown table row, splitting one cell's content
+/// across two rows (xberg-io/xberg#163).
+const CELL_LINE_BREAK: &str = "<br>";
+
+/// Push `s` into `buffer`, escaping everything that would let a spreadsheet cell
+/// break out of its markdown table cell.
+///
+/// Deliberately *not* routed through the shared `rendering::common` table
+/// renderer: this path streams a whole sheet (heading, table, truncation notice)
+/// into one buffer rather than rendering a `&[Vec<String>]` grid, and
+/// spreadsheet text is literal, so a `\` typed into a cell is doubled to survive
+/// markdown unescaping. The shared renderer must not double backslashes because
+/// its inputs (DOCX, HTML, PDF) already carry markdown-significant text.
+///
+/// Escapes `|`, doubles `\`, and turns any line break into [`CELL_LINE_BREAK`].
 #[inline]
 fn escape_markdown_into(buffer: &mut String, s: &str) {
-    for ch in s.chars() {
+    if !s.bytes().any(|b| matches!(b, b'|' | b'\\' | b'\n' | b'\r')) {
+        buffer.push_str(s);
+        return;
+    }
+    let mut chars = s.chars().peekable();
+    while let Some(ch) = chars.next() {
         match ch {
             '|' => buffer.push_str("\\|"),
             '\\' => buffer.push_str("\\\\"),
+            '\r' => {
+                // Consume the LF of a CRLF pair so it yields one break, not two.
+                if chars.peek() == Some(&'\n') {
+                    chars.next();
+                }
+                buffer.push_str(CELL_LINE_BREAK);
+            }
+            '\n' => buffer.push_str(CELL_LINE_BREAK),
             _ => buffer.push(ch),
         }
     }
@@ -1057,6 +1068,37 @@ mod tests {
         let mut buffer = String::new();
         escape_markdown_into(&mut buffer, "plain text");
         assert_eq!(buffer, "plain text");
+    }
+
+    /// xberg-io/xberg#163: a spreadsheet cell may contain a hard line break
+    /// (Alt+Enter). Emitted raw it ends the markdown table row, so the tail of
+    /// the cell becomes a malformed extra row.
+    #[test]
+    fn should_replace_cell_line_break_with_break_tag() {
+        let mut buffer = String::new();
+        escape_markdown_into(&mut buffer, "line1\nline2");
+        assert_eq!(buffer, "line1<br>line2");
+    }
+
+    #[test]
+    fn should_collapse_cell_crlf_to_a_single_break_tag() {
+        let mut buffer = String::new();
+        escape_markdown_into(&mut buffer, "line1\r\nline2");
+        assert_eq!(buffer, "line1<br>line2");
+    }
+
+    #[test]
+    fn should_replace_lone_carriage_return_with_break_tag() {
+        let mut buffer = String::new();
+        escape_markdown_into(&mut buffer, "line1\rline2");
+        assert_eq!(buffer, "line1<br>line2");
+    }
+
+    #[test]
+    fn should_escape_pipes_backslashes_and_line_breaks_together() {
+        let mut buffer = String::new();
+        escape_markdown_into(&mut buffer, "a|b\\c\nd");
+        assert_eq!(buffer, "a\\|b\\\\c<br>d");
     }
 
     #[test]

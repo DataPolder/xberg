@@ -218,6 +218,13 @@ pub(crate) fn extract_title_from_content(content: &str) -> Option<String> {
 /// Takes a 2D array of cell values and formats them as a markdown table
 /// with header row, separator row, and data rows.
 ///
+/// Delegates to the crate's single table renderer
+/// ([`crate::rendering::common::render_table_markdown`]) so markdown/MDX and
+/// PDF-structure tables serialise identically to every other source
+/// (xberg-io/xberg#220). That renderer escapes `|` and line breaks in cell
+/// content, which this copy did not — an unescaped pipe used to split one cell
+/// into two columns (xberg-io/xberg#163).
+///
 /// # Arguments
 ///
 /// * `cells` - A 2D array where cells[0] is the header row
@@ -237,37 +244,7 @@ pub(crate) fn extract_title_from_content(content: &str) -> Option<String> {
 /// assert!(markdown.contains("| Name | Age |"));
 /// ```
 pub(crate) fn cells_to_markdown(cells: &[Vec<String>]) -> String {
-    if cells.is_empty() {
-        return String::new();
-    }
-
-    let mut md = String::new();
-
-    md.push('|');
-    for cell in &cells[0] {
-        md.push(' ');
-        md.push_str(cell);
-        md.push_str(" |");
-    }
-    md.push('\n');
-
-    md.push('|');
-    for _ in &cells[0] {
-        md.push_str(" --- |");
-    }
-    md.push('\n');
-
-    for row in &cells[1..] {
-        md.push('|');
-        for cell in row {
-            md.push(' ');
-            md.push_str(cell);
-            md.push_str(" |");
-        }
-        md.push('\n');
-    }
-
-    md
+    crate::rendering::common::render_table_markdown(cells)
 }
 
 #[cfg(test)]

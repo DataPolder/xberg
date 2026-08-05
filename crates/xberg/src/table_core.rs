@@ -262,38 +262,15 @@ pub(crate) fn reconstruct_table(
 /// Convert a table grid to markdown format.
 ///
 /// The first row is treated as the header row, with a separator line added after it.
-/// Pipe characters in cell content are escaped.
+///
+/// Delegates to the crate's single table renderer
+/// ([`crate::rendering::common::render_table_markdown`]) so a reconstructed
+/// OCR/PDF table serialises identically to one from any other source
+/// (xberg-io/xberg#220). That renderer also pads every row to the widest row,
+/// which this reconstruction path did not do — ragged rows used to emit fewer
+/// pipe columns than the header, misaligning the table for downstream parsers.
 pub(crate) fn table_to_markdown(table: &[Vec<String>]) -> String {
-    if table.is_empty() {
-        return String::new();
-    }
-
-    let num_cols = table[0].len();
-    if num_cols == 0 {
-        return String::new();
-    }
-
-    let mut markdown = String::new();
-
-    for (row_idx, row) in table.iter().enumerate() {
-        markdown.push('|');
-        for cell in row {
-            markdown.push(' ');
-            markdown.push_str(&cell.replace('|', "\\|"));
-            markdown.push_str(" |");
-        }
-        markdown.push('\n');
-
-        if row_idx == 0 {
-            markdown.push('|');
-            for _ in 0..num_cols {
-                markdown.push_str(" --- |");
-            }
-            markdown.push('\n');
-        }
-    }
-
-    markdown
+    crate::rendering::common::render_table_markdown(table)
 }
 
 #[cfg(test)]

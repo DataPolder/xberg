@@ -242,26 +242,41 @@ impl FootnoteCollector {
 }
 
 /// Render a table (from `Table.cells`) as a GFM pipe table.
+///
+/// This is the crate's single table-to-markdown renderer: every extractor and
+/// every output renderer routes through it, so the same table serialises
+/// identically whether it came from a PDF, a DOCX, an HTML page or OCR
+/// (xberg-io/xberg#220).
+///
+/// The grid is normalised to the width of its *widest* row, so a row carrying
+/// more cells than the header keeps every one of them instead of having the
+/// overflow silently dropped (xberg-io/xberg#221); short rows are padded so the
+/// pipe columns stay aligned with the header.
+///
+/// Cell content is escaped so no cell can break out of the row it lives in:
+/// `|` becomes `\|` and any line break becomes `<br>` (xberg-io/xberg#163).
 pub(crate) fn render_table_markdown(cells: &[Vec<String>]) -> String {
+    let mut out = String::new();
+    render_table_markdown_into(&mut out, cells);
+    out
+}
+
+/// Render a GFM pipe table into an existing buffer.
+///
+/// Identical contract to [`render_table_markdown`]; callers that can pre-size
+/// the buffer from a capacity estimate use this to skip the intermediate
+/// allocation.
+pub(crate) fn render_table_markdown_into(out: &mut String, cells: &[Vec<String>]) {
     if cells.is_empty() {
-        return String::new();
+        return;
     }
     let num_cols = cells.iter().map(|r| r.len()).max().unwrap_or(0);
     if num_cols == 0 {
-        return String::new();
+        return;
     }
 
-    let mut out = String::new();
-
     if let Some(header) = cells.first() {
-        out.push('|');
-        for col in 0..num_cols {
-            out.push(' ');
-            let content = header.get(col).map(|s| s.as_str()).unwrap_or("");
-            push_escaped_pipe(&mut out, content);
-            out.push_str(" |");
-        }
-        out.push('\n');
+        push_table_row(out, header, num_cols);
 
         out.push('|');
         for _ in 0..num_cols {
@@ -271,31 +286,47 @@ pub(crate) fn render_table_markdown(cells: &[Vec<String>]) -> String {
     }
 
     for row in cells.iter().skip(1) {
-        out.push('|');
-        for col in 0..num_cols {
-            out.push(' ');
-            let content = row.get(col).map(|s| s.as_str()).unwrap_or("");
-            push_escaped_pipe(&mut out, content);
-            out.push_str(" |");
-        }
-        out.push('\n');
+        push_table_row(out, row, num_cols);
     }
-
-    out
 }
 
-/// Push `content` into `out`, escaping pipe characters. Avoids allocation when
-/// there are no pipes (the common case for table cell content).
-fn push_escaped_pipe(out: &mut String, content: &str) {
-    if memchr::memchr(b'|', content.as_bytes()).is_none() {
+/// Push one pipe-delimited row, padded out to `num_cols` columns.
+fn push_table_row(out: &mut String, row: &[String], num_cols: usize) {
+    out.push('|');
+    for col in 0..num_cols {
+        out.push(' ');
+        let content = row.get(col).map(String::as_str).unwrap_or("");
+        push_escaped_cell(out, content);
+        out.push_str(" |");
+    }
+    out.push('\n');
+}
+
+/// Stand-in for a line break inside a table cell. A raw newline ends the table
+/// row, splitting one cell's content across two rows (xberg-io/xberg#163).
+const CELL_LINE_BREAK: &str = "<br>";
+
+/// Push `content` into `out`, escaping every character that would let a cell
+/// break out of its row. Avoids allocation when there is nothing to escape (the
+/// common case for table cell content).
+fn push_escaped_cell(out: &mut String, content: &str) {
+    if memchr::memchr3(b'|', b'\n', b'\r', content.as_bytes()).is_none() {
         out.push_str(content);
-    } else {
-        for ch in content.chars() {
-            if ch == '|' {
-                out.push_str("\\|");
-            } else {
-                out.push(ch);
+        return;
+    }
+    let mut chars = content.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '|' => out.push_str("\\|"),
+            '\r' => {
+                // Consume the LF of a CRLF pair so it yields one break, not two.
+                if chars.peek() == Some(&'\n') {
+                    chars.next();
+                }
+                out.push_str(CELL_LINE_BREAK);
             }
+            '\n' => out.push_str(CELL_LINE_BREAK),
+            _ => out.push(ch),
         }
     }
 }
@@ -673,6 +704,26 @@ mod tests {
         let cells = vec![vec!["A|B".to_string()], vec!["C|D".to_string()]];
         let out = render_table_markdown(&cells);
         assert!(out.contains("A\\|B"), "pipe should be escaped, got: {}", out);
+    }
+
+    /// xberg-io/xberg#221: the grid is sized from the widest row, not the header.
+    #[test]
+    fn should_size_the_grid_from_the_widest_row() {
+        let cells = vec![
+            vec!["A".to_string(), "B".to_string()],
+            vec!["1".to_string(), "2".to_string(), "3".to_string()],
+        ];
+        let out = render_table_markdown(&cells);
+        assert_eq!(out, "| A | B |  |\n| --- | --- | --- |\n| 1 | 2 | 3 |\n");
+    }
+
+    /// xberg-io/xberg#163: a line break inside a cell must not end the row.
+    #[test]
+    fn should_replace_cell_line_breaks_with_a_break_tag() {
+        let cells = vec![vec!["H".to_string()], vec!["x\ny".to_string()], vec!["p\r\nq".to_string()]];
+        let out = render_table_markdown(&cells);
+        assert_eq!(out, "| H |\n| --- |\n| x<br>y |\n| p<br>q |\n");
+        assert_eq!(out.lines().count(), 4, "embedded newlines must not add rows: {out}");
     }
 
     #[test]
