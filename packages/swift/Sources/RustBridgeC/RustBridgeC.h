@@ -2775,6 +2775,30 @@ void *__swift_bridge__$Vec_PresetSummary$get_mut(void *vec_ptr,
 uintptr_t __swift_bridge__$Vec_PresetSummary$len(void *vec_ptr);
 void *__swift_bridge__$Vec_PresetSummary$as_ptr(void *vec_ptr);
 
+typedef struct DoctorCheck DoctorCheck;
+void __swift_bridge__$DoctorCheck$_free(void *self);
+
+void *__swift_bridge__$Vec_DoctorCheck$new(void);
+void __swift_bridge__$Vec_DoctorCheck$drop(void *vec_ptr);
+void __swift_bridge__$Vec_DoctorCheck$push(void *vec_ptr, void *item_ptr);
+void *__swift_bridge__$Vec_DoctorCheck$pop(void *vec_ptr);
+void *__swift_bridge__$Vec_DoctorCheck$get(void *vec_ptr, uintptr_t index);
+void *__swift_bridge__$Vec_DoctorCheck$get_mut(void *vec_ptr, uintptr_t index);
+uintptr_t __swift_bridge__$Vec_DoctorCheck$len(void *vec_ptr);
+void *__swift_bridge__$Vec_DoctorCheck$as_ptr(void *vec_ptr);
+
+typedef struct DoctorReport DoctorReport;
+void __swift_bridge__$DoctorReport$_free(void *self);
+
+void *__swift_bridge__$Vec_DoctorReport$new(void);
+void __swift_bridge__$Vec_DoctorReport$drop(void *vec_ptr);
+void __swift_bridge__$Vec_DoctorReport$push(void *vec_ptr, void *item_ptr);
+void *__swift_bridge__$Vec_DoctorReport$pop(void *vec_ptr);
+void *__swift_bridge__$Vec_DoctorReport$get(void *vec_ptr, uintptr_t index);
+void *__swift_bridge__$Vec_DoctorReport$get_mut(void *vec_ptr, uintptr_t index);
+uintptr_t __swift_bridge__$Vec_DoctorReport$len(void *vec_ptr);
+void *__swift_bridge__$Vec_DoctorReport$as_ptr(void *vec_ptr);
+
 typedef struct PaddleOcrConfig PaddleOcrConfig;
 void __swift_bridge__$PaddleOcrConfig$_free(void *self);
 
@@ -3905,6 +3929,18 @@ void *__swift_bridge__$Vec_PSMMode$get(void *vec_ptr, uintptr_t index);
 void *__swift_bridge__$Vec_PSMMode$get_mut(void *vec_ptr, uintptr_t index);
 uintptr_t __swift_bridge__$Vec_PSMMode$len(void *vec_ptr);
 void *__swift_bridge__$Vec_PSMMode$as_ptr(void *vec_ptr);
+
+typedef struct ProbeStatus ProbeStatus;
+void __swift_bridge__$ProbeStatus$_free(void *self);
+
+void *__swift_bridge__$Vec_ProbeStatus$new(void);
+void __swift_bridge__$Vec_ProbeStatus$drop(void *vec_ptr);
+void __swift_bridge__$Vec_ProbeStatus$push(void *vec_ptr, void *item_ptr);
+void *__swift_bridge__$Vec_ProbeStatus$pop(void *vec_ptr);
+void *__swift_bridge__$Vec_ProbeStatus$get(void *vec_ptr, uintptr_t index);
+void *__swift_bridge__$Vec_ProbeStatus$get_mut(void *vec_ptr, uintptr_t index);
+uintptr_t __swift_bridge__$Vec_ProbeStatus$len(void *vec_ptr);
+void *__swift_bridge__$Vec_ProbeStatus$as_ptr(void *vec_ptr);
 
 typedef struct PaddleLanguage PaddleLanguage;
 void __swift_bridge__$PaddleLanguage$_free(void *self);
@@ -5896,6 +5932,13 @@ void *__swift_bridge__$PresetSummary$tags(void *self);
 void *__swift_bridge__$PresetSummary$preferred_call_mode(void *self);
 bool __swift_bridge__$PresetSummary$emit_citations(void *self);
 void *__swift_bridge__$PresetSummary$fingerprint(void *self);
+void *__swift_bridge__$DoctorCheck$name(void *self);
+void *__swift_bridge__$DoctorCheck$status(void *self);
+void *__swift_bridge__$DoctorCheck$message(void *self);
+void *__swift_bridge__$DoctorReport$new(void *checks);
+void *__swift_bridge__$DoctorReport$checks(void *self);
+struct __private__ResultPtrAndPtr
+__swift_bridge__$doctor_report_is_ok_from_json(void *json);
 void *__swift_bridge__$PaddleOcrConfig$new(
     void *language, void *cache_dir, bool use_angle_cls,
     bool enable_table_detection, float det_db_thresh, float det_db_box_thresh,
@@ -6246,6 +6289,7 @@ void *__swift_bridge__$ChunkingReason$to_string(void *self);
 void *__swift_bridge__$BoundaryReason$to_string(void *self);
 void *__swift_bridge__$PresetCategory$to_string(void *self);
 void *__swift_bridge__$PSMMode$to_string(void *self);
+void *__swift_bridge__$ProbeStatus$to_string(void *self);
 void *__swift_bridge__$PaddleLanguage$to_string(void *self);
 void *__swift_bridge__$LayoutClass$to_string(void *self);
 void *__swift_bridge__$BrowserMode$to_string(void *self);
@@ -6280,6 +6324,7 @@ struct __private__ResultPtrAndPtr
 __swift_bridge__$list_tokenizer_backends(void);
 struct __private__ResultPtrAndPtr __swift_bridge__$list_validators(void);
 void *__swift_bridge__$classify_chunks(void *result, void *config);
+void *__swift_bridge__$doctor(void *config);
 double __swift_bridge__$max_sim_score(void *query, void *doc);
 void *__swift_bridge__$max_sim_rank(void *query, void *docs);
 void *__swift_bridge__$find_unmarked_claims(void *markdown);
@@ -6717,6 +6762,10 @@ struct __private__ResultPtrAndPtr __swift_bridge__$preset_from_json(void *json);
 struct __private__ResultPtrAndPtr
 __swift_bridge__$preset_summary_from_json(void *json);
 struct __private__ResultPtrAndPtr
+__swift_bridge__$doctor_check_from_json(void *json);
+struct __private__ResultPtrAndPtr
+__swift_bridge__$doctor_report_from_json(void *json);
+struct __private__ResultPtrAndPtr
 __swift_bridge__$paddle_ocr_config_from_json(void *json);
 struct __private__ResultPtrAndPtr
 __swift_bridge__$model_paths_from_json(void *json);
@@ -6886,6 +6935,8 @@ __swift_bridge__$preset_category_from_json(void *json);
 struct __private__ResultPtrAndPtr
 __swift_bridge__$psm_mode_from_json(void *json);
 struct __private__ResultPtrAndPtr
+__swift_bridge__$probe_status_from_json(void *json);
+struct __private__ResultPtrAndPtr
 __swift_bridge__$paddle_language_from_json(void *json);
 struct __private__ResultPtrAndPtr
 __swift_bridge__$layout_class_from_json(void *json);
@@ -7037,6 +7088,8 @@ void *__swift_bridge__$__alef_phantom_vec_table(void);
 void *__swift_bridge__$__alef_phantom_vec_table_cell(void);
 void *__swift_bridge__$__alef_phantom_vec_translation(void);
 void *__swift_bridge__$__alef_phantom_vec_extracted_uri(void);
+void *__swift_bridge__$__alef_phantom_vec_doctor_check(void);
+void *__swift_bridge__$__alef_phantom_vec_doctor_report(void);
 void *__swift_bridge__$__alef_phantom_vec_proxy_config(void);
 void *__swift_bridge__$__alef_phantom_vec_content_config(void);
 void *__swift_bridge__$__alef_phantom_vec_browser_config(void);
@@ -7097,6 +7150,7 @@ void *__swift_bridge__$__alef_phantom_vec_revision_kind(void);
 void *__swift_bridge__$__alef_phantom_vec_revision_anchor(void);
 void *__swift_bridge__$__alef_phantom_vec_summary_strategy(void);
 void *__swift_bridge__$__alef_phantom_vec_uri_kind(void);
+void *__swift_bridge__$__alef_phantom_vec_probe_status(void);
 void *__swift_bridge__$__alef_phantom_vec_browser_mode(void);
 void *__swift_bridge__$__alef_phantom_vec_browser_wait(void);
 void *__swift_bridge__$__alef_phantom_vec_browser_backend(void);
