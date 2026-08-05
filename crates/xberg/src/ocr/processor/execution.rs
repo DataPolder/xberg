@@ -1305,8 +1305,12 @@ fn process_image_resolved(
 
     let config_str = hash_config(config);
 
+    // `output_format` is part of the cache identity: it selects the renderer and
+    // therefore the `content` and `mime_type` of the result. Omitting it served a
+    // document cached as one format for a request for another (#205).
     if config.use_cache
-        && let Some(cached_result) = cache.get_cached_result(&image_hash, "tesseract", &config_str)?
+        && let Some(cached_result) =
+            cache.get_cached_result(&image_hash, "tesseract", &config_str, output_format.as_ref())?
     {
         #[cfg(feature = "otel")]
         tracing::Span::current().record("cache.hit", true);
@@ -1316,15 +1320,17 @@ fn process_image_resolved(
     #[cfg(feature = "otel")]
     tracing::Span::current().record("cache.hit", false);
 
-    let extraction_config = output_format.map(|fmt| ExtractionConfig {
-        output_format: fmt,
+    let extraction_config = output_format.as_ref().map(|fmt| ExtractionConfig {
+        output_format: fmt.clone(),
         ..Default::default()
     });
 
     let result = perform_ocr(image_bytes, config, api_pool, extraction_config.as_ref())?;
 
-    if config.use_cache {
-        let _ = cache.set_cached_result(&image_hash, "tesseract", &config_str, &result);
+    if config.use_cache
+        && let Err(e) = cache.set_cached_result(&image_hash, "tesseract", &config_str, output_format.as_ref(), &result)
+    {
+        tracing::warn!(error = %e, "Failed to cache the OCR result; the next identical request will re-run OCR");
     }
 
     Ok(result)
