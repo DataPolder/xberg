@@ -997,7 +997,11 @@ rqrr = { version = "0.10", optional = true }
 sceptre = { workspace = true, optional = true }
 scrypt = { version = "0.12", optional = true, default-features = false, features = ["kdf"] }
 serde = { workspace = true }
-serde_json = { workspace = true }
+# `preserve_order` keeps `Value::Object` backed by an IndexMap so JSON, YAML and TOML
+# extraction emit keys in document order rather than alphabetically (#165). It was already
+# active, but only as a side effect of `serde_toon_format` requesting it — declaring it here
+# means the guarantee survives that dependency changing. See `issue_165_json_key_order`.
+serde_json = { workspace = true, features = ["preserve_order"] }
 serde_toon_format = { workspace = true }
 serde_yaml_ng = "0.10.0"
 sevenz-rust2 = { version = "0.20.2", optional = true }
