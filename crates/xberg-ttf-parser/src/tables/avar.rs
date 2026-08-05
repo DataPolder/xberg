@@ -3,8 +3,8 @@
 
 use core::convert::TryFrom;
 
-use crate::parser::{FromData, LazyArray16, Stream};
 use crate::NormalizedCoordinate;
+use crate::parser::{FromData, LazyArray16, Stream};
 
 /// An axis value map.
 #[derive(Clone, Copy, Debug)]
@@ -115,21 +115,12 @@ impl<'a> Table<'a> {
     }
 
     /// Maps a single coordinate
-    pub fn map_coordinate(
-        &self,
-        coordinates: &mut [NormalizedCoordinate],
-        coordinate_index: usize,
-    ) -> Option<()> {
+    pub fn map_coordinate(&self, coordinates: &mut [NormalizedCoordinate], coordinate_index: usize) -> Option<()> {
         if usize::from(self.segment_maps.count) != coordinates.len() {
             return None;
         }
 
-        if let Some((map, coord)) = self
-            .segment_maps
-            .into_iter()
-            .zip(coordinates)
-            .nth(coordinate_index)
-        {
+        if let Some((map, coord)) = self.segment_maps.into_iter().zip(coordinates).nth(coordinate_index) {
             *coord = NormalizedCoordinate::from(map_value(&map, coord.0)?);
         }
 

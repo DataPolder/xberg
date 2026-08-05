@@ -6,8 +6,8 @@ use std::string::String;
 #[cfg(feature = "std")]
 use std::vec::Vec;
 
-use crate::parser::{FromData, LazyArray16, Offset, Offset16, Stream};
 use crate::Language;
+use crate::parser::{FromData, LazyArray16, Offset, Offset16, Stream};
 
 /// A list of [name ID](https://docs.microsoft.com/en-us/typography/opentype/spec/name#name-ids)'s.
 pub mod name_id {
@@ -171,10 +171,7 @@ impl<'a> Name<'a> {
     pub fn language(&self) -> Language {
         if self.platform_id == PlatformId::Windows {
             Language::windows_language(self.language_id)
-        } else if self.platform_id == PlatformId::Macintosh
-            && self.encoding_id == 0
-            && self.language_id == 0
-        {
+        } else if self.platform_id == PlatformId::Macintosh && self.encoding_id == 0 && self.language_id == 0 {
             Language::English_UnitedStates
         } else {
             Language::Unknown
@@ -257,10 +254,7 @@ impl<'a> IntoIterator for Names<'a> {
 
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
-        NamesIter {
-            names: self,
-            index: 0,
-        }
+        NamesIter { names: self, index: 0 }
     }
 }
 

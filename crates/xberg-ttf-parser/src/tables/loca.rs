@@ -22,11 +22,7 @@ impl<'a> Table<'a> {
     ///
     /// - `number_of_glyphs` is from the `maxp` table.
     /// - `format` is from the `head` table.
-    pub fn parse(
-        number_of_glyphs: NonZeroU16,
-        format: IndexToLocationFormat,
-        data: &'a [u8],
-    ) -> Option<Self> {
+    pub fn parse(number_of_glyphs: NonZeroU16, format: IndexToLocationFormat, data: &'a [u8]) -> Option<Self> {
         // The number of ranges is `maxp.numGlyphs + 1`.
         //
         // Check for overflow first.
@@ -82,9 +78,7 @@ impl<'a> Table<'a> {
                 // 'The actual local offset divided by 2 is stored.'
                 usize::from(array.get(glyph_id)?) * 2..usize::from(array.get(glyph_id + 1)?) * 2
             }
-            Table::Long(array) => {
-                usize::num_from(array.get(glyph_id)?)..usize::num_from(array.get(glyph_id + 1)?)
-            }
+            Table::Long(array) => usize::num_from(array.get(glyph_id)?)..usize::num_from(array.get(glyph_id + 1)?),
         };
 
         if range.start >= range.end {

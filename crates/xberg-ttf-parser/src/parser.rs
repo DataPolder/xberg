@@ -242,11 +242,7 @@ impl TryNumFrom<f32> for i32 {
         // We can't represent `MAX` exactly, but it will round up to exactly
         // `MAX+1` (a power of two) when we cast it.
         const MAX_P1: f32 = i32::MAX as f32;
-        if v >= MIN && v < MAX_P1 {
-            Some(v as i32)
-        } else {
-            None
-        }
+        if v >= MIN && v < MAX_P1 { Some(v as i32) } else { None }
     }
 }
 
@@ -382,10 +378,7 @@ impl<'a, T: FromData> IntoIterator for LazyArray16<'a, T> {
 
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
-        LazyArrayIter16 {
-            data: self,
-            index: 0,
-        }
+        LazyArrayIter16 { data: self, index: 0 }
     }
 }
 
@@ -532,10 +525,7 @@ impl<'a, T: FromData> IntoIterator for LazyArray32<'a, T> {
 
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
-        LazyArrayIter32 {
-            data: self,
-            index: 0,
-        }
+        LazyArrayIter32 { data: self, index: 0 }
     }
 }
 
@@ -640,10 +630,7 @@ impl<'a, T: FromSlice<'a>> IntoIterator for LazyOffsetArray16<'a, T> {
 
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
-        LazyOffsetArrayIter16 {
-            array: self,
-            index: 0,
-        }
+        LazyOffsetArrayIter16 { array: self, index: 0 }
     }
 }
 
@@ -828,11 +815,7 @@ impl FromData for Option<Offset16> {
     #[inline]
     fn parse(data: &[u8]) -> Option<Self> {
         let offset = Offset16::parse(data)?;
-        if offset.0 != 0 {
-            Some(Some(offset))
-        } else {
-            Some(None)
-        }
+        if offset.0 != 0 { Some(Some(offset)) } else { Some(None) }
     }
 }
 
@@ -862,11 +845,7 @@ impl FromData for Option<Offset24> {
     #[inline]
     fn parse(data: &[u8]) -> Option<Self> {
         let offset = Offset24::parse(data)?;
-        if offset.0 != 0 {
-            Some(Some(offset))
-        } else {
-            Some(None)
-        }
+        if offset.0 != 0 { Some(Some(offset)) } else { Some(None) }
     }
 }
 
@@ -896,11 +875,7 @@ impl FromData for Option<Offset32> {
     #[inline]
     fn parse(data: &[u8]) -> Option<Self> {
         let offset = Offset32::parse(data)?;
-        if offset.0 != 0 {
-            Some(Some(offset))
-        } else {
-            Some(None)
-        }
+        if offset.0 != 0 { Some(Some(offset)) } else { Some(None) }
     }
 }
 

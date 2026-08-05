@@ -1,7 +1,7 @@
-use super::charset::Charset;
 use super::StringId;
-use crate::parser::{FromData, LazyArray16, Stream};
+use super::charset::Charset;
 use crate::GlyphId;
+use crate::parser::{FromData, LazyArray16, Stream};
 
 /// The Standard Encoding as defined in the Adobe Technical Note #5176 Appendix B.
 #[rustfmt::skip]
@@ -99,9 +99,10 @@ impl Encoding<'_> {
 
     pub fn code_to_gid(&self, charset: &Charset, code: u8) -> Option<GlyphId> {
         if !self.supplemental.is_empty()
-            && let Some(ref s) = self.supplemental.into_iter().find(|s| s.code == code) {
-                return charset.sid_to_gid(s.name);
-            }
+            && let Some(ref s) = self.supplemental.into_iter().find(|s| s.code == code)
+        {
+            return charset.sid_to_gid(s.name);
+        }
 
         let index = usize::from(code);
         match self.kind {
@@ -155,9 +156,7 @@ pub(crate) fn parse_encoding<'a>(s: &mut Stream<'a>) -> Option<Encoding<'a>> {
     let kind = match format {
         // TODO: read_array8?
         0 => s.read_array16::<u8>(count).map(EncodingKind::Format0)?,
-        1 => s
-            .read_array16::<Format1Range>(count)
-            .map(EncodingKind::Format1)?,
+        1 => s.read_array16::<Format1Range>(count).map(EncodingKind::Format1)?,
         _ => return None,
     };
 

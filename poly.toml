@@ -51,13 +51,6 @@ exclude = [
   ".claude-plugin/marketplace.json",
   ".agents/plugins/marketplace.json",
   ".ai-rulez-generated.json",
-  # Vendored verbatim from harfbuzz/ttf-parser. Kept byte-identical to upstream
-  # so future upstream fixes cherry-pick without conflict; reformatting it to the
-  # workspace style would rewrite nearly every file. The hand-written shim under
-  # compat/ is deliberately not excluded.
-  "crates/xberg-ttf-parser/src/**",
-  "crates/xberg-ttf-parser/tests/**",
-  "crates/xberg-ttf-parser/CHANGELOG.md",
 ]
 
 [lint.markdown.rumdl]
@@ -131,12 +124,11 @@ ignore = ["strict-assertions", "use-specific-assertions", "no-redundant-variable
 php_version = "8.2"
 
 [lint.typos.extend_words]
+Availabilty = "Availabilty"
 acn = "acn"
 ake = "ake"
 algoritmos = "algoritmos"
 arange = "arange"
-# Corpus fixture identifier preserves this source filename spelling. ~keep
-Availabilty = "Availabilty"
 bre = "bre"
 caf = "caf"
 charater = "charater"
@@ -153,10 +145,7 @@ extention = "extention"
 faiure = "faiure"
 fith = "fith"
 flate = "flate"
-loca = "loca"
 formated = "formated"
-# ISO 639 bibliographic language aliases used by OCR backends. ~keep
-fre = "fre"
 headerr = "headerr"
 helo = "helo"
 hocr = "hocr"
@@ -167,6 +156,7 @@ ist = "ist"
 kreuzberg = "kreuzberg"
 layrnorm = "layrnorm"
 legt = "legt"
+loca = "loca"
 markitdown = "markitdown"
 ment = "ment"
 mis = "mis"
@@ -205,8 +195,6 @@ tre = "tre"
 unparseable = "unparseable"
 utiliza = "utiliza"
 webui = "webui"
-# ISO 639 bibliographic language alias used by OCR backends. ~keep
-wel = "wel"
 yor = "yor"
 
 [lint.typos.extend_identifiers]
@@ -223,7 +211,6 @@ remove_todos = false
 remove_fixme = false
 remove_docs = false
 use_default_ignores = true
-# clang-format owns C++ namespace-closing comments and restores them after lint fixes. ~keep
 preserve_patterns = ["SAFETY", "SPDX", "Copyright", "License", "licensed under", "namespace"]
 
 [tools.clang-format]
@@ -680,7 +667,7 @@ workspace = true
 files = "packages/dart/**/*.dart"
 
 [hooks.pre-commit.commands.credo]
-run = "mix credo --strict"
+run = "mix deps.get && mix credo --strict"
 root = "packages/elixir"
 workspace = true
 files = "packages/elixir/**/*.{ex,exs}"

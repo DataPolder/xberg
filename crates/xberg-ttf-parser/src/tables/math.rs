@@ -1,11 +1,9 @@
 //! A [Math Table](https://docs.microsoft.com/en-us/typography/opentype/spec/math) implementation.
 
+use crate::GlyphId;
 use crate::gpos::Device;
 use crate::opentype_layout::Coverage;
-use crate::parser::{
-    FromData, FromSlice, LazyArray16, LazyOffsetArray16, Offset, Offset16, Stream,
-};
-use crate::GlyphId;
+use crate::parser::{FromData, FromSlice, LazyArray16, LazyOffsetArray16, Offset, Offset16, Stream};
 
 /// A [Math Value](https://docs.microsoft.com/en-us/typography/opentype/spec/math#mathvaluerecord)
 /// with optional device corrections.
@@ -37,10 +35,7 @@ impl FromData for MathValueRecord {
         let mut s = Stream::new(data);
         let value = s.read::<i16>()?;
         let device_offset = s.read::<Option<Offset16>>()?;
-        Some(MathValueRecord {
-            value,
-            device_offset,
-        })
+        Some(MathValueRecord { value, device_offset })
     }
 }
 
@@ -539,10 +534,7 @@ impl<'a> Constants<'a> {
         self.data
             .get(offset..)
             .and_then(|data| MathValue::parse(data, self.data))
-            .unwrap_or(MathValue {
-                value: 0,
-                device: None,
-            })
+            .unwrap_or(MathValue { value: 0, device: None })
     }
 }
 
@@ -581,11 +573,7 @@ impl<'a> FromSlice<'a> for Kern<'a> {
         let count = s.read::<u16>()?;
         let heights = s.read_array16::<MathValueRecord>(count)?;
         let kerns = s.read_array16::<MathValueRecord>(count + 1)?;
-        Some(Kern {
-            data,
-            heights,
-            kerns,
-        })
+        Some(Kern { data, heights, kerns })
     }
 }
 
@@ -832,11 +820,7 @@ pub struct GlyphConstructions<'a> {
 }
 
 impl<'a> GlyphConstructions<'a> {
-    fn new(
-        data: &'a [u8],
-        coverage: Option<Coverage<'a>>,
-        offsets: LazyArray16<'a, Option<Offset16>>,
-    ) -> Self {
+    fn new(data: &'a [u8], coverage: Option<Coverage<'a>>, offsets: LazyArray16<'a, Option<Offset16>>) -> Self {
         GlyphConstructions {
             coverage: coverage.unwrap_or(Coverage::Format1 {
                 glyphs: LazyArray16::new(&[]),
@@ -883,16 +867,8 @@ impl<'a> FromSlice<'a> for Variants<'a> {
         let horizontal_offsets = s.read_array16::<Option<Offset16>>(horizontal_count)?;
         Some(Variants {
             min_connector_overlap,
-            vertical_constructions: GlyphConstructions::new(
-                data,
-                vertical_coverage,
-                vertical_offsets,
-            ),
-            horizontal_constructions: GlyphConstructions::new(
-                data,
-                horizontal_coverage,
-                horizontal_offsets,
-            ),
+            vertical_constructions: GlyphConstructions::new(data, vertical_coverage, vertical_offsets),
+            horizontal_constructions: GlyphConstructions::new(data, horizontal_coverage, horizontal_offsets),
         })
     }
 }

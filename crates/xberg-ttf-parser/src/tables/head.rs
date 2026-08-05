@@ -1,8 +1,8 @@
 //! A [Font Header Table](
 //! https://docs.microsoft.com/en-us/typography/opentype/spec/head) implementation.
 
-use crate::parser::{Fixed, Stream};
 use crate::Rect;
+use crate::parser::{Fixed, Stream};
 
 /// An index format used by the [Index to Location Table](
 /// https://docs.microsoft.com/en-us/typography/opentype/spec/loca).

@@ -45,9 +45,6 @@ impl<'a> DeltaSetIndexMap<'a> {
 
         let outer_index = n >> inner_index_bit_count;
         let inner_index = n & ((1 << inner_index_bit_count) - 1);
-        Some((
-            u16::try_from(outer_index).ok()?,
-            u16::try_from(inner_index).ok()?,
-        ))
+        Some((u16::try_from(outer_index).ok()?, u16::try_from(inner_index).ok()?))
     }
 }

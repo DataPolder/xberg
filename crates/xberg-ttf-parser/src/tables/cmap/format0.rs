@@ -1,5 +1,5 @@
-use crate::parser::{NumFrom, Stream};
 use crate::GlyphId;
+use crate::parser::{NumFrom, Stream};
 
 /// A [format 0](https://docs.microsoft.com/en-us/typography/opentype/spec/cmap#format-0-byte-encoding-table)
 /// subtable.

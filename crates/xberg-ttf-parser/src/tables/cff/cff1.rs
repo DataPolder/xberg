@@ -11,14 +11,14 @@ use core::num::NonZeroU16;
 use core::ops::Range;
 
 use super::argstack::ArgumentsStack;
-use super::charset::{parse_charset, Charset};
+use super::charset::{Charset, parse_charset};
 use super::charstring::CharStringParser;
 use super::dict::DictionaryParser;
-use super::encoding::{parse_encoding, Encoding, STANDARD_ENCODING};
-use super::index::{parse_index, skip_index, Index};
+use super::encoding::{Encoding, STANDARD_ENCODING, parse_encoding};
+use super::index::{Index, parse_index, skip_index};
 #[cfg(feature = "glyph-names")]
 use super::std_names::STANDARD_NAMES;
-use super::{calc_subroutine_bias, conv_subroutine_index, Builder, CFFError, IsEven, StringId};
+use super::{Builder, CFFError, IsEven, StringId, calc_subroutine_bias, conv_subroutine_index};
 use crate::parser::{LazyArray16, NumFrom, Stream, TryNumFrom};
 use crate::{DummyOutline, GlyphId, OutlineBuilder, Rect, RectF};
 
@@ -331,11 +331,7 @@ fn parse_font_dict(data: &[u8]) -> Option<Range<usize>> {
 ///   3. Get a Private DICT offset from a Font DICT.
 ///   4. Get a local subroutine offset from Private DICT.
 ///   5. Parse a local subroutine at offset.
-fn parse_cid_local_subrs<'a>(
-    data: &'a [u8],
-    glyph_id: GlyphId,
-    cid: &CIDMetadata,
-) -> Option<Index<'a>> {
+fn parse_cid_local_subrs<'a>(data: &'a [u8], glyph_id: GlyphId, cid: &CIDMetadata) -> Option<Index<'a>> {
     let font_dict_index = cid.fd_select.font_dict_index(glyph_id)?;
     let font_dict_data = cid.fd_array.get(u32::from(font_dict_index))?;
     let private_dict_range = parse_font_dict(font_dict_data)?;
@@ -434,10 +430,7 @@ fn _parse_char_string(
 ) -> Result<(), CFFError> {
     // xberg addition: charge one unit per invocation so total subroutine calls for a glyph
     // stay bounded regardless of nesting depth. See MAX_CHARSTRING_VISITS.
-    ctx.budget = ctx
-        .budget
-        .checked_sub(1)
-        .ok_or(CFFError::NestingLimitReached)?;
+    ctx.budget = ctx.budget.checked_sub(1).ok_or(CFFError::NestingLimitReached)?;
 
     let mut s = Stream::new(char_string);
     while !s.at_end() {
@@ -505,17 +498,15 @@ fn _parse_char_string(
                 // Since it's a pretty complex task, we're doing it only when
                 // a local subroutine is actually requested by the glyphs charstring.
                 if ctx.local_subrs.is_none()
-                    && let FontKind::CID(ref cid) = ctx.metadata.kind {
-                        ctx.local_subrs =
-                            parse_cid_local_subrs(ctx.metadata.table_data, ctx.glyph_id, cid);
-                    }
+                    && let FontKind::CID(ref cid) = ctx.metadata.kind
+                {
+                    ctx.local_subrs = parse_cid_local_subrs(ctx.metadata.table_data, ctx.glyph_id, cid);
+                }
 
                 if let Some(local_subrs) = ctx.local_subrs {
                     let subroutine_bias = calc_subroutine_bias(local_subrs.len());
                     let index = conv_subroutine_index(p.stack.pop(), subroutine_bias)?;
-                    let char_string = local_subrs
-                        .get(index)
-                        .ok_or(CFFError::InvalidSubroutineIndex)?;
+                    let char_string = local_subrs.get(index).ok_or(CFFError::InvalidSubroutineIndex)?;
                     _parse_char_string(ctx, char_string, depth + 1, p)?;
                 } else {
                     return Err(CFFError::NoLocalSubroutines);
@@ -552,10 +543,10 @@ fn _parse_char_string(
             operator::ENDCHAR => {
                 if p.stack.len() == 4 || (ctx.width.is_none() && p.stack.len() == 5) {
                     // Process 'seac'.
-                    let accent_char = seac_code_to_glyph_id(&ctx.metadata.charset, p.stack.pop())
-                        .ok_or(CFFError::InvalidSeacCode)?;
-                    let base_char = seac_code_to_glyph_id(&ctx.metadata.charset, p.stack.pop())
-                        .ok_or(CFFError::InvalidSeacCode)?;
+                    let accent_char =
+                        seac_code_to_glyph_id(&ctx.metadata.charset, p.stack.pop()).ok_or(CFFError::InvalidSeacCode)?;
+                    let base_char =
+                        seac_code_to_glyph_id(&ctx.metadata.charset, p.stack.pop()).ok_or(CFFError::InvalidSeacCode)?;
                     let dy = p.stack.pop();
                     let dx = p.stack.pop();
 
@@ -722,11 +713,7 @@ fn seac_code_to_glyph_id(charset: &Charset, n: f32) -> Option<GlyphId> {
     match charset {
         Charset::ISOAdobe => {
             // ISO Adobe charset only defines string ids up to 228 (zcaron)
-            if code <= 228 {
-                Some(GlyphId(sid.0))
-            } else {
-                None
-            }
+            if code <= 228 { Some(GlyphId(sid.0)) } else { None }
         }
         Charset::Expert | Charset::ExpertSubset => None,
         _ => charset.sid_to_gid(sid),
@@ -790,11 +777,7 @@ fn parse_fd_select<'a>(number_of_glyphs: u16, s: &mut Stream<'a>) -> Option<FDSe
     }
 }
 
-fn parse_sid_metadata<'a>(
-    data: &'a [u8],
-    top_dict: TopDict,
-    encoding: Encoding<'a>,
-) -> Option<FontKind<'a>> {
+fn parse_sid_metadata<'a>(data: &'a [u8], top_dict: TopDict, encoding: Encoding<'a>) -> Option<FontKind<'a>> {
     let mut metadata = SIDMetadata::default();
     metadata.encoding = encoding;
 
@@ -807,10 +790,9 @@ fn parse_sid_metadata<'a>(
     metadata.default_width = private_dict.default_width.unwrap_or(0.0);
     metadata.nominal_width = private_dict.nominal_width.unwrap_or(0.0);
 
-    if let (Some(private_dict_range), Some(subroutines_offset)) = (
-        top_dict.private_dict_range,
-        private_dict.local_subroutines_offset,
-    ) {
+    if let (Some(private_dict_range), Some(subroutines_offset)) =
+        (top_dict.private_dict_range, private_dict.local_subroutines_offset)
+    {
         // 'The local subroutines offset is relative to the beginning
         // of the Private DICT data.'
         if let Some(start) = private_dict_range.start.checked_add(subroutines_offset) {
@@ -914,9 +896,7 @@ impl<'a> Table<'a> {
         };
 
         // 'The number of glyphs is the value of the count field in the CharStrings INDEX.'
-        let number_of_glyphs = u16::try_from(char_strings.len())
-            .ok()
-            .and_then(NonZeroU16::new)?;
+        let number_of_glyphs = u16::try_from(char_strings.len()).ok().and_then(NonZeroU16::new)?;
 
         let charset = match top_dict.charset_offset {
             Some(charset_id::ISO_ADOBE) => Charset::ISOAdobe,
@@ -972,15 +952,8 @@ impl<'a> Table<'a> {
     }
 
     /// Outlines a glyph.
-    pub fn outline(
-        &self,
-        glyph_id: GlyphId,
-        builder: &mut dyn OutlineBuilder,
-    ) -> Result<Rect, CFFError> {
-        let data = self
-            .char_strings
-            .get(u32::from(glyph_id.0))
-            .ok_or(CFFError::NoGlyph)?;
+    pub fn outline(&self, glyph_id: GlyphId, builder: &mut dyn OutlineBuilder) -> Result<Rect, CFFError> {
+        let data = self.char_strings.get(u32::from(glyph_id.0)).ok_or(CFFError::NoGlyph)?;
         parse_char_string(data, self, glyph_id, false, builder).map(|v| v.0)
     }
 
@@ -1013,11 +986,8 @@ impl<'a> Table<'a> {
         match self.kind {
             FontKind::SID(ref sid) => {
                 let data = self.char_strings.get(u32::from(glyph_id.0))?;
-                let (_, width) =
-                    parse_char_string(data, self, glyph_id, true, &mut DummyOutline).ok()?;
-                let width = width
-                    .map(|w| sid.nominal_width + w)
-                    .unwrap_or(sid.default_width);
+                let (_, width) = parse_char_string(data, self, glyph_id, true, &mut DummyOutline).ok()?;
+                let width = width.map(|w| sid.nominal_width + w).unwrap_or(sid.default_width);
                 u16::try_from(width as i32).ok()
             }
             FontKind::CID(_) => None,
@@ -1032,10 +1002,7 @@ impl<'a> Table<'a> {
                 let sid = if let Some(index) = STANDARD_NAMES.iter().position(|n| *n == name) {
                     StringId(index as u16)
                 } else {
-                    let index = self
-                        .strings
-                        .into_iter()
-                        .position(|n| n == name.as_bytes())?;
+                    let index = self.strings.into_iter().position(|n| n == name.as_bytes())?;
                     StringId((STANDARD_NAMES.len() + index) as u16)
                 };
 

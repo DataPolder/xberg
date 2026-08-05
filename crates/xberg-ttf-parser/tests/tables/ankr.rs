@@ -1,7 +1,7 @@
+use crate::{Unit::*, convert};
 use std::num::NonZeroU16;
 use ttf_parser::GlyphId;
-use ttf_parser::ankr::{Table, Point};
-use crate::{convert, Unit::*};
+use ttf_parser::ankr::{Point, Table};
 
 #[test]
 fn empty() {
@@ -18,25 +18,21 @@ fn empty() {
 #[test]
 fn single() {
     let data = convert(&[
-        UInt16(0), // version
-        UInt16(0), // reserved
-        UInt32(12), // offset to lookup table
+        UInt16(0),       // version
+        UInt16(0),       // reserved
+        UInt32(12),      // offset to lookup table
         UInt32(12 + 16), // offset to glyphs data
-
         // Lookup Table
         UInt16(6), // format
-
         // Binary Search Table
         UInt16(4), // segment size
         UInt16(1), // number of segments
         UInt16(0), // search range: we don't use it
         UInt16(0), // entry selector: we don't use it
         UInt16(0), // range shift: we don't use it
-
         // Segment [0]
         UInt16(0), // glyph
         UInt16(0), // offset
-
         // Glyphs Data
         UInt32(1), // number of points
         // Point [0]
@@ -52,25 +48,21 @@ fn single() {
 #[test]
 fn two_points() {
     let data = convert(&[
-        UInt16(0), // version
-        UInt16(0), // reserved
-        UInt32(12), // offset to lookup table
+        UInt16(0),       // version
+        UInt16(0),       // reserved
+        UInt32(12),      // offset to lookup table
         UInt32(12 + 16), // offset to glyphs data
-
         // Lookup Table
         UInt16(6), // format
-
         // Binary Search Table
         UInt16(4), // segment size
         UInt16(1), // number of segments
         UInt16(0), // search range: we don't use it
         UInt16(0), // entry selector: we don't use it
         UInt16(0), // range shift: we don't use it
-
         // Segment [0]
         UInt16(0), // glyph
         UInt16(0), // offset
-
         // Glyphs Data
         // Glyph Data [0]
         UInt32(2), // number of points
@@ -78,7 +70,7 @@ fn two_points() {
         Int16(-5), // x
         Int16(11), // y
         // Point [1]
-        Int16(10), // x
+        Int16(10),  // x
         Int16(-40), // y
     ]);
 
@@ -91,28 +83,24 @@ fn two_points() {
 #[test]
 fn two_glyphs() {
     let data = convert(&[
-        UInt16(0), // version
-        UInt16(0), // reserved
-        UInt32(12), // offset to lookup table
+        UInt16(0),       // version
+        UInt16(0),       // reserved
+        UInt32(12),      // offset to lookup table
         UInt32(12 + 20), // offset to glyphs data
-
         // Lookup Table
         UInt16(6), // format
-
         // Binary Search Table
         UInt16(4), // segment size
         UInt16(2), // number of segments
         UInt16(0), // search range: we don't use it
         UInt16(0), // entry selector: we don't use it
         UInt16(0), // range shift: we don't use it
-
         // Segment [0]
         UInt16(0), // glyph
         UInt16(0), // offset
         // Segment [1]
         UInt16(1), // glyph
         UInt16(8), // offset
-
         // Glyphs Data
         // Glyph Data [0]
         UInt32(1), // number of points

@@ -1,8 +1,8 @@
 //! A [Style Attributes Table](https://docs.microsoft.com/en-us/typography/opentype/spec/stat) implementation.
 
 use crate::{
-    parser::{Offset, Offset16, Offset32, Stream},
     Fixed, FromData, LazyArray16, Tag,
+    parser::{Offset, Offset16, Offset32, Stream},
 };
 
 /// Axis-value pairing for [`AxisValueSubtableFormat4`].
@@ -285,9 +285,10 @@ impl<'a> AxisValueSubtable<'a> {
     /// axes.
     pub fn contains(&self, value: Fixed) -> bool {
         if let Some(subtable_value) = self.value()
-            && subtable_value.0 == value.0 {
-                return true;
-            }
+            && subtable_value.0 == value.0
+        {
+            return true;
+        }
 
         if let Self::Format2(AxisValueSubtableFormat2 {
             range_min_value,
@@ -415,19 +416,11 @@ impl<'a> Table<'a> {
     /// the variation axes exist.
     ///
     /// Note: Format 4 subtables are explicitly ignored in this function.
-    pub fn subtable_for_axis(
-        &self,
-        axis: Tag,
-        match_value: Option<Fixed>,
-    ) -> Option<AxisValueSubtable> {
+    pub fn subtable_for_axis(&self, axis: Tag, match_value: Option<Fixed>) -> Option<AxisValueSubtable> {
         for subtable in self.subtables() {
             match subtable {
-                AxisValueSubtable::Format1(AxisValueSubtableFormat1 {
-                    axis_index, value, ..
-                })
-                | AxisValueSubtable::Format3(AxisValueSubtableFormat3 {
-                    axis_index, value, ..
-                }) => {
+                AxisValueSubtable::Format1(AxisValueSubtableFormat1 { axis_index, value, .. })
+                | AxisValueSubtable::Format3(AxisValueSubtableFormat3 { axis_index, value, .. }) => {
                     if self.axes.get(axis_index)?.tag != axis {
                         continue;
                     }
@@ -453,9 +446,7 @@ impl<'a> Table<'a> {
 
                     match match_value {
                         Some(match_value) => {
-                            if match_value.0 >= range_min_value.0
-                                && match_value.0 < range_max_value.0
-                            {
+                            if match_value.0 >= range_min_value.0 && match_value.0 < range_max_value.0 {
                                 return Some(subtable);
                             }
                         }

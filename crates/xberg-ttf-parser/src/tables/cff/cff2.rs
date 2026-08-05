@@ -9,8 +9,8 @@ use core::ops::Range;
 use super::argstack::ArgumentsStack;
 use super::charstring::CharStringParser;
 use super::dict::DictionaryParser;
-use super::index::{parse_index, Index};
-use super::{calc_subroutine_bias, conv_subroutine_index, Builder, CFFError};
+use super::index::{Index, parse_index};
+use super::{Builder, CFFError, calc_subroutine_bias, conv_subroutine_index};
 use crate::parser::{NumFrom, Stream, TryNumFrom};
 use crate::var_store::*;
 use crate::{GlyphId, NormalizedCoordinate, OutlineBuilder, Rect, RectF};
@@ -183,11 +183,7 @@ impl Scalars {
     }
 
     pub fn at(&self, i: u8) -> f32 {
-        if i < self.len {
-            self.d[usize::from(i)]
-        } else {
-            0.0
-        }
+        if i < self.len { self.d[usize::from(i)] } else { 0.0 }
     }
 
     pub fn push(&mut self, n: f32) -> Option<()> {
@@ -227,9 +223,7 @@ impl CharStringParserContext<'_> {
                 .item_variation_store
                 .regions
                 .evaluate_region(index, self.coordinates);
-            self.scalars
-                .push(scalar)
-                .ok_or(CFFError::BlendRegionsLimitReached)?;
+            self.scalars.push(scalar).ok_or(CFFError::BlendRegionsLimitReached)?;
         }
 
         Ok(())
@@ -295,10 +289,7 @@ fn _parse_char_string(
 ) -> Result<(), CFFError> {
     // xberg addition: charge one unit per invocation so total subroutine calls for a glyph
     // stay bounded regardless of nesting depth. See MAX_CHARSTRING_VISITS.
-    ctx.budget = ctx
-        .budget
-        .checked_sub(1)
-        .ok_or(CFFError::NestingLimitReached)?;
+    ctx.budget = ctx.budget.checked_sub(1).ok_or(CFFError::NestingLimitReached)?;
 
     let mut s = Stream::new(char_string);
     while !s.at_end() {
@@ -379,8 +370,7 @@ fn _parse_char_string(
                     return Err(CFFError::InvalidArgumentsStackLength);
                 }
 
-                let index = u16::try_num_from(p.stack.pop())
-                    .ok_or(CFFError::InvalidItemVariationDataIndex)?;
+                let index = u16::try_num_from(p.stack.pop()).ok_or(CFFError::InvalidItemVariationDataIndex)?;
                 ctx.update_scalars(index)?;
 
                 ctx.had_vsindex = true;
@@ -398,8 +388,7 @@ fn _parse_char_string(
                     return Err(CFFError::InvalidArgumentsStackLength);
                 }
 
-                let n = u16::try_num_from(p.stack.pop())
-                    .ok_or(CFFError::InvalidNumberOfBlendOperands)?;
+                let n = u16::try_num_from(p.stack.pop()).ok_or(CFFError::InvalidNumberOfBlendOperands)?;
                 let k = ctx.scalars.len();
 
                 let len = usize::from(n) * (usize::from(k) + 1);
@@ -545,9 +534,7 @@ impl<'a> Table<'a> {
                     if let Some(subroutines_offset) = parse_private_dict(private_dict_data) {
                         // 'The local subroutines offset is relative to the beginning
                         // of the Private DICT data.'
-                        if let Some(start) =
-                            private_dict_range.start.checked_add(subroutines_offset)
-                        {
+                        if let Some(start) = private_dict_range.start.checked_add(subroutines_offset) {
                             let data = data.get(start..data.len())?;
                             let mut s = Stream::new(data);
                             metadata.local_subrs = parse_index::<u32>(&mut s)?;
@@ -568,10 +555,7 @@ impl<'a> Table<'a> {
         glyph_id: GlyphId,
         builder: &mut dyn OutlineBuilder,
     ) -> Result<Rect, CFFError> {
-        let data = self
-            .char_strings
-            .get(u32::from(glyph_id.0))
-            .ok_or(CFFError::NoGlyph)?;
+        let data = self.char_strings.get(u32::from(glyph_id.0)).ok_or(CFFError::NoGlyph)?;
         parse_char_string(data, self, coordinates, builder)
     }
 }

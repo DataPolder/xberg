@@ -3,9 +3,9 @@
 
 use core::num::NonZeroU16;
 
+use crate::GlyphId;
 use crate::aat;
 use crate::parser::{FromData, LazyArray32, Offset, Offset32, Stream};
-use crate::GlyphId;
 
 /// An anchor point.
 #[allow(missing_docs)]

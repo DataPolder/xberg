@@ -1,8 +1,8 @@
 //! A [Vertical Origin Table](
 //! https://docs.microsoft.com/en-us/typography/opentype/spec/vorg) implementation.
 
-use crate::parser::{FromData, LazyArray16, Stream};
 use crate::GlyphId;
+use crate::parser::{FromData, LazyArray16, Stream};
 
 /// Vertical origin metrics for the
 /// [Vertical Origin Table](https://docs.microsoft.com/en-us/typography/opentype/spec/vorg).

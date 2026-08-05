@@ -1,7 +1,7 @@
 use core::convert::TryFrom;
 
-use crate::parser::{FromData, LazyArray32, Stream};
 use crate::GlyphId;
+use crate::parser::{FromData, LazyArray32, Stream};
 
 #[derive(Clone, Copy)]
 pub struct SequentialMapGroup {

@@ -44,11 +44,7 @@ impl<'a> Table<'a> {
 
     /// Returns the advance height offset for a glyph.
     #[inline]
-    pub fn advance_offset(
-        &self,
-        glyph_id: GlyphId,
-        coordinates: &[NormalizedCoordinate],
-    ) -> Option<f32> {
+    pub fn advance_offset(&self, glyph_id: GlyphId, coordinates: &[NormalizedCoordinate]) -> Option<f32> {
         let (outer_idx, inner_idx) = if let Some(offset) = self.advance_height_mapping_offset {
             DeltaSetIndexMap::new(self.data.get(offset.to_usize()..)?).map(glyph_id.0 as u32)?
         } else {
@@ -59,39 +55,26 @@ impl<'a> Table<'a> {
             (0, glyph_id.0)
         };
 
-        self.variation_store
-            .parse_delta(outer_idx, inner_idx, coordinates)
+        self.variation_store.parse_delta(outer_idx, inner_idx, coordinates)
     }
 
     /// Returns the top side bearing offset for a glyph.
     #[inline]
-    pub fn top_side_bearing_offset(
-        &self,
-        glyph_id: GlyphId,
-        coordinates: &[NormalizedCoordinate],
-    ) -> Option<f32> {
+    pub fn top_side_bearing_offset(&self, glyph_id: GlyphId, coordinates: &[NormalizedCoordinate]) -> Option<f32> {
         let set_data = self.data.get(self.tsb_mapping_offset?.to_usize()..)?;
         self.side_bearing_offset(glyph_id, coordinates, set_data)
     }
 
     /// Returns the bottom side bearing offset for a glyph.
     #[inline]
-    pub fn bottom_side_bearing_offset(
-        &self,
-        glyph_id: GlyphId,
-        coordinates: &[NormalizedCoordinate],
-    ) -> Option<f32> {
+    pub fn bottom_side_bearing_offset(&self, glyph_id: GlyphId, coordinates: &[NormalizedCoordinate]) -> Option<f32> {
         let set_data = self.data.get(self.bsb_mapping_offset?.to_usize()..)?;
         self.side_bearing_offset(glyph_id, coordinates, set_data)
     }
 
     /// Returns the vertical origin offset for a glyph.
     #[inline]
-    pub fn vertical_origin_offset(
-        &self,
-        glyph_id: GlyphId,
-        coordinates: &[NormalizedCoordinate],
-    ) -> Option<f32> {
+    pub fn vertical_origin_offset(&self, glyph_id: GlyphId, coordinates: &[NormalizedCoordinate]) -> Option<f32> {
         let set_data = self.data.get(self.vorg_mapping_offset?.to_usize()..)?;
         self.side_bearing_offset(glyph_id, coordinates, set_data)
     }
@@ -103,8 +86,7 @@ impl<'a> Table<'a> {
         set_data: &[u8],
     ) -> Option<f32> {
         let (outer_idx, inner_idx) = DeltaSetIndexMap::new(set_data).map(glyph_id.0 as u32)?;
-        self.variation_store
-            .parse_delta(outer_idx, inner_idx, coordinates)
+        self.variation_store.parse_delta(outer_idx, inner_idx, coordinates)
     }
 }
 

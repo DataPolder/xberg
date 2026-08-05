@@ -6,12 +6,10 @@
 
 use core::convert::TryFrom;
 
+use crate::GlyphId;
 use crate::opentype_layout::ChainedContextLookup;
 use crate::opentype_layout::{Class, ClassDefinition, ContextLookup, Coverage, LookupSubtable};
-use crate::parser::{
-    FromData, FromSlice, LazyArray16, LazyArray32, NumFrom, Offset, Offset16, Stream,
-};
-use crate::GlyphId;
+use crate::parser::{FromData, FromSlice, LazyArray16, LazyArray32, NumFrom, Offset, Offset16, Stream};
 
 /// A [Device Table](
 /// https://docs.microsoft.com/en-us/typography/opentype/spec/chapter2#devVarIdxTbls)
@@ -168,11 +166,7 @@ pub struct ValueRecord<'a> {
 
 impl<'a> ValueRecord<'a> {
     // Returns `None` only on parsing error.
-    fn parse(
-        table_data: &'a [u8],
-        s: &mut Stream,
-        flags: ValueFormatFlags,
-    ) -> Option<ValueRecord<'a>> {
+    fn parse(table_data: &'a [u8], s: &mut Stream, flags: ValueFormatFlags) -> Option<ValueRecord<'a>> {
         let mut record = ValueRecord::default();
 
         if flags.x_placement() {
@@ -192,28 +186,28 @@ impl<'a> ValueRecord<'a> {
         }
 
         if flags.x_placement_device()
-            && let Some(offset) = s.read::<Option<Offset16>>()? {
-                record.x_placement_device =
-                    table_data.get(offset.to_usize()..).and_then(Device::parse)
-            }
+            && let Some(offset) = s.read::<Option<Offset16>>()?
+        {
+            record.x_placement_device = table_data.get(offset.to_usize()..).and_then(Device::parse)
+        }
 
         if flags.y_placement_device()
-            && let Some(offset) = s.read::<Option<Offset16>>()? {
-                record.y_placement_device =
-                    table_data.get(offset.to_usize()..).and_then(Device::parse)
-            }
+            && let Some(offset) = s.read::<Option<Offset16>>()?
+        {
+            record.y_placement_device = table_data.get(offset.to_usize()..).and_then(Device::parse)
+        }
 
         if flags.x_advance_device()
-            && let Some(offset) = s.read::<Option<Offset16>>()? {
-                record.x_advance_device =
-                    table_data.get(offset.to_usize()..).and_then(Device::parse)
-            }
+            && let Some(offset) = s.read::<Option<Offset16>>()?
+        {
+            record.x_advance_device = table_data.get(offset.to_usize()..).and_then(Device::parse)
+        }
 
         if flags.y_advance_device()
-            && let Some(offset) = s.read::<Option<Offset16>>()? {
-                record.y_advance_device =
-                    table_data.get(offset.to_usize()..).and_then(Device::parse)
-            }
+            && let Some(offset) = s.read::<Option<Offset16>>()?
+        {
+            record.y_advance_device = table_data.get(offset.to_usize()..).and_then(Device::parse)
+        }
 
         Some(record)
     }
@@ -237,12 +231,7 @@ pub struct ValueRecordsArray<'a> {
 }
 
 impl<'a> ValueRecordsArray<'a> {
-    fn parse(
-        table_data: &'a [u8],
-        count: u16,
-        flags: ValueFormatFlags,
-        s: &mut Stream<'a>,
-    ) -> Option<Self> {
+    fn parse(table_data: &'a [u8], count: u16, flags: ValueFormatFlags, s: &mut Stream<'a>) -> Option<Self> {
         Some(Self {
             table_data,
             flags,
@@ -372,11 +361,7 @@ impl<'a> PairSet<'a> {
             // mid >= 0: by definition
             // mid < size: mid = size / 2 + size / 4 + size / 8 ...
             let cmp = get_glyph(get_record(mid)?).cmp(&second);
-            base = if cmp == core::cmp::Ordering::Greater {
-                base
-            } else {
-                mid
-            };
+            base = if cmp == core::cmp::Ordering::Greater { base } else { mid };
             size -= half;
         }
 
@@ -424,11 +409,7 @@ impl<'a> PairSets<'a> {
         offsets: LazyArray16<'a, Option<Offset16>>,
         flags: (ValueFormatFlags, ValueFormatFlags),
     ) -> Self {
-        Self {
-            data,
-            offsets,
-            flags,
-        }
+        Self { data, offsets, flags }
     }
 
     /// Returns a value at `index`.
@@ -804,10 +785,7 @@ impl<'a> MarkArray<'a> {
     /// Returns contained data at index.
     pub fn get(&self, index: u16) -> Option<(Class, Anchor<'a>)> {
         let record = self.array.get(index)?;
-        let anchor = self
-            .data
-            .get(record.mark_anchor.to_usize()..)
-            .and_then(Anchor::parse)?;
+        let anchor = self.data.get(record.mark_anchor.to_usize()..).and_then(Anchor::parse)?;
         Some((record.class, anchor))
     }
 

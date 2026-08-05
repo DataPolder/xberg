@@ -5,8 +5,8 @@
 // A heavily modified port of https://github.com/harfbuzz/rustybuzz implementation
 // originally written by https://github.com/laurmaedje
 
-use crate::parser::{FromData, FromSlice, LazyArray16, Stream};
 use crate::GlyphId;
+use crate::parser::{FromData, FromSlice, LazyArray16, Stream};
 
 mod chained_context;
 mod context;
@@ -158,10 +158,7 @@ impl<'a> ClassDefinition<'a> {
     /// Returns the glyph class of the glyph (zero if it is not defined).
     pub fn get(&self, glyph: GlyphId) -> Class {
         match self {
-            Self::Format1 { start, classes } => glyph
-                .0
-                .checked_sub(start.0)
-                .and_then(|index| classes.get(index)),
+            Self::Format1 { start, classes } => glyph.0.checked_sub(start.0).and_then(|index| classes.get(index)),
             Self::Format2 { records } => records.range(glyph).map(|record| record.value),
             Self::Empty => Some(0),
         }

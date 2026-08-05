@@ -1,8 +1,8 @@
 //! A [Color Bitmap Location Table](
 //! https://docs.microsoft.com/en-us/typography/opentype/spec/cblc) implementation.
 
-use crate::parser::{FromData, NumFrom, Offset, Offset16, Offset32, Stream};
 use crate::GlyphId;
+use crate::parser::{FromData, NumFrom, Offset, Offset16, Offset32, Stream};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub(crate) struct BitmapFormat {
@@ -49,11 +49,7 @@ struct BitmapSizeTable {
     // Many fields are omitted.
 }
 
-fn select_bitmap_size_table(
-    glyph_id: GlyphId,
-    pixels_per_em: u16,
-    mut s: Stream,
-) -> Option<BitmapSizeTable> {
+fn select_bitmap_size_table(glyph_id: GlyphId, pixels_per_em: u16, mut s: Stream) -> Option<BitmapSizeTable> {
     let subtable_count = s.read::<u32>()?;
     let orig_s = s.clone();
 
@@ -75,9 +71,7 @@ fn select_bitmap_size_table(
         }
 
         // Select a best matching subtable based on `pixels_per_em`.
-        if (pixels_per_em <= ppem_x && ppem_x < max_ppem)
-            || (pixels_per_em > max_ppem && ppem_x > max_ppem)
-        {
+        if (pixels_per_em <= ppem_x && ppem_x < max_ppem) || (pixels_per_em > max_ppem && ppem_x > max_ppem) {
             idx = Some(usize::num_from(i));
             max_ppem = ppem_x;
             bit_depth_for_max_ppem = bit_depth;
@@ -105,11 +99,7 @@ struct IndexSubtableInfo {
     offset: usize, // absolute offset
 }
 
-fn select_index_subtable(
-    data: &[u8],
-    size_table: BitmapSizeTable,
-    glyph_id: GlyphId,
-) -> Option<IndexSubtableInfo> {
+fn select_index_subtable(data: &[u8], size_table: BitmapSizeTable, glyph_id: GlyphId) -> Option<IndexSubtableInfo> {
     let mut s = Stream::new_at(data, size_table.subtable_array_offset.to_usize())?;
     for _ in 0..size_table.number_of_subtables {
         let start_glyph_id = s.read::<GlyphId>()?;
@@ -118,10 +108,7 @@ fn select_index_subtable(
 
         if (start_glyph_id..=end_glyph_id).contains(&glyph_id) {
             let offset = size_table.subtable_array_offset.to_usize() + offset.to_usize();
-            return Some(IndexSubtableInfo {
-                start_glyph_id,
-                offset,
-            });
+            return Some(IndexSubtableInfo { start_glyph_id, offset });
         }
     }
 
@@ -262,9 +249,8 @@ impl<'a> Table<'a> {
                 let num_glyphs = s.read::<u32>()?;
                 let glyphs = s.read_array32::<GlyphId>(num_glyphs)?;
                 let (index, _) = glyphs.binary_search(&glyph_id)?;
-                image_offset = image_offset.checked_add(
-                    usize::num_from(index).checked_mul(usize::num_from(image_size))?,
-                )?;
+                image_offset =
+                    image_offset.checked_add(usize::num_from(index).checked_mul(usize::num_from(image_size))?)?;
             }
             _ => return None, // Invalid format.
         }

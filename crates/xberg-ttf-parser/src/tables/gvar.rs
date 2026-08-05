@@ -11,9 +11,9 @@ use core::cmp;
 use core::convert::TryFrom;
 use core::num::NonZeroU16;
 
-use crate::parser::{LazyArray16, Offset, Offset16, Offset32, Stream, F2DOT14};
-use crate::{glyf, PhantomPoints, PointF};
+use crate::parser::{F2DOT14, LazyArray16, Offset, Offset16, Offset32, Stream};
 use crate::{GlyphId, NormalizedCoordinate, OutlineBuilder, Rect, RectF, Transform};
+use crate::{PhantomPoints, PointF, glyf};
 
 /// 'The TrueType rasterizer dynamically generates 'phantom' points for each glyph
 /// that represent horizontal and vertical advance widths and side bearings,
@@ -65,9 +65,7 @@ enum VariationTuples<'a> {
         len: u16,
     },
     #[cfg(feature = "gvar-alloc")]
-    Heap {
-        vec: std::vec::Vec<VariationTuple<'a>>,
-    },
+    Heap { vec: std::vec::Vec<VariationTuple<'a>> },
 }
 
 impl<'a> Default for VariationTuples<'a> {
@@ -200,13 +198,8 @@ impl<'a> VariationTuples<'a> {
                     } else {
                         // If there are no more deltas, we have to resolve them manually.
                         let set_points = set_points.clone();
-                        let (x_delta, y_delta) = infer_deltas(
-                            tuple,
-                            set_points,
-                            points.clone(),
-                            all_points.clone(),
-                            point,
-                        );
+                        let (x_delta, y_delta) =
+                            infer_deltas(tuple, set_points, points.clone(), all_points.clone(), point);
 
                         x += x_delta;
                         y += y_delta;
@@ -214,8 +207,7 @@ impl<'a> VariationTuples<'a> {
                 } else {
                     // Point is not referenced, so we have to resolve it.
                     let set_points = set_points.clone();
-                    let (x_delta, y_delta) =
-                        infer_deltas(tuple, set_points, points.clone(), all_points.clone(), point);
+                    let (x_delta, y_delta) = infer_deltas(tuple, set_points, points.clone(), all_points.clone(), point);
 
                     x += x_delta;
                     y += y_delta;
@@ -245,10 +237,11 @@ impl<'a> VariationTuples<'a> {
         for tuple in self.as_mut_slice() {
             if let Some(ref mut set_points) = tuple.set_points {
                 if set_points.next()?
-                    && let Some((x_delta, y_delta)) = tuple.deltas.next() {
-                        x += x_delta;
-                        y += y_delta;
-                    }
+                    && let Some((x_delta, y_delta)) = tuple.deltas.next()
+                {
+                    x += x_delta;
+                    y += y_delta;
+                }
             } else {
                 if let Some((x_delta, y_delta)) = tuple.deltas.next() {
                     x += x_delta;
@@ -314,8 +307,8 @@ fn parse_variation_tuples<'a>(
 
         let deltas = {
             // Use `checked_sub` in case we went over the `serialized_data_len`.
-            let left = usize::from(header.serialized_data_len)
-                .checked_sub(serialized_s.offset() - serialized_data_start)?;
+            let left =
+                usize::from(header.serialized_data_len).checked_sub(serialized_s.offset() - serialized_data_start)?;
             let deltas_data = serialized_s.read_bytes(left)?;
             PackedDeltasIter::new(header.scalar, deltas_count, deltas_data)
         };
@@ -368,10 +361,7 @@ fn parse_tuple_variation_header(
             s.read_array16::<F2DOT14>(axis_count)?,
         )
     } else {
-        (
-            LazyArray16::<F2DOT14>::default(),
-            LazyArray16::<F2DOT14>::default(),
-        )
+        (LazyArray16::<F2DOT14>::default(), LazyArray16::<F2DOT14>::default())
     };
 
     let mut header = TupleVariationHeaderData {
@@ -505,9 +495,7 @@ mod packed_points {
                 let run_count = u16::from(control.run_count());
                 let is_points_are_words = control.is_points_are_words();
                 // Do not actually parse the number, simply advance.
-                s.advance_checked(
-                    if is_points_are_words { 2 } else { 1 } * usize::from(run_count),
-                )?;
+                s.advance_checked(if is_points_are_words { 2 } else { 1 } * usize::from(run_count))?;
                 i += run_count;
             }
 
@@ -676,9 +664,7 @@ mod packed_points {
                 1,
             ];
 
-            let points_iter = PackedPointsIter::new(&mut Stream::new(&data))
-                .unwrap()
-                .unwrap();
+            let points_iter = PackedPointsIter::new(&mut Stream::new(&data)).unwrap().unwrap();
             let mut iter = SetPointsIter::new(points_iter);
             assert_eq!(iter.next().unwrap(), false);
             assert_eq!(iter.next().unwrap(), true);
@@ -697,9 +683,7 @@ mod packed_points {
                 2,
             ];
 
-            let points_iter = PackedPointsIter::new(&mut Stream::new(&data))
-                .unwrap()
-                .unwrap();
+            let points_iter = PackedPointsIter::new(&mut Stream::new(&data)).unwrap().unwrap();
             let mut iter = SetPointsIter::new(points_iter);
             assert_eq!(iter.next().unwrap(), true);
             assert_eq!(iter.next().unwrap(), false);
@@ -719,9 +703,7 @@ mod packed_points {
                 1,
             ];
 
-            let points_iter = PackedPointsIter::new(&mut Stream::new(&data))
-                .unwrap()
-                .unwrap();
+            let points_iter = PackedPointsIter::new(&mut Stream::new(&data)).unwrap().unwrap();
             let mut iter = SetPointsIter::new(points_iter);
             assert_eq!(iter.next().unwrap(), false);
             assert_eq!(iter.next().unwrap(), true);
@@ -741,9 +723,7 @@ mod packed_points {
                 2,
             ];
 
-            let points_iter = PackedPointsIter::new(&mut Stream::new(&data))
-                .unwrap()
-                .unwrap();
+            let points_iter = PackedPointsIter::new(&mut Stream::new(&data)).unwrap().unwrap();
             let mut iter = SetPointsIter::new(points_iter);
             assert_eq!(iter.next().unwrap(), false);
             assert_eq!(iter.next().unwrap(), true);
@@ -765,9 +745,7 @@ mod packed_points {
                 2,
             ];
 
-            let points_iter = PackedPointsIter::new(&mut Stream::new(&data))
-                .unwrap()
-                .unwrap();
+            let points_iter = PackedPointsIter::new(&mut Stream::new(&data)).unwrap().unwrap();
             let mut iter = SetPointsIter::new(points_iter);
             assert_eq!(iter.next().unwrap(), false);
             assert_eq!(iter.next().unwrap(), false);
@@ -801,9 +779,7 @@ mod packed_points {
             for _ in 0..50 {
                 data.push(2);
             }
-            let points_iter = PackedPointsIter::new(&mut Stream::new(&data))
-                .unwrap()
-                .unwrap();
+            let points_iter = PackedPointsIter::new(&mut Stream::new(&data)).unwrap().unwrap();
             let mut iter = SetPointsIter::new(points_iter);
             assert_eq!(iter.next().unwrap(), false);
             for _ in 0..150 {
@@ -828,9 +804,7 @@ mod packed_points {
                 3,
             ];
 
-            let points_iter = PackedPointsIter::new(&mut Stream::new(&data))
-                .unwrap()
-                .unwrap();
+            let points_iter = PackedPointsIter::new(&mut Stream::new(&data)).unwrap().unwrap();
             let mut iter = SetPointsIter::new(points_iter);
             assert_eq!(iter.next().unwrap(), false);
             assert_eq!(iter.next().unwrap(), false);
@@ -862,9 +836,7 @@ mod packed_points {
                 2,
             ];
 
-            let points_iter = PackedPointsIter::new(&mut Stream::new(&data))
-                .unwrap()
-                .unwrap();
+            let points_iter = PackedPointsIter::new(&mut Stream::new(&data)).unwrap().unwrap();
             let mut iter = SetPointsIter::new(points_iter);
             assert_eq!(iter.next().unwrap(), false);
             assert_eq!(iter.next().unwrap(), false);
@@ -1478,15 +1450,14 @@ fn infer_deltas(
         let mut last_point = None;
         let mut deltas = tuple.deltas.clone();
         for (point, is_set) in points.clone().zip(points_set.clone()) {
-            if is_set
-                && let Some((x_delta, y_delta)) = deltas.next() {
-                    last_point = Some(PointAndDelta {
-                        x: point.x,
-                        y: point.y,
-                        x_delta,
-                        y_delta,
-                    });
-                }
+            if is_set && let Some((x_delta, y_delta)) = deltas.next() {
+                last_point = Some(PointAndDelta {
+                    x: point.x,
+                    y: point.y,
+                    x_delta,
+                    y_delta,
+                });
+            }
 
             if point.last_point {
                 break;
@@ -1593,19 +1564,9 @@ fn infer_deltas(
     (dx, dy)
 }
 
-fn infer_delta(
-    prev_point: i16,
-    target_point: i16,
-    next_point: i16,
-    prev_delta: f32,
-    next_delta: f32,
-) -> f32 {
+fn infer_delta(prev_point: i16, target_point: i16, next_point: i16, prev_delta: f32, next_delta: f32) -> f32 {
     if prev_point == next_point {
-        if prev_delta == next_delta {
-            prev_delta
-        } else {
-            0.0
-        }
+        if prev_delta == next_delta { prev_delta } else { 0.0 }
     } else if target_point <= prev_point.min(next_point) {
         if prev_point < next_point {
             prev_delta
@@ -1712,10 +1673,9 @@ impl<'a> Table<'a> {
                     array.get(next_glyph_id)?.to_usize() * 2,
                 )
             }
-            GlyphVariationDataOffsets::Long(ref array) => (
-                array.get(glyph_id.0)?.to_usize(),
-                array.get(next_glyph_id)?.to_usize(),
-            ),
+            GlyphVariationDataOffsets::Long(ref array) => {
+                (array.get(glyph_id.0)?.to_usize(), array.get(next_glyph_id)?.to_usize())
+            }
         };
 
         // Ignore empty data.
@@ -1724,13 +1684,7 @@ impl<'a> Table<'a> {
         }
 
         let data = self.glyphs_variation_data.get(start..end)?;
-        parse_variation_data(
-            coordinates,
-            &self.shared_tuple_records,
-            points_len,
-            data,
-            tuples,
-        )
+        parse_variation_data(coordinates, &self.shared_tuple_records, points_len, data, tuples)
     }
 
     /// Outlines a glyph.

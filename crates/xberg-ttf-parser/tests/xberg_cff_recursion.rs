@@ -16,7 +16,7 @@
 //! Kept out of `tests/tables/` so every file cherry-picked from upstream stays
 //! byte-identical to it.
 
-use ttf_parser::{cff, GlyphId, OutlineBuilder};
+use ttf_parser::{GlyphId, OutlineBuilder, cff};
 
 /// One more subroutine call than `MAX_CHARSTRING_VISITS` (100_000) allows, so the budget
 /// is exhausted before the glyph reaches its `endchar`.
@@ -109,7 +109,11 @@ fn recursion_bomb_cff() -> Vec<u8> {
     w.push(subr.len() as u8 + 1); // offset[1]
     w.extend_from_slice(&subr);
     // CharString INDEX: one entry, 4-byte offsets for the large glyph.
-    assert_eq!(w.len() as u32, charstr_offset, "CharString INDEX must start at offset 21");
+    assert_eq!(
+        w.len() as u32,
+        charstr_offset,
+        "CharString INDEX must start at offset 21"
+    );
     w.extend_from_slice(&1u16.to_be_bytes()); // count
     w.push(4); // offSize
     w.extend_from_slice(&1u32.to_be_bytes()); // offset[0]

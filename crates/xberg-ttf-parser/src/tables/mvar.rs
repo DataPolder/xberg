@@ -69,11 +69,8 @@ impl<'a> Table<'a> {
     /// Returns a metric offset by tag.
     pub fn metric_offset(&self, tag: Tag, coordinates: &[NormalizedCoordinate]) -> Option<f32> {
         let (_, record) = self.records.binary_search_by(|r| r.value_tag.cmp(&tag))?;
-        self.variation_store.parse_delta(
-            record.delta_set_outer_index,
-            record.delta_set_inner_index,
-            coordinates,
-        )
+        self.variation_store
+            .parse_delta(record.delta_set_outer_index, record.delta_set_inner_index, coordinates)
     }
 }
 

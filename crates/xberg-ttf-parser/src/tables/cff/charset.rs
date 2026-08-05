@@ -1,6 +1,6 @@
 use super::StringId;
-use crate::parser::{FromData, LazyArray16, Stream};
 use crate::GlyphId;
+use crate::parser::{FromData, LazyArray16, Stream};
 use core::num::NonZeroU16;
 
 /// The Expert Encoding conversion as defined in the Adobe Technical Note #5176 Appendix C.
@@ -90,10 +90,7 @@ impl Charset<'_> {
             Charset::ISOAdobe | Charset::Expert | Charset::ExpertSubset => None,
             Charset::Format0(array) => {
                 // First glyph is omitted, so we have to add 1.
-                array
-                    .into_iter()
-                    .position(|n| n == sid)
-                    .map(|n| GlyphId(n as u16 + 1))
+                array.into_iter().position(|n| n == sid).map(|n| GlyphId(n as u16 + 1))
             }
             Charset::Format1(array) => {
                 let mut glyph_id = GlyphId(1);
@@ -137,14 +134,8 @@ impl Charset<'_> {
                     None
                 }
             }
-            Charset::Expert => EXPERT_ENCODING
-                .get(usize::from(gid.0))
-                .cloned()
-                .map(StringId),
-            Charset::ExpertSubset => EXPERT_SUBSET_ENCODING
-                .get(usize::from(gid.0))
-                .cloned()
-                .map(StringId),
+            Charset::Expert => EXPERT_ENCODING.get(usize::from(gid.0)).cloned().map(StringId),
+            Charset::ExpertSubset => EXPERT_SUBSET_ENCODING.get(usize::from(gid.0)).cloned().map(StringId),
             Charset::Format0(array) => {
                 if gid.0 == 0 {
                     Some(StringId(0))
@@ -190,10 +181,7 @@ impl Charset<'_> {
     }
 }
 
-pub(crate) fn parse_charset<'a>(
-    number_of_glyphs: NonZeroU16,
-    s: &mut Stream<'a>,
-) -> Option<Charset<'a>> {
+pub(crate) fn parse_charset<'a>(number_of_glyphs: NonZeroU16, s: &mut Stream<'a>) -> Option<Charset<'a>> {
     // -1 everywhere, since `.notdef` is omitted.
     let format = s.read::<u8>()?;
     match format {

@@ -1,6 +1,4 @@
-use crate::parser::{
-    FromData, FromSlice, LazyArray16, LazyOffsetArray16, Offset, Offset16, Offset32, Stream,
-};
+use crate::parser::{FromData, FromSlice, LazyArray16, LazyOffsetArray16, Offset, Offset16, Offset32, Stream};
 
 /// A list of [`Lookup`] values.
 pub type LookupList<'a> = LazyOffsetArray16<'a, Lookup<'a>>;
@@ -31,11 +29,7 @@ impl<'a> FromSlice<'a> for Lookup<'a> {
 
         Some(Self {
             flags,
-            subtables: LookupSubtables {
-                kind,
-                data,
-                offsets,
-            },
+            subtables: LookupSubtables { kind, data, offsets },
             mark_filtering_set,
         })
     }

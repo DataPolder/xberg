@@ -113,11 +113,7 @@ pub fn f32_abs(n: f32) -> f32 {
 #[cfg(not(feature = "std"))]
 #[inline]
 pub fn f32_abs(n: f32) -> f32 {
-    if n.is_sign_negative() {
-        -n
-    } else {
-        n
-    }
+    if n.is_sign_negative() { -n } else { n }
 }
 
 #[inline]

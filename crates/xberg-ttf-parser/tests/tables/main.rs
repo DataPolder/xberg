@@ -15,7 +15,7 @@
 #[rustfmt::skip] mod sbix;
 #[rustfmt::skip] mod trak;
 
-use ttf_parser::{fonts_in_collection, Face, FaceParsingError};
+use ttf_parser::{Face, FaceParsingError, fonts_in_collection};
 
 #[allow(dead_code)]
 #[derive(Clone, Copy)]
@@ -70,10 +70,7 @@ fn convert_unit(unit: Unit, data: &mut Vec<u8>) {
 
 #[test]
 fn empty_font() {
-    assert_eq!(
-        Face::parse(&[], 0).unwrap_err(),
-        FaceParsingError::UnknownMagic
-    );
+    assert_eq!(Face::parse(&[], 0).unwrap_err(), FaceParsingError::UnknownMagic);
 }
 
 #[test]
@@ -87,10 +84,7 @@ fn zero_tables() {
         UInt16(0),                      // rangeShift
     ]);
 
-    assert_eq!(
-        Face::parse(&data, 0).unwrap_err(),
-        FaceParsingError::NoHeadTable
-    );
+    assert_eq!(Face::parse(&data, 0).unwrap_err(), FaceParsingError::NoHeadTable);
 }
 
 #[test]
@@ -104,10 +98,7 @@ fn tables_count_overflow() {
         UInt16(0),                      // rangeShift
     ]);
 
-    assert_eq!(
-        Face::parse(&data, 0).unwrap_err(),
-        FaceParsingError::MalformedFont
-    );
+    assert_eq!(Face::parse(&data, 0).unwrap_err(), FaceParsingError::MalformedFont);
 }
 
 #[test]
@@ -151,10 +142,7 @@ fn font_collection_num_fonts_overflow_2() {
         UInt32(u32::MAX),               // numFonts
     ]);
 
-    assert_eq!(
-        Face::parse(&data, 0).unwrap_err(),
-        FaceParsingError::MalformedFont
-    );
+    assert_eq!(Face::parse(&data, 0).unwrap_err(), FaceParsingError::MalformedFont);
 }
 
 #[test]

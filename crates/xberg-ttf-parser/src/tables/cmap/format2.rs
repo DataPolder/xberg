@@ -6,8 +6,8 @@
 
 use core::convert::TryFrom;
 
-use crate::parser::{FromData, LazyArray16, Stream};
 use crate::GlyphId;
+use crate::parser::{FromData, LazyArray16, Stream};
 
 #[derive(Clone, Copy)]
 struct SubHeaderRecord {

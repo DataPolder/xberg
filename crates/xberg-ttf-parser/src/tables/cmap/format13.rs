@@ -3,8 +3,8 @@
 use core::convert::TryFrom;
 
 use super::format12::SequentialMapGroup;
-use crate::parser::{LazyArray32, Stream};
 use crate::GlyphId;
+use crate::parser::{LazyArray32, Stream};
 
 /// A [format 13](https://docs.microsoft.com/en-us/typography/opentype/spec/cmap#format-13-segmented-coverage)
 /// subtable.

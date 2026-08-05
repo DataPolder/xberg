@@ -9,7 +9,7 @@ methods.
 */
 
 use crate::parser::{FromData, LazyArray16, Offset, Offset32, Stream};
-use crate::{name::PlatformId, GlyphId};
+use crate::{GlyphId, name::PlatformId};
 
 mod format0;
 mod format10;
@@ -21,13 +21,13 @@ mod format4;
 mod format6;
 
 pub use format0::Subtable0;
+pub use format2::Subtable2;
+pub use format4::Subtable4;
+pub use format6::Subtable6;
 pub use format10::Subtable10;
 pub use format12::Subtable12;
 pub use format13::Subtable13;
 pub use format14::{GlyphVariationResult, Subtable14};
-pub use format2::Subtable2;
-pub use format4::Subtable4;
-pub use format6::Subtable6;
 
 /// A character encoding subtable variant.
 #[allow(missing_docs)]
@@ -77,8 +77,7 @@ impl<'a> Subtable<'a> {
                 // "Fonts that support Unicode supplementary-plane characters (U+10000 to U+10FFFF)
                 // on the Windows platform must have a format 12 subtable for platform ID 3,
                 // encoding ID 10."
-                self.encoding_id == WINDOWS_UNICODE_FULL_REPERTOIRE_ENCODING_ID
-                    && is_format_12_compatible
+                self.encoding_id == WINDOWS_UNICODE_FULL_REPERTOIRE_ENCODING_ID && is_format_12_compatible
             }
             _ => false,
         }
@@ -116,15 +115,9 @@ impl<'a> Subtable<'a> {
     /// - when glyph ID is `0`.
     /// - when format is not `UnicodeVariationSequences`.
     #[inline]
-    pub fn glyph_variation_index(
-        &self,
-        code_point: u32,
-        variation: u32,
-    ) -> Option<GlyphVariationResult> {
+    pub fn glyph_variation_index(&self, code_point: u32, variation: u32) -> Option<GlyphVariationResult> {
         match self.format {
-            Format::UnicodeVariationSequences(ref subtable) => {
-                subtable.glyph_index(code_point, variation)
-            }
+            Format::UnicodeVariationSequences(ref subtable) => subtable.glyph_index(code_point, variation),
             _ => None,
         }
     }

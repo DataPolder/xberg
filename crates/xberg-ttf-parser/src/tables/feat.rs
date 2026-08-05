@@ -127,10 +127,7 @@ impl<'a> IntoIterator for FeatureNames<'a> {
 
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
-        FeatureNamesIter {
-            names: self,
-            index: 0,
-        }
+        FeatureNamesIter { names: self, index: 0 }
     }
 }
 

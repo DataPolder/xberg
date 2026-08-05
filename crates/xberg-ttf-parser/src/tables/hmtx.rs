@@ -3,8 +3,8 @@
 
 use core::num::NonZeroU16;
 
-use crate::parser::{FromData, LazyArray16, Stream};
 use crate::GlyphId;
+use crate::parser::{FromData, LazyArray16, Stream};
 
 /// Horizontal/Vertical Metrics.
 #[derive(Clone, Copy, Debug)]
@@ -47,11 +47,7 @@ impl<'a> Table<'a> {
     ///
     /// - `number_of_metrics` is from the `hhea`/`vhea` table.
     /// - `number_of_glyphs` is from the `maxp` table.
-    pub fn parse(
-        mut number_of_metrics: u16,
-        number_of_glyphs: NonZeroU16,
-        data: &'a [u8],
-    ) -> Option<Self> {
+    pub fn parse(mut number_of_metrics: u16, number_of_glyphs: NonZeroU16, data: &'a [u8]) -> Option<Self> {
         if number_of_metrics == 0 {
             return None;
         }
@@ -107,8 +103,7 @@ impl<'a> Table<'a> {
             // 'If the number_of_metrics is less than the total number of glyphs,
             // then that array is followed by an array for the side bearing values
             // of the remaining glyphs.'
-            self.bearings
-                .get(glyph_id.0.checked_sub(self.metrics.len())?)
+            self.bearings.get(glyph_id.0.checked_sub(self.metrics.len())?)
         }
     }
 }

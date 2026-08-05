@@ -53,7 +53,7 @@ pub mod mvar;
 #[cfg(feature = "variable-fonts")]
 pub mod vvar;
 
+pub use cff::CFFError;
 pub use cff::cff1;
 #[cfg(feature = "variable-fonts")]
 pub use cff::cff2;
-pub use cff::CFFError;

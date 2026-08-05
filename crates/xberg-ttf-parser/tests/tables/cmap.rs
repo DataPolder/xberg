@@ -1,13 +1,13 @@
 mod format0 {
-    use ttf_parser::{cmap, GlyphId};
-    use crate::{convert, Unit::*};
+    use crate::{Unit::*, convert};
+    use ttf_parser::{GlyphId, cmap};
 
     #[test]
     fn maps_not_all_256_codepoints() {
         let mut data = convert(&[
-            UInt16(0), // format
+            UInt16(0),   // format
             UInt16(262), // subtable size
-            UInt16(0), // language ID
+            UInt16(0),   // language ID
         ]);
 
         // Map (only) codepoint 0x40 to 100.
@@ -27,17 +27,17 @@ mod format0 {
 }
 
 mod format2 {
-    use ttf_parser::{cmap, GlyphId};
-    use crate::{convert, Unit::*};
+    use crate::{Unit::*, convert};
+    use ttf_parser::{GlyphId, cmap};
 
     const U16_SIZE: usize = std::mem::size_of::<u16>();
 
     #[test]
     fn collect_codepoints() {
         let mut data = convert(&[
-            UInt16(2), // format
+            UInt16(2),   // format
             UInt16(534), // subtable size
-            UInt16(0), // language ID
+            UInt16(0),   // language ID
         ]);
 
         // Make only high byte 0x28 multi-byte.
@@ -47,14 +47,14 @@ mod format2 {
         data.extend(convert(&[
             // First sub header (for single byte mapping)
             UInt16(254), // first code
-            UInt16(2), // entry count
-            UInt16(0), // id delta: uninteresting
-            UInt16(0), // id range offset: uninteresting
+            UInt16(2),   // entry count
+            UInt16(0),   // id delta: uninteresting
+            UInt16(0),   // id range offset: uninteresting
             // Second sub header (for high byte 0x28)
             UInt16(16), // first code: (0x28 << 8) + 0x10 = 10256
-            UInt16(3), // entry count
-            UInt16(0), // id delta: uninteresting
-            UInt16(0), // id range offset: uninteresting
+            UInt16(3),  // entry count
+            UInt16(0),  // id delta: uninteresting
+            UInt16(0),  // id range offset: uninteresting
         ]));
 
         // Now only glyph ID's would follow. Not interesting for codepoints.
@@ -69,9 +69,9 @@ mod format2 {
     #[test]
     fn codepoint_at_range_end() {
         let mut data = convert(&[
-            UInt16(2), // format
+            UInt16(2),   // format
             UInt16(532), // subtable size
-            UInt16(0), // language ID
+            UInt16(0),   // language ID
         ]);
 
         // Only single bytes.
@@ -79,12 +79,12 @@ mod format2 {
         data.extend(convert(&[
             // First sub header (for single byte mapping)
             UInt16(40), // first code
-            UInt16(2), // entry count
-            UInt16(0), // id delta
-            UInt16(2), // id range offset
+            UInt16(2),  // entry count
+            UInt16(0),  // id delta
+            UInt16(2),  // id range offset
             // Glyph index
-            UInt16(100), // glyph ID [0]
-            UInt16(1000), // glyph ID [1]
+            UInt16(100),   // glyph ID [0]
+            UInt16(1000),  // glyph ID [1]
             UInt16(10000), // glyph ID [2] (unused)
         ]));
 
@@ -97,29 +97,29 @@ mod format2 {
 }
 
 mod format4 {
-    use ttf_parser::{cmap, GlyphId};
-    use crate::{convert, Unit::*};
+    use crate::{Unit::*, convert};
+    use ttf_parser::{GlyphId, cmap};
 
     #[test]
     fn single_glyph() {
         let data = convert(&[
-            UInt16(4), // format
+            UInt16(4),  // format
             UInt16(32), // subtable size
-            UInt16(0), // language ID
-            UInt16(4), // 2 x segCount
-            UInt16(2), // search range
-            UInt16(0), // entry selector
-            UInt16(2), // range shift
+            UInt16(0),  // language ID
+            UInt16(4),  // 2 x segCount
+            UInt16(2),  // search range
+            UInt16(0),  // entry selector
+            UInt16(2),  // range shift
             // End character codes
-            UInt16(65), // char code [0]
+            UInt16(65),    // char code [0]
             UInt16(65535), // char code [1]
-            UInt16(0), // reserved
+            UInt16(0),     // reserved
             // Start character codes
-            UInt16(65), // char code [0]
+            UInt16(65),    // char code [0]
             UInt16(65535), // char code [1]
             // Deltas
             Int16(-64), // delta [0]
-            Int16(1), // delta [1]
+            Int16(1),   // delta [1]
             // Offsets into Glyph index array
             UInt16(0), // offset [0]
             UInt16(0), // offset [1]
@@ -133,23 +133,23 @@ mod format4 {
     #[test]
     fn continuous_range() {
         let data = convert(&[
-            UInt16(4), // format
+            UInt16(4),  // format
             UInt16(32), // subtable size
-            UInt16(0), // language ID
-            UInt16(4), // 2 x segCount
-            UInt16(2), // search range
-            UInt16(0), // entry selector
-            UInt16(2), // range shift
+            UInt16(0),  // language ID
+            UInt16(4),  // 2 x segCount
+            UInt16(2),  // search range
+            UInt16(0),  // entry selector
+            UInt16(2),  // range shift
             // End character codes
-            UInt16(73), // char code [0]
+            UInt16(73),    // char code [0]
             UInt16(65535), // char code [1]
-            UInt16(0), // reserved
+            UInt16(0),     // reserved
             // Start character codes
-            UInt16(65), // char code [0]
+            UInt16(65),    // char code [0]
             UInt16(65535), // char code [1]
             // Deltas
             Int16(-64), // delta [0]
-            Int16(1), // delta [1]
+            Int16(1),   // delta [1]
             // Offsets into Glyph index array
             UInt16(0), // offset [0]
             UInt16(0), // offset [1]
@@ -172,29 +172,29 @@ mod format4 {
     #[test]
     fn multiple_ranges() {
         let data = convert(&[
-            UInt16(4), // format
+            UInt16(4),  // format
             UInt16(48), // subtable size
-            UInt16(0), // language ID
-            UInt16(8), // 2 x segCount
-            UInt16(4), // search range
-            UInt16(1), // entry selector
-            UInt16(4), // range shift
+            UInt16(0),  // language ID
+            UInt16(8),  // 2 x segCount
+            UInt16(4),  // search range
+            UInt16(1),  // entry selector
+            UInt16(4),  // range shift
             // End character codes
-            UInt16(65), // char code [0]
-            UInt16(69), // char code [1]
-            UInt16(73), // char code [2]
+            UInt16(65),    // char code [0]
+            UInt16(69),    // char code [1]
+            UInt16(73),    // char code [2]
             UInt16(65535), // char code [3]
-            UInt16(0), // reserved
+            UInt16(0),     // reserved
             // Start character codes
-            UInt16(65), // char code [0]
-            UInt16(67), // char code [1]
-            UInt16(71), // char code [2]
+            UInt16(65),    // char code [0]
+            UInt16(67),    // char code [1]
+            UInt16(71),    // char code [2]
             UInt16(65535), // char code [3]
             // Deltas
             Int16(-64), // delta [0]
             Int16(-65), // delta [1]
             Int16(-66), // delta [2]
-            Int16(1), // delta [3]
+            Int16(1),   // delta [3]
             // Offsets into Glyph index array
             UInt16(0), // offset [0]
             UInt16(0), // offset [1]
@@ -219,19 +219,19 @@ mod format4 {
     #[test]
     fn unordered_ids() {
         let data = convert(&[
-            UInt16(4), // format
+            UInt16(4),  // format
             UInt16(42), // subtable size
-            UInt16(0), // language ID
-            UInt16(4), // 2 x segCount
-            UInt16(2), // search range
-            UInt16(0), // entry selector
-            UInt16(2), // range shift
+            UInt16(0),  // language ID
+            UInt16(4),  // 2 x segCount
+            UInt16(2),  // search range
+            UInt16(0),  // entry selector
+            UInt16(2),  // range shift
             // End character codes
-            UInt16(69), // char code [0]
+            UInt16(69),    // char code [0]
             UInt16(65535), // char code [1]
-            UInt16(0), // reserved
+            UInt16(0),     // reserved
             // Start character codes
-            UInt16(65), // char code [0]
+            UInt16(65),    // char code [0]
             UInt16(65535), // char code [1]
             // Deltas
             Int16(0), // delta [0]
@@ -240,10 +240,10 @@ mod format4 {
             UInt16(4), // offset [0]
             UInt16(0), // offset [1]
             // Glyph index array
-            UInt16(1), // glyph ID [0]
-            UInt16(10), // glyph ID [1]
-            UInt16(100), // glyph ID [2]
-            UInt16(1000), // glyph ID [3]
+            UInt16(1),     // glyph ID [0]
+            UInt16(10),    // glyph ID [1]
+            UInt16(100),   // glyph ID [2]
+            UInt16(1000),  // glyph ID [3]
             UInt16(10000), // glyph ID [4]
         ]);
 
@@ -260,35 +260,35 @@ mod format4 {
     #[test]
     fn unordered_chars_and_ids() {
         let data = convert(&[
-            UInt16(4), // format
+            UInt16(4),  // format
             UInt16(64), // subtable size
-            UInt16(0), // language ID
+            UInt16(0),  // language ID
             UInt16(12), // 2 x segCount
-            UInt16(8), // search range
-            UInt16(2), // entry selector
-            UInt16(4), // range shift
+            UInt16(8),  // search range
+            UInt16(2),  // entry selector
+            UInt16(4),  // range shift
             // End character codes
-            UInt16(80), // char code [0]
-            UInt16(256), // char code [1]
-            UInt16(336), // char code [2]
-            UInt16(512), // char code [3]
-            UInt16(592), // char code [4]
+            UInt16(80),    // char code [0]
+            UInt16(256),   // char code [1]
+            UInt16(336),   // char code [2]
+            UInt16(512),   // char code [3]
+            UInt16(592),   // char code [4]
             UInt16(65535), // char code [5]
-            UInt16(0), // reserved
+            UInt16(0),     // reserved
             // Start character codes
-            UInt16(80), // char code [0]
-            UInt16(256), // char code [1]
-            UInt16(336), // char code [2]
-            UInt16(512), // char code [3]
-            UInt16(592), // char code [4]
+            UInt16(80),    // char code [0]
+            UInt16(256),   // char code [1]
+            UInt16(336),   // char code [2]
+            UInt16(512),   // char code [3]
+            UInt16(592),   // char code [4]
             UInt16(65535), // char code [5]
             // Deltas
-            Int16(-79), // delta [0]
+            Int16(-79),  // delta [0]
             Int16(-246), // delta [1]
             Int16(-236), // delta [2]
-            Int16(488), // delta [3]
+            Int16(488),  // delta [3]
             Int16(9408), // delta [4]
-            Int16(1), // delta [5]
+            Int16(1),    // delta [5]
             // Offsets into Glyph index array
             UInt16(0), // offset [0]
             UInt16(0), // offset [1]
@@ -299,8 +299,8 @@ mod format4 {
         ]);
 
         let subtable = cmap::Subtable4::parse(&data).unwrap();
-        assert_eq!(subtable.glyph_index(0x40),  None);
-        assert_eq!(subtable.glyph_index(0x50),  Some(GlyphId(1)));
+        assert_eq!(subtable.glyph_index(0x40), None);
+        assert_eq!(subtable.glyph_index(0x50), Some(GlyphId(1)));
         assert_eq!(subtable.glyph_index(0x100), Some(GlyphId(10)));
         assert_eq!(subtable.glyph_index(0x150), Some(GlyphId(100)));
         assert_eq!(subtable.glyph_index(0x200), Some(GlyphId(1000)));
@@ -311,13 +311,13 @@ mod format4 {
     #[test]
     fn no_end_codes() {
         let data = convert(&[
-            UInt16(4), // format
+            UInt16(4),  // format
             UInt16(28), // subtable size
-            UInt16(0), // language ID
-            UInt16(4), // 2 x segCount
-            UInt16(2), // search range
-            UInt16(0), // entry selector
-            UInt16(2), // range shift
+            UInt16(0),  // language ID
+            UInt16(4),  // 2 x segCount
+            UInt16(2),  // search range
+            UInt16(0),  // entry selector
+            UInt16(2),  // range shift
             // End character codes
             UInt16(73), // char code [0]
             // 0xFF, 0xFF, // char code [1] <-- removed
@@ -327,7 +327,7 @@ mod format4 {
             // 0xFF, 0xFF, // char code [1] <-- removed
             // Deltas
             Int16(-64), // delta [0]
-            Int16(1), // delta [1]
+            Int16(1),   // delta [1]
             // Offsets into Glyph index array
             UInt16(0), // offset [0]
             UInt16(0), // offset [1]
@@ -339,23 +339,23 @@ mod format4 {
     #[test]
     fn invalid_segment_count() {
         let data = convert(&[
-            UInt16(4), // format
+            UInt16(4),  // format
             UInt16(32), // subtable size
-            UInt16(0), // language ID
-            UInt16(1), // 2 x segCount <-- must be more than 1
-            UInt16(2), // search range
-            UInt16(0), // entry selector
-            UInt16(2), // range shift
+            UInt16(0),  // language ID
+            UInt16(1),  // 2 x segCount <-- must be more than 1
+            UInt16(2),  // search range
+            UInt16(0),  // entry selector
+            UInt16(2),  // range shift
             // End character codes
-            UInt16(65), // char code [0]
+            UInt16(65),    // char code [0]
             UInt16(65535), // char code [1]
-            UInt16(0), // reserved
+            UInt16(0),     // reserved
             // Start character codes
-            UInt16(65), // char code [0]
+            UInt16(65),    // char code [0]
             UInt16(65535), // char code [1]
             // Deltas
             Int16(-64), // delta [0]
-            Int16(1), // delta [1]
+            Int16(1),   // delta [1]
             // Offsets into Glyph index array
             UInt16(0), // offset [0]
             UInt16(0), // offset [1]
@@ -367,21 +367,21 @@ mod format4 {
     #[test]
     fn only_end_segments() {
         let data = convert(&[
-            UInt16(4), // format
+            UInt16(4),  // format
             UInt16(32), // subtable size
-            UInt16(0), // language ID
-            UInt16(2), // 2 x segCount
-            UInt16(2), // search range
-            UInt16(0), // entry selector
-            UInt16(2), // range shift
+            UInt16(0),  // language ID
+            UInt16(2),  // 2 x segCount
+            UInt16(2),  // search range
+            UInt16(0),  // entry selector
+            UInt16(2),  // range shift
             // End character codes
             UInt16(65535), // char code [1]
-            UInt16(0), // reserved
+            UInt16(0),     // reserved
             // Start character codes
             UInt16(65535), // char code [1]
             // Deltas
             Int16(-64), // delta [0]
-            Int16(1), // delta [1]
+            Int16(1),   // delta [1]
             // Offsets into Glyph index array
             UInt16(0), // offset [0]
             UInt16(0), // offset [1]
@@ -395,23 +395,23 @@ mod format4 {
     #[test]
     fn invalid_length() {
         let data = convert(&[
-            UInt16(4), // format
+            UInt16(4),  // format
             UInt16(16), // subtable size <-- the size should be 32, but we don't check it anyway
-            UInt16(0), // language ID
-            UInt16(4), // 2 x segCount
-            UInt16(2), // search range
-            UInt16(0), // entry selector
-            UInt16(2), // range shift
+            UInt16(0),  // language ID
+            UInt16(4),  // 2 x segCount
+            UInt16(2),  // search range
+            UInt16(0),  // entry selector
+            UInt16(2),  // range shift
             // End character codes
-            UInt16(65), // char code [0]
+            UInt16(65),    // char code [0]
             UInt16(65535), // char code [1]
-            UInt16(0), // reserved
+            UInt16(0),     // reserved
             // Start character codes
-            UInt16(65), // char code [0]
+            UInt16(65),    // char code [0]
             UInt16(65535), // char code [1]
             // Deltas
             Int16(-64), // delta [0]
-            Int16(1), // delta [1]
+            Int16(1),   // delta [1]
             // Offsets into Glyph index array
             UInt16(0), // offset [0]
             UInt16(0), // offset [1]
@@ -425,23 +425,23 @@ mod format4 {
     #[test]
     fn codepoint_out_of_range() {
         let data = convert(&[
-            UInt16(4), // format
+            UInt16(4),  // format
             UInt16(32), // subtable size
-            UInt16(0), // language ID
-            UInt16(4), // 2 x segCount
-            UInt16(2), // search range
-            UInt16(0), // entry selector
-            UInt16(2), // range shift
+            UInt16(0),  // language ID
+            UInt16(4),  // 2 x segCount
+            UInt16(2),  // search range
+            UInt16(0),  // entry selector
+            UInt16(2),  // range shift
             // End character codes
-            UInt16(65), // char code [0]
+            UInt16(65),    // char code [0]
             UInt16(65535), // char code [1]
-            UInt16(0), // reserved
+            UInt16(0),     // reserved
             // Start character codes
-            UInt16(65), // char code [0]
+            UInt16(65),    // char code [0]
             UInt16(65535), // char code [1]
             // Deltas
             Int16(-64), // delta [0]
-            Int16(1), // delta [1]
+            Int16(1),   // delta [1]
             // Offsets into Glyph index array
             UInt16(0), // offset [0]
             UInt16(0), // offset [1]
@@ -455,19 +455,19 @@ mod format4 {
     #[test]
     fn zero() {
         let data = convert(&[
-            UInt16(4), // format
+            UInt16(4),  // format
             UInt16(42), // subtable size
-            UInt16(0), // language ID
-            UInt16(4), // 2 x segCount
-            UInt16(2), // search range
-            UInt16(0), // entry selector
-            UInt16(2), // range shift
+            UInt16(0),  // language ID
+            UInt16(4),  // 2 x segCount
+            UInt16(2),  // search range
+            UInt16(0),  // entry selector
+            UInt16(2),  // range shift
             // End character codes
-            UInt16(69), // char code [0]
+            UInt16(69),    // char code [0]
             UInt16(65535), // char code [1]
-            UInt16(0), // reserved
+            UInt16(0),     // reserved
             // Start character codes
-            UInt16(65), // char code [0]
+            UInt16(65),    // char code [0]
             UInt16(65535), // char code [1]
             // Deltas
             Int16(0), // delta [0]
@@ -476,10 +476,10 @@ mod format4 {
             UInt16(4), // offset [0]
             UInt16(0), // offset [1]
             // Glyph index array
-            UInt16(0), // glyph ID [0] <-- indicates missing glyph
-            UInt16(10), // glyph ID [1]
-            UInt16(100), // glyph ID [2]
-            UInt16(1000), // glyph ID [3]
+            UInt16(0),     // glyph ID [0] <-- indicates missing glyph
+            UInt16(10),    // glyph ID [1]
+            UInt16(100),   // glyph ID [2]
+            UInt16(1000),  // glyph ID [3]
             UInt16(10000), // glyph ID [4]
         ]);
 
@@ -490,25 +490,25 @@ mod format4 {
     #[test]
     fn invalid_offset() {
         let data = convert(&[
-            UInt16(4), // format
+            UInt16(4),  // format
             UInt16(42), // subtable size
-            UInt16(0), // language ID
-            UInt16(4), // 2 x segCount
-            UInt16(2), // search range
-            UInt16(0), // entry selector
-            UInt16(2), // range shift
+            UInt16(0),  // language ID
+            UInt16(4),  // 2 x segCount
+            UInt16(2),  // search range
+            UInt16(0),  // entry selector
+            UInt16(2),  // range shift
             // End character codes
-            UInt16(69), // char code [0]
+            UInt16(69),    // char code [0]
             UInt16(65535), // char code [1]
-            UInt16(0), // reserved
+            UInt16(0),     // reserved
             // Start character codes
-            UInt16(65), // char code [0]
+            UInt16(65),    // char code [0]
             UInt16(65535), // char code [1]
             // Deltas
             Int16(0), // delta [0]
             Int16(1), // delta [1]
             // Offsets into Glyph index array
-            UInt16(4), // offset [0]
+            UInt16(4),     // offset [0]
             UInt16(65535), // offset [1]
             // Glyph index array
             UInt16(1), // glyph ID [0]
@@ -521,19 +521,19 @@ mod format4 {
     #[test]
     fn collect_codepoints() {
         let data = convert(&[
-            UInt16(4), // format
+            UInt16(4),  // format
             UInt16(24), // subtable size
-            UInt16(0), // language ID
-            UInt16(4), // 2 x segCount
-            UInt16(2), // search range
-            UInt16(0), // entry selector
-            UInt16(2), // range shift
+            UInt16(0),  // language ID
+            UInt16(4),  // 2 x segCount
+            UInt16(2),  // search range
+            UInt16(0),  // entry selector
+            UInt16(2),  // range shift
             // End character codes
-            UInt16(34), // char code [0]
+            UInt16(34),    // char code [0]
             UInt16(65535), // char code [1]
-            UInt16(0), // reserved
+            UInt16(0),     // reserved
             // Start character codes
-            UInt16(27), // char code [0]
+            UInt16(27),    // char code [0]
             UInt16(65533), // char code [1]
             // Deltas
             Int16(0), // delta [0]
@@ -542,7 +542,7 @@ mod format4 {
             UInt16(4), // offset [0]
             UInt16(0), // offset [1]
             // Glyph index array
-            UInt16(0), // glyph ID [0]
+            UInt16(0),  // glyph ID [0]
             UInt16(10), // glyph ID [1]
         ]);
 

@@ -1,14 +1,14 @@
 //! A [Glyph Definition Table](
 //! https://docs.microsoft.com/en-us/typography/opentype/spec/gdef) implementation.
 
+use crate::GlyphId;
 use crate::opentype_layout::{Class, ClassDefinition, Coverage};
 use crate::parser::{FromSlice, LazyArray16, Offset, Offset16, Offset32, Stream};
-use crate::GlyphId;
 
 #[cfg(feature = "variable-fonts")]
-use crate::var_store::ItemVariationStore;
-#[cfg(feature = "variable-fonts")]
 use crate::NormalizedCoordinate;
+#[cfg(feature = "variable-fonts")]
+use crate::var_store::ItemVariationStore;
 
 /// A [glyph class](https://docs.microsoft.com/en-us/typography/opentype/spec/gdef#glyph-class-definition-table).
 #[allow(missing_docs)]
@@ -64,33 +64,38 @@ impl<'a> Table<'a> {
         let mut table = Table::default();
 
         if let Some(offset) = glyph_class_def_offset
-            && let Some(subdata) = data.get(offset.to_usize()..) {
-                table.glyph_classes = ClassDefinition::parse(subdata);
-            }
+            && let Some(subdata) = data.get(offset.to_usize()..)
+        {
+            table.glyph_classes = ClassDefinition::parse(subdata);
+        }
 
         if let Some(offset) = mark_attach_class_def_offset
-            && let Some(subdata) = data.get(offset.to_usize()..) {
-                table.mark_attach_classes = ClassDefinition::parse(subdata);
-            }
+            && let Some(subdata) = data.get(offset.to_usize()..)
+        {
+            table.mark_attach_classes = ClassDefinition::parse(subdata);
+        }
 
         if let Some(offset) = mark_glyph_sets_def_offset
-            && let Some(subdata) = data.get(offset.to_usize()..) {
-                let mut s = Stream::new(subdata);
-                let format = s.read::<u16>()?;
-                if format == 1
-                    && let Some(count) = s.read::<u16>()
-                        && let Some(array) = s.read_array16::<Offset32>(count) {
-                            table.mark_glyph_coverage_offsets = Some((subdata, array));
-                        }
+            && let Some(subdata) = data.get(offset.to_usize()..)
+        {
+            let mut s = Stream::new(subdata);
+            let format = s.read::<u16>()?;
+            if format == 1
+                && let Some(count) = s.read::<u16>()
+                && let Some(array) = s.read_array16::<Offset32>(count)
+            {
+                table.mark_glyph_coverage_offsets = Some((subdata, array));
             }
+        }
 
         #[cfg(feature = "variable-fonts")]
         {
             if let Some(offset) = var_store_offset
-                && let Some(subdata) = data.get(offset.to_usize()..) {
-                    let s = Stream::new(subdata);
-                    table.variation_store = ItemVariationStore::parse(s);
-                }
+                && let Some(subdata) = data.get(offset.to_usize()..)
+            {
+                let s = Stream::new(subdata);
+                table.variation_store = ItemVariationStore::parse(s);
+            }
         }
 
         Some(table)
@@ -128,9 +133,7 @@ impl<'a> Table<'a> {
     /// All glyphs not assigned to a class fall into Class 0.
     #[inline]
     pub fn glyph_mark_attachment_class(&self, glyph_id: GlyphId) -> Class {
-        self.mark_attach_classes
-            .map(|def| def.get(glyph_id))
-            .unwrap_or(0)
+        self.mark_attach_classes.map(|def| def.get(glyph_id)).unwrap_or(0)
     }
 
     /// Checks that glyph is a mark according to

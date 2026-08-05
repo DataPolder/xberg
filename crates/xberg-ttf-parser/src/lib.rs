@@ -87,7 +87,7 @@ use parser::{NumFrom, Offset, Offset32, Stream, TryNumFrom};
 pub use fvar::VariationAxis;
 
 pub use language::Language;
-pub use name::{name_id, PlatformId};
+pub use name::{PlatformId, name_id};
 pub use os2::{Permissions, ScriptMetrics, Style, UnicodeRanges, Weight, Width};
 pub use tables::CFFError;
 #[cfg(feature = "apple-layout")]
@@ -95,10 +95,7 @@ pub use tables::{ankr, feat, kerx, morx, trak};
 #[cfg(feature = "variable-fonts")]
 pub use tables::{avar, cff2, fvar, gvar, hvar, mvar, vvar};
 pub use tables::{cbdt, cblc, cff1 as cff, vhea};
-pub use tables::{
-    cmap, colr, cpal, glyf, head, hhea, hmtx, kern, loca, maxp, name, os2, post, sbix, stat, svg,
-    vorg,
-};
+pub use tables::{cmap, colr, cpal, glyf, head, hhea, hmtx, kern, loca, maxp, name, os2, post, sbix, stat, svg, vorg};
 #[cfg(feature = "opentype-layout")]
 pub use tables::{gdef, gpos, gsub, math};
 
@@ -227,10 +224,7 @@ impl Tag {
     /// ```
     #[inline]
     pub const fn from_bytes(bytes: &[u8; 4]) -> Self {
-        Tag(((bytes[0] as u32) << 24)
-            | ((bytes[1] as u32) << 16)
-            | ((bytes[2] as u32) << 8)
-            | (bytes[3] as u32))
+        Tag(((bytes[0] as u32) << 24) | ((bytes[1] as u32) << 16) | ((bytes[2] as u32) << 8) | (bytes[3] as u32))
     }
 
     /// Creates a `Tag` from bytes.
@@ -397,10 +391,7 @@ impl RectF {
 
     #[inline]
     fn is_default(&self) -> bool {
-        self.x_min == f32::MAX
-            && self.y_min == f32::MAX
-            && self.x_max == f32::MIN
-            && self.y_max == f32::MIN
+        self.x_min == f32::MAX && self.y_min == f32::MAX && self.x_max == f32::MIN && self.y_max == f32::MIN
     }
 
     #[inline]
@@ -501,12 +492,7 @@ impl Transform {
     #[inline]
     pub fn is_default(&self) -> bool {
         // A direct float comparison is fine in our case.
-        self.a == 1.0
-            && self.b == 0.0
-            && self.c == 0.0
-            && self.d == 1.0
-            && self.e == 0.0
-            && self.f == 0.0
+        self.a == 1.0 && self.b == 0.0 && self.c == 0.0 && self.d == 1.0 && self.e == 0.0 && self.f == 0.0
     }
 }
 
@@ -860,17 +846,14 @@ impl<'a> RawFace<'a> {
                 .read_array32::<Offset32>(number_of_faces)
                 .ok_or(FaceParsingError::MalformedFont)?;
 
-            let face_offset = offsets
-                .get(index)
-                .ok_or(FaceParsingError::FaceIndexOutOfBounds)?;
+            let face_offset = offsets.get(index).ok_or(FaceParsingError::FaceIndexOutOfBounds)?;
             // Face offset is from the start of the font data,
             // so we have to adjust it to the current parser offset.
             let face_offset = face_offset
                 .to_usize()
                 .checked_sub(s.offset())
                 .ok_or(FaceParsingError::MalformedFont)?;
-            s.advance_checked(face_offset)
-                .ok_or(FaceParsingError::MalformedFont)?;
+            s.advance_checked(face_offset).ok_or(FaceParsingError::MalformedFont)?;
 
             // Read **face** magic.
             // Each face in a font collection also starts with a magic.
@@ -893,17 +876,12 @@ impl<'a> RawFace<'a> {
             .read_array16::<TableRecord>(num_tables)
             .ok_or(FaceParsingError::MalformedFont)?;
 
-        Ok(RawFace {
-            data,
-            table_records,
-        })
+        Ok(RawFace { data, table_records })
     }
 
     /// Returns the raw data of a selected table.
     pub fn table(&self, tag: Tag) -> Option<&'a [u8]> {
-        let (_, table) = self
-            .table_records
-            .binary_search_by(|record| record.tag.cmp(&tag))?;
+        let (_, table) = self.table_records.binary_search_by(|record| record.tag.cmp(&tag))?;
         let offset = usize::num_from(table.offset);
         let length = usize::num_from(table.length);
         let end = offset.checked_add(length)?;
@@ -1244,59 +1222,49 @@ impl<'a> Face<'a> {
         let hhea = hhea::Table::parse(raw_tables.hhea).ok_or(FaceParsingError::NoHheaTable)?;
         let maxp = maxp::Table::parse(raw_tables.maxp).ok_or(FaceParsingError::NoMaxpTable)?;
 
-        let hmtx = raw_tables.hmtx.and_then(|data| {
-            hmtx::Table::parse(hhea.number_of_metrics, maxp.number_of_glyphs, data)
-        });
+        let hmtx = raw_tables
+            .hmtx
+            .and_then(|data| hmtx::Table::parse(hhea.number_of_metrics, maxp.number_of_glyphs, data));
 
         let vhea = raw_tables.vhea.and_then(vhea::Table::parse);
         let vmtx = if let Some(vhea) = vhea {
-            raw_tables.vmtx.and_then(|data| {
-                hmtx::Table::parse(vhea.number_of_metrics, maxp.number_of_glyphs, data)
-            })
+            raw_tables
+                .vmtx
+                .and_then(|data| hmtx::Table::parse(vhea.number_of_metrics, maxp.number_of_glyphs, data))
         } else {
             None
         };
 
-        let loca = raw_tables.loca.and_then(|data| {
-            loca::Table::parse(maxp.number_of_glyphs, head.index_to_location_format, data)
-        });
+        let loca = raw_tables
+            .loca
+            .and_then(|data| loca::Table::parse(maxp.number_of_glyphs, head.index_to_location_format, data));
         let glyf = if let Some(loca) = loca {
-            raw_tables
-                .glyf
-                .and_then(|data| glyf::Table::parse(loca, data))
+            raw_tables.glyf.and_then(|data| glyf::Table::parse(loca, data))
         } else {
             None
         };
 
         let bdat = if let Some(bloc) = raw_tables.bloc.and_then(cblc::Table::parse) {
-            raw_tables
-                .bdat
-                .and_then(|data| cbdt::Table::parse(bloc, data))
+            raw_tables.bdat.and_then(|data| cbdt::Table::parse(bloc, data))
         } else {
             None
         };
 
         let cbdt = if let Some(cblc) = raw_tables.cblc.and_then(cblc::Table::parse) {
-            raw_tables
-                .cbdt
-                .and_then(|data| cbdt::Table::parse(cblc, data))
+            raw_tables.cbdt.and_then(|data| cbdt::Table::parse(cblc, data))
         } else {
             None
         };
 
         let ebdt = if let Some(eblc) = raw_tables.eblc.and_then(cblc::Table::parse) {
-            raw_tables
-                .ebdt
-                .and_then(|data| cbdt::Table::parse(eblc, data))
+            raw_tables.ebdt.and_then(|data| cbdt::Table::parse(eblc, data))
         } else {
             None
         };
 
         let cpal = raw_tables.cpal.and_then(cpal::Table::parse);
         let colr = if let Some(cpal) = cpal {
-            raw_tables
-                .colr
-                .and_then(|data| colr::Table::parse(cpal, data))
+            raw_tables.colr.and_then(|data| colr::Table::parse(cpal, data))
         } else {
             None
         };
@@ -1330,13 +1298,9 @@ impl<'a> Face<'a> {
             #[cfg(feature = "opentype-layout")]
             gdef: raw_tables.gdef.and_then(gdef::Table::parse),
             #[cfg(feature = "opentype-layout")]
-            gpos: raw_tables
-                .gpos
-                .and_then(opentype_layout::LayoutTable::parse),
+            gpos: raw_tables.gpos.and_then(opentype_layout::LayoutTable::parse),
             #[cfg(feature = "opentype-layout")]
-            gsub: raw_tables
-                .gsub
-                .and_then(opentype_layout::LayoutTable::parse),
+            gsub: raw_tables.gsub.and_then(opentype_layout::LayoutTable::parse),
             #[cfg(feature = "opentype-layout")]
             math: raw_tables.math.and_then(math::Table::parse),
 
@@ -1453,10 +1417,7 @@ impl<'a> Face<'a> {
     /// Returns `false` when `post` table is not present.
     #[inline]
     pub fn is_monospaced(&self) -> bool {
-        self.tables
-            .post
-            .map(|post| post.is_monospaced)
-            .unwrap_or(false)
+        self.tables.post.map(|post| post.is_monospaced).unwrap_or(false)
     }
 
     /// Checks that face is variable.
@@ -1497,10 +1458,7 @@ impl<'a> Face<'a> {
     /// Returns `0.0` when `post` table is not present.
     #[inline]
     pub fn italic_angle(&self) -> f32 {
-        self.tables
-            .post
-            .map(|table| table.italic_angle)
-            .unwrap_or(0.0)
+        self.tables.post.map(|table| table.italic_angle).unwrap_or(0.0)
     }
 
     // Read https://github.com/freetype/freetype/blob/49270c17011491227ec7bd3fb73ede4f674aa065/src/sfnt/sfobjs.c#L1279
@@ -1512,22 +1470,24 @@ impl<'a> Face<'a> {
     #[inline]
     pub fn ascender(&self) -> i16 {
         if let Some(os_2) = self.tables.os2
-            && os_2.use_typographic_metrics() {
-                let value = os_2.typographic_ascender();
-                return self.apply_metrics_variation(Tag::from_bytes(b"hasc"), value);
-            }
+            && os_2.use_typographic_metrics()
+        {
+            let value = os_2.typographic_ascender();
+            return self.apply_metrics_variation(Tag::from_bytes(b"hasc"), value);
+        }
 
         let mut value = self.tables.hhea.ascender;
         if value == 0
-            && let Some(os_2) = self.tables.os2 {
-                value = os_2.typographic_ascender();
-                if value == 0 {
-                    value = os_2.windows_ascender();
-                    value = self.apply_metrics_variation(Tag::from_bytes(b"hcla"), value);
-                } else {
-                    value = self.apply_metrics_variation(Tag::from_bytes(b"hasc"), value);
-                }
+            && let Some(os_2) = self.tables.os2
+        {
+            value = os_2.typographic_ascender();
+            if value == 0 {
+                value = os_2.windows_ascender();
+                value = self.apply_metrics_variation(Tag::from_bytes(b"hcla"), value);
+            } else {
+                value = self.apply_metrics_variation(Tag::from_bytes(b"hasc"), value);
             }
+        }
 
         value
     }
@@ -1538,22 +1498,24 @@ impl<'a> Face<'a> {
     #[inline]
     pub fn descender(&self) -> i16 {
         if let Some(os_2) = self.tables.os2
-            && os_2.use_typographic_metrics() {
-                let value = os_2.typographic_descender();
-                return self.apply_metrics_variation(Tag::from_bytes(b"hdsc"), value);
-            }
+            && os_2.use_typographic_metrics()
+        {
+            let value = os_2.typographic_descender();
+            return self.apply_metrics_variation(Tag::from_bytes(b"hdsc"), value);
+        }
 
         let mut value = self.tables.hhea.descender;
         if value == 0
-            && let Some(os_2) = self.tables.os2 {
-                value = os_2.typographic_descender();
-                if value == 0 {
-                    value = os_2.windows_descender();
-                    value = self.apply_metrics_variation(Tag::from_bytes(b"hcld"), value);
-                } else {
-                    value = self.apply_metrics_variation(Tag::from_bytes(b"hdsc"), value);
-                }
+            && let Some(os_2) = self.tables.os2
+        {
+            value = os_2.typographic_descender();
+            if value == 0 {
+                value = os_2.windows_descender();
+                value = self.apply_metrics_variation(Tag::from_bytes(b"hcld"), value);
+            } else {
+                value = self.apply_metrics_variation(Tag::from_bytes(b"hdsc"), value);
             }
+        }
 
         value
     }
@@ -1572,22 +1534,24 @@ impl<'a> Face<'a> {
     #[inline]
     pub fn line_gap(&self) -> i16 {
         if let Some(os_2) = self.tables.os2
-            && os_2.use_typographic_metrics() {
-                let value = os_2.typographic_line_gap();
-                return self.apply_metrics_variation(Tag::from_bytes(b"hlgp"), value);
-            }
+            && os_2.use_typographic_metrics()
+        {
+            let value = os_2.typographic_line_gap();
+            return self.apply_metrics_variation(Tag::from_bytes(b"hlgp"), value);
+        }
 
         let mut value = self.tables.hhea.line_gap;
         // For line gap, we have to check that ascender or descender are 0, not line gap itself.
         if (self.tables.hhea.ascender == 0 || self.tables.hhea.descender == 0)
-            && let Some(os_2) = self.tables.os2 {
-                if os_2.typographic_ascender() != 0 || os_2.typographic_descender() != 0 {
-                    value = os_2.typographic_line_gap();
-                    value = self.apply_metrics_variation(Tag::from_bytes(b"hlgp"), value);
-                } else {
-                    value = 0;
-                }
+            && let Some(os_2) = self.tables.os2
+        {
+            if os_2.typographic_ascender() != 0 || os_2.typographic_descender() != 0 {
+                value = os_2.typographic_line_gap();
+                value = self.apply_metrics_variation(Tag::from_bytes(b"hlgp"), value);
+            } else {
+                value = 0;
             }
+        }
 
         value
     }
@@ -1798,10 +1762,7 @@ impl<'a> Face<'a> {
     /// Checks if the face allows embedding a subset, further restricted by [`Self::permissions`].
     #[inline]
     pub fn is_subsetting_allowed(&self) -> bool {
-        self.tables
-            .os2
-            .map(|t| t.is_subsetting_allowed())
-            .unwrap_or(false)
+        self.tables.os2.map(|t| t.is_subsetting_allowed()).unwrap_or(false)
     }
 
     /// Checks if the face allows outline data to be embedded.
@@ -1820,10 +1781,7 @@ impl<'a> Face<'a> {
     /// Returns [Unicode Ranges](https://docs.microsoft.com/en-us/typography/opentype/spec/os2#ur).
     #[inline]
     pub fn unicode_ranges(&self) -> UnicodeRanges {
-        self.tables
-            .os2
-            .map(|t| t.unicode_ranges())
-            .unwrap_or_default()
+        self.tables.os2.map(|t| t.unicode_ranges()).unwrap_or_default()
     }
 
     /// Returns a total number of glyphs in the face.
@@ -1866,20 +1824,11 @@ impl<'a> Face<'a> {
     #[cfg(feature = "glyph-names")]
     #[inline]
     pub fn glyph_index_by_name(&self, name: &str) -> Option<GlyphId> {
-        if let Some(name) = self
-            .tables
-            .post
-            .and_then(|post| post.glyph_index_by_name(name))
-        {
+        if let Some(name) = self.tables.post.and_then(|post| post.glyph_index_by_name(name)) {
             return Some(name);
         }
 
-        if let Some(name) = self
-            .tables
-            .cff
-            .as_ref()
-            .and_then(|cff| cff.glyph_index_by_name(name))
-        {
+        if let Some(name) = self.tables.cff.as_ref().and_then(|cff| cff.glyph_index_by_name(name)) {
             return Some(name);
         }
 
@@ -1981,10 +1930,11 @@ impl<'a> Face<'a> {
             if self.is_variable() {
                 // Ignore variation offset when `hvar` is not set.
                 if let Some(hvar) = self.tables.hvar
-                    && let Some(offset) = hvar.left_side_bearing_offset(glyph_id, self.coords()) {
-                        // We can't use `round()` in `no_std`, so this is the next best thing.
-                        bearing += offset + 0.5;
-                    }
+                    && let Some(offset) = hvar.left_side_bearing_offset(glyph_id, self.coords())
+                {
+                    // We can't use `round()` in `no_std`, so this is the next best thing.
+                    bearing += offset + 0.5;
+                }
             }
 
             i16::try_num_from(bearing)
@@ -2008,10 +1958,11 @@ impl<'a> Face<'a> {
             if self.is_variable() {
                 // Ignore variation offset when `vvar` is not set.
                 if let Some(vvar) = self.tables.vvar
-                    && let Some(offset) = vvar.top_side_bearing_offset(glyph_id, self.coords()) {
-                        // We can't use `round()` in `no_std`, so this is the next best thing.
-                        bearing += offset + 0.5;
-                    }
+                    && let Some(offset) = vvar.top_side_bearing_offset(glyph_id, self.coords())
+                {
+                    // We can't use `round()` in `no_std`, so this is the next best thing.
+                    bearing += offset + 0.5;
+                }
             }
 
             i16::try_num_from(bearing)
@@ -2035,10 +1986,11 @@ impl<'a> Face<'a> {
             if self.is_variable() {
                 // Ignore variation offset when `vvar` is not set.
                 if let Some(vvar) = self.tables.vvar
-                    && let Some(offset) = vvar.vertical_origin_offset(glyph_id, self.coords()) {
-                        // We can't use `round()` in `no_std`, so this is the next best thing.
-                        origin += offset + 0.5;
-                    }
+                    && let Some(offset) = vvar.vertical_origin_offset(glyph_id, self.coords())
+                {
+                    // We can't use `round()` in `no_std`, so this is the next best thing.
+                    origin += offset + 0.5;
+                }
             }
 
             i16::try_num_from(origin)
@@ -2062,12 +2014,7 @@ impl<'a> Face<'a> {
             return Some(name);
         }
 
-        if let Some(name) = self
-            .tables
-            .cff
-            .as_ref()
-            .and_then(|cff1| cff1.glyph_name(glyph_id))
-        {
+        if let Some(name) = self.tables.cff.as_ref().and_then(|cff1| cff1.glyph_name(glyph_id)) {
             return Some(name);
         }
 
@@ -2127,11 +2074,7 @@ impl<'a> Face<'a> {
     /// assert_eq!(bbox, ttf_parser::Rect { x_min: 6, y_min: 0, x_max: 541, y_max: 656 });
     /// ```
     #[inline]
-    pub fn outline_glyph(
-        &self,
-        glyph_id: GlyphId,
-        builder: &mut dyn OutlineBuilder,
-    ) -> Option<Rect> {
+    pub fn outline_glyph(&self, glyph_id: GlyphId, builder: &mut dyn OutlineBuilder) -> Option<Rect> {
         #[cfg(feature = "variable-fonts")]
         {
             if let Some(ref gvar) = self.tables.gvar {
@@ -2205,15 +2148,12 @@ impl<'a> Face<'a> {
     /// This includes `sbix`, `bloc` + `bdat`, `EBLC` + `EBDT`, `CBLC` + `CBDT`.
     /// And font's tables will be accesses in this specific order.
     #[inline]
-    pub fn glyph_raster_image(
-        &self,
-        glyph_id: GlyphId,
-        pixels_per_em: u16,
-    ) -> Option<RasterGlyphImage> {
+    pub fn glyph_raster_image(&self, glyph_id: GlyphId, pixels_per_em: u16) -> Option<RasterGlyphImage> {
         if let Some(table) = self.tables.sbix
-            && let Some(strike) = table.best_strike(pixels_per_em) {
-                return strike.get(glyph_id);
-            }
+            && let Some(strike) = table.best_strike(pixels_per_em)
+        {
+            return strike.get(glyph_id);
+        }
         if let Some(bdat) = self.tables.bdat {
             return bdat.get(glyph_id, pixels_per_em);
         }
@@ -2249,10 +2189,7 @@ impl<'a> Face<'a> {
     ///
     /// See [`paint_color_glyph`](Face::paint_color_glyph) for details.
     pub fn is_color_glyph(&self, glyph_id: GlyphId) -> bool {
-        self.tables()
-            .colr
-            .map(|colr| colr.contains(glyph_id))
-            .unwrap_or(false)
+        self.tables().colr.map(|colr| colr.contains(glyph_id)).unwrap_or(false)
     }
 
     /// Returns the number of palettes stored in the `COLR`+`CPAL` tables.

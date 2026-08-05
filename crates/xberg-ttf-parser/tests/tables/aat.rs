@@ -1,7 +1,7 @@
+use crate::{Unit::*, convert};
 use std::num::NonZeroU16;
 use ttf_parser::GlyphId;
 use ttf_parser::apple_layout::Lookup;
-use crate::{convert, Unit::*};
 
 mod format0 {
     use super::*;
@@ -9,7 +9,7 @@ mod format0 {
     #[test]
     fn single() {
         let data = convert(&[
-            UInt16(0), // format
+            UInt16(0),  // format
             UInt16(10), // value
         ]);
 
@@ -21,7 +21,7 @@ mod format0 {
     #[test]
     fn not_enough_glyphs() {
         let data = convert(&[
-            UInt16(0), // format
+            UInt16(0),  // format
             UInt16(10), // value
         ]);
 
@@ -31,7 +31,7 @@ mod format0 {
     #[test]
     fn too_many_glyphs() {
         let data = convert(&[
-            UInt16(0), // format
+            UInt16(0),  // format
             UInt16(10), // value
             UInt16(11), // value <-- will be ignored
         ]);
@@ -49,18 +49,16 @@ mod format2 {
     fn single() {
         let data = convert(&[
             UInt16(2), // format
-
             // Binary Search Table
             UInt16(6), // segment size
             UInt16(1), // number of segments
             UInt16(0), // search range: we don't use it
             UInt16(0), // entry selector: we don't use it
             UInt16(0), // range shift: we don't use it
-
             // Segment [0]
             UInt16(118), // last glyph
             UInt16(118), // first glyph
-            UInt16(10), // value
+            UInt16(10),  // value
         ]);
 
         let table = Lookup::parse(NonZeroU16::new(1).unwrap(), &data).unwrap();
@@ -72,17 +70,15 @@ mod format2 {
     fn range() {
         let data = convert(&[
             UInt16(2), // format
-
             // Binary Search Table
             UInt16(6), // segment size
             UInt16(1), // number of segments
             UInt16(0), // search range: we don't use it
             UInt16(0), // entry selector: we don't use it
             UInt16(0), // range shift: we don't use it
-
             // Segment [0]
-            UInt16(7), // last glyph
-            UInt16(5), // first glyph
+            UInt16(7),  // last glyph
+            UInt16(5),  // first glyph
             UInt16(18), // offset
         ]);
 
@@ -102,19 +98,16 @@ mod format4 {
     fn single() {
         let data = convert(&[
             UInt16(4), // format
-
             // Binary Search Table
             UInt16(6), // segment size
             UInt16(1), // number of segments
             UInt16(0), // search range: we don't use it
             UInt16(0), // entry selector: we don't use it
             UInt16(0), // range shift: we don't use it
-
             // Segment [0]
             UInt16(118), // last glyph
             UInt16(118), // first glyph
-            UInt16(18), // offset
-
+            UInt16(18),  // offset
             // Values [0]
             UInt16(10), // value [0]
         ]);
@@ -128,19 +121,16 @@ mod format4 {
     fn range() {
         let data = convert(&[
             UInt16(4), // format
-
             // Binary Search Table
             UInt16(6), // segment size
             UInt16(1), // number of segments
             UInt16(0), // search range: we don't use it
             UInt16(0), // entry selector: we don't use it
             UInt16(0), // range shift: we don't use it
-
             // Segment [0]
-            UInt16(7), // last glyph
-            UInt16(5), // first glyph
+            UInt16(7),  // last glyph
+            UInt16(5),  // first glyph
             UInt16(18), // offset
-
             // Values [0]
             UInt16(10), // value [0]
             UInt16(11), // value [1]
@@ -163,16 +153,14 @@ mod format6 {
     fn single() {
         let data = convert(&[
             UInt16(6), // format
-
             // Binary Search Table
             UInt16(4), // segment size
             UInt16(1), // number of segments
             UInt16(0), // search range: we don't use it
             UInt16(0), // entry selector: we don't use it
             UInt16(0), // range shift: we don't use it
-
             // Segment [0]
-            UInt16(0), // glyph
+            UInt16(0),  // glyph
             UInt16(10), // value
         ]);
 
@@ -185,19 +173,17 @@ mod format6 {
     fn multiple() {
         let data = convert(&[
             UInt16(6), // format
-
             // Binary Search Table
             UInt16(4), // segment size
             UInt16(3), // number of segments
             UInt16(0), // search range: we don't use it
             UInt16(0), // entry selector: we don't use it
             UInt16(0), // range shift: we don't use it
-
             // Segment [0]
-            UInt16(0), // glyph
+            UInt16(0),  // glyph
             UInt16(10), // value
             // Segment [1]
-            UInt16(5), // glyph
+            UInt16(5),  // glyph
             UInt16(20), // value
             // Segment [2]
             UInt16(10), // glyph
@@ -217,7 +203,6 @@ mod format6 {
     fn no_segments() {
         let data = convert(&[
             UInt16(6), // format
-
             // Binary Search Table
             UInt16(4), // segment size
             UInt16(0), // number of segments
@@ -233,16 +218,14 @@ mod format6 {
     fn ignore_termination() {
         let data = convert(&[
             UInt16(6), // format
-
             // Binary Search Table
             UInt16(4), // segment size
             UInt16(2), // number of segments
             UInt16(0), // search range: we don't use it
             UInt16(0), // entry selector: we don't use it
             UInt16(0), // range shift: we don't use it
-
             // Segment [0]
-            UInt16(0), // glyph
+            UInt16(0),  // glyph
             UInt16(10), // value
             // Segment [1]
             UInt16(0xFFFF), // glyph
@@ -257,14 +240,12 @@ mod format6 {
     fn only_termination() {
         let data = convert(&[
             UInt16(6), // format
-
             // Binary Search Table
             UInt16(4), // segment size
             UInt16(1), // number of segments
             UInt16(0), // search range: we don't use it
             UInt16(0), // entry selector: we don't use it
             UInt16(0), // range shift: we don't use it
-
             // Segment [0]
             UInt16(0xFFFF), // glyph
             UInt16(0xFFFF), // value
@@ -277,16 +258,14 @@ mod format6 {
     fn invalid_segment_size() {
         let data = convert(&[
             UInt16(6), // format
-
             // Binary Search Table
             UInt16(8), // segment size <-- must be 4
             UInt16(1), // number of segments
             UInt16(0), // search range: we don't use it
             UInt16(0), // entry selector: we don't use it
             UInt16(0), // range shift: we don't use it
-
             // Segment [0]
-            UInt16(0), // glyph
+            UInt16(0),  // glyph
             UInt16(10), // value
         ]);
 
@@ -334,10 +313,10 @@ mod format10 {
     fn single() {
         let data = convert(&[
             UInt16(10), // format
-            UInt16(1), // value size: u8
-            UInt16(0), // first glyph
-            UInt16(1), // glyphs count
-            UInt8(2), // value [0]
+            UInt16(1),  // value size: u8
+            UInt16(0),  // first glyph
+            UInt16(1),  // glyphs count
+            UInt8(2),   // value [0]
         ]);
 
         let table = Lookup::parse(NonZeroU16::new(1).unwrap(), &data).unwrap();
@@ -350,9 +329,9 @@ mod format10 {
         let data = convert(&[
             UInt16(10), // format
             UInt16(50), // value size <-- invalid
-            UInt16(0), // first glyph
-            UInt16(1), // glyphs count
-            UInt8(2), // value [0]
+            UInt16(0),  // first glyph
+            UInt16(1),  // glyphs count
+            UInt8(2),   // value [0]
         ]);
 
         let table = Lookup::parse(NonZeroU16::new(1).unwrap(), &data).unwrap();
@@ -362,10 +341,10 @@ mod format10 {
     #[test]
     fn unsupported_value_size() {
         let data = convert(&[
-            UInt16(10), // format
-            UInt16(8), // value size <-- we do not support u64
-            UInt16(0), // first glyph
-            UInt16(1), // glyphs count
+            UInt16(10),                                             // format
+            UInt16(8),                                              // value size <-- we do not support u64
+            UInt16(0),                                              // first glyph
+            UInt16(1),                                              // glyphs count
             Raw(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02]), // value [0]
         ]);
 
@@ -376,10 +355,10 @@ mod format10 {
     #[test]
     fn u32_value_size() {
         let data = convert(&[
-            UInt16(10), // format
-            UInt16(4), // value size
-            UInt16(0), // first glyph
-            UInt16(1), // glyphs count
+            UInt16(10),          // format
+            UInt16(4),           // value size
+            UInt16(0),           // first glyph
+            UInt16(1),           // glyphs count
             UInt32(0xFFFF + 10), // value [0] <-- will be truncated
         ]);
 

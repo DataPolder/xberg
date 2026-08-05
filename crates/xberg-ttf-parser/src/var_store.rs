@@ -2,8 +2,8 @@
 //!
 //! <https://docs.microsoft.com/en-us/typography/opentype/spec/otvarcommonformats#item-variation-store>
 
-use crate::parser::{FromData, LazyArray16, NumFrom, Stream};
 use crate::NormalizedCoordinate;
+use crate::parser::{FromData, LazyArray16, NumFrom, Stream};
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ItemVariationStore<'a> {
@@ -71,12 +71,7 @@ impl<'a> ItemVariationStore<'a> {
         s.read_array16::<u16>(count)
     }
 
-    pub fn parse_delta(
-        &self,
-        outer_index: u16,
-        inner_index: u16,
-        coordinates: &[NormalizedCoordinate],
-    ) -> Option<f32> {
+    pub fn parse_delta(&self, outer_index: u16, inner_index: u16, coordinates: &[NormalizedCoordinate]) -> Option<f32> {
         let offset = self.data_offsets.get(outer_index)?;
         let mut s = Stream::new_at(self.data, usize::num_from(offset))?;
         let item_count = s.read::<u16>()?;

@@ -13,7 +13,7 @@
 use core::num::NonZeroU16;
 
 use crate::parser::{FromData, LazyArray32, NumFrom, Offset, Offset32, Stream};
-use crate::{aat, GlyphId};
+use crate::{GlyphId, aat};
 
 /// The feature table is used to compute the sub-feature flags
 /// for a list of requested features and settings.
@@ -316,10 +316,7 @@ impl<'a> Iterator for SubtablesIter<'a> {
                 SubtableKind::Ligature(table)
             }
             // 3 - reserved
-            4 => SubtableKind::NonContextual(aat::Lookup::parse(
-                self.number_of_glyphs,
-                subtables_data,
-            )?),
+            4 => SubtableKind::NonContextual(aat::Lookup::parse(self.number_of_glyphs, subtables_data)?),
             5 => {
                 let table = InsertionSubtable::parse(self.number_of_glyphs, subtables_data)?;
                 SubtableKind::Insertion(table)

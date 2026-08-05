@@ -3,8 +3,8 @@
 
 use core::num::NonZeroU16;
 
-use crate::parser::{LazyArray16, NumFrom, Stream, F2DOT14};
-use crate::{loca, GlyphId, OutlineBuilder, Rect, RectF, Transform};
+use crate::parser::{F2DOT14, LazyArray16, NumFrom, Stream};
+use crate::{GlyphId, OutlineBuilder, Rect, RectF, Transform, loca};
 
 pub(crate) struct Builder<'a> {
     pub builder: &'a mut dyn OutlineBuilder,
@@ -248,12 +248,8 @@ impl<'a> Iterator for GlyphPointsIter<'a> {
         let last_point = self.endpoints.next();
         let flags = self.flags.next()?;
         Some(GlyphPoint {
-            x: self
-                .x_coords
-                .next(flags.x_short(), flags.x_is_same_or_positive_short()),
-            y: self
-                .y_coords
-                .next(flags.y_short(), flags.y_is_same_or_positive_short()),
+            x: self.x_coords.next(flags.x_short(), flags.x_is_same_or_positive_short()),
+            y: self.y_coords.next(flags.y_short(), flags.y_is_same_or_positive_short()),
             on_curve_point: flags.on_curve_point(),
             last_point,
         })
@@ -479,14 +475,15 @@ fn outline_impl(
             *budget = budget.checked_sub(1)?;
 
             if let Some(range) = loca_table.glyph_range(comp.glyph_id)
-                && let Some(glyph_data) = glyf_table.get(range) {
-                    let transform = Transform::combine(builder.transform, comp.transform);
-                    let mut b = Builder::new(transform, builder.bbox, builder.builder);
-                    outline_impl(loca_table, glyf_table, glyph_data, depth + 1, budget, &mut b)?;
+                && let Some(glyph_data) = glyf_table.get(range)
+            {
+                let transform = Transform::combine(builder.transform, comp.transform);
+                let mut b = Builder::new(transform, builder.bbox, builder.builder);
+                outline_impl(loca_table, glyf_table, glyph_data, depth + 1, budget, &mut b)?;
 
-                    // Take updated bbox.
-                    builder.bbox = b.bbox;
-                }
+                // Take updated bbox.
+                builder.bbox = b.bbox;
+            }
         }
     }
 
@@ -498,10 +495,7 @@ fn outline_impl(
 }
 
 #[inline]
-pub(crate) fn parse_simple_outline(
-    glyph_data: &[u8],
-    number_of_contours: NonZeroU16,
-) -> Option<GlyphPointsIter> {
+pub(crate) fn parse_simple_outline(glyph_data: &[u8], number_of_contours: NonZeroU16) -> Option<GlyphPointsIter> {
     let mut s = Stream::new(glyph_data);
     let endpoints = s.read_array16::<u16>(number_of_contours.get())?;
 

@@ -72,10 +72,7 @@ impl<'a> IntoIterator for Tracks<'a> {
 
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
-        TracksIter {
-            tracks: self,
-            index: 0,
-        }
+        TracksIter { tracks: self, index: 0 }
     }
 }
 
@@ -173,9 +170,6 @@ impl<'a> Table<'a> {
             TrackData::default()
         };
 
-        Some(Table {
-            horizontal,
-            vertical,
-        })
+        Some(Table { horizontal, vertical })
     }
 }

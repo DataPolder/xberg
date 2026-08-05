@@ -1,14 +1,14 @@
+use crate::{Unit::*, convert};
 use ttf_parser::trak::Table;
-use crate::{convert, Unit::*};
 
 #[test]
 fn empty() {
     let data = convert(&[
         Fixed(1.0), // version
-        UInt16(0), // format
-        UInt16(0), // horizontal data offset
-        UInt16(0), // vertical data offset
-        UInt16(0), // padding
+        UInt16(0),  // format
+        UInt16(0),  // horizontal data offset
+        UInt16(0),  // vertical data offset
+        UInt16(0),  // padding
     ]);
 
     let table = Table::parse(&data).unwrap();
@@ -22,36 +22,30 @@ fn empty() {
 fn basic() {
     let data = convert(&[
         Fixed(1.0), // version
-        UInt16(0), // format
+        UInt16(0),  // format
         UInt16(12), // horizontal data offset
-        UInt16(0), // vertical data offset
-        UInt16(0), // padding
-
+        UInt16(0),  // vertical data offset
+        UInt16(0),  // padding
         // TrackData
-        UInt16(3), // number of tracks
-        UInt16(2), // number of sizes
+        UInt16(3),  // number of tracks
+        UInt16(2),  // number of sizes
         UInt32(44), // offset to size table
-
         // TrackTableEntry [0]
         Fixed(-1.0), // track
         UInt16(256), // name index
-        UInt16(52), // offset of the two per-size tracking values
-
+        UInt16(52),  // offset of the two per-size tracking values
         // TrackTableEntry [1]
-        Fixed(0.0), // track
+        Fixed(0.0),  // track
         UInt16(258), // name index
-        UInt16(60), // offset of the two per-size tracking values
-
+        UInt16(60),  // offset of the two per-size tracking values
         // TrackTableEntry [2]
-        Fixed(1.0), // track
+        Fixed(1.0),  // track
         UInt16(257), // name index
-        UInt16(56), // offset of the two per-size tracking values
-
+        UInt16(56),  // offset of the two per-size tracking values
         // Size [0]
         Fixed(12.0), // points
         // Size [1]
         Fixed(24.0), // points
-
         // Per-size tracking values.
         Int16(-15),
         Int16(-7),

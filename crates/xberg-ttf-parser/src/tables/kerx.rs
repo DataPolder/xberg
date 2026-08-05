@@ -9,7 +9,7 @@ use core::num::NonZeroU16;
 
 use crate::kern::KerningPair;
 use crate::parser::{FromData, LazyArray32, NumFrom, Offset, Offset32, Stream};
-use crate::{aat, GlyphId};
+use crate::{GlyphId, aat};
 
 const HEADER_SIZE: usize = 12;
 
@@ -136,10 +136,8 @@ impl<'a> Subtable2<'a> {
         // adding the class values to the address of the subtable,
         // and fetching the kerning value to which the new address points.'
 
-        let left_class =
-            crate::kern::get_format2_class(left.0, left_hand_table_offset, self.0).unwrap_or(0);
-        let right_class =
-            crate::kern::get_format2_class(right.0, right_hand_table_offset, self.0).unwrap_or(0);
+        let left_class = crate::kern::get_format2_class(left.0, left_hand_table_offset, self.0).unwrap_or(0);
+        let right_class = crate::kern::get_format2_class(right.0, right_hand_table_offset, self.0).unwrap_or(0);
 
         // 'Values within the left-hand offset table should not be less than the kerning array offset.'
         if usize::from(left_class) < array_offset {
@@ -241,10 +239,7 @@ pub struct Subtable6<'a> {
 impl<'a> Subtable6<'a> {
     // TODO: parse actual structure
     fn parse(number_of_glyphs: NonZeroU16, data: &'a [u8]) -> Self {
-        Subtable6 {
-            number_of_glyphs,
-            data,
-        }
+        Subtable6 { number_of_glyphs, data }
     }
 
     /// Returns kerning for a pair of glyphs.
@@ -255,10 +250,9 @@ impl<'a> Subtable6<'a> {
         let flags = s.read::<u32>()?;
         s.skip::<u16>(); // row_count
         s.skip::<u16>(); // col_count
-                         // All offsets are from the start of the subtable.
+        // All offsets are from the start of the subtable.
         let row_index_table_offset = s.read::<Offset32>()?.to_usize().checked_sub(HEADER_SIZE)?;
-        let column_index_table_offset =
-            s.read::<Offset32>()?.to_usize().checked_sub(HEADER_SIZE)?;
+        let column_index_table_offset = s.read::<Offset32>()?.to_usize().checked_sub(HEADER_SIZE)?;
         let kerning_array_offset = s.read::<Offset32>()?.to_usize().checked_sub(HEADER_SIZE)?;
         let kerning_vector_offset = s.read::<Offset32>()?.to_usize().checked_sub(HEADER_SIZE)?;
 

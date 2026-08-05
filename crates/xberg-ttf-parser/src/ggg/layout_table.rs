@@ -4,10 +4,10 @@
 #[cfg(feature = "variable-fonts")]
 use super::FeatureVariations;
 use super::LookupList;
+use crate::Tag;
 #[cfg(feature = "variable-fonts")]
 use crate::parser::Offset32;
 use crate::parser::{FromData, LazyArray16, Offset, Offset16, Stream};
-use crate::Tag;
 
 /// A [Layout Table](https://docs.microsoft.com/en-us/typography/opentype/spec/chapter2#table-organization).
 #[derive(Clone, Copy, Debug)]
@@ -46,9 +46,7 @@ impl<'a> LayoutTable<'a> {
             }
 
             let variations = match variations_offset {
-                Some(offset) => data
-                    .get(offset.to_usize()..)
-                    .and_then(FeatureVariations::parse),
+                Some(offset) => data.get(offset.to_usize()..).and_then(FeatureVariations::parse),
                 None => None,
             };
 
@@ -153,10 +151,7 @@ impl<'a, T: RecordListItem<'a>> IntoIterator for RecordList<'a, T> {
 
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
-        RecordListIter {
-            list: self,
-            index: 0,
-        }
+        RecordListIter { list: self, index: 0 }
     }
 }
 
@@ -222,8 +217,7 @@ impl<'a> RecordListItem<'a> for Script<'a> {
         let mut s = Stream::new(data);
         let mut default_language = None;
         if let Some(offset) = s.read::<Option<Offset16>>()? {
-            default_language =
-                LanguageSystem::parse(Tag::from_bytes(b"dflt"), data.get(offset.to_usize()..)?);
+            default_language = LanguageSystem::parse(Tag::from_bytes(b"dflt"), data.get(offset.to_usize()..)?);
         }
         let mut languages = RecordList::parse(s.tail()?)?;
         // Offsets are relative to this table.
@@ -279,9 +273,6 @@ impl<'a> RecordListItem<'a> for Feature<'a> {
         let _params_offset = s.read::<Offset16>()?; // Unsupported.
         let count = s.read::<u16>()?;
         let lookup_indices = s.read_array16(count)?;
-        Some(Self {
-            tag,
-            lookup_indices,
-        })
+        Some(Self { tag, lookup_indices })
     }
 }

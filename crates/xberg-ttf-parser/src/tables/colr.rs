@@ -5,13 +5,13 @@
 // [skrifa](https://github.com/googlefonts/fontations/tree/main/skrifa).
 
 #[cfg(feature = "variable-fonts")]
+use crate::NormalizedCoordinate;
+#[cfg(feature = "variable-fonts")]
 use crate::delta_set::DeltaSetIndexMap;
-use crate::parser::{FromData, LazyArray16, Offset, Offset24, Offset32, Stream, F2DOT14};
+use crate::parser::{F2DOT14, FromData, LazyArray16, Offset, Offset24, Offset32, Stream};
 #[cfg(feature = "variable-fonts")]
 use crate::var_store::ItemVariationStore;
-#[cfg(feature = "variable-fonts")]
-use crate::NormalizedCoordinate;
-use crate::{cpal, Fixed, LazyArray32, RectF, Transform};
+use crate::{Fixed, LazyArray32, RectF, Transform, cpal};
 use crate::{GlyphId, RgbaColor};
 
 /// A [base glyph](
@@ -560,9 +560,7 @@ impl Iterator for GradientStopsIter<'_, '_> {
 
         match self.color_line {
             #[cfg(feature = "variable-fonts")]
-            ColorLine::VarColorLine(vcl) => {
-                vcl.get(self.palette, index, self.variation_data, self.coords)
-            }
+            ColorLine::VarColorLine(vcl) => vcl.get(self.palette, index, self.variation_data, self.coords),
             ColorLine::NonVarColorLine(nvcl) => nvcl.get(self.palette, index),
         }
     }
@@ -740,11 +738,10 @@ impl<'a> Table<'a> {
         let layers_offset = s.read::<Offset32>()?;
         let num_layers = s.read::<u16>()?;
 
-        let base_glyphs = Stream::new_at(data, base_glyphs_offset.to_usize())?
-            .read_array16::<BaseGlyphRecord>(num_base_glyphs)?;
+        let base_glyphs =
+            Stream::new_at(data, base_glyphs_offset.to_usize())?.read_array16::<BaseGlyphRecord>(num_base_glyphs)?;
 
-        let layers = Stream::new_at(data, layers_offset.to_usize())?
-            .read_array16::<LayerRecord>(num_layers)?;
+        let layers = Stream::new_at(data, layers_offset.to_usize())?.read_array16::<LayerRecord>(num_layers)?;
 
         let mut table = Self {
             version: version as u8,
@@ -1077,9 +1074,7 @@ impl<'a> Table<'a> {
                 let alpha = s.read::<F2DOT14>()?;
                 let var_index_base = s.read::<u32>()?;
 
-                let deltas = self
-                    .variation_data()
-                    .read_deltas::<1>(var_index_base, coords);
+                let deltas = self.variation_data().read_deltas::<1>(var_index_base, coords);
 
                 let mut color = if palette_index == u16::MAX {
                     foreground_color
@@ -1093,8 +1088,7 @@ impl<'a> Table<'a> {
             4 => {
                 // PaintLinearGradient
                 let color_line_offset = s.read::<Offset24>()?;
-                let color_line =
-                    self.parse_color_line(offset + color_line_offset.to_usize(), foreground_color)?;
+                let color_line = self.parse_color_line(offset + color_line_offset.to_usize(), foreground_color)?;
 
                 painter.paint(Paint::LinearGradient(LinearGradient {
                     x0: s.read::<i16>()? as f32,
@@ -1113,17 +1107,13 @@ impl<'a> Table<'a> {
             5 => {
                 // PaintVarLinearGradient
                 let var_color_line_offset = s.read::<Offset24>()?;
-                let color_line = self.parse_var_color_line(
-                    offset + var_color_line_offset.to_usize(),
-                    foreground_color,
-                )?;
+                let color_line =
+                    self.parse_var_color_line(offset + var_color_line_offset.to_usize(), foreground_color)?;
                 let mut var_s = s.clone();
                 var_s.advance(12);
                 let var_index_base = var_s.read::<u32>()?;
 
-                let deltas = self
-                    .variation_data()
-                    .read_deltas::<6>(var_index_base, coords);
+                let deltas = self.variation_data().read_deltas::<6>(var_index_base, coords);
 
                 painter.paint(Paint::LinearGradient(LinearGradient {
                     x0: s.read::<i16>()? as f32 + deltas[0],
@@ -1140,8 +1130,7 @@ impl<'a> Table<'a> {
             6 => {
                 // PaintRadialGradient
                 let color_line_offset = s.read::<Offset24>()?;
-                let color_line =
-                    self.parse_color_line(offset + color_line_offset.to_usize(), foreground_color)?;
+                let color_line = self.parse_color_line(offset + color_line_offset.to_usize(), foreground_color)?;
                 painter.paint(Paint::RadialGradient(RadialGradient {
                     x0: s.read::<i16>()? as f32,
                     y0: s.read::<i16>()? as f32,
@@ -1159,18 +1148,13 @@ impl<'a> Table<'a> {
             7 => {
                 // PaintVarRadialGradient
                 let color_line_offset = s.read::<Offset24>()?;
-                let color_line = self.parse_var_color_line(
-                    offset + color_line_offset.to_usize(),
-                    foreground_color,
-                )?;
+                let color_line = self.parse_var_color_line(offset + color_line_offset.to_usize(), foreground_color)?;
 
                 let mut var_s = s.clone();
                 var_s.advance(12);
                 let var_index_base = var_s.read::<u32>()?;
 
-                let deltas = self
-                    .variation_data()
-                    .read_deltas::<6>(var_index_base, coords);
+                let deltas = self.variation_data().read_deltas::<6>(var_index_base, coords);
 
                 painter.paint(Paint::RadialGradient(RadialGradient {
                     x0: s.read::<i16>()? as f32 + deltas[0],
@@ -1187,8 +1171,7 @@ impl<'a> Table<'a> {
             8 => {
                 // PaintSweepGradient
                 let color_line_offset = s.read::<Offset24>()?;
-                let color_line =
-                    self.parse_color_line(offset + color_line_offset.to_usize(), foreground_color)?;
+                let color_line = self.parse_color_line(offset + color_line_offset.to_usize(), foreground_color)?;
                 painter.paint(Paint::SweepGradient(SweepGradient {
                     center_x: s.read::<i16>()? as f32,
                     center_y: s.read::<i16>()? as f32,
@@ -1204,18 +1187,13 @@ impl<'a> Table<'a> {
             9 => {
                 // PaintVarSweepGradient
                 let color_line_offset = s.read::<Offset24>()?;
-                let color_line = self.parse_var_color_line(
-                    offset + color_line_offset.to_usize(),
-                    foreground_color,
-                )?;
+                let color_line = self.parse_var_color_line(offset + color_line_offset.to_usize(), foreground_color)?;
 
                 let mut var_s = s.clone();
                 var_s.advance(8);
                 let var_index_base = var_s.read::<u32>()?;
 
-                let deltas = self
-                    .variation_data()
-                    .read_deltas::<4>(var_index_base, coords);
+                let deltas = self.variation_data().read_deltas::<4>(var_index_base, coords);
 
                 painter.paint(Paint::SweepGradient(SweepGradient {
                     center_x: s.read::<i16>()? as f32 + deltas[0],
@@ -1296,9 +1274,7 @@ impl<'a> Table<'a> {
                 var_s.advance(24);
                 let var_index_base = var_s.read::<u32>()?;
 
-                let deltas = self
-                    .variation_data()
-                    .read_deltas::<6>(var_index_base, coords);
+                let deltas = self.variation_data().read_deltas::<6>(var_index_base, coords);
 
                 let ts = Transform {
                     a: s.read::<Fixed>()?.apply_float_delta(deltas[0]),
@@ -1347,9 +1323,7 @@ impl<'a> Table<'a> {
                 var_s.advance(4);
                 let var_index_base = var_s.read::<u32>()?;
 
-                let deltas = self
-                    .variation_data()
-                    .read_deltas::<2>(var_index_base, coords);
+                let deltas = self.variation_data().read_deltas::<2>(var_index_base, coords);
 
                 let tx = f32::from(s.read::<i16>()?) + deltas[0];
                 let ty = f32::from(s.read::<i16>()?) + deltas[1];
@@ -1392,9 +1366,7 @@ impl<'a> Table<'a> {
                 var_s.advance(4);
                 let var_index_base = var_s.read::<u32>()?;
 
-                let deltas = self
-                    .variation_data()
-                    .read_deltas::<2>(var_index_base, coords);
+                let deltas = self.variation_data().read_deltas::<2>(var_index_base, coords);
 
                 let sx = s.read::<F2DOT14>()?.apply_float_delta(deltas[0]);
                 let sy = s.read::<F2DOT14>()?.apply_float_delta(deltas[1]);
@@ -1443,9 +1415,7 @@ impl<'a> Table<'a> {
                 var_s.advance(8);
                 let var_index_base = var_s.read::<u32>()?;
 
-                let deltas = self
-                    .variation_data()
-                    .read_deltas::<4>(var_index_base, coords);
+                let deltas = self.variation_data().read_deltas::<4>(var_index_base, coords);
 
                 let sx = s.read::<F2DOT14>()?.apply_float_delta(deltas[0]);
                 let sy = s.read::<F2DOT14>()?.apply_float_delta(deltas[1]);
@@ -1493,9 +1463,7 @@ impl<'a> Table<'a> {
                 var_s.advance(2);
                 let var_index_base = var_s.read::<u32>()?;
 
-                let deltas = self
-                    .variation_data()
-                    .read_deltas::<1>(var_index_base, coords);
+                let deltas = self.variation_data().read_deltas::<1>(var_index_base, coords);
 
                 let scale = s.read::<F2DOT14>()?.apply_float_delta(deltas[0]);
 
@@ -1542,9 +1510,7 @@ impl<'a> Table<'a> {
                 var_s.advance(6);
                 let var_index_base = var_s.read::<u32>()?;
 
-                let deltas = self
-                    .variation_data()
-                    .read_deltas::<3>(var_index_base, coords);
+                let deltas = self.variation_data().read_deltas::<3>(var_index_base, coords);
 
                 let scale = s.read::<F2DOT14>()?.apply_float_delta(deltas[0]);
                 let center_x = f32::from(s.read::<i16>()?) + deltas[1];
@@ -1591,9 +1557,7 @@ impl<'a> Table<'a> {
                 var_s.advance(2);
                 let var_index_base = var_s.read::<u32>()?;
 
-                let deltas = self
-                    .variation_data()
-                    .read_deltas::<1>(var_index_base, coords);
+                let deltas = self.variation_data().read_deltas::<1>(var_index_base, coords);
 
                 let angle = s.read::<F2DOT14>()?.apply_float_delta(deltas[0]);
 
@@ -1640,9 +1604,7 @@ impl<'a> Table<'a> {
                 var_s.advance(6);
                 let var_index_base = var_s.read::<u32>()?;
 
-                let deltas = self
-                    .variation_data()
-                    .read_deltas::<3>(var_index_base, coords);
+                let deltas = self.variation_data().read_deltas::<3>(var_index_base, coords);
 
                 let angle = s.read::<F2DOT14>()?.apply_float_delta(deltas[0]);
                 let center_x = f32::from(s.read::<i16>()?) + deltas[1];
@@ -1690,9 +1652,7 @@ impl<'a> Table<'a> {
                 var_s.advance(4);
                 let var_index_base = var_s.read::<u32>()?;
 
-                let deltas = self
-                    .variation_data()
-                    .read_deltas::<2>(var_index_base, coords);
+                let deltas = self.variation_data().read_deltas::<2>(var_index_base, coords);
 
                 let skew_x = s.read::<F2DOT14>()?.apply_float_delta(deltas[0]);
                 let skew_y = s.read::<F2DOT14>()?.apply_float_delta(deltas[1]);
@@ -1741,9 +1701,7 @@ impl<'a> Table<'a> {
                 var_s.advance(8);
                 let var_index_base = var_s.read::<u32>()?;
 
-                let deltas = self
-                    .variation_data()
-                    .read_deltas::<4>(var_index_base, coords);
+                let deltas = self.variation_data().read_deltas::<4>(var_index_base, coords);
 
                 let skew_x = s.read::<F2DOT14>()?.apply_float_delta(deltas[0]);
                 let skew_y = s.read::<F2DOT14>()?.apply_float_delta(deltas[1]);
@@ -1800,11 +1758,7 @@ impl<'a> Table<'a> {
         Some(())
     }
 
-    fn parse_color_line(
-        &self,
-        offset: usize,
-        foreground_color: RgbaColor,
-    ) -> Option<NonVarColorLine<'a>> {
+    fn parse_color_line(&self, offset: usize, foreground_color: RgbaColor) -> Option<NonVarColorLine<'a>> {
         let mut s = Stream::new_at(self.data, offset)?;
         let extend = s.read::<GradientExtend>()?;
         let count = s.read::<u16>()?;
@@ -1818,11 +1772,7 @@ impl<'a> Table<'a> {
     }
 
     #[cfg(feature = "variable-fonts")]
-    fn parse_var_color_line(
-        &self,
-        offset: usize,
-        foreground_color: RgbaColor,
-    ) -> Option<VarColorLine<'a>> {
+    fn parse_var_color_line(&self, offset: usize, foreground_color: RgbaColor) -> Option<VarColorLine<'a>> {
         let mut s = Stream::new_at(self.data, offset)?;
         let extend = s.read::<GradientExtend>()?;
         let count = s.read::<u16>()?;
@@ -1909,18 +1859,11 @@ struct VariationData<'a> {
 #[cfg(feature = "variable-fonts")]
 impl VariationData<'_> {
     // Inspired from `fontations`.
-    fn read_deltas<const N: usize>(
-        &self,
-        var_index_base: u32,
-        coordinates: &[NormalizedCoordinate],
-    ) -> [f32; N] {
+    fn read_deltas<const N: usize>(&self, var_index_base: u32, coordinates: &[NormalizedCoordinate]) -> [f32; N] {
         const NO_VARIATION_DELTAS: u32 = 0xFFFFFFFF;
         let mut deltas = [0.0; N];
 
-        if coordinates.is_empty()
-            || self.variation_store.is_none()
-            || var_index_base == NO_VARIATION_DELTAS
-        {
+        if coordinates.is_empty() || self.variation_store.is_none() || var_index_base == NO_VARIATION_DELTAS {
             return deltas;
         }
 

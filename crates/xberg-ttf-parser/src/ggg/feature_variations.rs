@@ -38,11 +38,7 @@ impl<'a> FeatureVariations<'a> {
     }
 
     /// Returns a [`Feature`] at specified indices.
-    pub fn find_substitute(
-        &self,
-        feature_index: FeatureIndex,
-        variation_index: VariationIndex,
-    ) -> Option<Feature<'a>> {
+    pub fn find_substitute(&self, feature_index: FeatureIndex, variation_index: VariationIndex) -> Option<Feature<'a>> {
         let offset = self.records.get(variation_index)?.substitutions.to_usize();
         let subst = FeatureTableSubstitution::parse(self.data.get(offset..)?)?;
         subst.find_substitute(feature_index)
@@ -126,10 +122,7 @@ impl Condition {
             filter_range_min,
             filter_range_max,
         } = *self;
-        let coord = coords
-            .get(usize::from(axis_index))
-            .map(|c| c.get())
-            .unwrap_or(0);
+        let coord = coords.get(usize::from(axis_index)).map(|c| c.get()).unwrap_or(0);
         filter_range_min <= coord && coord <= filter_range_max
     }
 }

@@ -1,10 +1,10 @@
 //! A [PostScript Table](
 //! https://docs.microsoft.com/en-us/typography/opentype/spec/post) implementation.
 
-use crate::parser::{Fixed, LazyArray16, Stream};
 #[cfg(feature = "glyph-names")]
 use crate::GlyphId;
 use crate::LineMetrics;
+use crate::parser::{Fixed, LazyArray16, Stream};
 
 const ITALIC_ANGLE_OFFSET: usize = 4;
 const UNDERLINE_POSITION_OFFSET: usize = 8;
@@ -397,15 +397,11 @@ impl<'a> Table<'a> {
     #[cfg(feature = "glyph-names")]
     pub fn glyph_index_by_name(&self, name: &str) -> Option<GlyphId> {
         let id = if let Some(index) = MACINTOSH_NAMES.iter().position(|n| *n == name) {
-            self.glyph_indexes
-                .into_iter()
-                .position(|i| usize::from(i) == index)?
+            self.glyph_indexes.into_iter().position(|i| usize::from(i) == index)?
         } else {
             let mut index = self.names().position(|n| n == name)?;
             index += MACINTOSH_NAMES.len();
-            self.glyph_indexes
-                .into_iter()
-                .position(|i| usize::from(i) == index)?
+            self.glyph_indexes.into_iter().position(|i| usize::from(i) == index)?
         };
 
         Some(GlyphId(id as u16))

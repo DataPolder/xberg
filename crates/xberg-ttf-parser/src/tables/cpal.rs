@@ -3,8 +3,8 @@
 
 use core::num::NonZeroU16;
 
-use crate::parser::{FromData, LazyArray16, Offset, Offset32, Stream};
 use crate::RgbaColor;
+use crate::parser::{FromData, LazyArray16, Offset, Offset32, Stream};
 
 /// A [Color Palette Table](
 /// https://docs.microsoft.com/en-us/typography/opentype/spec/cpal).
@@ -35,13 +35,9 @@ impl<'a> Table<'a> {
         let color_records_offset = s.read::<Offset32>()?;
         let color_indices = s.read_array16::<u16>(num_palettes)?;
 
-        let colors = Stream::new_at(data, color_records_offset.to_usize())?
-            .read_array16::<BgraColor>(num_colors)?;
+        let colors = Stream::new_at(data, color_records_offset.to_usize())?.read_array16::<BgraColor>(num_colors)?;
 
-        Some(Self {
-            color_indices,
-            colors,
-        })
+        Some(Self { color_indices, colors })
     }
 
     /// Returns the number of palettes.
@@ -52,10 +48,7 @@ impl<'a> Table<'a> {
 
     /// Returns the color at the given index into the given palette.
     pub fn get(&self, palette_index: u16, palette_entry: u16) -> Option<RgbaColor> {
-        let index = self
-            .color_indices
-            .get(palette_index)?
-            .checked_add(palette_entry)?;
+        let index = self.color_indices.get(palette_index)?.checked_add(palette_entry)?;
         self.colors.get(index).map(|c| c.to_rgba())
     }
 }

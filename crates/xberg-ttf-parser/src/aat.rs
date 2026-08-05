@@ -6,8 +6,8 @@ related types.
 
 use core::num::NonZeroU16;
 
-use crate::parser::{FromData, LazyArray16, NumFrom, Offset, Offset16, Offset32, Stream};
 use crate::GlyphId;
+use crate::parser::{FromData, LazyArray16, NumFrom, Offset, Offset16, Offset32, Stream};
 
 /// Predefined states.
 pub mod state {
@@ -204,8 +204,7 @@ impl<'a> StateTable<'a> {
     /// Produces a new state.
     #[inline]
     pub fn new_state(&self, state: u16) -> u16 {
-        let n = (i32::from(state) - i32::from(self.state_array_offset))
-            / i32::from(self.number_of_classes);
+        let n = (i32::from(state) - i32::from(self.state_array_offset)) / i32::from(self.number_of_classes);
 
         use core::convert::TryFrom;
         u16::try_from(n).unwrap_or(0)
@@ -278,14 +277,10 @@ impl<'a, T: FromData> ExtendedStateTable<'a, T> {
             class = u16::from(class::OUT_OF_BOUNDS);
         }
 
-        let state_idx =
-            usize::from(state) * usize::num_from(self.number_of_classes) + usize::from(class);
+        let state_idx = usize::from(state) * usize::num_from(self.number_of_classes) + usize::from(class);
 
         let entry_idx: u16 = Stream::read_at(self.state_array, state_idx * u16::SIZE)?;
-        Stream::read_at(
-            self.entry_table,
-            usize::from(entry_idx) * GenericStateEntry::<T>::SIZE,
-        )
+        Stream::read_at(self.entry_table, usize::from(entry_idx) * GenericStateEntry::<T>::SIZE)
     }
 }
 
@@ -370,10 +365,7 @@ impl<'a> LookupInner<'a> {
                 let first_glyph = s.read::<u16>()?;
                 let glyph_count = s.read::<u16>()?;
                 let values = s.read_array16::<u16>(glyph_count)?;
-                Some(Self::Format8 {
-                    first_glyph,
-                    values,
-                })
+                Some(Self::Format8 { first_glyph, values })
             }
             10 => {
                 let value_size = s.read::<u16>()?;
@@ -403,10 +395,7 @@ impl<'a> LookupInner<'a> {
                 Stream::read_at::<u16>(data, offset)
             }
             Self::Format6(bsearch) => bsearch.get(glyph_id).map(|v| v.value),
-            Self::Format8 {
-                first_glyph,
-                values,
-            } => {
+            Self::Format8 { first_glyph, values } => {
                 let idx = glyph_id.0.checked_sub(*first_glyph)?;
                 values.get(idx)
             }
@@ -422,10 +411,7 @@ impl<'a> LookupInner<'a> {
                     1 => s.read_array16::<u8>(*glyph_count)?.get(idx).map(u16::from),
                     2 => s.read_array16::<u16>(*glyph_count)?.get(idx),
                     // TODO: we should return u32 here, but this is not supported yet
-                    4 => s
-                        .read_array16::<u32>(*glyph_count)?
-                        .get(idx)
-                        .map(|n| n as u16),
+                    4 => s.read_array16::<u32>(*glyph_count)?.get(idx).map(|n| n as u16),
                     _ => None, // 8 is also supported
                 }
             }
