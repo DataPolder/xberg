@@ -78,6 +78,8 @@ pub(crate) fn read_excel_file(file_path: &str) -> Result<ExcelReadResult> {
         || lower_path.ends_with(".xltm")
     {
         extract_xlsx_office_metadata_from_file(file_path).ok()
+    } else if lower_path.ends_with(".ods") {
+        extract_ods_office_metadata_from_file(file_path).ok()
     } else {
         None
     };
@@ -180,6 +182,7 @@ pub(crate) fn read_excel_bytes(data: &[u8], file_extension: &str) -> Result<Exce
     #[cfg(feature = "office")]
     let office_metadata = match file_extension.to_lowercase().as_str() {
         ".xlsx" | ".xlsm" | ".xlam" | ".xltm" => extract_xlsx_office_metadata_from_bytes(data).ok(),
+        ".ods" => extract_ods_office_metadata_from_bytes(data).ok(),
         _ => None,
     };
 
@@ -1079,6 +1082,74 @@ fn extract_xlsx_office_metadata_from_bytes(data: &[u8]) -> Result<HashMap<String
     extract_xlsx_office_metadata_from_archive(&mut archive)
 }
 
+/// Read ODS document metadata from the spreadsheet's `meta.xml`.
+///
+/// An `.ods` is an ODF package, not an OOXML one: its metadata lives in `meta.xml`
+/// under the ODF namespaces rather than in `docProps/core.xml`, so the OOXML reader
+/// finds nothing and every ODS came back with no title, author or dates at all. ODT
+/// and ODP already read this exact part through the same helper (#102).
+///
+/// The keys match [`extract_xlsx_office_metadata_from_archive`]'s so both spreadsheet
+/// families populate `Metadata` identically downstream.
+#[cfg(feature = "office")]
+fn extract_ods_office_metadata_from_archive<R: std::io::Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+) -> Result<HashMap<String, String>> {
+    let properties = crate::extraction::office_metadata::extract_odt_properties(archive)?;
+    let mut metadata = HashMap::new();
+
+    let mut insert = |key: &str, value: Option<String>| {
+        if let Some(value) = value.filter(|value| !value.is_empty()) {
+            metadata.insert(key.to_string(), value);
+        }
+    };
+
+    insert("title", properties.title);
+    insert("subject", properties.subject);
+    insert("keywords", properties.keywords);
+    insert("description", properties.description);
+    insert("language", properties.language);
+    insert("revision", properties.editing_cycles);
+    insert("created_at", properties.creation_date);
+    insert("modified_at", properties.date);
+
+    // ODF splits authorship the other way round from OOXML: `meta:initial-creator` is
+    // who created the document and `dc:creator` is who touched it last, whereas OOXML's
+    // `dc:creator` is the original author. Map by role, not by tag name, and fall back to
+    // `dc:creator` for the author when a producer omits `meta:initial-creator`.
+    let author = properties.initial_creator.or_else(|| properties.creator.clone());
+    insert("creator", author.clone());
+    insert("created_by", author);
+    insert("modified_by", properties.creator);
+
+    Ok(metadata)
+}
+
+#[cfg(feature = "office")]
+fn extract_ods_office_metadata_from_file(file_path: &str) -> Result<HashMap<String, String>> {
+    use std::fs::File;
+    use zip::ZipArchive;
+
+    // OSError/RuntimeError must bubble up - system errors need user reports ~keep
+    let file = File::open(file_path)?;
+
+    let mut archive =
+        ZipArchive::new(file).map_err(|e| XbergError::parsing(format!("Failed to open ZIP archive: {}", e)))?;
+
+    extract_ods_office_metadata_from_archive(&mut archive)
+}
+
+#[cfg(feature = "office")]
+fn extract_ods_office_metadata_from_bytes(data: &[u8]) -> Result<HashMap<String, String>> {
+    use zip::ZipArchive;
+
+    let cursor = Cursor::new(data);
+    let mut archive =
+        ZipArchive::new(cursor).map_err(|e| XbergError::parsing(format!("Failed to open ZIP archive: {}", e)))?;
+
+    extract_ods_office_metadata_from_archive(&mut archive)
+}
+
 #[cfg(feature = "office")]
 fn extract_xlsx_office_metadata_from_archive<R: std::io::Read + std::io::Seek>(
     archive: &mut zip::ZipArchive<R>,
@@ -1365,6 +1436,46 @@ fn parse_comments_xml(xml_bytes: &[u8]) -> Result<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression test for #102: office metadata was computed only for the OOXML
+    /// spreadsheet extensions, so an `.ods` reached `ExcelWorkbook` with an empty
+    /// metadata map — no title, no author, no dates — even though ODT and ODP read
+    /// the very same `meta.xml` through `extract_odt_properties`.
+    ///
+    /// The expectations are read straight out of the fixture's own `meta.xml`.
+    #[cfg(feature = "office")]
+    #[test]
+    fn should_read_ods_document_metadata_from_meta_xml() {
+        let path =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../test_documents/data_formats/test_01.ods");
+        if !path.exists() {
+            println!("Skipping: test document not found at {}", path.display());
+            return;
+        }
+        let bytes = std::fs::read(&path).expect("read fixture");
+
+        let (workbook, _warnings) = read_excel_bytes(&bytes, ".ods").expect("ODS extraction should succeed");
+
+        assert_eq!(
+            workbook.metadata.get("creator").map(String::as_str),
+            Some("Peter Staar"),
+            "meta:initial-creator must map to the document author; got {:?}",
+            workbook.metadata
+        );
+        assert_eq!(
+            workbook.metadata.get("modified_by").map(String::as_str),
+            Some("Peter Staar"),
+            "dc:creator is ODF's last-modifier"
+        );
+        assert_eq!(
+            workbook.metadata.get("created_at").map(String::as_str),
+            Some("2024-11-16T05:17:41")
+        );
+        assert_eq!(
+            workbook.metadata.get("modified_at").map(String::as_str),
+            Some("2025-01-24T13:18:51")
+        );
+    }
 
     #[test]
     fn test_format_cell_to_string_basic() {
