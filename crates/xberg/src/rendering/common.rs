@@ -224,6 +224,30 @@ impl FootnoteCollector {
             }
         }
 
+        // A definition that no reference points at is still authored content.
+        // `definitions` was previously populated only from inside the FootnoteRef
+        // loop above, so an unreferenced definition never reached any renderer and
+        // was silently lost. Append the orphans after the referenced ones, in
+        // document order, continuing the same numbering. See #68.
+        for elem in &doc.elements {
+            if elem.kind != ElementKind::FootnoteDefinition {
+                continue;
+            }
+            let Some(anchor) = elem.anchor.as_ref() else {
+                continue;
+            };
+            if anchor_to_number.contains_key(anchor) {
+                continue;
+            }
+            let number = next_number;
+            next_number += 1;
+            anchor_to_number.insert(anchor.clone(), number);
+            definitions.push(FootnoteEntry {
+                text: elem.text.clone(),
+                number,
+            });
+        }
+
         Self {
             ref_numbers,
             definitions,
@@ -779,6 +803,71 @@ mod tests {
         assert_eq!(defs.len(), 2);
         assert_eq!(defs[0].number, 1);
         assert_eq!(defs[1].number, 2);
+    }
+
+    /// Regression for #68: a footnote definition that no `FootnoteRef` points at
+    /// is still authored content and must be emitted, numbered after the
+    /// referenced ones. Before the fix `definitions` was filled only from inside
+    /// the reference loop, so "Orphaned." never reached a renderer.
+    #[test]
+    fn footnote_collector_emits_unreferenced_definitions() {
+        use crate::types::internal_builder::InternalDocumentBuilder;
+        let mut b = InternalDocumentBuilder::new("test");
+        b.push_footnote_ref("a", "fn1", None);
+        let d1 = b.push_footnote_definition("Referenced.", "fn1", None);
+        let d2 = b.push_footnote_definition("Orphaned.", "fn2", None);
+        b.set_layer(d1, ContentLayer::Footnote);
+        b.set_layer(d2, ContentLayer::Footnote);
+        let doc = b.build();
+
+        let collector = FootnoteCollector::new(&doc);
+        assert_eq!(collector.ref_number(0), Some(1));
+        let defs = collector.definitions();
+        assert_eq!(defs.len(), 2, "the unreferenced definition must still be emitted");
+        assert_eq!(defs[0].text, "Referenced.");
+        assert_eq!(defs[0].number, 1);
+        assert_eq!(defs[1].text, "Orphaned.");
+        assert_eq!(defs[1].number, 2);
+    }
+
+    /// A document with footnote definitions but no references at all still emits
+    /// every definition, numbered from 1 in document order.
+    #[test]
+    fn footnote_collector_emits_definitions_when_no_references_exist() {
+        use crate::types::internal_builder::InternalDocumentBuilder;
+        let mut b = InternalDocumentBuilder::new("test");
+        let d1 = b.push_footnote_definition("First orphan.", "fn1", None);
+        let d2 = b.push_footnote_definition("Second orphan.", "fn2", None);
+        b.set_layer(d1, ContentLayer::Footnote);
+        b.set_layer(d2, ContentLayer::Footnote);
+        let doc = b.build();
+
+        let collector = FootnoteCollector::new(&doc);
+        let defs = collector.definitions();
+        assert_eq!(defs.len(), 2);
+        assert_eq!(defs[0].text, "First orphan.");
+        assert_eq!(defs[0].number, 1);
+        assert_eq!(defs[1].text, "Second orphan.");
+        assert_eq!(defs[1].number, 2);
+    }
+
+    /// Two definitions sharing one anchor must not be double-numbered by the
+    /// orphan tail pass.
+    #[test]
+    fn footnote_collector_does_not_duplicate_shared_anchor_definitions() {
+        use crate::types::internal_builder::InternalDocumentBuilder;
+        let mut b = InternalDocumentBuilder::new("test");
+        let d1 = b.push_footnote_definition("Only once.", "fn1", None);
+        let d2 = b.push_footnote_definition("Duplicate anchor.", "fn1", None);
+        b.set_layer(d1, ContentLayer::Footnote);
+        b.set_layer(d2, ContentLayer::Footnote);
+        let doc = b.build();
+
+        let collector = FootnoteCollector::new(&doc);
+        let defs = collector.definitions();
+        assert_eq!(defs.len(), 1, "a repeated anchor must be numbered once");
+        assert_eq!(defs[0].text, "Only once.");
+        assert_eq!(defs[0].number, 1);
     }
 
     #[test]
