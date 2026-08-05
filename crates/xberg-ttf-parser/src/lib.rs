@@ -49,6 +49,16 @@ Font parsing starts with a [`Face`].
 // byte-identical to upstream so future cherry-picks apply without conflict;
 // `div_ceil` and `is_multiple_of` in particular postdate that MSRV, so
 // "fixing" them here would break upstream's own build. ~keep
+// `missing_docs` is upstream's own `warn` (above), which the workspace `-D warnings`
+// promotes to an error; upstream leaves its table modules undocumented. ~keep
+#![allow(missing_docs)]
+// Lean feature combos (e.g. `--no-default-features --features no-std-float`) leave parts of
+// the vendored tables unreachable — `colr` drops a format binding, `glyf::outline_points` and
+// `post::glyph_indexes` are only reached with `variable-fonts`/`glyph-names`. Allowing here
+// keeps those three files byte-identical to upstream instead of scattering per-site
+// `#[allow]`s that every cherry-pick would then conflict on. ~keep
+#![allow(dead_code)]
+#![allow(unused_variables)]
 #![allow(mismatched_lifetime_syntaxes)]
 #![allow(clippy::manual_div_ceil)]
 #![allow(clippy::manual_is_multiple_of)]
