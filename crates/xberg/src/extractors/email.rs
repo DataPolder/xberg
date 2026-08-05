@@ -57,6 +57,7 @@ impl EmailExtractor {
     fn build_internal_document(
         email_result: &crate::types::EmailExtractionResult,
         extracted_attachments: &[ArchiveEntry],
+        nested_embedded_messages: &[crate::types::EmailExtractionResult],
     ) -> InternalDocument {
         let mut builder = InternalDocumentBuilder::new("email");
 
@@ -73,8 +74,29 @@ impl EmailExtractor {
         if !email_result.cc_emails.is_empty() {
             header_entries.push(("CC".to_string(), email_result.cc_emails.join(", ")));
         }
+        if !email_result.bcc_emails.is_empty() {
+            header_entries.push(("BCC".to_string(), email_result.bcc_emails.join(", ")));
+        }
+        if let Some(reply_to) = email_result.metadata.get("reply_to") {
+            header_entries.push(("Reply-To".to_string(), reply_to.clone()));
+        }
         if let Some(ref date) = email_result.date {
             header_entries.push(("Date".to_string(), date.clone()));
+        }
+        if let Some(ref message_id) = email_result.message_id {
+            header_entries.push(("Message-ID".to_string(), message_id.clone()));
+        }
+        if let Some(in_reply_to) = email_result.metadata.get("in_reply_to") {
+            header_entries.push(("In-Reply-To".to_string(), in_reply_to.clone()));
+        }
+        if let Some(references) = email_result.metadata.get("references") {
+            header_entries.push(("References".to_string(), references.clone()));
+        }
+        if let Some(list_id) = email_result.metadata.get("list_id") {
+            header_entries.push(("List-Id".to_string(), list_id.clone()));
+        }
+        if let Some(list_unsubscribe) = email_result.metadata.get("list_unsubscribe") {
+            header_entries.push(("List-Unsubscribe".to_string(), list_unsubscribe.clone()));
         }
         if !header_entries.is_empty() {
             builder.push_metadata_block(&header_entries, None);
@@ -94,6 +116,21 @@ impl EmailExtractor {
                     builder.push_paragraph(trimmed, vec![], None, None);
                 }
             }
+        }
+
+        // Rendered before the attachment listing/content below so that
+        // `retain_budgeted_attachment_content`'s assumption that the *last*
+        // `extracted_attachments.len() * 2` elements are attachment
+        // heading/paragraph pairs continues to hold.
+        for nested in nested_embedded_messages {
+            let nested_text = crate::extraction::email::build_email_text_output(nested);
+            let trimmed = nested_text.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let heading = nested.subject.clone().unwrap_or_else(|| "Embedded Message".to_string());
+            builder.push_heading(2, &heading, None, None);
+            builder.push_paragraph(trimmed, vec![], None, None);
         }
 
         if !email_result.attachments.is_empty() {
@@ -138,8 +175,9 @@ impl EmailExtractor {
         mime_type: &str,
         config: &ExtractionConfig,
         extracted_attachments: &[ArchiveEntry],
+        nested_embedded_messages: &[crate::types::EmailExtractionResult],
     ) -> Result<InternalDocument> {
-        let mut doc = Self::build_internal_document(email_result, extracted_attachments);
+        let mut doc = Self::build_internal_document(email_result, extracted_attachments, nested_embedded_messages);
         doc.mime_type = mime_type.to_string();
         doc.metadata = Self::build_document_metadata(email_result);
 
@@ -347,7 +385,7 @@ impl SyncExtractor for EmailExtractor {
     fn extract_sync(&self, content: &[u8], mime_type: &str, config: &ExtractionConfig) -> Result<InternalDocument> {
         let fallback_codepage = config.email.as_ref().and_then(|e| e.msg_fallback_codepage);
         let email_result = crate::extraction::email::extract_email_content(content, mime_type, fallback_codepage)?;
-        Self::build_extracted_document(&email_result, mime_type, config, &[])
+        Self::build_extracted_document(&email_result, mime_type, config, &[], &[])
     }
 }
 
@@ -373,6 +411,7 @@ impl InternalDocumentExtractor for EmailExtractor {
             crate::extraction::email::ParsedEmailContent {
                 result: crate::extraction::email::extract_email_content(content, mime_type, fallback_codepage)?,
                 nested_messages: Vec::new(),
+                nested_embedded_messages: Vec::new(),
             }
         };
         let mut children = Vec::new();
@@ -382,7 +421,13 @@ impl InternalDocumentExtractor for EmailExtractor {
             (children, warnings) = extract_attachment_children(&parsed.result.attachments, config).await;
         }
 
-        let mut doc = Self::build_extracted_document(&parsed.result, mime_type, config, &children)?;
+        let mut doc = Self::build_extracted_document(
+            &parsed.result,
+            mime_type,
+            config,
+            &children,
+            &parsed.nested_embedded_messages,
+        )?;
 
         if config.max_archive_depth > 0 && mime_type == "message/rfc822" {
             let (nested_children, nested_warnings) =
@@ -447,16 +492,25 @@ pub(crate) async fn extract_attachment_children(
             continue;
         }
 
-        let bytes = match &attachment.data {
-            Some(data) if !data.is_empty() => data,
-            _ => continue,
-        };
-
         let filename = attachment
             .filename
             .clone()
             .or_else(|| attachment.name.clone())
             .unwrap_or_else(|| format!("attachment_{}", idx));
+
+        let bytes = match &attachment.data {
+            Some(data) if !data.is_empty() => data,
+            _ => {
+                warnings.push(ProcessingWarning {
+                    source: Cow::Borrowed("email_attachment_extraction"),
+                    message: Cow::Owned(format!(
+                        "Skipped attachment '{}': no attachment data available",
+                        filename
+                    )),
+                });
+                continue;
+            }
+        };
 
         let detected_mime = crate::core::mime::detect_mime_type_from_bytes(bytes)
             .ok()
@@ -471,7 +525,16 @@ pub(crate) async fn extract_attachment_children(
 
         let file_mime = match detected_mime {
             Some(m) if m != "application/octet-stream" => m,
-            _ => continue,
+            _ => {
+                warnings.push(ProcessingWarning {
+                    source: Cow::Borrowed("email_attachment_extraction"),
+                    message: Cow::Owned(format!(
+                        "Skipped attachment '{}': could not determine MIME type",
+                        filename
+                    )),
+                });
+                continue;
+            }
         };
 
         if config

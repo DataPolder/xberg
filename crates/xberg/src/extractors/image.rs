@@ -1720,6 +1720,9 @@ impl InternalDocumentExtractor for ImageExtractor {
     ) -> Result<InternalDocument> {
         tracing::debug!(format = "image", size_bytes = content.len(), "extraction starting");
         let extraction_metadata = extract_image_metadata(content)?;
+        // Computed against the original bytes (before any HEIC->PNG rebinding
+        // below) so it reflects the same input `extract_image_metadata` saw.
+        let exif_warning = crate::extraction::exif::extract_exif_warning(content);
 
         #[cfg(feature = "heic")]
         let owned_png;
@@ -1783,6 +1786,9 @@ impl InternalDocumentExtractor for ImageExtractor {
                 ..Default::default()
             };
             doc.mime_type = mime_type.to_string();
+            if let Some(warning) = exif_warning.clone() {
+                doc.processing_warnings.push(warning);
+            }
             tracing::debug!(
                 format = "image",
                 "OCR disabled via disable_ocr, returning metadata only"
@@ -1806,6 +1812,9 @@ impl InternalDocumentExtractor for ImageExtractor {
                 if config.needs_image_data() {
                     doc.images.push(extracted_image);
                 }
+                if let Some(warning) = exif_warning.clone() {
+                    doc.processing_warnings.push(warning);
+                }
                 return Ok(doc);
             }
 
@@ -1821,6 +1830,9 @@ impl InternalDocumentExtractor for ImageExtractor {
                 if config.needs_image_data() {
                     doc.images.push(extracted_image);
                 }
+                if let Some(warning) = exif_warning.clone() {
+                    doc.processing_warnings.push(warning);
+                }
                 return Ok(doc);
             }
         }
@@ -1833,6 +1845,9 @@ impl InternalDocumentExtractor for ImageExtractor {
                 ..Default::default()
             };
             doc.mime_type = mime_type.to_string();
+            if let Some(warning) = exif_warning.clone() {
+                doc.processing_warnings.push(warning);
+            }
 
             tracing::debug!(
                 element_count = doc.elements.len(),

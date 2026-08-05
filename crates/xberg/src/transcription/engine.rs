@@ -16,8 +16,10 @@
 //! For each 30-second audio chunk the engine:
 //! 1. Computes a log-mel spectrogram (shape `[1, n_mels, 3000]`) using `mel_spec`.
 //! 2. Runs the encoder to obtain cross-attention key-value states.
-//! 3. Seeds the decoder with a four-token prompt
-//!    `[<|startoftranscript|>, <|{lang}|>, <|transcribe|>, <|notimestamps|>]`.
+//! 3. Seeds the decoder with a prompt
+//!    `[<|startoftranscript|>, <|{lang}|>, <|transcribe|>, <|notimestamps|>]`
+//!    (the trailing `<|notimestamps|>` token is omitted when timestamps are
+//!    requested — see [`build_decoder_prompt_tokens`]).
 //! 4. Greedily generates tokens by running `decoder` (step 0) and then
 //!    `decoder_with_past` (steps 1…N), accumulating KV-cache tensors.
 //! 5. Stops on `<|endoftext|>` or a configurable max-token limit (448).
@@ -154,6 +156,27 @@ impl SpecialTokens {
     }
 }
 
+/// Build the four (or three) token Whisper decoder prompt.
+///
+/// The canonical Whisper prompt is
+/// `[<|startoftranscript|>, <|{lang}|>, <|transcribe|>, <|notimestamps|>]`.
+/// When `timestamps` is `true`, the trailing `no_timestamps` token is omitted
+/// so the model is free to emit `<|x.xx|>` timestamp tokens in its output
+/// instead of being forced to suppress them.
+pub fn build_decoder_prompt_tokens(
+    start_of_transcript: u32,
+    lang_id: u32,
+    transcribe: u32,
+    no_timestamps: u32,
+    timestamps: bool,
+) -> Vec<i64> {
+    let mut prompt: Vec<i64> = vec![start_of_transcript as i64, lang_id as i64, transcribe as i64];
+    if !timestamps {
+        prompt.push(no_timestamps as i64);
+    }
+    prompt
+}
+
 /// Build an ONNX Runtime session from a model file path.
 ///
 /// Uses the same builder configuration as `reranking/mod.rs`:
@@ -277,13 +300,17 @@ impl WhisperEngine {
     /// chunks; each chunk is transcribed independently and the results are
     /// joined with a single space.
     ///
-    /// The `_timestamps` parameter is accepted for API completeness but has
-    /// no effect in this implementation — v1 always uses `<|notimestamps|>`.
+    /// When `timestamps` is `true` the decoder prompt omits `<|notimestamps|>`,
+    /// letting the model emit `<|x.xx|>`-style timestamp tokens in its raw
+    /// output (these are stripped by the tokenizer's `decode(..., true)` call,
+    /// so timestamps do not currently surface in the returned string — see
+    /// [`build_decoder_prompt_tokens`] for the token-level effect). When
+    /// `false` (the default), the prompt includes `<|notimestamps|>` as before.
     pub fn transcribe(
         &self,
         pcm: &PcmAudio,
         language: Option<&str>,
-        _timestamps: bool,
+        timestamps: bool,
     ) -> Result<String, TranscriptionError> {
         if pcm.samples.is_empty() {
             return Ok(String::new());
@@ -303,7 +330,7 @@ impl WhisperEngine {
             let chunk_end = (offset + WHISPER_CHUNK_SAMPLES).min(pcm.samples.len());
             let chunk = &pcm.samples[offset..chunk_end];
 
-            let text = self.transcribe_chunk(chunk, lang)?;
+            let text = self.transcribe_chunk(chunk, lang, timestamps)?;
             if !text.is_empty() {
                 parts.push(text);
             }
@@ -321,7 +348,7 @@ impl WhisperEngine {
     ///
     /// The chunk is zero-padded to exactly [`WHISPER_CHUNK_SAMPLES`] samples
     /// so that the encoder always receives a `[1, n_mels, 3000]` tensor.
-    fn transcribe_chunk(&self, chunk: &[f32], lang: &str) -> Result<String, TranscriptionError> {
+    fn transcribe_chunk(&self, chunk: &[f32], lang: &str, timestamps: bool) -> Result<String, TranscriptionError> {
         let padded = if chunk.len() == WHISPER_CHUNK_SAMPLES {
             chunk.to_vec()
         } else {
@@ -335,12 +362,13 @@ impl WhisperEngine {
         let encoder_hidden_states = self.run_encoder(mel_flat)?;
 
         let lang_id = self.special_tokens.language_id(lang);
-        let prompt: Vec<i64> = vec![
-            self.special_tokens.start_of_transcript as i64,
-            lang_id as i64,
-            self.special_tokens.transcribe as i64,
-            self.special_tokens.no_timestamps as i64,
-        ];
+        let prompt = build_decoder_prompt_tokens(
+            self.special_tokens.start_of_transcript,
+            lang_id,
+            self.special_tokens.transcribe,
+            self.special_tokens.no_timestamps,
+            timestamps,
+        );
 
         let token_ids = self.greedy_decode(prompt, &encoder_hidden_states)?;
 

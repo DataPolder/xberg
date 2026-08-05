@@ -102,23 +102,58 @@ fn extract_from_path(path: &std::path::Path) -> Result<(Vec<EmailExtractionResul
         source: None,
     })?;
 
+    Ok(extract_from_store(store.as_ref()))
+}
+
+/// Walk an already-opened PST `Store` and extract all messages, collecting
+/// non-fatal `ProcessingWarning`s along the way.
+///
+/// Split out from `extract_from_path` so the traversal logic can be unit
+/// tested against a synthetic `Store` implementation without needing a real
+/// PST file on disk (see issue #162).
+#[cfg(feature = "email")]
+fn extract_from_store(
+    store: &dyn outlook_pst::messaging::store::Store,
+) -> (Vec<EmailExtractionResult>, Vec<ProcessingWarning>) {
     let mut messages = Vec::new();
     let mut warnings = Vec::new();
 
     let ipm_entry = match store.properties().ipm_sub_tree_entry_id() {
         Ok(e) => e,
-        Err(_) => return Ok((messages, warnings)),
+        Err(e) => {
+            warnings.push(ProcessingWarning {
+                source: Cow::Borrowed("pst_extraction"),
+                message: Cow::Owned(format!("Failed to locate IPM (mail) sub-tree in PST store: {e}")),
+            });
+            return (messages, warnings);
+        }
     };
 
     let root_folder = match store.open_folder(&ipm_entry) {
         Ok(f) => f,
-        Err(_) => return Ok((messages, warnings)),
+        Err(e) => {
+            warnings.push(ProcessingWarning {
+                source: Cow::Borrowed("pst_extraction"),
+                message: Cow::Owned(format!("Failed to open IPM (mail) sub-tree root folder: {e}")),
+            });
+            return (messages, warnings);
+        }
     };
 
-    let mut folder_stack: Vec<(Rc<dyn PstFolder>, u32)> = vec![(root_folder, 0)];
+    let root_name = root_folder
+        .properties()
+        .display_name()
+        .unwrap_or_else(|_| "Top of Personal Folders".to_string());
+    let mut folder_stack: Vec<(Rc<dyn PstFolder>, u32, String)> = vec![(root_folder, 0, root_name)];
 
-    while let Some((folder, depth)) = folder_stack.pop() {
+    while let Some((folder, depth, folder_path)) = folder_stack.pop() {
         if depth > 50 {
+            warnings.push(ProcessingWarning {
+                source: Cow::Borrowed("pst_extraction"),
+                message: Cow::Owned(format!(
+                    "Folder '{folder_path}' exceeds maximum traversal depth (50); subtree truncated"
+                )),
+            });
             continue;
         }
 
@@ -149,7 +184,7 @@ fn extract_from_path(path: &std::path::Path) -> Result<(Vec<EmailExtractionResul
                         continue;
                     }
                 };
-                messages.push(extract_message_content(msg.as_ref(), &entry_id));
+                messages.push(extract_message_content(msg.as_ref(), &entry_id, &folder_path));
             }
         }
 
@@ -177,16 +212,21 @@ fn extract_from_path(path: &std::path::Path) -> Result<(Vec<EmailExtractionResul
                         continue;
                     }
                 };
-                folder_stack.push((sub_folder, depth + 1));
+                let sub_name = sub_folder
+                    .properties()
+                    .display_name()
+                    .unwrap_or_else(|_| format!("(unnamed folder, node {node:?})"));
+                let sub_path = format!("{folder_path}/{sub_name}");
+                folder_stack.push((sub_folder, depth + 1, sub_path));
             }
         }
     }
 
-    Ok((messages, warnings))
+    (messages, warnings)
 }
 
 #[cfg(feature = "email")]
-fn extract_message_content(message: &dyn PstMessage, entry_id: &EntryId) -> EmailExtractionResult {
+fn extract_message_content(message: &dyn PstMessage, entry_id: &EntryId, folder_path: &str) -> EmailExtractionResult {
     let props = message.properties();
 
     let subject = get_str_prop(props, 0x0037);
@@ -196,8 +236,15 @@ fn extract_message_content(message: &dyn PstMessage, entry_id: &EntryId) -> Emai
 
     let plain_text = get_str_prop(props, 0x1000);
     let html_content = get_str_prop(props, 0x1013);
+    // PR_RTF_COMPRESSED (0x1009): fallback body source when neither plain text
+    // nor HTML is present. Decompressed and stripped via the same MS-OXRTFCP
+    // helpers the MSG extraction path uses (extraction/email.rs).
+    let rtf_body = get_binary_prop(props, 0x1009)
+        .and_then(|data| super::email::decompress_rtf_compressed(&data))
+        .map(|rtf| super::email::strip_rtf_to_plain_text(&rtf))
+        .filter(|s| !s.is_empty());
 
-    let content = plain_text.clone().or_else(|| html_content.clone()).unwrap_or_default();
+    let content = resolve_pst_body(plain_text.as_deref(), html_content.as_deref(), rtf_body.as_deref());
 
     let date = props.get(0x0E06).and_then(|v| {
         if let PropertyValue::Time(ft) = v {
@@ -337,7 +384,10 @@ fn extract_message_content(message: &dyn PstMessage, entry_id: &EntryId) -> Emai
         html_content,
         content,
         attachments,
-        metadata: HashMap::from([("entry_id".to_string(), entry_id_hex)]),
+        metadata: HashMap::from([
+            ("entry_id".to_string(), entry_id_hex),
+            ("folder_path".to_string(), folder_path.to_string()),
+        ]),
     }
 }
 
@@ -345,6 +395,32 @@ fn extract_message_content(message: &dyn PstMessage, entry_id: &EntryId) -> Emai
 #[cfg(feature = "email")]
 fn get_str_prop(props: &outlook_pst::messaging::message::MessageProperties, prop_id: u16) -> Option<String> {
     prop_value_to_string(props.get(prop_id)?)
+}
+
+/// Read a binary property (e.g. `PR_RTF_COMPRESSED`) verbatim, without string conversion.
+#[cfg(feature = "email")]
+fn get_binary_prop(props: &outlook_pst::messaging::message::MessageProperties, prop_id: u16) -> Option<Vec<u8>> {
+    match props.get(prop_id)? {
+        PropertyValue::Binary(v) => Some(v.buffer().to_vec()),
+        _ => None,
+    }
+}
+
+/// Resolve the message body from the available sources, in the same precedence
+/// order the MSG extraction path uses (extraction/email.rs): plain text first,
+/// then cleaned HTML, then RTF-decompressed plain text, else empty.
+///
+/// Pure and dependency-free so it can be unit-tested without a real PST file.
+fn resolve_pst_body(plain_text: Option<&str>, html_content: Option<&str>, rtf_body: Option<&str>) -> String {
+    if let Some(plain) = plain_text.filter(|s| !s.is_empty()) {
+        plain.to_string()
+    } else if let Some(html) = html_content.filter(|s| !s.is_empty()) {
+        super::email::clean_html_content(html)
+    } else if let Some(rtf) = rtf_body.filter(|s| !s.is_empty()) {
+        rtf.to_string()
+    } else {
+        String::new()
+    }
 }
 
 /// Convert a `PropertyValue` to a `String`, if it holds a string type.
@@ -389,9 +465,63 @@ mod tests {
     use super::*;
     use outlook_pst::{
         ltp::prop_context::PropertyValue,
-        messaging::store::{EntryId, StoreRecordKey},
+        messaging::store::{EntryId, Store, StoreProperties, StoreRecordKey},
         ndb::node_id::NodeId,
     };
+    use std::io;
+
+    /// Regression tests for issue #152: PST body resolution must fall back to
+    /// PR_RTF_COMPRESSED (decompressed+stripped) when plain text is absent, and
+    /// must clean raw HTML rather than dumping markup when only HTML is present.
+    #[test]
+    fn test_resolve_pst_body_prefers_plain_text_issue_152() {
+        let result = resolve_pst_body(Some("plain body"), Some("<p>html body</p>"), Some("rtf body"));
+        assert_eq!(result, "plain body");
+    }
+
+    #[test]
+    fn test_resolve_pst_body_cleans_html_when_plain_absent_issue_152() {
+        let result = resolve_pst_body(None, Some("<p>Hello <b>World</b></p>"), Some("rtf body"));
+        assert_eq!(result, "Hello World");
+    }
+
+    #[test]
+    fn test_resolve_pst_body_falls_back_to_rtf_when_only_rtf_present_issue_152() {
+        let result = resolve_pst_body(None, None, Some("rtf-derived plain text"));
+        assert_eq!(result, "rtf-derived plain text");
+    }
+
+    #[test]
+    fn test_resolve_pst_body_empty_when_all_absent_issue_152() {
+        let result = resolve_pst_body(None, None, None);
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_resolve_pst_body_treats_empty_strings_as_absent_issue_152() {
+        let result = resolve_pst_body(Some(""), Some(""), Some("rtf fallback"));
+        assert_eq!(result, "rtf fallback");
+    }
+
+    #[test]
+    fn test_decompress_and_strip_rtf_via_shared_email_helpers_issue_152() {
+        // End-to-end through the actual MS-OXRTFCP decoder shared with the MSG
+        // path: build a minimal "uncompressed" (MELA-magic) RTF-compressed blob
+        // and confirm extraction/pst.rs can decompress+strip it via the
+        // extraction/email.rs helpers exactly as extract_message_content does.
+        let rtf_plain = b"{\\rtf1 Hello RTF World\\par}";
+        let comp_size = (rtf_plain.len() + 12) as u32;
+        let mut data = Vec::new();
+        data.extend_from_slice(&comp_size.to_le_bytes());
+        data.extend_from_slice(&(rtf_plain.len() as u32).to_le_bytes());
+        data.extend_from_slice(&0x414c_454du32.to_le_bytes()); // MELA = uncompressed
+        data.extend_from_slice(&0u32.to_le_bytes()); // crc, unused for MELA
+        data.extend_from_slice(rtf_plain);
+
+        let decompressed = super::super::email::decompress_rtf_compressed(&data).expect("should decompress");
+        let plain = super::super::email::strip_rtf_to_plain_text(&decompressed);
+        assert_eq!(plain, "Hello RTF World");
+    }
 
     /// Regression test for issue #764: entry_id must be the MAPI hex format,
     /// not the Rust Debug representation of the EntryId struct.
@@ -465,5 +595,71 @@ mod tests {
     fn test_prop_value_time_returns_none() {
         let val = PropertyValue::Time(133_549_776_000_000_000);
         assert_eq!(prop_value_to_string(&val), None);
+    }
+
+    /// A `Store` whose `StoreProperties` are empty, so `ipm_sub_tree_entry_id()`
+    /// always fails, without needing a real PST file on disk.
+    struct FakeStoreWithoutIpmSubtree {
+        properties: StoreProperties,
+    }
+
+    impl Store for FakeStoreWithoutIpmSubtree {
+        fn properties(&self) -> &StoreProperties {
+            &self.properties
+        }
+
+        fn root_hierarchy_table(&self) -> io::Result<Rc<dyn outlook_pst::ltp::table_context::TableContext>> {
+            Err(io::Error::other("not implemented in test fake"))
+        }
+
+        fn unique_value(&self) -> u32 {
+            0
+        }
+
+        fn open_folder(&self, _entry_id: &EntryId) -> io::Result<Rc<dyn outlook_pst::messaging::folder::Folder>> {
+            Err(io::Error::other("not implemented in test fake"))
+        }
+
+        fn open_message(
+            &self,
+            _entry_id: &EntryId,
+            _prop_ids: Option<&[u16]>,
+        ) -> io::Result<Rc<dyn outlook_pst::messaging::message::Message>> {
+            Err(io::Error::other("not implemented in test fake"))
+        }
+
+        fn named_property_map(&self) -> io::Result<Rc<dyn outlook_pst::messaging::named_prop::NamedPropertyMap>> {
+            Err(io::Error::other("not implemented in test fake"))
+        }
+
+        fn search_update_queue(&self) -> io::Result<Rc<dyn outlook_pst::messaging::search::SearchUpdateQueue>> {
+            Err(io::Error::other("not implemented in test fake"))
+        }
+    }
+
+    /// Regression test for issue #162(a): a PST whose IPM (mail) sub-tree cannot
+    /// be located must surface a `ProcessingWarning`, not silently return an
+    /// empty result.
+    #[test]
+    fn test_extract_from_store_warns_when_ipm_subtree_missing_issue_162() {
+        let store = FakeStoreWithoutIpmSubtree {
+            properties: StoreProperties::default(),
+        };
+
+        let (messages, warnings) = extract_from_store(&store);
+
+        assert!(
+            messages.is_empty(),
+            "no messages should be extracted when the IPM sub-tree cannot be located"
+        );
+        assert_eq!(warnings.len(), 1, "exactly one warning should be emitted");
+        assert_eq!(warnings[0].source.as_ref(), "pst_extraction");
+        assert!(
+            warnings[0]
+                .message
+                .contains("Failed to locate IPM (mail) sub-tree in PST store"),
+            "unexpected warning message: {}",
+            warnings[0].message
+        );
     }
 }
