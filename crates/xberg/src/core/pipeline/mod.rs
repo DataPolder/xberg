@@ -1133,4 +1133,41 @@ mod issue_271_builtin_registration_warning_tests {
 
         assert!(doc.processing_warnings.is_empty());
     }
+
+    /// Exercises the actual call site in `run_pipeline` (not just the pure helper
+    /// above), by forcing `initialization::builtin_registration_error()` to report
+    /// a failure via the test-only setter and checking the warning that comes back
+    /// out of a real `run_pipeline` call. This is the test that catches a regression
+    /// where `push_builtin_registration_warning` exists but nothing calls it — the
+    /// exact shape of the bug #271 originally described.
+    ///
+    /// `#[serial]`: `BUILTIN_REGISTRATION_ERROR` is a process-global static with no
+    /// injectable variant, so a concurrent pipeline run expecting `None` would race
+    /// this test — same reasoning as the other process-global-static tests in this
+    /// crate (see `initialization::tests::processor_cache_rebuilds_when_registry_changes_after_first_use`).
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn run_pipeline_surfaces_a_forced_builtin_registration_failure() {
+        use crate::core::pipeline::initialization::test_support::set_registration_error;
+        use crate::types::internal::InternalDocument;
+
+        set_registration_error(Some("summarization: boom".to_string()));
+
+        let mut doc = InternalDocument::new("plain");
+        doc.mime_type = "text/plain".to_string();
+        let config = ExtractionConfig::default();
+
+        let result = run_pipeline(doc, &config).await;
+
+        set_registration_error(None);
+
+        let processed = result.expect("run_pipeline must still succeed despite the registration failure");
+        assert_eq!(processed.processing_warnings.len(), 1);
+        assert_eq!(processed.processing_warnings[0].source, "builtin_registration");
+        assert_eq!(
+            processed.processing_warnings[0].message,
+            "built-in post-processor registration was incomplete (summarization: boom); a configured \
+             processor may silently produce no output for its stage"
+        );
+    }
 }

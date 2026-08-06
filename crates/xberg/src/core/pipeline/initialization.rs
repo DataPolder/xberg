@@ -29,6 +29,21 @@ pub(crate) fn builtin_registration_error() -> Option<String> {
         .clone()
 }
 
+/// Test-only access to `BUILTIN_REGISTRATION_ERROR` for exercising the
+/// `builtin_registration_error()` call site inside `pipeline::mod` without
+/// re-triggering (or racing) the real one-time `BUILTIN_INIT` `OnceLock` pass.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::BUILTIN_REGISTRATION_ERROR;
+
+    /// Set (or clear, with `None`) the recorded registration error. The static is
+    /// process-global, so callers must restore it (typically to `None`) when done.
+    pub(crate) fn set_registration_error(value: Option<String>) {
+        let mut slot = BUILTIN_REGISTRATION_ERROR.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        *slot = value;
+    }
+}
+
 /// Type alias for processor stages tuple (Early, Middle, Late).
 type ProcessorStages = (
     std::sync::Arc<Vec<std::sync::Arc<dyn crate::plugins::PostProcessor>>>,
