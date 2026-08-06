@@ -541,7 +541,10 @@ mod tests {
         let score = calculate_quality_score(text, None);
         let nav_penalty = calculate_navigation_penalty(text, text.len() as f64);
 
-        assert!(nav_penalty > 0.0, "fixture must actually trigger the navigation pattern");
+        assert!(
+            nav_penalty > 0.0,
+            "fixture must actually trigger the navigation pattern"
+        );
         assert!(
             score < 1.0,
             "navigation-heavy short text must be penalized, got score {score}"
@@ -558,6 +561,9 @@ mod tests {
         let script_penalty = calculate_script_penalty(text, text.len() as f64);
 
         assert!(script_penalty > 0.0, "fixture must actually trigger the script pattern");
-        assert!(score < 1.0, "script-heavy short text must be penalized, got score {score}");
+        assert!(
+            score < 1.0,
+            "script-heavy short text must be penalized, got score {score}"
+        );
     }
 }

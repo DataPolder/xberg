@@ -1538,7 +1538,9 @@ mod tests {
         };
         let mut result = ExtractedDocument {
             content: "A short document with one embedded image.".to_string(),
-            mime_type: std::borrow::Cow::Borrowed("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+            mime_type: std::borrow::Cow::Borrowed(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ),
             images: Some(vec![ExtractedImage {
                 page_number: None,
                 ..Default::default()
@@ -1549,7 +1551,11 @@ mod tests {
         execute_chunking(&mut result, &config, None).unwrap();
 
         let chunks = result.chunks.expect("chunks must be populated");
-        assert_eq!(chunks.len(), 1, "expected the whole short document to be a single chunk");
+        assert_eq!(
+            chunks.len(),
+            1,
+            "expected the whole short document to be a single chunk"
+        );
         assert_eq!(chunks[0].metadata.first_page, None);
         assert_eq!(chunks[0].metadata.last_page, None);
         assert_eq!(
@@ -1647,7 +1653,12 @@ mod tests {
             .processing_warnings
             .iter()
             .find(|w| w.source == "chunking")
-            .unwrap_or_else(|| panic!("expected a 'chunking' ProcessingWarning, got: {:?}", result.processing_warnings));
+            .unwrap_or_else(|| {
+                panic!(
+                    "expected a 'chunking' ProcessingWarning, got: {:?}",
+                    result.processing_warnings
+                )
+            });
         assert_eq!(warning.source, "chunking");
         assert_eq!(
             warning.message,
