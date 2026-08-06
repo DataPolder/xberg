@@ -1410,10 +1410,15 @@ default_features = false
 # `extra_dependencies.xberg-ffi` entry does NOT override it — it emits a SECOND
 # `xberg-ffi` key, a duplicate-key manifest that poisons the workspace mid-regen.
 # So we do NOT declare it here. Instead `packages/swift/rust/Cargo.toml` carries
-# a committed post-regen normalization: its `xberg-ffi` line is set to
-# `default-features = false` + the full-minus-heic feature list. That edit is
-# stable for CI/publish (no CI job regenerates `packages/` + diffs), but a local
-# `alef all` reverts it — reapply it. Durable fix is upstream in alef.
+# a committed post-regen normalization: its single unconditional `xberg-ffi` line
+# is split into two `[target.cfg(...)]` blocks, mirroring the `xberg` dep below —
+# `default-features = false` + `full-no-heic` off-iOS/Android, `android-target` on
+# iOS/Android. A plain unconditional `full-no-heic` pulls in `sceptre-ocr` (->
+# `sceptre-ocr-ort`), which trips the mobile-only `compile_error!` guards in
+# crates/xberg/src/lib.rs (issue #324) because Cargo unifies features across
+# dependency edges for the same resolved package. That edit is stable for
+# CI/publish (no CI job regenerates `packages/` + diffs), but a local `alef all`
+# reverts it — reapply it. Durable fix is upstream in alef.
 
 [crates.csharp]
 namespace = "Xberg"

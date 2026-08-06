@@ -76,7 +76,22 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 swift-bridge = "0.1.59"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
+
+# xberg-ffi is injected unconditionally by alef's swift-bridge backend with no
+# `default-features` knob (see alef.toml's NOTE above `[crates.csharp]`), so this
+# dependency is a committed post-regen normalization, not raw alef output. It must
+# stay target-gated in lockstep with the `xberg` dependency below: `full-no-heic`
+# pulls in `sceptre-ocr` (-> `sceptre-ocr-ort`), which is desktop/server-only and
+# trips the `compile_error!` guards in crates/xberg/src/lib.rs on iOS/Android.
+# Cargo unifies features across all dependency edges for the same resolved
+# package, so an unconditional `full-no-heic` here would enable `sceptre-ocr-ort`
+# even where the `xberg` dep below only asks for `android-target`
+# (`sceptre-ocr-tract`). A local `alef all` reverts this — reapply it.
+[target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
 xberg-ffi = { version = "1.1.0", path = "../../../crates/xberg-ffi", default-features = false, features = ["full-no-heic"] }
+
+[target.'cfg(any(target_os = "ios", target_os = "android"))'.dependencies]
+xberg-ffi = { version = "1.1.0", path = "../../../crates/xberg-ffi", default-features = false, features = ["android-target"] }
 
 [target.'cfg(not(any(target_os = "ios", target_os = "android", target_os = "windows", all(target_os = "macos", target_arch = "x86_64"))))'.dependencies]
 xberg = { version = "1.1.0", path = "../../../crates/xberg", features = [
