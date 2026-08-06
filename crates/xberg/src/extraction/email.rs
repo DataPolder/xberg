@@ -25,12 +25,14 @@
 //! # }
 //! ```
 use crate::error::{Result, XbergError};
+use crate::extractors::security::{SecurityBudget, SecurityLimits};
 use crate::text::utf8_validation;
 use crate::text::windows_codepage::encoding_for_windows_codepage;
-use crate::types::{EmailAttachment, EmailExtractionResult};
+use crate::types::{EmailAttachment, EmailExtractionResult, ProcessingWarning};
 use bytes::Bytes;
 use mail_parser::MimeHeaders;
 use regex::Regex;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
@@ -52,9 +54,6 @@ const PID_TAG_ATTACH_DATA_OBJECT: u16 = 0x3701;
 /// `afEmbeddedMessage`: the attachment is itself a Message object stored as a
 /// nested CFB storage rather than binary stream data.
 const ATTACH_METHOD_EMBEDDED_MSG: u32 = 5;
-/// Maximum recursion depth for messages embedded within messages, guarding
-/// against pathological/malicious nesting.
-const MAX_EMBEDDED_MSG_DEPTH: u8 = 5;
 
 pub(crate) struct ParsedEmailContent {
     pub(crate) result: EmailExtractionResult,
@@ -62,6 +61,9 @@ pub(crate) struct ParsedEmailContent {
     /// Embedded `message/rfc822`-equivalent MSG attachments (`attach_method ==
     /// afEmbeddedMessage`), fully parsed. Flat list across all nesting depths.
     pub(crate) nested_embedded_messages: Vec<EmailExtractionResult>,
+    /// Non-fatal warnings raised while parsing (e.g. a `.msg`-in-`.msg` chain
+    /// that hit the configured nesting-depth cap and was left unextracted).
+    pub(crate) warnings: Vec<ProcessingWarning>,
 }
 
 pub(crate) struct NestedMessagePayload {
@@ -404,6 +406,7 @@ fn parse_eml_content_internal(
         },
         nested_messages,
         nested_embedded_messages: Vec::new(),
+        warnings: Vec::new(),
     })
 }
 
@@ -518,16 +521,18 @@ fn collect_nested_message_html(message: &mail_parser::Message<'_>, out: &mut Vec
 /// data range and parse correctly.
 ///
 pub(crate) fn parse_msg_content(data: &[u8], fallback_codepage: Option<u32>) -> Result<EmailExtractionResult> {
-    parse_msg_content_with_nested(data, fallback_codepage).map(|(result, _)| result)
+    parse_msg_content_with_nested(data, fallback_codepage, &SecurityLimits::default()).map(|(result, _, _)| result)
 }
 
 /// Parse .msg file content (Outlook format), also returning any embedded
 /// (`afEmbeddedMessage`) MSG attachments found while parsing, flattened
-/// across nesting depth.
+/// across nesting depth, plus any warnings raised (e.g. a `.msg`-in-`.msg`
+/// chain that hit `security_limits`' nesting-depth cap).
 pub(crate) fn parse_msg_content_with_nested(
     data: &[u8],
     fallback_codepage: Option<u32>,
-) -> Result<(EmailExtractionResult, Vec<EmailExtractionResult>)> {
+    security_limits: &SecurityLimits,
+) -> Result<(EmailExtractionResult, Vec<EmailExtractionResult>, Vec<ProcessingWarning>)> {
     use std::borrow::Cow;
     use std::io::Cursor;
 
@@ -546,7 +551,15 @@ pub(crate) fn parse_msg_content_with_nested(
     let mut comp = cfb::CompoundFile::open(Cursor::new(data_ref))
         .map_err(|e| XbergError::parsing(format!("Failed to parse MSG file: {e}")))?;
 
-    extract_msg_from_cfb_at(&mut comp, "", fallback_codepage, 0)
+    // Reuse the same nesting-depth counter `SecurityLimits` provides for
+    // every other format (XML/HTML/JSON) to guard the `.msg`-in-`.msg`
+    // recursion hazard, rather than a bespoke counter local to this parser.
+    let mut budget = SecurityBudget::from_limits(security_limits);
+    let mut warnings = Vec::new();
+    let (result, nested_embedded_messages) =
+        extract_msg_from_cfb_at(&mut comp, "", fallback_codepage, &mut budget, &mut warnings)?;
+
+    Ok((result, nested_embedded_messages, warnings))
 }
 
 /// Pad an OLE/CFB file so the sector count matches the FAT header.
@@ -856,8 +869,12 @@ fn direct_child_storage_paths<F: std::io::Read + std::io::Seek>(
 ///
 /// `message_root` is `""` for the top-level MSG message, or the CFB storage
 /// path of an embedded message (`afEmbeddedMessage` attachment) when called
-/// recursively. `depth` guards against pathological/malicious nesting via
-/// [`MAX_EMBEDDED_MSG_DEPTH`].
+/// recursively. `budget` guards against pathological/malicious
+/// message-in-message nesting via its `SecurityLimits`-derived
+/// [`crate::extractors::security::DepthValidator`] — the same nesting-depth
+/// counter every other format uses, rather than a bespoke one for MSG.
+/// `warnings` collects a [`ProcessingWarning`] whenever the depth cap stops a
+/// nested embedded message from being extracted further.
 ///
 /// Returns the parsed message plus a flat list of any embedded MSG messages
 /// discovered at or below this level.
@@ -865,7 +882,8 @@ fn extract_msg_from_cfb_at<F: std::io::Read + std::io::Seek>(
     comp: &mut cfb::CompoundFile<F>,
     message_root: &str,
     fallback_codepage: Option<u32>,
-    depth: u8,
+    budget: &mut SecurityBudget,
+    warnings: &mut Vec<ProcessingWarning>,
 ) -> Result<(EmailExtractionResult, Vec<EmailExtractionResult>)> {
     let message_codepage = read_msg_int_prop(comp, message_root, PID_TAG_MESSAGE_CODEPAGE);
     let internet_codepage = read_msg_int_prop(comp, message_root, PID_TAG_INTERNET_CODEPAGE);
@@ -934,25 +952,48 @@ fn extract_msg_from_cfb_at<F: std::io::Read + std::io::Seek>(
         let is_embedded_message =
             attach_method == Some(ATTACH_METHOD_EMBEDDED_MSG) && comp.is_storage(&embedded_storage_path);
 
-        if is_embedded_message && depth < MAX_EMBEDDED_MSG_DEPTH {
-            let (nested_result, deeper_nested) =
-                extract_msg_from_cfb_at(comp, &embedded_storage_path, fallback_codepage, depth + 1)?;
-            let size = None;
-            let filename = filename
-                .or_else(|| nested_result.subject.clone())
-                .or_else(|| Some("embedded_message".to_string()));
+        if is_embedded_message {
+            if budget.enter().is_ok() {
+                let recursed = extract_msg_from_cfb_at(comp, &embedded_storage_path, fallback_codepage, budget, warnings);
+                budget.leave();
+                let (nested_result, deeper_nested) = recursed?;
+                let size = None;
+                let filename = filename
+                    .or_else(|| nested_result.subject.clone())
+                    .or_else(|| Some("embedded_message".to_string()));
 
-            attachments.push(EmailAttachment {
-                name: filename.clone(),
-                filename,
-                mime_type: Some("message/rfc822".to_string()),
-                size,
-                is_image: false,
-                data: None,
-            });
+                attachments.push(EmailAttachment {
+                    name: filename.clone(),
+                    filename,
+                    mime_type: Some("message/rfc822".to_string()),
+                    size,
+                    is_image: false,
+                    data: None,
+                });
 
-            nested_embedded_messages.push(nested_result);
-            nested_embedded_messages.extend(deeper_nested);
+                nested_embedded_messages.push(nested_result);
+                nested_embedded_messages.extend(deeper_nested);
+            } else {
+                // `budget.enter()` still incremented the counter even though it
+                // rejected this level; balance it immediately so sibling
+                // attachments at the same depth aren't spuriously capped too.
+                budget.leave();
+                warnings.push(ProcessingWarning {
+                    source: Cow::Borrowed("msg_embedded_message_extraction"),
+                    message: Cow::Owned(format!(
+                        "Stopped extracting embedded message at '{path}': nesting depth cap reached; \
+                         the embedded message and anything nested inside it were left unextracted"
+                    )),
+                });
+                attachments.push(EmailAttachment {
+                    name: filename.clone(),
+                    filename,
+                    mime_type: Some("message/rfc822".to_string()),
+                    size: None,
+                    is_image: false,
+                    data: None,
+                });
+            }
             continue;
         }
 
@@ -1449,6 +1490,7 @@ pub(crate) fn extract_email_content_with_nested(
     mime_type: &str,
     fallback_codepage: Option<u32>,
     max_nested_message_bytes: Option<u64>,
+    security_limits: &SecurityLimits,
 ) -> Result<ParsedEmailContent> {
     if data.is_empty() {
         return Err(XbergError::validation("Email content is empty".to_string()));
@@ -1457,11 +1499,13 @@ pub(crate) fn extract_email_content_with_nested(
     match mime_type {
         "message/rfc822" | "text/plain" => parse_eml_content_internal(data, true, max_nested_message_bytes),
         "application/vnd.ms-outlook" => {
-            let (result, nested_embedded_messages) = parse_msg_content_with_nested(data, fallback_codepage)?;
+            let (result, nested_embedded_messages, warnings) =
+                parse_msg_content_with_nested(data, fallback_codepage, security_limits)?;
             Ok(ParsedEmailContent {
                 result,
                 nested_messages: Vec::new(),
                 nested_embedded_messages,
+                warnings,
             })
         }
         _ => Err(XbergError::validation(format!(

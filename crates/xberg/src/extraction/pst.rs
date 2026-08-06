@@ -32,12 +32,55 @@ use std::collections::HashMap;
 
 #[cfg(feature = "email")]
 use outlook_pst::{
-    ltp::prop_context::PropertyValue,
+    ltp::{prop_context::PropertyValue, table_context::TableContext},
     messaging::{folder::Folder as PstFolder, message::Message as PstMessage, store::EntryId},
     ndb::node_id::NodeId,
 };
 #[cfg(feature = "email")]
 use std::rc::Rc;
+
+/// Safety cap on rows read from a single PST contents/hierarchy table in one
+/// pass.
+///
+/// PST folder/table structures are attacker-controllable input: a corrupt or
+/// hostile table can report (or its row iterator can yield) an effectively
+/// unbounded number of rows. Before issue #162 the traversal fully
+/// materialized a table's rows via `.collect()` with no bound, so such a
+/// table hung extraction forever — the existing per-folder recursion-depth
+/// cap (`depth > 50`) never even came into play, because it protects against
+/// deep/cyclic *folder* nesting, not an unbounded row iterator *within* a
+/// single table. Reading rows one at a time and stopping at this cap fixes
+/// that regardless of which table (IPM or non-IPM) is misbehaving.
+#[cfg(feature = "email")]
+const MAX_TABLE_ROWS: usize = 100_000;
+
+/// Read node ids from a table's `rows_matrix()`, stopping after
+/// [`MAX_TABLE_ROWS`] rows without ever materializing the rest of the
+/// iterator. Returns `(ids, true)` when reading stopped only because the cap
+/// was hit, so callers can surface a `ProcessingWarning` about truncation.
+#[cfg(feature = "email")]
+fn collect_row_ids(table: &dyn TableContext) -> (Vec<u32>, bool) {
+    let mut ids = Vec::new();
+    for row in table.rows_matrix() {
+        if ids.len() >= MAX_TABLE_ROWS {
+            return (ids, true);
+        }
+        ids.push(u32::from(row.id()));
+    }
+    (ids, false)
+}
+
+/// From the node ids returned by `Store::root_hierarchy_table()` (the true
+/// PST root's direct children), determine which ones are non-IPM (non-mail)
+/// top-level folders that still need to be traversed — i.e. every id except
+/// the one already covered by the IPM (mail) sub-tree walk.
+///
+/// Pure and dependency-free so the enumeration decision (issue #162) can be
+/// unit-tested without a real PST `Store`/`Folder`.
+#[cfg(feature = "email")]
+fn non_ipm_top_level_ids(top_level_ids: &[u32], ipm_node_id: Option<u32>) -> Vec<u32> {
+    top_level_ids.iter().copied().filter(|id| Some(*id) != ipm_node_id).collect()
+}
 
 /// Extract all email messages from a PST file.
 ///
@@ -115,7 +158,6 @@ fn extract_from_path(path: &std::path::Path) -> Result<(Vec<EmailExtractionResul
 fn extract_from_store(
     store: &dyn outlook_pst::messaging::store::Store,
 ) -> (Vec<EmailExtractionResult>, Vec<ProcessingWarning>) {
-    let mut messages = Vec::new();
     let mut warnings = Vec::new();
 
     let ipm_entry = match store.properties().ipm_sub_tree_entry_id() {
@@ -125,7 +167,7 @@ fn extract_from_store(
                 source: Cow::Borrowed("pst_extraction"),
                 message: Cow::Owned(format!("Failed to locate IPM (mail) sub-tree in PST store: {e}")),
             });
-            return (messages, warnings);
+            return (Vec::new(), warnings);
         }
     };
 
@@ -136,7 +178,7 @@ fn extract_from_store(
                 source: Cow::Borrowed("pst_extraction"),
                 message: Cow::Owned(format!("Failed to open IPM (mail) sub-tree root folder: {e}")),
             });
-            return (messages, warnings);
+            return (Vec::new(), warnings);
         }
     };
 
@@ -144,7 +186,115 @@ fn extract_from_store(
         .properties()
         .display_name()
         .unwrap_or_else(|_| "Top of Personal Folders".to_string());
-    let mut folder_stack: Vec<(Rc<dyn PstFolder>, u32, String)> = vec![(root_folder, 0, root_name)];
+    let mut seeds: Vec<(Rc<dyn PstFolder>, u32, String)> = vec![(root_folder, 0, root_name)];
+
+    let (non_ipm_seeds, mut discovery_warnings) =
+        discover_non_ipm_top_level_folders(store, u32::from(ipm_entry.node_id()));
+    seeds.extend(non_ipm_seeds);
+    warnings.append(&mut discovery_warnings);
+
+    let (messages, mut traversal_warnings) = walk_folder_tree(store, seeds);
+    warnings.append(&mut traversal_warnings);
+
+    (messages, warnings)
+}
+
+/// Enumerate the PST store's true top-level folders (`Store::root_hierarchy_table()`)
+/// and return every one that is *not* the already-handled IPM (mail) sub-tree,
+/// ready to seed [`walk_folder_tree`] alongside it.
+///
+/// Split out from `extract_from_store` (issue #162) so the enumeration can be
+/// exercised without a fully-populated `StoreProperties` — every id is either
+/// opened as a seed folder or reported via a `ProcessingWarning`, traversal
+/// never aborts because one non-IPM folder failed to open.
+#[cfg(feature = "email")]
+fn discover_non_ipm_top_level_folders(
+    store: &dyn outlook_pst::messaging::store::Store,
+    ipm_node_id: u32,
+) -> (Vec<(Rc<dyn PstFolder>, u32, String)>, Vec<ProcessingWarning>) {
+    let mut seeds = Vec::new();
+    let mut warnings = Vec::new();
+
+    let root_table = match store.root_hierarchy_table() {
+        Ok(t) => t,
+        Err(e) => {
+            warnings.push(ProcessingWarning {
+                source: Cow::Borrowed("pst_extraction"),
+                message: Cow::Owned(format!("Failed to enumerate non-IPM top-level folders in PST store: {e}")),
+            });
+            return (seeds, warnings);
+        }
+    };
+
+    let (top_level_ids, truncated) = collect_row_ids(root_table.as_ref());
+    if truncated {
+        warnings.push(ProcessingWarning {
+            source: Cow::Borrowed("pst_extraction"),
+            message: Cow::Owned(format!(
+                "PST store root exceeds the maximum top-level folder limit ({MAX_TABLE_ROWS}); remaining top-level folders skipped"
+            )),
+        });
+    }
+
+    for id in non_ipm_top_level_ids(&top_level_ids, Some(ipm_node_id)) {
+        let node = NodeId::from(id);
+        let entry_id = match store.properties().make_entry_id(node) {
+            Ok(e) => e,
+            Err(e) => {
+                warnings.push(ProcessingWarning {
+                    source: Cow::Borrowed("pst_extraction"),
+                    message: Cow::Owned(format!(
+                        "Failed to create entry ID for non-IPM top-level folder node {:?}: {}; folder skipped",
+                        node, e
+                    )),
+                });
+                continue;
+            }
+        };
+        let top_folder = match store.open_folder(&entry_id) {
+            Ok(f) => f,
+            Err(e) => {
+                warnings.push(ProcessingWarning {
+                    source: Cow::Borrowed("pst_extraction"),
+                    message: Cow::Owned(format!(
+                        "Failed to open non-IPM top-level folder (node {:?}): {}; folder skipped",
+                        node, e
+                    )),
+                });
+                continue;
+            }
+        };
+        let top_name = top_folder
+            .properties()
+            .display_name()
+            .unwrap_or_else(|_| format!("(unnamed non-IPM folder, node {node:?})"));
+        seeds.push((top_folder, 0, top_name));
+    }
+
+    (seeds, warnings)
+}
+
+/// Walk a set of already-opened top-level folders (and their subtrees),
+/// extracting every message and collecting non-fatal `ProcessingWarning`s.
+///
+/// Split out from `extract_from_store` (issue #162) so the traversal itself
+/// — including its termination guarantees — can be unit tested against a
+/// synthetic folder tree, independent of how the seed folders were
+/// discovered (IPM sub-tree vs. non-IPM top-level folders).
+///
+/// Termination is guaranteed by two independent bounds: `depth > 50` caps how
+/// deep (or how many times, for a cyclic tree) folders are nested, and
+/// [`collect_row_ids`] caps how many rows are read from any single table —
+/// without the latter, a table whose row iterator never terminates hangs this
+/// function forever regardless of the depth cap, because the hang happens
+/// while reading rows *within* one folder, before depth is ever considered.
+#[cfg(feature = "email")]
+fn walk_folder_tree(
+    store: &dyn outlook_pst::messaging::store::Store,
+    mut folder_stack: Vec<(Rc<dyn PstFolder>, u32, String)>,
+) -> (Vec<EmailExtractionResult>, Vec<ProcessingWarning>) {
+    let mut messages = Vec::new();
+    let mut warnings = Vec::new();
 
     while let Some((folder, depth, folder_path)) = folder_stack.pop() {
         if depth > 50 {
@@ -158,7 +308,15 @@ fn extract_from_store(
         }
 
         if let Some(contents) = folder.contents_table() {
-            let ids: Vec<u32> = contents.rows_matrix().map(|r| u32::from(r.id())).collect();
+            let (ids, truncated) = collect_row_ids(contents.as_ref());
+            if truncated {
+                warnings.push(ProcessingWarning {
+                    source: Cow::Borrowed("pst_extraction"),
+                    message: Cow::Owned(format!(
+                        "Folder '{folder_path}' contents table exceeds the maximum row limit ({MAX_TABLE_ROWS}); remaining messages skipped"
+                    )),
+                });
+            }
             for id in ids {
                 let node = NodeId::from(id);
                 let entry_id = match store.properties().make_entry_id(node) {
@@ -189,7 +347,15 @@ fn extract_from_store(
         }
 
         if let Some(hierarchy) = folder.hierarchy_table() {
-            let ids: Vec<u32> = hierarchy.rows_matrix().map(|r| u32::from(r.id())).collect();
+            let (ids, truncated) = collect_row_ids(hierarchy.as_ref());
+            if truncated {
+                warnings.push(ProcessingWarning {
+                    source: Cow::Borrowed("pst_extraction"),
+                    message: Cow::Owned(format!(
+                        "Folder '{folder_path}' hierarchy table exceeds the maximum row limit ({MAX_TABLE_ROWS}); remaining subfolders skipped"
+                    )),
+                });
+            }
             for id in ids {
                 let node = NodeId::from(id);
                 let entry_id = match store.properties().make_entry_id(node) {
