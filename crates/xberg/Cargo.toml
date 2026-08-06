@@ -14,23 +14,30 @@ categories = ["parser-implementations", "text-processing"]
 readme = "README.md"
 
 [package.metadata.cargo-machete]
+# Only crates that are genuinely never named in Rust source belong here. Deps that are
+# `use`d under a `#[cfg(feature = ...)]` gate do NOT need an entry: cargo-machete scans
+# source textually and is feature-agnostic, so it already sees them.
 ignored = [
-  "liter-llm",
+  # Only ever reached as `opentelemetry::` (a different crate); the SDK is wired up by the
+  # binary/embedder, so xberg names the sdk crate nowhere.
   "opentelemetry_sdk",
+  # Installed as a tracing Layer by the embedder; never referenced by path here.
   "tracing-opentelemetry",
-  "nom-exif",
   # icu_provider is feature-gated and consumed transitively by language-detection;
   # cargo-machete cannot resolve `dep:icu_provider` references in feature flag chains.
   "icu_provider",
+  # Declared to pin `serde_json/preserve_order` semantics (#165); the format crate itself
+  # is never imported.
   "serde_toon_format",
-  # symphonia is optional behind the `transcription` feature; cargo-machete cannot
-  # resolve optional dep usage through feature-gated cfg blocks.
-  "symphonia",
-  # mel_spec is optional behind the `transcription` feature; same constraint.
-  "mel_spec",
   # tokenizers-model2vec is declared purely to activate a feature on model2vec-rs's tokenizers
   # 0.21 instance (GH#1389); it is deliberately never imported, so machete cannot see a use.
   "tokenizers-model2vec",
+  # The three wasm32 getrandom majors are declared only to force-enable the wasm_js backend
+  # across every getrandom in the graph (see the comment on the wasm32 dependency block);
+  # none of them is ever imported.
+  "getrandom",
+  "getrandom_02",
+  "getrandom_03",
 ]
 
 [lib]
@@ -39,15 +46,18 @@ crate-type = ["rlib"]
 [features]
 default = ["tokio-runtime", "simd-utf8"]
 
-# Build-time only: enables pprof flamegraph profiling. No #[cfg] gates —
-# activates the pprof dependency (non-Windows, non-WASM only).
-profiling = ["dep:pprof"]
+# Opt-in gate, no dependency of its own. Exposes the benchmark-only
+# `LayoutEngine::detect_batch_for_benchmark` hook (layout/engine.rs) that the
+# pdf_layout_microbatch bench requires. The actual pprof flamegraph capture lives
+# in tools/benchmark-harness, which owns its own `profiling`/`pprof` pair;
+# `task rust:build:profiling` turns both on in one workspace build.
+profiling = []
 
 pool-metrics = []
 
 simd-utf8 = ["dep:simdutf8"]
 
-tokio-runtime = ["dep:tokio", "dep:futures"]
+tokio-runtime = ["dep:tokio"]
 
 # PDF extraction is currently backed by pdf_oxide. Keep this as the canonical
 # `pdf` feature until/unless a second PDF backend is introduced.
@@ -754,9 +764,6 @@ macos-intel-target = ["full-no-heic", "ort-dynamic"]
 # auto-rotate, transcription)
 # and server transport infrastructure (mcp, otel, liter-llm).
 mobile = ["formats", "analysis", "ocr", "tree-sitter", "api-types", "tokio-runtime"]
-# WASM only: enables wasm-bindgen-rayon for multi-threaded WASM builds.
-# No #[cfg] gates — activates the wasm-bindgen-rayon dependency.
-wasm-threads = ["dep:wasm-bindgen-rayon"]
 # --- Aggregate features ---
 
 # Document format extractors only — no infrastructure or text analysis.
@@ -1082,7 +1089,6 @@ zip = { version = ">=7.0.0", optional = true, default-features = false, features
 
 [target.'cfg(all(not(target_os = "windows"), not(target_arch = "wasm32")))'.dependencies]
 liter-llm = { workspace = true, optional = true, features = ["native-http"] }
-pprof = { version = "0.15.0", features = ["flamegraph"], optional = true }
 # Xberg resolves pretrained tokenizer files through its shared hf-hub 1 client;
 # keep tokenizers' separate `http` client disabled to avoid a second cache stack.
 tokenizers = { version = "0.23", default-features = false, features = ["fancy-regex"], optional = true }
@@ -1141,7 +1147,6 @@ xberg-paddle-ocr = { path = "../xberg-paddle-ocr", version = "1.1.0", optional =
 # are below. `chunking-tokenizers`/`onnx-runtime`/etc. reference it unconditionally via
 # `dep:fs2`, which is a no-op on targets where the dependency isn't declared.
 fs2 = { workspace = true, optional = true }
-futures = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true, features = ["process", "fs", "rt-multi-thread"] }
 
 # hf-hub 1.0 (every native target, including Android and Windows): the single declaration for
@@ -1219,7 +1224,6 @@ liter-llm = { workspace = true, optional = true, features = ["wasm-http"] }
 # see `embeddings/static_engine.rs`.
 model2vec-rs = { version = "0.2", default-features = false, features = ["wasm"], optional = true }
 tree-sitter-language-pack = { workspace = true, default-features = false, features = ["serde"], optional = true }
-wasm-bindgen-rayon = { version = "1.3", optional = true }
 # On wasm32, swap xberg-tesseract from its native default ("static-linking" -> "build-tesseract")
 # to the WASI-SDK build path ("build-tesseract-wasm") and bundle eng.traineddata so OCR works
 # in-memory with no filesystem.
@@ -1253,7 +1257,6 @@ optional = true
 [build-dependencies]
 
 [dev-dependencies]
-anyhow = { workspace = true }
 criterion = { workspace = true }
 dotenvy = "0.15"
 filetime = "0.2"
