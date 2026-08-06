@@ -186,12 +186,17 @@ fn extract_from_store(
         .properties()
         .display_name()
         .unwrap_or_else(|_| "Top of Personal Folders".to_string());
-    let mut seeds: Vec<(Rc<dyn PstFolder>, u32, String)> = vec![(root_folder, 0, root_name)];
+    let seeds: Vec<(Rc<dyn PstFolder>, u32, String)> = vec![(root_folder, 0, root_name)];
 
-    let (non_ipm_seeds, mut discovery_warnings) =
-        discover_non_ipm_top_level_folders(store, u32::from(ipm_entry.node_id()));
-    seeds.extend(non_ipm_seeds);
-    warnings.append(&mut discovery_warnings);
+    // `discover_non_ipm_top_level_folders` (issue #162c) is deliberately NOT called here.
+    // See that function's doc comment: `outlook_pst::Store::root_hierarchy_table()`
+    // unconditionally deadlocks (self-relock of the same non-reentrant file-reader
+    // `Mutex` on the calling thread), so invoking it hangs extraction on every PST,
+    // not just malformed ones. There is no bounded-read or fail-soft wrapper that can
+    // save us here: the deadlock happens synchronously, before any row is read, so it
+    // can't be guarded the way `collect_row_ids`/`MAX_TABLE_ROWS` guard unbounded
+    // iteration. It also can't be satisfied by an alternate `Store` API — trait
+    // `outlook_pst::messaging::store::Store` exposes exactly one method for this.
 
     let (messages, mut traversal_warnings) = walk_folder_tree(store, seeds);
     warnings.append(&mut traversal_warnings);
@@ -207,7 +212,29 @@ fn extract_from_store(
 /// exercised without a fully-populated `StoreProperties` — every id is either
 /// opened as a seed folder or reported via a `ProcessingWarning`, traversal
 /// never aborts because one non-IPM folder failed to open.
+///
+/// # NOT called from `extract_from_store` — blocked on an upstream deadlock
+///
+/// `outlook_pst::messaging::store::Store::root_hierarchy_table()` (the first line
+/// of this function) deadlocks unconditionally in `outlook-pst` 1.2.0: its default
+/// implementation locks the PST file-reader `Mutex` to resolve the root folder's
+/// B-tree node, keeps that `MutexGuard` alive, and then calls
+/// `TableContextInner::read`, which tries to lock the *same* `Mutex` again on the
+/// same thread. `std::sync::Mutex` is not reentrant, so the second `.lock()` call
+/// blocks forever — this happens before a single row is read, on every PST file
+/// (malformed or not), not only ones with unusual structure. That means it cannot
+/// be fixed by bounding row iteration (`collect_row_ids`/`MAX_TABLE_ROWS` guard a
+/// different failure mode: an unbounded row *iterator*, not a synchronous
+/// self-deadlock during table construction) and there is no alternate `Store`
+/// trait method to enumerate root children instead.
+///
+/// This function and [`non_ipm_top_level_ids`] are kept, with unit test coverage,
+/// so the enumeration logic is ready to wire back into `extract_from_store` once
+/// the upstream bug is fixed (or `outlook-pst` is upgraded past it). Do not call
+/// this from any code path that runs against a real `outlook_pst`-backed `Store`
+/// until then.
 #[cfg(feature = "email")]
+#[allow(dead_code)]
 fn discover_non_ipm_top_level_folders(
     store: &dyn outlook_pst::messaging::store::Store,
     ipm_node_id: u32,
@@ -827,5 +854,56 @@ mod tests {
             "unexpected warning message: {}",
             warnings[0].message
         );
+    }
+
+    /// [`non_ipm_top_level_ids`] must exclude exactly the id equal to
+    /// `ipm_node_id`, preserving the order and every other id (including
+    /// duplicates) from `top_level_ids`.
+    #[test]
+    fn test_non_ipm_top_level_ids_filters_out_ipm_node_only() {
+        let top_level_ids = [10, 20, 30, 40];
+
+        assert_eq!(
+            non_ipm_top_level_ids(&top_level_ids, Some(20)),
+            vec![10, 30, 40],
+            "the id matching ipm_node_id must be removed and no others"
+        );
+    }
+
+    /// When `ipm_node_id` is `None` (e.g. the caller has no IPM node to
+    /// exclude), every id must be returned unchanged.
+    #[test]
+    fn test_non_ipm_top_level_ids_returns_all_ids_when_ipm_node_id_is_none() {
+        let top_level_ids = [1, 2, 3];
+
+        assert_eq!(non_ipm_top_level_ids(&top_level_ids, None), vec![1, 2, 3]);
+    }
+
+    /// When `ipm_node_id` does not match any id in `top_level_ids`, every id
+    /// must be returned unchanged (no accidental over-filtering).
+    #[test]
+    fn test_non_ipm_top_level_ids_returns_all_ids_when_ipm_node_id_not_present() {
+        let top_level_ids = [5, 6, 7];
+
+        assert_eq!(non_ipm_top_level_ids(&top_level_ids, Some(999)), vec![5, 6, 7]);
+    }
+
+    /// An empty `top_level_ids` slice must yield an empty result regardless
+    /// of `ipm_node_id`.
+    #[test]
+    fn test_non_ipm_top_level_ids_empty_input_returns_empty() {
+        let top_level_ids: [u32; 0] = [];
+
+        assert_eq!(non_ipm_top_level_ids(&top_level_ids, Some(1)), Vec::<u32>::new());
+    }
+
+    /// If `top_level_ids` contains the IPM node id more than once (a
+    /// malformed/hostile hierarchy table), every occurrence must be filtered
+    /// out, not just the first.
+    #[test]
+    fn test_non_ipm_top_level_ids_filters_all_duplicate_ipm_occurrences() {
+        let top_level_ids = [7, 7, 8, 7];
+
+        assert_eq!(non_ipm_top_level_ids(&top_level_ids, Some(7)), vec![8]);
     }
 }

@@ -19,15 +19,25 @@
 //! public constructor/setter for (only `Default`, which yields an empty
 //! property map) -- so it was verified by manual code review only.
 //!
-//! Issue #162(c) -- warning about non-IPM top-level folders skipped by
-//! extraction -- was attempted (enumerating `Store::root_hierarchy_table()`)
-//! but reverted: calling it against a real, parsed PST file (`empty.pst`)
-//! caused `test_pst_empty_file_extraction` to hang indefinitely. This appears
-//! to be a latent issue in how the `outlook-pst` crate resolves the root
-//! hierarchy table (a code path not otherwise exercised by this codebase, since
-//! only the IPM sub-tree was ever walked before), not a fixable bug in the two
-//! files owned by this change. Part (c) was therefore left unimplemented; see
-//! the accompanying report for the recommended follow-up.
+//! Issue #162(c) -- enumerating non-IPM top-level folders via
+//! `Store::root_hierarchy_table()` -- was implemented as
+//! `discover_non_ipm_top_level_folders`/`non_ipm_top_level_ids` in
+//! `crates/xberg/src/extraction/pst.rs`, but a commit that wired it into
+//! `extract_from_store` (unconditionally, on every PST) was found to
+//! reintroduce this exact hang: `test_pst_empty_file_extraction` blocked
+//! indefinitely against the real, parsed `empty.pst` fixture. Root-caused to
+//! an unconditional self-deadlock in `outlook-pst` 1.2.0's
+//! `root_hierarchy_table()` -- it locks the PST file-reader `Mutex`, keeps
+//! the guard alive, and then locks the *same* (non-reentrant) `Mutex` again
+//! while constructing the table -- which fires on every call, not only on
+//! malformed input, before the depth-50 cap or `MAX_TABLE_ROWS` row-iteration
+//! cap can even apply. The call was therefore removed from
+//! `extract_from_store` again; see that function's inline comment and
+//! `discover_non_ipm_top_level_folders`'s doc comment in `pst.rs` for the
+//! full analysis. The helper functions are kept, with direct unit test
+//! coverage of `non_ipm_top_level_ids`, ready to be wired back in once
+//! `outlook-pst` fixes the deadlock. Part (c) therefore remains unimplemented
+//! end-to-end.
 //!
 //! What *is* verified here, end-to-end through the public extraction API:
 //! - A well-formed PST with no warning conditions produces an empty
