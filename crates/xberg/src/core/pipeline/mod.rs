@@ -221,7 +221,7 @@ async fn run_captioning_prepass(
 #[cfg_attr(feature = "otel", tracing::instrument(
     skip(doc, config),
     fields(
-        pipeline.stage = "post_processing",
+        { crate::telemetry::conventions::OPERATION } = crate::telemetry::conventions::operations::PIPELINE,
         content.element_count = doc.elements.len(),
     )
 ))]
@@ -489,6 +489,13 @@ pub async fn run_pipeline(mut doc: InternalDocument, config: &ExtractionConfig) 
 /// - Async post-processors
 /// - Async validators
 #[cfg(not(feature = "tokio-runtime"))]
+#[cfg_attr(feature = "otel", tracing::instrument(
+    skip(doc, config),
+    fields(
+        { crate::telemetry::conventions::OPERATION } = crate::telemetry::conventions::operations::PIPELINE,
+        content.element_count = doc.elements.len(),
+    )
+))]
 #[cfg_attr(alef, alef(skip))]
 pub fn run_pipeline_sync(mut doc: InternalDocument, config: &ExtractionConfig) -> Result<ExtractedDocument> {
     doc.ocr_text_only = config.images.as_ref().map(|i| i.ocr_text_only).unwrap_or(false);

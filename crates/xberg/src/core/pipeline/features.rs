@@ -420,6 +420,11 @@ pub(super) fn execute_chunking(
 
     #[cfg(feature = "chunking")]
     if let Some(ref chunking_config) = config.chunking {
+        // Synchronous stage — `entered()` is safe here because no `.await` follows.
+        #[cfg(feature = "otel")]
+        let _stage_span =
+            crate::telemetry::spans::pipeline_stage_span(crate::telemetry::conventions::stages::CHUNKING).entered();
+
         #[cfg(feature = "tree-sitter")]
         if let Some(code_chunks) = try_code_chunks(result, &chunking_config.sizing) {
             result.chunks = Some(code_chunks);
@@ -641,6 +646,12 @@ pub(super) fn execute_chunking(
 pub(super) fn execute_language_detection(result: &mut ExtractedDocument, config: &ExtractionConfig) -> Result<()> {
     #[cfg(feature = "language-detection")]
     if let Some(ref lang_config) = config.language_detection {
+        // Synchronous stage — `entered()` is safe here because no `.await` follows.
+        #[cfg(feature = "otel")]
+        let _stage_span =
+            crate::telemetry::spans::pipeline_stage_span(crate::telemetry::conventions::stages::LANGUAGE_DETECTION)
+                .entered();
+
         match crate::language_detection::detect_languages(&result.content, lang_config) {
             Ok(detected) => {
                 result.detected_languages = detected;
@@ -672,6 +683,12 @@ pub(super) fn execute_token_reduction(result: &mut ExtractedDocument, config: &E
         let level = crate::text::token_reduction::ReductionLevel::from(tr_config.mode.as_str());
 
         if !matches!(level, crate::text::token_reduction::ReductionLevel::Off) {
+            // Synchronous stage — `entered()` is safe here because no `.await` follows.
+            #[cfg(feature = "otel")]
+            let _stage_span =
+                crate::telemetry::spans::pipeline_stage_span(crate::telemetry::conventions::stages::TOKEN_REDUCTION)
+                    .entered();
+
             let impl_config = crate::text::token_reduction::TokenReductionConfig {
                 level,
                 ..Default::default()

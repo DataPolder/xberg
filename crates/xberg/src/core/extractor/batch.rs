@@ -215,7 +215,8 @@ fn apply_batch_thread_budget(config: &mut ExtractionConfig, thread_budget: usize
 #[cfg_attr(feature = "otel", tracing::instrument(
     skip(config, items),
     fields(
-        extraction.batch_size = items.len(),
+        { crate::telemetry::conventions::OPERATION } = crate::telemetry::conventions::operations::BATCH_EXTRACT,
+        { crate::telemetry::conventions::BATCH_SIZE } = items.len(),
     )
 ))]
 pub(crate) async fn batch_extract_files(
@@ -318,7 +319,8 @@ pub(crate) async fn batch_extract_files(
 #[cfg_attr(feature = "otel", tracing::instrument(
     skip(config, items),
     fields(
-        extraction.batch_size = items.len(),
+        { crate::telemetry::conventions::OPERATION } = crate::telemetry::conventions::operations::BATCH_EXTRACT,
+        { crate::telemetry::conventions::BATCH_SIZE } = items.len(),
     )
 ))]
 pub(crate) async fn batch_extract_bytes(

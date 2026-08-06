@@ -14,6 +14,8 @@ use crate::plugins::InternalDocumentExtractor;
 use crate::plugins::registry::RegisteredDocumentExtractor;
 use crate::types::ExtractedDocument;
 use std::path::Path;
+#[cfg(feature = "otel")]
+use tracing::Instrument;
 
 use super::helpers::get_extractor;
 
@@ -285,7 +287,20 @@ pub(crate) async fn extract_with_candidates(
     let mut last_error = None;
 
     for (index, candidate) in candidates.into_iter().enumerate() {
-        match candidate.extract_path(path, mime_type, config).await {
+        // The extraction stage span wraps only the extractor invocation — post-processing
+        // is covered by `run_pipeline` below and must not be nested inside it.
+        #[cfg(feature = "otel")]
+        let extraction = {
+            let stage_span = crate::telemetry::spans::extraction_stage_span(
+                candidate.plugin().name(),
+                candidate.plugin().priority(),
+            );
+            candidate.extract_path(path, mime_type, config).instrument(stage_span).await
+        };
+        #[cfg(not(feature = "otel"))]
+        let extraction = candidate.extract_path(path, mime_type, config).await;
+
+        match extraction {
             Ok(mut doc) => {
                 if index > 0 {
                     let name = candidate.plugin().name();
@@ -382,7 +397,15 @@ pub(in crate::core::extractor) async fn extract_bytes_with_extractor(
     crate::extractors::ensure_initialized()?;
 
     let extractor = get_extractor(mime_type)?;
+
+    #[cfg(feature = "otel")]
+    let doc = {
+        let stage_span = crate::telemetry::spans::extraction_stage_span(extractor.name(), extractor.priority());
+        Box::pin(extractor.extract_content(content, mime_type, config)).instrument(stage_span).await?
+    };
+    #[cfg(not(feature = "otel"))]
     let doc = Box::pin(extractor.extract_content(content, mime_type, config)).await?;
+
     let result = Box::pin(crate::core::pipeline::run_pipeline(doc, config)).await?;
     Ok(result)
 }

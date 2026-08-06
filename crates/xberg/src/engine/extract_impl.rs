@@ -8,6 +8,8 @@
 
 use std::collections::{HashSet, VecDeque};
 use std::path::PathBuf;
+#[cfg(feature = "otel")]
+use tracing::Instrument;
 
 #[cfg(all(feature = "tokio-runtime", not(target_arch = "wasm32")))]
 use std::future::Future;
@@ -53,20 +55,34 @@ pub(crate) async fn extract_batch(
     inputs: Vec<ExtractInput>,
     config: &ExtractionConfig,
 ) -> Result<ExtractionResult> {
+    #[cfg(feature = "otel")]
+    let batch_span = crate::telemetry::spans::batch_span(inputs.len());
+
     // `extract_batch_concurrent` spawns tasks on `tokio::task::JoinSet`, which requires `Send`
     // futures; extractor futures are `!Send` on wasm32 (async_trait(?Send), see
     // plugins/extractor/trait.rs) and wasm32 has no OS threads to run them on regardless. Use
     // the sequential path there even though `tokio-runtime` is active (it's pulled in by
     // `chunking-tokenizers`/`static-embeddings`, not concurrency support). ~keep
-    #[cfg(all(feature = "tokio-runtime", not(target_arch = "wasm32")))]
-    {
-        extract_batch_concurrent(inner, inputs, config).await
-    }
+    let batch = async move {
+        #[cfg(all(feature = "tokio-runtime", not(target_arch = "wasm32")))]
+        {
+            extract_batch_concurrent(inner, inputs, config).await
+        }
 
-    #[cfg(any(not(feature = "tokio-runtime"), target_arch = "wasm32"))]
+        #[cfg(any(not(feature = "tokio-runtime"), target_arch = "wasm32"))]
+        {
+            let _ = inner;
+            extract_batch_sequential(inputs, config).await
+        }
+    };
+
+    #[cfg(feature = "otel")]
     {
-        let _ = inner;
-        extract_batch_sequential(inputs, config).await
+        batch.instrument(batch_span).await
+    }
+    #[cfg(not(feature = "otel"))]
+    {
+        batch.await
     }
 }
 
@@ -84,7 +100,14 @@ async fn extract_batch_sequential(inputs: Vec<ExtractInput>, config: &Extraction
 
     for (index, input) in inputs.into_iter().enumerate() {
         let source = input_source(&input);
-        match Box::pin(extract_one(input, config, index)).await {
+        let item = Box::pin(extract_one(input, config, index));
+
+        #[cfg(feature = "otel")]
+        let item_result = item.instrument(crate::telemetry::spans::batch_item_span(index)).await;
+        #[cfg(not(feature = "otel"))]
+        let item_result = item.await;
+
+        match item_result {
             Ok(item_output) => append_extraction_output(&mut output, item_output),
             Err(error) => output.errors.push(error_item(index, source, &error)),
         }
@@ -165,10 +188,18 @@ async fn extract_batch_concurrent(
             let resolved_config = resolve_batch_input_config(&input, &base_config, execution_plan.thread_budget);
             let timeout_secs = resolved_config.extraction_timeout_secs;
             let cancel_token = resolved_config.cancel_token.clone();
-            run_batch_item(index, source, timeout_secs, cancel_token, || async move {
+            let item = run_batch_item(index, source, timeout_secs, cancel_token, || async move {
                 Box::pin(extract_one_resolved(input, &resolved_config, index)).await
-            })
-            .await
+            });
+
+            #[cfg(feature = "otel")]
+            {
+                item.instrument(crate::telemetry::spans::batch_item_span(index)).await
+            }
+            #[cfg(not(feature = "otel"))]
+            {
+                item.await
+            }
         }
     })
     .await?;
