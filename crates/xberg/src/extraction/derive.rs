@@ -692,14 +692,13 @@ pub fn derive_extraction_result(
         None
     };
     #[cfg(feature = "tree-sitter")]
-    let code_intelligence: Option<serde_json::Value> = full_process_result.or_else(|| {
-        match doc.metadata.format.as_ref() {
+    let code_intelligence: Option<serde_json::Value> =
+        full_process_result.or_else(|| match doc.metadata.format.as_ref() {
             Some(crate::types::metadata::FormatMetadata::Code(code_metadata)) => {
                 serde_json::to_value(code_metadata).ok()
             }
             _ => None,
-        }
-    });
+        });
 
     let extraction_method = doc
         .metadata
