@@ -125,17 +125,21 @@ impl InternalDocumentExtractor for PlainTextExtractor {
         Ok(doc)
     }
 
+    /// Only `text/plain`.
+    ///
+    /// This extractor used to also claim `text/asciidoc`, `text/x-asciidoc`, `text/vtt`,
+    /// `text/troff`, `text/x-mdoc`, `text/x-pod` and `text/x-dokuwiki` while doing nothing
+    /// beyond a BOM strip and a blank-line paragraph split, so every one of those formats
+    /// silently produced structureless garbage that looked like a successful extraction
+    /// (#228).
+    ///
+    /// AsciiDoc and WebVTT now have real extractors
+    /// ([`AsciiDocExtractor`](crate::extractors::AsciiDocExtractor),
+    /// [`WebVttExtractor`](crate::extractors::WebVttExtractor)). troff, mdoc, POD and
+    /// DokuWiki were dropped from the format catalogue entirely rather than advertised
+    /// with no implementation behind them.
     fn supported_mime_types(&self) -> &[&str] {
-        &[
-            "text/plain",
-            "text/asciidoc",
-            "text/x-asciidoc",
-            "text/vtt",
-            "text/troff",
-            "text/x-mdoc",
-            "text/x-pod",
-            "text/x-dokuwiki",
-        ]
+        &["text/plain"]
     }
 
     fn priority(&self) -> i32 {
@@ -169,19 +173,7 @@ mod tests {
         let extractor = PlainTextExtractor::new();
         assert_eq!(extractor.name(), "plain-text-extractor");
         assert_eq!(extractor.version(), env!("CARGO_PKG_VERSION"));
-        assert_eq!(
-            extractor.supported_mime_types(),
-            &[
-                "text/plain",
-                "text/asciidoc",
-                "text/x-asciidoc",
-                "text/vtt",
-                "text/troff",
-                "text/x-mdoc",
-                "text/x-pod",
-                "text/x-dokuwiki",
-            ]
-        );
+        assert_eq!(extractor.supported_mime_types(), &["text/plain"]);
         assert_eq!(extractor.priority(), 50);
     }
 }

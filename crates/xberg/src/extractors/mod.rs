@@ -82,9 +82,11 @@ pub(crate) trait SyncExtractor {
 #[cfg(feature = "tree-sitter")]
 pub mod code;
 
+pub mod asciidoc;
 pub mod csv;
 pub mod structured;
 pub mod text;
+pub mod vtt;
 
 pub mod djot_format;
 pub mod frontmatter_utils;
@@ -206,10 +208,12 @@ pub mod docbook;
 #[cfg(feature = "tree-sitter")]
 pub use code::CodeExtractor;
 
+pub use asciidoc::AsciiDocExtractor;
 pub use csv::CsvExtractor;
 pub use markdown::MarkdownExtractor;
 pub use structured::StructuredExtractor;
 pub use text::PlainTextExtractor;
+pub use vtt::WebVttExtractor;
 
 #[cfg(any(feature = "ocr", feature = "ocr-wasm", feature = "ocr-pipeline"))]
 pub use image::ImageExtractor;
@@ -367,6 +371,8 @@ pub(crate) fn register_default_extractors() -> Result<()> {
     let mut registry = registry.write();
 
     registry.register_internal(Arc::new(PlainTextExtractor::new()))?;
+    registry.register_internal(Arc::new(AsciiDocExtractor::new()))?;
+    registry.register_internal(Arc::new(WebVttExtractor::new()))?;
     registry.register_internal(Arc::new(MarkdownExtractor::new()))?;
     registry.register_internal(Arc::new(StructuredExtractor::new()))?;
     registry.register_internal(Arc::new(CsvExtractor::new()))?;
@@ -482,8 +488,10 @@ mod tests {
         let extractor_names = reg.list();
 
         #[allow(unused_mut)]
-        let mut expected_count = 5;
+        let mut expected_count = 7;
         assert!(extractor_names.contains(&"plain-text-extractor".to_string()));
+        assert!(extractor_names.contains(&"asciidoc-extractor".to_string()));
+        assert!(extractor_names.contains(&"webvtt-extractor".to_string()));
         assert!(extractor_names.contains(&"markdown-extractor".to_string()));
         assert!(extractor_names.contains(&"structured-extractor".to_string()));
         assert!(extractor_names.contains(&"djot-extractor".to_string()));

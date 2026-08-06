@@ -182,26 +182,12 @@ static FORMATS: &[FormatEntry] = &[
         mime_type: "text/vtt",
         aliases: &[],
     },
-    FormatEntry {
-        extensions: &[],
-        mime_type: "text/troff",
-        aliases: &[],
-    },
-    FormatEntry {
-        extensions: &[],
-        mime_type: "text/x-mdoc",
-        aliases: &[],
-    },
-    FormatEntry {
-        extensions: &[],
-        mime_type: "text/x-pod",
-        aliases: &[],
-    },
-    FormatEntry {
-        extensions: &[],
-        mime_type: "text/x-dokuwiki",
-        aliases: &[],
-    },
+    // text/troff, text/x-mdoc, text/x-pod and text/x-dokuwiki were removed here (#228). They
+    // carried no extensions, so they were unreachable except via a caller-supplied MIME, and
+    // the only "extractor" behind them was the plain-text one — which BOM-stripped and split
+    // on blank lines, turning roff macros and POD commands into prose that looked like a
+    // successful extraction. Listing them made `validate_mime_type` return Ok for formats
+    // nothing could actually parse, which is the advertised-but-unroutable half of GH#1387.
     FormatEntry {
         extensions: &["md", "markdown"],
         mime_type: "text/markdown",
