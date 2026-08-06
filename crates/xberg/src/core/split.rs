@@ -291,7 +291,7 @@ fn sub_document_for_range(
         quality_score: source.quality_score,
         summary: source.summary.clone(),
         #[cfg(feature = "heuristics")]
-        extraction_confidence: source.extraction_confidence.clone(),
+        extraction_confidence: source.extraction_confidence,
         translation: source.translation.clone(),
         structured_output: source.structured_output.clone(),
         document: source.document.clone(),
@@ -349,7 +349,11 @@ fn sub_document_for_range(
 
 /// Keep only the items whose (required) page falls within `start..=end`.
 fn filter_by_page<T: Clone>(items: &[T], start: u32, end: u32, page_of: impl Fn(&T) -> u32) -> Vec<T> {
-    items.iter().filter(|item| (start..=end).contains(&page_of(item))).cloned().collect()
+    items
+        .iter()
+        .filter(|item| (start..=end).contains(&page_of(item)))
+        .cloned()
+        .collect()
 }
 
 /// Keep only the items whose page falls within `start..=end`. Items whose page
@@ -375,11 +379,14 @@ fn build_image_index_map(images: &[crate::types::ExtractedImage], start: u32, en
     images
         .iter()
         .map(|image| {
-            image.page_number.is_none_or(|page| (start..=end).contains(&page)).then(|| {
-                let assigned = next_index;
-                next_index += 1;
-                assigned
-            })
+            image
+                .page_number
+                .is_none_or(|page| (start..=end).contains(&page))
+                .then(|| {
+                    let assigned = next_index;
+                    next_index += 1;
+                    assigned
+                })
         })
         .collect()
 }
@@ -415,7 +422,10 @@ fn split_chunks(chunks: &[Chunk], start: u32, end: u32, image_index_map: &[Optio
             .iter()
             .filter_map(|&old_index| image_index_map.get(old_index as usize).copied().flatten())
             .collect();
-        chunk.metadata.page_spans.retain(|span| (start..=end).contains(&span.page));
+        chunk
+            .metadata
+            .page_spans
+            .retain(|span| (start..=end).contains(&span.page));
     }
     out
 }
@@ -592,15 +602,15 @@ mod enrichment_preservation_tests {
     use std::collections::HashMap;
 
     use super::*;
-    use crate::types::extraction::{
-        ArchiveEntry, BoundingBox, Chunk, ChunkMetadata, ChunkType, Element, ElementId, ElementMetadata, ElementType,
-        ExtractionMethod, LlmUsage, PageSpan,
-    };
     use crate::types::annotations::{PdfAnnotation, PdfAnnotationType};
     use crate::types::classification::{ClassificationLabel, PageClassification};
     use crate::types::djot::DjotContent;
     use crate::types::document_structure::DocumentStructure;
     use crate::types::entity::{Entity, EntityCategory};
+    use crate::types::extraction::{
+        ArchiveEntry, BoundingBox, Chunk, ChunkMetadata, ChunkType, Element, ElementId, ElementMetadata, ElementType,
+        ExtractionMethod, LlmUsage, PageSpan,
+    };
     use crate::types::form_field::{FormFieldType, PdfFormField};
     use crate::types::formula::Formula;
     use crate::types::ocr_elements::OcrElement;
@@ -785,7 +795,11 @@ mod enrichment_preservation_tests {
             ]),
             images: Some(vec![image(0, Some(2)), image(1, Some(4))]),
             pages: Some((1..=6).map(page).collect()),
-            elements: Some(vec![element("e1", Some(1)), element("e2", Some(4)), element("e3", None)]),
+            elements: Some(vec![
+                element("e1", Some(1)),
+                element("e2", Some(4)),
+                element("e3", None),
+            ]),
             djot_content: Some(DjotContent {
                 plain_text: "djot body".to_string(),
                 blocks: Vec::new(),
@@ -955,7 +969,10 @@ mod enrichment_preservation_tests {
             );
             assert_eq!(out.quality_score, Some(0.75), "segment {index}");
 
-            let summary = out.summary.as_ref().unwrap_or_else(|| panic!("summary on segment {index}"));
+            let summary = out
+                .summary
+                .as_ref()
+                .unwrap_or_else(|| panic!("summary on segment {index}"));
             assert_eq!(summary.text, "a summary");
             assert_eq!(summary.strategy, SummaryStrategy::Extractive);
             assert_eq!(summary.token_count, Some(3));
@@ -990,7 +1007,10 @@ mod enrichment_preservation_tests {
                 "djot body"
             );
 
-            let children = out.children.as_ref().unwrap_or_else(|| panic!("children on segment {index}"));
+            let children = out
+                .children
+                .as_ref()
+                .unwrap_or_else(|| panic!("children on segment {index}"));
             assert_eq!(children.len(), 1);
             assert_eq!(children[0].path, "inner.txt");
             assert_eq!(children[0].mime_type, "text/plain");
@@ -1030,7 +1050,10 @@ mod enrichment_preservation_tests {
         assert_eq!(entities[0].end, 3);
         assert_eq!(entities[0].confidence, Some(0.9));
 
-        let report = first.redaction_report.as_ref().expect("redaction report on first segment");
+        let report = first
+            .redaction_report
+            .as_ref()
+            .expect("redaction report on first segment");
         assert_eq!(report.total_redacted, 1);
         assert_eq!(report.findings.len(), 1);
         assert_eq!(report.findings[0].category, PiiCategory::Email);
@@ -1070,7 +1093,10 @@ mod enrichment_preservation_tests {
             assert!(out.llm_usage.is_none(), "segment {index} must not duplicate llm usage");
             assert!(out.revisions.is_none(), "segment {index} must not duplicate revisions");
             #[cfg(any(feature = "keywords-yake", feature = "keywords-rake"))]
-            assert_eq!(out.extracted_keywords, None, "segment {index} must not duplicate keywords");
+            assert_eq!(
+                out.extracted_keywords, None,
+                "segment {index} must not duplicate keywords"
+            );
         }
     }
 
@@ -1326,8 +1352,7 @@ mod enrichment_preservation_tests {
             "the page-2 image sits at split-local index 1 once the page-less image is kept"
         );
         assert_eq!(
-            images[chunks[0].metadata.image_indices[0] as usize].image_index,
-            0,
+            images[chunks[0].metadata.image_indices[0] as usize].image_index, 0,
             "the remapped index must resolve back to the same image"
         );
     }
@@ -1370,11 +1395,7 @@ mod enrichment_preservation_tests {
         assert_eq!(out.page_classifications.as_ref().expect("classifications").len(), 2);
         assert_eq!(
             uri_urls(out),
-            vec![
-                "https://one.example",
-                "https://six.example",
-                "https://pageless.example"
-            ]
+            vec!["https://one.example", "https://six.example", "https://pageless.example"]
         );
         assert_eq!(form_field_names(out), vec!["f3", "fnone"]);
         assert_eq!(element_texts(out), vec!["e1", "e2", "e3"]);

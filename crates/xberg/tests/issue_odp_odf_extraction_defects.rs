@@ -2,9 +2,9 @@
 //!
 //! - #95  Speaker notes (`presentation:notes`) were never extracted at all.
 //! - #116 Shapes other than `draw:frame > draw:text-box` (e.g.
-//!        `draw:custom-shape`) and `draw:g` groups were invisible to the
-//!        walker: only a bare `draw:frame` holding a `text-box`, `table`, or
-//!        `image` was ever visited.
+//!   `draw:custom-shape`) and `draw:g` groups were invisible to the walker:
+//!   only a bare `draw:frame` holding a `text-box`, `table`, or `image` was
+//!   ever visited.
 //!
 //! Each test builds a minimal in-memory `.odp` ZIP rather than depending on
 //! the `test_documents/odp` Git-LFS submodule, so these run unconditionally.

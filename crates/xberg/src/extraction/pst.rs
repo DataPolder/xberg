@@ -237,12 +237,16 @@ fn extract_from_store(
 /// the upstream bug is fixed (or `outlook-pst` is upgraded past it). Do not call
 /// this from any code path that runs against a real `outlook_pst`-backed `Store`
 /// until then.
+/// A top-level folder seed: the folder itself, its node id, and its display name.
+#[cfg(feature = "email")]
+type PstFolderSeed = (Rc<dyn PstFolder>, u32, String);
+
 #[cfg(feature = "email")]
 #[allow(dead_code)]
 fn discover_non_ipm_top_level_folders(
     store: &dyn outlook_pst::messaging::store::Store,
     ipm_node_id: u32,
-) -> (Vec<(Rc<dyn PstFolder>, u32, String)>, Vec<ProcessingWarning>) {
+) -> (Vec<PstFolderSeed>, Vec<ProcessingWarning>) {
     let mut seeds = Vec::new();
     let mut warnings = Vec::new();
 

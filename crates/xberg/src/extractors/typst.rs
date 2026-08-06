@@ -220,9 +220,9 @@ impl TypstExtractor {
                 continue;
             }
 
-            if trimmed.starts_with("/ ") {
+            if let Some(after_marker) = trimmed.strip_prefix("/ ") {
                 Self::flush_paragraph_internal(&mut paragraph_buf, &mut builder);
-                let rest = trimmed[2..].trim();
+                let rest = after_marker.trim();
                 if let Some(colon_idx) = rest.find(':') {
                     let term = rest[..colon_idx].trim();
                     let definition = rest[colon_idx + 1..].trim();

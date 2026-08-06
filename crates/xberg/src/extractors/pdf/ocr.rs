@@ -1999,7 +1999,6 @@ fn recognized_table_to_public_table(
         }),
         table_id: Some(format!("table-{}", table_index + 1)),
         columns: recognized.cells.first().cloned(),
-        ..Default::default()
     }
 }
 
@@ -2417,11 +2416,7 @@ pub(crate) async fn extract_with_ocr(
                         // pages are processed strictly in increasing `page_idx` order
                         // above, so push order is deterministic document order.
                         let table_index = collected_tables.len();
-                        collected_tables.push(recognized_table_to_public_table(
-                            rt,
-                            (page_idx + 1) as u32,
-                            table_index,
-                        ));
+                        collected_tables.push(recognized_table_to_public_table(rt, (page_idx + 1) as u32, table_index));
                     }
                 }
 

@@ -88,7 +88,7 @@ pub(crate) fn find_positions(haystack: &str, needle: &str) -> Option<Vec<usize>>
         let is_match = haystack_chars[start..start + needle_chars.len()]
             .iter()
             .zip(&needle_chars)
-            .all(|(h, n)| h.to_ascii_lowercase() == n.to_ascii_lowercase());
+            .all(|(h, n)| h.eq_ignore_ascii_case(n));
         if is_match {
             positions.push(start);
         }

@@ -81,6 +81,10 @@ fn register_all(entries: &[BuiltinRegistration]) -> crate::Result<()> {
 /// Every enabled processor is attempted regardless of whether an earlier one
 /// failed (see `register_all`); the returned `Result` reports failures but does
 /// not indicate which processors, if any, still registered successfully.
+#[allow(
+    clippy::vec_init_then_push,
+    reason = "every push below is #[cfg]-gated, so the entries cannot be written as one vec![] literal"
+)]
 pub fn register_builtin() -> crate::Result<()> {
     #[allow(unused_mut, reason = "mutated conditionally per enabled feature below")]
     let mut entries: Vec<BuiltinRegistration> = Vec::new();

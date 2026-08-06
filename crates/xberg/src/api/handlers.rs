@@ -107,7 +107,10 @@ struct JsonUnifiedExtractRequest {
 #[serde(untagged)]
 enum JsonExtractInput {
     Uri(String),
-    Object(JsonExtractInputObject),
+    // Boxed: the object form is ~6 KB, so an unboxed variant made every `JsonExtractInput`
+    // that size even for the bare-URI case. Private to this module, so this is not an API
+    // change.
+    Object(Box<JsonExtractInputObject>),
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -384,7 +387,7 @@ fn json_input_to_api_input(input: JsonExtractInput) -> Result<ApiExtractInput, A
             mime_type: None,
             config: None,
         }),
-        JsonExtractInput::Object(object) => object_to_api_input(object),
+        JsonExtractInput::Object(object) => object_to_api_input(*object),
     }
 }
 

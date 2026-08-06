@@ -299,13 +299,11 @@ pub(crate) fn extract_images_with_data(
 
         let page_number = (page_idx + 1) as u32;
         let page_alt_texts = alt_text_by_page.remove(&(page_idx as u32));
-        let mut page_image_position = 0usize;
-        for oxide_img in &oxide_images {
+        for (page_image_position, oxide_img) in oxide_images.iter().enumerate() {
             let alt_text = page_alt_texts
                 .as_ref()
                 .and_then(|alts| alts.get(page_image_position))
                 .and_then(|alt| alt.clone());
-            page_image_position += 1;
             let (data, format) = match oxide_img.data() {
                 pdf_oxide::extractors::ImageData::Jpeg(jpeg_bytes) => {
                     let data_bytes = Bytes::copy_from_slice(jpeg_bytes);

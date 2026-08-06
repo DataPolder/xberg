@@ -15,7 +15,7 @@ use xberg::plugins::InternalDocumentExtractor;
 
 #[tokio::test]
 async fn should_return_error_for_unsupported_mime_type() {
-    let extractor = CitationExtractor::default();
+    let extractor = CitationExtractor;
     let content = b"irrelevant content";
     let config = ExtractionConfig::default();
 

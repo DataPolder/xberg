@@ -779,6 +779,7 @@ fn parse_rich_text_table(
     Ok(strings)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn fill_table_tiles(
     tile_storage: &[u8],
     objects: &IwaObjects,
@@ -820,6 +821,7 @@ fn fill_table_tiles(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn fill_tile(
     payload: &[u8],
     row_offset: usize,

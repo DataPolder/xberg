@@ -91,8 +91,8 @@ fn parse_track(source: &str) -> ParsedTrack {
     let lines: Vec<&str> = source.lines().collect();
 
     let first = lines.first().copied().unwrap_or_default().trim_start();
-    let body_start = if first.starts_with(SIGNATURE) {
-        let trailing = first[SIGNATURE.len()..].trim().trim_start_matches('-').trim();
+    let body_start = if let Some(after_signature) = first.strip_prefix(SIGNATURE) {
+        let trailing = after_signature.trim().trim_start_matches('-').trim();
         if !trailing.is_empty() {
             title = Some(trailing.to_string());
         }
@@ -214,7 +214,7 @@ fn parse_cue(block: &[&str]) -> std::result::Result<Cue, &'static str> {
 /// Parse `00:00:01.000 --> 00:00:04.000 line:0 position:20%` into start/end milliseconds.
 fn parse_timing_line(line: &str) -> Option<(u64, u64)> {
     let (start, rest) = line.split_once(TIMING_ARROW)?;
-    let end = rest.trim().split_whitespace().next()?;
+    let end = rest.split_whitespace().next()?;
     Some((parse_timestamp(start.trim())?, parse_timestamp(end)?))
 }
 
@@ -485,8 +485,14 @@ mod tests {
         assert_eq!(parsed.cues.len(), 2);
         assert_eq!(parsed.cues[0].text, "First stray line.");
         assert_eq!(parsed.cues[1].text, "Second stray line.");
-        assert_eq!(parsed.cues[0].start_millis, None, "an untimed block must not fabricate a start");
-        assert_eq!(parsed.cues[0].end_millis, None, "an untimed block must not fabricate an end");
+        assert_eq!(
+            parsed.cues[0].start_millis, None,
+            "an untimed block must not fabricate a start"
+        );
+        assert_eq!(
+            parsed.cues[0].end_millis, None,
+            "an untimed block must not fabricate an end"
+        );
         assert_eq!(parsed.warnings.len(), 2, "each dropped-then-recovered block warns");
     }
 

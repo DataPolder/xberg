@@ -150,7 +150,7 @@ async fn translate_batch(
     for group in non_empty_indices.chunks(MAX_BATCH_ITEMS) {
         let group_texts: Vec<String> = group.iter().map(|&index| texts[index].clone()).collect();
         let translated = translate_batch_call(config, &group_texts, preserve_markup, source_label, usages).await?;
-        for (&index, translated_text) in group.iter().zip(translated.into_iter()) {
+        for (&index, translated_text) in group.iter().zip(translated) {
             output[index] = translated_text;
         }
     }
@@ -183,7 +183,7 @@ async fn translate_optional_fields(
         .collect();
     let translated = translate_batch(config, &texts, false, source_label, usages).await?;
 
-    for (slot, translated_text) in present.into_iter().zip(translated.into_iter()) {
+    for (slot, translated_text) in present.into_iter().zip(translated) {
         *fields[slot] = Some(translated_text);
     }
     Ok(())
@@ -226,7 +226,7 @@ async fn translate_table(
     }
     if !texts.is_empty() {
         let translated = translate_batch(config, &texts, false, "translation_table_cells", usages).await?;
-        for ((row_index, col_index), value) in positions.into_iter().zip(translated.into_iter()) {
+        for ((row_index, col_index), value) in positions.into_iter().zip(translated) {
             table.cells[row_index][col_index] = value;
         }
     }
@@ -272,7 +272,7 @@ async fn translate_pages(
             let texts: Vec<String> = hierarchy.blocks.iter().map(|block| block.text.clone()).collect();
             if !texts.is_empty() {
                 let translated = translate_batch(config, &texts, false, "translation_page_hierarchy", usages).await?;
-                for (block, value) in hierarchy.blocks.iter_mut().zip(translated.into_iter()) {
+                for (block, value) in hierarchy.blocks.iter_mut().zip(translated) {
                     block.text = value;
                 }
             }
@@ -300,7 +300,7 @@ async fn translate_elements(
         return Ok(());
     }
     let translated = translate_batch(config, &texts, false, "translation_elements", usages).await?;
-    for (element, value) in elements.iter_mut().zip(translated.into_iter()) {
+    for (element, value) in elements.iter_mut().zip(translated) {
         element.text = value;
     }
     Ok(())

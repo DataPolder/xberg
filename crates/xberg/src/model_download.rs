@@ -697,9 +697,9 @@ impl TracingDownloadProgress {
             state.per_file_bytes.insert(file.filename.clone(), file.bytes_completed);
         }
         let now = std::time::Instant::now();
-        if !state
+        if state
             .last_render
-            .is_none_or(|last| now.duration_since(last) >= PROGRESS_RENDER_INTERVAL)
+            .is_some_and(|last| now.duration_since(last) < PROGRESS_RENDER_INTERVAL)
         {
             return None;
         }

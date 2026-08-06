@@ -1208,10 +1208,10 @@ pub(crate) fn extract_node_text(node: roxmltree::Node) -> Option<String> {
             _ => {
                 if let Some(text) = child.text() {
                     text_parts.push(text.to_string());
-                } else if child.has_children() {
-                    if let Some(text) = extract_node_text(child) {
-                        text_parts.push(text);
-                    }
+                } else if child.has_children()
+                    && let Some(text) = extract_node_text(child)
+                {
+                    text_parts.push(text);
                 }
             }
         }

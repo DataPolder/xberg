@@ -547,7 +547,7 @@ fn compute_confidence_stats(lines: &[TextLine]) -> Option<ConfidenceStats> {
 
     let mut sorted = percentages.clone();
     sorted.sort_unstable();
-    let median_pct = if line_count % 2 == 0 {
+    let median_pct = if line_count.is_multiple_of(2) {
         (sorted[line_count / 2 - 1] + sorted[line_count / 2]) / 2
     } else {
         sorted[line_count / 2]

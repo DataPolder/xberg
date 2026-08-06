@@ -2,13 +2,13 @@
 //!
 //! - #93  Deeply nested inline text (spans nested inside spans) was truncated.
 //! - #94  `text:a` wrapping a styled `text:span` dropped the URL and/or text.
-//! - #100 Comments (`office:annotation`), indexes, and page-anchored frames
-//!        were dropped entirely.
+//! - #100 Comments (`office:annotation`), indexes, and page-anchored frames were
+//!   dropped entirely.
 //! - #104 Every list was hardcoded unordered regardless of its actual style.
 //! - #112 A ZIP missing `content.xml` returned an empty success instead of
-//!        failing loudly.
-//! - #117 Footnotes and nested lists inside table cells were silently
-//!        dropped; only the cell's leading plain text survived.
+//!   failing loudly.
+//! - #117 Footnotes and nested lists inside table cells were silently dropped;
+//!   only the cell's leading plain text survived.
 //!
 //! Each test builds a minimal in-memory ODF ZIP rather than depending on the
 //! `test_documents/odt` Git-LFS submodule, so these run unconditionally.

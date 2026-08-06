@@ -203,7 +203,7 @@ fn inject_unrepresented_form_field_elements(doc: &mut InternalDocument, form_fie
         };
         doc.push_element(InternalElement::text(
             ElementKind::Paragraph,
-            &format!("{display_name}: {value}"),
+            format!("{display_name}: {value}"),
             0,
         ));
     }
