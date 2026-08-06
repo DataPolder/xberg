@@ -322,15 +322,6 @@ async fn translate_metadata(metadata: &mut Metadata, config: &TranslationConfig,
 /// the same exhaustive-field walker the redaction engine uses — rather than
 /// hand-rolling a second copy of the `NodeContent` match.
 ///
-/// That walker is gated `#[cfg(feature = "redaction")]` in
-/// `types/document_structure.rs` (its only caller today is the redaction
-/// engine), so this function is only able to reuse it when the `redaction`
-/// feature is also enabled; the sibling `#[cfg(not(feature = "redaction"))]`
-/// stub below is a documented no-op otherwise. Widening that gate to
-/// `any(feature = "redaction", feature = "translation")` would remove this
-/// limitation, but `types/document_structure.rs` is outside this change's
-/// ownership boundary — see the accompanying report.
-#[cfg(feature = "redaction")]
 async fn translate_document_structure(
     document: Option<&mut DocumentStructure>,
     config: &TranslationConfig,
@@ -357,17 +348,6 @@ async fn translate_document_structure(
             }
         });
     }
-    Ok(())
-}
-
-/// See the `#[cfg(feature = "redaction")]` sibling's doc comment: the
-/// exhaustive walker this needs is only compiled under that feature.
-#[cfg(not(feature = "redaction"))]
-async fn translate_document_structure(
-    _document: Option<&mut DocumentStructure>,
-    _config: &TranslationConfig,
-    _usages: &mut Vec<LlmUsage>,
-) -> crate::Result<()> {
     Ok(())
 }
 

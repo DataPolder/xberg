@@ -689,10 +689,12 @@ impl NodeContent {
     ///
     /// Container/marker nodes with no text of their own — `List`, `Quote`,
     /// `PageBreak`, `DefinitionList` — are no-ops.
-    /// Gated to match its only caller (`text::redaction`, itself `#[cfg(feature =
-    /// "redaction")]`) — without this, any build with redaction off trips
-    /// `dead_code`, which CI escalates via `-D warnings`.
-    #[cfg(feature = "redaction")]
+    /// Gated to match its callers (`text::redaction` and `text::translation::fields`,
+    /// each gated on its own feature) — without this, a build with both off trips
+    /// `dead_code`, which CI escalates via `-D warnings`. Any new caller must add its
+    /// feature here, or the walker silently compiles out and that caller becomes a
+    /// no-op rather than failing to build (#254).
+    #[cfg(any(feature = "redaction", feature = "translation"))]
     pub(crate) fn for_each_text_field_mut(&mut self, mut redact: impl FnMut(&mut String)) {
         match self {
             NodeContent::Title { text }
