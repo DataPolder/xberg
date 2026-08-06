@@ -2,6 +2,7 @@
 
 use crate::Result;
 use crate::core::config::ExtractionConfig;
+use crate::extraction::transform::normalize_line_endings;
 use crate::extractors::SyncExtractor;
 use crate::plugins::{InternalDocumentExtractor, Plugin};
 use crate::types::internal::{ElementKind, InternalDocument, InternalElement};
@@ -110,7 +111,12 @@ fn push_messages_as_elements(doc: &mut InternalDocument, messages: &[crate::type
             last_folder_path = Some(path);
         }
 
-        let msg_text = crate::extraction::email::build_email_text_output(msg);
+        // `build_email_text_output` embeds `EmailExtractionResult::content` verbatim,
+        // and for PST that content is `PR_BODY` (0x1000) straight out of the message
+        // store — Outlook writes CRLF there (see `resolve_pst_body` in
+        // `extraction/pst.rs`, which passes the plain-text property through untouched).
+        // Normalize before splitting or the whole message body becomes one paragraph (#316).
+        let msg_text = normalize_line_endings(&crate::extraction::email::build_email_text_output(msg)).into_owned();
         if !msg_text.is_empty() {
             for paragraph in msg_text.split("\n\n") {
                 let trimmed = paragraph.trim();

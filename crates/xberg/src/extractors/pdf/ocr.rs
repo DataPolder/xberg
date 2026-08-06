@@ -654,12 +654,18 @@ fn assemble_mixed_ocr_page_document(
 ///
 /// Mirrors the paragraph shape of the raw-text fallback in `append_ocr_replacements`
 /// so the page reads identically, while giving its assets a document to travel in.
+///
+/// OCR page text is normalized to LF first: backend output is not uniformly LF-only.
+/// Tesseract emits LF, but the VLM backend (`crate::llm::vlm_ocr`) returns the model's
+/// markdown verbatim out of an HTTP JSON body, which routinely carries `\r\n`. Splitting
+/// raw would fold the entire page into a single block element (#316).
 #[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
 fn flat_ocr_page_document(text: &str) -> crate::types::internal::InternalDocument {
     use crate::types::internal::{ElementKind, InternalDocument, InternalElement};
     use crate::types::ocr_elements::OcrElementLevel;
 
     let mut doc = InternalDocument::new("pdf");
+    let text = crate::extraction::transform::normalize_line_endings(text);
     for paragraph in text
         .split("\n\n")
         .map(str::trim)
@@ -1416,6 +1422,8 @@ fn append_ocr_replacements(
             }));
             continue;
         }
+        // Backend text verbatim (see `flat_ocr_page_document`): normalize before splitting.
+        let text = crate::extraction::transform::normalize_line_endings(text);
         for paragraph in text.split("\n\n").map(str::trim).filter(|text| !text.is_empty()) {
             let element = InternalElement::text(
                 ElementKind::OcrText {
@@ -2730,6 +2738,8 @@ fn attach_ocr_pipeline_stage_warnings(
 
     let retained_doc = doc.get_or_insert_with(|| {
         let mut doc = crate::types::internal::InternalDocument::new("pdf");
+        // Backend text verbatim (see `flat_ocr_page_document`): normalize before splitting.
+        let text = crate::extraction::transform::normalize_line_endings(text);
         for paragraph in text.split("\n\n").map(str::trim).filter(|text| !text.is_empty()) {
             doc.push_element(crate::types::internal::InternalElement::text(
                 crate::types::internal::ElementKind::Paragraph,
@@ -2779,6 +2789,8 @@ fn attach_ocr_fallback_warnings(
 
     let retained_doc = doc.get_or_insert_with(|| {
         let mut doc = crate::types::internal::InternalDocument::new("pdf");
+        // Backend text verbatim (see `flat_ocr_page_document`): normalize before splitting.
+        let text = crate::extraction::transform::normalize_line_endings(text);
         for paragraph in text.split("\n\n").map(str::trim).filter(|text| !text.is_empty()) {
             doc.push_element(crate::types::internal::InternalElement::text(
                 crate::types::internal::ElementKind::Paragraph,
@@ -3011,6 +3023,9 @@ pub(crate) async fn run_ocr_pipeline(
             );
             let mut doc = doc.unwrap_or_else(|| {
                 let mut d = crate::types::internal::InternalDocument::new("pdf");
+                // Backend text verbatim (see `flat_ocr_page_document`). This best-effort arm
+                // is where `PreferLastNonEmpty` lands VLM output, the most likely CR source.
+                let text = crate::extraction::transform::normalize_line_endings(&text);
                 for paragraph in text.split("\n\n") {
                     let trimmed = paragraph.trim();
                     if !trimmed.is_empty() {

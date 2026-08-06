@@ -2,6 +2,7 @@
 
 use crate::Result;
 use crate::core::config::ExtractionConfig;
+use crate::extraction::transform::normalize_line_endings;
 use crate::extractors::SyncExtractor;
 use crate::extractors::security::SecurityBudget;
 use crate::plugins::{InternalDocumentExtractor, Plugin};
@@ -109,7 +110,14 @@ impl EmailExtractor {
                 }
             }
         } else {
-            for paragraph in email_result.content.split("\n\n") {
+            // RFC 5322 mandates CRLF line endings, and `mail-parser` hands back the
+            // decoded body verbatim (both the 7bit/8bit and quoted-printable decoders
+            // preserve `\r\n`). Without normalizing first, `\r\n\r\n` never matches the
+            // `"\n\n"` paragraph boundary and every plain-text email collapses into a
+            // single paragraph carrying stray carriage returns (#316, same defect class
+            // as #227).
+            let normalized = normalize_line_endings(&email_result.content);
+            for paragraph in normalized.split("\n\n") {
                 let trimmed = paragraph.trim();
                 if !trimmed.is_empty() {
                     builder.push_paragraph(trimmed, vec![], None, None);
@@ -648,17 +656,21 @@ async fn extract_nested_embedded_message_children(
             extract_attachment_children(&nested.attachments, &child_config).await;
         warnings.extend(grandchild_warnings);
 
-        let internal_doc =
-            match EmailExtractor::build_extracted_document(nested, "application/vnd.ms-outlook", &child_config, &grandchildren) {
-                Ok(doc) => doc,
-                Err(e) => {
-                    warnings.push(ProcessingWarning {
-                        source: Cow::Borrowed("msg_embedded_message_extraction"),
-                        message: Cow::Owned(format!("Failed to extract embedded message '{}': {}", filename, e)),
-                    });
-                    continue;
-                }
-            };
+        let internal_doc = match EmailExtractor::build_extracted_document(
+            nested,
+            "application/vnd.ms-outlook",
+            &child_config,
+            &grandchildren,
+        ) {
+            Ok(doc) => doc,
+            Err(e) => {
+                warnings.push(ProcessingWarning {
+                    source: Cow::Borrowed("msg_embedded_message_extraction"),
+                    message: Cow::Owned(format!("Failed to extract embedded message '{}': {}", filename, e)),
+                });
+                continue;
+            }
+        };
 
         match crate::core::pipeline::run_pipeline(internal_doc, &child_config).await {
             Ok(result) => {

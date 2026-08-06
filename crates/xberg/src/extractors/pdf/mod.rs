@@ -95,10 +95,17 @@ enum PdfDocumentOrigin {
     Ocr,
 }
 
+/// Flat paragraph document for PDF text that arrived without structure.
+///
+/// `text` is whichever of native or OCR text won the extraction-method decision, and
+/// neither is guaranteed LF-only: `crate::pdf::text::fix_pdf_control_chars` explicitly
+/// whitelists `\r` as a character to preserve, and the VLM OCR backend returns model
+/// markdown verbatim from an HTTP response. Normalize before splitting (#316).
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 fn flat_pdf_document(text: &str, mime_type: &str) -> InternalDocument {
     let mut doc = InternalDocument::new("pdf");
     doc.mime_type = mime_type.to_string();
+    let text = crate::extraction::transform::normalize_line_endings(text);
     for paragraph in text.split("\n\n").map(str::trim).filter(|text| !text.is_empty()) {
         doc.push_element(InternalElement::text(ElementKind::Paragraph, paragraph, 0));
     }
