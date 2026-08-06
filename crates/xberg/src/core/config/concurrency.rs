@@ -69,9 +69,17 @@ const DEFAULT_THREAD_CAP: usize = 8;
 /// fires at most once per process, not once per extraction.
 static DEFAULT_CAP_WARNED: AtomicBool = AtomicBool::new(false);
 
-/// Emit the "unused cores" warning exactly once per process.
-fn warn_default_thread_cap_once(host_cpus: usize) {
-    if DEFAULT_CAP_WARNED
+/// Emit the "unused cores" warning at most once per `already_warned` guard.
+///
+/// The guard is a parameter rather than a direct read of [`DEFAULT_CAP_WARNED`]
+/// so that the once-per-process property can be tested against a guard the test
+/// owns. Asserting on the global is not merely racy but unfixably so: any test
+/// in the binary that runs a real extraction reaches `resolve_thread_budget`
+/// and trips the global first on a host with more than [`DEFAULT_THREAD_CAP`]
+/// cores, and `#[serial]` cannot help because it only excludes other `#[serial]`
+/// tests. That is the same defect class as #215.
+fn warn_default_thread_cap_once(already_warned: &AtomicBool, host_cpus: usize) {
+    if already_warned
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_ok()
     {
@@ -86,13 +94,13 @@ fn warn_default_thread_cap_once(host_cpus: usize) {
     }
 }
 
-/// Reset the one-time default-cap warning guard. Test-only: lets tests
-/// observe the warning firing under controlled, repeatable conditions
-/// instead of depending on whichever test happened to trip it first.
-#[cfg(test)]
-pub(crate) fn reset_default_thread_cap_warning_for_test() {
-    DEFAULT_CAP_WARNED.store(false, Ordering::SeqCst);
-}
+/// The cgroup CPU quota, resolved at most once per process.
+///
+/// `resolve_thread_budget` runs per extracted document (see
+/// `core::extractor::file`), and the quota cannot change under a running
+/// process, so reading `/sys/fs/cgroup/...` on every call would be two
+/// syscalls per document for a value that never moves.
+static CGROUP_QUOTA_CORES: OnceLock<Option<usize>> = OnceLock::new();
 
 /// Detect an effective CPU core cap from the process's Linux cgroup CPU
 /// quota, if any.
@@ -103,14 +111,6 @@ pub(crate) fn reset_default_thread_cap_warning_for_test() {
 /// or v1 (`cpu.cfs_quota_us` / `cpu.cfs_period_us`) quota is present and
 /// finite, rounded up to the nearest whole core. Never panics: any read or
 /// parse failure is treated as "no quota".
-/// The cgroup CPU quota, read at most once per process.
-///
-/// `resolve_thread_budget` runs per extracted document (see
-/// `core::extractor::file`), and the quota cannot change under a running
-/// process, so reading `/sys/fs/cgroup/...` on every call would be two
-/// syscalls per document for a value that never moves.
-static CGROUP_QUOTA_CORES: OnceLock<Option<usize>> = OnceLock::new();
-
 fn cgroup_cpu_quota_cores() -> Option<usize> {
     *CGROUP_QUOTA_CORES.get_or_init(read_cgroup_cpu_quota_cores)
 }
@@ -191,16 +191,30 @@ fn resolve_thread_budget_inner(
     host_cpus: usize,
     quota_cores: Option<usize>,
 ) -> usize {
+    resolve_thread_budget_with_guard(config, host_cpus, quota_cores, &DEFAULT_CAP_WARNED)
+}
+
+/// As [`resolve_thread_budget_inner`], but against a caller-supplied
+/// "already warned" guard — see [`warn_default_thread_cap_once`] for why the
+/// warning tests cannot share the process-global one.
+fn resolve_thread_budget_with_guard(
+    config: Option<&ConcurrencyConfig>,
+    host_cpus: usize,
+    quota_cores: Option<usize>,
+    already_warned: &AtomicBool,
+) -> usize {
     if let Some(n) = config.and_then(|c| c.max_threads) {
         return n.max(1);
     }
     match quota_cores {
-        Some(quota_cores) => host_cpus.min(quota_cores).max(1),
+        // `clamp` rather than `min().max()`: both bounds are known non-zero here
+        // (`cgroup_cpu_quota_cores` floors its result at 1), so it cannot panic.
+        Some(quota_cores) => host_cpus.clamp(1, quota_cores.max(1)),
         None => {
             if host_cpus > DEFAULT_THREAD_CAP {
-                warn_default_thread_cap_once(host_cpus);
+                warn_default_thread_cap_once(already_warned, host_cpus);
             }
-            host_cpus.min(DEFAULT_THREAD_CAP).max(1)
+            host_cpus.clamp(1, DEFAULT_THREAD_CAP)
         }
     }
 }
@@ -478,7 +492,7 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn test_default_cap_warning_fires_exactly_once_when_cores_exceed_cap_and_unset() {
-        reset_default_thread_cap_warning_for_test();
+        let already_warned = AtomicBool::new(false);
         let capture = EventCapture::default();
         let subscriber = tracing_subscriber::registry()
             .with(EnvFilter::new("warn"))
@@ -486,7 +500,7 @@ mod tests {
 
         tracing::subscriber::with_default(subscriber, || {
             for _ in 0..5 {
-                assert_eq!(resolve_thread_budget_inner(None, 16, None), 8);
+                assert_eq!(resolve_thread_budget_with_guard(None, 16, None, &already_warned), 8);
             }
         });
 
@@ -501,7 +515,7 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn test_default_cap_warning_does_not_fire_when_max_threads_is_set() {
-        reset_default_thread_cap_warning_for_test();
+        let already_warned = AtomicBool::new(false);
         let capture = EventCapture::default();
         let subscriber = tracing_subscriber::registry()
             .with(EnvFilter::new("warn"))
@@ -509,7 +523,7 @@ mod tests {
 
         tracing::subscriber::with_default(subscriber, || {
             let config = ConcurrencyConfig { max_threads: Some(4) };
-            resolve_thread_budget_inner(Some(&config), 16, None)
+            resolve_thread_budget_with_guard(Some(&config), 16, None, &already_warned)
         });
 
         assert_eq!(warn_event_count(&capture), 0);
@@ -518,15 +532,15 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn test_default_cap_warning_does_not_fire_when_cores_at_or_below_default_cap() {
-        reset_default_thread_cap_warning_for_test();
+        let already_warned = AtomicBool::new(false);
         let capture = EventCapture::default();
         let subscriber = tracing_subscriber::registry()
             .with(EnvFilter::new("warn"))
             .with(capture.clone());
 
         tracing::subscriber::with_default(subscriber, || {
-            resolve_thread_budget_inner(None, 8, None);
-            resolve_thread_budget_inner(None, 1, None);
+            resolve_thread_budget_with_guard(None, 8, None, &already_warned);
+            resolve_thread_budget_with_guard(None, 1, None, &already_warned);
         });
 
         assert_eq!(warn_event_count(&capture), 0);
@@ -535,14 +549,14 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn test_default_cap_warning_does_not_fire_when_cgroup_quota_present() {
-        reset_default_thread_cap_warning_for_test();
+        let already_warned = AtomicBool::new(false);
         let capture = EventCapture::default();
         let subscriber = tracing_subscriber::registry()
             .with(EnvFilter::new("warn"))
             .with(capture.clone());
 
         tracing::subscriber::with_default(subscriber, || {
-            resolve_thread_budget_inner(None, 16, Some(12));
+            resolve_thread_budget_with_guard(None, 16, Some(12), &already_warned);
         });
 
         assert_eq!(warn_event_count(&capture), 0);
