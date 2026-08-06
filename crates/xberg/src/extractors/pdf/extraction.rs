@@ -409,14 +409,7 @@ fn apply_reading_order_reordering(
             reading_order::reorder_spans_by_layout(&spans, hints)
         };
 
-        let mut page_text = String::new();
-        for &span_idx in &span_order {
-            if span_idx < spans.len() {
-                page_text.push_str(&spans[span_idx].text);
-            }
-        }
-
-        reordered_pages.push(page_text);
+        reordered_pages.push(reading_order::assemble_reading_order_text(&spans, &span_order));
     }
 
     if reordered_pages.is_empty() {
