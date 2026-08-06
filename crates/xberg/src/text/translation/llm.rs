@@ -38,7 +38,12 @@ fn render_prompt(config: &TranslationConfig, text: &str, preserve_markup: bool) 
 }
 
 /// Translate a single segment, collecting any usage entry produced.
-async fn translate_segment(
+///
+/// `pub(super)` so the sibling [`super::fields`] module — which translates
+/// every secondary text field (tables, pages, metadata, elements, document
+/// structure) — can reuse it for fields that are naturally singular (page
+/// content, table markdown) rather than duplicating this logic.
+pub(super) async fn translate_segment(
     config: &TranslationConfig,
     text: &str,
     preserve_markup: bool,
@@ -60,7 +65,10 @@ async fn translate_segment(
 ///
 /// Populates `result.translation` with the translated `content`, optionally the
 /// translated `formatted_content` (when `preserve_markup = true`), and rewrites
-/// every chunk's `content` field. Every LLM call's usage is appended to
+/// every chunk's `content` field. It also rewrites every other text-bearing
+/// field — tables, pages, metadata, semantic elements, and the structured
+/// document tree — via [`super::fields::translate_secondary_fields`]
+/// (xberg-io/xberg#254). Every LLM call's usage is appended to
 /// `result.llm_usage`.
 pub async fn translate_result(result: &mut ExtractedDocument, config: &TranslationConfig) -> crate::Result<()> {
     if config.target_lang.trim().is_empty() {
@@ -89,6 +97,8 @@ pub async fn translate_result(result: &mut ExtractedDocument, config: &Translati
             chunk.content = translated;
         }
     }
+
+    super::fields::translate_secondary_fields(result, config, &mut usages).await?;
 
     result.translation = Some(Translation {
         target_lang: config.target_lang.clone(),
