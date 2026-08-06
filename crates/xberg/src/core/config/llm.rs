@@ -7,6 +7,10 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+/// Placeholder printed in place of a credential by the hand-written `Debug` impls
+/// in this module. Mirrors liter-llm's own `ClientConfig` debug policy.
+const REDACTED: &str = "[redacted]";
+
 /// Configuration for an LLM provider/model via liter-llm.
 ///
 /// Each feature (VLM OCR, VLM embeddings, structured extraction) carries
@@ -19,7 +23,10 @@ use serde::{Deserialize, Serialize};
 /// model = "openai/gpt-4o"
 /// api_key = "sk-..."  # or use XBERG_LLM_API_KEY env var
 /// ```
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+///
+/// `Debug` is implemented by hand so `api_key`, header values, and the AWS
+/// credentials in [`BedrockConfig`] are never printed.
+#[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "api", derive(utoipa::ToSchema))]
 pub struct LlmConfig {
     /// Provider/model string using liter-llm routing format.
@@ -68,6 +75,99 @@ pub struct LlmConfig {
     /// that require custom auth/routing headers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub headers: Option<HashMap<String, String>>,
+
+    /// AWS Bedrock settings (region, cross-region routing, explicit credentials).
+    ///
+    /// Only consulted for `bedrock/`-prefixed models. When `None` — or when an
+    /// individual field inside it is `None` — liter-llm falls back to the standard
+    /// AWS environment variables and the default credential chain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
+    pub bedrock: Option<BedrockConfig>,
+}
+
+/// AWS Bedrock configuration for `bedrock/`-prefixed models.
+///
+/// Mirrors liter-llm's `BedrockConfig`. Every field is optional: anything left
+/// unset falls back to the standard AWS environment variables
+/// (`AWS_DEFAULT_REGION` / `AWS_REGION`, `AWS_ACCESS_KEY_ID`,
+/// `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `BEDROCK_CROSS_REGION`) and the
+/// default AWS credential chain. Leave the credential fields unset unless you
+/// have an explicit reason to pin them.
+///
+/// # Example
+///
+/// ```toml
+/// [ocr.vlm_config]
+/// model = "bedrock/anthropic.claude-3-sonnet-20240229-v1:0"
+///
+/// [ocr.vlm_config.bedrock]
+/// region = "eu-central-1"
+/// cross_region_prefix = "eu"
+/// ```
+///
+/// `Debug` is implemented by hand so the three credential fields are never printed.
+#[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "api", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
+pub struct BedrockConfig {
+    /// AWS region (e.g. `"us-east-1"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+
+    /// Cross-region inference profile prefix (e.g. `"us"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cross_region_prefix: Option<String>,
+
+    /// Explicit AWS access key ID. Secret — never logged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_key_id: Option<String>,
+
+    /// Explicit AWS secret access key. Secret — never logged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_access_key: Option<String>,
+
+    /// Explicit AWS session token for temporary credentials. Secret — never logged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_token: Option<String>,
+}
+
+/// Redacting `Debug`: `api_key` and every header value are credentials, so only
+/// their presence (and, for headers, the header name) is printed.
+impl std::fmt::Debug for LlmConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let redacted_headers: Option<Vec<(&str, &str)>> = self
+            .headers
+            .as_ref()
+            .map(|headers| headers.keys().map(|name| (name.as_str(), REDACTED)).collect());
+
+        f.debug_struct("LlmConfig")
+            .field("model", &self.model)
+            .field("api_key", &self.api_key.as_ref().map(|_| REDACTED))
+            .field("base_url", &self.base_url)
+            .field("timeout_secs", &self.timeout_secs)
+            .field("max_retries", &self.max_retries)
+            .field("temperature", &self.temperature)
+            .field("max_tokens", &self.max_tokens)
+            .field("load_env", &self.load_env)
+            .field("headers", &redacted_headers)
+            .field("bedrock", &self.bedrock)
+            .finish()
+    }
+}
+
+/// Redacting `Debug`: the three AWS credential fields print only their presence.
+/// `region` and `cross_region_prefix` are not secrets and are printed verbatim.
+impl std::fmt::Debug for BedrockConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BedrockConfig")
+            .field("region", &self.region)
+            .field("cross_region_prefix", &self.cross_region_prefix)
+            .field("access_key_id", &self.access_key_id.as_ref().map(|_| REDACTED))
+            .field("secret_access_key", &self.secret_access_key.as_ref().map(|_| REDACTED))
+            .field("session_token", &self.session_token.as_ref().map(|_| REDACTED))
+            .finish()
+    }
 }
 
 /// Configuration for LLM-based structured data extraction.
@@ -191,6 +291,7 @@ mod tests {
         assert!(cfg.max_tokens.is_none());
         assert!(cfg.load_env.is_none());
         assert!(cfg.headers.is_none());
+        assert!(cfg.bedrock.is_none());
     }
 
     /// Verify the struct-update pattern from the issue compiles and produces
@@ -210,6 +311,7 @@ mod tests {
         assert!(cfg.max_tokens.is_none());
         assert!(cfg.load_env.is_none());
         assert!(cfg.headers.is_none());
+        assert!(cfg.bedrock.is_none());
     }
 
     /// `load_env` and `headers` must round-trip through TOML so they are settable
@@ -250,6 +352,119 @@ load_env = true
             "load_env should be omitted when None: {json}"
         );
         assert!(!json.contains("headers"), "headers should be omitted when None: {json}");
+        assert!(!json.contains("bedrock"), "bedrock should be omitted when None: {json}");
+    }
+
+    /// Regression test for https://github.com/xberg-io/xberg/issues/1381
+    ///
+    /// Bedrock region, cross-region prefix, and credentials must survive a TOML
+    /// load and a JSON round-trip so they are settable from a config file and
+    /// from every language binding.
+    #[test]
+    fn test_llm_config_bedrock_round_trips_through_toml_and_json() {
+        let toml_src = r#"
+model = "bedrock/anthropic.claude-3-sonnet-20240229-v1:0"
+
+[bedrock]
+region = "eu-central-1"
+cross_region_prefix = "eu"
+access_key_id = "AKIAEXAMPLE"
+secret_access_key = "example-secret"
+session_token = "example-token"
+"#;
+        let cfg: LlmConfig = toml::from_str(toml_src).expect("deserialize LlmConfig from TOML");
+        assert_eq!(cfg.model, "bedrock/anthropic.claude-3-sonnet-20240229-v1:0");
+        let bedrock = cfg.bedrock.as_ref().expect("bedrock present");
+        assert_eq!(bedrock.region.as_deref(), Some("eu-central-1"));
+        assert_eq!(bedrock.cross_region_prefix.as_deref(), Some("eu"));
+        assert_eq!(bedrock.access_key_id.as_deref(), Some("AKIAEXAMPLE"));
+        assert_eq!(bedrock.secret_access_key.as_deref(), Some("example-secret"));
+        assert_eq!(bedrock.session_token.as_deref(), Some("example-token"));
+
+        let round_tripped: LlmConfig =
+            serde_json::from_str(&serde_json::to_string(&cfg).expect("serialize")).expect("deserialize");
+        assert_eq!(round_tripped, cfg);
+    }
+
+    /// A `bedrock` table carrying only `region` must leave the credential fields
+    /// unset so the AWS default credential chain still applies.
+    #[test]
+    fn test_llm_config_bedrock_region_only_leaves_credentials_unset() {
+        let cfg: LlmConfig = toml::from_str(
+            r#"
+model = "bedrock/anthropic.claude-3-sonnet-20240229-v1:0"
+
+[bedrock]
+region = "us-east-1"
+"#,
+        )
+        .expect("deserialize LlmConfig from TOML");
+        let bedrock = cfg.bedrock.as_ref().expect("bedrock present");
+        assert_eq!(bedrock.region.as_deref(), Some("us-east-1"));
+        assert_eq!(bedrock.cross_region_prefix, None);
+        assert_eq!(bedrock.access_key_id, None);
+        assert_eq!(bedrock.secret_access_key, None);
+        assert_eq!(bedrock.session_token, None);
+    }
+
+    /// `Debug` must never print a credential — `LlmConfig` and `BedrockConfig` are
+    /// reachable from error contexts and diagnostic dumps.
+    #[test]
+    fn test_llm_config_debug_redacts_every_credential() {
+        let mut headers = HashMap::new();
+        headers.insert("X-Gateway-Key".to_string(), "header-secret".to_string());
+        let cfg = LlmConfig {
+            model: "bedrock/anthropic.claude-3-sonnet-20240229-v1:0".to_string(),
+            api_key: Some("sk-super-secret".to_string()),
+            headers: Some(headers),
+            bedrock: Some(BedrockConfig {
+                region: Some("eu-central-1".to_string()),
+                cross_region_prefix: Some("eu".to_string()),
+                access_key_id: Some("AKIAEXAMPLE".to_string()),
+                secret_access_key: Some("aws-secret".to_string()),
+                session_token: Some("aws-token".to_string()),
+            }),
+            ..Default::default()
+        };
+
+        let rendered = format!("{cfg:?}");
+        for secret in [
+            "sk-super-secret",
+            "header-secret",
+            "AKIAEXAMPLE",
+            "aws-secret",
+            "aws-token",
+        ] {
+            assert!(!rendered.contains(secret), "Debug leaked {secret}: {rendered}");
+        }
+        // Non-secret routing values stay visible so the output is still diagnosable.
+        assert!(
+            rendered.contains("eu-central-1"),
+            "region should be printed: {rendered}"
+        );
+        assert!(rendered.contains("\"eu\""), "prefix should be printed: {rendered}");
+        assert!(
+            rendered.contains("X-Gateway-Key"),
+            "header name should be printed: {rendered}"
+        );
+        assert_eq!(
+            rendered.matches(REDACTED).count(),
+            5,
+            "expected 5 redactions: {rendered}"
+        );
+    }
+
+    /// An unset credential must render as `None`, not as a redaction placeholder,
+    /// so an operator can tell "not configured" from "configured but hidden".
+    #[test]
+    fn test_bedrock_config_debug_distinguishes_unset_from_redacted() {
+        let bedrock = BedrockConfig {
+            region: Some("us-east-1".to_string()),
+            ..Default::default()
+        };
+        let rendered = format!("{bedrock:?}");
+        assert_eq!(rendered.matches(REDACTED).count(), 0, "nothing to redact: {rendered}");
+        assert_eq!(rendered.matches("None").count(), 4, "4 unset fields: {rendered}");
     }
 
     #[test]

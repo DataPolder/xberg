@@ -54,7 +54,7 @@ pub use html_output::{HtmlOutputConfig, HtmlTheme};
 pub use late_interaction::{LateInteractionConfig, LateInteractionModelType};
 #[cfg(feature = "layout-types")]
 pub use layout::{LayoutDetectionConfig, LayoutStrategy, TableModel};
-pub use llm::{CallMode, LlmConfig, MergeMode, StructuredExtractionConfig};
+pub use llm::{BedrockConfig, CallMode, LlmConfig, MergeMode, StructuredExtractionConfig};
 pub use ocr::{
     DEFAULT_SCANNED_MIN_CONFIDENCE, OcrConfig, OcrPipelineConfig, OcrPipelineStage, OcrQualityThresholds, OcrStrategy,
     VlmFallbackPolicy,

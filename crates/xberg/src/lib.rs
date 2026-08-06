@@ -216,7 +216,7 @@ pub use core::extract::{extract, extract_batch};
 pub use core::split::{SplitConfig, SplitSegment, SplitStrategy, split_and_extract};
 
 pub use core::config::{
-    AccelerationConfig, BreadcrumbTarget, CallMode, CaptioningConfig, ChunkClassificationConfig,
+    AccelerationConfig, BedrockConfig, BreadcrumbTarget, CallMode, CaptioningConfig, ChunkClassificationConfig,
     ChunkClassificationDefinition, ChunkSizing, ChunkerType, ChunkingConfig, ContentFilterConfig, EmailConfig,
     EmbeddingConfig, EmbeddingModelType, ExecutionProviderType, ExtractInput, ExtractInputKind, ExtractionConfig,
     ExtractionErrorItem, ExtractionResult, ExtractionSummary, FileExtractionConfig, ImageExtractionConfig,
