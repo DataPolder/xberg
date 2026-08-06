@@ -167,6 +167,24 @@ async fn run_captioning_prepass(
         doc.pre_rendered_content = None;
     }
     doc.metadata = std::mem::take(&mut caption_result.metadata);
+    // #355: the prepass derives a full `ExtractedDocument` from `doc` above, and that
+    // derivation destructively `.remove()`s `CODE_INTELLIGENCE_SCRATCH_KEY` from
+    // `metadata.additional` (see `derive::derive_extraction_result`) so the raw
+    // scratch payload never leaks into user-visible metadata. The `doc.metadata`
+    // assignment just above then overwrites `doc`'s metadata with that
+    // already-stripped copy, so the *second* derivation the pipeline runs later
+    // (after this prepass returns) finds no scratch key and falls back to a
+    // degraded `CodeMetadata`-only `code_intelligence` payload. Put the full
+    // payload the first derivation already computed back under the scratch key so
+    // the second derivation round-trips the same `.remove()` and reconstructs the
+    // identical, non-degraded result.
+    #[cfg(feature = "tree-sitter")]
+    if let Some(code_intelligence) = caption_result.code_intelligence.take() {
+        doc.metadata.additional.insert(
+            std::borrow::Cow::Borrowed(crate::extractors::code::CODE_INTELLIGENCE_SCRATCH_KEY),
+            code_intelligence,
+        );
+    }
     doc.uris = caption_result.uris.take().unwrap_or_default();
     doc.processing_warnings = std::mem::take(&mut caption_result.processing_warnings);
     doc.llm_usage = caption_result.llm_usage.take();
