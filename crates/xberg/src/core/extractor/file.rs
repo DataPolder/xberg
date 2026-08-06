@@ -11,6 +11,7 @@ use crate::XbergError;
 use crate::core::config::ExtractionConfig;
 use crate::core::mime::{LEGACY_POWERPOINT_MIME_TYPE, LEGACY_WORD_MIME_TYPE};
 use crate::plugins::InternalDocumentExtractor;
+use crate::plugins::registry::RegisteredDocumentExtractor;
 use crate::types::ExtractedDocument;
 use std::path::Path;
 
@@ -238,12 +239,9 @@ fn is_extractor_fallback_eligible(error: &XbergError) -> bool {
 
 /// Extract without caching logic.
 ///
-/// Tries every registered extractor for `mime_type` that declares it can handle
-/// `path` (see [`crate::plugins::registry::DocumentExtractorRegistry::get_candidates`]),
-/// highest priority first, falling back to the next candidate only when the
-/// failure is [fallback-eligible](is_extractor_fallback_eligible) (#217). A
-/// `ProcessingWarning` records which extractor ultimately ran and why whenever a
-/// higher-priority extractor was tried and failed first.
+/// Fetches extractor candidates for `mime_type` from the process-global
+/// [`crate::plugins::registry::DocumentExtractorRegistry`] and delegates the
+/// dispatch/fallback logic to [`extract_with_candidates`].
 async fn extract_file_uncached(path: &Path, mime_type: &str, config: &ExtractionConfig) -> Result<ExtractedDocument> {
     let budget = crate::core::config::concurrency::resolve_thread_budget(config.concurrency.as_ref());
     crate::core::config::concurrency::init_thread_pools(budget);
@@ -256,6 +254,27 @@ async fn extract_file_uncached(path: &Path, mime_type: &str, config: &Extraction
         registry_read.get_candidates(path, mime_type)
     };
 
+    extract_with_candidates(path, mime_type, config, candidates).await
+}
+
+/// Tries every extractor `candidates` in order (highest priority first,
+/// see [`crate::plugins::registry::DocumentExtractorRegistry::get_candidates`]),
+/// falling back to the next candidate only when the failure is
+/// [fallback-eligible](is_extractor_fallback_eligible) (#217). A
+/// `ProcessingWarning` records which extractor ultimately ran and why whenever a
+/// higher-priority extractor was tried and failed first.
+///
+/// Parameterized on `candidates` rather than fetching them itself so callers
+/// (in particular tests) can supply candidates from a local registry instead
+/// of the process-global one, without racing concurrently running extraction
+/// paths that self-heal the global registry only when it is observed
+/// completely empty (see `crate::extractors::ensure_initialized`).
+pub(crate) async fn extract_with_candidates(
+    path: &Path,
+    mime_type: &str,
+    config: &ExtractionConfig,
+    candidates: Vec<RegisteredDocumentExtractor>,
+) -> Result<ExtractedDocument> {
     if candidates.is_empty() {
         return Err(XbergError::UnsupportedFormat(mime_type.to_string()));
     }
@@ -461,7 +480,7 @@ mod cache_key_tests {
 mod issue_217_fallback_tests {
     use super::*;
     use crate::core::config::{ExtractInput, ExtractionConfig};
-    use crate::plugins::registry::test_support::DocumentExtractorRegistryGuard;
+    use crate::plugins::registry::DocumentExtractorRegistry;
     use crate::plugins::{DocumentExtractor, Plugin};
     use crate::types::ExtractedDocument;
     use std::borrow::Cow;
@@ -543,23 +562,26 @@ mod issue_217_fallback_tests {
     /// ran and why.
     #[tokio::test]
     async fn fallback_eligible_error_tries_next_extractor_and_warns() {
-        let _guard = DocumentExtractorRegistryGuard::acquire();
-        crate::plugins::register_document_extractor(Arc::new(ScriptedExtractor {
-            name: "picky-217",
-            priority: 100,
-            outcome: unsupported_format_error,
-        }))
-        .unwrap();
-        crate::plugins::register_document_extractor(Arc::new(ScriptedExtractor {
-            name: "fallback-217",
-            priority: 50,
-            outcome: ok_result,
-        }))
-        .unwrap();
+        let mut registry = DocumentExtractorRegistry::new();
+        registry
+            .register(Arc::new(ScriptedExtractor {
+                name: "picky-217",
+                priority: 100,
+                outcome: unsupported_format_error,
+            }))
+            .unwrap();
+        registry
+            .register(Arc::new(ScriptedExtractor {
+                name: "fallback-217",
+                priority: 50,
+                outcome: ok_result,
+            }))
+            .unwrap();
 
         let (_dir, file_path) = write_temp_file();
         let config = ExtractionConfig::default();
-        let result = extract_file_with_extractor(&file_path, FALLBACK_MIME, &config)
+        let candidates = registry.get_candidates(&file_path, FALLBACK_MIME);
+        let result = extract_with_candidates(&file_path, FALLBACK_MIME, &config, candidates)
             .await
             .expect("the lower-priority extractor must still succeed");
 
@@ -579,23 +601,26 @@ mod issue_217_fallback_tests {
     /// latency before producing a confusing error.
     #[tokio::test]
     async fn non_eligible_error_does_not_cascade_to_lower_priority_extractor() {
-        let _guard = DocumentExtractorRegistryGuard::acquire();
-        crate::plugins::register_document_extractor(Arc::new(ScriptedExtractor {
-            name: "hard-failure-217",
-            priority: 100,
-            outcome: parsing_error,
-        }))
-        .unwrap();
-        crate::plugins::register_document_extractor(Arc::new(ScriptedExtractor {
-            name: "never-reached-217",
-            priority: 50,
-            outcome: ok_result,
-        }))
-        .unwrap();
+        let mut registry = DocumentExtractorRegistry::new();
+        registry
+            .register(Arc::new(ScriptedExtractor {
+                name: "hard-failure-217",
+                priority: 100,
+                outcome: parsing_error,
+            }))
+            .unwrap();
+        registry
+            .register(Arc::new(ScriptedExtractor {
+                name: "never-reached-217",
+                priority: 50,
+                outcome: ok_result,
+            }))
+            .unwrap();
 
         let (_dir, file_path) = write_temp_file();
         let config = ExtractionConfig::default();
-        let result = extract_file_with_extractor(&file_path, FALLBACK_MIME, &config).await;
+        let candidates = registry.get_candidates(&file_path, FALLBACK_MIME);
+        let result = extract_with_candidates(&file_path, FALLBACK_MIME, &config, candidates).await;
 
         match result {
             Err(XbergError::Parsing { message, .. }) => {
