@@ -204,9 +204,14 @@ fn render_page_capturing_glyph_drops(
 /// ran, because [`PDF_OXIDE_PENDING_WARNINGS`] is thread-local. OCR page
 /// rendering runs inline on the extracting task's thread, so it is covered.
 /// Layout-detection rasterization runs inside `tokio::task::spawn_blocking`,
-/// which always executes on a different OS thread, so those warnings are
-/// deterministically never drained — a known gap tracked separately as #353,
-/// not fixed here.
+/// which always executes on a different OS thread, so this function alone
+/// would never see those warnings. As of #353,
+/// `extractors::pdf::layout_runner::run_layout_for_pdf_pages_async` drains
+/// this function itself from inside its `spawn_blocking` closure — the only
+/// place that can observe the blocking-pool thread's thread-local buffer —
+/// and threads the drained warnings back through its return value for the
+/// caller in `extractors::pdf::mod` to merge, so layout-path glyph drops are
+/// no longer silently lost.
 pub fn take_pdf_oxide_render_warnings() -> Vec<ProcessingWarning> {
     PDF_OXIDE_PENDING_WARNINGS.with(|pending| std::mem::take(&mut *pending.borrow_mut()))
 }

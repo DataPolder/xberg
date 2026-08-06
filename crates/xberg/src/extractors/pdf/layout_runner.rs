@@ -246,21 +246,33 @@ fn merge_render_warning(
     }
 }
 
+/// Runs the layout pass and returns it paired with any `pdf_oxide`
+/// glyph-drop warnings captured while rendering its pages (#353).
+///
+/// On the `tokio-runtime` path the whole pass — including every render call
+/// — executes inside `spawn_blocking`, on a blocking-pool OS thread distinct
+/// from the extracting task's thread. [`crate::pdf::render::take_pdf_oxide_render_warnings`]
+/// drains a *thread-local* buffer, so it must be called from that same
+/// blocking-pool thread before the closure returns; nothing else ever visits
+/// that thread again to drain it later. The drained warnings are threaded
+/// back out through the return value instead, so the caller can merge them
+/// into the document's `processing_warnings` the same way the same-thread
+/// drain in `extractors::pdf::mod` already does for OCR rasterization.
 #[cfg(all(feature = "pdf", feature = "layout-detection"))]
 async fn run_layout_for_pdf_pages_async(
     content: &[u8],
     layout_config: &LayoutDetectionConfig,
     thread_budget: usize,
     gated_handling: GatedPageHandling,
-) -> Result<LayoutAttempt<LayoutRunOutput>> {
+) -> Result<(LayoutAttempt<LayoutRunOutput>, Vec<crate::types::ProcessingWarning>)> {
     #[cfg(feature = "tokio-runtime")]
     {
         let owned_content = content.to_vec();
         let owned_config = layout_config.clone();
-        tokio::task::spawn_blocking(move || {
+        let (result, glyph_drop_warnings) = tokio::task::spawn_blocking(move || {
             let execution_provider_overridden = crate::ort_discovery::execution_provider_override().is_some();
             let acceleration_override = rtdetr_acceleration_override(&owned_config, execution_provider_overridden);
-            run_layout_with_auto_cpu_retry(
+            let result = run_layout_with_auto_cpu_retry(
                 &owned_config,
                 execution_provider_overridden,
                 acceleration_override,
@@ -268,23 +280,35 @@ async fn run_layout_for_pdf_pages_async(
                     run_layout_for_pdf_pages(&owned_content, attempt_config, thread_budget, gated_handling)
                 },
             )
-            .map(merge_render_warning)
+            .map(merge_render_warning);
+            // Drain this blocking-pool thread's captured glyph-drop warnings
+            // before returning: still on the thread that rendered the pages,
+            // which is the only place `PDF_OXIDE_PENDING_WARNINGS` (thread-local)
+            // can be observed from. See the function doc comment above.
+            let glyph_drop_warnings = crate::pdf::render::take_pdf_oxide_render_warnings();
+            (result, glyph_drop_warnings)
         })
         .await
-        .map_err(|error| XbergError::Other(format!("layout runner task failed: {error}")))?
+        .map_err(|error| XbergError::Other(format!("layout runner task failed: {error}")))?;
+        result.map(|attempt| (attempt, glyph_drop_warnings))
     }
 
     #[cfg(not(feature = "tokio-runtime"))]
     {
         let execution_provider_overridden = crate::ort_discovery::execution_provider_override().is_some();
         let acceleration_override = rtdetr_acceleration_override(layout_config, execution_provider_overridden);
-        run_layout_with_auto_cpu_retry(
+        let result = run_layout_with_auto_cpu_retry(
             layout_config,
             execution_provider_overridden,
             acceleration_override,
             |attempt_config| run_layout_for_pdf_pages(content, attempt_config, thread_budget, gated_handling),
         )
-        .map(merge_render_warning)
+        .map(merge_render_warning);
+        // No `spawn_blocking` here, so this already runs on the caller's own
+        // thread; draining here keeps both branches return warnings the same
+        // way regardless of which one compiled in.
+        let glyph_drop_warnings = crate::pdf::render::take_pdf_oxide_render_warnings();
+        result.map(|attempt| (attempt, glyph_drop_warnings))
     }
 }
 
@@ -678,7 +702,11 @@ pub(super) fn run_layout_for_pdf_pages(
 /// inference recovers on CPU or layout fails entirely. The seventh value carries
 /// the proactively resolved or recovered CPU acceleration config so downstream
 /// TATR/OCR models use the same provider. Rendering and inference run off the
-/// async executor when a Tokio runtime is enabled.
+/// async executor when a Tokio runtime is enabled. The eighth value carries any
+/// `pdf_oxide` glyph-drop warnings captured while rendering this pass's pages
+/// (#353); always present (possibly empty) rather than folded into the sixth
+/// value so each cause stays a distinct, individually-deduped
+/// `ProcessingWarning` when the caller merges it via `push_warning_deduped`.
 #[cfg(all(feature = "pdf", feature = "layout-detection"))]
 type LayoutForMarkdownOptional = (
     Option<Vec<image::RgbImage>>,
@@ -688,6 +716,7 @@ type LayoutForMarkdownOptional = (
     Option<Vec<PageGateDecision>>,
     Option<crate::types::ProcessingWarning>,
     Option<AccelerationConfig>,
+    Vec<crate::types::ProcessingWarning>,
 );
 
 pub(super) fn layout_failure_warning(error: &crate::XbergError) -> crate::types::ProcessingWarning {
@@ -716,13 +745,13 @@ pub(super) async fn maybe_run_layout_for_markdown(
     config: &ExtractionConfig,
 ) -> LayoutForMarkdownOptional {
     if !config.use_layout_for_markdown {
-        return (None, None, None, None, None, None, None);
+        return (None, None, None, None, None, None, None, Vec::new());
     }
     let Some(layout_config) = config.resolved_layout_config() else {
-        return (None, None, None, None, None, None, None);
+        return (None, None, None, None, None, None, None, Vec::new());
     };
     if config.force_ocr {
-        return (None, None, None, None, None, None, None);
+        return (None, None, None, None, None, None, None, Vec::new());
     }
     let thread_budget = crate::core::config::concurrency::resolve_thread_budget(config.concurrency.as_ref());
     let outcome = run_layout_for_pdf_pages_async(
@@ -734,15 +763,18 @@ pub(super) async fn maybe_run_layout_for_markdown(
     .await;
 
     match outcome {
-        Ok(LayoutAttempt {
-            output:
-                LayoutRunOutput {
-                    data: Some((images, results, hints, detections)),
-                    gate_decisions,
-                },
-            acceleration_override,
-            warning,
-        }) => {
+        Ok((
+            LayoutAttempt {
+                output:
+                    LayoutRunOutput {
+                        data: Some((images, results, hints, detections)),
+                        gate_decisions,
+                    },
+                acceleration_override,
+                warning,
+            },
+            glyph_drop_warnings,
+        )) => {
             let total_hints: usize = hints.iter().map(|h| h.len()).sum();
             tracing::info!(
                 pages = images.len(),
@@ -757,18 +789,32 @@ pub(super) async fn maybe_run_layout_for_markdown(
                 gate_decisions,
                 warning,
                 acceleration_override,
+                glyph_drop_warnings,
             )
         }
-        Ok(LayoutAttempt {
-            output: LayoutRunOutput {
-                data: None,
-                gate_decisions,
+        Ok((
+            LayoutAttempt {
+                output:
+                    LayoutRunOutput {
+                        data: None,
+                        gate_decisions,
+                    },
+                acceleration_override: _,
+                warning,
             },
-            acceleration_override: _,
-            warning,
-        }) => {
+            glyph_drop_warnings,
+        )) => {
             tracing::info!("layout-for-markdown: auto gate skipped every page, continuing without layout hints");
-            (None, None, None, None, gate_decisions, warning, None)
+            (
+                None,
+                None,
+                None,
+                None,
+                gate_decisions,
+                warning,
+                None,
+                glyph_drop_warnings,
+            )
         }
         Err(error) => {
             tracing::warn!(
@@ -776,7 +822,7 @@ pub(super) async fn maybe_run_layout_for_markdown(
                 "layout-for-markdown: detection failed, continuing without layout hints"
             );
             let warning = layout_failure_warning(&error);
-            (None, None, None, None, None, Some(warning), None)
+            (None, None, None, None, None, Some(warning), None, Vec::new())
         }
     }
 }
@@ -786,6 +832,10 @@ pub(super) async fn maybe_run_layout_for_markdown(
 /// `result` holds `data: None` when the `Auto` gate skipped every page: the caller
 /// then proceeds exactly as if layout were off, rendering its own OCR rasters once.
 /// Mirrors the markdown path's CPU fallback and warning on accelerated failure (#1344).
+///
+/// The second element of the returned tuple carries any `pdf_oxide` glyph-drop
+/// warnings captured while this pass rendered its pages (#353); the caller must
+/// merge them into the document's `processing_warnings`.
 #[cfg(all(
     feature = "pdf",
     feature = "layout-detection",
@@ -795,7 +845,7 @@ pub(super) async fn run_layout_for_ocr(
     content: &[u8],
     layout_config: &LayoutDetectionConfig,
     thread_budget: usize,
-) -> Result<LayoutAttempt<LayoutRunOutput>> {
+) -> Result<(LayoutAttempt<LayoutRunOutput>, Vec<crate::types::ProcessingWarning>)> {
     // OCR consumes the layout pass's rasters as its input images, so gated
     // pages still render; only model inference is skipped for them.
     run_layout_for_pdf_pages_async(
@@ -1506,6 +1556,142 @@ mod tests {
             "automatic layout inference failed (CoreML ExecuteKernel failed); recovered on CPU; \
              layout: 1 page(s) could not be prepared for layout analysis and were treated as empty: \
              page 2 failed to render: boom"
+        );
+    }
+
+    /// One-page fixture whose `/Font` resource is a PDF string rather than a
+    /// font dictionary, mirroring `build_pdf_with_malformed_font_resource` in
+    /// `tests/issue_291_dropped_glyph_warning.rs`. Duplicated here (rather
+    /// than shared) because `run_layout_for_pdf_pages_async` is private to
+    /// this crate and unreachable from that external integration test.
+    /// `pdf_oxide`'s `PageRenderer::load_resources` requires every `/Font`
+    /// resource to resolve to a dictionary and logs `Failed to parse font ...`
+    /// then drops the glyph rather than failing the page.
+    #[cfg(feature = "tokio-runtime")]
+    fn malformed_font_layout_fixture() -> Vec<u8> {
+        use lopdf::{Document, Object, Stream, dictionary};
+
+        let mut document = Document::with_version("1.5");
+        let pages_id = document.new_object_id();
+        let font_id = document.add_object(Object::string_literal("NotAFontDict"));
+        let content = "BT /F1 24 Tf 72 700 Td (Hello) Tj ET";
+        let content_id = document.add_object(Stream::new(dictionary! {}, content.as_bytes().to_vec()));
+        let page_id = document.new_object_id();
+        document.objects.insert(
+            page_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Page",
+                "Parent" => pages_id,
+                "MediaBox" => vec![0.into(), 0.into(), 300.into(), 792.into()],
+                "Resources" => dictionary! { "Font" => dictionary! { "F1" => font_id } },
+                "Contents" => content_id,
+            }),
+        );
+        document.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![page_id.into()],
+                "Count" => 1,
+            }),
+        );
+        let catalog_id = document.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
+        document.trailer.set("Root", catalog_id);
+
+        let mut bytes = Vec::new();
+        document.save_to(&mut bytes).expect("fixture PDF must serialize");
+        bytes
+    }
+
+    /// Regression test for #353.
+    ///
+    /// Layout-detection rasterization runs the whole layout pass — including
+    /// every render call — inside `tokio::task::spawn_blocking`, which always
+    /// executes on a blocking-pool OS thread distinct from the thread that
+    /// called it. `take_pdf_oxide_render_warnings` drains a *thread-local*
+    /// buffer (`PDF_OXIDE_PENDING_WARNINGS`), so before this fix nothing ever
+    /// visited that blocking-pool thread again to drain it: any glyph-drop
+    /// warning captured during layout rendering was silently lost, and kept
+    /// accumulating, unbounded, on that pooled thread across documents.
+    ///
+    /// This drives the real `spawn_blocking` boundary
+    /// (`run_layout_for_pdf_pages_async`, gated on the default-on
+    /// `tokio-runtime` feature) with a page whose font resource is
+    /// structurally invalid, so `pdf_oxide` drops every glyph drawn with it
+    /// and reports the drop through `log::warn!` (see `crate::pdf::render`
+    /// and the #291/#1364 fixture in `tests/issue_291_dropped_glyph_warning.rs`).
+    #[cfg(feature = "tokio-runtime")]
+    #[tokio::test]
+    async fn glyph_drop_warnings_survive_the_spawn_blocking_layout_pass() {
+        use crate::core::config::layout::LayoutStrategy;
+
+        // Capture is opt-in: unless an application (here, the test) asks for
+        // it, `render_page_capturing_glyph_drops` arms nothing. Asserting the
+        // return value (rather than ignoring it) is required, not cosmetic —
+        // a test binary where some other component already owns the `log`
+        // backend would otherwise pass this test for the wrong reason: no
+        // warnings would ever be captured at all, layout render or not.
+        assert!(
+            crate::pdf::render::install_pdf_render_diagnostics(),
+            "no other component should own the log backend in this test binary"
+        );
+        // Drain any residual state left on this thread by an earlier test
+        // that happened to reuse it, so the empty-buffer assertion below is
+        // exact rather than "no worse than before".
+        let _ = crate::pdf::render::take_pdf_oxide_render_warnings();
+
+        let bytes = malformed_font_layout_fixture();
+        let config = LayoutDetectionConfig {
+            strategy: LayoutStrategy::Always,
+            ..Default::default()
+        };
+
+        let (attempt, glyph_drop_warnings) =
+            super::run_layout_for_pdf_pages_async(&bytes, &config, 1, GatedPageHandling::SkipRender)
+                .await
+                .expect("malformed-font page must still render (and complete the layout pass) despite the glyph drop");
+
+        assert!(
+            attempt.output.data.is_some(),
+            "the page rendered fine (the glyph was dropped, not the render), so layout data must be present"
+        );
+
+        assert_eq!(
+            glyph_drop_warnings.len(),
+            1,
+            "the spawn_blocking closure must return exactly the one glyph-drop warning it captured on its own \
+             thread, got: {glyph_drop_warnings:?}"
+        );
+        let warning = &glyph_drop_warnings[0];
+        assert_eq!(
+            warning.source, "pdf-render",
+            "glyph-drop warnings must be sourced \"pdf-render\", got: {}",
+            warning.source
+        );
+        assert!(
+            warning.message.contains("Page 1"),
+            "warning must name the affected page, got: {}",
+            warning.message
+        );
+        assert!(
+            warning.message.contains("Failed to parse font"),
+            "warning must carry pdf_oxide's own diagnosis of the cause, got: {}",
+            warning.message
+        );
+
+        // The critical assertion: the calling (test) thread's own thread-local
+        // buffer must stay empty. The render happened on a blocking-pool
+        // thread; before this fix, that thread's captured warning was never
+        // returned to the caller and nothing else ever drained it, so it
+        // would neither show up here nor above.
+        let leaked_to_caller_thread = crate::pdf::render::take_pdf_oxide_render_warnings();
+        assert!(
+            leaked_to_caller_thread.is_empty(),
+            "glyph-drop warnings must come back through the spawn_blocking closure's return value, not leak into \
+             (or vanish from) the caller thread's own thread-local buffer: {leaked_to_caller_thread:?}"
         );
     }
 }
