@@ -28,6 +28,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   recognition confidence, supports all eight Gen2 model groups, and accepts tuning under
   `backend_options`.
 
+### Security
+
+- `biblib` moves from the exact pin `=0.4.3` to `0.8`, taking the citation parser off `quick-xml`
+  0.37 and onto 0.41. That clears RUSTSEC-2026-0194 (quadratic duplicate-attribute checking) and
+  RUSTSEC-2026-0195 (unbounded namespace-declaration allocation), both scored 7.5, which reached
+  every downstream consumer of the `office` feature. The old pin existed because biblib 0.4.4 called
+  a `quick-xml` API that had been removed; 0.8 no longer does. Its `regex` feature is gone —
+  matching is now unconditional `regex-lite` — and its RIS parser keeps records that earlier
+  versions rejected, so RIS input that used to fail to parse now yields a citation.
+
 ### Fixed
 
 - Image OCR benchmarks now score structural F1 only against genuinely structured Markdown ground
