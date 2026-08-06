@@ -103,6 +103,35 @@ jobs:
       - name: Verify submodule gitlinks are reachable on their remotes
         run: scripts/ci/check-submodule-gitlinks.sh --on-fetch-failure=fail
 
+  alef-bindings-freshness:
+    name: Alef-generated bindings freshness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Task
+        uses: xberg-io/actions/install-task@v1
+      # install-alef reads alef.toml's [workspace] alef_version and installs that
+      # exact pinned build, so this job doesn't go red every time alef cuts a
+      # release -- same hermeticity guarantee install-task gives the Task binary. ~keep
+      - name: Install alef CLI
+        uses: xberg-io/actions/install-alef@v1
+      # `alef verify` (aliased as `task alef:verify`) is a purpose-built freshness
+      # check: it recomputes each generated file's expected hash from the current
+      # Rust source and compares it to what's committed, without writing any files
+      # or running poly's post-generation formatters. That sidesteps the
+      # git-diff-after-regen trap the e2e freshness check uses (`task e2e:verify`),
+      # where formatter-only reflow of freshly generated output would show up as a
+      # spurious diff. Never run `alef all --clean` here -- `alef generate --lang X`
+      # deletes every other language's output, and even the safe `alef all` variant
+      # means a full 15-language regen (minutes, not the sub-second cost of verify).
+      # KNOWN RED as of 2026-08-06: crates/xberg-node has drifted from its Rust
+      # source (see the E0004/E0063 cargo check failure tracked separately) --
+      # land this job as non-blocking (continue-on-error) until that drift is
+      # fixed, then flip it to required. ~keep
+      - name: Verify alef-generated bindings are current
+        continue-on-error: true
+        run: task alef:verify
+
   validate:
     uses: xberg-io/actions/.github/workflows/reusable-validate.yml@v1
     with:
