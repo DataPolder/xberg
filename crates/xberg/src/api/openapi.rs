@@ -91,6 +91,7 @@ use utoipa::OpenApi;
             // so omitting one produces a dangling pointer (#251).
             crate::types::extraction::ArchiveEntry,
             crate::types::extraction::DocumentCounts,
+            crate::types::extraction::LanguageConfidence,
             crate::types::extraction::ExtractionMethod,
             crate::types::extraction::LlmUsage,
             crate::types::extraction::ProcessingWarning,
