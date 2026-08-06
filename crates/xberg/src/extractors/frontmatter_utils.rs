@@ -6,9 +6,32 @@
 //! This is a core module used by the Djot extractor (always available) and
 //! the enhanced Markdown extractor (requires `office` feature).
 
-use crate::types::Metadata;
+use crate::types::{Metadata, ProcessingWarning};
 
 use serde_yaml_ng::Value as YamlValue;
+use std::borrow::Cow;
+
+/// Frontmatter keys with a dedicated, typed home on [`Metadata`].
+///
+/// Any other top-level key found in a frontmatter mapping is preserved verbatim
+/// into [`Metadata::additional`] instead of being silently dropped (xberg-io/xberg#154).
+const KNOWN_FRONTMATTER_KEYS: &[&str] = &[
+    "title",
+    "author",
+    "authors",
+    "date",
+    "keywords",
+    "description",
+    "abstract",
+    "subject",
+    "category",
+    "tags",
+    "language",
+    "version",
+];
+
+/// The `diagnostics` module's `source` identifier used for frontmatter warnings.
+const FRONTMATTER_WARNING_SOURCE: &str = "frontmatter";
 
 /// Extract YAML frontmatter from document content.
 ///
@@ -28,13 +51,28 @@ use serde_yaml_ng::Value as YamlValue;
 /// assert!(yaml.is_some());
 /// assert!(remaining.contains("# Content"));
 /// ```
+/// Test-only since #154: every production caller (markdown, mdx, djot) now uses
+/// [`extract_frontmatter_with_warning`] and attaches the warning to the document, so
+/// discarding it is no longer acceptable outside tests that only assert on the parse.
+#[cfg(test)]
 pub(crate) fn extract_frontmatter(content: &str) -> (Option<YamlValue>, String) {
+    let (yaml, remaining, _warning) = extract_frontmatter_with_warning(content);
+    (yaml, remaining)
+}
+
+/// Same as [`extract_frontmatter`], but also reports a [`ProcessingWarning`] when
+/// `---`/`...` delimiters are present yet the enclosed content fails to parse, or the
+/// opening delimiter is never closed. Without this, malformed frontmatter and the
+/// simple absence of frontmatter are indistinguishable to the caller — both silently
+/// yield `(None, content)` (xberg-io/xberg#154).
+pub(crate) fn extract_frontmatter_with_warning(content: &str) -> (Option<YamlValue>, String, Option<ProcessingWarning>) {
     if content.starts_with("+++") {
-        return extract_toml_frontmatter(content);
+        let (yaml, remaining) = extract_toml_frontmatter(content);
+        return (yaml, remaining, None);
     }
 
     if !content.starts_with("---") {
-        return (None, content.to_string());
+        return (None, content.to_string(), None);
     }
 
     let rest = &content[3..];
@@ -83,11 +121,27 @@ pub(crate) fn extract_frontmatter(content: &str) -> (Option<YamlValue>, String) 
         };
 
         match serde_yaml_ng::from_str::<YamlValue>(frontmatter_str) {
-            Ok(value) => (Some(value), remaining.to_string()),
-            Err(_) => (None, content.to_string()),
+            Ok(value) => (Some(value), remaining.to_string(), None),
+            Err(err) => (
+                None,
+                content.to_string(),
+                Some(crate::core::diagnostics::warning(
+                    FRONTMATTER_WARNING_SOURCE,
+                    format!("frontmatter delimiters found but the YAML between them failed to parse: {err}"),
+                )),
+            ),
         }
     } else {
-        (None, content.to_string())
+        (
+            None,
+            content.to_string(),
+            Some(crate::core::diagnostics::warning(
+                FRONTMATTER_WARNING_SOURCE,
+                "frontmatter opening delimiter (`---`) found but no matching closing delimiter; treating the \
+                 entire document as plain content"
+                    .to_string(),
+            )),
+        )
     }
 }
 
@@ -187,10 +241,27 @@ pub(crate) fn extract_metadata_from_yaml(yaml: &YamlValue) -> Metadata {
         metadata.title = Some(title.to_string());
     }
 
-    if let Some(author) = yaml.get("author").and_then(|v| v.as_str())
-        && metadata.created_by.is_none()
+    // `author` may be a scalar ("Jane Doe") or a sequence (["Jane Doe", "John Roe"]);
+    // the plural Hugo/Jekyll `authors` key is the same shape. `Metadata::authors` is the
+    // typed home for all three. Decision: if both `author` and `authors` are present,
+    // `authors` wins for `Metadata::authors` (it is the more specific, list-oriented key),
+    // while `Metadata::created_by` is still populated from a scalar `author` regardless,
+    // preserving the pre-existing single-author behavior.
+    if let Some(author_value) = yaml.get("author") {
+        if let Some(author) = author_value.as_str()
+            && metadata.created_by.is_none()
+        {
+            metadata.created_by = Some(author.to_string());
+        }
+        if metadata.authors.is_none() {
+            metadata.authors = yaml_scalar_or_sequence_to_strings(author_value);
+        }
+    }
+
+    if let Some(authors_value) = yaml.get("authors")
+        && let Some(authors) = yaml_scalar_or_sequence_to_strings(authors_value)
     {
-        metadata.created_by = Some(author.to_string());
+        metadata.authors = Some(authors);
     }
 
     if let Some(date) = yaml.get("date").and_then(|v| v.as_str()) {
@@ -251,7 +322,39 @@ pub(crate) fn extract_metadata_from_yaml(yaml: &YamlValue) -> Metadata {
         metadata.document_version = Some(version.to_string());
     }
 
+    // Preserve every top-level key without a typed field above (Hugo/Jekyll/Obsidian
+    // extras like `aliases`, `slug`, `series`, `weight`, `draft`, or arbitrary custom
+    // keys) instead of silently dropping them (xberg-io/xberg#154). YAML structure is
+    // kept faithfully — a sequence stays a `serde_json::Value::Array`, not a joined string.
+    if let YamlValue::Mapping(map) = yaml {
+        for (key, value) in map {
+            let Some(key_str) = key.as_str() else { continue };
+            if KNOWN_FRONTMATTER_KEYS.contains(&key_str) {
+                continue;
+            }
+            if let Ok(json_value) = serde_json::to_value(value) {
+                metadata.additional.insert(Cow::Owned(key_str.to_string()), json_value);
+            }
+        }
+    }
+
     metadata
+}
+
+/// Convert a YAML scalar string or a sequence of strings into a `Vec<String>`.
+///
+/// Used for frontmatter fields that may appear either as a single value
+/// (`author: Jane Doe`) or as a list (`author: [Jane Doe, John Roe]`,
+/// `authors: [...]`). Returns `None` for an empty sequence or any other shape.
+fn yaml_scalar_or_sequence_to_strings(value: &YamlValue) -> Option<Vec<String>> {
+    match value {
+        YamlValue::String(s) => Some(vec![s.clone()]),
+        YamlValue::Sequence(seq) => {
+            let values: Vec<String> = seq.iter().filter_map(|v| v.as_str()).map(str::to_string).collect();
+            if values.is_empty() { None } else { Some(values) }
+        }
+        _ => None,
+    }
 }
 
 /// Extract first heading as title from content.
@@ -480,5 +583,126 @@ tags: "tag1, tag2"
             metadata.keywords.as_deref(),
             Some(["single", "keyword", "string"].map(String::from).as_slice())
         );
+    }
+
+    #[test]
+    fn test_unknown_frontmatter_key_preserved_in_additional() {
+        let yaml_str = "title: Test\nslug: my-post\nweight: 10\ndraft: true\naliases:\n  - /old-url\n";
+        let yaml: YamlValue = serde_yaml_ng::from_str(yaml_str).unwrap();
+        let metadata = extract_metadata_from_yaml(&yaml);
+
+        assert_eq!(metadata.title.as_deref(), Some("Test"));
+        assert_eq!(
+            metadata.additional.get(&Cow::Borrowed("slug")).cloned(),
+            Some(serde_json::Value::String("my-post".to_string()))
+        );
+        assert_eq!(
+            metadata.additional.get(&Cow::Borrowed("weight")).cloned(),
+            Some(serde_json::Value::Number(10.into()))
+        );
+        assert_eq!(
+            metadata.additional.get(&Cow::Borrowed("draft")).cloned(),
+            Some(serde_json::Value::Bool(true))
+        );
+        assert_eq!(
+            metadata.additional.get(&Cow::Borrowed("aliases")).cloned(),
+            Some(serde_json::Value::Array(vec![serde_json::Value::String("/old-url".to_string())]))
+        );
+    }
+
+    #[test]
+    fn test_known_keys_do_not_leak_into_additional() {
+        let yaml_str = "title: Test\nauthor: Jane\ndate: 2024-01-15\nkeywords: [a, b]\ndescription: d\n\
+                         abstract: ab\nsubject: s\ncategory: c\ntags: [t1]\nlanguage: en\nversion: \"1.0\"\n";
+        let yaml: YamlValue = serde_yaml_ng::from_str(yaml_str).unwrap();
+        let metadata = extract_metadata_from_yaml(&yaml);
+
+        assert!(metadata.additional.is_empty(), "expected no leaked keys, got {:?}", metadata.additional);
+    }
+
+    #[test]
+    fn test_author_sequence_produces_two_authors() {
+        let yaml_str = "author:\n  - A\n  - B\n";
+        let yaml: YamlValue = serde_yaml_ng::from_str(yaml_str).unwrap();
+        let metadata = extract_metadata_from_yaml(&yaml);
+
+        assert_eq!(metadata.authors, Some(vec!["A".to_string(), "B".to_string()]));
+        // A sequence `author` has no single string to hang off `created_by`.
+        assert_eq!(metadata.created_by, None);
+    }
+
+    #[test]
+    fn test_plural_authors_key_produces_authors() {
+        let yaml_str = "authors:\n  - A\n  - B\n";
+        let yaml: YamlValue = serde_yaml_ng::from_str(yaml_str).unwrap();
+        let metadata = extract_metadata_from_yaml(&yaml);
+
+        assert_eq!(metadata.authors, Some(vec!["A".to_string(), "B".to_string()]));
+    }
+
+    #[test]
+    fn test_scalar_author_still_populates_created_by_and_authors() {
+        let yaml_str = "author: Jane Doe\n";
+        let yaml: YamlValue = serde_yaml_ng::from_str(yaml_str).unwrap();
+        let metadata = extract_metadata_from_yaml(&yaml);
+
+        assert_eq!(metadata.created_by.as_deref(), Some("Jane Doe"));
+        assert_eq!(metadata.authors, Some(vec!["Jane Doe".to_string()]));
+    }
+
+    #[test]
+    fn test_both_author_and_authors_present_plural_wins_for_authors_field() {
+        let yaml_str = "author: Jane Doe\nauthors:\n  - Jane Doe\n  - John Roe\n";
+        let yaml: YamlValue = serde_yaml_ng::from_str(yaml_str).unwrap();
+        let metadata = extract_metadata_from_yaml(&yaml);
+
+        // Precedence decision (xberg-io/xberg#154): plural `authors` wins for the
+        // `Metadata::authors` list, while `created_by` still reflects the scalar `author`.
+        assert_eq!(metadata.authors, Some(vec!["Jane Doe".to_string(), "John Roe".to_string()]));
+        assert_eq!(metadata.created_by.as_deref(), Some("Jane Doe"));
+    }
+
+    #[test]
+    fn test_malformed_yaml_frontmatter_emits_warning() {
+        // Unterminated flow mapping - delimiters are present but the YAML is unparseable.
+        let content = "---\ntitle: [unterminated\n---\n\nBody";
+        let (yaml, remaining, warning) = extract_frontmatter_with_warning(content);
+
+        assert!(yaml.is_none());
+        assert_eq!(remaining, content);
+        let warning = warning.expect("expected a ProcessingWarning for malformed frontmatter");
+        assert_eq!(warning.source.as_ref(), "frontmatter");
+        assert_eq!(
+            warning.message.as_ref(),
+            "frontmatter delimiters found but the YAML between them failed to parse: did not find expected ',' \
+             or ']' at line 3 column 1, while parsing a flow sequence at line 2 column 8"
+        );
+    }
+
+    #[test]
+    fn test_unclosed_frontmatter_delimiter_emits_warning() {
+        let content = "---\ntitle: Test\nauthor: John\n\n# Content";
+        let (yaml, remaining, warning) = extract_frontmatter_with_warning(content);
+
+        assert!(yaml.is_none());
+        assert_eq!(remaining, content);
+        let warning = warning.expect("expected a ProcessingWarning for an unclosed delimiter");
+        assert_eq!(warning.source.as_ref(), "frontmatter");
+        assert_eq!(
+            warning.message.as_ref(),
+            "frontmatter opening delimiter (`---`) found but no matching closing delimiter; treating the entire \
+             document as plain content"
+        );
+    }
+
+    #[test]
+    fn test_extract_frontmatter_drops_warning_for_backward_compatibility() {
+        // The 2-tuple `extract_frontmatter` is the existing public(crate) entry point used by
+        // the markdown/mdx/djot extractors; it must keep behaving exactly as before.
+        let content = "---\ntitle: [unterminated\n---\n\nBody";
+        let (yaml, remaining) = extract_frontmatter(content);
+
+        assert!(yaml.is_none());
+        assert_eq!(remaining, content);
     }
 }

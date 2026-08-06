@@ -12,7 +12,7 @@
 //! - Data URI image extraction
 //!
 use super::annotation_utils::adjust_annotations_for_trim;
-use super::frontmatter_utils::{extract_frontmatter, extract_metadata_from_yaml, extract_title_from_content};
+use super::frontmatter_utils::{extract_frontmatter_with_warning, extract_metadata_from_yaml, extract_title_from_content};
 use crate::Result;
 use crate::core::config::ExtractionConfig;
 use crate::extractors::security::SecurityBudget;
@@ -829,7 +829,7 @@ impl InternalDocumentExtractor for MarkdownExtractor {
         budget.account_text(content.len())?;
         let text = String::from_utf8_lossy(content).into_owned();
 
-        let (yaml, remaining_content) = extract_frontmatter(&text);
+        let (yaml, remaining_content, frontmatter_warning) = extract_frontmatter_with_warning(&text);
 
         let mut metadata = if let Some(ref yaml_value) = yaml {
             extract_metadata_from_yaml(yaml_value)
@@ -852,6 +852,7 @@ impl InternalDocumentExtractor for MarkdownExtractor {
         let mut doc = Self::build_internal_document(&events, &yaml);
         doc.metadata = metadata;
         doc.mime_type = mime_type.to_string();
+        doc.processing_warnings.extend(frontmatter_warning);
 
         tracing::debug!(
             element_count = doc.elements.len(),

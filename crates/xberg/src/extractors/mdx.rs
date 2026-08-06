@@ -6,7 +6,7 @@
 //!
 //! Requires the `mdx` feature (which includes `pulldown-cmark`).
 
-use super::frontmatter_utils::{extract_frontmatter, extract_metadata_from_yaml, extract_title_from_content};
+use super::frontmatter_utils::{extract_frontmatter_with_warning, extract_metadata_from_yaml, extract_title_from_content};
 use super::markdown::{MarkdownExtractor, markdown_options};
 use crate::Result;
 use crate::core::config::ExtractionConfig;
@@ -223,7 +223,7 @@ impl InternalDocumentExtractor for MdxExtractor {
         let _ = config;
         let text = String::from_utf8_lossy(content).into_owned();
 
-        let (yaml, remaining_content) = extract_frontmatter(&text);
+        let (yaml, remaining_content, frontmatter_warning) = extract_frontmatter_with_warning(&text);
 
         let mut metadata = if let Some(ref yaml_value) = yaml {
             extract_metadata_from_yaml(yaml_value)
@@ -256,6 +256,7 @@ impl InternalDocumentExtractor for MdxExtractor {
         let mut doc = MarkdownExtractor::build_internal_document_with_jsx(&events, &yaml, &raw_jsx);
         doc.mime_type = mime_type.to_string();
         doc.metadata = metadata;
+        doc.processing_warnings.extend(frontmatter_warning);
 
         Ok(doc)
     }

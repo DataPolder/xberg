@@ -643,7 +643,8 @@ impl InternalDocumentExtractor for DjotExtractor {
         let _ = config;
         let text = String::from_utf8_lossy(content).into_owned();
 
-        let (yaml, remaining_content) = crate::extractors::frontmatter_utils::extract_frontmatter(&text);
+        let (yaml, remaining_content, frontmatter_warning) =
+            crate::extractors::frontmatter_utils::extract_frontmatter_with_warning(&text);
 
         let mut metadata = if let Some(ref yaml_value) = yaml {
             crate::extractors::frontmatter_utils::extract_metadata_from_yaml(yaml_value)
@@ -663,6 +664,7 @@ impl InternalDocumentExtractor for DjotExtractor {
         let mut doc = Self::build_internal_document(&events);
         doc.mime_type = mime_type.to_string();
         doc.metadata = metadata;
+        doc.processing_warnings.extend(frontmatter_warning);
 
         Ok(doc)
     }
