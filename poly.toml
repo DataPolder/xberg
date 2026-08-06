@@ -35,6 +35,12 @@ exclude = [
   "**/*.diff",
   "**/*.patch",
   "**/frb_generated.rs",
+  # flutter_rust_bridge emits the Dart half of the same codegen as frb_generated.rs above;
+  # formatting it only churns until the next `alef all` regenerates it (#319, #326).
+  "packages/dart/lib/src/xberg_bridge_generated/**",
+  # cbindgen rewrites these headers raw on every `cargo build`, so a formatted-and-committed
+  # header is undone by the next build — an unfixable loop for `poly fmt --check` (#326).
+  "**/xberg.h",
   "charts/**",
   "plugin/.claude-plugin/**",
   "plugin/.codex-plugin/**",
@@ -512,6 +518,12 @@ lint = { exclude = [
   "**/*.diff",
   "**/*.patch",
   "**/frb_generated.rs",
+  # flutter_rust_bridge emits the Dart half of the same codegen as frb_generated.rs above;
+  # formatting it only churns until the next `alef all` regenerates it (#319, #326).
+  "packages/dart/lib/src/xberg_bridge_generated/**",
+  # cbindgen rewrites these headers raw on every `cargo build`, so a formatted-and-committed
+  # header is undone by the next build — an unfixable loop for `poly fmt --check` (#326).
+  "**/xberg.h",
   "charts/**",
   "plugin/.claude-plugin/**",
   "plugin/.codex-plugin/**",
@@ -565,6 +577,12 @@ fmt = { exclude = [
   "**/*.diff",
   "**/*.patch",
   "**/frb_generated.rs",
+  # flutter_rust_bridge emits the Dart half of the same codegen as frb_generated.rs above;
+  # formatting it only churns until the next `alef all` regenerates it (#319, #326).
+  "packages/dart/lib/src/xberg_bridge_generated/**",
+  # cbindgen rewrites these headers raw on every `cargo build`, so a formatted-and-committed
+  # header is undone by the next build — an unfixable loop for `poly fmt --check` (#326).
+  "**/xberg.h",
   "charts/**",
   "plugin/.claude-plugin/**",
   "plugin/.codex-plugin/**",
@@ -618,6 +636,12 @@ file_safety = { exclude = [
   "**/*.diff",
   "**/*.patch",
   "**/frb_generated.rs",
+  # flutter_rust_bridge emits the Dart half of the same codegen as frb_generated.rs above;
+  # formatting it only churns until the next `alef all` regenerates it (#319, #326).
+  "packages/dart/lib/src/xberg_bridge_generated/**",
+  # cbindgen rewrites these headers raw on every `cargo build`, so a formatted-and-committed
+  # header is undone by the next build — an unfixable loop for `poly fmt --check` (#326).
+  "**/xberg.h",
   "charts/**",
   "plugin/.claude-plugin/**",
   "plugin/.codex-plugin/**",
