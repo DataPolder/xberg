@@ -160,6 +160,16 @@ mod tests {
     /// to be present would race this one. Serializing against the crate's other
     /// `#[serial]` tests (see `core::extractor::mod::test_concurrent_extractions_different_mimes`)
     /// is the same pattern used there for the same reason.
+    ///
+    /// The assertions are deliberately about **containment of this test's own
+    /// processor**, never about the registry being empty or about an exact count.
+    /// `#[serial]` only excludes the crate's other `#[serial]` tests, while *any*
+    /// non-serial test that runs a real extraction calls `initialize_features()` and
+    /// registers the built-in post-processors into the same global registry. An
+    /// "assert the cache starts empty" check therefore failed roughly one run in four
+    /// — a property of the test harness, not of the code under test. Emptiness was
+    /// only ever scaffolding; the #215 invariant is that a *late* registration becomes
+    /// visible, which containment states exactly and races nothing.
     #[serial_test::serial]
     #[test]
     fn processor_cache_rebuilds_when_registry_changes_after_first_use() {
@@ -205,11 +215,16 @@ mod tests {
 
         *PROCESSOR_CACHE.write() = None;
 
-        // Populate the cache from the (guard-cleared) empty registry, exactly as the
-        // first pipeline run of a process would.
+        let has_late_added =
+            |processors: &[std::sync::Arc<dyn PostProcessor>]| processors.iter().any(|p| p.name() == "late-added-215");
+
+        // Populate the cache, exactly as the first pipeline run of a process would.
         initialize_processor_cache().unwrap();
         let (_, middle, _) = get_processors_from_cache().unwrap();
-        assert_eq!(middle.len(), 0, "cache must start empty, matching the empty registry");
+        assert!(
+            !has_late_added(&middle),
+            "the processor under test must not be in the cache before it is registered"
+        );
 
         // Register a processor *after* the cache already holds a snapshot.
         crate::plugins::register_post_processor(Arc::new(LateAddedProcessor)).unwrap();
@@ -218,12 +233,10 @@ mod tests {
         // cache is `Some(_)`, so the newly registered processor would never appear.
         initialize_processor_cache().unwrap();
         let (_, middle, _) = get_processors_from_cache().unwrap();
-        assert_eq!(
-            middle.len(),
-            1,
+        assert!(
+            has_late_added(&middle),
             "the cache must pick up the post-registration processor"
         );
-        assert_eq!(middle[0].name(), "late-added-215");
 
         *PROCESSOR_CACHE.write() = None;
     }
