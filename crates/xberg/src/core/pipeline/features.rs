@@ -309,6 +309,40 @@ fn classify_code_chunk(node_types: &[String]) -> crate::types::extraction::Chunk
     ChunkType::CodeBlock
 }
 
+/// Names of the user-facing chunking settings that `try_code_chunks` silently
+/// disregards, restricted to those the caller set away from their default value.
+///
+/// Tree-sitter code-aware chunking always bypasses the general-purpose splitter,
+/// so `max_characters`/`overlap`/`chunker_type`/`trim`/`prepend_heading_context`
+/// are *always* ignored in that path — but warning about that unconditionally
+/// would fire on every code-chunked document, including the common case where
+/// the caller never touched chunking config and is relying on defaults. That's
+/// noise, not signal (#260): only settings the caller actually moved away from
+/// their default are worth surfacing.
+#[cfg(all(feature = "tree-sitter", feature = "chunking"))]
+fn overridden_code_chunk_settings(config: &crate::core::config::ChunkingConfig) -> Vec<&'static str> {
+    let default = crate::core::config::ChunkingConfig::default();
+    let mut overridden = Vec::new();
+
+    if config.max_characters != default.max_characters {
+        overridden.push("max_characters");
+    }
+    if config.overlap != default.overlap {
+        overridden.push("overlap");
+    }
+    if config.chunker_type != default.chunker_type {
+        overridden.push("chunker_type");
+    }
+    if config.trim != default.trim {
+        overridden.push("trim");
+    }
+    if config.prepend_heading_context != default.prepend_heading_context {
+        overridden.push("prepend_heading_context");
+    }
+
+    overridden
+}
+
 /// Map TSLP `CodeChunk`s directly to xberg `Chunk`s, bypassing text-splitter.
 ///
 /// When the extraction result contains code intelligence with non-empty chunks,
@@ -390,19 +424,26 @@ pub(super) fn execute_chunking(
         if let Some(code_chunks) = try_code_chunks(result, &chunking_config.sizing) {
             result.chunks = Some(code_chunks);
 
-            // Tree-sitter code-aware chunking bypasses the general-purpose splitter
-            // entirely, so the caller's max_characters/overlap/chunker_type/trim/
-            // prepend_heading_context are silently ignored — surface that (#260).
-            result.processing_warnings.push(ProcessingWarning {
-                source: Cow::Borrowed("chunking"),
-                message: Cow::Borrowed(
-                    "chunker_type/max_characters/overlap/trim/prepend_heading_context were \
-                     ignored: tree-sitter code intelligence produced structural (function/class) \
-                     chunks instead of honoring the configured chunker",
-                ),
-            });
-
             let resolved_config = chunking_config.resolve_preset();
+
+            // Tree-sitter code-aware chunking bypasses the general-purpose splitter
+            // entirely, so max_characters/overlap/chunker_type/trim/
+            // prepend_heading_context are silently ignored. Surface that (#260) — but
+            // only when the caller actually moved one of those settings away from its
+            // default; warning on every code-chunked document (the common case, where
+            // chunking config is left at defaults) would be noise, not signal.
+            let overridden_settings = overridden_code_chunk_settings(&resolved_config);
+            if !overridden_settings.is_empty() {
+                let verb = if overridden_settings.len() == 1 { "was" } else { "were" };
+                result.processing_warnings.push(ProcessingWarning {
+                    source: Cow::Borrowed("chunking"),
+                    message: Cow::Owned(format!(
+                        "{} {verb} ignored: tree-sitter code intelligence produced structural \
+                         (function/class) chunks instead of honoring the configured chunker",
+                        overridden_settings.join("/"),
+                    )),
+                });
+            }
             #[cfg(feature = "embeddings")]
             if let Some(ref embedding_config) = resolved_config.embedding
                 && let Some(ref mut chunks) = result.chunks
@@ -1556,24 +1597,12 @@ mod tests {
         }
     }
 
-    /// Regression test for #260: tree-sitter code-aware chunking silently bypasses the
-    /// user's `max_characters`/`overlap`/`chunker_type`/`trim`/`prepend_heading_context`
-    /// with no indication anything was overridden.
+    /// Builds an `ExtractedDocument` carrying a single tree-sitter code chunk, so
+    /// `try_code_chunks` takes the code-aware path in `execute_chunking`.
     #[cfg(feature = "tree-sitter")]
-    #[test]
-    fn code_chunking_override_pushes_processing_warning() {
+    fn make_code_result() -> ExtractedDocument {
         use crate::types::metadata::{CodeChunkInfo, CodeMetadata, FormatMetadata};
 
-        let config = crate::core::config::ExtractionConfig {
-            chunking: Some(crate::core::config::ChunkingConfig {
-                max_characters: 20,
-                overlap: 5,
-                trim: true,
-                chunker_type: crate::chunking::ChunkerType::Text,
-                ..Default::default()
-            }),
-            ..Default::default()
-        };
         let mut result = ExtractedDocument {
             content: "fn main() {}".to_string(),
             mime_type: std::borrow::Cow::Borrowed("text/x-rust"),
@@ -1589,16 +1618,66 @@ mod tests {
             }],
             data: None,
         }));
+        result
+    }
+
+    /// Regression test for #260: tree-sitter code-aware chunking silently bypasses the
+    /// user's `max_characters`/`overlap`/`chunker_type`/`trim`/`prepend_heading_context`
+    /// with no indication anything was overridden. When the caller has actually moved
+    /// settings away from their defaults, the exact overridden names must be surfaced.
+    #[cfg(feature = "tree-sitter")]
+    #[test]
+    fn code_chunking_override_pushes_processing_warning_naming_overridden_settings() {
+        let config = crate::core::config::ExtractionConfig {
+            chunking: Some(crate::core::config::ChunkingConfig {
+                max_characters: 20,
+                overlap: 5,
+                trim: true,
+                chunker_type: crate::chunking::ChunkerType::Text,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let mut result = make_code_result();
 
         execute_chunking(&mut result, &config, None).unwrap();
 
         assert!(result.chunks.is_some(), "code chunks must still be produced");
-        assert!(
-            result
-                .processing_warnings
-                .iter()
-                .any(|w| w.source == "chunking" && w.message.contains("were ignored")),
-            "expected a 'chunking' ProcessingWarning about the tree-sitter override, got: {:?}",
+        let warning = result
+            .processing_warnings
+            .iter()
+            .find(|w| w.source == "chunking")
+            .unwrap_or_else(|| panic!("expected a 'chunking' ProcessingWarning, got: {:?}", result.processing_warnings));
+        assert_eq!(warning.source, "chunking");
+        assert_eq!(
+            warning.message,
+            "max_characters/overlap were ignored: tree-sitter code intelligence produced \
+             structural (function/class) chunks instead of honoring the configured chunker",
+            "warning must name exactly the settings the caller overrode (trim=true and \
+             chunker_type=Text are both defaults here, so must not be listed)"
+        );
+    }
+
+    /// Regression test for #260 scoping: when the caller leaves chunking config at its
+    /// defaults, tree-sitter code-aware chunking must NOT push an override warning — every
+    /// code-chunked document would otherwise get a warning that is never actionable, which
+    /// is noise rather than signal.
+    #[cfg(feature = "tree-sitter")]
+    #[test]
+    fn code_chunking_with_default_settings_pushes_no_override_warning() {
+        let config = crate::core::config::ExtractionConfig {
+            chunking: Some(crate::core::config::ChunkingConfig::default()),
+            ..Default::default()
+        };
+        let mut result = make_code_result();
+
+        execute_chunking(&mut result, &config, None).unwrap();
+
+        assert!(result.chunks.is_some(), "code chunks must still be produced");
+        assert_eq!(
+            result.processing_warnings.len(),
+            0,
+            "no ProcessingWarning must be pushed when chunking config is left at defaults, got: {:?}",
             result.processing_warnings
         );
     }
