@@ -73,6 +73,41 @@ pub struct DocumentCounts {
     pub images: usize,
 }
 
+/// Structured per-language detection result: confidence, document share, and script —
+/// the information the ISO-code-only `detected_languages` list cannot convey (#261).
+///
+/// Populated by [`crate::language_detection`] alongside `detected_languages`, with one
+/// entry per language, in the same order as `detected_languages`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "api", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
+pub struct LanguageConfidence {
+    /// ISO 639-3 language code, matching the corresponding entry in `detected_languages`.
+    pub language: String,
+    /// Confidence for this language, in `[0.0, 1.0]`.
+    ///
+    /// In single-language mode this is whatlang's `Info::confidence()` for the whole
+    /// document. In multi-language mode this is the average whatlang confidence across
+    /// the document's 200-character chunks that were classified as this language.
+    pub confidence: f64,
+    /// Share of the document's analyzed content classified as this language, in `[0.0, 1.0]`.
+    ///
+    /// In single-language mode this is always `1.0`. In multi-language mode this is the
+    /// fraction of 200-character chunks classified as this language (chunks that did not
+    /// meet `min_confidence` for any language are excluded from the count but still count
+    /// toward the denominator).
+    pub proportion: f64,
+    /// Writing system whatlang detected for this language (e.g. `"Latin"`, `"Cyrillic"`).
+    pub script: String,
+    /// Whether this detection is considered reliable.
+    ///
+    /// In single-language mode this is whatlang's own `Info::is_reliable()` (confidence
+    /// above whatlang's internal 0.9 threshold). In multi-language mode this is the
+    /// chunk-averaged `confidence` above that same 0.9 threshold, since whatlang's
+    /// `is_reliable()` only applies to a single detection.
+    pub reliable: bool,
+}
+
 /// Document extracted by the core extraction pipeline.
 ///
 /// `extract` and `extract_batch` return an `ExtractionResult` envelope whose
@@ -108,6 +143,16 @@ pub struct ExtractedDocument {
     /// ISO 639-1 language codes detected in the document content.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detected_languages: Option<Vec<String>>,
+
+    /// Structured per-language detection results: confidence, document share, script,
+    /// and reliability, alongside the ISO-code-only `detected_languages` (#261).
+    ///
+    /// One entry per language in `detected_languages`, in the same order. `None` under
+    /// the same conditions as `detected_languages`: detection disabled, empty input
+    /// text, or no language met the configured `min_confidence`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
+    pub detected_language_confidences: Option<Vec<LanguageConfidence>>,
 
     /// Text chunks when chunking is enabled.
     ///
