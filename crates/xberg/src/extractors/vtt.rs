@@ -67,8 +67,12 @@ impl Default for WebVttExtractor {
 /// A single parsed cue.
 struct Cue {
     identifier: Option<String>,
-    start_millis: u64,
-    end_millis: u64,
+    /// `None` for a block that carried text but no timing line. Such a block is not a cue in
+    /// the WebVTT sense, but its text is still document content, so it is kept untimed rather
+    /// than discarded. Zero is deliberately not used as a stand-in: it would fabricate a
+    /// `00:00:00.000` start/end and skew the reported duration.
+    start_millis: Option<u64>,
+    end_millis: Option<u64>,
     speaker: Option<String>,
     text: String,
 }
@@ -106,7 +110,22 @@ fn parse_track(source: &str) -> ParsedTrack {
                 Ok(cue) => cues.push(cue),
                 Err(message) => warnings.push(warning(message)),
             },
-            BlockKind::Unknown => warnings.push(warning("block without a timing line skipped")),
+            // A block with no timing line is not a cue, but its text is still the document's
+            // content — dropping it loses everything in a file that is mislabelled `.vtt` or
+            // truncated before its timings. Keep the text as an untimed cue and warn.
+            BlockKind::Unknown => {
+                warnings.push(warning("block without a timing line kept as untimed text"));
+                let text = block.join("\n").trim().to_string();
+                if !text.is_empty() {
+                    cues.push(Cue {
+                        identifier: None,
+                        start_millis: None,
+                        end_millis: None,
+                        speaker: None,
+                        text,
+                    });
+                }
+            }
         }
     }
 
@@ -185,8 +204,8 @@ fn parse_cue(block: &[&str]) -> std::result::Result<Cue, &'static str> {
 
     Ok(Cue {
         identifier,
-        start_millis,
-        end_millis,
+        start_millis: Some(start_millis),
+        end_millis: Some(end_millis),
         speaker,
         text,
     })
@@ -293,8 +312,14 @@ fn warning(message: &'static str) -> ProcessingWarning {
 /// Attributes attached to a cue element.
 fn cue_attributes(cue: &Cue) -> AHashMap<String, String> {
     let mut attributes = AHashMap::new();
-    attributes.insert("start".to_string(), format_timestamp(cue.start_millis));
-    attributes.insert("end".to_string(), format_timestamp(cue.end_millis));
+    // An untimed block gets no start/end attributes at all rather than a fabricated
+    // `00:00:00.000`, so a consumer can tell "not timed" from "starts at zero".
+    if let Some(start_millis) = cue.start_millis {
+        attributes.insert("start".to_string(), format_timestamp(start_millis));
+    }
+    if let Some(end_millis) = cue.end_millis {
+        attributes.insert("end".to_string(), format_timestamp(end_millis));
+    }
     if let Some(identifier) = &cue.identifier {
         attributes.insert("cue_id".to_string(), identifier.clone());
     }
@@ -369,10 +394,13 @@ impl InternalDocumentExtractor for WebVttExtractor {
             title: parsed.title,
             ..Default::default()
         };
+        // `cue_count` counts real (timed) cues only — untimed blocks are recovered text, not
+        // cues, and counting them would change what this metadata field has always meant.
+        let timed_cue_count = parsed.cues.iter().filter(|cue| cue.start_millis.is_some()).count();
         metadata
             .additional
-            .insert(Cow::Borrowed("cue_count"), serde_json::json!(parsed.cues.len()));
-        if let Some(last) = parsed.cues.iter().map(|cue| cue.end_millis).max() {
+            .insert(Cow::Borrowed("cue_count"), serde_json::json!(timed_cue_count));
+        if let Some(last) = parsed.cues.iter().filter_map(|cue| cue.end_millis).max() {
             metadata
                 .additional
                 .insert(Cow::Borrowed("duration"), serde_json::json!(format_timestamp(last)));
@@ -444,5 +472,43 @@ mod tests {
         assert_eq!(parsed.cues.len(), 1);
         assert_eq!(parsed.cues[0].text, "Hello");
         assert_eq!(parsed.warnings.len(), 1);
+    }
+
+    /// A file with no timing line anywhere — a plain-text file that happens to be named
+    /// `.vtt`, or a track truncated before its timings — used to extract to nothing at all:
+    /// every block was classified `Unknown` and discarded, leaving only a warning. The text
+    /// is now recovered as untimed cues.
+    #[test]
+    fn should_keep_text_of_blocks_that_have_no_timing_line() {
+        let parsed = parse_track("WEBVTT\n\nFirst stray line.\n\nSecond stray line.\n");
+
+        assert_eq!(parsed.cues.len(), 2);
+        assert_eq!(parsed.cues[0].text, "First stray line.");
+        assert_eq!(parsed.cues[1].text, "Second stray line.");
+        assert_eq!(parsed.cues[0].start_millis, None, "an untimed block must not fabricate a start");
+        assert_eq!(parsed.cues[0].end_millis, None, "an untimed block must not fabricate an end");
+        assert_eq!(parsed.warnings.len(), 2, "each dropped-then-recovered block warns");
+    }
+
+    /// The recovered text must not be mistaken for a real cue: `cue_attributes` emits no
+    /// `start`/`end` keys at all rather than a fabricated `00:00:00.000`, which a consumer
+    /// would be unable to tell from a cue that genuinely starts at zero.
+    #[test]
+    fn should_omit_timing_attributes_for_an_untimed_block() {
+        let parsed = parse_track("WEBVTT\n\nStray line.\n");
+        let attributes = cue_attributes(&parsed.cues[0]);
+
+        assert!(!attributes.contains_key("start"), "got {attributes:?}");
+        assert!(!attributes.contains_key("end"), "got {attributes:?}");
+    }
+
+    /// A timed cue is unaffected by the untimed-block handling.
+    #[test]
+    fn should_still_emit_timing_attributes_for_a_timed_cue() {
+        let parsed = parse_track("WEBVTT\n\n00:00:01.000 --> 00:00:02.500\nHello\n");
+        let attributes = cue_attributes(&parsed.cues[0]);
+
+        assert_eq!(attributes.get("start").map(String::as_str), Some("00:00:01.000"));
+        assert_eq!(attributes.get("end").map(String::as_str), Some("00:00:02.500"));
     }
 }
