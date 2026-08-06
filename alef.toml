@@ -1931,7 +1931,6 @@ fields_optional = [
   "translation",
   "page_classifications",
   "redaction_report",
-  "formatted_content",
 ]
 fields_array = [
   "results",

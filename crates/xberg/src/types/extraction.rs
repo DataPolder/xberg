@@ -406,10 +406,20 @@ pub struct ExtractedDocument {
 
     /// Pre-rendered content in the requested output format.
     ///
-    /// Populated during `derive_extraction_result` before tree derivation consumes
-    /// element data. `apply_output_format` swaps this into `content` at the end
-    /// of the pipeline, after post-processors have operated on plain text.
+    /// Pipeline-internal scratch space, not a result field. `derive_extraction_result`
+    /// renders it before tree derivation consumes the element data, post-processors may
+    /// rewrite it alongside `content`, and `apply_output_format` then *moves* it into
+    /// `content` as the last pipeline step. Every document returned by `extract_bytes` /
+    /// `extract_file` — and every nested archive or email child — therefore carries
+    /// `None` here, with the rendering in `content`.
+    ///
+    /// It stays `pub` because it is part of the Rust plugin contract: a
+    /// `DocumentExtractor` may return it pre-rendered, and a post-processor that rewrites
+    /// `content` must rewrite this alongside it or the rendering is discarded as stale
+    /// (see `core::pipeline::discard_diverged_formatted_content`). It is hidden from the
+    /// language bindings, which only ever observe the post-pipeline document.
     #[serde(skip)]
+    #[cfg_attr(alef, alef(skip))]
     pub formatted_content: Option<String>,
 
     /// Structured hOCR document for the OCR+layout pipeline.

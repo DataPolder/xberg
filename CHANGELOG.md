@@ -28,6 +28,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   recognition confidence, supports all eight Gen2 model groups, and accepts tuning under
   `backend_options`.
 
+### Removed
+
+- **Breaking (bindings):** `ExtractedDocument.formatted_content` / `formattedContent` is no longer
+  exposed by any language binding (Python, Node, Ruby, PHP, Go, Java, C#, Elixir, Dart, Swift,
+  Kotlin, Zig, WASM, C FFI), and the C symbol `xberg_extracted_document_formatted_content` is gone.
+  The field is pipeline-internal scratch space: `apply_output_format` moves it into `content` as the
+  last pipeline step, so every document a binding could ever observe carried `null` there. Read the
+  rendering from `content` — it is already in the configured `output_format`. The field remains
+  `pub` on the Rust type, where extractor and post-processor plugins legitimately use it.
+
 ### Security
 
 - `biblib` moves from the exact pin `=0.4.3` to `0.8`, taking the citation parser off `quick-xml`
