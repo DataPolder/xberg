@@ -737,6 +737,24 @@ const NON_TEXT_BLOCK_TYPES: [TessPolyBlockType; 6] = [
     TessPolyBlockType::PT_VERT_LINE,
 ];
 
+/// Whether `auto_rotate` was requested by the caller but orientation detection
+/// could not run because the `auto-rotate` build feature is not compiled in.
+///
+/// Extracted as a pure function, separate from the surrounding OCR pipeline and
+/// its FFI calls, so the request-vs-availability logic is unit-testable without
+/// a live Tesseract API instance (#309).
+fn is_auto_rotate_requested_but_unavailable(auto_rotate_enabled: bool) -> bool {
+    #[cfg(auto_rotate)]
+    {
+        let _ = auto_rotate_enabled;
+        false
+    }
+    #[cfg(not(auto_rotate))]
+    {
+        auto_rotate_enabled
+    }
+}
+
 /// Inserts the `word_iterator_skipped_count` metadata key only when at least one
 /// word was actually skipped by the Tesseract result iterator, so callers can use
 /// the key's absence (rather than a `0` value) as the "clean extraction" signal.
@@ -1058,6 +1076,15 @@ pub(super) fn perform_ocr(
     let auto_rotate_enabled =
         config.preprocessing.as_ref().map(|p| p.auto_rotate).unwrap_or(false) || config.auto_rotate;
 
+    // Recorded into `metadata` below (once `metadata` exists) under the
+    // `auto_rotate_unavailable` key, mirroring `pre_formatted` and
+    // `word_iterator_skipped_count`: `OcrExtractionResult` has no dedicated
+    // warnings field, so `TesseractBackend` reads this key back out and turns
+    // it into a `ProcessingWarning` the caller actually sees (#309). Without
+    // it, a user's explicit `auto_rotate = true` silently does nothing on a
+    // build without the `auto-rotate` feature.
+    let auto_rotate_unavailable = is_auto_rotate_requested_but_unavailable(auto_rotate_enabled);
+
     #[cfg(not(auto_rotate))]
     if auto_rotate_enabled {
         tracing::warn!(
@@ -1261,6 +1288,9 @@ pub(super) fn perform_ocr(
             "source_format".to_string(),
             serde_json::Value::String("hocr".to_string()),
         );
+    }
+    if auto_rotate_unavailable {
+        metadata.insert("auto_rotate_unavailable".to_string(), serde_json::Value::Bool(true));
     }
 
     if mean_text_conf >= 0 {
@@ -1718,6 +1748,21 @@ mod tests {
         assert!(metadata.is_empty());
     }
 
+    /// When `auto_rotate` is not requested, the flag must be `false`
+    /// regardless of which build compiled this test (#309).
+    #[test]
+    fn should_report_auto_rotate_available_when_not_requested() {
+        assert!(!is_auto_rotate_requested_but_unavailable(false));
+    }
+
+    /// When `auto_rotate` is requested, the flag reflects whether *this* build
+    /// has the `auto-rotate` feature compiled in — `true` (unavailable) on a
+    /// build without it, `false` (available) on a build with it (#309).
+    #[test]
+    fn should_report_auto_rotate_unavailable_only_without_the_feature() {
+        assert_eq!(is_auto_rotate_requested_but_unavailable(true), cfg!(not(auto_rotate)));
+    }
+
     fn word_at(left: u32, top: u32, width: u32, height: u32, text: &str) -> crate::table_core::HocrWord {
         crate::table_core::HocrWord {
             text: text.to_string(),
@@ -2030,7 +2075,10 @@ mod tests {
         );
 
         assert_eq!(prepared.width, 2, "max_image_dimension=2 must clamp the resized width");
-        assert_eq!(prepared.height, 2, "max_image_dimension=2 must clamp the resized height");
+        assert_eq!(
+            prepared.height, 2,
+            "max_image_dimension=2 must clamp the resized height"
+        );
     }
 
     #[test]
