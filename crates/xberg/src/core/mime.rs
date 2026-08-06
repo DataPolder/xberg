@@ -1259,11 +1259,21 @@ pub fn get_extensions_for_mime(mime_type: &str) -> Result<Vec<String>> {
 /// Formats that have no registered file extension (such as source code,
 /// which is detected dynamically) are not included.
 ///
+/// The static `EXT_TO_MIME` table lists every format the *codebase* knows how
+/// to describe, regardless of which Cargo features were compiled in. Advertising
+/// that table directly would claim support for extractors that may not exist in
+/// this build (see GH#1387). To keep the advertised catalogue honest, the table
+/// is intersected with the document extractor registry: an extension is only
+/// included if some registered extractor actually claims its MIME type in this
+/// build. This can never drift from reality and automatically covers
+/// third-party extractors registered at runtime.
+///
 /// The list is sorted alphabetically by file extension.
 ///
 /// # Returns
 ///
-/// A vector of [`SupportedFormat`] entries sorted by extension.
+/// A vector of [`SupportedFormat`] entries sorted by extension, limited to
+/// formats with a registered extractor in this build.
 ///
 /// # Example
 ///
@@ -1272,11 +1282,18 @@ pub fn get_extensions_for_mime(mime_type: &str) -> Result<Vec<String>> {
 ///
 /// let formats = list_supported_formats();
 /// assert!(!formats.is_empty());
-/// assert!(formats.iter().any(|f| f.extension == "pdf"));
 /// ```
 pub fn list_supported_formats() -> Vec<SupportedFormat> {
+    if let Err(error) = crate::extractors::ensure_initialized() {
+        tracing::warn!(%error, "failed to initialize document extractor registry before listing formats");
+    }
+
+    let registry = crate::plugins::registry::get_document_extractor_registry();
+    let registry_guard = registry.read();
+
     let mut formats: Vec<SupportedFormat> = EXT_TO_MIME
         .iter()
+        .filter(|(_ext, mime)| registry_guard.get(mime).is_ok())
         .map(|(ext, mime)| SupportedFormat {
             extension: ext.to_string(),
             mime_type: mime.to_string(),
@@ -1838,16 +1855,22 @@ mod tests {
 
     #[test]
     fn test_list_supported_formats_includes_common_formats() {
+        // `list_supported_formats` now filters against the registered extractor set
+        // (#308), so assertions for extensions gated behind optional Cargo features
+        // only hold when those features are compiled in.
         let formats = list_supported_formats();
         let extensions: Vec<&str> = formats.iter().map(|f| f.extension.as_str()).collect();
 
+        #[cfg(feature = "pdf")]
         assert!(extensions.contains(&"pdf"), "Should include pdf");
         assert!(extensions.contains(&"md"), "Should include md");
+        #[cfg(feature = "office")]
         assert!(extensions.contains(&"docx"), "Should include docx");
         assert!(extensions.contains(&"html"), "Should include html");
         assert!(extensions.contains(&"txt"), "Should include txt");
         assert!(extensions.contains(&"csv"), "Should include csv");
         assert!(extensions.contains(&"json"), "Should include json");
+        #[cfg(any(feature = "excel", feature = "excel-wasm"))]
         assert!(extensions.contains(&"xlsx"), "Should include xlsx");
     }
 
