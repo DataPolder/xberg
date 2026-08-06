@@ -55,6 +55,7 @@ const MAX_METADATA_ENTRIES_PER_SHEET: usize = 200;
 
 #[cfg(feature = "office")]
 use crate::extraction::office_metadata::{
+    app_properties::{DOC_SECURITY_KEY, decode_doc_security_flags},
     extract_core_properties, extract_custom_properties, extract_xlsx_app_properties,
 };
 #[cfg(feature = "office")]
@@ -1208,6 +1209,15 @@ fn extract_xlsx_office_metadata_from_archive<R: std::io::Read + std::io::Seek>(
         }
         if let Some(app_version) = app.app_version {
             metadata.insert("application_version".to_string(), app_version);
+        }
+        // #230: surface the raw DocSecurity integer plus its decoded ECMA-376 flags.
+        // `XlsxAppProperties` never reaches `FormatMetadata::Excel`, so without this the
+        // workbook's protection state was discarded entirely.
+        if let Some(raw) = app.doc_security {
+            metadata.insert(DOC_SECURITY_KEY.to_string(), raw.to_string());
+            for (key, value) in decode_doc_security_flags(raw) {
+                metadata.insert(key.to_string(), value.to_string());
+            }
         }
     }
 

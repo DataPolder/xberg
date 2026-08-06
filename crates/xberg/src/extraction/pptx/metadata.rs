@@ -16,6 +16,7 @@ use roxmltree::Document;
 
 #[cfg(feature = "office")]
 use crate::extraction::office_metadata::{
+    app_properties::{DOC_SECURITY_KEY, decode_doc_security_flags},
     extract_core_properties, extract_custom_properties, extract_pptx_app_properties,
 };
 #[cfg(feature = "office")]
@@ -117,6 +118,15 @@ pub(super) fn extract_metadata<R: Read + Seek>(
                 }
                 if let Some(app_version) = app.app_version {
                     metadata_map.insert("application_version".to_string(), app_version);
+                }
+                // #230: surface the raw DocSecurity integer plus its decoded ECMA-376
+                // flags. `PptxAppProperties` never reaches `FormatMetadata::Pptx`, so
+                // without this the presentation's protection state was discarded entirely.
+                if let Some(raw) = app.doc_security {
+                    metadata_map.insert(DOC_SECURITY_KEY.to_string(), raw.to_string());
+                    for (key, value) in decode_doc_security_flags(raw) {
+                        metadata_map.insert(key.to_string(), value.to_string());
+                    }
                 }
             }
             Err(e) => push_warning(

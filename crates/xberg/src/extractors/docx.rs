@@ -961,6 +961,20 @@ impl InternalDocumentExtractor for DocxExtractor {
                     serde_json::Value::String(application.clone()),
                 );
             }
+            // #230: DocSecurity was parsed into `app.doc_security` and then only ever
+            // reachable as an opaque integer buried in the format-specific metadata.
+            // Surface both the raw value and the decoded ECMA-376 flags so a consumer
+            // can tell a read-only-recommended or password-protected document apart
+            // without knowing the bit layout.
+            if let Some(raw) = app.doc_security {
+                metadata_map.insert(
+                    Cow::Borrowed(office_metadata::app_properties::DOC_SECURITY_KEY),
+                    serde_json::Value::Number(raw.into()),
+                );
+                for (key, value) in office_metadata::app_properties::decode_doc_security_flags(raw) {
+                    metadata_map.insert(Cow::Borrowed(key), serde_json::Value::Bool(value));
+                }
+            }
             docx_app_properties = Some(app);
         }
 

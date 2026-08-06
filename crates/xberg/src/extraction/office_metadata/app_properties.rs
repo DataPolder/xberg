@@ -108,6 +108,50 @@ pub struct PptxAppProperties {
     pub slide_titles: Vec<String>,
 }
 
+/// Metadata key carrying the raw, undecoded `DocSecurity` integer.
+pub(crate) const DOC_SECURITY_KEY: &str = "doc_security";
+
+/// Decode a `DocSecurity` bit field into named boolean flags.
+///
+/// `DocSecurity` (ECMA-376 Part 1 §22.2.2.7, as clarified by MS-OI29500) packs four
+/// independent restrictions into one integer: `1` = password protected, `2` = read-only
+/// recommended, `4` = read-only enforced, `8` = locked for annotation. `doc_security` (see
+/// [`DocxAppProperties::doc_security`] and its XLSX/PPTX equivalents) is parsed and stored
+/// as that raw integer; extractors decode it here so consumers see named flags in
+/// `Metadata::additional` rather than an opaque bit field (#230).
+///
+/// The pairs are returned in ascending bit order. Higher-order bits beyond `8` are not part
+/// of the schema and are ignored.
+///
+/// All four flags are always returned, including when `raw` is `0`: an explicit `false`
+/// records that the document *declares* no security restrictions, as opposed to the
+/// `doc_security: None` case (no `DocSecurity` element at all), where nothing should be
+/// decoded because there is no data to decode. Security-relevant booleans are exactly the
+/// kind of value where "absent" and "false" must not be conflated by convention.
+///
+/// Returns `(key, value)` pairs; the keys are stable strings suitable for use in a
+/// `Metadata::additional` map.
+#[cfg_attr(alef, alef(skip))]
+pub fn decode_doc_security_flags(raw: i32) -> [(&'static str, bool); 4] {
+    const PASSWORD_PROTECTED_BIT: i32 = 1;
+    const READ_ONLY_RECOMMENDED_BIT: i32 = 2;
+    const READ_ONLY_ENFORCED_BIT: i32 = 4;
+    const LOCKED_FOR_ANNOTATIONS_BIT: i32 = 8;
+
+    [
+        ("doc_security_password_protected", raw & PASSWORD_PROTECTED_BIT != 0),
+        (
+            "doc_security_read_only_recommended",
+            raw & READ_ONLY_RECOMMENDED_BIT != 0,
+        ),
+        ("doc_security_read_only_enforced", raw & READ_ONLY_ENFORCED_BIT != 0),
+        (
+            "doc_security_locked_for_annotations",
+            raw & LOCKED_FOR_ANNOTATIONS_BIT != 0,
+        ),
+    ]
+}
+
 /// Extract DOCX application properties from an Office Open XML document
 ///
 /// Parses `docProps/app.xml` and extracts Word-specific metadata.
@@ -471,6 +515,105 @@ mod tests {
         assert_eq!(
             titles_for_heading(doc.root_element(), "named range"),
             vec!["Print_Area".to_string()]
+        );
+    }
+
+    #[test]
+    fn should_decode_zero_doc_security_as_all_flags_false() {
+        assert_eq!(
+            decode_doc_security_flags(0),
+            [
+                ("doc_security_password_protected", false),
+                ("doc_security_read_only_recommended", false),
+                ("doc_security_read_only_enforced", false),
+                ("doc_security_locked_for_annotations", false),
+            ]
+        );
+    }
+
+    #[test]
+    fn should_map_each_doc_security_bit_to_its_ecma376_meaning() {
+        // ECMA-376 §22.2.2.7: 1 = password protected, 2 = read-only recommended,
+        // 4 = read-only enforced, 8 = locked for annotation. Bits 1 and 2 are
+        // adjacent and easy to transpose, so each is pinned individually.
+        assert_eq!(
+            decode_doc_security_flags(1),
+            [
+                ("doc_security_password_protected", true),
+                ("doc_security_read_only_recommended", false),
+                ("doc_security_read_only_enforced", false),
+                ("doc_security_locked_for_annotations", false),
+            ]
+        );
+        assert_eq!(
+            decode_doc_security_flags(2),
+            [
+                ("doc_security_password_protected", false),
+                ("doc_security_read_only_recommended", true),
+                ("doc_security_read_only_enforced", false),
+                ("doc_security_locked_for_annotations", false),
+            ]
+        );
+        assert_eq!(
+            decode_doc_security_flags(4),
+            [
+                ("doc_security_password_protected", false),
+                ("doc_security_read_only_recommended", false),
+                ("doc_security_read_only_enforced", true),
+                ("doc_security_locked_for_annotations", false),
+            ]
+        );
+        assert_eq!(
+            decode_doc_security_flags(8),
+            [
+                ("doc_security_password_protected", false),
+                ("doc_security_read_only_recommended", false),
+                ("doc_security_read_only_enforced", false),
+                ("doc_security_locked_for_annotations", true),
+            ]
+        );
+    }
+
+    #[test]
+    fn should_decode_combined_read_only_recommended_and_enforced_bits() {
+        // 6 = 2 (read-only recommended) + 4 (read-only enforced)
+        assert_eq!(
+            decode_doc_security_flags(6),
+            [
+                ("doc_security_password_protected", false),
+                ("doc_security_read_only_recommended", true),
+                ("doc_security_read_only_enforced", true),
+                ("doc_security_locked_for_annotations", false),
+            ]
+        );
+    }
+
+    #[test]
+    fn should_decode_all_doc_security_bits_when_all_set() {
+        // 15 = 1 + 2 + 4 + 8, all four restrictions active
+        assert_eq!(
+            decode_doc_security_flags(15),
+            [
+                ("doc_security_password_protected", true),
+                ("doc_security_read_only_recommended", true),
+                ("doc_security_read_only_enforced", true),
+                ("doc_security_locked_for_annotations", true),
+            ]
+        );
+    }
+
+    #[test]
+    fn should_ignore_doc_security_bits_outside_the_ecma376_schema() {
+        // Bit 16 (0x10) is outside the DocSecurity schema and must not be
+        // surfaced as, or conflated with, any of the four named flags.
+        assert_eq!(
+            decode_doc_security_flags(16),
+            [
+                ("doc_security_password_protected", false),
+                ("doc_security_read_only_recommended", false),
+                ("doc_security_read_only_enforced", false),
+                ("doc_security_locked_for_annotations", false),
+            ]
         );
     }
 
