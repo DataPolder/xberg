@@ -8,6 +8,7 @@
 
 use serde::Serialize;
 
+use crate::types::annotations::PdfAnnotation;
 use crate::types::internal::{ElementKind, InternalDocument, InternalElement};
 
 use super::common::{
@@ -24,6 +25,9 @@ pub struct JsonDocument {
     pub title: Option<String>,
     /// Body content nodes.
     pub body: Vec<JsonNode>,
+    /// PDF annotations extracted from the document (issue #63), if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub annotations: Option<Vec<PdfAnnotation>>,
 }
 
 /// A node in the JSON document tree.
@@ -460,7 +464,11 @@ fn build_json_document(doc: &InternalDocument) -> JsonDocument {
         }
     }
 
-    JsonDocument { title, body: root_body }
+    JsonDocument {
+        title,
+        body: root_body,
+        annotations: doc.annotations.clone(),
+    }
 }
 
 /// Read a named attribute off an element, if present.

@@ -25,6 +25,12 @@ fn source_document() -> ExtractedDocument {
         content: Some("a highlighted note".to_string()),
         page_number: 7,
         bounding_box: None,
+        author: None,
+        modified: None,
+        color: None,
+        subject: None,
+        quad_points: None,
+        marked_text: None,
     }]);
     result.uris = Some(vec![ExtractedUri {
         url: "https://example.com/a".to_string(),

@@ -681,6 +681,12 @@ mod enrichment_preservation_tests {
             content: Some(format!("note on {page_number}")),
             page_number,
             bounding_box: None,
+            author: None,
+            modified: None,
+            color: None,
+            subject: None,
+            quad_points: None,
+            marked_text: None,
         }
     }
 

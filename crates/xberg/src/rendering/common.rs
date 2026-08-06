@@ -507,6 +507,64 @@ pub(crate) fn parse_metadata_entries(text: &str) -> Vec<(&str, &str)> {
         .collect()
 }
 
+/// Human-readable label for a [`PdfAnnotationType`], shared by every
+/// renderer's annotation appendix (issue #63).
+pub(crate) fn annotation_type_label(kind: crate::types::annotations::PdfAnnotationType) -> &'static str {
+    use crate::types::annotations::PdfAnnotationType;
+    match kind {
+        PdfAnnotationType::Text => "Text",
+        PdfAnnotationType::Highlight => "Highlight",
+        PdfAnnotationType::Link => "Link",
+        PdfAnnotationType::Stamp => "Stamp",
+        PdfAnnotationType::Underline => "Underline",
+        PdfAnnotationType::StrikeOut => "StrikeOut",
+        PdfAnnotationType::Squiggly => "Squiggly",
+        PdfAnnotationType::Ink => "Ink",
+        PdfAnnotationType::Square => "Square",
+        PdfAnnotationType::Circle => "Circle",
+        PdfAnnotationType::Polygon => "Polygon",
+        PdfAnnotationType::PolyLine => "PolyLine",
+        PdfAnnotationType::Line => "Line",
+        PdfAnnotationType::Caret => "Caret",
+        PdfAnnotationType::FileAttachment => "FileAttachment",
+        PdfAnnotationType::Sound => "Sound",
+        PdfAnnotationType::Movie => "Movie",
+        PdfAnnotationType::Other => "Other",
+    }
+}
+
+/// The best available text for a rendered annotation: the QuadPoints-derived
+/// marked-up text (Highlight/Underline/StrikeOut/Squiggly) takes priority
+/// over the free-form comment/URL in `content`, since the marked text is what
+/// the annotation is actually about.
+pub(crate) fn annotation_display_text(annotation: &crate::types::annotations::PdfAnnotation) -> Option<&str> {
+    annotation
+        .marked_text
+        .as_deref()
+        .or(annotation.content.as_deref())
+        .filter(|s| !s.is_empty())
+}
+
+/// Escape a string for safe inclusion in HTML text content (not attributes).
+///
+/// Only the three characters that matter for text nodes are escaped, matching
+/// the minimal escaping `comrak`'s own HTML formatter performs for body text.
+pub(crate) fn escape_html_text(input: &str) -> Cow<'_, str> {
+    if !input.contains(['&', '<', '>']) {
+        return Cow::Borrowed(input);
+    }
+    let mut out = String::with_capacity(input.len() + 16);
+    for c in input.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            _ => out.push(c),
+        }
+    }
+    Cow::Owned(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -919,5 +977,71 @@ mod tests {
     #[test]
     fn test_normalize_inline_text_no_change() {
         assert_eq!(normalize_inline_text("Hello world"), "Hello world");
+    }
+
+    #[test]
+    fn test_annotation_type_label_highlight() {
+        assert_eq!(
+            annotation_type_label(crate::types::annotations::PdfAnnotationType::Highlight),
+            "Highlight"
+        );
+    }
+
+    #[test]
+    fn test_annotation_type_label_previously_collapsed_variant() {
+        assert_eq!(
+            annotation_type_label(crate::types::annotations::PdfAnnotationType::Squiggly),
+            "Squiggly"
+        );
+        assert_eq!(
+            annotation_type_label(crate::types::annotations::PdfAnnotationType::FileAttachment),
+            "FileAttachment"
+        );
+    }
+
+    fn make_annotation(content: Option<&str>, marked_text: Option<&str>) -> crate::types::annotations::PdfAnnotation {
+        crate::types::annotations::PdfAnnotation {
+            annotation_type: crate::types::annotations::PdfAnnotationType::Highlight,
+            content: content.map(str::to_string),
+            page_number: 1,
+            bounding_box: None,
+            author: None,
+            modified: None,
+            color: None,
+            subject: None,
+            quad_points: None,
+            marked_text: marked_text.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn test_annotation_display_text_prefers_marked_text() {
+        let annotation = make_annotation(Some("a comment"), Some("the highlighted words"));
+        assert_eq!(annotation_display_text(&annotation), Some("the highlighted words"));
+    }
+
+    #[test]
+    fn test_annotation_display_text_falls_back_to_content() {
+        let annotation = make_annotation(Some("a comment"), None);
+        assert_eq!(annotation_display_text(&annotation), Some("a comment"));
+    }
+
+    #[test]
+    fn test_annotation_display_text_none_when_both_absent() {
+        let annotation = make_annotation(None, None);
+        assert_eq!(annotation_display_text(&annotation), None);
+    }
+
+    #[test]
+    fn test_escape_html_text_no_special_chars_returns_borrowed() {
+        let result = escape_html_text("plain text");
+        assert!(matches!(result, Cow::Borrowed(_)));
+        assert_eq!(result, "plain text");
+    }
+
+    #[test]
+    fn test_escape_html_text_escapes_ampersand_and_angle_brackets() {
+        let result = escape_html_text("a < b & c > d");
+        assert_eq!(result, "a &lt; b &amp; c &gt; d");
     }
 }
