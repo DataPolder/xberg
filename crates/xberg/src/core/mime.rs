@@ -1866,6 +1866,7 @@ mod tests {
         assert!(extensions.contains(&"md"), "Should include md");
         #[cfg(feature = "office")]
         assert!(extensions.contains(&"docx"), "Should include docx");
+        #[cfg(feature = "html")]
         assert!(extensions.contains(&"html"), "Should include html");
         assert!(extensions.contains(&"txt"), "Should include txt");
         assert!(extensions.contains(&"csv"), "Should include csv");
