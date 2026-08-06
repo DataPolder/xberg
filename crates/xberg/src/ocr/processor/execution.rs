@@ -13,7 +13,7 @@ use crate::image::normalize_image_dpi_owned;
 use crate::ocr::cache::OcrCache;
 use crate::ocr::conversion::{TsvRow, iterator_word_to_element, tsv_row_to_element};
 use crate::ocr::error::OcrError;
-use crate::ocr::hocr_parser::parse_hocr_to_internal_document;
+use crate::ocr::hocr_parser::{HOCR_FONT_SIZE_ATTRIBUTE, parse_hocr_to_internal_document};
 #[cfg(feature = "pdf")]
 use crate::ocr::table::post_process_table;
 use crate::ocr::table::{extract_words_from_tsv, reconstruct_table, table_to_markdown};
@@ -189,6 +189,70 @@ where
     tracing::debug!(stage, timestamp = format!("{timestamp:.3}"), "{}", details());
 }
 
+/// Multiple of the page's average word height used as the vertical-gap
+/// threshold for splitting table candidate words into separate regions
+/// (#177). Normal row spacing inside one table rarely exceeds ~1.5x the
+/// average word height, so a wider multiple avoids splitting a single
+/// table's own row gaps while still separating genuinely distinct tables
+/// (or a table from surrounding prose) on the same page.
+const TABLE_REGION_GAP_HEIGHT_MULTIPLIER: u32 = 3;
+
+/// Minimum number of words for a spatial region to be treated as a table
+/// candidate. Mirrors the previous whole-page threshold so a single small
+/// table on an otherwise text-only page is not over-fabricated.
+const MIN_TABLE_CANDIDATE_WORDS: usize = 6;
+
+/// Split table-candidate words into vertically separated regions.
+///
+/// Tesseract's TSV output has no notion of "this is a separate table from
+/// that one" — [`reconstruct_table`] previously ran once over every
+/// table-confidence word on the page, producing at most one table whose
+/// bounding box spanned the union of all such words, even when the page had
+/// several independent tables separated by paragraphs of prose (#177).
+///
+/// This groups words by contiguous vertical extent: a gap between one row's
+/// bottom edge and the next word's top edge wider than
+/// `TABLE_REGION_GAP_HEIGHT_MULTIPLIER` times the average word height starts
+/// a new region. Each region is reconstructed independently, giving each
+/// table its own bounding box.
+fn cluster_words_into_table_regions(words: &[crate::table_core::HocrWord]) -> Vec<Vec<crate::table_core::HocrWord>> {
+    if words.is_empty() {
+        return Vec::new();
+    }
+
+    let mut sorted: Vec<&crate::table_core::HocrWord> = words.iter().collect();
+    sorted.sort_by(|a, b| a.top.cmp(&b.top).then(a.left.cmp(&b.left)));
+
+    let avg_height: u32 = {
+        let total: u32 = sorted.iter().map(|w| w.height).sum();
+        (total / sorted.len() as u32).max(1)
+    };
+    let region_gap_threshold = avg_height * TABLE_REGION_GAP_HEIGHT_MULTIPLIER;
+
+    let mut regions: Vec<Vec<crate::table_core::HocrWord>> = Vec::new();
+    let mut current_region: Vec<crate::table_core::HocrWord> = Vec::new();
+    let mut current_bottom: u32 = 0;
+
+    for word in sorted {
+        let word_bottom = word.top + word.height;
+        let is_new_region =
+            !current_region.is_empty() && word.top.saturating_sub(current_bottom) > region_gap_threshold;
+
+        if is_new_region {
+            regions.push(std::mem::take(&mut current_region));
+            current_bottom = 0;
+        }
+
+        current_bottom = current_bottom.max(word_bottom);
+        current_region.push(word.clone());
+    }
+    if !current_region.is_empty() {
+        regions.push(current_region);
+    }
+
+    regions
+}
+
 /// Build content with OCR tables inlined at their correct vertical positions.
 ///
 /// Parses TSV word positions to separate table words from non-table words,
@@ -341,6 +405,67 @@ fn build_content_with_inline_tables(tsv_data: &str, tables: &[OcrTable], min_con
     }
 
     output
+}
+
+/// Minimum ratio of a paragraph's average hOCR font size (`x_fsize`) to the
+/// page's median paragraph font size before the paragraph is promoted to a
+/// markdown heading (#185). Chosen so ordinary size variation between body
+/// paragraphs doesn't trigger false positives, while genuinely larger
+/// heading text (typically >=1.3x body size) does.
+const HEADING_FONT_SIZE_RATIO: f64 = 1.3;
+
+/// Maximum word count for a large-font paragraph to still be treated as a
+/// heading. Headings are short by convention; a large-font paragraph with
+/// many words is more likely emphasized body text or a pull-quote.
+const HEADING_MAX_WORD_COUNT: usize = 12;
+
+/// Read the paragraph-average hOCR font size stored by `hocr_parser` (#185).
+fn element_font_size(element: &crate::types::internal::InternalElement) -> Option<f64> {
+    element
+        .attributes
+        .as_ref()?
+        .get(HOCR_FONT_SIZE_ATTRIBUTE)?
+        .parse::<f64>()
+        .ok()
+}
+
+/// Render hOCR-derived paragraphs to markdown, promoting large-font, short,
+/// single-line paragraphs to `##` headings using the average `x_fsize`
+/// captured per paragraph by `hocr_parser::parse_hocr_to_internal_document`
+/// (#185). Paragraphs without a captured font size, or on a page where no
+/// paragraph reports one, render unchanged — matching the previous flat
+/// paragraph-join behavior.
+fn render_hocr_elements_as_markdown(elements: &[crate::types::internal::InternalElement]) -> String {
+    let mut font_sizes: Vec<f64> = elements.iter().filter_map(element_font_size).collect();
+    let median_font_size = if font_sizes.is_empty() {
+        None
+    } else {
+        font_sizes.sort_by(f64::total_cmp);
+        Some(font_sizes[font_sizes.len() / 2])
+    };
+
+    elements
+        .iter()
+        .filter_map(|e| match e.kind {
+            ElementKind::PageBreak => None,
+            _ if !e.text.is_empty() => {
+                let is_heading = median_font_size.is_some_and(|median| {
+                    element_font_size(e).is_some_and(|size| {
+                        size >= median * HEADING_FONT_SIZE_RATIO
+                            && !e.text.contains('\n')
+                            && e.text.split_whitespace().count() <= HEADING_MAX_WORD_COUNT
+                    })
+                });
+                Some(if is_heading {
+                    format!("## {}", e.text)
+                } else {
+                    e.text.clone()
+                })
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 /// Minimum confidence for accepting orientation detection results.
@@ -569,6 +694,36 @@ fn point_in_bbox(x: i32, y: i32, left: i32, top: i32, right: i32, bottom: i32) -
     x >= left && x <= right && y >= top && y <= bottom
 }
 
+/// Result of [`extract_elements_via_iterator`]: the extracted elements plus
+/// counters distinguishing "nothing to extract" from "extraction degraded"
+/// (#192, #180).
+struct IteratorExtractionResult {
+    elements: Vec<OcrElement>,
+    /// Words the Tesseract result iterator itself failed to extract
+    /// (null pointer / invalid parameter / invalid UTF-8 per word), per
+    /// `ResultIterator::extract_all_words` (#192).
+    skipped_words: usize,
+    /// Words whose parent block is a non-flowing-text type (noise, an
+    /// embedded image region, or a ruling line) that are now retained in
+    /// `elements` instead of being silently dropped (#180).
+    non_text_block_word_count: usize,
+}
+
+/// Block types that historically caused a word to be dropped entirely from
+/// `ocr_elements`. Words in these blocks are now retained (tagged with their
+/// `block_type` via `iterator_word_to_element`) so text baked into figures,
+/// chart axis labels, pull-out captions, and ruling-line regions is not lost
+/// from OCR output (#180). Kept as a named set purely to identify and count
+/// them for the `non_text_block_word_count` signal.
+const NON_TEXT_BLOCK_TYPES: [TessPolyBlockType; 6] = [
+    TessPolyBlockType::PT_NOISE,
+    TessPolyBlockType::PT_FLOWING_IMAGE,
+    TessPolyBlockType::PT_HEADING_IMAGE,
+    TessPolyBlockType::PT_PULLOUT_IMAGE,
+    TessPolyBlockType::PT_HORZ_LINE,
+    TessPolyBlockType::PT_VERT_LINE,
+];
+
 /// Extract OcrElements via Tesseract's iterator APIs with rich metadata.
 ///
 /// Uses ResultIterator for word-level text, bounding boxes, confidence, and font
@@ -578,44 +733,66 @@ fn extract_elements_via_iterator(
     api: &TesseractAPI,
     page_number: u32,
     min_confidence: f64,
-) -> Result<Vec<OcrElement>, OcrError> {
+) -> Result<IteratorExtractionResult, OcrError> {
+    let empty = || IteratorExtractionResult {
+        elements: Vec::new(),
+        skipped_words: 0,
+        non_text_block_word_count: 0,
+    };
+
     let page_iter = match api.get_page_iterator() {
         Ok(iter) => iter,
-        Err(_) => return Ok(Vec::new()),
+        Err(e) => {
+            tracing::warn!(error = %e, "Tesseract page iterator unavailable; falling back to TSV-based OCR element extraction");
+            return Ok(empty());
+        }
     };
 
     let blocks = match page_iter.extract_all_blocks() {
         Ok(b) => b,
-        Err(_) => return Ok(Vec::new()),
+        Err(e) => {
+            tracing::warn!(error = %e, "Failed to extract Tesseract page blocks; falling back to TSV-based OCR element extraction");
+            return Ok(empty());
+        }
     };
 
     let paragraphs = match page_iter.extract_all_paragraphs() {
         Ok(p) => p,
-        Err(_) => return Ok(Vec::new()),
+        Err(e) => {
+            tracing::warn!(error = %e, "Failed to extract Tesseract page paragraphs; falling back to TSV-based OCR element extraction");
+            return Ok(empty());
+        }
     };
 
     let result_iter = match api.get_iterator() {
         Ok(iter) => iter,
-        Err(_) => return Ok(Vec::new()),
+        Err(e) => {
+            tracing::warn!(error = %e, "Tesseract result iterator unavailable; falling back to TSV-based OCR element extraction");
+            return Ok(empty());
+        }
     };
 
-    let words = match result_iter.extract_all_words() {
+    let word_extraction = match result_iter.extract_all_words() {
         Ok(w) => w,
-        Err(_) => return Ok(Vec::new()),
+        Err(e) => {
+            tracing::warn!(error = %e, "Tesseract result iterator failed; falling back to TSV-based OCR element extraction");
+            return Ok(empty());
+        }
     };
 
-    let skip_block_types = [
-        TessPolyBlockType::PT_NOISE,
-        TessPolyBlockType::PT_FLOWING_IMAGE,
-        TessPolyBlockType::PT_HEADING_IMAGE,
-        TessPolyBlockType::PT_PULLOUT_IMAGE,
-        TessPolyBlockType::PT_HORZ_LINE,
-        TessPolyBlockType::PT_VERT_LINE,
-    ];
+    if word_extraction.skipped > 0 {
+        tracing::warn!(
+            skipped_words = word_extraction.skipped,
+            extracted_words = word_extraction.words.len(),
+            "Tesseract result iterator failed to extract some words (null pointer, invalid \
+             parameter, or invalid UTF-8); they were dropped from OCR output"
+        );
+    }
 
     let mut elements = Vec::new();
+    let mut non_text_block_word_count = 0usize;
 
-    for word in &words {
+    for word in &word_extraction.words {
         if (word.confidence as f64) < min_confidence {
             continue;
         }
@@ -634,9 +811,9 @@ fn extract_elements_via_iterator(
         let block_type = parent_block.map(|b| b.block_type);
 
         if let Some(bt) = block_type
-            && skip_block_types.contains(&bt)
+            && NON_TEXT_BLOCK_TYPES.contains(&bt)
         {
-            continue;
+            non_text_block_word_count += 1;
         }
 
         let para_info = paragraphs
@@ -647,7 +824,11 @@ fn extract_elements_via_iterator(
         elements.push(element);
     }
 
-    Ok(elements)
+    Ok(IteratorExtractionResult {
+        elements,
+        skipped_words: word_extraction.skipped,
+        non_text_block_word_count,
+    })
 }
 
 /// Perform OCR on an image using Tesseract.
@@ -835,8 +1016,11 @@ pub(super) fn perform_ocr(
         )
     });
 
+    // Only (degrees, confidence): the ONNX PP-LCNet orientation classifier used
+    // here has no script-detection capability, unlike Tesseract's own
+    // `DetectOrientationScript()`/OSD, which this crate does not call (#184).
     #[cfg_attr(not(auto_rotate), allow(unused_mut))]
-    let mut detected_orientation: Option<(i32, f32, String, f32)> = None;
+    let mut detected_orientation: Option<(i32, f32)> = None;
     let auto_rotate_enabled =
         config.preprocessing.as_ref().map(|p| p.auto_rotate).unwrap_or(false) || config.auto_rotate;
 
@@ -866,7 +1050,7 @@ pub(super) fn perform_ocr(
                 log_ci_debug(ci_debug_enabled, "orientation_detection", || {
                     format!("orientation={}° confidence={:.2}", orient_deg, orient_conf)
                 });
-                detected_orientation = Some((orient_deg, orient_conf, String::new(), 0.0));
+                detected_orientation = Some((orient_deg, orient_conf));
 
                 if orient_deg != 0 && orient_conf > MIN_ORIENTATION_CONFIDENCE {
                     tracing::info!(
@@ -989,16 +1173,7 @@ pub(super) fn perform_ocr(
                 .map_err(|e| OcrError::ProcessingFailed(format!("Failed to extract hOCR: {}", e)))?;
 
             let internal_doc = parse_hocr_to_internal_document(&hocr);
-            let content = internal_doc
-                .elements
-                .iter()
-                .filter_map(|e| match e.kind {
-                    ElementKind::PageBreak => None,
-                    _ if !e.text.is_empty() => Some(e.text.clone()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join("\n\n");
+            let content = render_hocr_elements_as_markdown(&internal_doc.elements);
             hocr_document = Some(internal_doc);
 
             let mime_type = extraction_config
@@ -1080,7 +1255,12 @@ pub(super) fn perform_ocr(
         );
     }
 
-    if let Some((orient_deg, orient_conf, ref script_name, script_conf)) = detected_orientation {
+    // No `script_name`/`script_confidence` metadata: the ONNX PP-LCNet
+    // orientation classifier used here has no script-detection capability,
+    // unlike Tesseract's own `DetectOrientationScript()`/OSD (which this crate
+    // does not call). Emitting a placeholder script name would misrepresent
+    // real detection as having happened (#184).
+    if let Some((orient_deg, orient_conf)) = detected_orientation {
         metadata.insert(
             crate::ocr::OCR_ORIENTATION_DEGREES_METADATA_KEY.to_string(),
             serde_json::Value::Number(serde_json::Number::from(orient_deg)),
@@ -1089,16 +1269,6 @@ pub(super) fn perform_ocr(
             "orientation_confidence".to_string(),
             serde_json::Value::Number(
                 serde_json::Number::from_f64(orient_conf as f64).unwrap_or(serde_json::Number::from(0)),
-            ),
-        );
-        metadata.insert(
-            "script_name".to_string(),
-            serde_json::Value::String(script_name.clone()),
-        );
-        metadata.insert(
-            "script_confidence".to_string(),
-            serde_json::Value::Number(
-                serde_json::Number::from_f64(script_conf as f64).unwrap_or(serde_json::Number::from(0)),
             ),
         );
         if orient_deg != 0 && orient_conf > MIN_ORIENTATION_CONFIDENCE {
@@ -1116,58 +1286,88 @@ pub(super) fn perform_ocr(
         let tsv_data = tsv_data_for_tables.as_ref().unwrap();
 
         let words = extract_words_from_tsv(tsv_data, config.table_min_confidence)?;
+        let regions = cluster_words_into_table_regions(&words);
 
-        if words.len() >= 6 {
-            let table = reconstruct_table(&words, config.table_column_threshold, config.table_row_threshold_ratio);
-            if !table.is_empty() && !table[0].is_empty() {
-                #[cfg(feature = "pdf")]
-                let cleaned = post_process_table(table, false, false);
-                #[cfg(not(feature = "pdf"))]
-                let cleaned = Some(table);
-                if let Some(cleaned) = cleaned {
-                    metadata.insert("table_count".to_string(), serde_json::Value::Number(1.into()));
-                    metadata.insert("tables_detected".to_string(), serde_json::Value::Number(1.into()));
-                    metadata.insert(
-                        "table_rows".to_string(),
-                        serde_json::Value::Number(cleaned.len().into()),
-                    );
-                    metadata.insert(
-                        "table_cols".to_string(),
-                        serde_json::Value::Number(cleaned[0].len().into()),
-                    );
-
-                    let markdown_table = table_to_markdown(&cleaned);
-
-                    let bbox = if !words.is_empty() {
-                        let left = words.iter().map(|w| w.left).min().unwrap_or(0);
-                        let top = words.iter().map(|w| w.top).min().unwrap_or(0);
-                        let right = words.iter().map(|w| w.left + w.width).max().unwrap_or(0);
-                        let bottom = words.iter().map(|w| w.top + w.height).max().unwrap_or(0);
-                        Some(OcrTableBoundingBox {
-                            left,
-                            top,
-                            right,
-                            bottom,
-                        })
-                    } else {
-                        None
-                    };
-
-                    tables.push(OcrTable {
-                        cells: cleaned,
-                        markdown: markdown_table,
-                        page_number: 1,
-                        bounding_box: bbox,
-                    });
-                }
+        for region_words in regions {
+            if region_words.len() < MIN_TABLE_CANDIDATE_WORDS {
+                continue;
             }
+
+            let table = reconstruct_table(
+                &region_words,
+                config.table_column_threshold,
+                config.table_row_threshold_ratio,
+            );
+            if table.is_empty() || table[0].is_empty() {
+                continue;
+            }
+
+            #[cfg(feature = "pdf")]
+            let cleaned = post_process_table(table, false, false);
+            #[cfg(not(feature = "pdf"))]
+            let cleaned = Some(table);
+            let Some(cleaned) = cleaned else {
+                continue;
+            };
+
+            let markdown_table = table_to_markdown(&cleaned);
+
+            let left = region_words.iter().map(|w| w.left).min().unwrap_or(0);
+            let top = region_words.iter().map(|w| w.top).min().unwrap_or(0);
+            let right = region_words.iter().map(|w| w.left + w.width).max().unwrap_or(0);
+            let bottom = region_words.iter().map(|w| w.top + w.height).max().unwrap_or(0);
+
+            tables.push(OcrTable {
+                cells: cleaned,
+                markdown: markdown_table,
+                page_number: 1,
+                bounding_box: Some(OcrTableBoundingBox {
+                    left,
+                    top,
+                    right,
+                    bottom,
+                }),
+            });
+        }
+
+        // Real count, not hardcoded to at-most-one (#177): a page can contain
+        // several independent tables separated by prose.
+        metadata.insert(
+            "table_count".to_string(),
+            serde_json::Value::Number(tables.len().into()),
+        );
+        metadata.insert(
+            "tables_detected".to_string(),
+            serde_json::Value::Number(tables.len().into()),
+        );
+        if let Some(first) = tables.first() {
+            metadata.insert(
+                "table_rows".to_string(),
+                serde_json::Value::Number(first.cells.len().into()),
+            );
+            metadata.insert(
+                "table_cols".to_string(),
+                serde_json::Value::Number(first.cells.first().map_or(0, Vec::len).into()),
+            );
         }
     }
 
-    let iterator_elements = extract_elements_via_iterator(&api, 1, config.min_confidence);
-    match iterator_elements {
-        Ok(elements) if !elements.is_empty() => {
-            ocr_elements = Some(elements);
+    let iterator_extraction = extract_elements_via_iterator(&api, 1, config.min_confidence);
+    match iterator_extraction {
+        Ok(extraction) if !extraction.elements.is_empty() => {
+            if extraction.skipped_words > 0 {
+                metadata.insert(
+                    "word_iterator_skipped_count".to_string(),
+                    serde_json::Value::Number(extraction.skipped_words.into()),
+                );
+            }
+            if extraction.non_text_block_word_count > 0 {
+                metadata.insert(
+                    "non_text_block_word_count".to_string(),
+                    serde_json::Value::Number(extraction.non_text_block_word_count.into()),
+                );
+            }
+            ocr_elements = Some(extraction.elements);
         }
         _ => {
             if let Some(ref tsv_data) = tsv_data_for_tables {
@@ -1457,6 +1657,127 @@ pub(super) fn process_image_files_batch(
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    fn word_at(left: u32, top: u32, width: u32, height: u32, text: &str) -> crate::table_core::HocrWord {
+        crate::table_core::HocrWord {
+            text: text.to_string(),
+            left,
+            top,
+            width,
+            height,
+            confidence: 95.0,
+        }
+    }
+
+    /// Builds a grid of `rows * cols` words starting at `(left, top)`, each
+    /// cell `40x20` pixels, simulating one table's worth of OCR words.
+    fn table_grid_words(left: u32, top: u32, rows: u32, cols: u32) -> Vec<crate::table_core::HocrWord> {
+        let mut words = Vec::new();
+        for row in 0..rows {
+            for col in 0..cols {
+                words.push(word_at(
+                    left + col * 60,
+                    top + row * 30,
+                    40,
+                    20,
+                    &format!("r{row}c{col}"),
+                ));
+            }
+        }
+        words
+    }
+
+    #[test]
+    fn cluster_words_into_table_regions_separates_two_distant_tables() {
+        // Two 3x3 grids of words (9 words each) far apart vertically: a real
+        // page with two independent tables separated by a paragraph of prose.
+        let mut words = table_grid_words(0, 0, 3, 3);
+        words.extend(table_grid_words(0, 1000, 3, 3));
+
+        let regions = cluster_words_into_table_regions(&words);
+
+        assert_eq!(regions.len(), 2, "two spatially distant grids should form two regions");
+        assert_eq!(regions[0].len(), 9);
+        assert_eq!(regions[1].len(), 9);
+    }
+
+    #[test]
+    fn cluster_words_into_table_regions_keeps_one_table_as_a_single_region() {
+        let words = table_grid_words(0, 0, 4, 3);
+
+        let regions = cluster_words_into_table_regions(&words);
+
+        assert_eq!(
+            regions.len(),
+            1,
+            "a single table's own row gaps must not be split into regions"
+        );
+        assert_eq!(regions[0].len(), 12);
+    }
+
+    #[test]
+    fn cluster_words_into_table_regions_empty_input_yields_no_regions() {
+        assert!(cluster_words_into_table_regions(&[]).is_empty());
+    }
+
+    fn text_element_with_font_size(text: &str, font_size: Option<f64>) -> crate::types::internal::InternalElement {
+        let mut elem = crate::types::internal::InternalElement::text(
+            ElementKind::OcrText {
+                level: crate::types::OcrElementLevel::Block,
+            },
+            text,
+            0,
+        );
+        if let Some(size) = font_size {
+            elem.attributes
+                .get_or_insert_with(Default::default)
+                .insert(HOCR_FONT_SIZE_ATTRIBUTE.to_string(), size.to_string());
+        }
+        elem
+    }
+
+    #[test]
+    fn render_hocr_elements_as_markdown_promotes_large_font_short_paragraph_to_heading() {
+        let elements = vec![
+            text_element_with_font_size("Chapter One", Some(28.0)),
+            text_element_with_font_size("Body text at normal size.", Some(12.0)),
+            text_element_with_font_size("More body text at normal size.", Some(12.0)),
+        ];
+
+        let markdown = render_hocr_elements_as_markdown(&elements);
+
+        assert_eq!(
+            markdown,
+            "## Chapter One\n\nBody text at normal size.\n\nMore body text at normal size."
+        );
+    }
+
+    #[test]
+    fn render_hocr_elements_as_markdown_does_not_promote_long_large_font_paragraph() {
+        let long_text = std::iter::repeat_n("word", HEADING_MAX_WORD_COUNT + 1)
+            .collect::<Vec<_>>()
+            .join(" ");
+        let elements = vec![
+            text_element_with_font_size(&long_text, Some(28.0)),
+            text_element_with_font_size("Normal paragraph.", Some(12.0)),
+        ];
+
+        let markdown = render_hocr_elements_as_markdown(&elements);
+
+        assert_eq!(markdown, format!("{long_text}\n\nNormal paragraph."));
+    }
+
+    #[test]
+    fn render_hocr_elements_as_markdown_leaves_content_unchanged_without_font_sizes() {
+        let elements = vec![
+            text_element_with_font_size("First paragraph.", None),
+            text_element_with_font_size("Second paragraph.", None),
+        ];
+
+        let markdown = render_hocr_elements_as_markdown(&elements);
+
+        assert_eq!(markdown, "First paragraph.\n\nSecond paragraph.");
+    }
 
     #[test]
     fn test_is_all_languages() {

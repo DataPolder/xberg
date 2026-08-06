@@ -438,7 +438,7 @@ impl OcrBackend for GlmOcrBackend {
             });
         }
 
-        let image_bytes = image_bytes.to_vec();
+        let image_bytes_owned = image_bytes.to_vec();
         let dtype = self.dtype;
         let cache_dir = opts.cache_dir.unwrap_or_else(hf_hub::resolve_cache_dir);
         let revision = opts.hf_revision.unwrap_or_else(|| GlmOcrEngine::revision().to_string());
@@ -449,13 +449,12 @@ impl OcrBackend for GlmOcrBackend {
                 let device = opts.device;
                 let content = tokio::task::spawn_blocking(move || {
                     let engine = get_or_init_engine(device, dtype, cache_dir, revision)?;
-                    let output =
-                        engine
-                            .process_image_with_task(&image_bytes, task)
-                            .map_err(|e| crate::XbergError::Ocr {
-                                message: format!("GLM-OCR inference failed: {e}"),
-                                source: Some(Box::new(e)),
-                            })?;
+                    let output = engine
+                        .process_image_with_task(&image_bytes_owned, task)
+                        .map_err(|e| crate::XbergError::Ocr {
+                            message: format!("GLM-OCR inference failed: {e}"),
+                            source: Some(Box::new(e)),
+                        })?;
                     Ok::<String, crate::XbergError>(output.content)
                 })
                 .await
@@ -470,7 +469,7 @@ impl OcrBackend for GlmOcrBackend {
             LayoutMode::Paired => {
                 let enable_chart_understanding = opts.enable_chart_understanding;
                 process_paired(
-                    image_bytes,
+                    image_bytes_owned,
                     opts.device,
                     dtype,
                     enable_chart_understanding,
@@ -481,12 +480,13 @@ impl OcrBackend for GlmOcrBackend {
             }
         };
 
-        Ok(ExtractedDocument {
+        Ok(super::ocr_result::build_ocr_document(
             content,
             formulas,
-            mime_type: Cow::Borrowed("text/markdown"),
-            ..Default::default()
-        })
+            Cow::Borrowed("text/markdown"),
+            image_bytes,
+            config,
+        ))
     }
 
     async fn process_image_file(&self, path: &Path, config: &OcrConfig) -> Result<ExtractedDocument> {

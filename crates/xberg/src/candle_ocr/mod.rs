@@ -6,6 +6,13 @@
 
 mod config;
 
+// Shared `ExtractedDocument` construction (metadata, tables, detected_languages)
+// used by every candle-* backend below, so the same logic isn't pasted per
+// backend (issue #179). Gated on the umbrella `candle-ocr` feature that each
+// concrete backend feature implies. ~keep
+#[cfg(feature = "candle-ocr")]
+mod ocr_result;
+
 #[cfg(feature = "candle-trocr")]
 pub mod trocr_backend;
 

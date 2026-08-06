@@ -28,6 +28,25 @@ pub struct WordData {
     pub bottom: i32,
     pub confidence: f32,
     pub font_attrs: Option<FontAttributes>,
+    /// Language that recognized this specific word (e.g. `"eng"`, `"deu"`), from
+    /// `TessResultIteratorWordRecognitionLanguage`. `None` when Tesseract could
+    /// not report a language for this word.
+    pub language: Option<String>,
+}
+
+/// Outcome of a full-page word extraction pass over the `ResultIterator`.
+///
+/// `skipped` distinguishes "the page has no words" from "words exist but
+/// per-word FFI extraction failed for some of them" — both previously
+/// collapsed into an empty or partial `Vec<WordData>` with no signal.
+#[derive(Debug, Clone, Default)]
+pub struct WordExtractionOutcome {
+    /// Successfully extracted words, in iterator order.
+    pub words: Vec<WordData>,
+    /// Count of words for which `extract_word_data_unlocked` returned a
+    /// recoverable error (null pointer, invalid parameter, or invalid UTF-8)
+    /// and was therefore dropped from `words`.
+    pub skipped: usize,
 }
 
 pub struct ResultIterator {
@@ -277,14 +296,20 @@ impl ResultIterator {
     /// The iterator is always reset to the beginning before traversal so that partial
     /// prior consumption does not cause words to be missed.
     ///
+    /// Per-word extraction failures (null pointer, invalid parameter, invalid UTF-8)
+    /// are recoverable and do not abort the pass, but they ARE counted in
+    /// `WordExtractionOutcome::skipped` so callers can distinguish "no words on this
+    /// page" from "words exist but some were dropped by the iterator" (#192).
+    ///
     /// # Returns
     ///
-    /// Returns a `Vec<WordData>` containing data for every word, or an error if the
-    /// mutex cannot be acquired.
-    pub fn extract_all_words(&self) -> Result<Vec<WordData>> {
+    /// Returns a [`WordExtractionOutcome`], or an error if the mutex cannot be
+    /// acquired or an unrecoverable iterator error occurs.
+    pub fn extract_all_words(&self) -> Result<WordExtractionOutcome> {
         let handle = self.handle.lock().map_err(|_| TesseractError::MutexLockError)?;
         let raw = *handle;
         let mut words = Vec::new();
+        let mut skipped = 0usize;
 
         unsafe { TessPageIteratorBegin(raw) };
 
@@ -293,7 +318,9 @@ impl ResultIterator {
                 Ok(word) => words.push(word),
                 Err(TesseractError::NullPointerError)
                 | Err(TesseractError::InvalidParameterError)
-                | Err(TesseractError::Utf8Error(_)) => {}
+                | Err(TesseractError::Utf8Error(_)) => {
+                    skipped += 1;
+                }
                 Err(e) => return Err(e),
             }
 
@@ -303,7 +330,7 @@ impl ResultIterator {
             }
         }
 
-        Ok(words)
+        Ok(WordExtractionOutcome { words, skipped })
     }
 
     /// Extracts the current word's data in a single mutex lock.
@@ -396,6 +423,21 @@ fn extract_word_data_unlocked(raw: *mut c_void) -> Result<WordData> {
         }
     };
 
+    // `TessResultIteratorWordRecognitionLanguage` returns a pointer owned by
+    // Tesseract (not by us), so it must NOT be freed via `TessDeleteText` —
+    // matching `ResultIterator::word_recognition_language`. A null pointer
+    // means Tesseract could not attribute this word to a specific language
+    // (e.g. non-LSTM engines, or a word outside the recognized text);
+    // that's a normal, non-fatal case, so it maps to `None`, not an error.
+    let language = {
+        let lang_ptr = unsafe { TessResultIteratorWordRecognitionLanguage(raw) };
+        if lang_ptr.is_null() {
+            None
+        } else {
+            unsafe { CStr::from_ptr(lang_ptr) }.to_str().ok().map(str::to_owned)
+        }
+    };
+
     Ok(WordData {
         text,
         left,
@@ -404,6 +446,7 @@ fn extract_word_data_unlocked(raw: *mut c_void) -> Result<WordData> {
         bottom,
         confidence,
         font_attrs,
+        language,
     })
 }
 

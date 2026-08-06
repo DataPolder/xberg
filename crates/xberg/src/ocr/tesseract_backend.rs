@@ -153,6 +153,32 @@ impl Default for TesseractBackend {
     }
 }
 
+/// Convert a backend-internal [`crate::types::OcrTable`] into the public
+/// [`crate::types::Table`], assigning a deterministic `table_id`.
+///
+/// `index` is the table's 0-based position among the tables returned for this
+/// single OCR call (i.e. document push order for this call), so the id is
+/// `"table-{index + 1}"` — never derived from randomness or wall-clock time,
+/// so the same input always produces the same id. See
+/// `crate::types::Table::table_id` for the shared scheme doc.
+fn convert_ocr_table(index: usize, table: crate::types::OcrTable) -> crate::types::Table {
+    let bounding_box = table.bounding_box.map(|bbox| crate::types::BoundingBox {
+        x0: bbox.left as f64,
+        y0: bbox.top as f64,
+        x1: bbox.right as f64,
+        y1: bbox.bottom as f64,
+    });
+    let columns = table.cells.first().cloned();
+    crate::types::Table {
+        cells: table.cells,
+        markdown: table.markdown,
+        page_number: table.page_number,
+        bounding_box,
+        table_id: Some(format!("table-{}", index + 1)),
+        columns,
+    }
+}
+
 impl Plugin for TesseractBackend {
     fn name(&self) -> &str {
         "tesseract"
@@ -271,21 +297,8 @@ impl OcrBackend for TesseractBackend {
             tables: ocr_result
                 .tables
                 .into_iter()
-                .map(|t| {
-                    let bounding_box = t.bounding_box.map(|bbox| crate::types::BoundingBox {
-                        x0: bbox.left as f64,
-                        y0: bbox.top as f64,
-                        x1: bbox.right as f64,
-                        y1: bbox.bottom as f64,
-                    });
-                    crate::types::Table {
-                        cells: t.cells,
-                        markdown: t.markdown,
-                        page_number: t.page_number,
-                        bounding_box,
-                        ..Default::default()
-                    }
-                })
+                .enumerate()
+                .map(|(index, t)| convert_ocr_table(index, t))
                 .collect(),
             ocr_elements: ocr_result.ocr_elements,
             ocr_internal_document: ocr_result.internal_document,
@@ -380,21 +393,8 @@ impl OcrBackend for TesseractBackend {
             tables: ocr_result
                 .tables
                 .into_iter()
-                .map(|t| {
-                    let bounding_box = t.bounding_box.map(|bbox| crate::types::BoundingBox {
-                        x0: bbox.left as f64,
-                        y0: bbox.top as f64,
-                        x1: bbox.right as f64,
-                        y1: bbox.bottom as f64,
-                    });
-                    crate::types::Table {
-                        cells: t.cells,
-                        markdown: t.markdown,
-                        page_number: t.page_number,
-                        bounding_box,
-                        ..Default::default()
-                    }
-                })
+                .enumerate()
+                .map(|(index, t)| convert_ocr_table(index, t))
                 .collect(),
             ocr_elements: ocr_result.ocr_elements,
             ocr_internal_document: ocr_result.internal_document,
@@ -700,6 +700,50 @@ mod tests {
                 .iter()
                 .any(|language| language == "jpn_vert")
         );
+    }
+
+    /// Issue #181: OCR-produced tables must carry a deterministic `table_id`,
+    /// `columns`, and `bounding_box` — not `..Default::default()` blanks.
+    #[test]
+    fn convert_ocr_table_assigns_sequential_ids_columns_and_bounding_box() {
+        let first = crate::types::OcrTable {
+            cells: vec![
+                vec!["Name".to_string(), "Age".to_string()],
+                vec!["Alice".to_string(), "30".to_string()],
+            ],
+            markdown: "| Name | Age |\n|---|---|\n| Alice | 30 |".to_string(),
+            page_number: 1,
+            bounding_box: Some(crate::types::OcrTableBoundingBox {
+                left: 10,
+                top: 20,
+                right: 110,
+                bottom: 220,
+            }),
+        };
+        let second = crate::types::OcrTable {
+            cells: vec![vec!["X".to_string()]],
+            markdown: "| X |".to_string(),
+            page_number: 2,
+            bounding_box: None,
+        };
+
+        let converted_first = convert_ocr_table(0, first);
+        let converted_second = convert_ocr_table(1, second);
+
+        assert_eq!(converted_first.table_id.as_deref(), Some("table-1"));
+        assert_eq!(
+            converted_first.columns,
+            Some(vec!["Name".to_string(), "Age".to_string()])
+        );
+        let bbox = converted_first.bounding_box.expect("bounding box must be populated");
+        assert_eq!(bbox.x0, 10.0);
+        assert_eq!(bbox.y0, 20.0);
+        assert_eq!(bbox.x1, 110.0);
+        assert_eq!(bbox.y1, 220.0);
+
+        assert_eq!(converted_second.table_id.as_deref(), Some("table-2"));
+        assert_eq!(converted_second.columns, Some(vec!["X".to_string()]));
+        assert!(converted_second.bounding_box.is_none());
     }
 
     #[test]
