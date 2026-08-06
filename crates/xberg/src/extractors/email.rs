@@ -416,22 +416,33 @@ impl InternalDocumentExtractor for EmailExtractor {
                 extract_attachment_children(&parsed.result.attachments, config).await;
             children = attachment_children;
             warnings.extend(attachment_warnings);
+
+            // An `afEmbeddedMessage` attachment is an attachment of the parent
+            // message, so its recovered text is inlined into the parent exactly
+            // like any other extracted attachment (heading + body, accounted
+            // against the same `SecurityBudget`). This must happen *before*
+            // `build_extracted_document`, which is what performs the inlining;
+            // appending afterwards would leave the embedded body reachable only
+            // through `doc.children` and absent from the parent's rendered
+            // content (#307, #153).
+            if !parsed.nested_embedded_messages.is_empty() {
+                let (embedded_children, embedded_warnings) =
+                    extract_nested_embedded_message_children(&parsed.nested_embedded_messages, config).await;
+                children.extend(embedded_children);
+                warnings.extend(embedded_warnings);
+            }
         }
 
         let mut doc = Self::build_extracted_document(&parsed.result, mime_type, config, &children)?;
 
+        // MIME `message/rfc822` sub-parts are a body structure, not an
+        // attachment, so they stay children-only and are deliberately not
+        // inlined into the parent's elements.
         if config.max_archive_depth > 0 && mime_type == "message/rfc822" {
             let (nested_children, nested_warnings) =
                 extract_nested_message_children(&parsed.nested_messages, config).await;
             children.extend(nested_children);
             warnings.extend(nested_warnings);
-        }
-
-        if config.max_archive_depth > 0 && !parsed.nested_embedded_messages.is_empty() {
-            let (embedded_children, embedded_warnings) =
-                extract_nested_embedded_message_children(&parsed.nested_embedded_messages, config).await;
-            children.extend(embedded_children);
-            warnings.extend(embedded_warnings);
         }
 
         if !children.is_empty() {
@@ -633,6 +644,11 @@ async fn extract_nested_message_children(
 /// child (subject, body, its own attachments) instead of leaving the embedded
 /// message as an opaque, unextracted attachment placeholder.
 ///
+/// The returned entries are handed to `build_extracted_document` alongside the
+/// ordinary attachment children, so the embedded message's text is inlined into
+/// the parent document under a level-two heading as well as being reachable as
+/// a child.
+///
 /// `nested_embedded_messages` is the flat list `extraction::email` already
 /// parsed while walking the CFB tree, bounded by the `SecurityLimits`
 /// nesting-depth cap shared with every other format (see
@@ -656,7 +672,7 @@ async fn extract_nested_embedded_message_children(
             extract_attachment_children(&nested.attachments, &child_config).await;
         warnings.extend(grandchild_warnings);
 
-        let internal_doc = match EmailExtractor::build_extracted_document(
+        let mut internal_doc = match EmailExtractor::build_extracted_document(
             nested,
             "application/vnd.ms-outlook",
             &child_config,
@@ -671,6 +687,12 @@ async fn extract_nested_embedded_message_children(
                 continue;
             }
         };
+        // The embedded message's own attachments are inlined into its text by
+        // `build_extracted_document`; keep them addressable as structured
+        // children too, exactly as a top-level message's attachments are.
+        if !grandchildren.is_empty() {
+            internal_doc.children = Some(grandchildren);
+        }
 
         match crate::core::pipeline::run_pipeline(internal_doc, &child_config).await {
             Ok(result) => {
