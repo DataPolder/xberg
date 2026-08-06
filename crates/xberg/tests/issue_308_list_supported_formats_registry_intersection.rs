@@ -61,8 +61,14 @@ fn list_stays_sorted_after_registry_filtering() {
 }
 
 /// Formats that are always registered regardless of optional Cargo features (the
-/// unconditional built-ins: plain text, markdown, structured/JSON, CSV, HTML) must survive
-/// the registry intersection in every build, including the narrowest ones.
+/// unconditional built-ins: plain text, markdown, structured/JSON, CSV) must survive the
+/// registry intersection in every build, including the narrowest ones.
+///
+/// `html` is intentionally excluded here: `crates/xberg/Cargo.toml` gates the HTML extractor
+/// behind the `html` Cargo feature (`html = ["dep:html-to-markdown-rs", "dep:v_htmlescape"]`,
+/// and `register_default_extractors()` only registers `HtmlExtractor` under
+/// `#[cfg(feature = "html")]`), so asserting on it unconditionally fails on any build with
+/// that feature off. It gets its own conditional assertion below instead.
 #[test]
 fn unconditionally_registered_formats_always_survive_filtering() {
     ensure_initialized().expect("built-in extractor registration should succeed");
@@ -71,11 +77,17 @@ fn unconditionally_registered_formats_always_survive_filtering() {
     let extensions: std::collections::HashSet<&str> =
         formats.iter().map(|format| format.extension.as_str()).collect();
 
-    for ext in ["txt", "md", "csv", "json", "html"] {
+    for ext in ["txt", "md", "csv", "json"] {
         assert!(
             extensions.contains(ext),
             "extension `{ext}` is served by an unconditionally-registered extractor and \
              should always be present regardless of optional feature flags"
         );
     }
+
+    #[cfg(feature = "html")]
+    assert!(
+        extensions.contains("html"),
+        "extension `html` should be present when the `html` Cargo feature is enabled"
+    );
 }
