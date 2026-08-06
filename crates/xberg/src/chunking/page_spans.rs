@@ -175,7 +175,11 @@ fn node_text_for_matching(content: &NodeContent) -> Vec<Cow<'_, str>> {
             vec![Cow::Borrowed(term.as_str()), Cow::Borrowed(definition.as_str())]
         }
         NodeContent::Admonition { title, .. } => title.as_deref().map(Cow::Borrowed).into_iter().collect(),
-        NodeContent::Table { grid } => grid.cells.iter().map(|cell| Cow::Borrowed(cell.content.as_str())).collect(),
+        NodeContent::Table { grid } => grid
+            .cells
+            .iter()
+            .map(|cell| Cow::Borrowed(cell.content.as_str()))
+            .collect(),
         _ => Vec::new(),
     }
 }
@@ -782,7 +786,10 @@ mod tests {
             relationships: Vec::new(),
             node_types: Vec::new(),
         };
-        let mut chunks = vec![chunk_with_spans("Any content at all.", vec![PageSpan { page: 1, bbox: None }])];
+        let mut chunks = vec![chunk_with_spans(
+            "Any content at all.",
+            vec![PageSpan { page: 1, bbox: None }],
+        )];
 
         populate_page_span_bboxes(&mut chunks, &structure);
 
@@ -843,7 +850,10 @@ mod tests {
 
         populate_page_span_bboxes(&mut chunks, &structure);
 
-        assert_eq!(chunks[0].metadata.page_spans[0].bbox, Some(bbox(0.0, 0.0, 100.0, 100.0)));
+        assert_eq!(
+            chunks[0].metadata.page_spans[0].bbox,
+            Some(bbox(0.0, 0.0, 100.0, 100.0))
+        );
         assert_eq!(chunks[0].metadata.node_ids, vec!["slide-1".to_string()]);
     }
 
@@ -902,10 +912,7 @@ mod tests {
 
         populate_page_span_bboxes(&mut chunks, &structure);
 
-        assert_eq!(
-            chunks[0].metadata.page_spans[0].bbox,
-            Some(bbox(3.0, 3.0, 33.0, 33.0))
-        );
+        assert_eq!(chunks[0].metadata.page_spans[0].bbox, Some(bbox(3.0, 3.0, 33.0, 33.0)));
         assert_eq!(chunks[0].metadata.node_ids, vec!["admonition-1".to_string()]);
     }
 
@@ -914,7 +921,12 @@ mod tests {
     #[test]
     fn should_not_match_pure_container_node_with_no_text() {
         let structure = DocumentStructure {
-            nodes: vec![node_with_content("quote-1", NodeContent::Quote, 1, Some(bbox(1.0, 1.0, 2.0, 2.0)))],
+            nodes: vec![node_with_content(
+                "quote-1",
+                NodeContent::Quote,
+                1,
+                Some(bbox(1.0, 1.0, 2.0, 2.0)),
+            )],
             source_format: None,
             relationships: Vec::new(),
             node_types: Vec::new(),

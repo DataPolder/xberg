@@ -274,7 +274,11 @@ pub async fn classify_chunks(result: &mut ExtractedDocument, config: &ChunkClass
 
     if let Some(err) = &first_error {
         let message = partial_batch_failure_message(failed_batches, total_batches, err);
-        crate::core::diagnostics::push_warning(&mut result.processing_warnings, PARTIAL_FAILURE_WARNING_SOURCE, message);
+        crate::core::diagnostics::push_warning(
+            &mut result.processing_warnings,
+            PARTIAL_FAILURE_WARNING_SOURCE,
+            message,
+        );
     }
 
     if let Some(chunks_mut) = result.chunks.as_mut() {
@@ -292,7 +296,11 @@ pub async fn classify_chunks(result: &mut ExtractedDocument, config: &ChunkClass
 /// batches failed but at least one succeeded. The chunks belonging to the
 /// failed batches are left with an empty `classifications` vector, which is
 /// otherwise indistinguishable from "classified, no label matched" (#264).
-fn partial_batch_failure_message(failed_batches: usize, total_batches: usize, last_error: &crate::XbergError) -> String {
+fn partial_batch_failure_message(
+    failed_batches: usize,
+    total_batches: usize,
+    last_error: &crate::XbergError,
+) -> String {
     format!(
         "{failed_batches} of {total_batches} chunk-classification batch{} failed; \
          chunks in the failed batch{} were left without classifications (last error: {last_error})",

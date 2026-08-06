@@ -76,7 +76,9 @@ fn resolve_tokenizer_counter(model: &str) -> Option<TokenCounter> {
         .read()
         .lookup(model)
     {
-        return Some(Box::new(move |text: &str| TokenizerBackendSizer(backend.clone()).size(text)));
+        return Some(Box::new(move |text: &str| {
+            TokenizerBackendSizer(backend.clone()).size(text)
+        }));
     }
 
     match super::tokenizer_cache::get_or_init_tokenizer(model) {

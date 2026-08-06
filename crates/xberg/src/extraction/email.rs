@@ -532,7 +532,11 @@ pub(crate) fn parse_msg_content_with_nested(
     data: &[u8],
     fallback_codepage: Option<u32>,
     security_limits: &SecurityLimits,
-) -> Result<(EmailExtractionResult, Vec<EmailExtractionResult>, Vec<ProcessingWarning>)> {
+) -> Result<(
+    EmailExtractionResult,
+    Vec<EmailExtractionResult>,
+    Vec<ProcessingWarning>,
+)> {
     use std::borrow::Cow;
     use std::io::Cursor;
 
@@ -954,7 +958,8 @@ fn extract_msg_from_cfb_at<F: std::io::Read + std::io::Seek>(
 
         if is_embedded_message {
             if budget.enter().is_ok() {
-                let recursed = extract_msg_from_cfb_at(comp, &embedded_storage_path, fallback_codepage, budget, warnings);
+                let recursed =
+                    extract_msg_from_cfb_at(comp, &embedded_storage_path, fallback_codepage, budget, warnings);
                 budget.leave();
                 let (nested_result, deeper_nested) = recursed?;
                 let size = None;

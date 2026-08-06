@@ -1327,8 +1327,9 @@ mod tests {
             strategy: LayoutStrategy::Auto,
             ..Default::default()
         };
-        let (output, render_warning) = super::run_layout_for_pdf_pages(&bytes, &config, 1, GatedPageHandling::SkipRender)
-            .expect("all-gated run must succeed without a layout engine");
+        let (output, render_warning) =
+            super::run_layout_for_pdf_pages(&bytes, &config, 1, GatedPageHandling::SkipRender)
+                .expect("all-gated run must succeed without a layout engine");
         assert!(output.data.is_none(), "all-gated prose must skip the layout pass");
         assert!(
             render_warning.is_none(),
@@ -1468,9 +1469,14 @@ mod tests {
         let (output, warning) = super::run_layout_for_pdf_pages(&bytes, &config, 1, GatedPageHandling::SkipRender)
             .expect("the run must succeed even though one page failed to render");
 
-        let (images, _results, _hints, _detections) =
-            output.data.expect("the one real page rendered fine, so layout data must be present");
-        assert_eq!(images.len(), 2, "both page slots must stay present despite the render failure");
+        let (images, _results, _hints, _detections) = output
+            .data
+            .expect("the one real page rendered fine, so layout data must be present");
+        assert_eq!(
+            images.len(),
+            2,
+            "both page slots must stay present despite the render failure"
+        );
 
         let warning = warning.expect("a render failure must surface a caller-visible warning");
         assert_eq!(warning.source, "layout");
@@ -1489,8 +1495,7 @@ mod tests {
     fn should_concatenate_cpu_retry_and_render_failure_warnings_without_dropping_either() {
         let cpu_retry_warning =
             super::layout_cpu_fallback_warning(&XbergError::Other("CoreML ExecuteKernel failed".to_string()));
-        let render_failure_warning =
-            super::page_render_failure_warning(&["page 2 failed to render: boom".to_string()]);
+        let render_failure_warning = super::page_render_failure_warning(&["page 2 failed to render: boom".to_string()]);
 
         let combined = super::combine_layout_warnings(Some(cpu_retry_warning), Some(render_failure_warning))
             .expect("both warnings present must combine rather than one being dropped");

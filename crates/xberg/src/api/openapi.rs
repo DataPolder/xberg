@@ -155,10 +155,7 @@ pub struct ApiDoc;
 
 #[cfg(all(feature = "api", feature = "tree-sitter"))]
 #[derive(OpenApi)]
-#[openapi(components(schemas(
-    crate::types::metadata::CodeDataAttribute,
-    crate::types::metadata::CodeDataNodeKind
-)))]
+#[openapi(components(schemas(crate::types::metadata::CodeDataAttribute, crate::types::metadata::CodeDataNodeKind)))]
 #[cfg_attr(alef, alef(skip))]
 struct TreeSitterSchemas;
 

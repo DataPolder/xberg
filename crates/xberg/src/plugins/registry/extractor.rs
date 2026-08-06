@@ -1003,7 +1003,11 @@ mod tests {
 
         let candidates = registry.get_candidates(std::path::Path::new("f.pdf"), "application/pdf");
         let names: Vec<&str> = candidates.iter().map(|c| c.plugin().name()).collect();
-        assert_eq!(names, vec!["generic"], "the can_handle=false extractor must be excluded, not just deprioritized");
+        assert_eq!(
+            names,
+            vec!["generic"],
+            "the can_handle=false extractor must be excluded, not just deprioritized"
+        );
     }
 
     #[test]

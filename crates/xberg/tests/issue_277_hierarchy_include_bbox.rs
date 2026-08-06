@@ -67,7 +67,8 @@ async fn hierarchy_include_bbox_false_strips_bbox_from_all_blocks() {
         for block in &hierarchy.blocks {
             total_blocks += 1;
             assert_eq!(
-                block.bbox, None,
+                block.bbox,
+                None,
                 "block '{}' must have bbox = None when include_bbox = false",
                 block.text.chars().take(40).collect::<String>()
             );

@@ -39,7 +39,9 @@ pub(crate) mod test_support {
     /// Set (or clear, with `None`) the recorded registration error. The static is
     /// process-global, so callers must restore it (typically to `None`) when done.
     pub(crate) fn set_registration_error(value: Option<String>) {
-        let mut slot = BUILTIN_REGISTRATION_ERROR.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut slot = BUILTIN_REGISTRATION_ERROR
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         *slot = value;
     }
 }
@@ -74,7 +76,9 @@ pub(super) fn initialize_features() {
     BUILTIN_INIT.get_or_init(|| {
         if let Err(e) = crate::plugins::processor::builtin::register_builtin() {
             tracing::error!("Built-in post-processor registration was incomplete: {e}");
-            let mut slot = BUILTIN_REGISTRATION_ERROR.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut slot = BUILTIN_REGISTRATION_ERROR
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             *slot = Some(e.to_string());
         }
     });
@@ -89,7 +93,9 @@ pub(super) fn initialize_features() {
 /// `clear_processor_cache()`. Comparing the registry's live generation against
 /// the generation recorded in the cached snapshot makes this self-correcting.
 pub(super) fn initialize_processor_cache() -> Result<()> {
-    let current_generation = crate::plugins::registry::get_post_processor_registry().read().generation();
+    let current_generation = crate::plugins::registry::get_post_processor_registry()
+        .read()
+        .generation();
 
     let mut cache_lock = PROCESSOR_CACHE.write();
     let is_stale = cache_lock
@@ -125,7 +131,9 @@ mod tests {
     #[test]
     fn builtin_registration_error_reports_a_recorded_failure() {
         {
-            let mut slot = BUILTIN_REGISTRATION_ERROR.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut slot = BUILTIN_REGISTRATION_ERROR
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             *slot = Some("1 of 3 built-in post-processor(s) failed to register: ner: boom".to_string());
         }
         assert_eq!(
@@ -134,7 +142,9 @@ mod tests {
         );
 
         // Reset: this static is process-global and shared with other tests in this binary.
-        let mut slot = BUILTIN_REGISTRATION_ERROR.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut slot = BUILTIN_REGISTRATION_ERROR
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         *slot = None;
     }
 
@@ -181,7 +191,11 @@ mod tests {
 
         #[async_trait]
         impl PostProcessor for LateAddedProcessor {
-            async fn process(&self, _result: &mut ExtractedDocument, _config: &crate::core::config::ExtractionConfig) -> Result<()> {
+            async fn process(
+                &self,
+                _result: &mut ExtractedDocument,
+                _config: &crate::core::config::ExtractionConfig,
+            ) -> Result<()> {
                 Ok(())
             }
             fn processing_stage(&self) -> ProcessingStage {
@@ -204,7 +218,11 @@ mod tests {
         // cache is `Some(_)`, so the newly registered processor would never appear.
         initialize_processor_cache().unwrap();
         let (_, middle, _) = get_processors_from_cache().unwrap();
-        assert_eq!(middle.len(), 1, "the cache must pick up the post-registration processor");
+        assert_eq!(
+            middle.len(),
+            1,
+            "the cache must pick up the post-registration processor"
+        );
         assert_eq!(middle[0].name(), "late-added-215");
 
         *PROCESSOR_CACHE.write() = None;

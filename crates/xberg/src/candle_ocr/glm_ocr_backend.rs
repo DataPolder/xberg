@@ -308,7 +308,10 @@ fn is_table_region(class: crate::layout::LayoutClass) -> bool {
 /// entries on either side (a table detection whose output failed to parse as GFM,
 /// or vice versa) are left without a match rather than mis-attributed.
 #[cfg(feature = "layout-detection")]
-fn merge_table_bounding_boxes(tables: &mut [crate::types::Table], detection_bboxes: &[crate::types::extraction::BoundingBox]) {
+fn merge_table_bounding_boxes(
+    tables: &mut [crate::types::Table],
+    detection_bboxes: &[crate::types::extraction::BoundingBox],
+) {
     for (table, bbox) in tables.iter_mut().zip(detection_bboxes.iter()) {
         table.bounding_box = Some(*bbox);
     }
@@ -487,12 +490,12 @@ impl OcrBackend for GlmOcrBackend {
                 let device = opts.device;
                 let content = tokio::task::spawn_blocking(move || {
                     let engine = get_or_init_engine(device, dtype, cache_dir, revision)?;
-                    let output = engine
-                        .process_image_with_task(&image_bytes_owned, task)
-                        .map_err(|e| crate::XbergError::Ocr {
+                    let output = engine.process_image_with_task(&image_bytes_owned, task).map_err(|e| {
+                        crate::XbergError::Ocr {
                             message: format!("GLM-OCR inference failed: {e}"),
                             source: Some(Box::new(e)),
-                        })?;
+                        }
+                    })?;
                     Ok::<String, crate::XbergError>(output.content)
                 })
                 .await
@@ -518,8 +521,13 @@ impl OcrBackend for GlmOcrBackend {
             }
         };
 
-        let mut document =
-            super::ocr_result::build_ocr_document(content, formulas, Cow::Borrowed("text/markdown"), image_bytes, config);
+        let mut document = super::ocr_result::build_ocr_document(
+            content,
+            formulas,
+            Cow::Borrowed("text/markdown"),
+            image_bytes,
+            config,
+        );
         #[cfg(feature = "layout-detection")]
         merge_table_bounding_boxes(&mut document.tables, &table_bboxes);
         #[cfg(not(feature = "layout-detection"))]
@@ -570,7 +578,11 @@ async fn process_paired(
     enable_chart_understanding: bool,
     cache_dir: PathBuf,
     revision: String,
-) -> crate::Result<(String, Vec<crate::types::Formula>, Vec<crate::types::extraction::BoundingBox>)> {
+) -> crate::Result<(
+    String,
+    Vec<crate::types::Formula>,
+    Vec<crate::types::extraction::BoundingBox>,
+)> {
     use crate::layout::LayoutModelManager;
     use crate::layout::models::LayoutModel;
 
@@ -613,11 +625,14 @@ async fn process_paired(
                     message: format!("GLM-OCR paired (fallback): whole-page inference failed: {e}"),
                     source: Some(Box::new(e)),
                 })?;
-            return Ok::<(String, Vec<crate::types::Formula>, Vec<crate::types::extraction::BoundingBox>), crate::XbergError>((
-                output.content,
-                Vec::new(),
-                Vec::new(),
-            ));
+            return Ok::<
+                (
+                    String,
+                    Vec<crate::types::Formula>,
+                    Vec<crate::types::extraction::BoundingBox>,
+                ),
+                crate::XbergError,
+            >((output.content, Vec::new(), Vec::new()));
         }
 
         let img_width = img.width();
@@ -700,11 +715,14 @@ async fn process_paired(
             parts.push(wrapped);
         }
 
-        Ok::<(String, Vec<crate::types::Formula>, Vec<crate::types::extraction::BoundingBox>), crate::XbergError>((
-            parts.join("\n\n"),
-            formulas,
-            table_bboxes,
-        ))
+        Ok::<
+            (
+                String,
+                Vec<crate::types::Formula>,
+                Vec<crate::types::extraction::BoundingBox>,
+            ),
+            crate::XbergError,
+        >((parts.join("\n\n"), formulas, table_bboxes))
     })
     .await
     .map_err(|e| crate::XbergError::Ocr {
@@ -1076,8 +1094,18 @@ mod tests {
         ];
 
         let bboxes = vec![
-            BoundingBox { x0: 10.0, y0: 20.0, x1: 100.0, y1: 200.0 },
-            BoundingBox { x0: 5.0, y0: 6.0, x1: 7.0, y1: 8.0 },
+            BoundingBox {
+                x0: 10.0,
+                y0: 20.0,
+                x1: 100.0,
+                y1: 200.0,
+            },
+            BoundingBox {
+                x0: 5.0,
+                y0: 6.0,
+                x1: 7.0,
+                y1: 8.0,
+            },
         ];
 
         merge_table_bounding_boxes(&mut tables, &bboxes);
@@ -1085,9 +1113,22 @@ mod tests {
         assert_eq!(tables.len(), 2, "table count must be unchanged by the merge");
         assert_eq!(
             tables[0].bounding_box,
-            Some(BoundingBox { x0: 10.0, y0: 20.0, x1: 100.0, y1: 200.0 })
+            Some(BoundingBox {
+                x0: 10.0,
+                y0: 20.0,
+                x1: 100.0,
+                y1: 200.0
+            })
         );
-        assert_eq!(tables[1].bounding_box, Some(BoundingBox { x0: 5.0, y0: 6.0, x1: 7.0, y1: 8.0 }));
+        assert_eq!(
+            tables[1].bounding_box,
+            Some(BoundingBox {
+                x0: 5.0,
+                y0: 6.0,
+                x1: 7.0,
+                y1: 8.0
+            })
+        );
     }
 
     #[cfg(feature = "layout-detection")]
@@ -1102,12 +1143,19 @@ mod tests {
         // detection bbox attached) and one Text-class region (must NOT show up in
         // `result.tables`). Mirrors the per-detection loop body without needing the
         // GLM model or PP-DocLayout-V3.
-        let table_bbox = BoundingBox { x0: 12.0, y0: 34.0, x1: 512.0, y1: 734.0 };
+        let table_bbox = BoundingBox {
+            x0: 12.0,
+            y0: 34.0,
+            x1: 512.0,
+            y1: 734.0,
+        };
         let table_output = "| Name | Age |\n|------|-----|\n| Alice | 30 |";
         let text_output = "Just some plain OCR'd prose.";
 
-        let regions: Vec<(LayoutClass, BoundingBox, &str)> =
-            vec![(LayoutClass::Table, table_bbox, table_output), (LayoutClass::Text, BoundingBox::default(), text_output)];
+        let regions: Vec<(LayoutClass, BoundingBox, &str)> = vec![
+            (LayoutClass::Table, table_bbox, table_output),
+            (LayoutClass::Text, BoundingBox::default(), text_output),
+        ];
 
         let mut parts: Vec<String> = Vec::with_capacity(regions.len());
         let mut table_bboxes: Vec<BoundingBox> = Vec::new();
@@ -1129,7 +1177,11 @@ mod tests {
         );
         merge_table_bounding_boxes(&mut doc.tables, &table_bboxes);
 
-        assert_eq!(doc.tables.len(), 1, "the Text-class region must not produce a table entry");
+        assert_eq!(
+            doc.tables.len(),
+            1,
+            "the Text-class region must not produce a table entry"
+        );
         assert_eq!(doc.tables[0].bounding_box, Some(table_bbox));
     }
 

@@ -11,9 +11,9 @@ use crate::chunking::text_splitter::{ChunkConfig, ChunkSizer, MarkdownSplitter, 
 use crate::error::Result;
 use crate::types::PageBoundary;
 
-use super::builder::{build_chunk_config, build_chunks, resolve_token_counter};
 #[cfg(feature = "chunking-tokenizers")]
 use super::builder::TokenizerBackendSizer;
+use super::builder::{build_chunk_config, build_chunks, resolve_token_counter};
 use super::classifier::classify_chunk;
 use super::config::{ChunkerType, ChunkingConfig, ChunkingResult, TableChunkingMode};
 use super::headings::{build_heading_map, resolve_heading_context};
@@ -2010,7 +2010,12 @@ mod tests {
             .chunks
             .iter()
             .find(|c| c.content.trim() == body)
-            .unwrap_or_else(|| panic!("expected a chunk containing exactly the body text, got: {:?}", result.chunks));
+            .unwrap_or_else(|| {
+                panic!(
+                    "expected a chunk containing exactly the body text, got: {:?}",
+                    result.chunks
+                )
+            });
 
         assert!(
             body_chunk.metadata.heading_context.is_some(),

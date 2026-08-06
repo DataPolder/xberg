@@ -608,7 +608,11 @@ fn compute_header_row_count(headers: &[TatrDetection], rows: &[[f32; 4]]) -> usi
 /// covers, based on axis overlap with the row/column bands used to build the
 /// grid. Detections that resolve to a single cell (no actual merge) are
 /// skipped.
-fn compute_spans(spanning: &[TatrDetection], rows: &[[f32; 4]], cols: &[[f32; 4]]) -> Vec<(usize, usize, usize, usize)> {
+fn compute_spans(
+    spanning: &[TatrDetection],
+    rows: &[[f32; 4]],
+    cols: &[[f32; 4]],
+) -> Vec<(usize, usize, usize, usize)> {
     let mut spans = Vec::new();
     for span in spanning {
         let row_indices: Vec<usize> = rows

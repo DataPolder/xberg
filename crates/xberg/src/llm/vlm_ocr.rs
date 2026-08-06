@@ -639,7 +639,10 @@ mod tests {
     #[test]
     fn test_extract_formulas_ignores_single_unpaired_dollar() {
         let formulas = super::extract_formulas("Prices start at $20 per unit.");
-        assert!(formulas.is_empty(), "unpaired dollar sign must not match; got: {formulas:?}");
+        assert!(
+            formulas.is_empty(),
+            "unpaired dollar sign must not match; got: {formulas:?}"
+        );
     }
 
     /// Display math must still take priority over the inline alternative so a
@@ -650,7 +653,11 @@ mod tests {
 
         let formulas = super::extract_formulas(text);
 
-        assert_eq!(formulas.len(), 2, "expected one display + one inline; got: {formulas:?}");
+        assert_eq!(
+            formulas.len(),
+            2,
+            "expected one display + one inline; got: {formulas:?}"
+        );
         assert_eq!(formulas[0].latex, "x^2 + y^2 = z^2");
         assert_eq!(formulas[1].latex, "a+b");
     }

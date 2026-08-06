@@ -35,7 +35,8 @@ fn narrative_texts(elements: &[xberg::types::Element]) -> Vec<&str> {
 
 #[tokio::test]
 async fn should_split_crlf_only_document_into_exact_paragraphs() {
-    let content = b"First paragraph line one.\r\nFirst paragraph line two.\r\n\r\nSecond paragraph.\r\n\r\nThird paragraph.";
+    let content =
+        b"First paragraph line one.\r\nFirst paragraph line two.\r\n\r\nSecond paragraph.\r\n\r\nThird paragraph.";
     let config = element_based_config();
 
     let result = extract_bytes_document(content, "text/plain", &config)

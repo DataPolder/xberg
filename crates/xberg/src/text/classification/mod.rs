@@ -183,7 +183,11 @@ mod tests {
         let aggregated = aggregate_page_labels(&per_page);
 
         assert_eq!(aggregated.len(), 1);
-        assert_eq!(aggregated[0].confidence, Some(0.9), "the None entry must not dilute the average");
+        assert_eq!(
+            aggregated[0].confidence,
+            Some(0.9),
+            "the None entry must not dilute the average"
+        );
     }
 
     #[test]

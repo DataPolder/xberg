@@ -652,7 +652,14 @@ mod tests {
              reconstruct_table's nearest-row/nearest-column assignment never returns None here"
         );
 
-        let all_text: Vec<&str> = table.iter().flat_map(|row| row.iter()).flat_map(|c| c.split_whitespace()).collect();
-        assert!(all_text.contains(&"Outlier"), "the outlier word must not be silently dropped");
+        let all_text: Vec<&str> = table
+            .iter()
+            .flat_map(|row| row.iter())
+            .flat_map(|c| c.split_whitespace())
+            .collect();
+        assert!(
+            all_text.contains(&"Outlier"),
+            "the outlier word must not be silently dropped"
+        );
     }
 }

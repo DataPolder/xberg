@@ -530,7 +530,10 @@ fn compute_confidence_stats(lines: &[TextLine]) -> Option<ConfidenceStats> {
         return None;
     }
 
-    let percentages: Vec<i64> = lines.iter().map(|line| confidence_to_percent(line.confidence)).collect();
+    let percentages: Vec<i64> = lines
+        .iter()
+        .map(|line| confidence_to_percent(line.confidence))
+        .collect();
     let line_count = percentages.len();
     let low_confidence_count = percentages
         .iter()
@@ -1020,12 +1023,7 @@ mod tests {
         let output = BlockingOutput {
             result: OcrResult {
                 // percentages: 90, 80, 40, 100 -> mean 77, sorted [40,80,90,100]
-                lines: vec![
-                    line("a", 0.9),
-                    line("b", 0.8),
-                    line("c", 0.4),
-                    line("d", 1.0),
-                ],
+                lines: vec![line("a", 0.9), line("b", 0.8), line("c", 0.4), line("d", 1.0)],
             },
             width: 100,
             height: 100,
@@ -1037,10 +1035,7 @@ mod tests {
 
         let metadata = build_metadata(&["eng".to_string()], &output);
 
-        assert_eq!(
-            metadata.additional.get("mean_text_conf"),
-            Some(&serde_json::json!(77))
-        );
+        assert_eq!(metadata.additional.get("mean_text_conf"), Some(&serde_json::json!(77)));
         assert_eq!(
             metadata.additional.get("median_word_conf"),
             Some(&serde_json::json!(85))
@@ -1094,7 +1089,10 @@ mod tests {
         let Some(FormatMetadata::Ocr(ocr_metadata)) = metadata.format else {
             panic!("expected FormatMetadata::Ocr");
         };
-        assert_eq!(ocr_metadata.psm, 0, "Sceptre has no PSM; must not claim Tesseract's PSM 3");
+        assert_eq!(
+            ocr_metadata.psm, 0,
+            "Sceptre has no PSM; must not claim Tesseract's PSM 3"
+        );
     }
 
     #[test]

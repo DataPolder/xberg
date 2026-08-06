@@ -879,7 +879,11 @@ mod issue_214_text_coverage_tests {
     #[test]
     fn measures_fraction_of_non_blank_pages() {
         let result = ExtractedDocument {
-            pages: Some(vec![page(1, "Real text here"), page(2, "   "), page(3, "More real text")]),
+            pages: Some(vec![
+                page(1, "Real text here"),
+                page(2, "   "),
+                page(3, "More real text"),
+            ]),
             ..Default::default()
         };
         assert!(
@@ -1081,7 +1085,11 @@ mod issue_213_chunk_offset_ordering_tests {
             "expected NFC normalization to compose the combining accent away, got: {:?}",
             result.content
         );
-        assert!(result.content.contains('é'), "expected composed 'é' in: {:?}", result.content);
+        assert!(
+            result.content.contains('é'),
+            "expected composed 'é' in: {:?}",
+            result.content
+        );
         assert!(
             result.content.len() < DECOMPOSED.len(),
             "normalization must have shortened the content by at least one byte"

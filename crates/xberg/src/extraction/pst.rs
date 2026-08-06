@@ -79,7 +79,11 @@ fn collect_row_ids(table: &dyn TableContext) -> (Vec<u32>, bool) {
 /// unit-tested without a real PST `Store`/`Folder`.
 #[cfg(feature = "email")]
 fn non_ipm_top_level_ids(top_level_ids: &[u32], ipm_node_id: Option<u32>) -> Vec<u32> {
-    top_level_ids.iter().copied().filter(|id| Some(*id) != ipm_node_id).collect()
+    top_level_ids
+        .iter()
+        .copied()
+        .filter(|id| Some(*id) != ipm_node_id)
+        .collect()
 }
 
 /// Extract all email messages from a PST file.
@@ -247,7 +251,9 @@ fn discover_non_ipm_top_level_folders(
         Err(e) => {
             warnings.push(ProcessingWarning {
                 source: Cow::Borrowed("pst_extraction"),
-                message: Cow::Owned(format!("Failed to enumerate non-IPM top-level folders in PST store: {e}")),
+                message: Cow::Owned(format!(
+                    "Failed to enumerate non-IPM top-level folders in PST store: {e}"
+                )),
             });
             return (seeds, warnings);
         }

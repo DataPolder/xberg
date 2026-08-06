@@ -102,9 +102,14 @@ async fn translate_batch_call(
         "maxItems": texts.len(),
     });
 
-    let (value, usage) =
-        crate::llm::structured::complete_with_json_schema(&config.llm, &prompt, "translated_segments", &schema, source_label)
-            .await?;
+    let (value, usage) = crate::llm::structured::complete_with_json_schema(
+        &config.llm,
+        &prompt,
+        "translated_segments",
+        &schema,
+        source_label,
+    )
+    .await?;
     if let Some(u) = usage {
         usages.push(u);
     }
@@ -206,7 +211,11 @@ async fn translate_string_list(
 /// Translate one table's cells (batched, plain text) and its rendered
 /// markdown (its own call, with markup preservation forced on since the
 /// markdown IS table syntax that must survive verbatim).
-async fn translate_table(table: &mut Table, config: &TranslationConfig, usages: &mut Vec<LlmUsage>) -> crate::Result<()> {
+async fn translate_table(
+    table: &mut Table,
+    config: &TranslationConfig,
+    usages: &mut Vec<LlmUsage>,
+) -> crate::Result<()> {
     let mut positions: Vec<(usize, usize)> = Vec::new();
     let mut texts: Vec<String> = Vec::new();
     for (row_index, row) in table.cells.iter().enumerate() {
@@ -226,7 +235,11 @@ async fn translate_table(table: &mut Table, config: &TranslationConfig, usages: 
     Ok(())
 }
 
-async fn translate_tables(tables: &mut [Table], config: &TranslationConfig, usages: &mut Vec<LlmUsage>) -> crate::Result<()> {
+async fn translate_tables(
+    tables: &mut [Table],
+    config: &TranslationConfig,
+    usages: &mut Vec<LlmUsage>,
+) -> crate::Result<()> {
     for table in tables.iter_mut() {
         translate_table(table, config, usages).await?;
     }
@@ -298,7 +311,11 @@ async fn translate_elements(
 ///
 /// `authors`, `created_by`, and `modified_by` are intentionally skipped — see
 /// the module-level doc comment.
-async fn translate_metadata(metadata: &mut Metadata, config: &TranslationConfig, usages: &mut Vec<LlmUsage>) -> crate::Result<()> {
+async fn translate_metadata(
+    metadata: &mut Metadata,
+    config: &TranslationConfig,
+    usages: &mut Vec<LlmUsage>,
+) -> crate::Result<()> {
     translate_optional_fields(
         config,
         vec![

@@ -1253,7 +1253,10 @@ mod tests {
             crate::core::config::OutputFormat::Custom("markdwon".to_string()),
         );
 
-        assert!(result.formatted_content.is_none(), "no renderer is registered for 'markdwon'");
+        assert!(
+            result.formatted_content.is_none(),
+            "no renderer is registered for 'markdwon'"
+        );
         assert_eq!(result.processing_warnings.len(), 1);
         assert_eq!(result.processing_warnings[0].source, "output-format");
         assert!(

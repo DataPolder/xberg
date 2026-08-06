@@ -599,11 +599,7 @@ fn push_non_table_drawable_warning(warnings: &mut Vec<ProcessingWarning>, sheet_
     if archive_types.is_empty() {
         return;
     }
-    let types = archive_types
-        .iter()
-        .map(u32::to_string)
-        .collect::<Vec<_>>()
-        .join(", ");
+    let types = archive_types.iter().map(u32::to_string).collect::<Vec<_>>().join(", ");
     crate::core::diagnostics::push_warning(
         warnings,
         crate::extractors::iwork::IWORK_WARNING_SOURCE,
@@ -650,7 +646,16 @@ fn parse_table(
 
     let mut cells = vec![vec![String::new(); columns]; rows];
     if let Some(tile_storage) = field_bytes(&data_store_fields, field::DATA_STORE_TILES).next() {
-        fill_table_tiles(tile_storage, objects, &strings, &rich_strings, &mut cells, budget, &name, warnings)?;
+        fill_table_tiles(
+            tile_storage,
+            objects,
+            &strings,
+            &rich_strings,
+            &mut cells,
+            budget,
+            &name,
+            warnings,
+        )?;
     }
     Ok(Some((name, cells)))
 }
@@ -1033,7 +1038,11 @@ fn parse_old_cell(
 /// xberg's wire-level cell parser does not decode (#110). One warning per
 /// table per kind: `push_warning` dedupes identical `(source, message)`
 /// pairs, so a table with many such cells still surfaces a single line.
-fn push_legacy_formula_comment_warning(warnings: &mut Vec<ProcessingWarning>, table_name: &str, fields: &OldCellFields) {
+fn push_legacy_formula_comment_warning(
+    warnings: &mut Vec<ProcessingWarning>,
+    table_name: &str,
+    fields: &OldCellFields,
+) {
     if fields.has_formula {
         crate::core::diagnostics::push_warning(
             warnings,
@@ -1048,7 +1057,9 @@ fn push_legacy_formula_comment_warning(warnings: &mut Vec<ProcessingWarning>, ta
         crate::core::diagnostics::push_warning(
             warnings,
             crate::extractors::iwork::IWORK_WARNING_SOURCE,
-            format!("Table '{table_name}' has a cell with a legacy-format comment; xberg does not extract cell comment text"),
+            format!(
+                "Table '{table_name}' has a cell with a legacy-format comment; xberg does not extract cell comment text"
+            ),
         );
     }
 }

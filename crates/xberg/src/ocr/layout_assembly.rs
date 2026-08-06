@@ -668,8 +668,7 @@ mod tests {
         let (_, markdown) = build_markdown_table(&grid, &element_refs, 0.0, 0.0, &structure);
 
         assert_eq!(
-            markdown,
-            "| Title | Region |\n| Sub | Head |\n| --- | --- |\n| A | B |",
+            markdown, "| Title | Region |\n| Sub | Head |\n| --- | --- |\n| A | B |",
             "the separator must follow both TATR-detected header rows, not just row 0 (#176)"
         );
     }

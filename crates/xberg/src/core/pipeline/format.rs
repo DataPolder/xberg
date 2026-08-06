@@ -36,7 +36,8 @@ pub fn apply_output_format(result: ExtractedDocument, output_format: OutputForma
     // reach this function with no pre-rendered content — every successful custom
     // render always produces `Some(_)`. Detect that fallback here so metadata does
     // not claim a format that was never actually produced.
-    let custom_fallback_to_plain = matches!(output_format, OutputFormat::Custom(_)) && result.formatted_content.is_none();
+    let custom_fallback_to_plain =
+        matches!(output_format, OutputFormat::Custom(_)) && result.formatted_content.is_none();
 
     let format_name = match output_format {
         OutputFormat::Plain => "plain",

@@ -30,8 +30,8 @@ use crate::Result;
 use crate::core::config::redaction::RedactionConfig;
 use crate::types::ExtractedDocument;
 use crate::types::entity::{Entity, EntityCategory};
-use crate::types::redaction::{PiiCategory, RedactionFinding, RedactionReport};
 use crate::types::metadata::FormatMetadata;
+use crate::types::redaction::{PiiCategory, RedactionFinding, RedactionReport};
 use crate::types::revisions::{DiffLine, RevisionAnchor};
 
 use super::patterns::{PatternMatch, scan_text};

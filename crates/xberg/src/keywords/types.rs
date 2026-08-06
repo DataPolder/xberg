@@ -123,7 +123,10 @@ mod tests {
 
     #[test]
     fn should_find_positions_locates_every_occurrence() {
-        assert_eq!(find_positions("rust is rust, and rust rocks", "rust"), Some(vec![0, 8, 18]));
+        assert_eq!(
+            find_positions("rust is rust, and rust rocks", "rust"),
+            Some(vec![0, 8, 18])
+        );
     }
 
     #[test]
@@ -139,8 +142,12 @@ mod tests {
 
     #[test]
     fn should_with_positions_is_none_when_keyword_not_found_verbatim() {
-        let keyword =
-            Keyword::with_positions("learn*".to_string(), 0.5, KeywordAlgorithm::Rake, "machine learning is great");
+        let keyword = Keyword::with_positions(
+            "learn*".to_string(),
+            0.5,
+            KeywordAlgorithm::Rake,
+            "machine learning is great",
+        );
         assert_eq!(keyword.positions, None);
     }
 }

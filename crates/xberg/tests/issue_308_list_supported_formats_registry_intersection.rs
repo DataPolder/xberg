@@ -57,7 +57,10 @@ fn list_stays_sorted_after_registry_filtering() {
     let mut sorted = extensions.clone();
     sorted.sort_unstable();
 
-    assert_eq!(extensions, sorted, "formats must remain sorted by extension after filtering");
+    assert_eq!(
+        extensions, sorted,
+        "formats must remain sorted by extension after filtering"
+    );
 }
 
 /// Formats that are always registered regardless of optional Cargo features (the
@@ -74,8 +77,7 @@ fn unconditionally_registered_formats_always_survive_filtering() {
     ensure_initialized().expect("built-in extractor registration should succeed");
 
     let formats = list_supported_formats();
-    let extensions: std::collections::HashSet<&str> =
-        formats.iter().map(|format| format.extension.as_str()).collect();
+    let extensions: std::collections::HashSet<&str> = formats.iter().map(|format| format.extension.as_str()).collect();
 
     for ext in ["txt", "md", "csv", "json"] {
         assert!(
