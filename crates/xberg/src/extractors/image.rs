@@ -1204,6 +1204,58 @@ fn sparse_image_ocr_fallback_config(
     fallback_config
 }
 
+/// Resize/re-DPI raw image bytes for OCR using `ExtractionConfig::images`
+/// (`ImageExtractionConfig`) before handing them to an OCR backend.
+///
+/// OCR backends only ever see `OcrConfig` (via the `OcrBackend` trait), and
+/// `OcrConfig` has no field that traces back to `ExtractionConfig::images` — so
+/// `target_dpi`, `max_image_dimension`, `auto_adjust_dpi`, `min_dpi`, and
+/// `max_dpi` were parsed into config but silently dropped before reaching any
+/// backend (issue #209). Normalizing the bytes once, here, at the extractor
+/// boundary makes the setting effective for every backend without touching the
+/// backend trait or its config types.
+///
+/// Falls back to the original bytes unchanged if decoding or normalization
+/// fails; OCR should still be attempted on the original image rather than
+/// aborting the extraction.
+#[cfg(feature = "ocr")]
+fn normalize_image_bytes_for_ocr(
+    content: &[u8],
+    images_config: &crate::core::config::ImageExtractionConfig,
+) -> Vec<u8> {
+    let Ok(decoded) = image::load_from_memory(content) else {
+        return content.to_vec();
+    };
+    let rgb = decoded.into_rgb8();
+    let (width, height) = rgb.dimensions();
+    let dpi_config = crate::types::ImageDpiConfig::from(images_config);
+
+    match crate::image::preprocessing::normalize_image_dpi_owned(
+        rgb.into_raw(),
+        width as usize,
+        height as usize,
+        &dpi_config,
+        None,
+    ) {
+        Ok(result) => {
+            let (new_width, new_height) = result.dimensions;
+            encode_rgb_as_png(&result.rgb_data, new_width as u32, new_height as u32).unwrap_or_else(|_| content.to_vec())
+        }
+        Err(_) => content.to_vec(),
+    }
+}
+
+#[cfg(feature = "ocr")]
+fn encode_rgb_as_png(rgb_data: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
+    use image::ImageEncoder;
+
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::codecs::png::PngEncoder::new(&mut png)
+        .write_image(rgb_data, width, height, image::ExtendedColorType::Rgb8)
+        .map_err(|error| crate::XbergError::Other(format!("Failed to encode normalized image as PNG: {error}")))?;
+    Ok(png.into_inner())
+}
+
 #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
 fn uses_tatr_image_table_recognition(table_model: crate::core::config::layout::TableModel) -> bool {
     use crate::core::config::layout::TableModel;
@@ -1384,13 +1436,27 @@ impl ImageExtractor {
             enable_image_ocr_elements(&mut ocr_config_with_format, true);
         }
 
-        let ocr_result = backend.process_image(content, &ocr_config_with_format).await?;
+        // OCR backends only see `OcrConfig`, which has no route back to
+        // `ExtractionConfig::images`, so DPI/dimension normalization from
+        // `ImageExtractionConfig` has to happen here, once, before any backend
+        // ever sees the bytes (issue #209).
+        #[cfg(feature = "ocr")]
+        let normalized_ocr_bytes = config
+            .images
+            .as_ref()
+            .map(|images_config| normalize_image_bytes_for_ocr(content, images_config));
+        #[cfg(feature = "ocr")]
+        let ocr_input: &[u8] = normalized_ocr_bytes.as_deref().unwrap_or(content);
+        #[cfg(not(feature = "ocr"))]
+        let ocr_input: &[u8] = content;
+
+        let ocr_result = backend.process_image(ocr_input, &ocr_config_with_format).await?;
         #[cfg(not(target_arch = "wasm32"))]
         let ocr_result = {
             let mut ocr_result = ocr_result;
             if should_retry_sparse_image_ocr(ocr_config, &ocr_result) {
                 let fallback_config = sparse_image_ocr_fallback_config(&ocr_config_with_format);
-                match backend.process_image(content, &fallback_config).await {
+                match backend.process_image(ocr_input, &fallback_config).await {
                     Ok(mut fallback_result) if has_robust_word_confidence_distribution(&fallback_result) => {
                         let mut processing_warnings = ocr_result.processing_warnings.clone();
                         processing_warnings.append(&mut fallback_result.processing_warnings);

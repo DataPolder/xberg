@@ -539,6 +539,7 @@ fn prepare_ocr_image(
     width: u32,
     height: u32,
     preprocessing: Option<&crate::types::ImagePreprocessingConfig>,
+    images_config: Option<&crate::core::config::ImageExtractionConfig>,
     ci_debug_enabled: bool,
 ) -> PreparedOcrImage {
     let Some(preprocessing) = preprocessing else {
@@ -548,6 +549,7 @@ fn prepare_ocr_image(
                 width,
                 height,
                 &crate::types::ImagePreprocessingConfig::default(),
+                images_config,
                 ci_debug_enabled,
             );
         }
@@ -560,7 +562,7 @@ fn prepare_ocr_image(
         };
     };
 
-    prepare_preprocessed_ocr_image(rgb_data, width, height, preprocessing, ci_debug_enabled)
+    prepare_preprocessed_ocr_image(rgb_data, width, height, preprocessing, images_config, ci_debug_enabled)
 }
 
 /// Classify bright, page-like RGB images that benefit from the default OCR preprocessing path.
@@ -593,11 +595,22 @@ fn prepare_preprocessed_ocr_image(
     width: u32,
     height: u32,
     preprocessing: &crate::types::ImagePreprocessingConfig,
+    images_config: Option<&crate::core::config::ImageExtractionConfig>,
     ci_debug_enabled: bool,
 ) -> PreparedOcrImage {
-    let dpi_config = crate::types::ImageDpiConfig {
-        target_dpi: preprocessing.target_dpi,
-        ..Default::default()
+    // `target_dpi` always comes from the (Tesseract-specific) `preprocessing` config, which
+    // takes precedence when explicitly set. The dimension/auto-adjust limits have no home in
+    // `ImagePreprocessingConfig`, so they come from the real `ImageExtractionConfig` when the
+    // caller has one, instead of being silently defaulted (issue #209).
+    let dpi_config = match images_config {
+        Some(images_config) => crate::types::ImageDpiConfig {
+            target_dpi: preprocessing.target_dpi,
+            ..crate::types::ImageDpiConfig::from(images_config)
+        },
+        None => crate::types::ImageDpiConfig {
+            target_dpi: preprocessing.target_dpi,
+            ..Default::default()
+        },
     };
     match normalize_image_dpi_owned(rgb_data, width as usize, height as usize, &dpi_config, None) {
         Ok(result) => {
@@ -897,11 +910,13 @@ pub(super) fn perform_ocr(
         format!("dimensions={}x{} color_type=RGB8", orig_width, orig_height)
     });
 
+    let images_config = extraction_config.and_then(|extraction_config| extraction_config.images.as_ref());
     let prepared_image = prepare_ocr_image(
         rgb_data,
         orig_width,
         orig_height,
         config.preprocessing.as_ref(),
+        images_config,
         ci_debug_enabled,
     );
     let image_data = prepared_image.data;
@@ -1938,7 +1953,7 @@ mod tests {
     fn test_prepare_ocr_image_without_config_preserves_shadowed_rgb() {
         let rgb_data = vec![0, 1, 2, 3, 4, 5];
 
-        let prepared = prepare_ocr_image(rgb_data.clone(), 2, 1, None, false);
+        let prepared = prepare_ocr_image(rgb_data.clone(), 2, 1, None, None, false);
 
         assert_eq!(prepared.data, rgb_data);
         assert_eq!(prepared.width, 2);
@@ -1961,7 +1976,7 @@ mod tests {
         const HEIGHT: u32 = 4;
         let rgb_data = vec![u8::MAX; WIDTH as usize * HEIGHT as usize * RGB_CHANNEL_COUNT];
 
-        let prepared = prepare_ocr_image(rgb_data, WIDTH, HEIGHT, None, false);
+        let prepared = prepare_ocr_image(rgb_data, WIDTH, HEIGHT, None, None, false);
 
         assert!(prepared.apply_pix_preprocessing);
     }
@@ -1983,9 +1998,39 @@ mod tests {
             ..Default::default()
         };
 
-        let prepared = prepare_ocr_image(rgb_data, 2, 2, Some(&preprocessing), false);
+        let prepared = prepare_ocr_image(rgb_data, 2, 2, Some(&preprocessing), None, false);
 
         assert!(prepared.apply_pix_preprocessing);
+    }
+
+    /// #209: when a caller supplies `ImageExtractionConfig`, its `max_image_dimension`
+    /// and `auto_adjust_dpi` must actually reach the DPI-normalization step instead of
+    /// being silently replaced by `ImageDpiConfig::default()`.
+    #[test]
+    fn test_prepare_preprocessed_ocr_image_honours_image_extraction_config_limits() {
+        const SOURCE_DIMENSION: u32 = 4;
+        let rgb_data = vec![255; SOURCE_DIMENSION as usize * SOURCE_DIMENSION as usize * RGB_CHANNEL_COUNT];
+        let preprocessing = crate::types::ImagePreprocessingConfig {
+            target_dpi: 300,
+            ..Default::default()
+        };
+        let images_config = crate::core::config::ImageExtractionConfig {
+            max_image_dimension: 2,
+            auto_adjust_dpi: false,
+            ..Default::default()
+        };
+
+        let prepared = prepare_preprocessed_ocr_image(
+            rgb_data,
+            SOURCE_DIMENSION,
+            SOURCE_DIMENSION,
+            &preprocessing,
+            Some(&images_config),
+            false,
+        );
+
+        assert_eq!(prepared.width, 2, "max_image_dimension=2 must clamp the resized width");
+        assert_eq!(prepared.height, 2, "max_image_dimension=2 must clamp the resized height");
     }
 
     #[test]
