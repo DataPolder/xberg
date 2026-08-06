@@ -57,6 +57,11 @@ pub(crate) async fn extract_batch(
 ) -> Result<ExtractionResult> {
     #[cfg(feature = "otel")]
     let batch_span = crate::telemetry::spans::batch_span(inputs.len());
+    // `Instant::now()` panics on wasm32 (no usable timer there, see the wasm32 note on
+    // `extract_file_uncached`'s timeout handling), so the batch counter/histogram pair is
+    // skipped on that target rather than risking a panic for a metrics-only side effect.
+    #[cfg(all(feature = "otel", not(target_arch = "wasm32")))]
+    let batch_started = std::time::Instant::now();
 
     // `extract_batch_concurrent` spawns tasks on `tokio::task::JoinSet`, which requires `Send`
     // futures; extractor futures are `!Send` on wasm32 (async_trait(?Send), see
@@ -77,13 +82,30 @@ pub(crate) async fn extract_batch(
     };
 
     #[cfg(feature = "otel")]
-    {
-        batch.instrument(batch_span).await
-    }
+    let result = batch.instrument(batch_span).await;
     #[cfg(not(feature = "otel"))]
-    {
-        batch.await
-    }
+    let result = batch.await;
+
+    #[cfg(all(feature = "otel", not(target_arch = "wasm32")))]
+    record_batch_metrics(batch_started.elapsed(), &result);
+
+    result
+}
+
+/// Emit the batch-level counter and duration histogram (#332).
+///
+/// Unlike the per-extraction metrics recorded in `plugins::extractor::instrumented`, there is
+/// exactly one batch span per call, so this carries no per-item attributes — only the
+/// overall `status` of the batch as a whole (an individual item's failure is captured in
+/// `ExtractionResult::errors`, not here).
+#[cfg(all(feature = "otel", not(target_arch = "wasm32")))]
+fn record_batch_metrics(elapsed: std::time::Duration, result: &Result<ExtractionResult>) {
+    let metrics = crate::telemetry::metrics::get_metrics();
+    let status = if result.is_ok() { "ok" } else { "error" };
+    let attrs = [opentelemetry::KeyValue::new("status", status)];
+
+    metrics.batch_total.add(1, &attrs);
+    metrics.batch_duration_ms.record(elapsed.as_secs_f64() * 1000.0, &[]);
 }
 
 #[cfg(any(not(feature = "tokio-runtime"), target_arch = "wasm32"))]

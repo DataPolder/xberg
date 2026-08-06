@@ -197,6 +197,16 @@ impl OcrCache {
 
     /// Emit OCR cache-lookup telemetry.
     fn record_lookup(cache_key: &str, hit: bool) {
+        #[cfg(feature = "otel")]
+        {
+            let metrics = crate::telemetry::metrics::get_metrics();
+            if hit {
+                metrics.cache_hits.add(1, &[]);
+            } else {
+                metrics.cache_misses.add(1, &[]);
+            }
+        }
+
         tracing::debug!(
             { conventions::OPERATION } = conventions::operations::CACHE_LOOKUP,
             { conventions::CACHE_KEY } = cache_key,

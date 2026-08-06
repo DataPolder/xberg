@@ -293,7 +293,16 @@ impl GenericCache {
     /// Emit cache-lookup telemetry for a resolved key.
     fn record_lookup(versioned_key: &str, hit: bool) {
         #[cfg(feature = "otel")]
-        tracing::Span::current().record("cache.hit", hit);
+        {
+            tracing::Span::current().record("cache.hit", hit);
+
+            let metrics = crate::telemetry::metrics::get_metrics();
+            if hit {
+                metrics.cache_hits.add(1, &[]);
+            } else {
+                metrics.cache_misses.add(1, &[]);
+            }
+        }
 
         tracing::debug!(
             { conventions::OPERATION } = conventions::operations::CACHE_LOOKUP,

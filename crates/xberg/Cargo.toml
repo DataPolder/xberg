@@ -978,7 +978,12 @@ nom-exif = { workspace = true, optional = true }
 num_cpus = { workspace = true }
 once_cell = { workspace = true }
 opentelemetry = { version = "0.32", features = ["trace"], optional = true }
-opentelemetry_sdk = { version = "0.32", features = ["rt-tokio"], optional = true }
+# `testing` supplies `metrics::InMemoryMetricExporter`, which the #332 regression test
+# uses to read back real counter/histogram deltas instead of asserting on a mock. It is
+# a small module and only reachable from otel builds, which already pull this crate in;
+# declaring it as a dev-dependency instead would compile the whole SDK for every test
+# build, including the ones with `otel` off.
+opentelemetry_sdk = { version = "0.32", features = ["rt-tokio", "testing"], optional = true }
 org = { version = "0.3", optional = true }
 # ort 2.0.0-rc.13 gates ort::ep::CoreML/CUDA/TensorRT behind same-named Cargo features
 # (previously ungated in rc.12). Do NOT blanket-enable coreml/cuda/tensorrt here: ort's
