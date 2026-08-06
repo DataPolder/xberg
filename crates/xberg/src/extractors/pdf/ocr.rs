@@ -1659,13 +1659,21 @@ fn analyze_container_markers(elements: &[crate::types::internal::InternalElement
 }
 
 // locally because this PDF OCR path also compiles under `ocr-pipeline` (VLM OCR, e.g.
-// the `binstall` CLI) where the `ocr` module — gated on `ocr`/`ocr-wasm` — is absent.
-#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+// the `binstall` CLI) or under `layout-detection` alone (layout without any OCR backend
+// enabled), where the `ocr` module — gated on `ocr`/`ocr-wasm` — is absent.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
 const OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY: &str = "ocr_processed_image_width";
-#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
 const OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY: &str = "ocr_processed_image_height";
+// Same rationale, scoped to `layout-detection` only: `resolved_ocr_correction_degrees` and
+// `transform_ocr_elements_to_render_space` (both `layout-detection`-only) are the sole
+// readers of these two key names in this file, and they must resolve without `crate::ocr`.
+#[cfg(feature = "layout-detection")]
+const OCR_ORIENTATION_DEGREES_METADATA_KEY: &str = "orientation_degrees";
+#[cfg(feature = "layout-detection")]
+const OCR_AUTO_ROTATED_METADATA_KEY: &str = "auto_rotated";
 
-#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
 fn valid_ocr_layout_dimension(value: &serde_json::Value) -> Option<u32> {
     let value = value.as_f64()?;
     if !value.is_finite() || value <= 0.0 || value > u32::MAX as f64 || value.fract() != 0.0 {
@@ -1674,7 +1682,7 @@ fn valid_ocr_layout_dimension(value: &serde_json::Value) -> Option<u32> {
     Some(value as u32)
 }
 
-#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
 fn processed_ocr_layout_dimensions(metadata: &crate::types::Metadata) -> Option<(u32, u32)> {
     let width = metadata
         .additional
@@ -1728,7 +1736,7 @@ fn scale_detection_to_dimensions(
 fn resolved_ocr_correction_degrees(metadata: &crate::types::Metadata) -> Option<u16> {
     if !metadata
         .additional
-        .get(crate::ocr::OCR_AUTO_ROTATED_METADATA_KEY)
+        .get(OCR_AUTO_ROTATED_METADATA_KEY)
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false)
     {
@@ -1736,7 +1744,7 @@ fn resolved_ocr_correction_degrees(metadata: &crate::types::Metadata) -> Option<
     }
     let orientation = metadata
         .additional
-        .get(crate::ocr::OCR_ORIENTATION_DEGREES_METADATA_KEY)
+        .get(OCR_ORIENTATION_DEGREES_METADATA_KEY)
         .and_then(serde_json::Value::as_i64)?;
     if !matches!(orientation, 0 | 90 | 180 | 270) {
         return None;
@@ -1900,7 +1908,7 @@ fn transform_ocr_elements_to_render_space(
     };
     let auto_rotated = metadata
         .additional
-        .get(crate::ocr::OCR_AUTO_ROTATED_METADATA_KEY)
+        .get(OCR_AUTO_ROTATED_METADATA_KEY)
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
     let correction_degrees = resolved_ocr_correction_degrees(metadata);
