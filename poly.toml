@@ -366,6 +366,8 @@ enabled = true
 "crates/xberg-php/**" = ["comment", "doc-comment"]
 "crates/xberg-py/src/lib.rs" = ["comment", "doc-comment"]
 "crates/xberg-wasm/src/lib.rs" = ["comment", "doc-comment"]
+# uncomment rule has 3x deleted real explanatory comments during the v1.1.0 audit; suppress here only.
+"crates/xberg/src/**" = ["comment", "doc-comment"]
 "docker/**" = ["DL3006", "DL3059"]
 "e2e/**/*.py" = ["A001", "N801"]
 "packages/**" = ["comment", "doc-comment"]
