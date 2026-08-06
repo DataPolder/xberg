@@ -441,6 +441,25 @@ fn build_json_document(doc: &InternalDocument) -> JsonDocument {
 
     close_sections_to_level(&mut section_stack, &mut root_body, 0);
 
+    // Footnote definitions live on `ContentLayer::Footnote`, not `ContentLayer::Body`,
+    // so the per-element loop above never sees them: `is_body_element` filters them
+    // out before the `ElementKind::FootnoteDefinition` arm is reached. That filter is
+    // correct — a definition is document furniture, not body flow, and must not be
+    // interleaved into whatever section happened to be open when its reference
+    // occurred — but it also meant the definition a `[^n]` marker points at was
+    // dropped entirely (xberg-io/xberg#288). Collect the ones the main loop skipped
+    // and append them once, in document order, at the very end, mirroring how the
+    // Markdown renderer (`comrak_bridge::render_markdown`) emits collected footnote
+    // definitions after the rest of the tree instead of inline.
+    for elem in &doc.elements {
+        if elem.kind == ElementKind::FootnoteDefinition && !is_body_element(elem) {
+            root_body.push(JsonNode::FootnoteDefinition {
+                text: elem.text.clone(),
+                id: elem.anchor.clone(),
+            });
+        }
+    }
+
     JsonDocument { title, body: root_body }
 }
 
