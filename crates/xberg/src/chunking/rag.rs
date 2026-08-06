@@ -18,6 +18,32 @@
 //! of heading hierarchy, so `heading_path` will always be `[]` for every chunk
 //! produced by a `Yaml`-typed config.
 //!
+//! # Breadcrumb placement: dense vs. lexical retrieval
+//!
+//! When the caller's config sets `chunker_type: Markdown` and
+//! `prepend_heading_context: true`, the underlying chunker prepends the heading
+//! hierarchy (e.g. `"# Guide > ## Setup\n\n"`) directly into each chunk's
+//! `content`. That is a good default for **dense/embedding retrieval**, where each
+//! chunk should read as a self-contained passage that carries its own structural
+//! context.
+//!
+//! It actively harms **lexical retrieval (BM25/TF-IDF)**: every chunk under the
+//! same section repeats the same heading tokens, so a heading word's document
+//! frequency approaches the number of chunks in that section and its IDF collapses
+//! toward zero — the heading text can dominate, or drown out, real match signal.
+//!
+//! [`ChunkingConfig::breadcrumb_target`](crate::core::config::ChunkingConfig::breadcrumb_target)
+//! controls this trade-off directly instead of requiring callers to string-strip the
+//! breadcrumb prefix back out of `content` using `heading_path`:
+//!
+//! * [`BreadcrumbTarget::Content`](crate::core::config::extraction::BreadcrumbTarget::Content)
+//!   (default) — prepend into `content`, as described above. Preserves the
+//!   behaviour that existed before this option was introduced.
+//! * [`BreadcrumbTarget::Metadata`](crate::core::config::extraction::BreadcrumbTarget::Metadata)
+//!   — leave `content` untouched; exclude or down-weight heading tokens on the
+//!   lexical side using `heading_path` instead, which `chunk_for_rag` always
+//!   populates regardless of this setting.
+//!
 //! # Design
 //!
 //! - Delegates all splitting to [`super::core::chunk_text`] with

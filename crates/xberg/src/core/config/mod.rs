@@ -44,9 +44,9 @@ pub(crate) use extraction::BatchBytesItem;
 #[cfg(all(test, feature = "tokio-runtime", not(target_arch = "wasm32")))]
 pub(crate) use extraction::BatchFileItem;
 pub use extraction::{
-    ExtractInput, ExtractInputKind, ExtractionConfig, ExtractionErrorItem, ExtractionResult, ExtractionSummary,
-    FileExtractionConfig, ImageExtractionConfig, LanguageDetectionConfig, TokenReductionOptions, UrlExtractionConfig,
-    UrlExtractionMode,
+    BreadcrumbTarget, ExtractInput, ExtractInputKind, ExtractionConfig, ExtractionErrorItem, ExtractionResult,
+    ExtractionSummary, FileExtractionConfig, ImageExtractionConfig, LanguageDetectionConfig, TokenReductionOptions,
+    UrlExtractionConfig, UrlExtractionMode,
 };
 pub use formats::{JupyterCellRendering, OutputFormat};
 #[cfg(feature = "html")]

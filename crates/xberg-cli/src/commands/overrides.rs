@@ -8,7 +8,7 @@
 use anyhow::Context as _;
 use anyhow::{Result, bail};
 #[cfg(any(feature = "core-cli", feature = "analysis"))]
-use xberg::ChunkingConfig;
+use xberg::{BreadcrumbTarget, ChunkingConfig};
 #[cfg(feature = "analysis")]
 use xberg::LanguageDetectionConfig;
 #[cfg(feature = "ocr-surface")]
@@ -78,6 +78,28 @@ impl From<AccelerationArg> for ExecutionProviderType {
             AccelerationArg::CoreMl => ExecutionProviderType::CoreMl,
             AccelerationArg::Cuda => ExecutionProviderType::Cuda,
             AccelerationArg::TensorRt => ExecutionProviderType::TensorRt,
+        }
+    }
+}
+
+/// Where the heading-path breadcrumb is written when Markdown chunking prepends
+/// heading context. See [`xberg::BreadcrumbTarget`] for the dense-vs-lexical
+/// retrieval trade-off.
+#[cfg(any(feature = "core-cli", feature = "analysis"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum BreadcrumbTargetArg {
+    /// Prepend the breadcrumb into chunk content (default).
+    Content,
+    /// Keep content clean; rely on `ChunkMetadata::heading_path` only.
+    Metadata,
+}
+
+#[cfg(any(feature = "core-cli", feature = "analysis"))]
+impl From<BreadcrumbTargetArg> for BreadcrumbTarget {
+    fn from(arg: BreadcrumbTargetArg) -> Self {
+        match arg {
+            BreadcrumbTargetArg::Content => BreadcrumbTarget::Content,
+            BreadcrumbTargetArg::Metadata => BreadcrumbTarget::Metadata,
         }
     }
 }
@@ -220,6 +242,12 @@ pub struct ExtractionOverrides {
     #[cfg(any(feature = "core-cli", feature = "analysis"))]
     #[arg(long)]
     pub chunking_tokenizer: Option<String>,
+
+    /// Where the heading-path breadcrumb is written when Markdown chunking prepends
+    /// heading context (content, metadata, or both). Default: content.
+    #[cfg(any(feature = "core-cli", feature = "analysis"))]
+    #[arg(long, value_enum)]
+    pub chunk_breadcrumb_target: Option<BreadcrumbTargetArg>,
 
     /// Content rendering format (plain, markdown, djot, html).
     /// Controls the format of extracted content.
@@ -716,6 +744,15 @@ impl ExtractionOverrides {
                     chunking_config
                 };
 
+                let chunking_config = if let Some(target) = self.chunk_breadcrumb_target {
+                    ChunkingConfig {
+                        breadcrumb_target: target.into(),
+                        ..chunking_config
+                    }
+                } else {
+                    chunking_config
+                };
+
                 config.chunking = Some(chunking_config);
             } else {
                 config.chunking = None;
@@ -738,6 +775,10 @@ impl ExtractionOverrides {
                     model: model.clone(),
                     cache_dir: None,
                 };
+            }
+
+            if let Some(target) = self.chunk_breadcrumb_target {
+                chunking.breadcrumb_target = target.into();
             }
         }
     }
@@ -1379,6 +1420,49 @@ mod tests {
         let chunking = config.chunking.unwrap();
         assert_eq!(chunking.max_characters, 500);
         assert_eq!(chunking.overlap, 50);
+    }
+
+    #[cfg(any(feature = "core-cli", feature = "analysis"))]
+    #[test]
+    fn test_chunking_breadcrumb_target_applied_on_new_config() {
+        let mut config = ExtractionConfig::default();
+        let overrides = ExtractionOverrides {
+            chunk: Some(true),
+            chunk_breadcrumb_target: Some(BreadcrumbTargetArg::Metadata),
+            ..default_overrides()
+        };
+        overrides.apply(&mut config);
+        let chunking = config.chunking.unwrap();
+        assert_eq!(chunking.breadcrumb_target, BreadcrumbTarget::Metadata);
+    }
+
+    #[cfg(any(feature = "core-cli", feature = "analysis"))]
+    #[test]
+    fn test_chunking_breadcrumb_target_applied_on_existing_config() {
+        let mut config = ExtractionConfig {
+            chunking: Some(ChunkingConfig::default()),
+            ..Default::default()
+        };
+        let overrides = ExtractionOverrides {
+            chunk_breadcrumb_target: Some(BreadcrumbTargetArg::Metadata),
+            ..default_overrides()
+        };
+        overrides.apply(&mut config);
+        let chunking = config.chunking.unwrap();
+        assert_eq!(chunking.breadcrumb_target, BreadcrumbTarget::Metadata);
+    }
+
+    #[cfg(any(feature = "core-cli", feature = "analysis"))]
+    #[test]
+    fn test_chunking_breadcrumb_target_defaults_to_content() {
+        let mut config = ExtractionConfig::default();
+        let overrides = ExtractionOverrides {
+            chunk: Some(true),
+            ..default_overrides()
+        };
+        overrides.apply(&mut config);
+        let chunking = config.chunking.unwrap();
+        assert_eq!(chunking.breadcrumb_target, BreadcrumbTarget::Content);
     }
 
     #[cfg(any(feature = "core-cli", feature = "analysis"))]

@@ -349,6 +349,42 @@ fn default_xberg_crawl_config() -> crawlberg::CrawlConfig {
     }
 }
 
+/// Where the heading-path breadcrumb is written when
+/// [`ChunkingConfig::prepend_heading_context`](super::super::processing::ChunkingConfig::prepend_heading_context)
+/// is enabled for a `Markdown`-chunked document.
+///
+/// Prepending the breadcrumb into a chunk's `content` (the default, `Content`) helps
+/// dense/embedding retrieval: each chunk becomes a self-contained passage that carries
+/// its own structural context. It actively harms lexical retrieval (BM25/TF-IDF),
+/// though — every chunk under the same section repeats the same heading tokens, so a
+/// heading word's document frequency approaches the number of chunks in that section
+/// and its IDF collapses toward zero, drowning out real match signal.
+///
+/// `Metadata` keeps `content` free of the breadcrumb and relies solely on
+/// [`ChunkMetadata::heading_path`](crate::types::ChunkMetadata::heading_path) (already
+/// populated for every chunk under a heading by
+/// [`chunk_for_rag`](crate::chunking::chunk_for_rag)), which downstream lexical/hybrid
+/// pipelines can use to exclude or down-weight heading tokens directly — instead of the
+/// fragile pattern of string-stripping a breadcrumb prefix back out of `content`.
+///
+/// There is deliberately no `Both` variant. `heading_path` is populated for every
+/// chunk under a heading regardless of this setting, so "both" is precisely what
+/// `Content` already does — a third variant would be a synonym, and one that every
+/// binding in 15 languages would have to carry and every caller would have to guess
+/// the meaning of.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "api", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum BreadcrumbTarget {
+    /// Prepend the heading breadcrumb into chunk `content`, and keep `heading_path`
+    /// populated (default; preserves the behaviour that existed before this option
+    /// was introduced).
+    #[default]
+    Content,
+    /// Leave `content` untouched; rely on `ChunkMetadata::heading_path` only.
+    Metadata,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg(all(test, feature = "tokio-runtime", not(target_arch = "wasm32")))]
 pub(crate) struct BatchBytesItem {

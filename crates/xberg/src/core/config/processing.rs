@@ -232,6 +232,18 @@ pub struct ChunkingConfig {
     /// Default: `Split`
     #[serde(default)]
     pub table_chunking: TableChunkingMode,
+
+    /// Where the heading-path breadcrumb is written when `prepend_heading_context`
+    /// is `true`. See
+    /// [`BreadcrumbTarget`](crate::core::config::extraction::BreadcrumbTarget) for
+    /// the dense-vs-lexical retrieval trade-off. Has no effect when
+    /// `prepend_heading_context` is `false`.
+    ///
+    /// Default: `Content` — preserves the pre-existing behaviour of prepending the
+    /// breadcrumb into chunk `content`.
+    #[serde(default)]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
+    pub breadcrumb_target: crate::core::config::extraction::BreadcrumbTarget,
 }
 
 impl ChunkingConfig {
@@ -293,6 +305,7 @@ impl ChunkingConfig {
             prepend_heading_context: self.prepend_heading_context,
             topic_threshold: self.topic_threshold,
             table_chunking: self.table_chunking,
+            breadcrumb_target: self.breadcrumb_target,
         }
     }
 
@@ -319,6 +332,7 @@ impl Default for ChunkingConfig {
             prepend_heading_context: false,
             topic_threshold: None,
             table_chunking: TableChunkingMode::Split,
+            breadcrumb_target: crate::core::config::extraction::BreadcrumbTarget::Content,
         }
     }
 }

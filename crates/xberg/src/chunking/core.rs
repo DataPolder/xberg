@@ -147,7 +147,15 @@ pub(crate) fn chunk_text_with_heading_source(
                 chunk.chunk_type = classify_chunk(&chunk.content, chunk.metadata.heading_context.as_ref());
             }
 
-            if config.prepend_heading_context {
+            // `Metadata` keeps `content` clean for lexical/BM25 retrieval (#337): every
+            // chunk under the same section otherwise repeats the same heading tokens,
+            // collapsing that term's IDF toward zero. `heading_path` (derived by
+            // `chunk_for_rag`/`execute_chunking` from `heading_context`, set above
+            // regardless of this flag) remains the source of truth for the breadcrumb
+            // in that mode instead of string-stripping a prefix back out of `content`.
+            if config.prepend_heading_context
+                && config.breadcrumb_target != crate::core::config::extraction::BreadcrumbTarget::Metadata
+            {
                 // NOTE (#1294): this mutates `chunk.content` only. `byte_start`/`byte_end`
                 for chunk in &mut chunks {
                     let Some(ref ctx) = chunk.metadata.heading_context else {
