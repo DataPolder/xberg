@@ -21,6 +21,20 @@ use crate::types::internal::InternalDocument;
 use crate::types::metadata::{
     CodeChunkInfo, CodeDataAttribute, CodeDataNode, CodeDataNodeKind, CodeMetadata, FormatMetadata, Metadata,
 };
+
+/// `metadata.additional` scratch key carrying the full serialized
+/// `tree_sitter_language_pack::ProcessResult` — language, metrics, structure,
+/// imports, exports, comments, docstrings, symbols and diagnostics — from
+/// extraction through to `extraction::derive::derive_extraction_result`.
+///
+/// `CodeMetadata` (the typed, FFI-facing struct on `Metadata::format`)
+/// deliberately carries only `chunks`/`data`, so the rest of `ProcessResult`
+/// has nowhere else to travel without widening that type or `ExtractedDocument`
+/// itself. This key is removed from `metadata.additional` by the derivation
+/// step (see `extraction/derive.rs`), so it never leaks into the final
+/// `ExtractedDocument.metadata.additional` map.
+pub(crate) const CODE_INTELLIGENCE_SCRATCH_KEY: &str = "__xberg_code_intelligence_process_result";
+
 #[cfg_attr(alef, alef(skip))]
 /// Source code extractor using tree-sitter language pack.
 ///
@@ -97,6 +111,13 @@ impl CodeExtractor {
             source: None,
         })?;
 
+        // #259: `chunks`/`data` get lifted into the typed `CodeMetadata` below, but the
+        // rest of `ProcessResult` (metrics, structure, imports, exports, comments,
+        // docstrings, symbols, diagnostics) has no typed home. Serialize the whole
+        // result now, while it is still in scope, and stash it in the scratch slot so
+        // the derivation step can surface it as `code_intelligence` instead of losing it.
+        let process_result_json = serde_json::to_value(&result).ok();
+
         let mut builder = InternalDocumentBuilder::new("code");
         let mut code_chunks: Vec<CodeChunkInfo> = Vec::with_capacity(result.chunks.len());
 
@@ -135,12 +156,18 @@ impl CodeExtractor {
             }
         }
 
+        let mut additional = ahash::AHashMap::default();
+        if let Some(json) = process_result_json {
+            additional.insert(Cow::Borrowed(CODE_INTELLIGENCE_SCRATCH_KEY), json);
+        }
+
         let mut doc = builder.build();
         doc.metadata = Metadata {
             format: Some(FormatMetadata::Code(CodeMetadata {
                 chunks: code_chunks,
                 data: result.data.as_ref().map(convert_data_node),
             })),
+            additional,
             ..Default::default()
         };
         doc.mime_type = SOURCE_CODE_MIME_TYPE.to_string();

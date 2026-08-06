@@ -664,20 +664,39 @@ pub fn derive_extraction_result(
     };
 
     // #259: `code_intelligence` is documented (types/extraction.rs) as carrying
-    // metrics, imports/exports, comments, docstrings, symbols and diagnostics —
-    // the full `tree_sitter_language_pack::ProcessResult`. Only the structural
-    // chunks and hierarchical data tree (`FormatMetadata::Code`) survive onto
-    // `InternalDocument`; `extractors/code.rs` discards the rest of
-    // `ProcessResult` (metrics, imports, exports, comments, docstrings, symbols,
-    // diagnostics) before building the document, so they are not reachable here.
-    // This surfaces what *is* available instead of hardcoding `None` — populating
-    // the remaining fields requires `extractors/code.rs` to also preserve them
-    // (e.g. serialized onto the document) for this derivation step to lift out.
+    // the full `tree_sitter_language_pack::ProcessResult` — metrics, structure,
+    // imports, exports, comments, docstrings, symbols, diagnostics, chunks and
+    // the hierarchical data tree. `extractors/code.rs` stashes that entire
+    // serialized result under `CODE_INTELLIGENCE_SCRATCH_KEY` in
+    // `metadata.additional` (the typed `CodeMetadata` on `Metadata::format` only
+    // carries `chunks`/`data`, so it has no room for the rest). Prefer that full
+    // payload; `.remove()` so it never leaks into the final
+    // `ExtractedDocument.metadata.additional` map. Fall back to serializing just
+    // `CodeMetadata` for documents that reach this point without going through
+    // `CodeExtractor` (e.g. synthetic `InternalDocument`s built by tests or other
+    // callers that set `FormatMetadata::Code` directly).
     #[cfg(feature = "tree-sitter")]
-    let code_intelligence: Option<serde_json::Value> = match doc.metadata.format.as_ref() {
-        Some(crate::types::metadata::FormatMetadata::Code(code_metadata)) => serde_json::to_value(code_metadata).ok(),
-        _ => None,
+    let is_code_metadata = matches!(
+        doc.metadata.format.as_ref(),
+        Some(crate::types::metadata::FormatMetadata::Code(_))
+    );
+    #[cfg(feature = "tree-sitter")]
+    let full_process_result = if is_code_metadata {
+        doc.metadata
+            .additional
+            .remove(crate::extractors::code::CODE_INTELLIGENCE_SCRATCH_KEY)
+    } else {
+        None
     };
+    #[cfg(feature = "tree-sitter")]
+    let code_intelligence: Option<serde_json::Value> = full_process_result.or_else(|| {
+        match doc.metadata.format.as_ref() {
+            Some(crate::types::metadata::FormatMetadata::Code(code_metadata)) => {
+                serde_json::to_value(code_metadata).ok()
+            }
+            _ => None,
+        }
+    });
 
     let extraction_method = doc
         .metadata
@@ -1325,10 +1344,12 @@ mod tests {
     }
 
     /// #259: `code_intelligence` must surface the tree-sitter-derived
-    /// `FormatMetadata::Code` payload instead of being hardcoded to `None`.
-    /// (The full upstream `ProcessResult` — metrics, imports, exports, comments,
-    /// docstrings, symbols, diagnostics — never reaches `InternalDocument` in the
-    /// first place; see the comment at the `code_intelligence` binding site.)
+    /// `FormatMetadata::Code` payload instead of being hardcoded to `None`, even
+    /// for an `InternalDocument` that never went through `CodeExtractor` (so has
+    /// no `CODE_INTELLIGENCE_SCRATCH_KEY` entry in `metadata.additional`) — the
+    /// fallback path serializes `CodeMetadata` directly. See
+    /// `test_derive_extraction_result_prefers_full_process_result_over_code_metadata`
+    /// for the primary, `CodeExtractor`-shaped path.
     #[cfg(feature = "tree-sitter")]
     #[test]
     fn test_derive_extraction_result_populates_code_intelligence_from_code_metadata() {
@@ -1355,6 +1376,42 @@ mod tests {
         assert_eq!(
             code_intelligence["chunks"][0]["context_path"][0],
             serde_json::json!("main")
+        );
+    }
+
+    /// #259: when `metadata.additional` carries the full serialized
+    /// `tree_sitter_language_pack::ProcessResult` under
+    /// `extractors::code::CODE_INTELLIGENCE_SCRATCH_KEY` (as `CodeExtractor`
+    /// populates it), derivation must prefer that full payload over the
+    /// `CodeMetadata`-only fallback, and must remove the scratch key so it does
+    /// not leak into the final `ExtractedDocument.metadata.additional` map.
+    #[cfg(feature = "tree-sitter")]
+    #[test]
+    fn test_derive_extraction_result_prefers_full_process_result_over_code_metadata() {
+        use crate::types::metadata::{CodeMetadata, FormatMetadata};
+
+        let mut doc = make_doc("code");
+        doc.push_element(InternalElement::text(ElementKind::Paragraph, "def f(): pass", 0));
+        doc.metadata.format = Some(FormatMetadata::Code(CodeMetadata::default()));
+        doc.metadata.additional.insert(
+            std::borrow::Cow::Borrowed(crate::extractors::code::CODE_INTELLIGENCE_SCRATCH_KEY),
+            serde_json::json!({"language": "python", "metrics": {"total_lines": 1}}),
+        );
+
+        let result = derive_extraction_result(doc, false, crate::core::config::OutputFormat::Plain);
+
+        let code_intelligence = result
+            .code_intelligence
+            .expect("code_intelligence must be populated from the scratch key");
+        assert_eq!(code_intelligence["language"], serde_json::json!("python"));
+        assert_eq!(code_intelligence["metrics"]["total_lines"], serde_json::json!(1));
+        // The stashed key must not leak into the final metadata.
+        assert!(
+            !result
+                .metadata
+                .additional
+                .contains_key(crate::extractors::code::CODE_INTELLIGENCE_SCRATCH_KEY),
+            "scratch key must be removed before assembling the final ExtractedDocument"
         );
     }
 
