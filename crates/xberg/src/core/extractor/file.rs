@@ -44,14 +44,16 @@ use super::helpers::get_extractor;
 ///
 /// # Example
 ///
+/// This function is crate-internal; the public entry point that reaches it is
+/// [`crate::extract`] with a URI input.
+///
 /// ```rust,no_run
-/// use xberg::core::extractor::extract_file;
-/// use xberg::core::config::ExtractionConfig;
+/// use xberg::{ExtractInput, ExtractionConfig, extract};
 ///
 /// # async fn example() -> xberg::Result<()> {
 /// let config = ExtractionConfig::default();
-/// let result = extract_file("document.pdf", None, &config).await?;
-/// println!("Content: {}", result.content);
+/// let output = extract(ExtractInput::from_uri("document.pdf"), &config).await?;
+/// println!("Content: {}", output.results[0].content);
 /// # Ok(())
 /// # }
 /// ```

@@ -28,12 +28,15 @@
 //! ```rust,no_run
 //! # #[cfg(feature = "keywords-rake")]
 //! # {
-//! # use xberg::keywords::{extract_keywords, KeywordConfig};
+//! # use xberg::keywords::{extract_keywords, KeywordAlgorithm, KeywordConfig};
 //! // Use RAKE algorithm explicitly
 //! let text = "Machine learning models require large datasets.";
-//! let config = KeywordConfig::rake()
-//!     .with_max_keywords(5)
-//!     .with_min_score(0.3);
+//! let config = KeywordConfig {
+//!     algorithm: KeywordAlgorithm::Rake,
+//!     max_keywords: 5,
+//!     min_score: 0.3,
+//!     ..Default::default()
+//! };
 //!
 //! let keywords = extract_keywords(text, &config).unwrap();
 //! # }
@@ -89,9 +92,11 @@ pub use types::{Keyword, KeywordAlgorithm};
 /// ```rust,no_run
 /// # use xberg::keywords::{extract_keywords, KeywordConfig};
 /// let text = "Document intelligence with Rust provides memory safety.";
-/// let config = KeywordConfig::default()
-///     .with_max_keywords(10)
-///     .with_language("en");
+/// let config = KeywordConfig {
+///     max_keywords: 10,
+///     language: Some("en".to_string()),
+///     ..Default::default()
+/// };
 ///
 /// let keywords = extract_keywords(text, &config)?;
 ///
@@ -163,17 +168,17 @@ pub(crate) fn ensure_initialized() -> Result<()> {
 ///
 /// # Example
 ///
-/// ```rust
-/// # #[cfg(any(feature = "keywords-yake", feature = "keywords-rake"))]
+/// Not run as a doctest: registration is `pub(crate)` and happens automatically on
+/// first use, so there is no public call for this example to make. It documents the
+/// in-crate call shape.
+///
+/// ```ignore
 /// use xberg::keywords::register_keyword_processor;
 ///
-/// # #[cfg(any(feature = "keywords-yake", feature = "keywords-rake"))]
 /// # fn main() -> xberg::Result<()> {
 /// register_keyword_processor()?;
 /// # Ok(())
 /// # }
-/// # #[cfg(not(any(feature = "keywords-yake", feature = "keywords-rake")))]
-/// # fn main() {}
 /// ```
 #[cfg_attr(alef, alef(skip))]
 pub(crate) fn register_keyword_processor() -> Result<()> {

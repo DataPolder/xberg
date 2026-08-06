@@ -122,6 +122,33 @@ jobs:
           DYLD_LIBRARY_PATH: ${{ env.DYLD_LIBRARY_PATH || '' }}
           DYLD_FALLBACK_LIBRARY_PATH: ${{ env.DYLD_FALLBACK_LIBRARY_PATH || '' }}
 
+      # `task rust:test:ci` passes `--all-targets`, which runs --lib/--bins/--tests/
+      # --examples/--benches but deliberately EXCLUDES `--doc`. That left every rustdoc
+      # example in `-p xberg` with zero CI coverage, so they rotted into ~25 compile
+      # failures before anyone noticed (#313). This is the leg that catches that.
+      #
+      # Feature set matches the unit-test leg on purpose: (a) rustdoc forwards the crate's
+      # `--cfg feature="..."` flags to doctests, so a narrower set would silently *strip*
+      # the `# #[cfg(feature = "...")]`-guarded doctest bodies instead of checking them,
+      # and (b) reusing the same set means this step reuses that leg's warm build
+      # artifacts rather than rebuilding the dependency graph.
+      # The Linux-aarch64 substitution mirrors scripts/ci/rust/run-unit-tests.sh, which is
+      # the source of truth for why `full` is unbuildable there (candle -> gemm-f16 aarch64
+      # asm needs fullfp16). Keep the two in sync. ~keep
+      - name: Run doctests
+        run: |
+          features=full
+          if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "aarch64" ]; then
+            features=full-no-heic,heic
+          fi
+          echo "xberg doctest features: ${features}"
+          cargo test --locked -p xberg --features "${features}" --doc
+        shell: bash
+        env:
+          LD_LIBRARY_PATH: ${{ env.LD_LIBRARY_PATH || '' }}
+          DYLD_LIBRARY_PATH: ${{ env.DYLD_LIBRARY_PATH || '' }}
+          DYLD_FALLBACK_LIBRARY_PATH: ${{ env.DYLD_FALLBACK_LIBRARY_PATH || '' }}
+
       - name: Check no-default-features
         run: cargo check --locked -p xberg --no-default-features
         shell: bash

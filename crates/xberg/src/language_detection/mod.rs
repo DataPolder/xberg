@@ -30,7 +30,11 @@ pub use processor::LanguageDetector;
 ///
 /// # Example
 ///
-/// ```rust
+/// Not run as a doctest: this function is `pub(crate)`. Downstream crates reach it by
+/// setting [`crate::core::config::LanguageDetectionConfig`] on the extraction config and
+/// reading `ExtractedDocument::detected_languages`.
+///
+/// ```ignore
 /// use xberg::language_detection::detect_languages;
 /// use xberg::core::config::LanguageDetectionConfig;
 ///

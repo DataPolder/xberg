@@ -105,8 +105,9 @@ pub fn manifest() -> Vec<gline::GlinerManifestEntry> {
 ///
 /// ```rust,no_run
 /// use xberg::types::entity::EntityCategory;
-/// use xberg::text::ner::{detect_entities, LlmBackend};
+/// use xberg::text::ner::detect_entities;
 /// use xberg::core::config::LlmConfig;
+/// use xberg::LlmBackend;
 ///
 /// # async fn example() -> xberg::Result<()> {
 /// let backend = LlmBackend::new(LlmConfig::default());

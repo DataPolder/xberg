@@ -622,7 +622,11 @@ impl SecurityBudget {
 ///
 /// # Examples
 ///
-/// ```
+/// Not run as a doctest: this predicate is `pub(crate)`, used by the archive and
+/// container extractors. The public entry point for archive safety is
+/// [`crate::SecurityLimits`].
+///
+/// ```ignore
 /// # use xberg::extractors::security::has_path_traversal;
 /// assert!(has_path_traversal("word/../../etc/passwd"));
 /// assert!(!has_path_traversal("word/images/photo.png"));

@@ -15,7 +15,11 @@
 //!
 //! # Example
 //!
-//! ```rust,no_run
+//! `OcrProcessor::new` and `process_image` are `pub(crate)` — OCR is driven through the
+//! extraction pipeline (`ExtractionConfig::ocr`), not by constructing a processor directly.
+//! The example below documents the internal shape and is not compiled.
+//!
+//! ```ignore
 //! use xberg::ocr::{OcrProcessor, TesseractConfig};
 //!
 //! # fn example() -> Result<(), xberg::ocr::error::OcrError> {

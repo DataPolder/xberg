@@ -337,7 +337,11 @@ fn inject_table_headers(chunks: &mut [crate::types::Chunk]) {
 ///
 /// # Examples
 ///
-/// ```rust
+/// This function is `#[cfg(test)]`, so it does not exist in a normal build and the example
+/// cannot be compiled. The public route is [`chunk_text`], which takes a
+/// [`ChunkingConfig`](crate::chunking::ChunkingConfig) carrying the same knobs.
+///
+/// ```ignore
 /// use xberg::chunking::{chunk_text_with_type, ChunkerType};
 ///
 /// # fn example() -> xberg::Result<()> {
@@ -384,7 +388,10 @@ pub(crate) fn chunk_text_with_type(
 ///
 /// # Examples
 ///
-/// ```rust
+/// This function is `#[cfg(test)]`, so it does not exist in a normal build and the example
+/// cannot be compiled. The public route is [`chunk_text`], called once per input.
+///
+/// ```ignore
 /// use xberg::chunking::{chunk_texts_batch, ChunkingConfig};
 ///
 /// # fn example() -> xberg::Result<()> {

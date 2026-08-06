@@ -95,11 +95,17 @@ impl ApiSizeLimits {
     ///
     /// # Examples
     ///
+    /// This helper is test-only. Outside the crate, build the same limits from the
+    /// struct's public fields:
+    ///
     /// ```
     /// use xberg::api::ApiSizeLimits;
     ///
     /// // 50 MB limits
-    /// let limits = ApiSizeLimits::from_mb(50, 50);
+    /// let limits = ApiSizeLimits {
+    ///     max_request_body_bytes: 50 * 1024 * 1024,
+    ///     max_multipart_field_bytes: 50 * 1024 * 1024,
+    /// };
     /// ```
     #[cfg(test)]
     pub(crate) fn from_mb(max_request_body_mb: usize, max_multipart_field_mb: usize) -> Self {

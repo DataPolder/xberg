@@ -220,7 +220,10 @@ const VALID_OUTPUT_FORMATS: &[&str] = &["plain", "text", "markdown", "md", "djot
 ///
 /// # Examples
 ///
-/// ```rust
+/// Not run as a doctest: exported `#[cfg(test)] pub(crate)` only (see the note in
+/// [`crate::core::config_validation`]), so it is unreachable from a downstream crate.
+///
+/// ```ignore
 /// use xberg::core::config_validation::validate_binarization_method;
 ///
 /// assert!(validate_binarization_method("otsu").is_ok());
@@ -374,7 +377,10 @@ pub(crate) fn validate_language_code(code: &str) -> Result<()> {
 ///
 /// # Examples
 ///
-/// ```rust
+/// Not run as a doctest: exported `#[cfg(test)] pub(crate)` only (see the note in
+/// [`crate::core::config_validation`]), so it is unreachable from a downstream crate.
+///
+/// ```ignore
 /// use xberg::core::config_validation::validate_tesseract_psm;
 ///
 /// assert!(validate_tesseract_psm(3).is_ok());  // Fully automatic
@@ -409,7 +415,10 @@ pub(crate) fn validate_tesseract_psm(psm: i32) -> Result<()> {
 ///
 /// # Examples
 ///
-/// ```rust
+/// Not run as a doctest: exported `#[cfg(test)] pub(crate)` only (see the note in
+/// [`crate::core::config_validation`]), so it is unreachable from a downstream crate.
+///
+/// ```ignore
 /// use xberg::core::config_validation::validate_tesseract_oem;
 ///
 /// assert!(validate_tesseract_oem(1).is_ok());  // Neural nets (LSTM)
@@ -450,7 +459,10 @@ pub(crate) fn validate_tesseract_oem(oem: i32) -> Result<()> {
 ///
 /// # Examples
 ///
-/// ```rust
+/// Not run as a doctest: exported `#[cfg(test)] pub(crate)` only (see the note in
+/// [`crate::core::config_validation`]), so it is unreachable from a downstream crate.
+///
+/// ```ignore
 /// use xberg::core::config_validation::validate_output_format;
 ///
 /// assert!(validate_output_format("text").is_ok());
