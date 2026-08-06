@@ -75,28 +75,103 @@ pub async fn classify_document(
         if page_text.is_empty() {
             continue;
         }
-        // NOTE: `classify_one`'s `LlmUsage` is intentionally dropped here.
-        // `classify_document` returns a bare `Vec<ClassificationLabel>` with
-        // no slot to carry usage, and the only caller (`enrich::enrich`) is
-        // outside this fix's file scope — see the #265 write-up for the
-        // proposed shape change.
+        // `classify_document` returns a bare `Vec<ClassificationLabel>` with no slot to
+        // carry usage, so this entry point still drops it. Callers that own an
+        // `ExtractedDocument` must use `classify_document_onto`, which records both the
+        // per-page labels and every call's `LlmUsage` on the document (#263).
         let (labels, _usage) = page_classifier::classify_one(page_text, &ctx, config).await?;
         per_page_labels.push(labels);
     }
 
-    let aggregated = aggregate_page_labels(&per_page_labels);
+    Ok(finalize_document_labels(&per_page_labels, config.multi_label))
+}
 
-    if config.multi_label {
+/// Classify `result`'s pages and record everything the call produced **on the document**.
+///
+/// This is the write-back counterpart of [`classify_document`]. Besides returning the
+/// aggregated document-level label set it also populates
+/// [`ExtractedDocument::page_classifications`](crate::types::ExtractedDocument::page_classifications)
+/// with the per-page detail and appends every LLM call's
+/// [`LlmUsage`](crate::types::LlmUsage) to
+/// [`ExtractedDocument::llm_usage`](crate::types::ExtractedDocument::llm_usage).
+///
+/// `classify_document` can do neither: it takes borrowed page slices and returns a bare
+/// label vector, so its caller's token/cost accounting and per-page labels were silently
+/// discarded — the enrichment chokepoint's classification stage was the only caller and
+/// therefore produced results that never reached the serialized document (#263).
+///
+/// Pages are the per-page `content` entries when the document has them, otherwise the
+/// whole `content` as a single page. Empty pages are skipped and consume no LLM call, but
+/// still keep their 1-indexed page number for the pages that follow.
+///
+/// # Errors
+///
+/// Returns [`crate::XbergError::Validation`] when `config.labels` is empty, or any error
+/// raised by prompt rendering or the underlying LLM call.
+pub(crate) async fn classify_document_onto(
+    result: &mut crate::types::ExtractedDocument,
+    config: &crate::core::config::PageClassificationConfig,
+) -> crate::Result<Vec<crate::ClassificationLabel>> {
+    if config.labels.is_empty() {
+        return Err(crate::XbergError::validation(
+            "PageClassificationConfig.labels must contain at least one entry",
+        ));
+    }
+
+    let pages: Vec<String> = match result.pages.as_deref() {
+        Some(pages) if !pages.is_empty() => pages.iter().map(|page| page.content.clone()).collect(),
+        _ => vec![result.content.clone()],
+    };
+
+    let ctx = page_classifier::ClassifyContext::new(config);
+    let mut per_page_labels: Vec<Vec<crate::ClassificationLabel>> = Vec::new();
+    let mut classifications: Vec<crate::types::classification::PageClassification> = Vec::new();
+    let mut usages: Vec<crate::types::LlmUsage> = Vec::new();
+
+    for (index, page_text) in pages.iter().enumerate() {
+        if page_text.is_empty() {
+            continue;
+        }
+        let (labels, usage) = page_classifier::classify_one(page_text, &ctx, config).await?;
+        if let Some(usage) = usage {
+            usages.push(usage);
+        }
+        classifications.push(crate::types::classification::PageClassification {
+            page_number: index as u32 + 1,
+            labels: labels.clone(),
+        });
+        per_page_labels.push(labels);
+    }
+
+    if !classifications.is_empty() {
+        result.page_classifications = Some(classifications);
+    }
+    if !usages.is_empty() {
+        result.llm_usage.get_or_insert_with(Vec::new).extend(usages);
+    }
+
+    Ok(finalize_document_labels(&per_page_labels, config.multi_label))
+}
+
+/// Reduce per-page labels to the document-level label set: every label in multi-label
+/// mode (sorted by name), or the single highest-confidence label otherwise.
+fn finalize_document_labels(
+    per_page_labels: &[Vec<crate::ClassificationLabel>],
+    multi_label: bool,
+) -> Vec<crate::ClassificationLabel> {
+    let aggregated = aggregate_page_labels(per_page_labels);
+
+    if multi_label {
         let mut labels = aggregated;
         labels.sort_by(|a, b| a.label.cmp(&b.label));
-        Ok(labels)
+        labels
     } else {
         let best = aggregated.into_iter().max_by(|a, b| {
             let a_score = a.confidence.unwrap_or(0.0);
             let b_score = b.confidence.unwrap_or(0.0);
             a_score.partial_cmp(&b_score).unwrap_or(std::cmp::Ordering::Equal)
         });
-        Ok(best.into_iter().collect())
+        best.into_iter().collect()
     }
 }
 
