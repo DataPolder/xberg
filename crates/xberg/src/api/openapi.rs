@@ -171,6 +171,16 @@ struct HeuristicsSchemas;
 #[cfg_attr(alef, alef(skip))]
 struct KeywordSchemas;
 
+// `/metrics` is only routed when the `prometheus` feature is enabled (it requires both
+// `api` and `otel`; see the `prometheus` feature definition), so — same as the schema
+// groups above — its path lives in its own gated `OpenApi` document rather than in
+// `ApiDoc::paths(..)` directly, which would fail to compile without the feature.
+#[cfg(all(feature = "api", feature = "prometheus"))]
+#[derive(OpenApi)]
+#[openapi(paths(crate::api::handlers::metrics_handler))]
+#[cfg_attr(alef, alef(skip))]
+struct PrometheusPaths;
+
 /// Generate OpenAPI JSON schema.
 ///
 /// Returns the complete OpenAPI 3.1 specification as a JSON string.
@@ -195,6 +205,8 @@ pub fn openapi_json() -> String {
     document.merge(HeuristicsSchemas::openapi());
     #[cfg(any(feature = "keywords-yake", feature = "keywords-rake"))]
     document.merge(KeywordSchemas::openapi());
+    #[cfg(feature = "prometheus")]
+    document.merge(PrometheusPaths::openapi());
 
     document.to_pretty_json().unwrap_or_else(|_| "{}".to_string())
 }

@@ -195,6 +195,12 @@ pub struct ApiState {
     /// In-memory job store for async extraction polling.
     #[cfg(feature = "api")]
     pub job_store: Arc<super::jobs::JobStore>,
+    /// Prometheus registry backing `GET /metrics`.
+    ///
+    /// Installed by [`crate::telemetry::init_prometheus`] as the global OTel meter
+    /// provider before this state is constructed — see `create_router_with_limits_and_server_config`.
+    #[cfg(feature = "prometheus")]
+    pub prometheus_registry: prometheus::Registry,
 }
 
 /// Response from `POST /extract-async`: a job identifier the client polls.

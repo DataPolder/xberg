@@ -18,9 +18,6 @@ readme = "README.md"
 # `use`d under a `#[cfg(feature = ...)]` gate do NOT need an entry: cargo-machete scans
 # source textually and is feature-agnostic, so it already sees them.
 ignored = [
-  # Only ever reached as `opentelemetry::` (a different crate); the SDK is wired up by the
-  # binary/embedder, so xberg names the sdk crate nowhere.
-  "opentelemetry_sdk",
   # Installed as a tracing Layer by the embedder; never referenced by path here.
   "tracing-opentelemetry",
   # icu_provider is feature-gated and consumed transitively by language-detection;
@@ -542,6 +539,17 @@ mcp-http = ["mcp", "api"]
 # ~keep reach the collector through the consumer's tracing-opentelemetry layer.
 otel = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:tracing-opentelemetry", "crawlberg?/otel", "liter-llm?/otel"]
 
+# Opt-in Prometheus `/metrics` endpoint (#1391). Needs BOTH `api` (the HTTP route) and
+# `otel` (the OTel meter instruments actually being fed) — neither implies the other, so
+# both are listed explicitly rather than relying on `services` (which bundles `api` + `mcp`
+# + `otel` together and would needlessly pull in `mcp`). `opentelemetry-prometheus` 0.32.0
+# matches this crate's pinned `opentelemetry`/`opentelemetry_sdk` 0.32 exactly and requests
+# `opentelemetry_sdk`'s unstable `experimental_metrics_custom_reader` feature itself (via
+# Cargo feature unification), so it does not need to be declared again here. `prometheus`
+# is pulled with `default-features = false` so its `protobuf` dependency is never enabled —
+# every remaining transitive dependency is already present in the workspace.
+prometheus = ["api", "otel", "dep:opentelemetry-prometheus", "dep:prometheus"]
+
 # no-ort-target: shared base for targets that cannot use ONNX Runtime (Android x86_64 emulator,
 # WASM). Pure-Rust only — no ORT, no native-only C++ deps. Used as a foundation for both
 # wasm-target and android-target to avoid duplication.
@@ -996,6 +1004,9 @@ opentelemetry = { version = "0.32", features = ["trace"], optional = true }
 # declaring it as a dev-dependency instead would compile the whole SDK for every test
 # build, including the ones with `otel` off.
 opentelemetry_sdk = { version = "0.32", features = ["rt-tokio", "testing"], optional = true }
+# Bridges the OTel `SdkMeterProvider` to a `prometheus::Registry` for the opt-in `/metrics`
+# endpoint (#1391). 0.32.0 matches the `opentelemetry`/`opentelemetry_sdk` 0.32 pin exactly.
+opentelemetry-prometheus = { version = "0.32", optional = true }
 org = { version = "0.3", optional = true }
 # ort 2.0.0-rc.13 gates ort::ep::CoreML/CUDA/TensorRT behind same-named Cargo features
 # (previously ungated in rc.12). Do NOT blanket-enable coreml/cuda/tensorrt here: ort's
@@ -1013,6 +1024,9 @@ outlook-pst = { version = "1.2.0", optional = true }
 parking_lot = { workspace = true }
 pastey = "0.2"
 pdf_oxide = { workspace = true, features = ["rendering"], optional = true }
+# Registry + text-exposition-format encoder backing the `/metrics` endpoint (#1391).
+# `default-features = false` drops the `protobuf` dependency, which nothing here needs.
+prometheus = { version = "0.14", default-features = false, optional = true }
 pulldown-cmark = { version = "0.13" }
 quick-xml = { version = "0.41.0", features = ["serialize"], optional = true }
 rake = { version = "0.3.6", optional = true }

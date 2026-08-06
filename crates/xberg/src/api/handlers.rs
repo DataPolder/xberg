@@ -521,6 +521,50 @@ pub(crate) async fn info_handler() -> Json<InfoResponse> {
     })
 }
 
+/// Prometheus metrics endpoint handler.
+///
+/// GET /metrics
+///
+/// Returns the current OTel extraction metrics in the Prometheus text exposition format
+/// (`text/plain; version=0.0.4`). Requires the `prometheus` feature.
+///
+/// The `SdkMeterProvider` backing these metrics is installed by
+/// [`crate::telemetry::init_prometheus`] before this router's extraction service is built
+/// (see `create_router_with_limits_and_server_config`), so every extraction handled by this
+/// router is reflected here. If a caller embeds a custom extraction pipeline instead of this
+/// router, they must call `init_prometheus()` themselves before their first extraction, or
+/// this endpoint scrapes an empty registry.
+#[cfg(feature = "prometheus")]
+#[utoipa::path(
+    get,
+    path = "/metrics",
+    tag = "health",
+    responses(
+        (status = 200, description = "Prometheus text-format extraction metrics", content_type = "text/plain"),
+    )
+)]
+#[cfg_attr(feature = "otel", tracing::instrument(name = "api.metrics", skip(state)))]
+pub(crate) async fn metrics_handler(
+    State(state): State<ApiState>,
+) -> Result<axum::response::Response<axum::body::Body>, ApiError> {
+    use prometheus::Encoder;
+
+    let metric_families = state.prometheus_registry.gather();
+    let encoder = prometheus::TextEncoder::new();
+    let mut buffer = Vec::new();
+    encoder.encode(&metric_families, &mut buffer).map_err(|e| {
+        ApiError::internal(crate::error::XbergError::Other(format!(
+            "Failed to encode Prometheus metrics: {}",
+            e
+        )))
+    })?;
+
+    Ok(axum::response::Response::builder()
+        .header(axum::http::header::CONTENT_TYPE, prometheus::TEXT_FORMAT)
+        .body(axum::body::Body::from(buffer))
+        .expect("valid response"))
+}
+
 /// Check whether TOON wire format was requested via the `Accept` header.
 fn wants_toon(headers: &HeaderMap) -> bool {
     headers
@@ -1317,6 +1361,8 @@ mod tests {
             extraction_service: std::sync::Arc::new(std::sync::Mutex::new(extraction_service)),
             #[cfg(feature = "api")]
             job_store: std::sync::Arc::new(crate::api::jobs::JobStore::new()),
+            #[cfg(feature = "prometheus")]
+            prometheus_registry: crate::telemetry::init_prometheus(),
         };
         #[allow(unused_mut)]
         let mut router = Router::new()
