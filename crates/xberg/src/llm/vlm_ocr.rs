@@ -19,14 +19,11 @@ use crate::core::config::LlmConfig;
 use crate::plugins::{OcrBackend, OcrBackendType, Plugin};
 use crate::types::{BoundingBox, FormatMetadata, Formula, Metadata, OcrMetadata, Table};
 
-// Mirrors `crate::ocr::OCR_PROCESSED_IMAGE_{WIDTH,HEIGHT}_METADATA_KEY` (same
-// string values). Not reused directly: that module is gated on
-// `feature = "ocr"` / `"ocr-wasm"`, neither of which `liter-llm` implies, so a
-// VLM-only build cannot see it. `candle_ocr::ocr_result` carries an identical
-// pair of local constants for the same reason — the two are separate feature
-// domains (VLM vs. candle-*), so sharing one copy would wrongly couple them. ~keep
-const PROCESSED_WIDTH_KEY: &str = "ocr_processed_image_width";
-const PROCESSED_HEIGHT_KEY: &str = "ocr_processed_image_height";
+// Taken from the ungated `crate::ocr_metadata_keys` rather than `crate::ocr`, which is
+// gated on `feature = "ocr"` / `"ocr-wasm"` — neither of which `liter-llm` implies, so a
+// VLM-only build cannot see it. ~keep
+use crate::ocr_metadata_keys::OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY as PROCESSED_HEIGHT_KEY;
+use crate::ocr_metadata_keys::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY as PROCESSED_WIDTH_KEY;
 
 /// Default request timeout for VLM OCR when `vlm_config.timeout_secs` is unset.
 ///
@@ -330,8 +327,9 @@ static FORMULA_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
 /// table count, `ocr_used`, and processed image dimensions (best-effort; a
 /// decode failure just omits the dimensions rather than failing the OCR call).
 ///
-/// Mirrors `candle_ocr::ocr_result::build_metadata`; not shared with it for the
-/// feature-domain reasons documented on [`PROCESSED_WIDTH_KEY`] (issue #179).
+/// Mirrors `candle_ocr::ocr_result::build_metadata`; not shared with it because the
+/// two sit in separate feature domains (VLM vs. `candle-*`), issue #179. Only the key
+/// names are shared, via `crate::ocr_metadata_keys`.
 fn build_metadata(image_bytes: &[u8], table_count: u32) -> Metadata {
     let mut metadata = Metadata {
         format: Some(FormatMetadata::Ocr(OcrMetadata {

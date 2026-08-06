@@ -731,7 +731,10 @@ const NON_TEXT_BLOCK_TYPES: [TessPolyBlockType; 6] = [
 /// Extracted as its own function, separate from the surrounding OCR pipeline, so
 /// the presence/absence and exact-value behaviour is unit-testable without a live
 /// Tesseract API instance (#192).
-fn insert_word_iterator_skipped_count_metadata(metadata: &mut HashMap<String, serde_json::Value>, skipped_words: usize) {
+fn insert_word_iterator_skipped_count_metadata(
+    metadata: &mut HashMap<String, serde_json::Value>,
+    skipped_words: usize,
+) {
     if skipped_words > 0 {
         metadata.insert(
             "word_iterator_skipped_count".to_string(),
@@ -1224,11 +1227,11 @@ pub(super) fn perform_ocr(
 
     let mut metadata = HashMap::new();
     metadata.insert(
-        crate::ocr::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY.to_string(),
+        crate::ocr_metadata_keys::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY.to_string(),
         serde_json::Value::Number(ocr_image_width.into()),
     );
     metadata.insert(
-        crate::ocr::OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY.to_string(),
+        crate::ocr_metadata_keys::OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY.to_string(),
         serde_json::Value::Number(ocr_image_height.into()),
     );
     metadata.insert(
@@ -1278,18 +1281,18 @@ pub(super) fn perform_ocr(
     // real detection as having happened (#184).
     if let Some((orient_deg, orient_conf)) = detected_orientation {
         metadata.insert(
-            crate::ocr::OCR_ORIENTATION_DEGREES_METADATA_KEY.to_string(),
+            crate::ocr_metadata_keys::OCR_ORIENTATION_DEGREES_METADATA_KEY.to_string(),
             serde_json::Value::Number(serde_json::Number::from(orient_deg)),
         );
         metadata.insert(
-            "orientation_confidence".to_string(),
+            crate::ocr_metadata_keys::OCR_ORIENTATION_CONFIDENCE_METADATA_KEY.to_string(),
             serde_json::Value::Number(
                 serde_json::Number::from_f64(orient_conf as f64).unwrap_or(serde_json::Number::from(0)),
             ),
         );
         if orient_deg != 0 && orient_conf > MIN_ORIENTATION_CONFIDENCE {
             metadata.insert(
-                crate::ocr::OCR_AUTO_ROTATED_METADATA_KEY.to_string(),
+                crate::ocr_metadata_keys::OCR_AUTO_ROTATED_METADATA_KEY.to_string(),
                 serde_json::Value::Bool(true),
             );
         }

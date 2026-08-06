@@ -236,13 +236,13 @@ fn whole_image_ocr_coordinate_transform(
     {
         let additional = &doc.metadata.additional;
         let processed_width = additional
-            .get(crate::ocr::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY)
+            .get(crate::ocr_metadata_keys::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY)
             .and_then(serde_json::Value::as_u64);
         let processed_height = additional
-            .get(crate::ocr::OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY)
+            .get(crate::ocr_metadata_keys::OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY)
             .and_then(serde_json::Value::as_u64);
         let auto_rotated = additional
-            .get(crate::ocr::OCR_AUTO_ROTATED_METADATA_KEY)
+            .get(crate::ocr_metadata_keys::OCR_AUTO_ROTATED_METADATA_KEY)
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false);
         let (processed_width, processed_height) = (processed_width?, processed_height?);
@@ -2200,11 +2200,11 @@ mod tests {
             sheet_name: None,
         }]);
         doc.metadata.additional.insert(
-            std::borrow::Cow::Borrowed(crate::ocr::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY),
+            std::borrow::Cow::Borrowed(crate::ocr_metadata_keys::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY),
             serde_json::json!(width),
         );
         doc.metadata.additional.insert(
-            std::borrow::Cow::Borrowed(crate::ocr::OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY),
+            std::borrow::Cow::Borrowed(crate::ocr_metadata_keys::OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY),
             serde_json::json!(height),
         );
         doc

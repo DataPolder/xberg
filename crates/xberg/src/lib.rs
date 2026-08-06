@@ -143,6 +143,10 @@ pub mod presets;
 #[cfg(any(feature = "ocr", feature = "ocr-wasm"))]
 pub mod ocr;
 
+/// Canonical OCR metadata key names, shared across every OCR-producing and
+/// OCR-consuming feature domain. Deliberately ungated — see the module docs.
+pub(crate) mod ocr_metadata_keys;
+
 pub mod doctor;
 
 #[cfg(any(

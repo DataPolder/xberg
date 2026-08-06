@@ -22,13 +22,11 @@ use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use crate::core::config::OcrConfig;
 use crate::types::{ExtractedDocument, FormatMetadata, Formula, Metadata, OcrMetadata, Table};
 
-// Mirrors `crate::ocr::OCR_PROCESSED_IMAGE_{WIDTH,HEIGHT}_METADATA_KEY` (same
-// string values). Not reused directly: that module is gated on
-// `feature = "ocr"` / `"ocr-wasm"`, neither of which any `candle-*` backend
-// feature implies, so candle-only builds (e.g. `candle-trocr` alone) cannot
-// see it. ~keep
-const PROCESSED_WIDTH_KEY: &str = "ocr_processed_image_width";
-const PROCESSED_HEIGHT_KEY: &str = "ocr_processed_image_height";
+// Taken from the ungated `crate::ocr_metadata_keys` rather than `crate::ocr`, which is
+// gated on `feature = "ocr"` / `"ocr-wasm"` — neither of which any `candle-*` backend
+// feature implies, so candle-only builds (e.g. `candle-trocr` alone) cannot see it. ~keep
+use crate::ocr_metadata_keys::OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY as PROCESSED_HEIGHT_KEY;
+use crate::ocr_metadata_keys::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY as PROCESSED_WIDTH_KEY;
 
 /// Default OCR language when none is configured, matching
 /// `crate::core::config::ocr::DEFAULT_OCR_LANGUAGE`. Not reused directly for the

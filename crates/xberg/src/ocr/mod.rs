@@ -39,19 +39,6 @@
 //! ```
 mod backends;
 
-// Written by OCR backends and read by shared image/PDF post-processing. The
-// WASM and Sceptre-only surfaces enable `ocr-pipeline` without full native OCR. ~keep
-#[cfg(feature = "ocr-pipeline")]
-pub(crate) const OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY: &str = "ocr_processed_image_width";
-#[cfg(feature = "ocr-pipeline")]
-pub(crate) const OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY: &str = "ocr_processed_image_height";
-#[cfg(feature = "ocr-pipeline")]
-#[allow(dead_code)] // Some portable OCR feature sets do not include orientation correction. ~keep
-pub(crate) const OCR_ORIENTATION_DEGREES_METADATA_KEY: &str = "orientation_degrees";
-#[cfg(feature = "ocr-pipeline")]
-#[allow(dead_code)] // Some portable OCR feature sets do not include orientation correction. ~keep
-pub(crate) const OCR_AUTO_ROTATED_METADATA_KEY: &str = "auto_rotated";
-
 #[cfg(feature = "ocr")]
 /// Persistent file-backed cache for OCR results keyed by image hash and config.
 pub mod cache;

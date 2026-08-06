@@ -26,14 +26,17 @@ use crate::{Result, XbergError};
 
 const BACKEND_NAME: &str = "sceptre";
 const DEFAULT_LANGUAGE: &str = "eng";
-const PROCESSED_WIDTH_KEY: &str = "ocr_processed_image_width";
-const PROCESSED_HEIGHT_KEY: &str = "ocr_processed_image_height";
+// The metadata key names come from the ungated `crate::ocr_metadata_keys` rather than
+// `crate::ocr`, which is gated on `feature = "ocr"` / `"ocr-wasm"` — neither of which a
+// Sceptre-only build implies. ~keep
+use crate::ocr_metadata_keys::OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY as PROCESSED_HEIGHT_KEY;
+use crate::ocr_metadata_keys::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY as PROCESSED_WIDTH_KEY;
 #[cfg(auto_rotate)]
-const ORIENTATION_CONFIDENCE_KEY: &str = "orientation_confidence";
-#[cfg(auto_rotate)]
-const ORIENTATION_DEGREES_KEY: &str = "orientation_degrees";
-#[cfg(auto_rotate)]
-const AUTO_ROTATED_KEY: &str = "auto_rotated";
+use crate::ocr_metadata_keys::{
+    OCR_AUTO_ROTATED_METADATA_KEY as AUTO_ROTATED_KEY,
+    OCR_ORIENTATION_CONFIDENCE_METADATA_KEY as ORIENTATION_CONFIDENCE_KEY,
+    OCR_ORIENTATION_DEGREES_METADATA_KEY as ORIENTATION_DEGREES_KEY,
+};
 // Each reader retains multiple ONNX sessions and a worker pool. Four entries
 // cover common language/configuration reuse while bounding retained resources. ~keep
 const READER_CACHE_CAPACITY: usize = 4;

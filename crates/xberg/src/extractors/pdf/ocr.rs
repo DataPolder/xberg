@@ -1666,20 +1666,17 @@ fn analyze_container_markers(elements: &[crate::types::internal::InternalElement
     analysis
 }
 
-// locally because this PDF OCR path also compiles under `ocr-pipeline` (VLM OCR, e.g.
-// the `binstall` CLI) or under `layout-detection` alone (layout without any OCR backend
-// enabled), where the `ocr` module — gated on `ocr`/`ocr-wasm` — is absent.
+// The OCR metadata keys come from `crate::ocr_metadata_keys`, which is ungated, rather
+// than from `crate::ocr`: this PDF OCR path also compiles under `ocr-pipeline` (VLM OCR,
+// e.g. the `binstall` CLI) or under `layout-detection` alone (layout without any OCR
+// backend enabled), where the `ocr` module — gated on `ocr`/`ocr-wasm` — is absent.
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
-const OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY: &str = "ocr_processed_image_width";
-#[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
-const OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY: &str = "ocr_processed_image_height";
+use crate::ocr_metadata_keys::{OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY, OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY};
 // Same rationale, scoped to `layout-detection` only: `resolved_ocr_correction_degrees` and
 // `transform_ocr_elements_to_render_space` (both `layout-detection`-only) are the sole
-// readers of these two key names in this file, and they must resolve without `crate::ocr`.
+// readers of these two key names in this file.
 #[cfg(feature = "layout-detection")]
-const OCR_ORIENTATION_DEGREES_METADATA_KEY: &str = "orientation_degrees";
-#[cfg(feature = "layout-detection")]
-const OCR_AUTO_ROTATED_METADATA_KEY: &str = "auto_rotated";
+use crate::ocr_metadata_keys::{OCR_AUTO_ROTATED_METADATA_KEY, OCR_ORIENTATION_DEGREES_METADATA_KEY};
 
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
 fn valid_ocr_layout_dimension(value: &serde_json::Value) -> Option<u32> {
@@ -5875,11 +5872,11 @@ Name: ___
     fn ocr_layout_dimensions_use_valid_processed_image_metadata() {
         let mut metadata = crate::types::Metadata::default();
         metadata.additional.insert(
-            crate::ocr::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY.into(),
+            crate::ocr_metadata_keys::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY.into(),
             serde_json::json!(2000),
         );
         metadata.additional.insert(
-            crate::ocr::OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY.into(),
+            crate::ocr_metadata_keys::OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY.into(),
             serde_json::json!(3000),
         );
 
@@ -5891,23 +5888,23 @@ Name: ___
     fn ocr_layout_dimensions_fall_back_for_incomplete_or_invalid_metadata() {
         let mut metadata = crate::types::Metadata::default();
         metadata.additional.insert(
-            crate::ocr::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY.into(),
+            crate::ocr_metadata_keys::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY.into(),
             serde_json::json!(0),
         );
         metadata.additional.insert(
-            crate::ocr::OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY.into(),
+            crate::ocr_metadata_keys::OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY.into(),
             serde_json::json!(3000),
         );
 
         assert_eq!(resolved_ocr_layout_dimensions(&metadata, 1000, 1500), (1000, 1500));
 
         metadata.additional.insert(
-            crate::ocr::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY.into(),
+            crate::ocr_metadata_keys::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY.into(),
             serde_json::json!(2000),
         );
         metadata
             .additional
-            .remove(crate::ocr::OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY);
+            .remove(crate::ocr_metadata_keys::OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY);
 
         assert_eq!(resolved_ocr_layout_dimensions(&metadata, 1000, 1500), (1000, 1500));
     }
@@ -5944,19 +5941,19 @@ Name: ___
     fn rotated_ocr_metadata(final_width: u32, final_height: u32, orientation_degrees: i32) -> crate::types::Metadata {
         let mut metadata = crate::types::Metadata::default();
         metadata.additional.insert(
-            crate::ocr::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY.into(),
+            crate::ocr_metadata_keys::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY.into(),
             serde_json::json!(final_width),
         );
         metadata.additional.insert(
-            crate::ocr::OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY.into(),
+            crate::ocr_metadata_keys::OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY.into(),
             serde_json::json!(final_height),
         );
         metadata.additional.insert(
-            crate::ocr::OCR_AUTO_ROTATED_METADATA_KEY.into(),
+            crate::ocr_metadata_keys::OCR_AUTO_ROTATED_METADATA_KEY.into(),
             serde_json::json!(true),
         );
         metadata.additional.insert(
-            crate::ocr::OCR_ORIENTATION_DEGREES_METADATA_KEY.into(),
+            crate::ocr_metadata_keys::OCR_ORIENTATION_DEGREES_METADATA_KEY.into(),
             serde_json::json!(orientation_degrees),
         );
         metadata
