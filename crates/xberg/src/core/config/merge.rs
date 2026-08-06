@@ -55,6 +55,8 @@ pub fn merge_config_json(base: &ExtractionConfig, override_json: &str) -> Result
 
     restore_skipped_fields(base, &mut merged);
 
+    merged.validate().map_err(|e| e.to_string())?;
+
     Ok(merged)
 }
 
@@ -89,8 +91,8 @@ fn restore_skipped_fields(base: &ExtractionConfig, merged: &mut ExtractionConfig
 
 /// Build extraction config by optionally merging JSON overrides into a base config.
 ///
-/// If `override_json` is `None`, returns a clone of `base`. Otherwise delegates
-/// to [`merge_config_json`].
+/// If `override_json` is `None`, returns a clone of `base` after validating it. Otherwise
+/// delegates to [`merge_config_json`], which validates the merged result.
 #[cfg_attr(alef, alef(skip))]
 pub fn build_config_from_json(
     base: &ExtractionConfig,
@@ -98,7 +100,10 @@ pub fn build_config_from_json(
 ) -> Result<ExtractionConfig, String> {
     match override_json {
         Some(json) => merge_config_json(base, json),
-        None => Ok(base.clone()),
+        None => {
+            base.validate().map_err(|e| e.to_string())?;
+            Ok(base.clone())
+        }
     }
 }
 

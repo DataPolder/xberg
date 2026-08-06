@@ -756,6 +756,57 @@ impl ExtractionConfig {
     /// Validate the configuration, returning an error if any settings are invalid.
     ///
     /// Checks:
+    /// - `ocr`: backend name, VLM backend/model requirements, language codes, and the
+    ///   `vlm_fallback` quality threshold (see [`OcrConfig::validate`]).
+    /// - `chunking`: `max_characters` is non-zero and `overlap` is smaller than it.
+    /// - `token_reduction`: `mode` is one of the recognized reduction levels.
+    /// - `images`: `target_dpi`, `min_dpi`, and `max_dpi` are all positive and within the
+    ///   supported range.
+    /// - `language_detection`: `min_confidence` is a `[0.0, 1.0]` value.
+    ///
+    /// Called automatically when a config is loaded from a file
+    /// ([`ExtractionConfig::from_file`] and friends) or built from a JSON override
+    /// (`crate::core::config::merge::merge_config_json`). A config assembled directly through
+    /// the typed Rust API or an FFI builder is **not** automatically validated — call this
+    /// method explicitly before use in that case.
+    ///
+    /// # Errors
+    ///
+    /// Returns `XbergError::Validation` describing the first invalid setting found.
+    pub fn validate(&self) -> Result<(), crate::XbergError> {
+        use crate::core::config_validation::{validate_chunking_params, validate_confidence, validate_dpi, validate_token_reduction_level};
+
+        if let Some(ref ocr) = self.ocr {
+            ocr.validate()?;
+        }
+
+        if let Some(ref chunking) = self.chunking {
+            // Only meaningful when the raw fields are the ones that will be used. A `preset`
+            // replaces both `max_characters` and `overlap` in `ChunkingConfig::resolve_preset`,
+            // and both fields carry serde defaults, so validating them alongside a preset would
+            // reject a config on values the preset discards before anything reads them.
+            if chunking.preset.is_none() {
+                validate_chunking_params(chunking.max_characters, chunking.overlap)?;
+            }
+        }
+
+        if let Some(ref token_reduction) = self.token_reduction {
+            validate_token_reduction_level(&token_reduction.mode)?;
+        }
+
+        if let Some(ref images) = self.images {
+            validate_dpi(images.target_dpi)?;
+            validate_dpi(images.min_dpi)?;
+            validate_dpi(images.max_dpi)?;
+        }
+
+        if let Some(ref language_detection) = self.language_detection {
+            validate_confidence(language_detection.min_confidence)?;
+        }
+
+        Ok(())
+    }
+
     /// Returns the effective disable-OCR value, accounting for both the top-level
     /// `disable_ocr` flag and the `ocr.enabled` shorthand on [`OcrConfig`].
     ///

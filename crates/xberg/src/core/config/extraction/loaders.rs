@@ -18,8 +18,10 @@ impl ExtractionConfig {
         let path = path.as_ref();
         let content = std::fs::read_to_string(path)
             .map_err(|e| XbergError::validation(format!("Failed to read config file {}: {}", path.display(), e)))?;
-        toml::from_str(&content)
-            .map_err(|e| XbergError::validation(format!("Invalid TOML in {}: {}", path.display(), e)))
+        let config: Self = toml::from_str(&content)
+            .map_err(|e| XbergError::validation(format!("Invalid TOML in {}: {}", path.display(), e)))?;
+        config.validate()?;
+        Ok(config)
     }
 
     /// Load configuration from a YAML file.
@@ -27,8 +29,10 @@ impl ExtractionConfig {
         let path = path.as_ref();
         let content = std::fs::read_to_string(path)
             .map_err(|e| XbergError::validation(format!("Failed to read config file {}: {}", path.display(), e)))?;
-        serde_yaml_ng::from_str(&content)
-            .map_err(|e| XbergError::validation(format!("Invalid YAML in {}: {}", path.display(), e)))
+        let config: Self = serde_yaml_ng::from_str(&content)
+            .map_err(|e| XbergError::validation(format!("Invalid YAML in {}: {}", path.display(), e)))?;
+        config.validate()?;
+        Ok(config)
     }
 
     /// Load configuration from a JSON file.
@@ -36,8 +40,10 @@ impl ExtractionConfig {
         let path = path.as_ref();
         let content = std::fs::read_to_string(path)
             .map_err(|e| XbergError::validation(format!("Failed to read config file {}: {}", path.display(), e)))?;
-        serde_json::from_str(&content)
-            .map_err(|e| XbergError::validation(format!("Invalid JSON in {}: {}", path.display(), e)))
+        let config: Self = serde_json::from_str(&content)
+            .map_err(|e| XbergError::validation(format!("Invalid JSON in {}: {}", path.display(), e)))?;
+        config.validate()?;
+        Ok(config)
     }
 
     /// Load configuration from a file, auto-detecting format by extension.

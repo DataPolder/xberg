@@ -492,7 +492,7 @@ pub(crate) fn validate_output_format(format: &str) -> Result<()> {
 ///
 /// # Examples
 ///
-/// ```rust
+/// ```ignore
 /// use xberg::core::config_validation::validate_confidence;
 ///
 /// assert!(validate_confidence(0.5).is_ok());
@@ -501,7 +501,6 @@ pub(crate) fn validate_output_format(format: &str) -> Result<()> {
 /// assert!(validate_confidence(1.5).is_err());
 /// assert!(validate_confidence(-0.1).is_err());
 /// ```
-#[cfg(test)]
 pub(crate) fn validate_confidence(confidence: f64) -> Result<()> {
     if (0.0..=1.0).contains(&confidence) {
         Ok(())
@@ -530,7 +529,7 @@ pub(crate) fn validate_confidence(confidence: f64) -> Result<()> {
 ///
 /// # Examples
 ///
-/// ```rust
+/// ```ignore
 /// use xberg::core::config_validation::validate_dpi;
 ///
 /// assert!(validate_dpi(96).is_ok());
@@ -538,7 +537,6 @@ pub(crate) fn validate_confidence(confidence: f64) -> Result<()> {
 /// assert!(validate_dpi(0).is_err());
 /// assert!(validate_dpi(-1).is_err());
 /// ```
-#[cfg(test)]
 pub(crate) fn validate_dpi(dpi: i32) -> Result<()> {
     if dpi > 0 && dpi <= 2400 {
         Ok(())
@@ -609,13 +607,12 @@ pub(crate) fn validate_chunking_params(max_chars: usize, max_overlap: usize) -> 
 ///
 /// # Examples
 ///
-/// ```rust
+/// ```ignore
 /// use xberg::core::config_validation::validate_llm_config_model;
 ///
 /// assert!(validate_llm_config_model("openai/gpt-4o").is_ok());
 /// assert!(validate_llm_config_model("").is_err());
 /// ```
-#[cfg(test)]
 pub(crate) fn validate_llm_config_model(model: &str) -> Result<()> {
     if model.trim().is_empty() {
         return Err(XbergError::Validation {
@@ -644,7 +641,7 @@ pub(crate) fn validate_llm_config_model(model: &str) -> Result<()> {
 ///
 /// # Examples
 ///
-/// ```rust
+/// ```ignore
 /// use xberg::core::config_validation::validate_vlm_backend_config;
 /// use xberg::core::config::LlmConfig;
 ///
@@ -661,7 +658,6 @@ pub(crate) fn validate_llm_config_model(model: &str) -> Result<()> {
 /// assert!(validate_vlm_backend_config("vlm", Some(&config)).is_ok());
 /// assert!(validate_vlm_backend_config("vlm", None).is_err());
 /// ```
-#[cfg(test)]
 pub(crate) fn validate_vlm_backend_config(
     backend: &str,
     vlm_config: Option<&crate::core::config::LlmConfig>,
