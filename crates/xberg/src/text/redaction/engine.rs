@@ -31,7 +31,8 @@ use crate::core::config::redaction::RedactionConfig;
 use crate::types::ExtractedDocument;
 use crate::types::entity::{Entity, EntityCategory};
 use crate::types::redaction::{PiiCategory, RedactionFinding, RedactionReport};
-use crate::types::revisions::DiffLine;
+use crate::types::metadata::FormatMetadata;
+use crate::types::revisions::{DiffLine, RevisionAnchor};
 
 use super::patterns::{PatternMatch, scan_text};
 use super::strategy::{TokenCounter, apply_strategy};
@@ -319,10 +320,12 @@ impl RedactionPass<'_> {
         self.redact_pages(doc);
         self.redact_elements(doc);
         self.redact_djot(doc);
+        self.redact_document_structure(doc);
         self.redact_revisions(doc);
         self.redact_nested_documents(doc, depth);
         self.redact_references(doc);
         self.redact_metadata(doc);
+        self.redact_processing_warnings(doc);
 
         if let Some(structured) = doc.structured_output.as_mut() {
             self.redact_json_value(structured);
@@ -377,6 +380,10 @@ impl RedactionPass<'_> {
         if let Some(elements) = doc.elements.as_mut() {
             for element in elements.iter_mut() {
                 self.redact_in_place(&mut element.text);
+                self.redact_optional(&mut element.metadata.filename);
+                for value in element.metadata.additional.values_mut() {
+                    self.redact_in_place(value);
+                }
             }
         }
         if let Some(ocr_elements) = doc.ocr_elements.as_mut() {
@@ -386,6 +393,21 @@ impl RedactionPass<'_> {
         }
         for formula in doc.formulas.iter_mut() {
             self.redact_in_place(&mut formula.latex);
+        }
+    }
+
+    /// Rewrite the structured document tree (`ExtractedDocument::document`).
+    ///
+    /// `NodeContent` carries the document body verbatim across every text-bearing
+    /// node type; without this, a redaction pass leaves the structured tree
+    /// holding everything the caller just asked to have hidden from `content`
+    /// (xberg-io/xberg#298).
+    fn redact_document_structure(&mut self, doc: &mut ExtractedDocument) {
+        let Some(structure) = doc.document.as_mut() else {
+            return;
+        };
+        for node in structure.nodes.iter_mut() {
+            node.content.for_each_text_field_mut(|text| self.redact_in_place(text));
         }
     }
 
@@ -425,6 +447,9 @@ impl RedactionPass<'_> {
         };
         for revision in revisions.iter_mut() {
             self.redact_optional(&mut revision.author);
+            if let Some(RevisionAnchor::Sheet { name, .. }) = revision.anchor.as_mut() {
+                self.redact_optional(name);
+            }
             for line in revision.delta.content.iter_mut() {
                 match line {
                     DiffLine::Context(text) | DiffLine::Added(text) | DiffLine::Removed(text) => {
@@ -522,10 +547,229 @@ impl RedactionPass<'_> {
             }
         }
 
+        if let Some(format) = doc.metadata.format.as_mut() {
+            self.redact_format_metadata(format);
+        }
+
         // Format-specific metadata lands here as untyped JSON for several
         // extractors, so it has to be walked as a value tree. ~keep
         for value in doc.metadata.additional.values_mut() {
             self.redact_json_value(value);
+        }
+    }
+
+    /// Rewrite the free-text surfaces of `Metadata::format`.
+    ///
+    /// `FormatMetadata` is a ~20-variant discriminated union and was not visited by
+    /// any redaction matcher at all: `EmailMetadata` alone carries sender/recipient
+    /// addresses and names verbatim (`from_email`, `from_name`, `to_emails`,
+    /// `cc_emails`, `bcc_emails`), and several other variants carry free text or
+    /// names (sheet names, archive file paths, HTML page metadata, bibliographic
+    /// author lists, source code chunks) (xberg-io/xberg#299). Variants with no
+    /// free-text field (page/row counts, codecs, PDF page geometry, etc.) are
+    /// intentionally left as no-ops.
+    fn redact_format_metadata(&mut self, format: &mut FormatMetadata) {
+        match format {
+            FormatMetadata::Excel(excel) => {
+                if let Some(sheet_names) = excel.sheet_names.as_mut() {
+                    for name in sheet_names.iter_mut() {
+                        self.redact_in_place(name);
+                    }
+                }
+            }
+            FormatMetadata::Email(email) => {
+                self.redact_optional(&mut email.from_email);
+                self.redact_optional(&mut email.from_name);
+                self.redact_optional(&mut email.message_id);
+                for address in email.to_emails.iter_mut() {
+                    self.redact_in_place(address);
+                }
+                for address in email.cc_emails.iter_mut() {
+                    self.redact_in_place(address);
+                }
+                for address in email.bcc_emails.iter_mut() {
+                    self.redact_in_place(address);
+                }
+                for attachment in email.attachments.iter_mut() {
+                    self.redact_in_place(attachment);
+                }
+            }
+            FormatMetadata::Archive(archive) => {
+                for path in archive.file_list.iter_mut() {
+                    self.redact_in_place(path);
+                }
+            }
+            FormatMetadata::Text(text) => {
+                self.redact_text_metadata_fields(text);
+            }
+            #[cfg(feature = "office")]
+            FormatMetadata::Docx(docx) => {
+                if let Some(core) = docx.core_properties.as_mut() {
+                    self.redact_optional(&mut core.title);
+                    self.redact_optional(&mut core.subject);
+                    self.redact_optional(&mut core.creator);
+                    self.redact_optional(&mut core.keywords);
+                    self.redact_optional(&mut core.description);
+                    self.redact_optional(&mut core.last_modified_by);
+                }
+                if let Some(app) = docx.app_properties.as_mut() {
+                    self.redact_optional(&mut app.company);
+                }
+                if let Some(custom) = docx.custom_properties.as_mut() {
+                    for value in custom.values_mut() {
+                        self.redact_json_value(value);
+                    }
+                }
+            }
+            #[cfg(feature = "office")]
+            FormatMetadata::Bibtex(bibtex) => {
+                for author in bibtex.authors.iter_mut() {
+                    self.redact_in_place(author);
+                }
+            }
+            #[cfg(feature = "office")]
+            FormatMetadata::Citation(citation) => {
+                for author in citation.authors.iter_mut() {
+                    self.redact_in_place(author);
+                }
+                for keyword in citation.keywords.iter_mut() {
+                    self.redact_in_place(keyword);
+                }
+            }
+            #[cfg(feature = "office")]
+            FormatMetadata::FictionBook(fiction_book) => {
+                self.redact_optional(&mut fiction_book.annotation);
+            }
+            #[cfg(feature = "xml")]
+            FormatMetadata::Jats(jats) => {
+                self.redact_optional(&mut jats.copyright);
+                for contributor in jats.contributor_roles.iter_mut() {
+                    self.redact_in_place(&mut contributor.name);
+                }
+            }
+            FormatMetadata::Html(html) => {
+                self.redact_html_metadata_fields(html);
+            }
+            #[cfg(feature = "tree-sitter")]
+            FormatMetadata::Code(code) => {
+                for chunk in code.chunks.iter_mut() {
+                    self.redact_in_place(&mut chunk.text);
+                }
+                if let Some(data) = code.data.as_mut() {
+                    self.redact_code_data_node(data);
+                }
+            }
+            #[cfg(feature = "pdf")]
+            FormatMetadata::Pdf(_) => {}
+            // Slide titles are the direct analogue of `ExcelMetadata::sheet_names`
+            // handled above — a deck routinely names people in them
+            // ("Performance review — J. Smith").
+            FormatMetadata::Pptx(pptx) => {
+                for name in pptx.slide_names.iter_mut() {
+                    self.redact_in_place(name);
+                }
+            }
+            // EXIF values carry Artist, Copyright, camera-owner and GPS tags. Only the
+            // values are redacted: the keys are EXIF tag names from a fixed vocabulary,
+            // and rewriting them would corrupt the map without hiding anything.
+            FormatMetadata::Image(image) => {
+                for value in image.exif.values_mut() {
+                    self.redact_in_place(value);
+                }
+            }
+            // No string-bearing fields, or only format descriptors (delimiter, column
+            // types, codec) that cannot carry document content.
+            FormatMetadata::Xml(_) | FormatMetadata::Ocr(_) | FormatMetadata::Csv(_) | FormatMetadata::Pst(_) => {}
+            #[cfg(feature = "office")]
+            FormatMetadata::Dbf(_) | FormatMetadata::Epub(_) => {}
+            #[cfg(feature = "transcription-types")]
+            FormatMetadata::Audio(_) => {}
+        }
+    }
+
+    /// Rewrite the free-text surfaces of `TextMetadata` (Markdown headers/links/code).
+    fn redact_text_metadata_fields(&mut self, text: &mut crate::types::metadata::TextMetadata) {
+        if let Some(headers) = text.headers.as_mut() {
+            for header in headers.iter_mut() {
+                self.redact_in_place(header);
+            }
+        }
+        if let Some(links) = text.links.as_mut() {
+            for (link_text, url) in links.iter_mut() {
+                self.redact_in_place(link_text);
+                self.redact_in_place(url);
+            }
+        }
+        if let Some(code_blocks) = text.code_blocks.as_mut() {
+            for (_language, code) in code_blocks.iter_mut() {
+                self.redact_in_place(code);
+            }
+        }
+    }
+
+    /// Rewrite the free-text surfaces of `HtmlMetadata`: page-level metadata,
+    /// social-card metadata, and every extracted header/link/image/structured-data
+    /// element.
+    fn redact_html_metadata_fields(&mut self, html: &mut crate::types::metadata::HtmlMetadata) {
+        self.redact_optional(&mut html.title);
+        self.redact_optional(&mut html.description);
+        self.redact_optional(&mut html.author);
+        self.redact_optional(&mut html.canonical_url);
+        self.redact_optional(&mut html.base_href);
+        for keyword in html.keywords.iter_mut() {
+            self.redact_in_place(keyword);
+        }
+        for value in html.meta_tags.values_mut() {
+            self.redact_in_place(value);
+        }
+        for value in html.open_graph.values_mut() {
+            self.redact_in_place(value);
+        }
+        for value in html.twitter_card.values_mut() {
+            self.redact_in_place(value);
+        }
+        for header in html.headers.iter_mut() {
+            self.redact_in_place(&mut header.text);
+        }
+        for link in html.links.iter_mut() {
+            self.redact_in_place(&mut link.href);
+            self.redact_in_place(&mut link.text);
+            self.redact_optional(&mut link.title);
+        }
+        for image in html.images.iter_mut() {
+            self.redact_in_place(&mut image.src);
+            self.redact_optional(&mut image.alt);
+            self.redact_optional(&mut image.title);
+        }
+        for structured in html.structured_data.iter_mut() {
+            self.redact_in_place(&mut structured.raw_json);
+        }
+    }
+
+    /// Rewrite a code-format data-tree node (JSON/YAML/TOML/XML/CSV structural
+    /// tree) and its children, bounded by [`MAX_BLOCK_NESTING_DEPTH`].
+    #[cfg(feature = "tree-sitter")]
+    fn redact_code_data_node(&mut self, node: &mut crate::types::metadata::CodeDataNode) {
+        self.redact_code_data_node_at_depth(node, 0);
+    }
+
+    #[cfg(feature = "tree-sitter")]
+    fn redact_code_data_node_at_depth(&mut self, node: &mut crate::types::metadata::CodeDataNode, depth: usize) {
+        self.redact_optional(&mut node.value);
+        if depth >= MAX_BLOCK_NESTING_DEPTH {
+            return;
+        }
+        for child in node.children.iter_mut() {
+            self.redact_code_data_node_at_depth(child, depth + 1);
+        }
+    }
+
+    /// Rewrite processing-warning messages: they can embed source paths or other
+    /// diagnostic detail carrying a person's name (e.g. a home-directory path).
+    fn redact_processing_warnings(&mut self, doc: &mut ExtractedDocument) {
+        for warning in doc.processing_warnings.iter_mut() {
+            let redacted = self.redact(&warning.message);
+            warning.message = std::borrow::Cow::Owned(redacted);
         }
     }
 

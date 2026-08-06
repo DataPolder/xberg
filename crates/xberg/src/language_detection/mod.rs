@@ -14,6 +14,15 @@ pub use processor::LanguageDetector;
 /// Returns a list of detected language codes (ISO 639-3 format).
 /// Returns `None` if no languages could be detected with sufficient confidence.
 ///
+/// In `config.detect_multiple` mode, languages are ordered by descending
+/// chunk-share — the first entry is the language whatlang detected most
+/// often across the document's 200-character chunks, ties broken by ISO
+/// 639-3 code — so callers without access to per-language confidence or
+/// proportions can still infer the dominant language from list order (#261).
+/// This is the extent of what the current `Option<Vec<String>>` return type
+/// can convey; see the crate's #261 tracking notes for a proposed type that
+/// would carry confidence and per-language proportions explicitly.
+///
 /// # Arguments
 ///
 /// * `text` - The text to analyze for language detection
@@ -986,6 +995,27 @@ mod tests {
         let over_chunk = "This is English text. ".repeat(30);
         let result2 = detect_languages(&over_chunk, &config).unwrap();
         assert!(result2.is_none() || result2.is_some());
+    }
+
+    /// Locks in the ordering contract documented on `detect_languages` (#261):
+    /// with no per-language confidence/proportion in the return type, list
+    /// order is the only signal callers have for which language dominates.
+    /// English chunks outnumber Spanish 4:1 here, so "eng" must sort first.
+    #[test]
+    fn test_multiple_languages_ordered_by_descending_chunk_share() {
+        let text = format!(
+            "{}{}",
+            "Hello world! This is English text. The quick brown fox jumps over the lazy dog. ".repeat(8),
+            "Hola mundo! Este es texto en español. El rápido zorro marrón salta sobre el perro perezoso. ".repeat(2)
+        );
+        let config = LanguageDetectionConfig {
+            enabled: true,
+            min_confidence: 0.3,
+            detect_multiple: true,
+        };
+
+        let langs = detect_languages(&text, &config).unwrap().expect("languages detected");
+        assert_eq!(langs.first().map(String::as_str), Some("eng"), "got order: {langs:?}");
     }
 
     #[test]

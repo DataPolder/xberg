@@ -11,7 +11,10 @@ use crate::chunking::text_splitter::{ChunkConfig, ChunkSizer, MarkdownSplitter, 
 use crate::error::Result;
 use crate::types::PageBoundary;
 
-use super::builder::{build_chunk_config, build_chunks};
+use super::builder::{build_chunk_config, build_chunks, resolve_token_counter};
+#[cfg(feature = "chunking-tokenizers")]
+use super::builder::TokenizerBackendSizer;
+use super::classifier::classify_chunk;
 use super::config::{ChunkerType, ChunkingConfig, ChunkingResult, TableChunkingMode};
 use super::headings::{build_heading_map, resolve_heading_context};
 use super::validation::validate_utf8_boundaries;
@@ -135,6 +138,13 @@ pub(crate) fn chunk_text_with_heading_source(
             for chunk in &mut chunks {
                 chunk.metadata.heading_context =
                     resolve_heading_context(chunk.metadata.byte_start, &heading_map, page_boundaries);
+                // Reclassify now that heading context is known: heading-context-aware
+                // rules (e.g. `is_schedule`) are dead at construction time, where
+                // `build_chunks` always classifies with `heading_context = None` (#211).
+                // Must run before `prepend_heading_context` mutates `chunk.content` below,
+                // since that mutation prefixes a heading breadcrumb that would otherwise
+                // make every chunk look like a heading.
+                chunk.chunk_type = classify_chunk(&chunk.content, chunk.metadata.heading_context.as_ref());
             }
 
             if config.prepend_heading_context {
@@ -171,6 +181,15 @@ pub(crate) fn chunk_text_with_heading_source(
         inject_table_headers(&mut chunks);
     }
 
+    // Populate `token_count` from the configured tokenizer sizer, if any (#255).
+    // Computed last so it reflects each chunk's final `content` (after any
+    // heading-breadcrumb prepend or table-header repetition above).
+    if let Some(counter) = resolve_token_counter(&config.sizing) {
+        for chunk in &mut chunks {
+            chunk.metadata.token_count = Some(counter(&chunk.content));
+        }
+    }
+
     let chunk_count = chunks.len();
 
     Ok(ChunkingResult { chunks, chunk_count })
@@ -195,36 +214,6 @@ fn strip_leading_heading<'a>(text: &'a str, level: u8, title: &str) -> &'a str {
     let rest = &after_prefix[title.len()..];
     let line_end = rest.find('\n').unwrap_or(rest.len());
     rest[line_end..].trim_start_matches('\n')
-}
-
-/// Adapts a registered [`crate::plugins::TokenizerBackend`] to the splitter's
-/// [`ChunkSizer`] interface: chunk size is the backend's token count.
-///
-/// A backend reporting zero tokens for non-empty text is not trusted: a zero
-/// count would make every span appear to fit any budget and silently produce
-/// oversized chunks. Host-language bridges surface backend exceptions as a
-/// zero count, so this is also the failure mode of a backend that starts
-/// erroring mid-run. The sizer falls back to the character count — tokens
-/// don't exceed characters for practical tokenizers, so the budget degrades
-/// to the conservative `max_characters` semantics instead of an unbounded
-/// chunk — and logs the substitution.
-#[cfg(feature = "chunking-tokenizers")]
-struct TokenizerBackendSizer(std::sync::Arc<dyn crate::plugins::TokenizerBackend>);
-
-#[cfg(feature = "chunking-tokenizers")]
-impl ChunkSizer for TokenizerBackendSizer {
-    fn size(&self, chunk: &str) -> usize {
-        let count = self.0.count_tokens(chunk);
-        if count == 0 && !chunk.is_empty() {
-            tracing::warn!(
-                backend = self.0.name(),
-                chunk_len = chunk.len(),
-                "Tokenizer backend reported zero tokens for non-empty text; using character count instead"
-            );
-            return chunk.chars().count();
-        }
-        count
-    }
 }
 
 /// Split text using the appropriate splitter type with a generic sizer.
@@ -1922,5 +1911,116 @@ mod tests {
                 chunk.content,
             );
         }
+    }
+
+    /// Regression test for #255: with `ChunkSizing::Tokenizer` pointed at a registered
+    /// [`crate::plugins::TokenizerBackend`], `token_count` must be populated from that
+    /// backend's count instead of staying `None` forever.
+    #[cfg(feature = "chunking-tokenizers")]
+    #[test]
+    fn test_token_count_populated_from_registered_tokenizer_backend() {
+        use crate::plugins::registry::test_support::TokenizerRegistryGuard;
+        use crate::plugins::{Plugin, TokenizerBackend, register_tokenizer_backend};
+        use std::sync::Arc;
+
+        struct WordCountTokenizer;
+        impl Plugin for WordCountTokenizer {
+            fn name(&self) -> &str {
+                "chunking-core-word-count-tokenizer"
+            }
+            fn version(&self) -> String {
+                "1.0.0".to_string()
+            }
+            fn initialize(&self) -> crate::Result<()> {
+                Ok(())
+            }
+            fn shutdown(&self) -> crate::Result<()> {
+                Ok(())
+            }
+        }
+        impl TokenizerBackend for WordCountTokenizer {
+            fn count_tokens(&self, text: &str) -> usize {
+                text.split_whitespace().count()
+            }
+        }
+
+        let _guard = TokenizerRegistryGuard::acquire();
+        register_tokenizer_backend(Arc::new(WordCountTokenizer)).unwrap();
+
+        let config = ChunkingConfig {
+            max_characters: 100,
+            overlap: 0,
+            trim: true,
+            chunker_type: ChunkerType::Text,
+            sizing: crate::core::config::ChunkSizing::Tokenizer {
+                model: "chunking-core-word-count-tokenizer".to_string(),
+                cache_dir: None,
+            },
+            ..Default::default()
+        };
+        let text = "one two three four five";
+        let result = chunk_text(text, &config, None).unwrap();
+
+        assert_eq!(result.chunks.len(), 1);
+        assert_eq!(
+            result.chunks[0].metadata.token_count,
+            Some(5),
+            "token_count must be populated from the registered tokenizer backend, not left None"
+        );
+    }
+
+    /// `token_count` has no meaningful value for character-based sizing (the default);
+    /// it must stay `None` rather than being populated with a bogus count.
+    #[test]
+    fn test_token_count_stays_none_for_character_sizing() {
+        let config = ChunkingConfig::default();
+        let result = chunk_text("hello world", &config, None).unwrap();
+        assert_eq!(result.chunks.len(), 1);
+        assert_eq!(result.chunks[0].metadata.token_count, None);
+    }
+
+    /// Regression test for #211: heading-context-aware classification rules (e.g.
+    /// `is_schedule`, which inspects the *heading text*, not just the chunk body) are
+    /// dead at `build_chunks` time because `heading_context` is always `None` there —
+    /// it is only resolved afterward. After the fix, chunks must be reclassified using
+    /// the now-known `heading_context`.
+    #[test]
+    fn test_chunk_reclassified_after_heading_context_resolved() {
+        let heading = "# Schedule 1";
+        // No schedule/annex/appendix/exhibit keyword in the body itself, and not
+        // matching any other higher-priority rule (heading/code/table/formula/
+        // definitions/signature/operative-clause/party-list), so this body classifies
+        // as `Unknown` on its own — only the heading context can make it `Schedule`.
+        let body = "This paragraph states general provisions applicable under the arrangement.";
+        let markdown = format!("{heading}\n\n{body}");
+
+        // Small enough that the heading and body land in separate chunks, so the body
+        // chunk's own content never starts with '#' (which would otherwise trip the
+        // higher-priority `is_heading` rule instead of exercising `is_schedule`).
+        let config = ChunkingConfig {
+            max_characters: body.len(),
+            overlap: 0,
+            trim: true,
+            chunker_type: ChunkerType::Markdown,
+            ..Default::default()
+        };
+        let result = chunk_text(&markdown, &config, None).unwrap();
+
+        let body_chunk = result
+            .chunks
+            .iter()
+            .find(|c| c.content.trim() == body)
+            .unwrap_or_else(|| panic!("expected a chunk containing exactly the body text, got: {:?}", result.chunks));
+
+        assert!(
+            body_chunk.metadata.heading_context.is_some(),
+            "body chunk must have heading_context resolved"
+        );
+        assert_eq!(
+            body_chunk.chunk_type,
+            crate::types::ChunkType::Schedule,
+            "chunk under a 'Schedule 1' heading must reclassify as Schedule once heading_context is known, got {:?}",
+            body_chunk.chunk_type
+        );
     }
 }
