@@ -262,13 +262,10 @@ impl OcrBackend for TesseractBackend {
             .unwrap_or(&tess_config.language)
             .to_string();
 
-        let pre_formatted = ocr_result
-            .metadata
-            .get("pre_formatted")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+        let pre_formatted = extract_pre_formatted_metadata(&mut ocr_result.metadata);
 
         let processing_warnings = warnings_from_ocr_metadata(&ocr_result.metadata);
+        strip_ocr_scratch_metadata_keys(&mut ocr_result.metadata);
 
         let mut additional = AHashMap::new();
         for (key, value) in ocr_result.metadata {
@@ -361,13 +358,10 @@ impl OcrBackend for TesseractBackend {
             .unwrap_or(&tess_config.language)
             .to_string();
 
-        let pre_formatted = ocr_result
-            .metadata
-            .get("pre_formatted")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+        let pre_formatted = extract_pre_formatted_metadata(&mut ocr_result.metadata);
 
         let processing_warnings = warnings_from_ocr_metadata(&ocr_result.metadata);
+        strip_ocr_scratch_metadata_keys(&mut ocr_result.metadata);
 
         let mut additional = AHashMap::new();
         for (key, value) in ocr_result.metadata {
@@ -548,6 +542,29 @@ const WORD_ITERATOR_SKIPPED_COUNT_METADATA_KEY: &str = "word_iterator_skipped_co
 /// never ran. Mirrors the literal written in `ocr::processor::execution::perform_ocr`.
 const AUTO_ROTATE_UNAVAILABLE_METADATA_KEY: &str = "auto_rotate_unavailable";
 
+/// Metadata key `perform_ocr` sets when it rebuilds `content` with inline
+/// table markdown at each table's original vertical position (see
+/// `perform_ocr`'s `build_content_with_inline_tables` step). Promoted to
+/// `Metadata::output_format` by [`extract_pre_formatted_metadata`] rather
+/// than left as a raw `Metadata::additional` entry (#354).
+const PRE_FORMATTED_METADATA_KEY: &str = "pre_formatted";
+
+/// Pull the `pre_formatted` marker out of an `OcrExtractionResult`'s metadata
+/// map, returning its string value if present.
+///
+/// Uses `.remove()`, not `.get()`, so the key never also survives into the
+/// user-visible `Metadata::additional` map once the remaining metadata is
+/// copied wholesale (#354). Extracted as its own pure function, mirroring
+/// `warnings_from_ocr_metadata`, so the removal is unit-testable without a
+/// live Tesseract API instance.
+fn extract_pre_formatted_metadata(
+    metadata: &mut std::collections::HashMap<String, serde_json::Value>,
+) -> Option<String> {
+    metadata
+        .remove(PRE_FORMATTED_METADATA_KEY)
+        .and_then(|v| v.as_str().map(str::to_string))
+}
+
 /// Turn the OCR backend's metadata side-channel into the `ProcessingWarning`s a
 /// caller of `ExtractedDocument` actually sees (#309).
 ///
@@ -597,6 +614,25 @@ fn warnings_from_ocr_metadata(
     }
 
     warnings
+}
+
+/// Remove the OCR pipeline's internal scratch metadata keys before the
+/// remaining map is copied wholesale into the user-visible
+/// `Metadata::additional` (#354).
+///
+/// `WORD_ITERATOR_SKIPPED_COUNT_METADATA_KEY` and
+/// `AUTO_ROTATE_UNAVAILABLE_METADATA_KEY` are plumbing for
+/// `warnings_from_ocr_metadata` (call that first -- it reads these keys back
+/// out before this function removes them) and have no meaning as document
+/// metadata. `pre_formatted` is handled separately by
+/// [`extract_pre_formatted_metadata`] because it is promoted to
+/// `Metadata::output_format`, not dropped.
+///
+/// Extracted as its own pure function, mirroring `warnings_from_ocr_metadata`,
+/// so the filtering is unit-testable without a live Tesseract API instance.
+fn strip_ocr_scratch_metadata_keys(metadata: &mut std::collections::HashMap<String, serde_json::Value>) {
+    metadata.remove(WORD_ITERATOR_SKIPPED_COUNT_METADATA_KEY);
+    metadata.remove(AUTO_ROTATE_UNAVAILABLE_METADATA_KEY);
 }
 
 fn compact_cjk_horizontal_spacing(text: &str) -> String {
@@ -1062,6 +1098,87 @@ mod tests {
         assert_eq!(before[0].message, after[0].message);
         assert_eq!(before[1].source, after[1].source);
         assert_eq!(before[1].message, after[1].message);
+    }
+
+    /// #354: `word_iterator_skipped_count` is pipeline plumbing consumed by
+    /// `warnings_from_ocr_metadata` -- it must not survive into the
+    /// user-visible metadata map that becomes `Metadata::additional`.
+    #[test]
+    fn strip_ocr_scratch_metadata_keys_removes_word_iterator_skipped_count() {
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert(
+            WORD_ITERATOR_SKIPPED_COUNT_METADATA_KEY.to_string(),
+            serde_json::Value::Number(2.into()),
+        );
+
+        strip_ocr_scratch_metadata_keys(&mut metadata);
+
+        assert!(!metadata.contains_key(WORD_ITERATOR_SKIPPED_COUNT_METADATA_KEY));
+    }
+
+    /// #354: `auto_rotate_unavailable` is pipeline plumbing consumed by
+    /// `warnings_from_ocr_metadata` -- it must not survive into the
+    /// user-visible metadata map that becomes `Metadata::additional`.
+    #[test]
+    fn strip_ocr_scratch_metadata_keys_removes_auto_rotate_unavailable() {
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert(
+            AUTO_ROTATE_UNAVAILABLE_METADATA_KEY.to_string(),
+            serde_json::Value::Bool(true),
+        );
+
+        strip_ocr_scratch_metadata_keys(&mut metadata);
+
+        assert!(!metadata.contains_key(AUTO_ROTATE_UNAVAILABLE_METADATA_KEY));
+    }
+
+    /// #354: `pre_formatted` is promoted to `Metadata::output_format`, so it
+    /// must be removed from the metadata map (not merely read), or it would
+    /// also leak into `Metadata::additional` once the remaining map is
+    /// copied wholesale.
+    #[test]
+    fn extract_pre_formatted_metadata_removes_key_and_returns_value() {
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert(
+            PRE_FORMATTED_METADATA_KEY.to_string(),
+            serde_json::Value::String("markdown".to_string()),
+        );
+
+        let extracted = extract_pre_formatted_metadata(&mut metadata);
+
+        assert_eq!(extracted.as_deref(), Some("markdown"));
+        assert!(!metadata.contains_key(PRE_FORMATTED_METADATA_KEY));
+    }
+
+    /// #354 must not over-fire: genuine document metadata that happens to
+    /// share the map with the scratch keys has to survive the filter intact,
+    /// both in value and key set, so callers still see it in
+    /// `Metadata::additional`.
+    #[test]
+    fn strip_ocr_scratch_metadata_keys_preserves_genuine_user_metadata() {
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert("language".to_string(), serde_json::Value::String("eng".to_string()));
+        metadata.insert("mean_text_conf".to_string(), serde_json::Value::Number(87.into()));
+        metadata.insert(
+            WORD_ITERATOR_SKIPPED_COUNT_METADATA_KEY.to_string(),
+            serde_json::Value::Number(1.into()),
+        );
+        metadata.insert(
+            AUTO_ROTATE_UNAVAILABLE_METADATA_KEY.to_string(),
+            serde_json::Value::Bool(true),
+        );
+
+        strip_ocr_scratch_metadata_keys(&mut metadata);
+
+        assert_eq!(metadata.len(), 2);
+        assert_eq!(
+            metadata.get("language"),
+            Some(&serde_json::Value::String("eng".to_string()))
+        );
+        assert_eq!(
+            metadata.get("mean_text_conf"),
+            Some(&serde_json::Value::Number(87.into()))
+        );
     }
 
     #[test]
