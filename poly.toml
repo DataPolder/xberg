@@ -207,7 +207,11 @@ WebUI = "WebUI"
 traineddata = "traineddata"
 
 [lint.uncomment]
-enabled = true
+# Disabled deliberately (#315). This rule deletes commented-out code, but it cannot
+# distinguish that from explanatory prose, and it has silently removed real comments
+# from this tree three separate times during the v1.1.0 audit campaign. Re-enable only
+# with a proven-narrow matcher.
+enabled = false
 remove_todos = false
 remove_fixme = false
 remove_docs = false
