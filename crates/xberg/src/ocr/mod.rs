@@ -37,8 +37,6 @@
 //! [dependencies]
 //! xberg = { version = "4.0", features = ["ocr"] }
 //! ```
-mod backends;
-
 #[cfg(feature = "ocr")]
 /// Persistent file-backed cache for OCR results keyed by image hash and config.
 pub mod cache;
@@ -50,8 +48,6 @@ pub mod error;
 #[cfg(feature = "ocr")]
 /// hOCR HTML output parser that extracts word bounding boxes and confidence scores.
 pub mod hocr_parser;
-/// Registry of Tesseract language codes and language-pack validation helpers.
-pub mod language_registry;
 #[cfg(all(
     feature = "layout-detection",
     feature = "pdf",
@@ -89,7 +85,6 @@ pub mod validation;
 #[cfg(feature = "ocr")]
 pub use cache::{OcrCache, OcrCacheStats};
 pub use error::OcrError;
-pub use language_registry::LanguageRegistry;
 #[cfg(feature = "ocr")]
 pub use processor::OcrProcessor;
 #[cfg(feature = "ocr")]
