@@ -19,30 +19,25 @@
 
 use xberg::core::mime::list_supported_formats;
 use xberg::extractors::ensure_initialized;
-use xberg::plugins::registry::get_document_extractor_registry;
 
-/// Every extension `list_supported_formats()` advertises must resolve to a MIME type that
-/// some extractor is actually registered for in this build.
+/// The advertised list must not be empty in any build — the unconditional built-ins alone
+/// guarantee several entries, so an empty result means the registry intersection ran before
+/// registration and silently filtered everything away.
+///
+/// NOTE: there is deliberately no test here asserting "every advertised format resolves to a
+/// registered extractor". `list_supported_formats()` builds its result by filtering
+/// `EXT_TO_MIME` on `registry.get(mime).is_ok()` (core/mime.rs), so re-filtering its output on
+/// `is_err()` is necessarily empty and such a test cannot fail in any build, broken or not.
+/// The invariant with actual teeth runs over the raw catalogue rather than the filtered output,
+/// and lives in `issue_289_advertised_formats_have_extractors.rs`.
 #[test]
-fn every_advertised_format_resolves_to_a_registered_extractor() {
+fn the_advertised_format_list_is_never_empty() {
     ensure_initialized().expect("built-in extractor registration should succeed");
 
-    let formats = list_supported_formats();
-    assert!(!formats.is_empty(), "list_supported_formats() should not be empty");
-
-    let registry = get_document_extractor_registry();
-    let registry_guard = registry.read();
-
-    let unregistered: Vec<String> = formats
-        .iter()
-        .filter(|format| registry_guard.get(&format.mime_type).is_err())
-        .map(|format| format!("{} ({})", format.extension, format.mime_type))
-        .collect();
-
     assert!(
-        unregistered.is_empty(),
-        "list_supported_formats() advertised formats with no registered extractor in this \
-         build (GH#1387 regression): {unregistered:?}"
+        !list_supported_formats().is_empty(),
+        "list_supported_formats() returned nothing; the registry intersection filtered out \
+         even the unconditionally-registered built-ins"
     );
 }
 

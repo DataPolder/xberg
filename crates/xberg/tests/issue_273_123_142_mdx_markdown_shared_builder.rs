@@ -16,6 +16,11 @@
 //!
 //! Requires `--features mdx` (Markdown itself is always compiled).
 
+// Every test below is `#[cfg(feature = "mdx")]`, but the imports and fixture below were not,
+// so a build without `mdx` left them unused — three warnings that `-D warnings` turns into
+// errors. Gate the whole file instead of each item.
+#![cfg(feature = "mdx")]
+
 use xberg::core::config::ExtractionConfig;
 
 mod helpers;
