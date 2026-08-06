@@ -194,9 +194,19 @@ fn render_page_capturing_glyph_drops(
 ///
 /// `pub` (rather than `pub(crate)`) so both in-tree render-consumers and the
 /// regression test for #1364 can observe capture without depending on any
-/// one extractor's internal state; the extraction call sites that should
-/// merge this into `processing_warnings` (OCR page rendering, layout
-/// rasterization) are not modified by this change.
+/// one extractor's internal state.
+///
+/// As of #340, `crate::extractors::pdf::mod` drains this unconditionally right
+/// after assembling a document's `processing_warnings`, so every PDF
+/// extraction that renders at least one page picks up any captured
+/// glyph-drop warnings for free. ~keep: that drain only ever observes
+/// warnings from render calls that happened on the *same OS thread* before it
+/// ran, because [`PDF_OXIDE_PENDING_WARNINGS`] is thread-local. OCR page
+/// rendering runs inline on the extracting task's thread, so it is covered.
+/// Layout-detection rasterization runs inside `tokio::task::spawn_blocking`,
+/// which always executes on a different OS thread, so those warnings are
+/// deterministically never drained — a known gap tracked separately as #353,
+/// not fixed here.
 pub fn take_pdf_oxide_render_warnings() -> Vec<ProcessingWarning> {
     PDF_OXIDE_PENDING_WARNINGS.with(|pending| std::mem::take(&mut *pending.borrow_mut()))
 }
@@ -377,7 +387,9 @@ pub(crate) fn render_page_with_safeguards(
         );
     }
     let options = pdf_oxide::rendering::RenderOptions::with_dpi(safe_dpi);
-    render_page_capturing_glyph_drops(page_index, || pdf_oxide::rendering::render_page(doc, page_index, &options))
+    render_page_capturing_glyph_drops(page_index, || {
+        pdf_oxide::rendering::render_page(doc, page_index, &options)
+    })
 }
 
 /// Open (and optionally authenticate) a PDF document from raw bytes.
