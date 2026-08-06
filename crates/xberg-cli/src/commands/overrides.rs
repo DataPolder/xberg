@@ -418,6 +418,16 @@ pub struct ExtractionOverrides {
     #[cfg(feature = "html")]
     #[arg(long)]
     pub html_no_embed_css: bool,
+
+    /// CSV/TSV field delimiter (single ASCII character, e.g. ";", "|", "\t").
+    /// When unset, the delimiter is auto-detected from the file.
+    #[arg(long, value_name = "CHAR")]
+    pub csv_delimiter: Option<String>,
+
+    /// Line prefix marking a CSV/TSV comment line to skip entirely (e.g. "#").
+    /// Can be specified multiple times. Default: no comment filtering.
+    #[arg(long, value_name = "PREFIX")]
+    pub csv_comment_prefix: Vec<String>,
 }
 
 impl ExtractionOverrides {
@@ -537,6 +547,15 @@ impl ExtractionOverrides {
             );
         }
 
+        if let Some(ref delimiter) = self.csv_delimiter
+            && !(delimiter.len() == 1 && delimiter.is_ascii())
+        {
+            bail!(
+                "Invalid CSV delimiter '{}'. Must be exactly one ASCII character (e.g. ',', ';', '\\t', '|').",
+                delimiter
+            );
+        }
+
         Ok(())
     }
 
@@ -569,6 +588,7 @@ impl ExtractionOverrides {
         self.apply_email(config);
         self.apply_cache(config);
         self.apply_html_styled(config);
+        self.apply_csv(config);
         if let Some(key) = resolved_api_key {
             apply_llm_api_key(config, &key);
         }
@@ -1006,6 +1026,20 @@ impl ExtractionOverrides {
 
                 config.html_output = Some(html_cfg);
             }
+        }
+    }
+
+    fn apply_csv(&self, config: &mut ExtractionConfig) {
+        let has_flag = self.csv_delimiter.is_some() || !self.csv_comment_prefix.is_empty();
+        if has_flag {
+            let mut csv_cfg = config.csv.clone().unwrap_or_default();
+            if let Some(ref delimiter) = self.csv_delimiter {
+                csv_cfg.delimiter = Some(delimiter.clone());
+            }
+            if !self.csv_comment_prefix.is_empty() {
+                csv_cfg.comment_prefixes = self.csv_comment_prefix.clone();
+            }
+            config.csv = Some(csv_cfg);
         }
     }
 }
@@ -1533,6 +1567,63 @@ mod tests {
             ..default_overrides()
         };
         assert!(overrides.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_csv_delimiter_valid() {
+        let overrides = ExtractionOverrides {
+            csv_delimiter: Some(";".to_string()),
+            ..default_overrides()
+        };
+        assert!(overrides.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_csv_delimiter_empty_rejected() {
+        let overrides = ExtractionOverrides {
+            csv_delimiter: Some(String::new()),
+            ..default_overrides()
+        };
+        let err = overrides.validate().unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Invalid CSV delimiter ''. Must be exactly one ASCII character (e.g. ',', ';', '\\t', '|')."
+        );
+    }
+
+    #[test]
+    fn test_validate_csv_delimiter_multi_byte_rejected() {
+        let overrides = ExtractionOverrides {
+            csv_delimiter: Some("::".to_string()),
+            ..default_overrides()
+        };
+        let err = overrides.validate().unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Invalid CSV delimiter '::'. Must be exactly one ASCII character (e.g. ',', ';', '\\t', '|')."
+        );
+    }
+
+    #[test]
+    fn test_apply_csv_delimiter_and_comment_prefixes() {
+        let mut config = ExtractionConfig::default();
+        let overrides = ExtractionOverrides {
+            csv_delimiter: Some(";".to_string()),
+            csv_comment_prefix: vec!["#".to_string(), "//".to_string()],
+            ..default_overrides()
+        };
+        overrides.apply(&mut config);
+        let csv = config.csv.expect("csv config should be set");
+        assert_eq!(csv.delimiter.as_deref(), Some(";"));
+        assert_eq!(csv.comment_prefixes, vec!["#".to_string(), "//".to_string()]);
+    }
+
+    #[test]
+    fn test_apply_csv_no_flags_leaves_config_untouched() {
+        let mut config = ExtractionConfig::default();
+        let overrides = default_overrides();
+        overrides.apply(&mut config);
+        assert!(config.csv.is_none());
     }
 
     #[cfg(feature = "layout-detection")]

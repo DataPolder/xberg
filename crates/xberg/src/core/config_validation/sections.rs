@@ -642,6 +642,44 @@ pub(crate) fn validate_llm_config_model(model: &str) -> Result<()> {
     Ok(())
 }
 
+/// Validate a CSV delimiter string.
+///
+/// The delimiter must be exactly one ASCII byte (e.g. `","`, `";"`, `"\t"`,
+/// `"|"`). An empty string or a value containing a multi-byte UTF-8
+/// character (e.g. `"é"` or a multi-character string) is rejected.
+///
+/// # Arguments
+///
+/// * `delimiter` - The delimiter string to validate
+///
+/// # Returns
+///
+/// `Ok(())` if the delimiter is a single ASCII byte, or a `ValidationError` otherwise.
+///
+/// # Examples
+///
+/// ```ignore
+/// use xberg::core::config_validation::validate_csv_delimiter;
+///
+/// assert!(validate_csv_delimiter(";").is_ok());
+/// assert!(validate_csv_delimiter("").is_err());
+/// assert!(validate_csv_delimiter(",,").is_err());
+/// assert!(validate_csv_delimiter("é").is_err());
+/// ```
+pub(crate) fn validate_csv_delimiter(delimiter: &str) -> Result<()> {
+    if delimiter.len() == 1 && delimiter.is_ascii() {
+        Ok(())
+    } else {
+        Err(XbergError::Validation {
+            message: format!(
+                "Invalid CSV delimiter '{}'. Must be exactly one ASCII character (e.g. ',', ';', '\\t', '|').",
+                delimiter
+            ),
+            source: None,
+        })
+    }
+}
+
 /// Validate that a VLM OCR backend has the required `vlm_config`.
 ///
 /// When the OCR backend is set to `"vlm"`, the `vlm_config` field must be present

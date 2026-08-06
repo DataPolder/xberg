@@ -5,6 +5,7 @@
 
 use crate::{Result, XbergError};
 
+use super::super::csv::CsvConfig;
 use super::super::ocr::OcrConfig;
 use super::super::processing::ChunkingConfig;
 use super::core::ExtractionConfig;
@@ -36,6 +37,10 @@ impl ExtractionConfig {
     /// - `XBERG_VLM_EMBEDDING_MODEL`: LLM model for embedding generation (e.g., "openai/text-embedding-3-small")
     /// - `XBERG_EMBEDDING_PLUGIN_NAME`: Name of an in-process embedding backend registered via `plugins::register_embedding_backend`
     /// - `XBERG_MSG_FALLBACK_CODEPAGE`: (deferred) Windows codepage for MSG PT_STRING8 fallback
+    /// - `XBERG_CSV_DELIMITER`: CSV/TSV field delimiter, exactly one ASCII character
+    ///   (e.g. ",", ";", "\t", "|"). Overrides delimiter auto-detection.
+    /// - `XBERG_CSV_COMMENT_PREFIXES`: comma-separated list of line prefixes marking a
+    ///   CSV/TSV comment line to skip (e.g. "#,//")
     ///
     /// # Behavior
     ///
@@ -443,6 +448,37 @@ impl ExtractionConfig {
             }
         }
 
+        if let Ok(value) = std::env::var("XBERG_CSV_DELIMITER") {
+            crate::core::config_validation::validate_csv_delimiter(&value)?;
+            if self.csv.is_none() {
+                self.csv = Some(CsvConfig::default());
+            }
+            if let Some(ref mut csv) = self.csv {
+                csv.delimiter = Some(value);
+            }
+        }
+
+        if let Ok(value) = std::env::var("XBERG_CSV_COMMENT_PREFIXES") {
+            let prefixes: Vec<String> = value
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect();
+            if prefixes.is_empty() {
+                return Err(XbergError::Validation {
+                    message: "XBERG_CSV_COMMENT_PREFIXES must contain at least one non-empty prefix".to_string(),
+                    source: None,
+                });
+            }
+            if self.csv.is_none() {
+                self.csv = Some(CsvConfig::default());
+            }
+            if let Some(ref mut csv) = self.csv {
+                csv.comment_prefixes = prefixes;
+            }
+        }
+
         Ok(())
     }
 }
@@ -659,5 +695,65 @@ mod tests {
         assert_eq!(paddle.get("drop_score").and_then(|v| v.as_f64()), Some(0.7));
         assert!(paddle.get("model_tier").is_none());
         clear_paddle_model_env();
+    }
+
+    fn clear_csv_env() {
+        unsafe {
+            std::env::remove_var("XBERG_CSV_DELIMITER");
+            std::env::remove_var("XBERG_CSV_COMMENT_PREFIXES");
+        }
+    }
+
+    #[test]
+    fn csv_delimiter_env_sets_csv_config() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        clear_csv_env();
+        unsafe { std::env::set_var("XBERG_CSV_DELIMITER", ";") };
+        let mut config = ExtractionConfig::default();
+        config.apply_env_overrides().expect("valid delimiter should apply");
+        assert_eq!(config.csv.as_ref().unwrap().delimiter.as_deref(), Some(";"));
+        clear_csv_env();
+    }
+
+    #[test]
+    fn csv_delimiter_env_rejects_multi_byte_value() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        clear_csv_env();
+        unsafe { std::env::set_var("XBERG_CSV_DELIMITER", "::") };
+        let mut config = ExtractionConfig::default();
+        let err = config
+            .apply_env_overrides()
+            .expect_err("multi-byte delimiter should be rejected");
+        assert!(matches!(err, XbergError::Validation { .. }));
+        clear_csv_env();
+    }
+
+    #[test]
+    fn csv_comment_prefixes_env_sets_csv_config() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        clear_csv_env();
+        unsafe { std::env::set_var("XBERG_CSV_COMMENT_PREFIXES", "#, //") };
+        let mut config = ExtractionConfig::default();
+        config
+            .apply_env_overrides()
+            .expect("valid comment prefixes should apply");
+        assert_eq!(
+            config.csv.as_ref().unwrap().comment_prefixes,
+            vec!["#".to_string(), "//".to_string()]
+        );
+        clear_csv_env();
+    }
+
+    #[test]
+    fn csv_comment_prefixes_env_rejects_empty_value() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        clear_csv_env();
+        unsafe { std::env::set_var("XBERG_CSV_COMMENT_PREFIXES", " , ") };
+        let mut config = ExtractionConfig::default();
+        let err = config
+            .apply_env_overrides()
+            .expect_err("blank comment prefixes should be rejected");
+        assert!(matches!(err, XbergError::Validation { .. }));
+        clear_csv_env();
     }
 }

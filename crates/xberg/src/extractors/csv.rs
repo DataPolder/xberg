@@ -3,6 +3,7 @@
 //! Parses CSV/TSV files into structured table data and clean text output.
 //! Handles RFC 4180 quoted fields with embedded commas and newlines.
 
+use std::borrow::Cow;
 use std::sync::LazyLock;
 
 use crate::Result;
@@ -76,13 +77,23 @@ impl InternalDocumentExtractor for CsvExtractor {
         tracing::debug!(format = "csv", size_bytes = content.len(), "extraction starting");
         let mut budget = SecurityBudget::from_config(config);
         let text = decode_csv_bytes(content);
+        let csv_config = config.csv.as_ref();
+        let comment_prefixes: &[String] = csv_config.map(|c| c.comment_prefixes.as_slice()).unwrap_or(&[]);
+        let configured_delimiter = csv_config
+            .and_then(|c| c.delimiter.as_deref())
+            .and_then(|d| d.chars().next());
+
+        let filtered_text = strip_comment_lines(&text, comment_prefixes);
+
         let delimiter = if mime_type == "text/tab-separated-values" {
             '\t'
+        } else if let Some(delimiter) = configured_delimiter {
+            delimiter
         } else {
-            detect_delimiter(&text)
+            detect_delimiter(&filtered_text)
         };
 
-        let rows = parse_csv(&text, delimiter);
+        let rows = parse_csv(&filtered_text, delimiter);
 
         for row in &rows {
             budget.step()?;
@@ -201,6 +212,32 @@ fn detect_delimiter(text: &str) -> char {
         }
     }
     best_delimiter
+}
+
+/// Remove lines whose trimmed start matches one of `prefixes` from `text`.
+///
+/// Comment lines are dropped entirely (not just their content), so row
+/// indices in the remaining data are unaffected by their removal. Preserves
+/// each surviving line's original terminator (`\n` or `\r\n`) so downstream
+/// CRLF handling in [`parse_csv`] is unaffected.
+///
+/// Returns the input unchanged (borrowed, no allocation) when `prefixes` is
+/// empty — the default when [`crate::core::config::CsvConfig`] is unset —
+/// so existing behavior is preserved byte-for-byte.
+fn strip_comment_lines<'a>(text: &'a str, prefixes: &[String]) -> Cow<'a, str> {
+    if prefixes.is_empty() {
+        return Cow::Borrowed(text);
+    }
+
+    let mut result = String::with_capacity(text.len());
+    for line in text.split_inclusive('\n') {
+        let trimmed_start = line.trim_start();
+        let is_comment = prefixes.iter().any(|prefix| trimmed_start.starts_with(prefix.as_str()));
+        if !is_comment {
+            result.push_str(line);
+        }
+    }
+    Cow::Owned(result)
 }
 
 /// Parse CSV text into rows of fields, handling RFC 4180 quoted fields.
@@ -800,5 +837,111 @@ mod tests {
         let result = extractor.extract_content(&content, "text/csv", &config).await.unwrap();
 
         assert!(!result.tables.is_empty());
+    }
+
+    #[tokio::test]
+    async fn plain_comma_csv_parses_identically_with_no_csv_config_set() {
+        // Regression guard: introducing `ExtractionConfig::csv` must not change
+        // default behavior when it is left `None`.
+        let extractor = CsvExtractor::new();
+        let config = ExtractionConfig::default();
+        assert!(config.csv.is_none());
+        let csv_data = b"Name,Age,City\nAlice,30,NYC\nBob,25,LA\n";
+
+        let result = extractor
+            .extract_content(csv_data, "text/csv", &config)
+            .await
+            .expect("CSV extraction should succeed");
+
+        assert_eq!(
+            result.tables[0].cells,
+            vec![
+                vec!["Name".to_string(), "Age".to_string(), "City".to_string()],
+                vec!["Alice".to_string(), "30".to_string(), "NYC".to_string()],
+                vec!["Bob".to_string(), "25".to_string(), "LA".to_string()],
+            ]
+        );
+
+        let plain = crate::rendering::render_plain(&result);
+        assert_eq!(plain, "Name Age City\nAlice 30 NYC\nBob 25 LA");
+    }
+
+    #[tokio::test]
+    async fn configured_semicolon_delimiter_is_used_instead_of_auto_detection() {
+        let extractor = CsvExtractor::new();
+        let config = ExtractionConfig {
+            csv: Some(crate::core::config::CsvConfig {
+                delimiter: Some(";".to_string()),
+                comment_prefixes: vec![],
+            }),
+            ..Default::default()
+        };
+        // A single-row, single-delimiter-occurrence sample defeats consistency-based
+        // auto-detection (`detect_delimiter` needs >= 2 rows to score a candidate),
+        // so this only parses correctly when the configured delimiter is honored.
+        let csv_data = b"Name;Age;City\nAlice;30;NYC\n";
+
+        let result = extractor
+            .extract_content(csv_data, "text/csv", &config)
+            .await
+            .expect("CSV extraction with configured delimiter should succeed");
+
+        assert_eq!(
+            result.tables[0].cells,
+            vec![
+                vec!["Name".to_string(), "Age".to_string(), "City".to_string()],
+                vec!["Alice".to_string(), "30".to_string(), "NYC".to_string()],
+            ]
+        );
+
+        if let Some(FormatMetadata::Csv(csv_meta)) = &result.metadata.format {
+            assert_eq!(csv_meta.delimiter.as_deref(), Some(";"));
+        } else {
+            panic!("Expected FormatMetadata::Csv");
+        }
+    }
+
+    #[tokio::test]
+    async fn configured_comment_prefix_skips_matching_lines() {
+        let extractor = CsvExtractor::new();
+        let config = ExtractionConfig {
+            csv: Some(crate::core::config::CsvConfig {
+                delimiter: None,
+                comment_prefixes: vec!["#".to_string()],
+            }),
+            ..Default::default()
+        };
+        let csv_data = b"# this is a comment\nName,Age,City\n# another comment\nAlice,30,NYC\nBob,25,LA\n";
+
+        let result = extractor
+            .extract_content(csv_data, "text/csv", &config)
+            .await
+            .expect("CSV extraction with comment prefix should succeed");
+
+        assert_eq!(
+            result.tables[0].cells,
+            vec![
+                vec!["Name".to_string(), "Age".to_string(), "City".to_string()],
+                vec!["Alice".to_string(), "30".to_string(), "NYC".to_string()],
+                vec!["Bob".to_string(), "25".to_string(), "LA".to_string()],
+            ]
+        );
+
+        let plain = crate::rendering::render_plain(&result);
+        assert_eq!(plain, "Name Age City\nAlice 30 NYC\nBob 25 LA");
+        assert!(!plain.contains('#'));
+    }
+
+    #[test]
+    fn strip_comment_lines_is_a_no_op_when_no_prefixes_are_configured() {
+        let text = "a,b\n#c,d\n";
+        assert_eq!(strip_comment_lines(text, &[]), Cow::Borrowed(text));
+    }
+
+    #[test]
+    fn strip_comment_lines_drops_lines_whose_trimmed_start_matches_a_prefix() {
+        let text = "# header comment\na,b,c\n  # indented comment\n1,2,3\n";
+        let filtered = strip_comment_lines(text, &["#".to_string()]);
+        assert_eq!(filtered, "a,b,c\n1,2,3\n");
     }
 }

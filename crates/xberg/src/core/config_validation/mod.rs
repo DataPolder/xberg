@@ -29,8 +29,8 @@ mod dependencies;
 mod sections;
 
 pub(crate) use sections::{
-    validate_chunking_params, validate_confidence, validate_dpi, validate_language_code, validate_ocr_backend,
-    validate_token_reduction_level, validate_vlm_backend_config,
+    validate_chunking_params, validate_confidence, validate_csv_delimiter, validate_dpi, validate_language_code,
+    validate_ocr_backend, validate_token_reduction_level, validate_vlm_backend_config,
 };
 
 // The remaining validators are exported under `#[cfg(test)]` only: every `ExtractionConfig`

@@ -337,6 +337,15 @@ pub struct ExtractionConfig {
     #[serde(default)]
     pub email: Option<super::super::email::EmailConfig>,
 
+    /// CSV/TSV extraction configuration (None = use defaults).
+    ///
+    /// Lets callers set an explicit delimiter and declare comment-line
+    /// prefixes to skip, instead of relying solely on delimiter
+    /// auto-detection. See [`crate::core::config::CsvConfig`] for details.
+    #[serde(default)]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
+    pub csv: Option<super::super::csv::CsvConfig>,
+
     /// Concurrency limits for constrained environments (None = use defaults).
     ///
     /// Controls Rayon thread pool size, ONNX Runtime intra-op threads, and the
@@ -496,6 +505,7 @@ impl Default for ExtractionConfig {
             cache_namespace: None,
             cache_ttl_secs: None,
             email: None,
+            csv: None,
             concurrency: None,
             url: UrlExtractionConfig::default(),
             max_archive_depth: default_archive_depth(),
@@ -763,6 +773,7 @@ impl ExtractionConfig {
     /// - `images`: `target_dpi`, `min_dpi`, and `max_dpi` are all positive and within the
     ///   supported range.
     /// - `language_detection`: `min_confidence` is a `[0.0, 1.0]` value.
+    /// - `csv`: `delimiter`, when set, is exactly one ASCII character.
     ///
     /// Called automatically when a config is loaded from a file
     /// ([`ExtractionConfig::from_file`] and friends) or built from a JSON override
@@ -774,7 +785,10 @@ impl ExtractionConfig {
     ///
     /// Returns `XbergError::Validation` describing the first invalid setting found.
     pub fn validate(&self) -> Result<(), crate::XbergError> {
-        use crate::core::config_validation::{validate_chunking_params, validate_confidence, validate_dpi, validate_token_reduction_level};
+        use crate::core::config_validation::{
+            validate_chunking_params, validate_confidence, validate_csv_delimiter, validate_dpi,
+            validate_token_reduction_level,
+        };
 
         if let Some(ref ocr) = self.ocr {
             ocr.validate()?;
@@ -802,6 +816,12 @@ impl ExtractionConfig {
 
         if let Some(ref language_detection) = self.language_detection {
             validate_confidence(language_detection.min_confidence)?;
+        }
+
+        if let Some(ref csv) = self.csv
+            && let Some(ref delimiter) = csv.delimiter
+        {
+            validate_csv_delimiter(delimiter)?;
         }
 
         Ok(())
@@ -1218,5 +1238,51 @@ mod tests {
         let html_output = resolved.html_output.expect("html output override should apply");
         assert_eq!(html_output.css.as_deref(), Some(".kb-p { color: red; }"));
         assert!(!html_output.embed_css);
+    }
+
+    #[test]
+    fn validate_accepts_a_single_ascii_char_csv_delimiter() {
+        let config = ExtractionConfig {
+            csv: Some(crate::core::config::CsvConfig {
+                delimiter: Some(";".to_string()),
+                comment_prefixes: vec![],
+            }),
+            ..Default::default()
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_an_empty_csv_delimiter_with_a_helpful_message() {
+        let config = ExtractionConfig {
+            csv: Some(crate::core::config::CsvConfig {
+                delimiter: Some(String::new()),
+                comment_prefixes: vec![],
+            }),
+            ..Default::default()
+        };
+        let err = config.validate().expect_err("empty delimiter must be rejected");
+        assert_eq!(
+            err.to_string(),
+            "Validation error: Invalid CSV delimiter ''. Must be exactly one ASCII character (e.g. ',', ';', '\\t', '|')."
+        );
+    }
+
+    #[test]
+    fn validate_rejects_a_multi_byte_csv_delimiter_with_a_helpful_message() {
+        let config = ExtractionConfig {
+            csv: Some(crate::core::config::CsvConfig {
+                delimiter: Some("::".to_string()),
+                comment_prefixes: vec![],
+            }),
+            ..Default::default()
+        };
+        let err = config
+            .validate()
+            .expect_err("multi-character delimiter must be rejected");
+        assert_eq!(
+            err.to_string(),
+            "Validation error: Invalid CSV delimiter '::'. Must be exactly one ASCII character (e.g. ',', ';', '\\t', '|')."
+        );
     }
 }
