@@ -363,7 +363,7 @@ pub(crate) fn build_minimal_pdf_with_mediabox(w: f32, h: f32) -> Vec<u8> {
 /// Adobe's Type 1 to Type 2 converter output that surfaced the bug. The font
 /// is generated with fontTools (no third-party font data); stock ttf-parser
 /// 0.25.1 drops all seven dotsection glyphs from it while the controls keep
-/// their outlines, so the vendored parser (which carries the fix) is what makes
+/// their outlines, so the patched parser (which carries the fix) is what makes
 /// this render. Used by the dotsection regression test below.
 ///
 /// Layout (48pt glyphs, one per 72pt-wide cell starting at x=72):
@@ -548,8 +548,9 @@ mod tests {
     /// charstring with `UnsupportedOperator`, so pdf_oxide painted nothing for
     /// i, j, period, colon, semicolon, exclam and question while still
     /// advancing the cursor: OCR received page images with those letters
-    /// silently missing. Exercises the full render path against the vendored
-    /// ttf-parser this branch routes to, which carries the fix (upstream #228).
+    /// silently missing. Exercises the full render path against the parser the
+    /// workspace `[patch.crates-io]` routes to — `xberg-ttf-parser`, which
+    /// carries the fix (upstream #228).
     #[test]
     fn test_render_paints_cff_glyphs_that_use_dotsection() {
         let names_row1 = ["i", "j", "period", "colon", "semicolon", "exclam", "question"];

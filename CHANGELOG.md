@@ -11,9 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- New `xberg-ttf-parser` crate: a vendored copy of `ttf-parser` 0.25.1 carrying the fix above.
-  Upstream is currently unmaintained, so vendoring lets us ship font parser fixes without waiting
-  on a release. The crate tracks which upstream pull requests it carries in its README.
+- The `ttf-parser` used when rendering PDF pages is redirected onto `xberg-ttf-parser`, a fork of
+  upstream 0.25.1 carrying the fix above plus eight other correctness and DoS fixes that are merged
+  upstream but unreleased. It is consumed from crates.io; only a small name-compatibility shim
+  (`crates/ttf-parser-compat`) lives in this repo, because Cargo matches `[patch.crates-io]` on
+  package name alone. No first-party code calls the parser directly.
 - New `xberg doctor` command and `doctor()` API probe the configured OCR backend, layout
   detection, and caches, then report pass / warn / fail / skip with a one-line reason —
   answering "is it my document or my environment?" before the first document, with no

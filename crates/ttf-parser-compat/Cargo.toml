@@ -2,11 +2,20 @@
 #
 # Cargo matches patch entries on package name alone, so redirecting the
 # `ttf-parser` that `pdf_oxide` and `fontdb` depend on requires a package
-# literally named `ttf-parser`. crates.io already owns that name, so the crate
-# we publish is `xberg-ttf-parser` and this shim re-exports it. It is never
-# published; it exists only to satisfy the patch matcher.
+# literally named `ttf-parser`. crates.io already owns that name, so the parser
+# we consume is `xberg-ttf-parser` and this shim re-exports it. It is never
+# published; it exists only to satisfy the patch matcher, which also means it
+# cannot be replaced by a plain dependency — cargo refuses to patch a package
+# with one of a different name, or with another crates.io package.
 #
-# The version must stay within the `^0.25` range both crates request.
+# Two versions here must not be touched by a blanket version bump:
+#
+#   * `version` must stay within the `^0.25` range both consumers request.
+#     Raising it to the workspace version silently disengages the patch, and
+#     cargo says nothing. See tests/patch_engaged.rs.
+#   * the `xberg-ttf-parser` requirement points at a published crates.io
+#     release. Bumping it to a version that was never published breaks the
+#     build.
 
 [package]
 name = "ttf-parser"
@@ -34,7 +43,7 @@ glyph-names = ["xberg-ttf-parser/glyph-names"]
 gvar-alloc = ["xberg-ttf-parser/gvar-alloc"]
 
 [dependencies]
-xberg-ttf-parser = { path = "..", default-features = false }
+xberg-ttf-parser = { version = "1.1.0", default-features = false }
 
 [lints]
 workspace = true
