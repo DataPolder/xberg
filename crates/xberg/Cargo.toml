@@ -28,6 +28,9 @@ ignored = [
   "symphonia",
   # mel_spec is optional behind the `transcription` feature; same constraint.
   "mel_spec",
+  # tokenizers-model2vec is declared purely to activate a feature on model2vec-rs's tokenizers
+  # 0.21 instance (GH#1389); it is deliberately never imported, so machete cannot see a use.
+  "tokenizers-model2vec",
 ]
 
 [lib]
@@ -387,6 +390,8 @@ static-embeddings = [
   "embedding-presets",
   "tokio-runtime",
   "dep:model2vec-rs",
+  # Supplies model2vec-rs's tokenizers 0.21 instance a regex backend without esaxx_fast (GH#1389).
+  "dep:tokenizers-model2vec",
   "dep:tokenizers",
   "dep:ndarray",
   "dep:hf-hub",
@@ -1153,14 +1158,35 @@ default-features = false
 features = ["blocking"]
 optional = true
 
-# model2vec-rs (native, including Android): `fancy-regex` gives its vendored
-# tokenizers 0.21 a regex backend (required — tokenizers refuses to compile with
-# neither `onig` nor `fancy-regex`) and pulls in `esaxx_fast`, a small C++ dep
-# that compiles cleanly with a native host toolchain (including the Android
-# NDK), unlike on wasm32 where cross-compiling C++ needs a WASI sysroot we
-# don't provision. See the wasm32 block below for the WASM-safe alternative.
+# model2vec-rs (native, including Android). Its tokenizers 0.21 instance needs a regex
+# backend — tokenizers refuses to compile with neither `onig` nor `fancy-regex` — but BOTH
+# of model2vec-rs's own regex features additionally pull `tokenizers/esaxx_fast`, and
+# `esaxx_fast` = `esaxx-rs/cpp`, whose build.rs forces `.static_crt(true)` (/MT). Rust
+# defaults to /MD on x86_64-pc-windows-msvc, so linking the two aborts with LNK2038 and any
+# `cargo add xberg --features full` build dies on Windows (GH#1389).
+#
+# esaxx_fast only accelerates BPE *training*; inference-only consumers never reach it. So we
+# take neither model2vec-rs regex feature and instead hand the shared tokenizers 0.21
+# instance `fancy-regex` directly, via the alias below. Note `esaxx-rs` resolves to a single
+# instance shared with tokenizers 0.22/0.23 (candle, gliner) — those depend on it with
+# `default-features = false`, so `cpp` stays off for everyone once model2vec-rs stops asking.
+#
+# This has to be a manifest change rather than a `[patch.crates-io]`: patches do not
+# propagate to downstream consumers, so patching esaxx-rs would fix our own builds and leave
+# the reported failure exactly as-is for anyone depending on the published crate.
+# See the wasm32 block below for the WASM-safe alternative.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies.model2vec-rs]
 version = "0.2"
+default-features = false
+features = []
+optional = true
+
+# Feature activation only — never imported from Rust (see the cargo-machete ignore list).
+# Same crate and semver range as model2vec-rs's own `tokenizers` dependency, so Cargo unifies
+# both onto one instance and this supplies the required regex backend WITHOUT `esaxx_fast`.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies.tokenizers-model2vec]
+package = "tokenizers"
+version = "0.21"
 default-features = false
 features = ["fancy-regex"]
 optional = true
