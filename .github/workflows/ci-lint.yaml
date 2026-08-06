@@ -9,18 +9,21 @@ on:
       - "e2e/**"
       - "tools/**"
       - "docs-site/**"
+      - "scripts/**"
       - "*.toml"
       - "*.yaml"
       - "*.yml"
       - "*.md"
       - ".github/**"
       - ".task/**"
+      - ".gitmodules"
       - "Taskfile.yml"
       - "alef.toml"
       - "pyproject.toml"
       - "plugin/**"
       - ".claude-plugin/**"
       - ".agents/plugins/**"
+      - "test_documents"
   pull_request:
     branches: [main]
     paths:
@@ -29,18 +32,21 @@ on:
       - "e2e/**"
       - "tools/**"
       - "docs-site/**"
+      - "scripts/**"
       - "*.toml"
       - "*.yaml"
       - "*.yml"
       - "*.md"
       - ".github/**"
       - ".task/**"
+      - ".gitmodules"
       - "Taskfile.yml"
       - "alef.toml"
       - "pyproject.toml"
       - "plugin/**"
       - ".claude-plugin/**"
       - ".agents/plugins/**"
+      - "test_documents"
   workflow_dispatch:
 
 concurrency:
@@ -79,6 +85,23 @@ jobs:
       # `task plugin:generate`. ~keep
       - name: Verify generated plugin bundles are current
         run: uvx ai-rulez==4.11.0 verify --recursive --plugin --if-configured
+
+  submodule-gitlinks:
+    name: Submodule gitlinks reachable
+    runs-on: ubuntu-latest
+    steps:
+      # submodules: false is deliberate -- we do NOT want git's own checkout-time
+      # fetch of the submodule to run here. If a gitlink is unreachable, checkout
+      # would die with a cryptic "not our ref" fatal; this job instead runs the
+      # same check standalone so it can report the path, the SHA, and the fix. ~keep
+      - uses: actions/checkout@v6
+        with:
+          submodules: false
+      # CI has a reliable network, so unlike the local pre-push hook (which warns
+      # on fetch failure to tolerate flaky connections), this job always fails hard
+      # -- both on unreachable remotes and on a gitlink SHA that was never pushed.
+      - name: Verify submodule gitlinks are reachable on their remotes
+        run: scripts/ci/check-submodule-gitlinks.sh --on-fetch-failure=fail
 
   validate:
     uses: xberg-io/actions/.github/workflows/reusable-validate.yml@v1

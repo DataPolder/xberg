@@ -698,3 +698,13 @@ run = "mix deps.get && mix credo --strict"
 root = "packages/elixir"
 workspace = true
 files = "packages/elixir/**/*.{ex,exs}"
+
+# Catches the incident class where a submodule gitlink is advanced and pushed but the
+# submodule commit itself never is -- builds/tests fine locally, only breaks CI and
+# fresh clones at checkout (#341). `warn` here (not `fail`) because this team already
+# runs `git push --no-verify` habitually (the pre-commit hook is known to hang), and a
+# flaky network shouldn't block a push either -- the CI job (ci-lint.yaml) is the real,
+# unbypassable backstop for this check, not this hook. ~keep
+[hooks.pre-push.commands.submodule-gitlinks]
+run = "scripts/ci/check-submodule-gitlinks.sh --on-fetch-failure=warn"
+workspace = true
