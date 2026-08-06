@@ -343,9 +343,11 @@ pub struct EmbeddingConfig {
 
     /// Show model download progress.
     ///
-    /// Reserved for future progress reporting. Currently has no effect for any
-    /// [`EmbeddingModelType`] variant — no progress indicator is emitted during
-    /// a HuggingFace model download regardless of this value (#279).
+    /// When enabled, transfer progress for the model, tokenizer and config files is reported at
+    /// `info` level on the `xberg::model_download` target while they download (#279). Covers both
+    /// local backends (ONNX and static/model2vec). A warm Hugging Face cache transfers nothing and
+    /// so reports nothing. Ignored by [`EmbeddingModelType::Llm`] and
+    /// [`EmbeddingModelType::Plugin`], which download no model.
     #[serde(default)]
     pub show_download_progress: bool,
 
@@ -449,9 +451,8 @@ pub enum EmbeddingModelType {
     /// When this variant is selected, only the following [`EmbeddingConfig`] fields
     /// apply: `normalize` (post-call L2 normalization) and `max_embed_duration_secs`
     /// (dispatcher timeout). Model-loading fields (`batch_size`, `cache_dir`,
-    /// `acceleration`) are ignored — the host owns the model lifecycle.
-    /// `show_download_progress` is likewise irrelevant here, but note it currently
-    /// has no effect for any variant, not just this one (#279).
+    /// `show_download_progress`, `acceleration`) are ignored — the host owns the
+    /// model lifecycle, so there is no download to report progress for.
     ///
     /// Semantic chunking falls back to [`ChunkingConfig::max_characters`] when this variant
     /// is used, since there is no preset to look a chunk-size ceiling up against — size your

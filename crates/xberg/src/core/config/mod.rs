@@ -9,6 +9,7 @@ pub mod chunk_classification;
 pub mod classification;
 pub mod concurrency;
 pub mod content_filter;
+pub(crate) mod download_progress;
 pub mod email;
 pub mod extraction;
 pub mod formats;
@@ -35,6 +36,8 @@ pub mod tree_sitter;
 pub use acceleration::{AccelerationConfig, ExecutionProviderType};
 pub use concurrency::ConcurrencyConfig;
 pub use content_filter::ContentFilterConfig;
+#[allow(unused_imports)]
+pub(crate) use download_progress::DownloadProgress;
 pub use email::EmailConfig;
 #[cfg(all(test, feature = "tokio-runtime", not(target_arch = "wasm32")))]
 pub(crate) use extraction::BatchBytesItem;

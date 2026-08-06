@@ -35,9 +35,10 @@ pub struct RerankerConfig {
 
     /// Show model download progress (local ONNX path only).
     ///
-    /// Reserved for future progress reporting. Currently has no effect for any
-    /// [`RerankerModelType`] variant — no progress indicator is emitted during a
-    /// HuggingFace model download regardless of this value (#279).
+    /// When enabled, transfer progress for the model, tokenizer and config files is reported at
+    /// `info` level on the `xberg::model_download` target while they download (#279). A warm
+    /// Hugging Face cache transfers nothing and so reports nothing. Ignored by
+    /// [`RerankerModelType::Llm`] and [`RerankerModelType::Plugin`], which download no model.
     #[serde(default)]
     pub show_download_progress: bool,
 
@@ -207,10 +208,9 @@ pub enum RerankerModelType {
     /// backend — no HuggingFace download, no ONNX Runtime requirement.
     ///
     /// When this variant is selected, only `max_rerank_duration_secs` applies.
-    /// Model-loading fields (`batch_size`, `cache_dir`, `acceleration`) are
-    /// ignored — the host owns the model lifecycle. `show_download_progress` is
-    /// likewise irrelevant here, but note it currently has no effect for any
-    /// variant, not just this one (#279).
+    /// Model-loading fields (`batch_size`, `cache_dir`, `show_download_progress`,
+    /// `acceleration`) are ignored — the host owns the model lifecycle, so there is
+    /// no download to report progress for.
     ///
     /// See [`crate::plugins::register_reranker_backend`].
     Plugin {
