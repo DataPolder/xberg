@@ -130,6 +130,20 @@ jobs:
         run: cargo check --locked -p xberg --no-default-features --features ocr-wasm --lib
         shell: bash
 
+      # Regression coverage for #320: `layout-detection` compiles standalone (no `ocr`/
+      # `ocr-pipeline`), so the PDF OCR-coordinate-transform helpers it calls must not
+      # depend on the `ocr` module or on items gated behind `ocr`/`ocr-pipeline` alone.
+      - name: Check layout-detection without OCR
+        run: cargo check --locked -p xberg --no-default-features --features "tokio-runtime,pdf,layout-detection" --lib
+        shell: bash
+
+      # Cheap standalone check of the exact feature closure the `all` Docker images build
+      # (default features + `all`, not `--no-default-features`). Catches a feature-closure
+      # compile break in minutes instead of via the ~20-minute Docker build (#325).
+      - name: Check xberg-cli --features all
+        run: cargo check --locked -p xberg-cli --features all
+        shell: bash
+
       - name: Check xberg-cli feature profiles
         if: runner.os == 'Linux'
         run: |
