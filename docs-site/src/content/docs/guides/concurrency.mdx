@@ -70,7 +70,13 @@ The largest scaling caveat applies to batches that run native PDF layout detecti
 
 For an all-layout-PDF batch, raising `max_threads` still increases the per-document thread budget (more intra-op threads for that one worker), but it will not add more concurrent documents. Throughput for these batches is bound by single-document layout inference speed, not by core count.
 
-A published cores-vs-throughput benchmark is planned but not yet available.
+A cores-vs-throughput benchmark that sweeps `max_threads` against a non-layout batch (expected to
+scale with cores) and an all-layout-PDF batch (expected to flatten) lives at
+`crates/xberg/benches/concurrency_scaling.rs`:
+
+```bash title="Terminal"
+cargo bench --bench concurrency_scaling --features pdf,layout-detection,ocr
+```
 
 ## How do I tell if I'm hitting the default cap?
 

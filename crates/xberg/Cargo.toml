@@ -1330,5 +1330,10 @@ name = "pdf_layout_microbatch"
 harness = false
 required-features = ["pdf", "layout-detection", "ocr", "profiling"]
 
+[[bench]]
+name = "concurrency_scaling"
+harness = false
+required-features = ["pdf", "layout-detection", "ocr"]
+
 [lints]
 workspace = true
