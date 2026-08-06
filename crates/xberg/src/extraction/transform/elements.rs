@@ -229,7 +229,7 @@ fn is_lone_numbered_line_in_paragraph(text: &str, line_offset: usize) -> bool {
 /// `"\n\n"` paragraph-boundary logic (and downstream `str::lines()` calls)
 /// work identically regardless of source line-ending style, including
 /// documents that mix styles.
-pub(super) fn normalize_line_endings(text: &str) -> std::borrow::Cow<'_, str> {
+pub(crate) fn normalize_line_endings(text: &str) -> std::borrow::Cow<'_, str> {
     if !text.contains('\r') {
         return std::borrow::Cow::Borrowed(text);
     }

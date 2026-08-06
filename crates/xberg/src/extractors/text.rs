@@ -2,6 +2,7 @@
 
 use crate::Result;
 use crate::core::config::ExtractionConfig;
+use crate::extraction::transform::normalize_line_endings;
 use crate::plugins::{InternalDocumentExtractor, Plugin};
 use crate::types::internal::InternalDocument;
 use crate::types::internal_builder::InternalDocumentBuilder;
@@ -30,10 +31,19 @@ impl Default for PlainTextExtractor {
 impl PlainTextExtractor {
     /// Build an `InternalDocument` from plain text content.
     ///
-    /// Splits on double-newlines into paragraphs.
+    /// Splits on double-newlines into paragraphs, after normalizing all line endings to
+    /// `\n` so CRLF and lone-CR blank lines are recognized as paragraph boundaries the
+    /// same way as bare LF ones.
+    ///
+    /// The normalization cannot be left to `extraction::transform`: populating an
+    /// `InternalDocument` here makes `transform_extraction_result_to_elements` take the
+    /// `convert_internal_elements_to_elements` path, which never reaches that module's
+    /// paragraph splitter. Without this, `\r\n\r\n` and `\r\r` never match the `"\n\n"`
+    /// boundary and the whole document collapses into one paragraph (#227).
     fn build_internal_document(text: &str) -> InternalDocument {
         let mut builder = InternalDocumentBuilder::new("text");
-        for paragraph in text.split("\n\n") {
+        let normalized = normalize_line_endings(text);
+        for paragraph in normalized.split("\n\n") {
             let trimmed = paragraph.trim();
             if !trimmed.is_empty() {
                 builder.push_paragraph(trimmed, vec![], None, None);
