@@ -14,6 +14,10 @@ use std::borrow::Cow;
 use roxmltree::Node;
 use serde_json;
 
+/// `ProcessingWarning::source` for every warning this extractor emits (#171).
+#[cfg(feature = "office")]
+const OPML_WARNING_SOURCE: &str = "opml";
+
 /// Extract OPML content and metadata from raw bytes.
 ///
 /// Parses the XML document structure, extracts metadata from the `<head>` section,
@@ -258,16 +262,36 @@ pub(crate) fn build_internal_document(
 
     let mut builder = InternalDocumentBuilder::new("opml");
 
-    if let Some(opml) = doc.root().children().find(|n| n.tag_name().name() == "opml")
-        && let Some(body) = opml.children().find(|n| n.tag_name().name() == "body")
-    {
-        for outline in body.children().filter(|n| n.tag_name().name() == "outline") {
-            budget.step()?;
-            build_outline_internal(outline, 1, &mut builder, budget)?;
-        }
+    // Both lookups failing silently is total loss: the file parsed as XML, so extraction
+    // returns `Ok`, but the document handed back is empty and the caller cannot tell that
+    // from an outline file that genuinely has no entries (#171).
+    let mut missing_structure: Option<&'static str> = None;
+    match doc.root().children().find(|n| n.tag_name().name() == "opml") {
+        Some(opml) => match opml.children().find(|n| n.tag_name().name() == "body") {
+            Some(body) => {
+                for outline in body.children().filter(|n| n.tag_name().name() == "outline") {
+                    budget.step()?;
+                    build_outline_internal(outline, 1, &mut builder, budget)?;
+                }
+            }
+            None => missing_structure = Some("<body>"),
+        },
+        None => missing_structure = Some("<opml> root"),
     }
 
-    Ok(builder.build())
+    let mut document = builder.build();
+    if let Some(missing) = missing_structure {
+        crate::core::diagnostics::push_warning(
+            &mut document.processing_warnings,
+            OPML_WARNING_SOURCE,
+            format!(
+                "The file parsed as XML but has no {missing} element, so no outline entries \
+                 could be read and the extracted document is empty"
+            ),
+        );
+    }
+
+    Ok(document)
 }
 
 /// Recursively build internal document from outline nodes.

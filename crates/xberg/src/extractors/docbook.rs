@@ -33,6 +33,9 @@ use std::collections::HashMap;
 #[cfg(feature = "tokio-runtime")]
 use std::path::Path;
 
+/// `ProcessingWarning::source` for every warning this extractor emits (#171).
+const DOCBOOK_WARNING_SOURCE: &str = "docbook";
+
 /// Strip namespace prefix from XML tag names.
 /// Converts "{http://docbook.org/ns/docbook}title" to "title"
 /// and leaves non-namespaced "title" unchanged.
@@ -1364,9 +1367,12 @@ impl InternalDocumentExtractor for DocbookExtractor {
         mime_type: &str,
         config: &ExtractionConfig,
     ) -> Result<InternalDocument> {
-        let docbook_content = utf8_validation::from_utf8(content)
-            .map(|s| s.to_string())
-            .unwrap_or_else(|_| String::from_utf8_lossy(content).into_owned());
+        // Track the fallback: a non-UTF-8 source is decoded lossily and every byte the
+        // decoder could not read is already U+FFFD before parsing starts (#171).
+        let (docbook_content, decoded_lossily) = match utf8_validation::from_utf8(content) {
+            Ok(valid) => (valid.to_string(), false),
+            Err(_) => (String::from_utf8_lossy(content).into_owned(), true),
+        };
 
         let mut budget = SecurityBudget::from_config(config);
         let (_extracted_content, title, author, date, _tables, publisher, copyright) =
@@ -1413,6 +1419,14 @@ impl InternalDocumentExtractor for DocbookExtractor {
         let mut doc = build_docbook_internal_document(&docbook_content, inject_placeholders, &mut budget2)?;
         doc.mime_type = mime_type.to_string();
         doc.metadata = metadata;
+
+        if decoded_lossily {
+            crate::core::diagnostics::push_lossy_decode_warning(
+                &mut doc.processing_warnings,
+                DOCBOOK_WARNING_SOURCE,
+                "DocBook source",
+            );
+        }
 
         Ok(doc)
     }

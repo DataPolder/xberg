@@ -113,6 +113,25 @@ pub(crate) fn push_unclosed_elements_warning(
     push_warning(accumulated, source, message);
 }
 
+/// Record that the input could not be decoded as UTF-8 and was read lossily.
+///
+/// `String::from_utf8_lossy` — and the `utf8_validation` fallbacks built on it —
+/// substitute U+FFFD for every byte they cannot interpret, then extraction
+/// continues and returns `Ok`. Without this warning a mojibake'd document is
+/// indistinguishable from a clean one, which is exactly the gap #171 is about.
+///
+/// `subject` names the input in the extractor's own vocabulary ("HTML source",
+/// "RTF source"). Emit this only when the decode actually fell back — a document
+/// that is valid UTF-8 must not produce it.
+pub(crate) fn push_lossy_decode_warning(accumulated: &mut Vec<ProcessingWarning>, source: &'static str, subject: &str) {
+    let message = format!(
+        "The {subject} is not valid UTF-8; the undecodable bytes were replaced with the Unicode \
+         replacement character, so those characters are missing from the extracted text. \
+         Re-encode the input as UTF-8 to recover them"
+    );
+    push_warning(accumulated, source, message);
+}
+
 /// Render item names for embedding in a warning message: comma-separated, and
 /// elided after [`MAX_NAMED_ENTRIES`] with a count of the remainder.
 pub(crate) fn format_entry_list(names: &[String]) -> String {

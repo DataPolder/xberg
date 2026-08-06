@@ -20,6 +20,10 @@ use html_to_markdown_rs::InlineImageFormat;
 use std::borrow::Cow;
 #[cfg(feature = "tokio-runtime")]
 use std::path::Path;
+
+/// `ProcessingWarning::source` for every warning this extractor emits (#171).
+const HTML_WARNING_SOURCE: &str = "html";
+
 #[cfg_attr(alef, alef(skip))]
 /// HTML document extractor using html-to-markdown.
 pub struct HtmlExtractor;
@@ -489,9 +493,13 @@ impl SyncExtractor for HtmlExtractor {
     fn extract_sync(&self, content: &[u8], mime_type: &str, config: &ExtractionConfig) -> Result<InternalDocument> {
         let _span = tracing::debug_span!("extract_html", element_count = tracing::field::Empty,).entered();
 
-        let html = utf8_validation::from_utf8(content)
-            .map(|s| s.to_string())
-            .unwrap_or_else(|_| String::from_utf8_lossy(content).into_owned());
+        // A non-UTF-8 page still extracts, but every undecodable byte has already become
+        // U+FFFD by the time anything downstream sees it. Remember that here so the caller
+        // is told the text was mangled instead of being handed silent mojibake (#171).
+        let (html, decoded_lossily) = match utf8_validation::from_utf8(content) {
+            Ok(valid) => (valid.to_string(), false),
+            Err(_) => (String::from_utf8_lossy(content).into_owned(), true),
+        };
 
         let html_options =
             apply_content_filter_to_html_options(config.html_options.clone(), config.content_filter.as_ref());
@@ -557,6 +565,14 @@ impl SyncExtractor for HtmlExtractor {
         } else {
             InternalDocumentBuilder::new("html").build()
         };
+
+        if decoded_lossily {
+            crate::core::diagnostics::push_lossy_decode_warning(
+                &mut doc.processing_warnings,
+                HTML_WARNING_SOURCE,
+                "HTML source",
+            );
+        }
 
         doc.metadata = Metadata {
             title: meta_title,

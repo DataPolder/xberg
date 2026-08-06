@@ -39,6 +39,9 @@ use parser::extract_citation_text as jats_extract_citation;
 use parser::extract_fig_content as jats_extract_fig;
 use parser::extract_text_content as jats_extract_text;
 
+/// `ProcessingWarning::source` for every warning this extractor emits (#171).
+const JATS_WARNING_SOURCE: &str = "jats";
+
 /// Extract text and inline annotations from a JATS `<p>` element.
 ///
 /// Recognizes:
@@ -502,9 +505,12 @@ impl InternalDocumentExtractor for JatsExtractor {
         config: &ExtractionConfig,
     ) -> Result<InternalDocument> {
         tracing::debug!(format = "jats", size_bytes = content.len(), "extraction starting");
-        let jats_content = utf8_validation::from_utf8(content)
-            .map(|s| s.to_string())
-            .unwrap_or_else(|_| String::from_utf8_lossy(content).to_string());
+        // Track the fallback: a non-UTF-8 article is decoded lossily and every byte the
+        // decoder could not read is already U+FFFD before parsing starts (#171).
+        let (jats_content, decoded_lossily) = match utf8_validation::from_utf8(content) {
+            Ok(valid) => (valid.to_string(), false),
+            Err(_) => (String::from_utf8_lossy(content).to_string(), true),
+        };
 
         let (jats_metadata, _extracted_content, _title, _tables) = extract_jats_all_in_one(&jats_content)?;
 
@@ -622,6 +628,14 @@ impl InternalDocumentExtractor for JatsExtractor {
         let mut doc = build_jats_internal_document(&jats_content, &mut budget)?;
         doc.mime_type = mime_type.to_string();
         doc.metadata = metadata;
+
+        if decoded_lossily {
+            crate::core::diagnostics::push_lossy_decode_warning(
+                &mut doc.processing_warnings,
+                JATS_WARNING_SOURCE,
+                "JATS source",
+            );
+        }
 
         if let Some(doi) = &jats_metadata.doi {
             doc.push_uri(ExtractedUri::citation(
