@@ -134,7 +134,9 @@ mod tests {
         let keyword = Keyword::with_positions(
             "learning".to_string(),
             0.5,
-            KeywordAlgorithm::Rake,
+            // Both variants are feature-gated, so naming one breaks any build without it;
+            // these tests are about position offsets, not which algorithm produced them.
+            KeywordAlgorithm::default(),
             "machine learning is great",
         );
         assert_eq!(keyword.positions, Some(vec![8]));
@@ -145,7 +147,9 @@ mod tests {
         let keyword = Keyword::with_positions(
             "learn*".to_string(),
             0.5,
-            KeywordAlgorithm::Rake,
+            // Both variants are feature-gated, so naming one breaks any build without it;
+            // these tests are about position offsets, not which algorithm produced them.
+            KeywordAlgorithm::default(),
             "machine learning is great",
         );
         assert_eq!(keyword.positions, None);
