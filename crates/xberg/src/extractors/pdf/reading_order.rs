@@ -14,6 +14,11 @@ use crate::pdf::structure::types::{LayoutHint, LayoutHintClass, LayoutRegionPath
 const COLUMN_MERGE_THRESHOLD_PTS: f32 = 20.0;
 
 /// A text span with bounding box information.
+///
+/// `x`/`y`/`width`/`height` are always the page-space bbox pdf_oxide reports:
+/// for a rotated run the origin is in page coordinates but `width`/`height`
+/// are flattened onto the run's own (rotated) axis — see
+/// [`upright_reading_origin`] for why ordering must account for this.
 #[derive(Debug, Clone)]
 pub struct TextSpan {
     pub text: String,
@@ -21,6 +26,10 @@ pub struct TextSpan {
     pub y: f32,
     pub width: f32,
     pub height: f32,
+    /// Text-matrix rotation in degrees, as reported by pdf_oxide
+    /// (`TextSpan::rotation_degrees`). Zero for the overwhelming majority of
+    /// (unrotated) spans.
+    pub rotation_degrees: f32,
 }
 
 /// A region projection: layout region with indices of spans it contains.
@@ -1240,10 +1249,46 @@ pub(crate) fn reorder_segments_by_layout(
         .collect()
 }
 
+/// Rotate a span's page-space origin into its own upright reading frame.
+///
+/// Mirrors [`crate::pdf::oxide::span_geometry::upright_origin`] (which
+/// operates on `pdf_oxide::layout::TextSpan`) for the simpler geometry this
+/// module works with. Returns `(advance, cross)`: `advance` is the position
+/// along the span's own reading direction and `cross` is the position along
+/// the axis lines stack on. For unrotated spans (`rotation_degrees == 0`,
+/// the overwhelming majority) this is the identity `(x, y)`.
+fn upright_reading_origin(span: &TextSpan) -> (f32, f32) {
+    if span.rotation_degrees == 0.0 {
+        return (span.x, span.y);
+    }
+    let (sin, cos) = (-span.rotation_degrees).to_radians().sin_cos();
+    (span.x * cos - span.y * sin, span.x * sin + span.y * cos)
+}
+
+/// `(advance_start, cross_top)` for ordering spans within a reading-order
+/// group: descending `cross_top` walks rows in the span's own reading
+/// direction (top-to-bottom for unrotated text; the equivalent "downward"
+/// step in the run's own frame for rotated text), then ascending
+/// `advance_start` reads left-to-right along that same axis. Identical to
+/// `(x, y + height)` when `rotation_degrees == 0`.
+fn reading_order_key(span: &TextSpan) -> (f32, f32) {
+    let (advance_start, cross_start) = upright_reading_origin(span);
+    (advance_start, cross_start + span.height)
+}
+
 /// Reorder spans using purely geometric column detection (no layout hints needed).
 ///
 /// Detects columns by clustering span x-centers, then orders spans
 /// left-to-right across columns, and top-to-bottom within each column.
+///
+/// This geometric fallback only runs when no layout hints are available at
+/// all (whole-page multi-column detection); it is intentionally left on raw
+/// page x/y rather than each span's own upright frame — unlike a single
+/// detected table region (see [`reading_order_key`], used by
+/// [`reorder_spans_by_layout`]'s per-region sort), a page-wide set of
+/// same-rotation spans has no single well-defined "reading flow" to rotate
+/// into, so the safer, verified fix targets the layout-hint path where a
+/// rotated table's spans are known to form one region.
 ///
 /// Returns a Vec of span indices in reading order.
 fn reorder_spans_geometric(spans: &[TextSpan]) -> Vec<usize> {
@@ -1337,11 +1382,9 @@ pub(crate) fn reorder_spans_by_layout(spans: &[TextSpan], hints: &[LayoutHint]) 
 
     for region in &mut regions {
         region.span_indices.sort_by(|&a, &b| {
-            let span_a = &spans[a];
-            let span_b = &spans[b];
-            let top_a = span_a.y + span_a.height;
-            let top_b = span_b.y + span_b.height;
-            top_b.total_cmp(&top_a).then_with(|| span_a.x.total_cmp(&span_b.x))
+            let (advance_a, cross_top_a) = reading_order_key(&spans[a]);
+            let (advance_b, cross_top_b) = reading_order_key(&spans[b]);
+            cross_top_b.total_cmp(&cross_top_a).then_with(|| advance_a.total_cmp(&advance_b))
         });
     }
 
@@ -2500,6 +2543,7 @@ mod tests {
                 y: 450.0,
                 width: 70.0,
                 height: 12.0,
+                rotation_degrees: 0.0,
             },
             TextSpan {
                 text: "Right column".to_string(),
@@ -2507,6 +2551,7 @@ mod tests {
                 y: 450.0,
                 width: 75.0,
                 height: 12.0,
+                rotation_degrees: 0.0,
             },
         ];
 
@@ -2546,6 +2591,7 @@ mod tests {
                 y: 450.0,
                 width: 10.0,
                 height: 12.0,
+                rotation_degrees: 0.0,
             },
             TextSpan {
                 text: "B".to_string(),
@@ -2553,6 +2599,7 @@ mod tests {
                 y: 200.0,
                 width: 10.0,
                 height: 12.0,
+                rotation_degrees: 0.0,
             },
             TextSpan {
                 text: "C".to_string(),
@@ -2560,6 +2607,7 @@ mod tests {
                 y: 450.0,
                 width: 10.0,
                 height: 12.0,
+                rotation_degrees: 0.0,
             },
             TextSpan {
                 text: "D".to_string(),
@@ -2567,6 +2615,7 @@ mod tests {
                 y: 200.0,
                 width: 10.0,
                 height: 12.0,
+                rotation_degrees: 0.0,
             },
         ];
 
@@ -2730,6 +2779,7 @@ mod tests {
                 y: 450.0,
                 width: 100.0,
                 height: 12.0,
+                rotation_degrees: 0.0,
             },
             TextSpan {
                 text: "MarginalNote".to_string(),
@@ -2737,6 +2787,7 @@ mod tests {
                 y: 270.0,
                 width: 100.0,
                 height: 12.0,
+                rotation_degrees: 0.0,
             },
             TextSpan {
                 text: "BottomSpan".to_string(),
@@ -2744,6 +2795,7 @@ mod tests {
                 y: 150.0,
                 width: 100.0,
                 height: 12.0,
+                rotation_degrees: 0.0,
             },
         ];
 
@@ -2787,6 +2839,7 @@ mod tests {
                 y: 480.0,
                 width: 10.0,
                 height: 12.0,
+                rotation_degrees: 0.0,
             },
             TextSpan {
                 text: "B".to_string(),
@@ -2794,6 +2847,7 @@ mod tests {
                 y: 300.0,
                 width: 10.0,
                 height: 12.0,
+                rotation_degrees: 0.0,
             },
             TextSpan {
                 text: "C".to_string(),
@@ -2801,6 +2855,7 @@ mod tests {
                 y: 470.0,
                 width: 10.0,
                 height: 12.0,
+                rotation_degrees: 0.0,
             },
             TextSpan {
                 text: "D".to_string(),
@@ -2808,6 +2863,7 @@ mod tests {
                 y: 300.0,
                 width: 10.0,
                 height: 12.0,
+                rotation_degrees: 0.0,
             },
             TextSpan {
                 text: "E".to_string(),
@@ -2815,6 +2871,7 @@ mod tests {
                 y: 150.0,
                 width: 10.0,
                 height: 12.0,
+                rotation_degrees: 0.0,
             },
             TextSpan {
                 text: "X".to_string(),
@@ -2822,6 +2879,7 @@ mod tests {
                 y: 300.0,
                 width: 10.0,
                 height: 12.0,
+                rotation_degrees: 0.0,
             },
         ];
 
@@ -2871,6 +2929,7 @@ mod tests {
                 y: 100.0,
                 width: 10.0,
                 height: 12.0,
+                rotation_degrees: 0.0,
             },
             TextSpan {
                 text: "B".to_string(),
@@ -2878,6 +2937,7 @@ mod tests {
                 y: 100.0,
                 width: 10.0,
                 height: 12.0,
+                rotation_degrees: 0.0,
             },
         ];
         let hints = vec![];
@@ -3004,6 +3064,7 @@ mod tests {
                 y: 200.0,
                 width: 80.0,
                 height: 12.0,
+                rotation_degrees: 0.0,
             },
             TextSpan {
                 text: "2.1.1 ErP".to_string(),
@@ -3011,6 +3072,7 @@ mod tests {
                 y: 180.0,
                 width: 60.0,
                 height: 12.0,
+                rotation_degrees: 0.0,
             },
             TextSpan {
                 text: "2.1.2 Gas".to_string(),
@@ -3018,6 +3080,7 @@ mod tests {
                 y: 160.0,
                 width: 60.0,
                 height: 12.0,
+                rotation_degrees: 0.0,
             },
             TextSpan {
                 text: "2 TOESTEL".to_string(),
@@ -3025,6 +3088,7 @@ mod tests {
                 y: 450.0,
                 width: 80.0,
                 height: 12.0,
+                rotation_degrees: 0.0,
             },
         ];
 
@@ -3072,6 +3136,7 @@ mod tests {
                 y: f32::NAN,
                 width: 10.0,
                 height: 12.0,
+                rotation_degrees: 0.0,
             },
             TextSpan {
                 text: "B".to_string(),
@@ -3079,6 +3144,7 @@ mod tests {
                 y: 5.0,
                 width: 10.0,
                 height: 12.0,
+                rotation_degrees: 0.0,
             },
             TextSpan {
                 text: "C".to_string(),
@@ -3086,6 +3152,7 @@ mod tests {
                 y: 10.0,
                 width: 10.0,
                 height: 12.0,
+                rotation_degrees: 0.0,
             },
         ];
         let order = reorder_spans_geometric(&spans);
@@ -3108,6 +3175,7 @@ mod tests {
                 y: 450.0,
                 width: 80.0,
                 height: 12.0,
+                rotation_degrees: 0.0,
             },
             TextSpan {
                 text: "Left bottom".to_string(),
@@ -3115,6 +3183,7 @@ mod tests {
                 y: 200.0,
                 width: 80.0,
                 height: 12.0,
+                rotation_degrees: 0.0,
             },
             TextSpan {
                 text: "Right top".to_string(),
@@ -3122,6 +3191,7 @@ mod tests {
                 y: 450.0,
                 width: 80.0,
                 height: 12.0,
+                rotation_degrees: 0.0,
             },
             TextSpan {
                 text: "Right bottom".to_string(),
@@ -3129,6 +3199,7 @@ mod tests {
                 y: 200.0,
                 width: 80.0,
                 height: 12.0,
+                rotation_degrees: 0.0,
             },
         ];
 
@@ -3139,5 +3210,157 @@ mod tests {
             "Without hints, geometric fallback should detect columns by x-center \
              and order left column (0,1) before right column (2,3), top-to-bottom"
         );
+    }
+
+    // Regression tests for issue #292/#293 (GH#1358): a sideways (rotated)
+    // table's spans were ordered by raw page x/y, which is the wrong axis for
+    // rotated text — it cuts across the table's actual rows/columns instead
+    // of walking them. `reading_order_key`/`upright_reading_origin` rotate a
+    // span's origin into its own reading frame before comparing, so ordering
+    // follows the table's real row/column structure regardless of the
+    // text-matrix rotation pdf_oxide reports.
+    mod issue_292_rotated_reading_order {
+        use super::*;
+
+        /// A `rotation_degrees = 90` span, built from the same fields the
+        /// existing unrotated `TextSpan` literals use plus the new field.
+        fn rotated_span(text: &str, x: f32, y: f32, width: f32, height: f32) -> TextSpan {
+            TextSpan {
+                text: text.to_string(),
+                x,
+                y,
+                width,
+                height,
+                rotation_degrees: 90.0,
+            }
+        }
+
+        /// Four cells of a 2-row-by-2-column table rotated 90 degrees, fed in
+        /// scrambled order. Rotating `-90` maps page `(x, y)` to
+        /// `(advance, cross) = (y, -x)`: reading advances along page-y (so
+        /// smaller y reads first within a row) and rows stack along page-x
+        /// (so smaller x is the first row). The correct reading order is
+        /// therefore row-major: `A1, A2` (x=100, ascending y) then `B1, B2`
+        /// (x=200, ascending y).
+        fn scrambled_rotated_table() -> Vec<TextSpan> {
+            vec![
+                rotated_span("B2", 200.0, 200.0, 30.0, 10.0), // index 0
+                rotated_span("A1", 100.0, 100.0, 30.0, 10.0), // index 1
+                rotated_span("B1", 200.0, 100.0, 30.0, 10.0), // index 2
+                rotated_span("A2", 100.0, 200.0, 30.0, 10.0), // index 3
+            ]
+        }
+
+        #[test]
+        fn should_order_rotated_table_along_its_own_axis_within_a_layout_region() {
+            let spans = scrambled_rotated_table();
+            // A single generous Text region covering every span's page-space
+            // center (span.x + width/2, span.y + height/2 stays well inside
+            // this box for every cell), so all four spans land in one group
+            // and the region-level sort (not the no-hints fallback) is what
+            // orders them.
+            let hints = vec![LayoutHint {
+                class_name: crate::pdf::structure::types::LayoutHintClass::Text,
+                confidence: 0.9,
+                left: 0.0,
+                bottom: 0.0,
+                right: 400.0,
+                top: 400.0,
+            }];
+
+            let order = reorder_spans_by_layout(&spans, &hints);
+
+            let texts: Vec<&str> = order.iter().map(|&index| spans[index].text.as_str()).collect();
+            assert_eq!(
+                texts,
+                vec!["A1", "A2", "B1", "B2"],
+                "within a layout region, rotated spans must still be ordered along their own axis"
+            );
+        }
+
+        #[test]
+        fn should_not_reverse_or_glue_words_within_a_rotated_row() {
+            // Same fixture and region, but assert the row-level word order
+            // specifically: "A1" must precede "A2" (both in the x=100 row),
+            // never the reverse — this is the word-order aspect of #292
+            // (rotated text reading back-to-front) as observed at the
+            // block-ordering layer.
+            let spans = scrambled_rotated_table();
+            let hints = vec![LayoutHint {
+                class_name: crate::pdf::structure::types::LayoutHintClass::Text,
+                confidence: 0.9,
+                left: 0.0,
+                bottom: 0.0,
+                right: 400.0,
+                top: 400.0,
+            }];
+
+            let order = reorder_spans_by_layout(&spans, &hints);
+            let position_of = |text: &str| order.iter().position(|&index| spans[index].text == text).unwrap();
+
+            assert!(
+                position_of("A1") < position_of("A2"),
+                "A1 must be read before A2 within the same rotated row"
+            );
+            assert!(
+                position_of("B1") < position_of("B2"),
+                "B1 must be read before B2 within the same rotated row"
+            );
+            assert!(
+                position_of("A2") < position_of("B1"),
+                "the first rotated row must fully precede the second"
+            );
+        }
+
+        /// Companion case: an ordinary unrotated two-column layout must be
+        /// completely unaffected by the rotation-aware sort key, since
+        /// `upright_reading_origin`/`reading_order_key` reduce to the
+        /// identity `(x, y + height)` when `rotation_degrees == 0`.
+        #[test]
+        fn should_leave_unrotated_reading_order_unchanged() {
+            let spans = vec![
+                TextSpan {
+                    text: "Top left".to_string(),
+                    x: 50.0,
+                    y: 400.0,
+                    width: 80.0,
+                    height: 12.0,
+                    rotation_degrees: 0.0,
+                },
+                TextSpan {
+                    text: "Bottom left".to_string(),
+                    x: 50.0,
+                    y: 200.0,
+                    width: 80.0,
+                    height: 12.0,
+                    rotation_degrees: 0.0,
+                },
+                TextSpan {
+                    text: "Top right".to_string(),
+                    x: 300.0,
+                    y: 400.0,
+                    width: 80.0,
+                    height: 12.0,
+                    rotation_degrees: 0.0,
+                },
+                TextSpan {
+                    text: "Bottom right".to_string(),
+                    x: 300.0,
+                    y: 200.0,
+                    width: 80.0,
+                    height: 12.0,
+                    rotation_degrees: 0.0,
+                },
+            ];
+
+            let order = reorder_spans_by_layout(&spans, &[]);
+
+            assert_eq!(
+                order,
+                vec![0, 1, 2, 3],
+                "unrotated geometric fallback must still order left column top-to-bottom \
+                 then right column top-to-bottom, exactly as before rotation awareness was added"
+            );
+        }
     }
 }

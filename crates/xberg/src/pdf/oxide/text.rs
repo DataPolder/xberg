@@ -86,6 +86,7 @@ pub(crate) fn extract_spans_from_page(
             y: span.bbox.y,
             width: span.bbox.width,
             height: span.bbox.height,
+            rotation_degrees: span.rotation_degrees,
         })
         .collect();
 
