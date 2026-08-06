@@ -1923,4 +1923,51 @@ mod tests {
         assert!(SUPPORTED_MIME_TYPES.contains("text/rtf"), "rtf alias");
         assert!(SUPPORTED_MIME_TYPES.contains("text/x-typst"), "typst alias");
     }
+
+    /// Every alias in [`FORMATS`] must route to the same extractor as its canonical MIME
+    /// type.
+    ///
+    /// `validate_mime_type` accepts an alias verbatim — it does not normalize it to the
+    /// canonical form — and `DocumentExtractorRegistry::get` resolves by exact string with
+    /// no alias awareness. So an alias that no extractor lists in `supported_mime_types()`
+    /// is advertised as supported by `list_supported_formats()` and then rejected as
+    /// `UnsupportedFormat` at extraction time (#229, and #289 for the same shape).
+    ///
+    /// Formats whose canonical MIME has no registered extractor are skipped, so this stays
+    /// valid under any feature set: it only ever asserts that an alias is no worse off than
+    /// the canonical name beside it.
+    #[test]
+    fn every_declared_alias_resolves_to_the_same_extractor_as_its_canonical_mime() {
+        crate::extractors::ensure_initialized().expect("failed to initialize default extractors");
+        let registry = crate::plugins::registry::get_document_extractor_registry();
+        let registry = registry.read();
+
+        let mut unclaimed = Vec::new();
+        for format in FORMATS {
+            let Ok(canonical) = registry.get(format.mime_type) else {
+                continue;
+            };
+            for alias in format.aliases {
+                match registry.get(alias) {
+                    Ok(aliased) if aliased.name() == canonical.name() => {}
+                    Ok(aliased) => unclaimed.push(format!(
+                        "{alias} (alias of {}) resolves to {}, not {}",
+                        format.mime_type,
+                        aliased.name(),
+                        canonical.name()
+                    )),
+                    Err(_) => unclaimed.push(format!(
+                        "{alias} (alias of {}) resolves to no extractor, but {} does",
+                        format.mime_type, format.mime_type
+                    )),
+                }
+            }
+        }
+
+        assert!(
+            unclaimed.is_empty(),
+            "declared alias MIME types are advertised as supported but unroutable:\n  {}",
+            unclaimed.join("\n  ")
+        );
+    }
 }

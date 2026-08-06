@@ -19,8 +19,49 @@ use crate::transcription::tags::AudioTags;
 use crate::types::internal::{ElementKind, InternalDocument, InternalElement};
 use crate::types::metadata::{AudioMetadata, FormatMetadata};
 use crate::{Result, XbergError};
+use ahash::AHashMap;
 use async_trait::async_trait;
 use tokio::task;
+
+/// Attribute key holding a segment's start time (milliseconds, as a decimal string).
+const ATTR_START_MS: &str = "start_ms";
+/// Attribute key holding a segment's end time (milliseconds, as a decimal string).
+const ATTR_END_MS: &str = "end_ms";
+
+/// Push transcript text onto `doc` as one or more `Paragraph` elements.
+///
+/// When `timestamps` is `false`, all segment text is joined into a single flat
+/// paragraph (matching the pre-#306 behavior, since there is no per-segment
+/// timing to preserve). When `true`, each non-empty `(start_ms, end_ms, text)`
+/// segment becomes its own `Paragraph` element carrying `start_ms`/`end_ms`
+/// attributes, so callers get segment boundaries and per-segment timestamps
+/// without a new binding-visible type.
+fn push_transcript_elements(doc: &mut InternalDocument, segments: &[(u32, u32, String)], timestamps: bool) {
+    if timestamps {
+        for (start_ms, end_ms, text) in segments {
+            if text.is_empty() {
+                continue;
+            }
+            let mut element = InternalElement::text(ElementKind::Paragraph, text.as_str(), 0);
+            let mut attributes = AHashMap::default();
+            attributes.insert(ATTR_START_MS.to_string(), start_ms.to_string());
+            attributes.insert(ATTR_END_MS.to_string(), end_ms.to_string());
+            element.attributes = Some(attributes);
+            doc.push_element(element);
+        }
+        return;
+    }
+
+    let joined = segments
+        .iter()
+        .map(|(_, _, text)| text.as_str())
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if !joined.is_empty() {
+        doc.push_element(InternalElement::text(ElementKind::Paragraph, &joined, 0));
+    }
+}
 
 /// Process-wide cache of loaded `WhisperEngine` instances, keyed by the
 /// canonical model paths (encoder|tokenizer). Mirrors the pattern in
@@ -138,16 +179,15 @@ async fn run_transcription_pipeline(
     let timestamps = tcfg.timestamps;
     let engine_for_task = Arc::clone(&engine);
 
-    let transcript =
-        task::spawn_blocking(move || engine_for_task.transcribe(&pcm_clone, lang_clone.as_deref(), timestamps))
-            .await
-            .map_err(|e| XbergError::transcription(format!("whisper task panicked: {e}")))?
-            .map_err(|e| XbergError::transcription(format!("whisper inference failed: {e}")))?;
+    let segments = task::spawn_blocking(move || {
+        engine_for_task.transcribe_segments(&pcm_clone, lang_clone.as_deref(), timestamps)
+    })
+    .await
+    .map_err(|e| XbergError::transcription(format!("whisper task panicked: {e}")))?
+    .map_err(|e| XbergError::transcription(format!("whisper inference failed: {e}")))?;
 
     let mut doc = build_audio_document(tags, &pcm, mime_type);
-    if !transcript.is_empty() {
-        doc.push_element(InternalElement::text(ElementKind::Paragraph, &transcript, 0));
-    }
+    push_transcript_elements(&mut doc, &segments, tcfg.timestamps);
     Ok(doc)
 }
 
@@ -208,12 +248,21 @@ impl InternalDocumentExtractor for TranscriptionExtractor {
     }
 
     fn supported_mime_types(&self) -> &[&str] {
+        // The `audio/mp3`, `audio/x-m4a`, `audio/x-wav` and `video/mpeg` entries are the
+        // aliases core/mime.rs declares for the four canonical types beside them.
+        // `validate_mime_type` accepts an alias verbatim and the registry looks extractors up
+        // by exact string with no alias resolution, so an unclaimed alias is advertised as
+        // supported and then fails as UnsupportedFormat (#229).
         &[
             "audio/mpeg",
+            "audio/mp3",
             "audio/mp4",
+            "audio/x-m4a",
             "audio/wav",
+            "audio/x-wav",
             "audio/webm",
             "video/mp4",
+            "video/mpeg",
             "video/webm",
         ]
     }
@@ -267,14 +316,12 @@ impl TranscriptionExtractor {
 
         let engine = get_or_build_engine(&paths)?;
 
-        let transcript = engine
-            .transcribe(&pcm, tcfg.language.as_deref(), tcfg.timestamps)
+        let segments = engine
+            .transcribe_segments(&pcm, tcfg.language.as_deref(), tcfg.timestamps)
             .map_err(|e| XbergError::transcription(format!("whisper inference failed: {e}")))?;
 
         let mut doc = build_audio_document(tags, &pcm, mime_type);
-        if !transcript.is_empty() {
-            doc.push_element(InternalElement::text(ElementKind::Paragraph, &transcript, 0));
-        }
+        push_transcript_elements(&mut doc, &segments, tcfg.timestamps);
         Ok(doc)
     }
 }
@@ -447,10 +494,8 @@ mod tests {
 
     #[tokio::test]
     async fn apply_timeout_passes_through_err_when_future_finishes_in_time() {
-        let result: Result<i32> = apply_timeout(Some(5_000), async {
-            Err(XbergError::transcription("inner failure"))
-        })
-        .await;
+        let result: Result<i32> =
+            apply_timeout(Some(5_000), async { Err(XbergError::transcription("inner failure")) }).await;
         let msg = result.unwrap_err().to_string();
         assert!(msg.contains("inner failure"), "unexpected message: {msg}");
     }
