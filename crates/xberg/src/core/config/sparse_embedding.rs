@@ -34,6 +34,10 @@ pub struct SparseEmbeddingConfig {
     pub max_length: usize,
 
     /// Show model download progress (local ONNX path only).
+    ///
+    /// Reserved for future progress reporting. Currently has no effect for any
+    /// [`SparseEmbeddingModelType`] variant — no progress indicator is emitted
+    /// during a HuggingFace model download regardless of this value (#279).
     #[serde(default)]
     pub show_download_progress: bool,
 

@@ -230,6 +230,12 @@ pub(crate) mod test_support {
         crate::plugins::clear_document_extractors,
         "document extractor"
     );
+    registry_guard!(
+        PostProcessorRegistryGuard,
+        POST_PROCESSOR_REGISTRY_LOCK,
+        crate::plugins::clear_post_processors,
+        "post-processor"
+    );
 }
 
 #[cfg(test)]
