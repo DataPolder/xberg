@@ -141,6 +141,39 @@ use utoipa::OpenApi;
 #[cfg_attr(alef, alef(skip))]
 pub struct ApiDoc;
 
+// Schemas for types that only exist behind an optional feature.
+//
+// utoipa's `components(schemas(..))` list is a single attribute argument list and
+// cannot carry `#[cfg]` on individual entries, so a type gated behind a feature
+// cannot simply be added to `ApiDoc` above — the reference would fail to compile
+// in any build without that feature. Each group therefore gets its own gated
+// `OpenApi` document, merged into the spec by `openapi_json`.
+//
+// Every type below IS reachable from `ExtractedDocument` when its feature is on,
+// so leaving it unregistered emits a `$ref` with no matching component — a
+// dangling pointer that makes the published spec unusable for codegen (#251).
+
+#[cfg(all(feature = "api", feature = "tree-sitter"))]
+#[derive(OpenApi)]
+#[openapi(components(schemas(
+    crate::types::metadata::CodeDataAttribute,
+    crate::types::metadata::CodeDataNodeKind
+)))]
+#[cfg_attr(alef, alef(skip))]
+struct TreeSitterSchemas;
+
+#[cfg(all(feature = "api", feature = "heuristics"))]
+#[derive(OpenApi)]
+#[openapi(components(schemas(crate::heuristics::confidence::ExtractionConfidence)))]
+#[cfg_attr(alef, alef(skip))]
+struct HeuristicsSchemas;
+
+#[cfg(all(feature = "api", any(feature = "keywords-yake", feature = "keywords-rake")))]
+#[derive(OpenApi)]
+#[openapi(components(schemas(crate::keywords::types::Keyword)))]
+#[cfg_attr(alef, alef(skip))]
+struct KeywordSchemas;
+
 /// Generate OpenAPI JSON schema.
 ///
 /// Returns the complete OpenAPI 3.1 specification as a JSON string.
@@ -156,7 +189,17 @@ pub struct ApiDoc;
 #[cfg(feature = "api")]
 #[cfg_attr(alef, alef(skip))]
 pub fn openapi_json() -> String {
-    ApiDoc::openapi().to_pretty_json().unwrap_or_else(|_| "{}".to_string())
+    #[allow(unused_mut)]
+    let mut document = ApiDoc::openapi();
+
+    #[cfg(feature = "tree-sitter")]
+    document.merge(TreeSitterSchemas::openapi());
+    #[cfg(feature = "heuristics")]
+    document.merge(HeuristicsSchemas::openapi());
+    #[cfg(any(feature = "keywords-yake", feature = "keywords-rake"))]
+    document.merge(KeywordSchemas::openapi());
+
+    document.to_pretty_json().unwrap_or_else(|_| "{}".to_string())
 }
 
 #[cfg(not(feature = "api"))]

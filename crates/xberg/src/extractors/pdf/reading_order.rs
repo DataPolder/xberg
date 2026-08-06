@@ -23,56 +23,6 @@ pub struct TextSpan {
     pub height: f32,
 }
 
-/// Detect columns by clustering region x-centers.
-///
-/// Analyzes the horizontal positions of regions (using their x-centers) to
-/// identify distinct columns. Uses k-means-like clustering with a distance
-/// threshold to group regions that belong to the same column.
-///
-/// Returns a Vec of column assignments, one per region, mapping region index
-/// to column ID (0 = leftmost column).
-fn detect_columns(regions: &[RegionProjection]) -> Vec<usize> {
-    if regions.is_empty() {
-        return Vec::new();
-    }
-
-    let mut x_centers: Vec<f32> = regions.iter().map(|r| (r.left + r.right) / 2.0).collect();
-
-    x_centers.sort_by(|a, b| a.total_cmp(b));
-
-    let mut unique_centers: Vec<f32> = Vec::new();
-    let merge_threshold: f32 = COLUMN_MERGE_THRESHOLD_PTS;
-
-    for &center in &x_centers {
-        if let Some(&last) = unique_centers.last() {
-            if (center - last).abs() > merge_threshold {
-                unique_centers.push(center);
-            }
-        } else {
-            unique_centers.push(center);
-        }
-    }
-
-    let mut assignments = vec![0usize; regions.len()];
-    for (i, region) in regions.iter().enumerate() {
-        let center = (region.left + region.right) / 2.0;
-        let mut best_col = 0;
-        let mut best_dist = f32::INFINITY;
-
-        for (col_id, &cluster_center) in unique_centers.iter().enumerate() {
-            let dist = (center - cluster_center).abs();
-            if dist < best_dist {
-                best_dist = dist;
-                best_col = col_id;
-            }
-        }
-
-        assignments[i] = best_col;
-    }
-
-    assignments
-}
-
 /// A region projection: layout region with indices of spans it contains.
 #[derive(Debug, Clone)]
 struct RegionProjection {
@@ -495,6 +445,37 @@ fn strict_segments_union_block(
     let mut union = None;
     for index in indices {
         let block = segment_block(&segments[*index])?;
+        union = Some(union.map_or(block, |current| union_order_blocks(current, block)));
+    }
+    union
+}
+
+/// [`OrderBlock`] for a single [`TextSpan`], or `None` for degenerate/non-finite geometry.
+///
+/// Mirrors [`segment_block`] so span runs can be ordered with the same
+/// predecessor-graph machinery the segment path uses (#194).
+fn span_block(span: &TextSpan) -> Option<OrderBlock> {
+    let coordinates = [span.x, span.y, span.width, span.height];
+    if coordinates.iter().any(|coordinate| !coordinate.is_finite()) || span.width <= 0.0 || span.height <= 0.0 {
+        return None;
+    }
+    let block = OrderBlock {
+        left: span.x,
+        bottom: span.y,
+        right: span.x + span.width,
+        top: span.y + span.height,
+    };
+    let edges = [block.left, block.bottom, block.right, block.top];
+    (edges.iter().all(|edge| edge.is_finite()) && block_area(&block).is_finite() && block_area(&block) > 0.0)
+        .then_some(block)
+}
+
+/// Union [`OrderBlock`] covering every span in `indices`, or `None` if any span
+/// in the run has degenerate/non-finite geometry.
+fn spans_union_block(indices: &[usize], spans: &[TextSpan]) -> Option<OrderBlock> {
+    let mut union = None;
+    for index in indices {
+        let block = span_block(&spans[*index])?;
         union = Some(union.map_or(block, |current| union_order_blocks(current, block)));
     }
     union
@@ -1307,13 +1288,35 @@ fn reorder_spans_geometric(spans: &[TextSpan]) -> Vec<usize> {
     span_columns.into_iter().map(|(_, _, idx)| idx).collect()
 }
 
-/// Reorder spans based on layout regions and column detection.
+/// Groups a maximal run of layout-uncovered spans (in original span order)
+/// into its own block, mirroring [`uncovered_group`]'s batching on the
+/// segment path: consecutive uncovered spans travel together, and a covered
+/// span in between starts a new run.
+fn push_uncovered_run(
+    run: Vec<usize>,
+    spans: &[TextSpan],
+    groups: &mut Vec<Vec<usize>>,
+    blocks: &mut Vec<Option<OrderBlock>>,
+    first_indices: &mut Vec<usize>,
+) {
+    first_indices.push(*run.iter().min().expect("non-empty run"));
+    blocks.push(spans_union_block(&run, spans));
+    groups.push(run);
+}
+
+/// Reorder spans based on layout regions.
 ///
 /// Given a set of spans with bounding boxes and layout-detected regions:
-/// 1. Project spans onto regions
-/// 2. Detect columns from region x-centers
-/// 3. Sort regions by (column_id, top-to-bottom within column)
-/// 4. Emit spans in the order of their sorted regions
+/// 1. Project spans onto regions (`project_spans_to_regions`); spans a region
+///    does not contain (a marginal note, or a span whose center falls outside
+///    every region) are grouped into maximal uncovered runs instead of being
+///    dropped.
+/// 2. Sort spans within each region top-to-bottom, then left-to-right.
+/// 3. Order every region and every uncovered run together with the same
+///    predecessor-graph reading-order algorithm the segment path uses
+///    (`ordered_indices`), so uncovered material is interleaved by position
+///    rather than relocated to the end of the page (#194) — this is the same
+///    helper `plan_segment_groups_by_layout` calls via `order_planned_groups`.
 ///
 /// When layout hints are unavailable, falls back to geometric column detection.
 ///
@@ -1327,51 +1330,70 @@ pub(crate) fn reorder_spans_by_layout(spans: &[TextSpan], hints: &[LayoutHint]) 
         return reorder_spans_geometric(spans);
     }
 
-    let regions = project_spans_to_regions(spans, hints);
+    let mut regions = project_spans_to_regions(spans, hints);
     if regions.is_empty() {
         return (0..spans.len()).collect();
     }
 
-    let column_assignments = detect_columns(&regions);
-
-    let mut sorted_regions: Vec<(usize, f32, usize)> = regions
-        .iter()
-        .enumerate()
-        .map(|(region_idx, region)| {
-            let col_id = column_assignments[region_idx];
-            let top_y = region.top;
-            (col_id, top_y, region_idx)
-        })
-        .collect();
-
-    sorted_regions.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| b.1.total_cmp(&a.1)));
-
-    let mut result = Vec::new();
-    let mut projected_spans = std::collections::HashSet::new();
-
-    for (_, _, region_idx) in sorted_regions {
-        let mut sorted_span_indices: Vec<usize> = regions[region_idx].span_indices.clone();
-        sorted_span_indices.sort_by(|&a, &b| {
+    for region in &mut regions {
+        region.span_indices.sort_by(|&a, &b| {
             let span_a = &spans[a];
             let span_b = &spans[b];
             let top_a = span_a.y + span_a.height;
             let top_b = span_b.y + span_b.height;
             top_b.total_cmp(&top_a).then_with(|| span_a.x.total_cmp(&span_b.x))
         });
-
-        for &span_idx in &sorted_span_indices {
-            result.push(span_idx);
-            projected_spans.insert(span_idx);
-        }
     }
 
+    let projected_spans: std::collections::HashSet<usize> = regions
+        .iter()
+        .flat_map(|region| region.span_indices.iter().copied())
+        .collect();
+
+    let mut groups: Vec<Vec<usize>> = Vec::with_capacity(regions.len());
+    let mut blocks: Vec<Option<OrderBlock>> = Vec::with_capacity(regions.len());
+    let mut first_indices: Vec<usize> = Vec::with_capacity(regions.len());
+    for region in &regions {
+        first_indices.push(
+            *region
+                .span_indices
+                .iter()
+                .min()
+                .expect("project_spans_to_regions drops empty regions"),
+        );
+        blocks.push(Some(OrderBlock {
+            left: region.left,
+            bottom: region.bottom,
+            right: region.right,
+            top: region.top,
+        }));
+        groups.push(region.span_indices.clone());
+    }
+
+    let mut uncovered_run: Vec<usize> = Vec::new();
     for span_idx in 0..spans.len() {
-        if !projected_spans.contains(&span_idx) {
-            result.push(span_idx);
+        if projected_spans.contains(&span_idx) {
+            if !uncovered_run.is_empty() {
+                push_uncovered_run(
+                    std::mem::take(&mut uncovered_run),
+                    spans,
+                    &mut groups,
+                    &mut blocks,
+                    &mut first_indices,
+                );
+            }
+        } else {
+            uncovered_run.push(span_idx);
         }
     }
+    if !uncovered_run.is_empty() {
+        push_uncovered_run(uncovered_run, spans, &mut groups, &mut blocks, &mut first_indices);
+    }
 
-    result
+    ordered_indices(&blocks, &first_indices, false, None)
+        .into_iter()
+        .flat_map(|index| groups[index].clone())
+        .collect()
 }
 
 #[cfg(test)]
@@ -2470,32 +2492,6 @@ mod tests {
     }
 
     #[test]
-    fn test_detect_columns_two_column_layout() {
-        let regions = vec![
-            RegionProjection {
-                left: 100.0,
-                bottom: 100.0,
-                right: 200.0,
-                top: 500.0,
-                span_indices: vec![],
-            },
-            RegionProjection {
-                left: 400.0,
-                bottom: 100.0,
-                right: 500.0,
-                top: 500.0,
-                span_indices: vec![],
-            },
-        ];
-
-        let assignments = detect_columns(&regions);
-        assert_eq!(assignments.len(), 2);
-        assert_ne!(assignments[0], assignments[1]);
-        assert_eq!(assignments[0], 0);
-        assert_eq!(assignments[1], 1);
-    }
-
-    #[test]
     fn test_project_spans_to_regions() {
         let spans = vec![
             TextSpan {
@@ -2713,6 +2709,72 @@ mod tests {
             vec!["Title", "L1", "L2", "R1", "R2"],
             "full-width heading must precede both columns, then each column reads top-to-bottom \
              without interleaving across the column boundary"
+        );
+    }
+
+    /// Regression for issue #194: a span that projects into no layout region (a
+    /// marginal note sitting in the vertical gap between two stacked regions)
+    /// must be interleaved into the reading order by position, not relocated
+    /// to the end of the page. The previous implementation appended every
+    /// layout-uncovered span, in raw index order, after all projected regions
+    /// (`reorder_spans_by_layout`, old tail loop over `0..spans.len()`
+    /// pushing unfound indices last) — for this fixture that produced
+    /// `[0, 2, 1]` (top region, bottom region, uncovered-note-last) even
+    /// though the uncovered note sits directly between the two regions.
+    #[test]
+    fn test_reorder_spans_uncovered_span_interleaves_between_regions() {
+        let spans = vec![
+            TextSpan {
+                text: "TopSpan".to_string(),
+                x: 50.0,
+                y: 450.0,
+                width: 100.0,
+                height: 12.0,
+            },
+            TextSpan {
+                text: "MarginalNote".to_string(),
+                x: 50.0,
+                y: 270.0,
+                width: 100.0,
+                height: 12.0,
+            },
+            TextSpan {
+                text: "BottomSpan".to_string(),
+                x: 50.0,
+                y: 150.0,
+                width: 100.0,
+                height: 12.0,
+            },
+        ];
+
+        // Region A covers y in [300, 500]; region B covers y in [100, 250].
+        // The marginal note's center (y = 276) falls in the [250, 300] gap
+        // between them, so `project_spans_to_regions` assigns it to neither.
+        let hints = vec![
+            LayoutHint {
+                class_name: crate::pdf::structure::types::LayoutHintClass::Text,
+                confidence: 0.95,
+                left: 40.0,
+                bottom: 300.0,
+                right: 460.0,
+                top: 500.0,
+            },
+            LayoutHint {
+                class_name: crate::pdf::structure::types::LayoutHintClass::Text,
+                confidence: 0.95,
+                left: 40.0,
+                bottom: 100.0,
+                right: 460.0,
+                top: 250.0,
+            },
+        ];
+
+        let order = reorder_spans_by_layout(&spans, &hints);
+        assert_eq!(
+            order,
+            vec![0, 1, 2],
+            "uncovered span must be interleaved between the regions that surround it \
+             (top region, marginal note, bottom region), not appended after both regions"
         );
     }
 

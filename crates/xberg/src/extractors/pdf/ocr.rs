@@ -1960,6 +1960,36 @@ fn fill_unstructured_ocr_pages(
     }
 }
 
+/// Convert a TATR-recognized table into the public [`crate::types::Table`],
+/// carrying over its `detection_bbox` and assigning a deterministic `table_id`.
+///
+/// `table_index` is the table's 0-based position in the document's push order
+/// (see the caller), so the id is `"table-{table_index + 1}"` — never derived
+/// from randomness or wall-clock time, so the same input document always
+/// produces the same id. See [`crate::types::Table::table_id`] for the shared
+/// scheme doc.
+#[cfg(feature = "layout-detection")]
+fn recognized_table_to_public_table(
+    recognized: &crate::RecognizedTable,
+    page_number: u32,
+    table_index: usize,
+) -> crate::types::Table {
+    crate::types::Table {
+        cells: recognized.cells.clone(),
+        markdown: recognized.markdown.clone(),
+        page_number,
+        bounding_box: Some(crate::types::BoundingBox {
+            x0: recognized.detection_bbox.x1 as f64,
+            y0: recognized.detection_bbox.y1 as f64,
+            x1: recognized.detection_bbox.x2 as f64,
+            y1: recognized.detection_bbox.y2 as f64,
+        }),
+        table_id: Some(format!("table-{}", table_index + 1)),
+        columns: recognized.cells.first().cloned(),
+        ..Default::default()
+    }
+}
+
 /// Extract text from PDF using OCR on pre-rendered page images.
 ///
 /// When `layout_detections` are provided (pixel-space, from the same images),
@@ -2370,13 +2400,15 @@ pub(crate) async fn extract_with_ocr(
 
                 for rt in &recognized_tables {
                     if !rt.markdown.is_empty() {
-                        collected_tables.push(crate::types::Table {
-                            cells: rt.cells.clone(),
-                            markdown: rt.markdown.clone(),
-                            page_number: (page_idx + 1) as u32,
-                            bounding_box: None,
-                            ..Default::default()
-                        });
+                        // The id is this table's 1-based position in `collected_tables`;
+                        // pages are processed strictly in increasing `page_idx` order
+                        // above, so push order is deterministic document order.
+                        let table_index = collected_tables.len();
+                        collected_tables.push(recognized_table_to_public_table(
+                            rt,
+                            (page_idx + 1) as u32,
+                            table_index,
+                        ));
                     }
                 }
 
@@ -3120,6 +3152,33 @@ mod tests {
     #[cfg(feature = "ocr")]
     fn t() -> OcrQualityThresholds {
         OcrQualityThresholds::default()
+    }
+
+    /// Issue #181: TATR tables recognized during full-document OCR must carry a
+    /// deterministic `table_id`, `columns`, and `bounding_box` derived from
+    /// `detection_bbox` — not `..Default::default()` blanks.
+    #[cfg(all(feature = "ocr", feature = "layout-detection"))]
+    #[test]
+    fn recognized_table_to_public_table_assigns_id_columns_and_bounding_box() {
+        let recognized = crate::RecognizedTable {
+            detection_bbox: crate::layout::BBox::new(10.0, 20.0, 110.0, 220.0),
+            cells: vec![
+                vec!["Name".to_string(), "Age".to_string()],
+                vec!["Alice".to_string(), "30".to_string()],
+            ],
+            markdown: "| Name | Age |\n|---|---|\n| Alice | 30 |".to_string(),
+        };
+
+        let table = recognized_table_to_public_table(&recognized, 3, 1);
+
+        assert_eq!(table.page_number, 3);
+        assert_eq!(table.table_id.as_deref(), Some("table-2"));
+        assert_eq!(table.columns, Some(vec!["Name".to_string(), "Age".to_string()]));
+        let bbox = table.bounding_box.expect("bounding box must be populated");
+        assert_eq!(bbox.x0, 10.0);
+        assert_eq!(bbox.y0, 20.0);
+        assert_eq!(bbox.x1, 110.0);
+        assert_eq!(bbox.y1, 220.0);
     }
 
     #[cfg(feature = "ocr")]

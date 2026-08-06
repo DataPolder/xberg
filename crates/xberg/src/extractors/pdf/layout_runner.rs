@@ -105,6 +105,10 @@ struct RenderedLayoutPage {
     /// ONNX batch and keeps an empty detection, exactly like a page where the
     /// model ran and found nothing.
     run_inference: bool,
+    /// `Some(reason)` when `image` is `None` because rendering, OCR rotation
+    /// normalization, or PNG decode failed for this page (#196). `None` for
+    /// gate-skipped pages, which have no render attempt and no failure.
+    render_failure: Option<String>,
 }
 
 #[cfg(all(feature = "pdf", feature = "layout-detection"))]
@@ -206,6 +210,42 @@ fn rtdetr_acceleration_override(
     }
 }
 
+/// Combines the CPU-retry recovery warning with the page-render-failure
+/// warning (#196) into the single slot callers observe. Both can fire
+/// together (an automatic-provider retry that also hit unrenderable pages),
+/// so their messages are concatenated rather than one silently discarding
+/// the other.
+#[cfg(all(feature = "pdf", feature = "layout-detection"))]
+fn combine_layout_warnings(
+    outer: Option<crate::types::ProcessingWarning>,
+    inner: Option<crate::types::ProcessingWarning>,
+) -> Option<crate::types::ProcessingWarning> {
+    match (outer, inner) {
+        (Some(outer), Some(inner)) => Some(crate::types::ProcessingWarning {
+            source: std::borrow::Cow::Borrowed("layout"),
+            message: std::borrow::Cow::Owned(format!("{}; {}", outer.message, inner.message)),
+        }),
+        (Some(warning), None) | (None, Some(warning)) => Some(warning),
+        (None, None) => None,
+    }
+}
+
+#[cfg(all(feature = "pdf", feature = "layout-detection"))]
+fn merge_render_warning(
+    attempt: LayoutAttempt<(LayoutRunOutput, Option<crate::types::ProcessingWarning>)>,
+) -> LayoutAttempt<LayoutRunOutput> {
+    let LayoutAttempt {
+        output: (output, render_warning),
+        acceleration_override,
+        warning,
+    } = attempt;
+    LayoutAttempt {
+        output,
+        acceleration_override,
+        warning: combine_layout_warnings(warning, render_warning),
+    }
+}
+
 #[cfg(all(feature = "pdf", feature = "layout-detection"))]
 async fn run_layout_for_pdf_pages_async(
     content: &[u8],
@@ -228,6 +268,7 @@ async fn run_layout_for_pdf_pages_async(
                     run_layout_for_pdf_pages(&owned_content, attempt_config, thread_budget, gated_handling)
                 },
             )
+            .map(merge_render_warning)
         })
         .await
         .map_err(|error| XbergError::Other(format!("layout runner task failed: {error}")))?
@@ -243,6 +284,7 @@ async fn run_layout_for_pdf_pages_async(
             acceleration_override,
             |attempt_config| run_layout_for_pdf_pages(content, attempt_config, thread_budget, gated_handling),
         )
+        .map(merge_render_warning)
     }
 }
 
@@ -331,17 +373,20 @@ fn render_layout_chunk(
             };
             let run_inference = gate_selects_page(gate_decisions, page_index);
             let skip_render = !run_inference && gated_handling == GatedPageHandling::SkipRender;
-            let image = if skip_render {
-                None
+            let (image, render_failure) = if skip_render {
+                (None, None)
             } else {
-                render_layout_page(
+                match render_layout_page(
                     doc,
                     page_index,
                     page_width_pts,
                     page_height_pts,
                     rotation,
                     normalize_for_ocr,
-                )
+                ) {
+                    Ok(image) => (Some(image), None),
+                    Err(reason) => (None, Some(reason)),
+                }
             };
 
             RenderedLayoutPage {
@@ -351,6 +396,7 @@ fn render_layout_chunk(
                 rotation,
                 image,
                 run_inference,
+                render_failure,
             }
         })
         .collect()
@@ -364,7 +410,7 @@ fn render_layout_page(
     page_height_pts: f32,
     rotation: u32,
     normalize_for_ocr: bool,
-) -> Option<image::RgbImage> {
+) -> std::result::Result<image::RgbImage, String> {
     let rendered = crate::pdf::render::render_page_with_safeguards(doc, page_index, 150).map_err(|error| {
         tracing::warn!(
             page = page_index + 1,
@@ -373,8 +419,8 @@ fn render_layout_page(
             error = %error,
             "layout runner: skipping page with render failure, returning empty detections"
         );
-    });
-    let rendered = rendered.ok()?;
+        format!("page {} failed to render: {error}", page_index + 1)
+    })?;
 
     let rendered_data = if normalize_for_ocr {
         crate::pdf::render::normalize_rendered_page_for_ocr(rendered.data, rendered.width, rendered.height, rotation)
@@ -386,8 +432,8 @@ fn render_layout_page(
                     error = %error,
                     "layout runner: skipping page (OCR rotation normalization failed), returning empty detections"
                 );
-            })
-            .ok()?
+                format!("page {} OCR rotation normalization failed: {error}", page_index + 1)
+            })?
     } else {
         rendered.data
     };
@@ -402,8 +448,8 @@ fn render_layout_page(
                 error = %error,
                 "layout runner: skipping page (PNG decode failed), returning empty detections"
             );
+            format!("page {} PNG decode failed: {error}", page_index + 1)
         })
-        .ok()
 }
 
 /// Whether a page joins the ONNX batch: it must both be gate-selected and
@@ -499,12 +545,29 @@ fn assemble_layout_page(
     }
 }
 
+/// Builds the `ProcessingWarning` surfaced when one or more pages could not be
+/// rendered, rotation-normalized, or PNG-decoded for layout analysis (#196).
+/// Without this, a page that failed silently substitutes a blank placeholder
+/// and an empty `DetectionResult`, indistinguishable from a page the model
+/// actually examined and found empty.
+#[cfg(all(feature = "pdf", feature = "layout-detection"))]
+fn page_render_failure_warning(failures: &[String]) -> crate::types::ProcessingWarning {
+    crate::types::ProcessingWarning {
+        source: std::borrow::Cow::Borrowed("layout"),
+        message: std::borrow::Cow::Owned(format!(
+            "layout: {} page(s) could not be prepared for layout analysis and were treated as empty: {}",
+            failures.len(),
+            failures.join("; ")
+        )),
+    }
+}
+
 pub(super) fn run_layout_for_pdf_pages(
     content: &[u8],
     layout_config: &LayoutDetectionConfig,
     thread_budget: usize,
     gated_handling: GatedPageHandling,
-) -> Result<LayoutRunOutput> {
+) -> Result<(LayoutRunOutput, Option<crate::types::ProcessingWarning>)> {
     let doc = pdf_oxide::PdfDocument::from_bytes(content.to_vec()).map_err(|e| XbergError::Parsing {
         message: format!("layout runner: failed to open PDF: {e}"),
         source: None,
@@ -516,10 +579,13 @@ pub(super) fn run_layout_for_pdf_pages(
     })?;
 
     if page_count == 0 {
-        return Ok(LayoutRunOutput {
-            data: Some((Vec::new(), Vec::new(), Vec::new(), Vec::new())),
-            gate_decisions: None,
-        });
+        return Ok((
+            LayoutRunOutput {
+                data: Some((Vec::new(), Vec::new(), Vec::new(), Vec::new())),
+                gate_decisions: None,
+            },
+            None,
+        ));
     }
 
     let gate_decisions = auto_gate_decisions(&doc, layout_config, page_count);
@@ -529,10 +595,13 @@ pub(super) fn run_layout_for_pdf_pages(
         // No page can benefit: behave exactly as if layout were off, with no
         // engine init and no renders. The OCR path then produces its own
         // rasters once, as it does without layout. ~keep
-        return Ok(LayoutRunOutput {
-            data: None,
-            gate_decisions,
-        });
+        return Ok((
+            LayoutRunOutput {
+                data: None,
+                gate_decisions,
+            },
+            None,
+        ));
     }
 
     let mut engine = crate::layout::take_or_create_engine(layout_config, thread_budget)
@@ -544,6 +613,7 @@ pub(super) fn run_layout_for_pdf_pages(
     let mut all_layout_results: Vec<PageLayoutResult> = Vec::with_capacity(page_count);
     let mut all_hints: Vec<Vec<LayoutHint>> = Vec::with_capacity(page_count);
     let mut all_detections: Vec<crate::layout::DetectionResult> = Vec::with_capacity(page_count);
+    let mut render_failures: Vec<String> = Vec::new();
 
     let total_chunks = page_count.div_ceil(LAYOUT_BATCH_CHUNK_SIZE);
 
@@ -558,6 +628,7 @@ pub(super) fn run_layout_for_pdf_pages(
             gated_handling,
         );
         let rendered = pages.iter().filter(|page| page.image.is_some()).count();
+        render_failures.extend(pages.iter().filter_map(|page| page.render_failure.clone()));
         tracing::debug!(
             chunk_idx,
             total_chunks,
@@ -584,10 +655,15 @@ pub(super) fn run_layout_for_pdf_pages(
 
     crate::layout::return_engine(engine);
 
-    Ok(LayoutRunOutput {
-        data: Some((all_images, all_layout_results, all_hints, all_detections)),
-        gate_decisions,
-    })
+    let render_warning = (!render_failures.is_empty()).then(|| page_render_failure_warning(&render_failures));
+
+    Ok((
+        LayoutRunOutput {
+            data: Some((all_images, all_layout_results, all_hints, all_detections)),
+            gate_decisions,
+        },
+        render_warning,
+    ))
 }
 
 /// Convenience wrapper that reads `use_layout_for_markdown` and other gate
@@ -987,6 +1063,7 @@ mod tests {
             rotation: 0,
             image: Some(image::RgbImage::new(width, 20)),
             run_inference: true,
+            render_failure: None,
         }
     }
 
@@ -1208,9 +1285,13 @@ mod tests {
             strategy: LayoutStrategy::Auto,
             ..Default::default()
         };
-        let output = super::run_layout_for_pdf_pages(&bytes, &config, 1, GatedPageHandling::SkipRender)
+        let (output, render_warning) = super::run_layout_for_pdf_pages(&bytes, &config, 1, GatedPageHandling::SkipRender)
             .expect("all-gated run must succeed without a layout engine");
         assert!(output.data.is_none(), "all-gated prose must skip the layout pass");
+        assert!(
+            render_warning.is_none(),
+            "all-gated run performs no renders and must not warn"
+        );
         let recorded = output.gate_decisions.expect("auto strategy must record decisions");
         assert_eq!(recorded, decisions);
     }

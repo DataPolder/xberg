@@ -513,6 +513,15 @@ fn push_cached_layout_region(
                 cells: recognized.cells.clone(),
                 markdown: recognized.markdown.clone(),
                 page_number: 1,
+                bounding_box: Some(crate::types::BoundingBox {
+                    x0: recognized.detection_bbox.x1 as f64,
+                    y0: recognized.detection_bbox.y1 as f64,
+                    x1: recognized.detection_bbox.x2 as f64,
+                    y1: recognized.detection_bbox.y2 as f64,
+                }),
+                // `table_id`/`columns` are assigned once, in document push order, by
+                // `finish_cached_layout_document` after all regions for this image have
+                // been pushed — see that function for the deterministic scheme.
                 ..Default::default()
             },
             Some(1),
@@ -550,6 +559,15 @@ fn finish_cached_layout_document(
     image_height: u32,
 ) -> InternalDocument {
     let mut assembled = builder.build();
+    // Deterministic id: `"table-N"` where N is this table's 1-based position among
+    // this image's tables, in document (push) order — never randomness/wall-clock.
+    // See `crate::types::Table::table_id` for the shared scheme doc.
+    for (index, table) in assembled.tables.iter_mut().enumerate() {
+        table.table_id = Some(format!("table-{}", index + 1));
+        if table.columns.is_none() {
+            table.columns = table.cells.first().cloned();
+        }
+    }
     assembled.metadata = whole_image_doc.metadata.clone();
     assembled.processing_warnings = whole_image_doc.processing_warnings.clone();
     assembled.prebuilt_ocr_elements = whole_image_doc.prebuilt_ocr_elements.clone();
@@ -2696,6 +2714,54 @@ mod tests {
             serde_json::to_value(&whole.prebuilt_ocr_elements).unwrap()
         );
         assert_eq!(assembled.prebuilt_pages.as_ref().unwrap()[0].tables.len(), 1);
+    }
+
+    /// Issue #181: a TATR-recognized table assembled from cached layout must carry
+    /// a deterministic `table_id`, `columns`, and `bounding_box` derived from the
+    /// detection's `detection_bbox` — not `..Default::default()` blanks.
+    #[cfg(all(feature = "layout-detection", feature = "ocr"))]
+    #[test]
+    fn recognized_table_gets_table_id_columns_and_bounding_box() {
+        let table_bbox = crate::layout::BBox::new(0.0, 0.0, 100.0, 100.0);
+        let detections = vec![
+            crate::layout::LayoutDetection::new(crate::layout::LayoutClass::Table, 0.98, table_bbox),
+            crate::layout::LayoutDetection::new(
+                crate::layout::LayoutClass::Text,
+                0.95,
+                crate::layout::BBox::new(100.0, 0.0, 200.0, 100.0),
+            ),
+        ];
+        let elements = vec![
+            positioned_word_box("Header", 90, 10, 20, 20),
+            positioned_word_box("Value", 50, 10, 30, 20),
+            positioned_word_box("Total", 120, 10, 40, 20),
+        ];
+        let whole = whole_image_doc_with_elements("Header Value Total", elements, 200, 100);
+        let recognized = vec![crate::RecognizedTable {
+            detection_bbox: table_bbox,
+            cells: vec![
+                vec!["Header".to_string(), "Value".to_string()],
+                vec!["A".to_string(), "1".to_string()],
+            ],
+            markdown: "| Header | Value |\n| --- | --- |\n| A | 1 |".to_string(),
+        }];
+
+        let assembled = try_assemble_cached_layout_document(&whole, &detections, &recognized, 200, 100)
+            .expect("successful recognition must assemble a structured image table");
+
+        assert_eq!(assembled.tables.len(), 1);
+        assert_eq!(assembled.tables[0].table_id.as_deref(), Some("table-1"));
+        assert_eq!(
+            assembled.tables[0].columns,
+            Some(vec!["Header".to_string(), "Value".to_string()])
+        );
+        let bbox = assembled.tables[0]
+            .bounding_box
+            .expect("bounding box must be populated from detection_bbox");
+        assert_eq!(bbox.x0, 0.0);
+        assert_eq!(bbox.y0, 0.0);
+        assert_eq!(bbox.x1, 100.0);
+        assert_eq!(bbox.y1, 100.0);
     }
 
     #[cfg(all(feature = "layout-detection", feature = "ocr"))]

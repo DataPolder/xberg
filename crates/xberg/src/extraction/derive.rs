@@ -603,6 +603,18 @@ pub fn derive_extraction_result(
                 Ok(rendered) => Some(rendered),
                 Err(e) => {
                     tracing::warn!(renderer = %name, error = %e, "Custom renderer failed, falling back to plain");
+                    // #208: `tracing::warn!` is invisible to API/binding consumers — the
+                    // only channel they can observe is `processing_warnings`. Without
+                    // this, a typo'd or unregistered custom format silently produced
+                    // plain text with no way for the caller to detect the fallback.
+                    crate::core::diagnostics::push_warning(
+                        &mut doc.processing_warnings,
+                        "output-format",
+                        format!(
+                            "requested output format '{name}' has no registered renderer ({e}); \
+                             returned plain text instead"
+                        ),
+                    );
                     None
                 }
             }
@@ -629,8 +641,21 @@ pub fn derive_extraction_result(
         Some(doc.uris)
     };
 
+    // #259: `code_intelligence` is documented (types/extraction.rs) as carrying
+    // metrics, imports/exports, comments, docstrings, symbols and diagnostics —
+    // the full `tree_sitter_language_pack::ProcessResult`. Only the structural
+    // chunks and hierarchical data tree (`FormatMetadata::Code`) survive onto
+    // `InternalDocument`; `extractors/code.rs` discards the rest of
+    // `ProcessResult` (metrics, imports, exports, comments, docstrings, symbols,
+    // diagnostics) before building the document, so they are not reachable here.
+    // This surfaces what *is* available instead of hardcoding `None` — populating
+    // the remaining fields requires `extractors/code.rs` to also preserve them
+    // (e.g. serialized onto the document) for this derivation step to lift out.
     #[cfg(feature = "tree-sitter")]
-    let code_intelligence: Option<serde_json::Value> = None;
+    let code_intelligence: Option<serde_json::Value> = match doc.metadata.format.as_ref() {
+        Some(crate::types::metadata::FormatMetadata::Code(code_metadata)) => serde_json::to_value(code_metadata).ok(),
+        _ => None,
+    };
 
     let extraction_method = doc
         .metadata
@@ -1211,6 +1236,111 @@ mod tests {
         assert_eq!(result.content, "Hello world.");
         assert_eq!(result.mime_type, "text/markdown");
         assert!(result.document.is_none());
+    }
+
+    /// #208: requesting a custom output format with no matching renderer must
+    /// leave a `ProcessingWarning` behind — `tracing::warn!` alone is invisible
+    /// to API and binding consumers, who have no other way to learn that the
+    /// requested format ("markdwon", a typo) was not actually produced.
+    #[test]
+    fn test_derive_extraction_result_unregistered_custom_format_emits_processing_warning() {
+        let mut doc = make_doc("markdown");
+        doc.push_element(InternalElement::text(ElementKind::Paragraph, "Hello world.", 0));
+
+        let result = derive_extraction_result(
+            doc,
+            false,
+            crate::core::config::OutputFormat::Custom("markdwon".to_string()),
+        );
+
+        assert!(result.formatted_content.is_none(), "no renderer is registered for 'markdwon'");
+        assert_eq!(result.processing_warnings.len(), 1);
+        assert_eq!(result.processing_warnings[0].source, "output-format");
+        assert!(
+            result.processing_warnings[0].message.contains("markdwon"),
+            "warning must name the requested format: {}",
+            result.processing_warnings[0].message
+        );
+    }
+
+    /// A custom output format with a registered renderer must produce no
+    /// output-format warning at all.
+    #[test]
+    fn test_derive_extraction_result_registered_custom_format_emits_no_warning() {
+        struct UppercaseRenderer;
+        impl crate::plugins::Plugin for UppercaseRenderer {
+            fn name(&self) -> &str {
+                "shout-259"
+            }
+        }
+        impl crate::plugins::Renderer for UppercaseRenderer {
+            fn render_result(&self, result: &crate::types::ExtractedDocument) -> crate::Result<String> {
+                Ok(result.content.to_uppercase())
+            }
+        }
+        crate::plugins::register_renderer(std::sync::Arc::new(UppercaseRenderer)).unwrap();
+
+        let mut doc = make_doc("markdown");
+        doc.push_element(InternalElement::text(ElementKind::Paragraph, "Hello world.", 0));
+
+        let result = derive_extraction_result(
+            doc,
+            false,
+            crate::core::config::OutputFormat::Custom("shout-259".to_string()),
+        );
+
+        assert_eq!(result.formatted_content.as_deref(), Some("HELLO WORLD."));
+        assert!(
+            result.processing_warnings.is_empty(),
+            "a successful custom render must not warn: {:?}",
+            result.processing_warnings
+        );
+
+        crate::plugins::unregister_renderer("shout-259").unwrap();
+    }
+
+    /// #259: `code_intelligence` must surface the tree-sitter-derived
+    /// `FormatMetadata::Code` payload instead of being hardcoded to `None`.
+    /// (The full upstream `ProcessResult` — metrics, imports, exports, comments,
+    /// docstrings, symbols, diagnostics — never reaches `InternalDocument` in the
+    /// first place; see the comment at the `code_intelligence` binding site.)
+    #[cfg(feature = "tree-sitter")]
+    #[test]
+    fn test_derive_extraction_result_populates_code_intelligence_from_code_metadata() {
+        use crate::types::metadata::{CodeChunkInfo, CodeMetadata, FormatMetadata};
+
+        let mut doc = make_doc("code");
+        doc.push_element(InternalElement::text(ElementKind::Paragraph, "fn main() {}", 0));
+        doc.metadata.format = Some(FormatMetadata::Code(CodeMetadata {
+            chunks: vec![CodeChunkInfo {
+                text: "fn main() {}".to_string(),
+                context_path: vec!["main".to_string()],
+                node_types: vec!["function_definition".to_string()],
+                byte_start: 0,
+                byte_end: 12,
+            }],
+            data: None,
+        }));
+
+        let result = derive_extraction_result(doc, false, crate::core::config::OutputFormat::Plain);
+
+        let code_intelligence = result
+            .code_intelligence
+            .expect("code_intelligence must be populated when FormatMetadata::Code is present");
+        assert_eq!(
+            code_intelligence["chunks"][0]["context_path"][0],
+            serde_json::json!("main")
+        );
+    }
+
+    #[cfg(feature = "tree-sitter")]
+    #[test]
+    fn test_derive_extraction_result_code_intelligence_none_without_code_metadata() {
+        let mut doc = make_doc("markdown");
+        doc.push_element(InternalElement::text(ElementKind::Paragraph, "Hello world.", 0));
+
+        let result = derive_extraction_result(doc, false, crate::core::config::OutputFormat::Plain);
+        assert!(result.code_intelligence.is_none());
     }
 
     #[cfg(any(feature = "pdf", feature = "ocr"))]

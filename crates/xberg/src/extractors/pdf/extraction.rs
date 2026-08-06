@@ -217,6 +217,17 @@ pub(crate) fn extract_all_from_oxide_document(
             .map(|h| h.k_clusters)
             .unwrap_or(4);
 
+        // `HierarchyConfig::include_bbox` (default `true`): when explicitly disabled,
+        // bounding-box info is stripped from every structural element below so
+        // `assign_hierarchy_to_pages` (extractors/pdf/pages.rs) — which maps
+        // `element.bbox` straight onto each `HierarchicalBlock.bbox` — omits it too.
+        let include_bbox = config
+            .pdf_options
+            .as_ref()
+            .and_then(|opts| opts.hierarchy.as_ref())
+            .map(|h| h.include_bbox)
+            .unwrap_or(true);
+
         let (strip_repeating_text, include_headers, include_footers) = config
             .content_filter
             .as_ref()
@@ -280,7 +291,7 @@ pub(crate) fn extract_all_from_oxide_document(
                 ),
             },
         ) {
-            Ok(structured_doc) if !structured_doc.elements.is_empty() => {
+            Ok(mut structured_doc) if !structured_doc.elements.is_empty() => {
                 tracing::debug!(
                     elements = structured_doc.elements.len(),
                     has_headings = structured_doc
@@ -289,6 +300,11 @@ pub(crate) fn extract_all_from_oxide_document(
                         .any(|e| matches!(e.kind, crate::types::internal::ElementKind::Heading { .. })),
                     "oxide structure: render succeeded"
                 );
+                if !include_bbox {
+                    for element in &mut structured_doc.elements {
+                        element.bbox = None;
+                    }
+                }
                 Some(structured_doc)
             }
             Ok(_) => {

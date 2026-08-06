@@ -677,6 +677,71 @@ impl NodeContent {
         }
     }
 
+    /// Invoke `redact` on every text-bearing field of this variant, in place.
+    ///
+    /// A `&mut` companion to [`Self::text`], but exhaustive rather than
+    /// primary-field-only: it also covers secondary text fields `text()` does not
+    /// surface (`Group::heading_text`, `Slide::title`, `Image::description`,
+    /// `DefinitionItem::definition`, `Admonition::title`), plus per-cell table text
+    /// and metadata-block values. Without this, a redaction pass over
+    /// [`super::extraction::ExtractedDocument::content`] leaves the structured
+    /// `document` tree holding the original text verbatim (xberg-io/xberg#298).
+    ///
+    /// Container/marker nodes with no text of their own — `List`, `Quote`,
+    /// `PageBreak`, `DefinitionList` — are no-ops.
+    /// Gated to match its only caller (`text::redaction`, itself `#[cfg(feature =
+    /// "redaction")]`) — without this, any build with redaction off trips
+    /// `dead_code`, which CI escalates via `-D warnings`.
+    #[cfg(feature = "redaction")]
+    pub(crate) fn for_each_text_field_mut(&mut self, mut redact: impl FnMut(&mut String)) {
+        match self {
+            NodeContent::Title { text }
+            | NodeContent::Heading { text, .. }
+            | NodeContent::Paragraph { text }
+            | NodeContent::ListItem { text }
+            | NodeContent::Code { text, .. }
+            | NodeContent::Formula { text }
+            | NodeContent::Footnote { text }
+            | NodeContent::Citation { text, .. }
+            | NodeContent::RawBlock { content: text, .. } => redact(text),
+            NodeContent::DefinitionItem { term, definition } => {
+                redact(term);
+                redact(definition);
+            }
+            NodeContent::Group { heading_text, .. } => {
+                if let Some(text) = heading_text.as_mut() {
+                    redact(text);
+                }
+            }
+            NodeContent::Slide { title, .. } => {
+                if let Some(text) = title.as_mut() {
+                    redact(text);
+                }
+            }
+            NodeContent::Image { description, .. } => {
+                if let Some(text) = description.as_mut() {
+                    redact(text);
+                }
+            }
+            NodeContent::Admonition { title, .. } => {
+                if let Some(text) = title.as_mut() {
+                    redact(text);
+                }
+            }
+            NodeContent::Table { grid } => {
+                for cell in grid.cells.iter_mut() {
+                    redact(&mut cell.content);
+                }
+            }
+            NodeContent::MetadataBlock { entries } => {
+                for (_key, value) in entries.iter_mut() {
+                    redact(value);
+                }
+            }
+            NodeContent::List { .. } | NodeContent::Quote | NodeContent::PageBreak | NodeContent::DefinitionList => {}
+        }
+    }
+
     /// Get the serde tag discriminant string for this variant.
     pub(crate) fn node_type_str(&self) -> &'static str {
         match self {
