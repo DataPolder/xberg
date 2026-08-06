@@ -880,6 +880,12 @@ impl InternalDocumentExtractor for MarkdownExtractor {
             "text/x-multimarkdown",
             "text/x-pandoc",
             "text/x-quarto",
+            // `application/x-quarto` is declared as an alias of `text/x-quarto` in the
+            // static format table (core/mime.rs), so `validate_mime_type` accepts it —
+            // but the registry looks extractors up by exact string with no alias
+            // resolution, so an unclaimed alias reaches extraction and fails as
+            // UnsupportedFormat despite being advertised as supported (#229).
+            "application/x-quarto",
             "text/x-r-markdown",
         ]
     }
