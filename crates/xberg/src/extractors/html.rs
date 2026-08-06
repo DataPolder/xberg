@@ -237,12 +237,29 @@ fn push_link_uris_from_annotations(annotations: &[TextAnnotation], text: &str, b
             if url.is_empty() {
                 continue;
             }
-            let label = if ann.start < ann.end && (ann.end as usize) <= text.len() {
-                let slice = &text[ann.start as usize..ann.end as usize];
-                if slice.is_empty() {
-                    None
+            let start = ann.start as usize;
+            let end = ann.end as usize;
+            let label = if ann.start < ann.end && end <= text.len() {
+                if text.is_char_boundary(start) && text.is_char_boundary(end) {
+                    let slice = &text[start..end];
+                    if slice.is_empty() {
+                        None
+                    } else {
+                        Some(slice.to_string())
+                    }
                 } else {
-                    Some(slice.to_string())
+                    // A non-ASCII document can have an annotation span whose byte
+                    // offsets land mid-codepoint; slicing on that would panic.
+                    // Degrade gracefully instead: drop the label but keep the URI.
+                    b.add_warning(crate::core::diagnostics::warning(
+                        HTML_WARNING_SOURCE,
+                        format!(
+                            "A link annotation ({start}..{end}) did not align with a character \
+                             boundary in the source text; its label text was dropped, though the \
+                             link URL was preserved"
+                        ),
+                    ));
+                    None
                 }
             } else {
                 None
@@ -765,6 +782,45 @@ mod tests {
         assert_eq!(table.page_number, 1);
         assert!(table.markdown.contains("Header1"));
         assert!(table.markdown.contains("Row1Col1"));
+    }
+
+    /// A non-ASCII document whose link annotation lands mid-codepoint must not panic
+    /// `push_link_uris_from_annotations`. `text` is "café" (5 bytes: c, a, f, then the
+    /// 2-byte UTF-8 encoding of 'é'); an annotation ending at byte 4 splits that 'é' and
+    /// is not a valid `&str` slice boundary. The link's label must be dropped (not sliced)
+    /// while the URI itself is still recorded, and a `ProcessingWarning` must name the drop.
+    #[test]
+    fn should_not_panic_and_should_warn_when_link_annotation_splits_a_codepoint() {
+        use crate::types::document_structure::AnnotationKind;
+
+        let text = "caf\u{00e9}";
+        assert_eq!(text.len(), 5, "'café' must be 5 UTF-8 bytes for this test to be meaningful");
+        assert!(!text.is_char_boundary(4), "byte 4 must split the 2-byte 'é' encoding");
+
+        let annotations = vec![TextAnnotation {
+            start: 0,
+            end: 4,
+            kind: AnnotationKind::Link {
+                url: "https://example.com".to_string(),
+                title: None,
+            },
+        }];
+
+        let mut builder = InternalDocumentBuilder::new("html");
+        push_link_uris_from_annotations(&annotations, text, &mut builder);
+        let doc = builder.build();
+
+        assert_eq!(doc.uris.len(), 1, "the URI must still be recorded");
+        assert_eq!(doc.uris[0].url, "https://example.com");
+        assert_eq!(doc.uris[0].label, None, "label must be dropped, not sliced mid-codepoint");
+
+        assert_eq!(doc.processing_warnings.len(), 1);
+        assert_eq!(doc.processing_warnings[0].source, HTML_WARNING_SOURCE);
+        assert!(
+            doc.processing_warnings[0].message.contains("character boundary"),
+            "warning message was: {}",
+            doc.processing_warnings[0].message
+        );
     }
 
     #[test]
