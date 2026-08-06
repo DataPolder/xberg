@@ -350,6 +350,13 @@ pub async fn run_pipeline(mut doc: InternalDocument, config: &ExtractionConfig) 
         result.formatted_content = Some(html);
     }
 
+    // #331: same idea for the rendered output format, which `apply_output_format` swaps into
+    // `content` at the very end. See `discard_diverged_formatted_content`.
+    let formatted_content_source = result
+        .formatted_content
+        .as_ref()
+        .map(|formatted| (result.content.clone(), formatted.clone()));
+
     #[cfg(feature = "image-encode")]
     if let Some(ref image_cfg) = config.images {
         apply_output_format_pass(&mut result, image_cfg);
@@ -415,6 +422,7 @@ pub async fn run_pipeline(mut doc: InternalDocument, config: &ExtractionConfig) 
     // normalized text that `content` carries (#286).
     normalize_nfc(&mut result);
     discard_diverged_internal_document(&mut result, internal_document_source_content.as_deref());
+    discard_diverged_formatted_content(&mut result, formatted_content_source.as_ref());
     apply_element_transform(&mut result, config);
 
     // ~keep Run LLM-based structured extraction BEFORE output formatting
@@ -586,6 +594,13 @@ pub fn run_pipeline_sync(mut doc: InternalDocument, config: &ExtractionConfig) -
         result.formatted_content = Some(html);
     }
 
+    // #331: same idea for the rendered output format, which `apply_output_format` swaps into
+    // `content` at the very end. See `discard_diverged_formatted_content`.
+    let formatted_content_source = result
+        .formatted_content
+        .as_ref()
+        .map(|formatted| (result.content.clone(), formatted.clone()));
+
     #[cfg(feature = "image-encode")]
     if let Some(ref image_cfg) = config.images {
         apply_output_format_pass(&mut result, image_cfg);
@@ -600,6 +615,7 @@ pub fn run_pipeline_sync(mut doc: InternalDocument, config: &ExtractionConfig) -
 
     normalize_nfc(&mut result);
     discard_diverged_internal_document(&mut result, internal_document_source_content.as_deref());
+    discard_diverged_formatted_content(&mut result, formatted_content_source.as_ref());
     apply_element_transform(&mut result, config);
 
     result = apply_output_format(result, config.output_format.clone());
@@ -761,6 +777,51 @@ fn discard_diverged_internal_document(result: &mut ExtractedDocument, source_con
     if result.content != source_content {
         result.internal_document = None;
     }
+}
+
+/// `ProcessingWarning::source` for the output-format downgrade below.
+const OUTPUT_FORMAT_WARNING_SOURCE: &str = "output_format";
+
+/// Drop `formatted_content` when post-processing has rewritten `content` since it was
+/// rendered.
+///
+/// `formatted_content` is produced by `derive_extraction_result` from the extractor's
+/// element tree, before any post-processor runs, and [`apply_output_format`] then
+/// overwrites `content` with it at the very end of the pipeline. So a processor that
+/// rewrote `content` — redaction, summarisation, translation — had its work silently
+/// thrown away for every output format that renders one (Markdown, Djot, HTML, JSON,
+/// Custom); with redaction configured, the returned document was the *unredacted*
+/// rendering (#331).
+///
+/// A processor that maintains both surfaces is honoured, not punished: the built-in
+/// redaction processor rewrites `formatted_content` alongside `content`
+/// (`text/redaction/engine.rs`), and its rendering is correct, so it is kept. Only a
+/// rendering that did *not* move while `content` did is stale, and only that one is
+/// dropped — correctness over presentation, with the caller told the requested format was
+/// downgraded rather than being handed text no processor ever saw.
+fn discard_diverged_formatted_content(result: &mut ExtractedDocument, source: Option<&(String, String)>) {
+    let Some((source_content, source_formatted)) = source else {
+        return;
+    };
+
+    // `content` never moved — the rendering still stands for it.
+    if result.content == *source_content {
+        return;
+    }
+    // Both moved: a processor rewrote the rendering alongside the text, so it is current.
+    if result.formatted_content.as_deref() != Some(source_formatted.as_str()) {
+        return;
+    }
+
+    result.formatted_content = None;
+    crate::core::diagnostics::push_warning(
+        &mut result.processing_warnings,
+        OUTPUT_FORMAT_WARNING_SOURCE,
+        "Post-processing rewrote the document text after the requested output format had \
+         already been rendered, so the rendering was discarded and the post-processed plain \
+         text is returned instead. Rendering it in the requested format would have undone \
+         the post-processors' changes",
+    );
 }
 
 /// Transform to element-based output if requested by the config.
