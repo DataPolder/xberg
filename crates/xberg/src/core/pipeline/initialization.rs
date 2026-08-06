@@ -18,19 +18,10 @@ static BUILTIN_REGISTRATION_ERROR: RwLock<Option<String>> = RwLock::new(None);
 /// processor failed to register. `None` means either registration has not run
 /// yet or every enabled processor registered successfully.
 ///
-/// Intended for pipeline code that needs to tell a caller *why* a configured
-/// processor (e.g. `ner`, `redaction`) is silently producing no output: check
-/// this alongside the processor cache before concluding the processor is simply
-/// unconfigured.
-///
-/// Not yet called from `pipeline::mod` (out of scope for #271 — see that
-/// module's captioning-only "processor missing" warning at the call site of
-/// `run_captioning_prepass`, which this is meant to generalize): the intended
-/// caller would check, per config-gated processor, whether the processor is
-/// absent from the cache *and* this returns `Some(_)`, and if so push a
-/// `ProcessingWarning` naming the processor and this message instead of
-/// silently producing no output.
-#[allow(dead_code, reason = "consumed by a future pipeline::mod generalization of the captioning warning; see #271")]
+/// Called from `pipeline::mod::run_pipeline` (#271), which pushes a
+/// `ProcessingWarning` naming this message whenever it is `Some(_)` — the
+/// aggregate counterpart to the captioning-only "processor missing" warning at
+/// the call site of `run_captioning_prepass`.
 pub(crate) fn builtin_registration_error() -> Option<String> {
     BUILTIN_REGISTRATION_ERROR
         .read()
@@ -135,6 +126,16 @@ mod tests {
     /// #215: a post-processor registered after the cache was already populated
     /// must become visible on the *next* extraction, not stay invisible until
     /// something remembers to call `clear_processor_cache()`.
+    ///
+    /// `#[serial]`: this test clears the global post-processor registry (via
+    /// `PostProcessorRegistryGuard`) and mutates the process-global
+    /// `PROCESSOR_CACHE` directly — there is no local/injectable variant of either,
+    /// so any other test that runs the real pipeline concurrently and expects the
+    /// built-in post-processors (or a previously cached, non-empty processor set)
+    /// to be present would race this one. Serializing against the crate's other
+    /// `#[serial]` tests (see `core::extractor::mod::test_concurrent_extractions_different_mimes`)
+    /// is the same pattern used there for the same reason.
+    #[serial_test::serial]
     #[test]
     fn processor_cache_rebuilds_when_registry_changes_after_first_use() {
         use crate::plugins::registry::test_support::PostProcessorRegistryGuard;

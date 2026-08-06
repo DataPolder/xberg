@@ -23,9 +23,12 @@ use crate::types::internal::InternalDocument;
 
 use execution::{execute_processor_stages, execute_validators};
 use features::{execute_chunking, execute_language_detection, execute_token_reduction};
-use initialization::{get_processors_from_cache, initialize_features, initialize_processor_cache};
+use initialization::{
+    builtin_registration_error, get_processors_from_cache, initialize_features, initialize_processor_cache,
+};
 
 const CAPTIONING_PROCESSOR_NAME: &str = "captioning";
+const BUILTIN_REGISTRATION_SOURCE: &str = "builtin_registration";
 
 type PostProcessorHandle = std::sync::Arc<dyn crate::plugins::PostProcessor>;
 
@@ -82,6 +85,28 @@ fn image_descriptions_changed(
             .iter()
             .zip(after)
             .any(|(retained, captioned)| retained.description != captioned.description)
+}
+
+/// Push a `ProcessingWarning` onto `doc` when the one-time built-in post-processor
+/// registration pass (#271) reported a failure. `registration_error` is
+/// `initialization::builtin_registration_error()`; `None` means every enabled
+/// built-in processor registered successfully (or registration has not run yet).
+///
+/// Without this, a processor that failed to register (e.g. `summarization`) simply
+/// never appears in the processor cache, so a caller who configured it saw a clean
+/// `Ok` with no output for that stage and no indication why — the same class of gap
+/// the captioning-only "processor missing" warning below closes for captioning.
+fn push_builtin_registration_warning(doc: &mut InternalDocument, registration_error: Option<String>) {
+    let Some(error) = registration_error else {
+        return;
+    };
+    doc.processing_warnings.push(crate::types::ProcessingWarning {
+        source: std::borrow::Cow::Borrowed(BUILTIN_REGISTRATION_SOURCE),
+        message: std::borrow::Cow::Owned(format!(
+            "built-in post-processor registration was incomplete ({error}); a configured \
+             processor may silently produce no output for its stage"
+        )),
+    });
 }
 
 async fn run_captioning_prepass(
@@ -246,6 +271,7 @@ pub async fn run_pipeline(mut doc: InternalDocument, config: &ExtractionConfig) 
     let postprocessing_enabled = pp_config.is_none_or(|processor_config| processor_config.enabled);
     let processor_stages = if postprocessing_enabled {
         initialize_features();
+        push_builtin_registration_warning(&mut doc, builtin_registration_error());
         initialize_processor_cache()?;
 
         let (early_processors, middle_processors, late_processors) = get_processors_from_cache()?;
@@ -1071,5 +1097,40 @@ mod issue_213_chunk_offset_ordering_tests {
                  not a pre-mutation snapshot"
             );
         }
+    }
+}
+
+/// Regression tests for #271: `builtin_registration_error()` used to be dead code —
+/// nothing surfaced it, so a user whose e.g. `summarization` processor failed to
+/// register got a clean `Ok` with no output and no explanation. These test the pure
+/// warning-construction helper directly (no global registry involved) rather than
+/// the real one-time `OnceLock` registration pass, which cannot be re-triggered or
+/// forced to fail from a test without mutating process-global state (#310).
+#[cfg(test)]
+mod issue_271_builtin_registration_warning_tests {
+    use super::*;
+
+    #[test]
+    fn pushes_a_warning_naming_the_registration_error() {
+        let mut doc = InternalDocument::new("plain");
+
+        push_builtin_registration_warning(&mut doc, Some("summarization: boom".to_string()));
+
+        assert_eq!(doc.processing_warnings.len(), 1);
+        assert_eq!(doc.processing_warnings[0].source, "builtin_registration");
+        assert_eq!(
+            doc.processing_warnings[0].message,
+            "built-in post-processor registration was incomplete (summarization: boom); a configured \
+             processor may silently produce no output for its stage"
+        );
+    }
+
+    #[test]
+    fn pushes_nothing_when_registration_succeeded() {
+        let mut doc = InternalDocument::new("plain");
+
+        push_builtin_registration_warning(&mut doc, None);
+
+        assert!(doc.processing_warnings.is_empty());
     }
 }
