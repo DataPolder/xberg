@@ -11,6 +11,12 @@ use async_trait::async_trait;
 /// scoring needs enough co-occurrence signal to be meaningful.
 const MIN_WORD_COUNT_FOR_KEYWORDS: usize = 10;
 
+/// Name under which [`KeywordExtractor`] registers with the global
+/// post-processor registry. Shared with `keywords::ensure_initialized` so the
+/// self-healing re-registration check and the plugin's own [`Plugin::name`]
+/// can never drift apart.
+pub(crate) const KEYWORD_PROCESSOR_NAME: &str = "keyword-extraction";
+
 /// Post-processor that extracts keywords from document content.
 ///
 /// This processor:
@@ -34,7 +40,7 @@ pub struct KeywordExtractor;
 
 impl Plugin for KeywordExtractor {
     fn name(&self) -> &str {
-        "keyword-extraction"
+        KEYWORD_PROCESSOR_NAME
     }
 
     fn version(&self) -> String {
