@@ -653,6 +653,16 @@ windows-target = [
   # UnsupportedFormat on Windows for a format listSupportedFormats() reports as
   # supported (the 1.0.4 Windows XLSX bug).
   "excel",
+  # Same class as the excel entry above, found while fixing GH#1387: each of
+  # these has an ungated EXT_TO_MIME entry, so leaving the feature off makes
+  # listSupportedFormats() advertise a format that extract() then rejects.
+  # All four are pure Rust and Windows-safe: hwp = [cfb, flate2],
+  # hwpx = [unhwp, zip], iwork = [snap, zip], mdx has no dependencies at all.
+  # (wordperfect is handled separately below — it is native C++.)
+  "hwp",
+  "hwpx",
+  "iwork",
+  "mdx",
   "email",
   "archives",
   "stopwords",
@@ -982,7 +992,7 @@ rake = { version = "0.3.6", optional = true }
 rayon = { workspace = true }
 regex = "1.13.1"
 resvg = { workspace = true, optional = true }
-rmcp = { version = "3.1.0", features = [
+rmcp = { version = "3.1.1", features = [
   "server",
   "macros",
   "base64",
