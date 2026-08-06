@@ -213,11 +213,7 @@ WebUI = "WebUI"
 traineddata = "traineddata"
 
 [lint.uncomment]
-# Disabled deliberately (#315). This rule deletes commented-out code, but it cannot
-# distinguish that from explanatory prose, and it has silently removed real comments
-# from this tree three separate times during the v1.1.0 audit campaign. Re-enable only
-# with a proven-narrow matcher.
-enabled = false
+enabled = true
 remove_todos = false
 remove_fixme = false
 remove_docs = false
@@ -372,7 +368,7 @@ enabled = true
 "crates/xberg-php/**" = ["comment", "doc-comment"]
 "crates/xberg-py/src/lib.rs" = ["comment", "doc-comment"]
 "crates/xberg-wasm/src/lib.rs" = ["comment", "doc-comment"]
-# uncomment rule has 3x deleted real explanatory comments during the v1.1.0 audit; suppress here only.
+# Rationale-heavy prose the uncomment rule reads as commented-out code. ~keep
 "crates/xberg/src/**" = ["comment", "doc-comment"]
 "docker/**" = ["DL3006", "DL3059"]
 "e2e/**/*.py" = ["A001", "N801"]
