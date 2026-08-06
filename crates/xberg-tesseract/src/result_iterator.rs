@@ -314,15 +314,7 @@ impl ResultIterator {
         unsafe { TessPageIteratorBegin(raw) };
 
         loop {
-            match extract_word_data_unlocked(raw) {
-                Ok(word) => words.push(word),
-                Err(TesseractError::NullPointerError)
-                | Err(TesseractError::InvalidParameterError)
-                | Err(TesseractError::Utf8Error(_)) => {
-                    skipped += 1;
-                }
-                Err(e) => return Err(e),
-            }
+            record_word_extraction_result(extract_word_data_unlocked(raw), &mut words, &mut skipped)?;
 
             let has_next = unsafe { TessResultIteratorNext(raw, TessPageIteratorLevel::RIL_WORD as c_int) != 0 };
             if !has_next {
@@ -346,6 +338,31 @@ impl ResultIterator {
         let handle = self.handle.lock().map_err(|_| TesseractError::MutexLockError)?;
         extract_word_data_unlocked(*handle)
     }
+}
+
+/// Classifies a single per-word extraction attempt and folds it into the running
+/// `words`/`skipped` totals used by [`ResultIterator::extract_all_words`].
+///
+/// Null pointer, invalid parameter, and invalid UTF-8 errors are recoverable: the
+/// word is dropped and `skipped` is incremented. Any other error is unrecoverable
+/// and is propagated to abort the pass. Extracted as a standalone, FFI-free
+/// function so the classification/counting logic itself is unit-testable without
+/// a live Tesseract handle (#192).
+fn record_word_extraction_result(
+    result: Result<WordData>,
+    words: &mut Vec<WordData>,
+    skipped: &mut usize,
+) -> Result<()> {
+    match result {
+        Ok(word) => words.push(word),
+        Err(TesseractError::NullPointerError)
+        | Err(TesseractError::InvalidParameterError)
+        | Err(TesseractError::Utf8Error(_)) => {
+            *skipped += 1;
+        }
+        Err(e) => return Err(e),
+    }
+    Ok(())
 }
 
 /// Extracts word data from a raw iterator handle without acquiring the mutex.
@@ -490,4 +507,88 @@ ffi_extern! {
         right: *mut c_int,
         bottom: *mut c_int,
     ) -> c_int;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_word(text: &str) -> WordData {
+        WordData {
+            text: text.to_string(),
+            left: 0,
+            top: 0,
+            right: 10,
+            bottom: 10,
+            confidence: 90.0,
+            font_attrs: None,
+            language: Some("eng".to_string()),
+        }
+    }
+
+    fn invalid_utf8_error() -> TesseractError {
+        let invalid_bytes: Vec<u8> = vec![0xFF, 0xFE];
+        std::str::from_utf8(&invalid_bytes).unwrap_err().into()
+    }
+
+    /// Drives [`record_word_extraction_result`] over a fixed, known sequence of
+    /// synthetic per-word outcomes — the same seam `extract_all_words` folds its
+    /// FFI-derived results through — and asserts the *exact* resulting `skipped`
+    /// count and surviving `words`. No live Tesseract handle is involved: this
+    /// isolates the counting/classification logic from the FFI iteration (#192).
+    #[test]
+    fn should_count_exact_number_of_recoverable_failures_and_keep_successful_words() {
+        let results: Vec<Result<WordData>> = vec![
+            Ok(sample_word("first")),
+            Err(TesseractError::NullPointerError),
+            Ok(sample_word("second")),
+            Err(TesseractError::InvalidParameterError),
+            Err(invalid_utf8_error()),
+            Ok(sample_word("third")),
+        ];
+
+        let mut words = Vec::new();
+        let mut skipped = 0usize;
+        for result in results {
+            record_word_extraction_result(result, &mut words, &mut skipped).expect("all failures here are recoverable");
+        }
+
+        assert_eq!(skipped, 3, "exactly three recoverable failures were fed in");
+        assert_eq!(words.len(), 3, "exactly three successful words were fed in");
+        assert_eq!(
+            words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>(),
+            vec!["first", "second", "third"]
+        );
+    }
+
+    /// When nothing goes wrong, `skipped` must stay at exactly zero — not merely
+    /// "not incremented past some threshold" — so callers can rely on its absence
+    /// as a clean-extraction signal.
+    #[test]
+    fn should_report_zero_skipped_when_no_recoverable_failures_occur() {
+        let results: Vec<Result<WordData>> = vec![Ok(sample_word("only")), Ok(sample_word("word"))];
+
+        let mut words = Vec::new();
+        let mut skipped = 0usize;
+        for result in results {
+            record_word_extraction_result(result, &mut words, &mut skipped).unwrap();
+        }
+
+        assert_eq!(skipped, 0);
+        assert_eq!(words.len(), 2);
+    }
+
+    /// An unrecoverable error (anything outside the three recoverable variants)
+    /// must propagate instead of being silently folded into `skipped`.
+    #[test]
+    fn should_propagate_unrecoverable_error_instead_of_counting_it_as_skipped() {
+        let mut words = Vec::new();
+        let mut skipped = 0usize;
+
+        let outcome = record_word_extraction_result(Err(TesseractError::MutexLockError), &mut words, &mut skipped);
+
+        assert!(outcome.is_err());
+        assert_eq!(skipped, 0, "unrecoverable errors must not be counted as skipped");
+        assert!(words.is_empty());
+    }
 }

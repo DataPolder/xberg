@@ -724,6 +724,22 @@ const NON_TEXT_BLOCK_TYPES: [TessPolyBlockType; 6] = [
     TessPolyBlockType::PT_VERT_LINE,
 ];
 
+/// Inserts the `word_iterator_skipped_count` metadata key only when at least one
+/// word was actually skipped by the Tesseract result iterator, so callers can use
+/// the key's absence (rather than a `0` value) as the "clean extraction" signal.
+///
+/// Extracted as its own function, separate from the surrounding OCR pipeline, so
+/// the presence/absence and exact-value behaviour is unit-testable without a live
+/// Tesseract API instance (#192).
+fn insert_word_iterator_skipped_count_metadata(metadata: &mut HashMap<String, serde_json::Value>, skipped_words: usize) {
+    if skipped_words > 0 {
+        metadata.insert(
+            "word_iterator_skipped_count".to_string(),
+            serde_json::Value::Number(skipped_words.into()),
+        );
+    }
+}
+
 /// Extract OcrElements via Tesseract's iterator APIs with rich metadata.
 ///
 /// Uses ResultIterator for word-level text, bounding boxes, confidence, and font
@@ -1355,12 +1371,7 @@ pub(super) fn perform_ocr(
     let iterator_extraction = extract_elements_via_iterator(&api, 1, config.min_confidence);
     match iterator_extraction {
         Ok(extraction) if !extraction.elements.is_empty() => {
-            if extraction.skipped_words > 0 {
-                metadata.insert(
-                    "word_iterator_skipped_count".to_string(),
-                    serde_json::Value::Number(extraction.skipped_words.into()),
-                );
-            }
+            insert_word_iterator_skipped_count_metadata(&mut metadata, extraction.skipped_words);
             if extraction.non_text_block_word_count > 0 {
                 metadata.insert(
                     "non_text_block_word_count".to_string(),
@@ -1657,6 +1668,37 @@ pub(super) fn process_image_files_batch(
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    /// Exact count: a known number of skipped words must produce exactly the
+    /// matching `word_iterator_skipped_count` value, not just a truthy presence
+    /// (#192 — catches off-by-one or double-counting regressions).
+    #[test]
+    fn should_insert_exact_skipped_count_when_words_were_skipped() {
+        let mut metadata = HashMap::new();
+
+        insert_word_iterator_skipped_count_metadata(&mut metadata, 3);
+
+        assert_eq!(
+            metadata.get("word_iterator_skipped_count"),
+            Some(&serde_json::Value::Number(3.into()))
+        );
+    }
+
+    /// When nothing was skipped, the metadata key must be entirely ABSENT, not
+    /// present with a value of `0` — callers rely on key absence as the
+    /// clean-extraction signal (#192).
+    #[test]
+    fn should_omit_skipped_count_key_when_nothing_was_skipped() {
+        let mut metadata = HashMap::new();
+
+        insert_word_iterator_skipped_count_metadata(&mut metadata, 0);
+
+        assert!(
+            !metadata.contains_key("word_iterator_skipped_count"),
+            "key must be absent, not present with value 0"
+        );
+        assert!(metadata.is_empty());
+    }
 
     fn word_at(left: u32, top: u32, width: u32, height: u32, text: &str) -> crate::table_core::HocrWord {
         crate::table_core::HocrWord {
