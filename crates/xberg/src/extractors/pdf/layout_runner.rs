@@ -1108,6 +1108,48 @@ mod tests {
         bytes
     }
 
+    /// A PDF whose page tree declares `/Count 2` in the `Pages` dictionary but
+    /// whose `/Kids` array lists only one real page. `page_count()` trusts the
+    /// declared `/Count` (pdf_oxide's primary reader), so the runner iterates
+    /// page index 1 as if it existed; the page tree walk that resolves that
+    /// index then genuinely fails, giving a real (not injected) render
+    /// failure at the same seam production traffic would hit for a
+    /// truncated/corrupt page tree.
+    fn pdf_with_declared_count_exceeding_real_pages() -> Vec<u8> {
+        use lopdf::{Document, Object, Stream, dictionary};
+
+        let mut document = Document::with_version("1.5");
+        let pages_id = document.new_object_id();
+        let page_id = document.new_object_id();
+        let content_id = document.add_object(Stream::new(dictionary! {}, Vec::new()));
+
+        let page = dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "MediaBox" => vec![0.into(), 0.into(), 200.into(), 100.into()],
+            "Resources" => dictionary! {},
+            "Contents" => content_id,
+        };
+        document.objects.insert(page_id, Object::Dictionary(page));
+
+        let pages = dictionary! {
+            "Type" => "Pages",
+            "Kids" => vec![page_id.into()],
+            "Count" => 2,
+        };
+        document.objects.insert(pages_id, Object::Dictionary(pages));
+
+        let catalog_id = document.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
+        document.trailer.set("Root", catalog_id);
+
+        let mut bytes = Vec::new();
+        document.save_to(&mut bytes).expect("fixture PDF must serialize");
+        bytes
+    }
+
     fn assert_pdf_oxide_applies_rotation(bytes: Vec<u8>) {
         let document = pdf_oxide::PdfDocument::from_bytes(bytes.clone()).expect("fixture PDF must open");
         let rendered =
@@ -1405,5 +1447,60 @@ mod tests {
     #[test]
     fn pdf_oxide_applies_inherited_page_rotation() {
         assert_pdf_oxide_applies_rotation(rotated_pdf(true, 90));
+    }
+
+    /// Drives a genuine, unrenderable page through the full
+    /// `run_layout_for_pdf_pages` entry point (#196): the fixture's page tree
+    /// declares `/Count 2` but only lists one real page, so pdf_oxide's page
+    /// tree walk for index 1 fails for real — this is not an injected error.
+    /// The other page renders and runs inference normally, proving the
+    /// warning is additive rather than replacing the successful pages.
+    #[test]
+    fn should_return_exact_render_failure_warning_when_a_page_fails_to_render() {
+        use crate::core::config::layout::LayoutStrategy;
+
+        let bytes = pdf_with_declared_count_exceeding_real_pages();
+        let config = LayoutDetectionConfig {
+            strategy: LayoutStrategy::Always,
+            ..Default::default()
+        };
+
+        let (output, warning) = super::run_layout_for_pdf_pages(&bytes, &config, 1, GatedPageHandling::SkipRender)
+            .expect("the run must succeed even though one page failed to render");
+
+        let (images, _results, _hints, _detections) =
+            output.data.expect("the one real page rendered fine, so layout data must be present");
+        assert_eq!(images.len(), 2, "both page slots must stay present despite the render failure");
+
+        let warning = warning.expect("a render failure must surface a caller-visible warning");
+        assert_eq!(warning.source, "layout");
+        assert_eq!(
+            warning.message,
+            "layout: 1 page(s) could not be prepared for layout analysis and were treated as empty: \
+             page 2 failed to render: Invalid PDF: Page index 1 not found by scanning"
+        );
+    }
+
+    /// #196's combination step: a CPU-retry recovery warning and a
+    /// page-render-failure warning firing on the same attempt must both
+    /// survive `combine_layout_warnings`, concatenated rather than one
+    /// discarding the other.
+    #[test]
+    fn should_concatenate_cpu_retry_and_render_failure_warnings_without_dropping_either() {
+        let cpu_retry_warning =
+            super::layout_cpu_fallback_warning(&XbergError::Other("CoreML ExecuteKernel failed".to_string()));
+        let render_failure_warning =
+            super::page_render_failure_warning(&["page 2 failed to render: boom".to_string()]);
+
+        let combined = super::combine_layout_warnings(Some(cpu_retry_warning), Some(render_failure_warning))
+            .expect("both warnings present must combine rather than one being dropped");
+
+        assert_eq!(combined.source, "layout");
+        assert_eq!(
+            combined.message,
+            "automatic layout inference failed (CoreML ExecuteKernel failed); recovered on CPU; \
+             layout: 1 page(s) could not be prepared for layout analysis and were treated as empty: \
+             page 2 failed to render: boom"
+        );
     }
 }
