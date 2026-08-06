@@ -633,6 +633,28 @@ pub fn derive_extraction_result(
 
     let images = if doc.images.is_empty() { None } else { Some(doc.images) };
 
+    // #76: `push_uri` caps collection at `InternalDocument::MAX_URIS` and silently
+    // discarded the rest, so a document with more links than the cap was
+    // indistinguishable from one that genuinely has exactly `MAX_URIS`. Name the
+    // loss; only when it actually happened, so a normal document stays warning-free.
+    if doc.uris_dropped > 0 {
+        let dropped = doc.uris_dropped;
+        // Report the cap itself, not `doc.uris.len()`: the derivation runs a second
+        // time after the captioning prepass, by which point the list has been
+        // de-duplicated and shortened. A length-derived count would produce a second,
+        // differently-worded warning that `push_warning`'s dedup could not collapse.
+        let kept = InternalDocument::MAX_URIS;
+        let found = kept + dropped;
+        crate::core::diagnostics::push_warning(
+            &mut doc.processing_warnings,
+            "uris",
+            format!(
+                "Collected the first {kept} of {found} URIs; {dropped} were dropped at the \
+                 per-document limit and are missing from the result"
+            ),
+        );
+    }
+
     let uris = if doc.uris.is_empty() {
         None
     } else {

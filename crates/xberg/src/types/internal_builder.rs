@@ -487,6 +487,7 @@ impl InternalDocumentBuilder {
         self.doc.tables.extend(other.tables);
         self.doc.images.extend(other.images);
         self.doc.uris.extend(other.uris);
+        self.doc.uris_dropped += other.uris_dropped;
 
         for mut element in other.elements {
             match &mut element.kind {
