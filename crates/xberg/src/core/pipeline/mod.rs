@@ -340,6 +340,11 @@ pub async fn run_pipeline(mut doc: InternalDocument, config: &ExtractionConfig) 
     result.internal_document = doc_for_elements;
     captioning_carry_over.apply(&mut result);
 
+    // #286: record the text the preserved element tree stands for, so the divergence check
+    // below can tell whether post-processing has since made the tree a stale second copy of
+    // the document text. See `discard_diverged_internal_document`.
+    let internal_document_source_content = result.internal_document.is_some().then(|| result.content.clone());
+
     #[cfg(feature = "html")]
     if let Some(html) = styled_html_prerender {
         result.formatted_content = Some(html);
@@ -405,8 +410,12 @@ pub async fn run_pipeline(mut doc: InternalDocument, config: &ExtractionConfig) 
     execute_token_reduction(&mut result, config)?;
     execute_validators(&result, config).await?;
 
-    apply_element_transform(&mut result, config);
+    // NFC normalization moved ahead of the element transform so the divergence check below
+    // sees the final plain-text `content`, and so the fallback element build reads the same
+    // normalized text that `content` carries (#286).
     normalize_nfc(&mut result);
+    discard_diverged_internal_document(&mut result, internal_document_source_content.as_deref());
+    apply_element_transform(&mut result, config);
 
     // ~keep Run LLM-based structured extraction BEFORE output formatting
     // ~keep so extraction sees plain text, not markdown/HTML
@@ -569,6 +578,9 @@ pub fn run_pipeline_sync(mut doc: InternalDocument, config: &ExtractionConfig) -
         crate::extraction::derive::derive_extraction_result(doc, include_structure, config.output_format.clone());
     result.internal_document = doc_for_elements;
 
+    // #286: mirrors `run_pipeline` — see `discard_diverged_internal_document`.
+    let internal_document_source_content = result.internal_document.is_some().then(|| result.content.clone());
+
     #[cfg(feature = "html")]
     if let Some(html) = styled_html_prerender {
         result.formatted_content = Some(html);
@@ -586,8 +598,9 @@ pub fn run_pipeline_sync(mut doc: InternalDocument, config: &ExtractionConfig) -
     execute_language_detection(&mut result, config)?;
     execute_token_reduction(&mut result, config)?;
 
-    apply_element_transform(&mut result, config);
     normalize_nfc(&mut result);
+    discard_diverged_internal_document(&mut result, internal_document_source_content.as_deref());
+    apply_element_transform(&mut result, config);
 
     result = apply_output_format(result, config.output_format.clone());
 
@@ -716,6 +729,37 @@ fn apply_data_base64_pass(
     use base64::Engine as _;
     for image in result.images.iter_mut().flatten() {
         image.data_base64 = Some(base64::engine::general_purpose::STANDARD.encode(&image.data));
+    }
+}
+
+/// Drop the preserved extractor `InternalDocument` once post-processing has rewritten
+/// `content`, so nothing downstream can hand out pre-post-processing text (#286).
+///
+/// `source_content` is `result.content` as it stood when the tree was stored, or `None`
+/// when no tree was stored at all.
+///
+/// The tree is a verbatim clone of the extractor's element list, taken before the
+/// post-processor stages run. No stage writes back into it: redaction, summarisation,
+/// translation and token reduction all rewrite `result.content` and leave the tree holding
+/// the original text. Two consumers then read that stale tree:
+///
+/// - `plugins::renderer`'s blanket `impl<T: InternalRenderer> Renderer for T`, so the
+///   public `Renderer::render_result` renders text that never went through
+///   post-processing and disagrees with `ExtractedDocument::content`;
+/// - `extraction::transform::transform_extraction_result_to_elements`, which prefers the
+///   tree over `content`/`pages`, so the public `elements` — including the copy the
+///   renderer registry hands to foreign renderers — carries the same stale text.
+///
+/// Dropping the tree makes both fall back to the post-processed `content`/`pages`: the
+/// blanket impl returns `content` verbatim, per its documented `Renderer` default. The
+/// tree is kept whenever `content` is untouched, which is the overwhelmingly common case
+/// and preserves the extractor reading order the field exists to carry.
+fn discard_diverged_internal_document(result: &mut ExtractedDocument, source_content: Option<&str>) {
+    let Some(source_content) = source_content else {
+        return;
+    };
+    if result.content != source_content {
+        result.internal_document = None;
     }
 }
 
