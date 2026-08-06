@@ -69,18 +69,7 @@ fn should_parse_multiple_adjacent_segments_with_exact_boundaries() {
     let b = 11_u32;
     let c = 12_u32;
     let d = 13_u32;
-    let tokens = vec![
-        ts(0),
-        a,
-        ts(250),
-        ts(250),
-        b,
-        c,
-        ts(500),
-        ts(500),
-        d,
-        ts(720),
-    ];
+    let tokens = vec![ts(0), a, ts(250), ts(250), b, c, ts(500), ts(500), d, ts(720)];
 
     let segments = parse_timestamped_segments(&tokens, TIMESTAMP_BEGIN);
 
@@ -88,21 +77,30 @@ fn should_parse_multiple_adjacent_segments_with_exact_boundaries() {
 
     let (s0, e0, t0) = &segments[0];
     assert_eq!(
-        (timestamp_token_to_ms(*s0, TIMESTAMP_BEGIN), timestamp_token_to_ms(*e0, TIMESTAMP_BEGIN)),
+        (
+            timestamp_token_to_ms(*s0, TIMESTAMP_BEGIN),
+            timestamp_token_to_ms(*e0, TIMESTAMP_BEGIN)
+        ),
         (0, 2_500)
     );
     assert_eq!(t0, &vec![a]);
 
     let (s1, e1, t1) = &segments[1];
     assert_eq!(
-        (timestamp_token_to_ms(*s1, TIMESTAMP_BEGIN), timestamp_token_to_ms(*e1, TIMESTAMP_BEGIN)),
+        (
+            timestamp_token_to_ms(*s1, TIMESTAMP_BEGIN),
+            timestamp_token_to_ms(*e1, TIMESTAMP_BEGIN)
+        ),
         (2_500, 5_000)
     );
     assert_eq!(t1, &vec![b, c]);
 
     let (s2, e2, t2) = &segments[2];
     assert_eq!(
-        (timestamp_token_to_ms(*s2, TIMESTAMP_BEGIN), timestamp_token_to_ms(*e2, TIMESTAMP_BEGIN)),
+        (
+            timestamp_token_to_ms(*s2, TIMESTAMP_BEGIN),
+            timestamp_token_to_ms(*e2, TIMESTAMP_BEGIN)
+        ),
         (5_000, 7_200)
     );
     assert_eq!(t2, &vec![d]);
@@ -120,7 +118,11 @@ fn should_drop_text_before_first_timestamp_and_after_trailing_unpaired_timestamp
 
     let segments = parse_timestamped_segments(&tokens, TIMESTAMP_BEGIN);
 
-    assert_eq!(segments.len(), 1, "expected only the one complete pair, got {segments:?}");
+    assert_eq!(
+        segments.len(),
+        1,
+        "expected only the one complete pair, got {segments:?}"
+    );
     let (start_id, end_id, text_tokens) = &segments[0];
     assert_eq!(timestamp_token_to_ms(*start_id, TIMESTAMP_BEGIN), 0);
     assert_eq!(timestamp_token_to_ms(*end_id, TIMESTAMP_BEGIN), 1_000);

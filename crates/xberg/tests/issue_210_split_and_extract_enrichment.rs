@@ -172,7 +172,10 @@ async fn should_partition_chunks_by_page_and_renumber_them_per_segment() {
             "segment {index} must carry exactly the chunks overlapping pages {start}..={end}"
         );
         assert_eq!(
-            actual.iter().map(|chunk| chunk.metadata.chunk_index).collect::<Vec<_>>(),
+            actual
+                .iter()
+                .map(|chunk| chunk.metadata.chunk_index)
+                .collect::<Vec<_>>(),
             (0..actual.len()).collect::<Vec<_>>(),
             "segment {index} must renumber chunk_index from 0"
         );
@@ -264,7 +267,10 @@ async fn should_slice_pages_tables_and_images_by_page_range_when_split_into_thre
         );
 
         let expected_pages = (end - start + 1) as usize;
-        assert_eq!(segment.document.counts.pages, expected_pages, "segment {index} page count");
+        assert_eq!(
+            segment.document.counts.pages, expected_pages,
+            "segment {index} page count"
+        );
         assert_eq!(
             segment.document.metadata.pages.as_ref().map(|pages| pages.total_count),
             Some(expected_pages as u32),
@@ -317,9 +323,6 @@ async fn should_preserve_enrichment_when_document_splits_into_one_segment() {
         "a single segment covering the whole document must keep every chunk"
     );
     assert_eq!(only.tables.len(), whole.tables.len());
-    assert_eq!(
-        only.images.as_ref().map(Vec::len),
-        whole.images.as_ref().map(Vec::len)
-    );
+    assert_eq!(only.images.as_ref().map(Vec::len), whole.images.as_ref().map(Vec::len));
     assert_eq!(only.counts, whole.counts);
 }

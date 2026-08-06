@@ -92,7 +92,10 @@ async fn enrich_ner_writes_detected_entities_onto_the_extracted_document() {
 
     assert_eq!(
         on_document,
-        enriched.entities.as_ref().expect("side-channel entities stay populated"),
+        enriched
+            .entities
+            .as_ref()
+            .expect("side-channel entities stay populated"),
         "the document field and the returned field must carry the same entities"
     );
 }

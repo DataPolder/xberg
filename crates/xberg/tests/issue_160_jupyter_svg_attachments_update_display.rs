@@ -21,7 +21,8 @@ const PNG_MAGIC: &[u8] = b"\x89PNG\r\n\x1a\n";
 
 /// A valid 1x1 transparent PNG, base64-encoded (reused from the existing
 /// jupyter output-image fixtures in `jupyter_extractor_tests.rs`).
-const PNG_1X1_BASE64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+const PNG_1X1_BASE64: &str =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 
 const SVG_MARKUP: &str = "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"1\" height=\"1\"/></svg>";
 
@@ -193,11 +194,7 @@ fn should_warn_when_attachment_mime_type_is_unsupported() {
         .expect("notebook extraction should succeed even with an unsupported attachment");
 
     assert!(
-        result
-            .images
-            .as_ref()
-            .map(|images| images.is_empty())
-            .unwrap_or(true),
+        result.images.as_ref().map(|images| images.is_empty()).unwrap_or(true),
         "an unsupported-MIME attachment must not produce an image"
     );
     assert!(

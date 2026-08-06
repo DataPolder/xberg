@@ -28,7 +28,9 @@ async fn should_emit_processing_warning_when_citation_parsing_fails() {
         .expect("malformed citation extraction should still succeed with a fallback");
 
     assert!(
-        extraction.content.contains("<xml><records><record><titles><title>Broken"),
+        extraction
+            .content
+            .contains("<xml><records><record><titles><title>Broken"),
         "expected raw text fallback in body, got: {:?}",
         extraction.content
     );

@@ -30,8 +30,7 @@ mod email_body {
     /// Header block emitted by `EmailExtractor::build_internal_document` before the
     /// body paragraphs. It is a `MetadataBlock`, which maps to `NarrativeText` in the
     /// element-based output, so it is part of the exact expected sequence.
-    const EXPECTED_HEADER_BLOCK: &str =
-        "Subject: CRLF Body Test\nFrom: sender@example.com\nTo: recipient@example.com";
+    const EXPECTED_HEADER_BLOCK: &str = "Subject: CRLF Body Test\nFrom: sender@example.com\nTo: recipient@example.com";
 
     fn element_based_config() -> ExtractionConfig {
         ExtractionConfig {

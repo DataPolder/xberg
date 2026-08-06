@@ -102,8 +102,8 @@ fn should_not_emit_script_metadata_when_auto_rotate_is_disabled() {
         ..Default::default()
     };
     let file_path = get_test_file_path("images/test_hello_world.png");
-    let result = extract_uri_document_blocking(&file_path, None, &config)
-        .expect("should extract test_hello_world.png with OCR");
+    let result =
+        extract_uri_document_blocking(&file_path, None, &config).expect("should extract test_hello_world.png with OCR");
 
     let script_keys: Vec<&str> = result
         .metadata

@@ -47,7 +47,9 @@ const MAX_SECTION_LEVEL: usize = 6;
 const ADMONITION_LABELS: [&str; 5] = ["NOTE", "TIP", "IMPORTANT", "WARNING", "CAUTION"];
 
 /// Characters that may appear in an AsciiDoc table cell specifier (`2+|`, `.3+|`, `a|`).
-const CELL_SPEC_CHARS: [char; 15] = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '*', '.', '<', '>'];
+const CELL_SPEC_CHARS: [char; 15] = [
+    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '*', '.', '<', '>',
+];
 
 /// AsciiDoc document extractor.
 ///
@@ -629,9 +631,7 @@ impl<'a> AsciiDocParser<'a> {
                 at_boundary = false;
                 continue;
             }
-            if at_boundary
-                && let Some((consumed, inner, kind)) = parse_constrained_span(rest)
-            {
+            if at_boundary && let Some((consumed, inner, kind)) = parse_constrained_span(rest) {
                 let start = out.len() as u32;
                 out.push_str(&inner);
                 annotations.push(TextAnnotation {
@@ -802,7 +802,11 @@ fn parse_link_macro(rest: &str) -> Option<(usize, String, String)> {
         && let Some(close) = inner.find(']')
     {
         let display = inner[..close].trim();
-        let display = if display.is_empty() { url.clone() } else { display.to_string() };
+        let display = if display.is_empty() {
+            url.clone()
+        } else {
+            display.to_string()
+        };
         return Some((scheme.len() + target_end + close + 2, display, url));
     }
     if *scheme == "link:" {
@@ -971,7 +975,10 @@ mod tests {
         let code = doc.elements.iter().find(|e| e.kind == ElementKind::Code).expect("code");
         assert_eq!(code.text, "fn main() {}");
         assert_eq!(
-            code.attributes.as_ref().and_then(|a| a.get("language")).map(String::as_str),
+            code.attributes
+                .as_ref()
+                .and_then(|a| a.get("language"))
+                .map(String::as_str),
             Some("rust")
         );
     }

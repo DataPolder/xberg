@@ -1,7 +1,7 @@
 //! Concurrency and thread pool configuration.
 
-use std::sync::{Once, OnceLock};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Once, OnceLock};
 
 use serde::{Deserialize, Serialize};
 

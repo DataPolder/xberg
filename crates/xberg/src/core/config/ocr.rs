@@ -927,7 +927,11 @@ impl OcrConfig {
 /// filters them out and falls back to the default language, so an empty string is not itself a
 /// configuration error — but a non-blank, unrecognized code (e.g. a typo) is.
 fn validate_languages(languages: &[String]) -> Result<(), XbergError> {
-    for language in languages.iter().map(|language| language.trim()).filter(|l| !l.is_empty()) {
+    for language in languages
+        .iter()
+        .map(|language| language.trim())
+        .filter(|l| !l.is_empty())
+    {
         crate::core::config_validation::validate_language_code(language)?;
     }
     Ok(())

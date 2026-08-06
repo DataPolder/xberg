@@ -74,7 +74,11 @@ fn without_images_config_ocr_processes_the_source_dimensions_unchanged() {
         .expect("should OCR the flat grey canvas");
 
     assert_eq!(
-        result.metadata.additional.get("ocr_processed_image_width").and_then(|v| v.as_u64()),
+        result
+            .metadata
+            .additional
+            .get("ocr_processed_image_width")
+            .and_then(|v| v.as_u64()),
         Some(u64::from(SOURCE_WIDTH)),
         "without ImageExtractionConfig the processed width must equal the source width"
     );
@@ -111,7 +115,11 @@ fn image_extraction_config_dpi_and_dimension_limit_reach_ocr_preprocessing() {
     // 800x600, then max_image_dimension=100 clamps the longer edge to
     // exactly 100, carrying the 4:3 aspect ratio down to 75.
     assert_eq!(
-        result.metadata.additional.get("ocr_processed_image_width").and_then(|v| v.as_u64()),
+        result
+            .metadata
+            .additional
+            .get("ocr_processed_image_width")
+            .and_then(|v| v.as_u64()),
         Some(100),
         "max_image_dimension=100 must clamp the processed width to exactly 100, got: {:?}",
         result.metadata.additional.get("ocr_processed_image_width")

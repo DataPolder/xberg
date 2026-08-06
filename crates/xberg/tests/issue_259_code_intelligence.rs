@@ -85,7 +85,9 @@ async fn code_intelligence_surfaces_the_full_tree_sitter_process_result() {
     assert_eq!(structure[0]["span"]["start_byte"], serde_json::json!(35));
 
     // `imports` (enabled by default): exactly the one top-level `import os`.
-    let imports = code_intelligence["imports"].as_array().expect("imports must be an array");
+    let imports = code_intelligence["imports"]
+        .as_array()
+        .expect("imports must be an array");
     assert_eq!(imports.len(), 1, "expected exactly one import: {imports:?}");
     assert_eq!(imports[0]["source"], serde_json::json!("import os"));
     assert_eq!(imports[0]["is_wildcard"], serde_json::json!(false));
@@ -96,7 +98,15 @@ async fn code_intelligence_surfaces_the_full_tree_sitter_process_result() {
     // docstrings, symbols, diagnostics and chunking all at their default-disabled
     // state, and does not enable data-format extraction. All of these must therefore
     // be entirely absent from the JSON rather than present as empty arrays/objects.
-    for absent_field in ["exports", "comments", "docstrings", "symbols", "diagnostics", "chunks", "data"] {
+    for absent_field in [
+        "exports",
+        "comments",
+        "docstrings",
+        "symbols",
+        "diagnostics",
+        "chunks",
+        "data",
+    ] {
         assert!(
             code_intelligence.get(absent_field).is_none(),
             "expected `{absent_field}` to be entirely absent from code_intelligence, got {:?}",

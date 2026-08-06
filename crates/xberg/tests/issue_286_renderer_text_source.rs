@@ -100,11 +100,7 @@ async fn extract_plain_text(text: &str, filename: &str, config: &ExtractionConfi
     .await
     .expect("extraction succeeds");
 
-    outcome
-        .results
-        .into_iter()
-        .next()
-        .expect("one input yields one result")
+    outcome.results.into_iter().next().expect("one input yields one result")
 }
 
 #[tokio::test]

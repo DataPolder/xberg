@@ -65,7 +65,9 @@ pub(crate) fn extract_frontmatter(content: &str) -> (Option<YamlValue>, String) 
 /// opening delimiter is never closed. Without this, malformed frontmatter and the
 /// simple absence of frontmatter are indistinguishable to the caller — both silently
 /// yield `(None, content)` (xberg-io/xberg#154).
-pub(crate) fn extract_frontmatter_with_warning(content: &str) -> (Option<YamlValue>, String, Option<ProcessingWarning>) {
+pub(crate) fn extract_frontmatter_with_warning(
+    content: &str,
+) -> (Option<YamlValue>, String, Option<ProcessingWarning>) {
     if content.starts_with("+++") {
         let (yaml, remaining) = extract_toml_frontmatter(content);
         return (yaml, remaining, None);
@@ -606,7 +608,9 @@ tags: "tag1, tag2"
         );
         assert_eq!(
             metadata.additional.get(&Cow::Borrowed("aliases")).cloned(),
-            Some(serde_json::Value::Array(vec![serde_json::Value::String("/old-url".to_string())]))
+            Some(serde_json::Value::Array(vec![serde_json::Value::String(
+                "/old-url".to_string()
+            )]))
         );
     }
 
@@ -617,7 +621,11 @@ tags: "tag1, tag2"
         let yaml: YamlValue = serde_yaml_ng::from_str(yaml_str).unwrap();
         let metadata = extract_metadata_from_yaml(&yaml);
 
-        assert!(metadata.additional.is_empty(), "expected no leaked keys, got {:?}", metadata.additional);
+        assert!(
+            metadata.additional.is_empty(),
+            "expected no leaked keys, got {:?}",
+            metadata.additional
+        );
     }
 
     #[test]
@@ -658,7 +666,10 @@ tags: "tag1, tag2"
 
         // Precedence decision (xberg-io/xberg#154): plural `authors` wins for the
         // `Metadata::authors` list, while `created_by` still reflects the scalar `author`.
-        assert_eq!(metadata.authors, Some(vec!["Jane Doe".to_string(), "John Roe".to_string()]));
+        assert_eq!(
+            metadata.authors,
+            Some(vec!["Jane Doe".to_string(), "John Roe".to_string()])
+        );
         assert_eq!(metadata.created_by.as_deref(), Some("Jane Doe"));
     }
 

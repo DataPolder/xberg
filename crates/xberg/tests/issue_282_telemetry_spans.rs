@@ -203,7 +203,12 @@ fn run_pipeline_span_should_carry_the_pipeline_operation() {
     let spans = extract_plain_text(&uncached_config());
 
     assert_eq!(
-        count_spans(&spans, "run_pipeline", conventions::OPERATION, conventions::operations::PIPELINE),
+        count_spans(
+            &spans,
+            "run_pipeline",
+            conventions::OPERATION,
+            conventions::operations::PIPELINE
+        ),
         1,
         "the pipeline runs exactly once per document; captured spans were:\n{}",
         describe(&spans)

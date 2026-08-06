@@ -195,7 +195,11 @@ mod tests {
     use super::*;
 
     fn post_processor_registry_lists(name: &str) -> bool {
-        get_post_processor_registry().read().list().iter().any(|registered| registered == name)
+        get_post_processor_registry()
+            .read()
+            .list()
+            .iter()
+            .any(|registered| registered == name)
     }
 
     /// #317: `ensure_initialized` registers the keyword post-processor exactly

@@ -295,7 +295,10 @@ pub(crate) async fn extract_with_candidates(
                 candidate.plugin().name(),
                 candidate.plugin().priority(),
             );
-            candidate.extract_path(path, mime_type, config).instrument(stage_span).await
+            candidate
+                .extract_path(path, mime_type, config)
+                .instrument(stage_span)
+                .await
         };
         #[cfg(not(feature = "otel"))]
         let extraction = candidate.extract_path(path, mime_type, config).await;
@@ -401,7 +404,9 @@ pub(in crate::core::extractor) async fn extract_bytes_with_extractor(
     #[cfg(feature = "otel")]
     let doc = {
         let stage_span = crate::telemetry::spans::extraction_stage_span(extractor.name(), extractor.priority());
-        Box::pin(extractor.extract_content(content, mime_type, config)).instrument(stage_span).await?
+        Box::pin(extractor.extract_content(content, mime_type, config))
+            .instrument(stage_span)
+            .await?
     };
     #[cfg(not(feature = "otel"))]
     let doc = Box::pin(extractor.extract_content(content, mime_type, config)).await?;

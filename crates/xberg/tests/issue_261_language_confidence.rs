@@ -82,8 +82,14 @@ async fn mixed_language_document_reports_exact_proportions_and_ordering() {
     assert_eq!(details.len(), 2, "expected exactly two languages, got: {details:?}");
 
     // Dominance ordering: English (19/20 chunks) must sort before Chinese (1/20 chunks).
-    assert_eq!(details[0].language, "eng", "English must be the dominant language: {details:?}");
-    assert_eq!(details[1].language, "cmn", "Chinese must be the minority language: {details:?}");
+    assert_eq!(
+        details[0].language, "eng",
+        "English must be the dominant language: {details:?}"
+    );
+    assert_eq!(
+        details[1].language, "cmn",
+        "Chinese must be the minority language: {details:?}"
+    );
 
     // Exact chunk-share proportions — computed the same way the implementation does,
     // from the same integer chunk counts, so this is bit-for-bit exact, not approximate.
@@ -105,7 +111,10 @@ async fn mixed_language_document_reports_exact_proportions_and_ordering() {
     // Script: English is Latin-script, Chinese is Mandarin/Han-script — unambiguous
     // given the two languages chosen for this fixture.
     assert_eq!(details[0].script, "Latin", "unexpected script for English: {details:?}");
-    assert_eq!(details[1].script, "Mandarin", "unexpected script for Chinese: {details:?}");
+    assert_eq!(
+        details[1].script, "Mandarin",
+        "unexpected script for Chinese: {details:?}"
+    );
 
     // Confidence must be in range and self-consistent with `reliable`, which is
     // documented (see `language_detection::AGGREGATE_RELIABLE_THRESHOLD`) as the

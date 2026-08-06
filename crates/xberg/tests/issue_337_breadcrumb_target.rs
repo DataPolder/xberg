@@ -10,8 +10,8 @@
 //! `heading_path` — this suite locks down all three variants plus the default.
 #![cfg(feature = "chunking")]
 
-use xberg::chunking::{ChunkerType, ChunkingConfig, chunk_for_rag};
 use xberg::BreadcrumbTarget;
+use xberg::chunking::{ChunkerType, ChunkingConfig, chunk_for_rag};
 
 /// A single H1 heading (`# Setup`) at byte offset 0, followed by prose long enough
 /// (with `max_characters` below) to force multiple chunks. The heading text is the

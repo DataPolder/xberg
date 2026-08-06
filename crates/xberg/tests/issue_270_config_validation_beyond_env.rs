@@ -18,7 +18,8 @@ fn write_temp(name: &str, contents: &str) -> std::path::PathBuf {
     std::fs::create_dir_all(&dir).expect("failed to create temp dir");
     let path = dir.join(name);
     let mut file = std::fs::File::create(&path).expect("failed to create temp config file");
-    file.write_all(contents.as_bytes()).expect("failed to write temp config file");
+    file.write_all(contents.as_bytes())
+        .expect("failed to write temp config file");
     path
 }
 

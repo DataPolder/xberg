@@ -50,7 +50,9 @@ pub(crate) use sections::{
 #[cfg(test)]
 pub(crate) use dependencies::{validate_cors_origin, validate_host, validate_port, validate_upload_size};
 #[cfg(test)]
-pub(crate) use sections::{validate_binarization_method, validate_output_format, validate_tesseract_oem, validate_tesseract_psm};
+pub(crate) use sections::{
+    validate_binarization_method, validate_output_format, validate_tesseract_oem, validate_tesseract_psm,
+};
 
 #[cfg(test)]
 mod tests {

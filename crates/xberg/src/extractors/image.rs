@@ -1239,7 +1239,8 @@ fn normalize_image_bytes_for_ocr(
     ) {
         Ok(result) => {
             let (new_width, new_height) = result.dimensions;
-            encode_rgb_as_png(&result.rgb_data, new_width as u32, new_height as u32).unwrap_or_else(|_| content.to_vec())
+            encode_rgb_as_png(&result.rgb_data, new_width as u32, new_height as u32)
+                .unwrap_or_else(|_| content.to_vec())
         }
         Err(_) => content.to_vec(),
     }

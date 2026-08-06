@@ -12,7 +12,9 @@
 //! - Data URI image extraction
 //!
 use super::annotation_utils::adjust_annotations_for_trim;
-use super::frontmatter_utils::{extract_frontmatter_with_warning, extract_metadata_from_yaml, extract_title_from_content};
+use super::frontmatter_utils::{
+    extract_frontmatter_with_warning, extract_metadata_from_yaml, extract_title_from_content,
+};
 use crate::Result;
 use crate::core::config::ExtractionConfig;
 use crate::extractors::security::SecurityBudget;

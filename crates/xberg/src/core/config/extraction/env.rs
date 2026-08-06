@@ -626,7 +626,10 @@ mod tests {
         config
             .apply_env_overrides()
             .expect("valid breadcrumb target should apply");
-        assert_eq!(config.chunking.as_ref().unwrap().breadcrumb_target, BreadcrumbTarget::Metadata);
+        assert_eq!(
+            config.chunking.as_ref().unwrap().breadcrumb_target,
+            BreadcrumbTarget::Metadata
+        );
         clear_breadcrumb_target_env();
     }
 

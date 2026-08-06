@@ -264,7 +264,10 @@ mod xlsx {
         assert_eq!(additional.get(PASSWORD_PROTECTED), Some(&serde_json::json!("false")));
         assert_eq!(additional.get(READ_ONLY_RECOMMENDED), Some(&serde_json::json!("true")));
         assert_eq!(additional.get(READ_ONLY_ENFORCED), Some(&serde_json::json!("false")));
-        assert_eq!(additional.get(LOCKED_FOR_ANNOTATIONS), Some(&serde_json::json!("false")));
+        assert_eq!(
+            additional.get(LOCKED_FOR_ANNOTATIONS),
+            Some(&serde_json::json!("false"))
+        );
     }
 
     #[tokio::test]

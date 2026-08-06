@@ -197,9 +197,9 @@ mod tests {
     /// touched those sections at all.
     #[test]
     fn test_merge_preserves_serde_skip_fields() {
-        use ahash::AHashSet;
         use crate::cancellation::CancellationToken;
         use crate::core::config::{AccelerationConfig, ExecutionProviderType, OcrConfig, PostProcessorConfig};
+        use ahash::AHashSet;
 
         let token = CancellationToken::new();
 

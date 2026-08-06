@@ -93,7 +93,11 @@ fn write_message(compound: &mut Cfb, base: &str, subject: &str, body: &str, send
     } else {
         EMBEDDED_PROPERTY_HEADER_LEN
     };
-    write_stream(compound, &format!("{base}/__properties_version1.0"), &vec![0u8; header_len]);
+    write_stream(
+        compound,
+        &format!("{base}/__properties_version1.0"),
+        &vec![0u8; header_len],
+    );
     write_unicode_string_prop(compound, base, PID_SUBJECT, subject);
     write_unicode_string_prop(compound, base, PID_BODY, body);
     if let Some((name, address)) = sender {
@@ -185,7 +189,10 @@ fn should_recover_embedded_message_subject_sender_and_body_as_child_document() {
 
     assert_eq!(child.path, "embedded_message_0.msg");
     assert_eq!(child.mime_type, MSG_MIME);
-    assert_eq!(child.result.metadata.subject.as_deref(), Some("Embedded message subject"));
+    assert_eq!(
+        child.result.metadata.subject.as_deref(),
+        Some("Embedded message subject")
+    );
 
     let Some(FormatMetadata::Email(email)) = child.result.metadata.format.as_ref() else {
         panic!("embedded message child must carry email metadata");
@@ -245,7 +252,13 @@ fn should_recover_attachments_of_the_embedded_message() {
     let mut compound = new_compound();
     write_message(&mut compound, "", "Outer message subject", "Outer body.", None);
     let embedded = attach_embedded_message(&mut compound, "", 0);
-    write_message(&mut compound, &embedded, "Embedded message subject", "Embedded body.", None);
+    write_message(
+        &mut compound,
+        &embedded,
+        "Embedded message subject",
+        "Embedded body.",
+        None,
+    );
     attach_file(&mut compound, &embedded, 0, "note.txt", b"Inner attachment body");
     let bytes = finish(compound);
 
@@ -282,11 +295,29 @@ fn should_stop_recursing_embedded_messages_at_the_nesting_depth_cap() {
     let mut compound = new_compound();
     write_message(&mut compound, "", "Outer message subject", "Outer body.", None);
     let level_one = attach_embedded_message(&mut compound, "", 0);
-    write_message(&mut compound, &level_one, "Level one subject", "Level one body text.", None);
+    write_message(
+        &mut compound,
+        &level_one,
+        "Level one subject",
+        "Level one body text.",
+        None,
+    );
     let level_two = attach_embedded_message(&mut compound, &level_one, 0);
-    write_message(&mut compound, &level_two, "Level two subject", "Level two body text.", None);
+    write_message(
+        &mut compound,
+        &level_two,
+        "Level two subject",
+        "Level two body text.",
+        None,
+    );
     let level_three = attach_embedded_message(&mut compound, &level_two, 0);
-    write_message(&mut compound, &level_three, "Level three subject", "Level three body text.", None);
+    write_message(
+        &mut compound,
+        &level_three,
+        "Level three subject",
+        "Level three body text.",
+        None,
+    );
     let bytes = finish(compound);
 
     let config = ExtractionConfig {
@@ -342,7 +373,13 @@ fn should_stop_recursing_embedded_messages_at_the_nesting_depth_cap() {
 #[test]
 fn should_extract_parent_and_warn_when_embedded_message_is_unreadable() {
     let mut compound = new_compound();
-    write_message(&mut compound, "", "Outer message subject", "Outer message body text.", None);
+    write_message(
+        &mut compound,
+        "",
+        "Outer message subject",
+        "Outer message body text.",
+        None,
+    );
     // Declare an embedded message, then omit the `__substg1.0_3701000D` storage
     // it points at — the shape a truncated or corrupted `.msg` produces.
     create_attachment_storage(&mut compound, "", 0, Some(ATTACH_METHOD_EMBEDDED_MSG));

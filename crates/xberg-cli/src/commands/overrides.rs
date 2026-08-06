@@ -7,12 +7,12 @@
 #[cfg(feature = "ocr-surface")]
 use anyhow::Context as _;
 use anyhow::{Result, bail};
-#[cfg(any(feature = "core-cli", feature = "analysis"))]
-use xberg::{BreadcrumbTarget, ChunkingConfig};
 #[cfg(feature = "analysis")]
 use xberg::LanguageDetectionConfig;
 #[cfg(feature = "ocr-surface")]
 use xberg::OcrConfig;
+#[cfg(any(feature = "core-cli", feature = "analysis"))]
+use xberg::{BreadcrumbTarget, ChunkingConfig};
 use xberg::{ExecutionProviderType, ExtractionConfig, LlmConfig};
 
 use xberg::JupyterCellRendering;

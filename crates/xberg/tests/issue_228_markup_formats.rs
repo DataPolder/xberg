@@ -182,7 +182,11 @@ async fn should_extract_asciidoc_table_as_structured_grid() {
         .await
         .expect("asciidoc extraction should succeed");
 
-    assert_eq!(result.tables.len(), 1, "the `|===` block must produce exactly one table");
+    assert_eq!(
+        result.tables.len(),
+        1,
+        "the `|===` block must produce exactly one table"
+    );
     assert_eq!(
         result.tables[0].cells,
         vec![
@@ -227,9 +231,13 @@ async fn should_extract_asciidoc_admonition_with_kind_and_body() {
 
 #[tokio::test]
 async fn should_populate_text_metadata_for_asciidoc() {
-    let result = extract_bytes_document(ASCIIDOC_SAMPLE.as_bytes(), "text/asciidoc", &ExtractionConfig::default())
-        .await
-        .expect("asciidoc extraction should succeed");
+    let result = extract_bytes_document(
+        ASCIIDOC_SAMPLE.as_bytes(),
+        "text/asciidoc",
+        &ExtractionConfig::default(),
+    )
+    .await
+    .expect("asciidoc extraction should succeed");
 
     let text_metadata = match result.metadata.format.as_ref().expect("format metadata") {
         xberg::types::FormatMetadata::Text(meta) => meta,
@@ -287,7 +295,9 @@ async fn should_resolve_asciidoc_x_alias_to_the_same_extractor() {
     let registry = registry.read();
 
     let canonical = registry.get("text/asciidoc").expect("text/asciidoc must be routable");
-    let alias = registry.get("text/x-asciidoc").expect("text/x-asciidoc must be routable");
+    let alias = registry
+        .get("text/x-asciidoc")
+        .expect("text/x-asciidoc must be routable");
     assert_eq!(canonical.name(), "asciidoc-extractor");
     assert_eq!(alias.name(), canonical.name());
 }
@@ -440,7 +450,10 @@ async fn should_populate_text_metadata_for_webvtt() {
     // Counts are over the extracted cue text only — never over the timing lines.
     // "Roger Bingham: We are in New York City\nSecond line one\nSecond line two\n
     //  Escaped & styled text" — 38 + 15 + 15 + 21 characters plus 3 newlines.
-    assert_eq!(text_metadata.line_count, 4, "3 cues, one of which has two payload lines");
+    assert_eq!(
+        text_metadata.line_count, 4,
+        "3 cues, one of which has two payload lines"
+    );
     assert_eq!(text_metadata.word_count, 18);
     assert_eq!(text_metadata.character_count, 92);
     assert_eq!(
@@ -513,10 +526,7 @@ fn should_have_no_registered_extractor_for_removed_markup_mime_types() {
     let registry = registry.read();
 
     for mime in REMOVED_MIME_TYPES {
-        assert!(
-            registry.get(mime).is_err(),
-            "{mime} must not resolve to any extractor"
-        );
+        assert!(registry.get(mime).is_err(), "{mime} must not resolve to any extractor");
     }
 }
 

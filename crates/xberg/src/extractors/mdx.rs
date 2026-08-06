@@ -6,7 +6,9 @@
 //!
 //! Requires the `mdx` feature (which includes `pulldown-cmark`).
 
-use super::frontmatter_utils::{extract_frontmatter_with_warning, extract_metadata_from_yaml, extract_title_from_content};
+use super::frontmatter_utils::{
+    extract_frontmatter_with_warning, extract_metadata_from_yaml, extract_title_from_content,
+};
 use super::markdown::{MarkdownExtractor, markdown_options};
 use crate::Result;
 use crate::core::config::ExtractionConfig;

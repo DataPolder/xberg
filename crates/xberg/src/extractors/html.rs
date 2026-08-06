@@ -794,7 +794,11 @@ mod tests {
         use crate::types::document_structure::AnnotationKind;
 
         let text = "caf\u{00e9}";
-        assert_eq!(text.len(), 5, "'café' must be 5 UTF-8 bytes for this test to be meaningful");
+        assert_eq!(
+            text.len(),
+            5,
+            "'café' must be 5 UTF-8 bytes for this test to be meaningful"
+        );
         assert!(!text.is_char_boundary(4), "byte 4 must split the 2-byte 'é' encoding");
 
         let annotations = vec![TextAnnotation {
@@ -812,7 +816,10 @@ mod tests {
 
         assert_eq!(doc.uris.len(), 1, "the URI must still be recorded");
         assert_eq!(doc.uris[0].url, "https://example.com");
-        assert_eq!(doc.uris[0].label, None, "label must be dropped, not sliced mid-codepoint");
+        assert_eq!(
+            doc.uris[0].label, None,
+            "label must be dropped, not sliced mid-codepoint"
+        );
 
         assert_eq!(doc.processing_warnings.len(), 1);
         assert_eq!(doc.processing_warnings[0].source, HTML_WARNING_SOURCE);

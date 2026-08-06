@@ -55,8 +55,7 @@ type NotebookContent = (
 /// than base64-decoded raster bytes) for outputs, though attachments always
 /// decode base64 regardless of mimetype.
 #[cfg(feature = "notebook")]
-const SUPPORTED_IMAGE_MIME_TYPES: &[&str] =
-    &["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"];
+const SUPPORTED_IMAGE_MIME_TYPES: &[&str] = &["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"];
 
 /// Jupyter Notebook extractor.
 ///
@@ -144,7 +143,14 @@ impl JupyterExtractor {
             metadata.insert(Cow::Borrowed("cells"), json!(cells_meta));
         }
 
-        Ok((extracted_content, metadata, images, notebook, warnings, attachment_images))
+        Ok((
+            extracted_content,
+            metadata,
+            images,
+            notebook,
+            warnings,
+            attachment_images,
+        ))
     }
 
     /// Extract a markdown/raw cell's `attachments` map into `images`.
@@ -595,7 +601,11 @@ impl JupyterExtractor {
 
         let plain_value = data.get("text/plain")?;
         let text = Self::extract_source(plain_value);
-        if text.is_empty() { None } else { Some(OutputRepresentation::Text(text)) }
+        if text.is_empty() {
+            None
+        } else {
+            Some(OutputRepresentation::Text(text))
+        }
     }
 
     /// Render an `error` output's exception name/value and full traceback as
@@ -985,9 +995,8 @@ mod tests {
 
     #[test]
     fn test_rendering_source_emits_code_without_outputs() {
-        let doc =
-            JupyterExtractor::build_internal_document(&rendering_sample(), JupyterCellRendering::Source, false)
-                .unwrap();
+        let doc = JupyterExtractor::build_internal_document(&rendering_sample(), JupyterCellRendering::Source, false)
+            .unwrap();
         assert!(
             doc.elements
                 .iter()
@@ -1002,9 +1011,8 @@ mod tests {
 
     #[test]
     fn test_rendering_outputs_emits_outputs_without_code() {
-        let doc =
-            JupyterExtractor::build_internal_document(&rendering_sample(), JupyterCellRendering::Outputs, false)
-                .unwrap();
+        let doc = JupyterExtractor::build_internal_document(&rendering_sample(), JupyterCellRendering::Outputs, false)
+            .unwrap();
         assert!(
             !doc.elements.iter().any(|e| matches!(e.kind, ElementKind::Code)),
             "outputs rendering suppresses the code source"
@@ -1022,8 +1030,7 @@ mod tests {
     #[test]
     fn test_rendering_both_emits_code_and_outputs() {
         let doc =
-            JupyterExtractor::build_internal_document(&rendering_sample(), JupyterCellRendering::Both, false)
-                .unwrap();
+            JupyterExtractor::build_internal_document(&rendering_sample(), JupyterCellRendering::Both, false).unwrap();
         assert!(
             doc.elements.iter().any(|e| matches!(e.kind, ElementKind::Code)),
             "both rendering keeps the code source"
@@ -1045,8 +1052,7 @@ mod tests {
         }"##,
         )
         .unwrap();
-        let doc =
-            JupyterExtractor::build_internal_document(&notebook, JupyterCellRendering::Both, false).unwrap();
+        let doc = JupyterExtractor::build_internal_document(&notebook, JupyterCellRendering::Both, false).unwrap();
         assert!(
             doc.elements
                 .iter()

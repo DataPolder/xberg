@@ -71,7 +71,9 @@ fn build_pdf_with_malformed_font_resource() -> Vec<u8> {
          {off4:010} 00000 n \r\n\
          {off5:010} 00000 n \r\n"
     ));
-    push_str!(format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref_off}\n%%EOF\n"));
+    push_str!(format!(
+        "trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref_off}\n%%EOF\n"
+    ));
 
     pdf
 }
@@ -133,7 +135,9 @@ fn build_pdf_with_resolvable_font() -> Vec<u8> {
          {off4:010} 00000 n \r\n\
          {off5:010} 00000 n \r\n"
     ));
-    push_str!(format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref_off}\n%%EOF\n"));
+    push_str!(format!(
+        "trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref_off}\n%%EOF\n"
+    ));
 
     pdf
 }
@@ -165,11 +169,12 @@ fn test_dropped_glyphs_from_malformed_font_produce_one_deduped_warning() {
 
     let pdf = build_pdf_with_malformed_font_resource();
 
-    let first_png =
-        render_pdf_page_to_png(&pdf, 0, Some(150), None).expect("page with a malformed font resource must still render");
+    let first_png = render_pdf_page_to_png(&pdf, 0, Some(150), None)
+        .expect("page with a malformed font resource must still render");
     assert!(!first_png.is_empty(), "renderer must still produce page bytes");
 
-    let second_png = render_pdf_page_to_png(&pdf, 0, Some(150), None).expect("re-rendering the same page must also succeed");
+    let second_png =
+        render_pdf_page_to_png(&pdf, 0, Some(150), None).expect("re-rendering the same page must also succeed");
     assert!(!second_png.is_empty(), "renderer must still produce page bytes");
 
     let warnings = take_pdf_oxide_render_warnings();
