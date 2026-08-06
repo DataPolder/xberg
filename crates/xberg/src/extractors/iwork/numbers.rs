@@ -65,8 +65,10 @@ impl Plugin for NumbersExtractor {
 
 /// Parsed Numbers tables and optional metadata.
 struct NumbersData {
-    /// Tables from every document sheet, in display order.
-    tables: Vec<(String, Vec<Vec<String>>)>,
+    /// Tables from every document sheet, in display order. The sheet name is
+    /// `None` when no sheet context is available (e.g. the legacy text
+    /// fallback, which has no notion of sheets).
+    tables: Vec<(Option<String>, String, Vec<Vec<String>>)>,
     /// Metadata extracted from the ZIP archive.
     metadata: crate::types::metadata::Metadata,
     /// Warnings for IWA members that failed to parse (#106).
@@ -264,17 +266,14 @@ fn parse_numbers_structured(
     let sheets = document_sheets(&objects, budget, &mut warnings)?;
     let mut tables = Vec::new();
     for sheet in sheets {
+        // Numbers sheet names are otherwise dropped entirely (#111). Carry the sheet name
+        // alongside each table so rendering can surface it as its own heading, matching how
+        // the xlsx/ods path (`extraction/excel.rs`) headings a sheet separately from its
+        // table content rather than folding it into the table's title text.
+        let sheet_name = (!sheet.name.is_empty()).then_some(sheet.name);
         for table_id in sheet.table_ids {
             if let Some((table_name, cells)) = parse_table(table_id, &objects, budget, &mut warnings)? {
-                // Numbers sheet names are otherwise dropped entirely (#111); prefixing the
-                // table heading is the minimal way to surface them without reshaping the
-                // document/table output contract every other extractor path relies on.
-                let name = if sheet.name.is_empty() {
-                    table_name
-                } else {
-                    format!("{} / {table_name}", sheet.name)
-                };
-                tables.push((name, cells));
+                tables.push((sheet_name.clone(), table_name, cells));
             }
         }
     }
@@ -320,10 +319,10 @@ fn parse_numbers_legacy(
 
     let mut tables = Vec::new();
     if !table_cells.is_empty() {
-        tables.push(("Sheet Data".to_string(), table_cells));
+        tables.push((None, "Sheet Data".to_string(), table_cells));
     }
     if !other_cells.is_empty() {
-        tables.push(("Document Info".to_string(), other_cells));
+        tables.push((None, "Document Info".to_string(), other_cells));
     }
     Ok(NumbersData {
         tables,
@@ -1388,12 +1387,26 @@ fn build_numbers_internal_document(data: &NumbersData) -> InternalDocument {
         builder.set_metadata(data.metadata.clone());
     }
 
-    for (table_name, cells) in &data.tables {
+    // Sheet names are their own heading, separate from the table heading beneath them —
+    // matching the xlsx/ods convention (see `extraction/excel.rs`) of headinging a sheet
+    // independently of its content rather than folding the sheet name into a table title.
+    let mut last_sheet_name: Option<&str> = None;
+    for (sheet_name, table_name, cells) in &data.tables {
         if cells.is_empty() {
             continue;
         }
 
-        builder.push_heading(1, table_name, None, None);
+        match sheet_name.as_deref() {
+            Some(name) if last_sheet_name != Some(name) => {
+                builder.push_heading(1, name, None, None);
+                last_sheet_name = Some(name);
+            }
+            Some(_) => {}
+            None => last_sheet_name = None,
+        }
+
+        let table_heading_level = if sheet_name.is_some() { 2 } else { 1 };
+        builder.push_heading(table_heading_level, table_name, None, None);
         builder.push_table_from_cells(cells, None, None);
     }
 
@@ -1417,6 +1430,72 @@ mod tests {
         let extractor = NumbersExtractor::new();
         let types = extractor.supported_mime_types();
         assert!(types.contains(&"application/x-iwork-numbers-sffnumbers"));
+    }
+
+    #[test]
+    fn should_warn_when_sheet_has_non_table_drawables() {
+        // #111: the only .numbers fixture has zero non-table drawables (verified: no
+        // shape/image/text-box archive types appear in its Document/Sheet objects), so this
+        // exercises the byte-level warning path directly rather than a real document. ~keep
+        let mut warnings = Vec::new();
+
+        push_non_table_drawable_warning(&mut warnings, "Sheet1", &[42, 7]);
+
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("Sheet1"));
+        assert!(warnings[0].message.contains("2 non-table drawable"));
+        assert!(warnings[0].message.contains("42, 7"));
+    }
+
+    #[test]
+    fn should_not_warn_when_sheet_has_no_non_table_drawables() {
+        let mut warnings = Vec::new();
+
+        push_non_table_drawable_warning(&mut warnings, "Sheet1", &[]);
+
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn should_warn_when_legacy_cell_has_formula_flag() {
+        // #110: the fixture corpus has no .numbers file with a real formula cell (verified by
+        // inspecting its IWA members), so this exercises the byte-level warning path directly. ~keep
+        let mut warnings = Vec::new();
+        let fields = OldCellFields {
+            has_formula: true,
+            ..Default::default()
+        };
+
+        push_legacy_formula_comment_warning(&mut warnings, "Sheet1", &fields);
+
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("legacy-format formula"));
+        assert!(warnings[0].message.contains("Sheet1"));
+    }
+
+    #[test]
+    fn should_warn_when_legacy_cell_has_comment_flag() {
+        // #110: no real fixture with a cell comment exists; see the formula test above. ~keep
+        let mut warnings = Vec::new();
+        let fields = OldCellFields {
+            has_comment: true,
+            ..Default::default()
+        };
+
+        push_legacy_formula_comment_warning(&mut warnings, "Sheet1", &fields);
+
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("legacy-format comment"));
+    }
+
+    #[test]
+    fn should_not_warn_when_legacy_cell_has_neither_formula_nor_comment() {
+        let mut warnings = Vec::new();
+        let fields = OldCellFields::default();
+
+        push_legacy_formula_comment_warning(&mut warnings, "Sheet1", &fields);
+
+        assert!(warnings.is_empty());
     }
 
     #[test]
@@ -1707,8 +1786,9 @@ mod tests {
         let data = parse_numbers(&archive, &limits).unwrap();
 
         assert_eq!(data.tables.len(), 1);
-        assert_eq!(data.tables[0].0, "Sheet Data");
-        assert_eq!(data.tables[0].1, vec![vec!["fresh fallback".to_string()]]);
+        assert_eq!(data.tables[0].0, None);
+        assert_eq!(data.tables[0].1, "Sheet Data");
+        assert_eq!(data.tables[0].2, vec![vec!["fresh fallback".to_string()]]);
     }
 
     fn v5_cell(cell_type: u8, flag: u32, value: &[u8]) -> Vec<u8> {
