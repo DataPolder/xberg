@@ -100,6 +100,22 @@ pub enum JsonNode {
         #[serde(skip_serializing_if = "Option::is_none")]
         id: Option<String>,
     },
+    /// A reviewer/editor comment reference marker occurring in body text (e.g.
+    /// DOCX comments). Distinct from `FootnoteRef` (xberg-io/xberg#300).
+    #[serde(rename = "comment_ref")]
+    CommentRef {
+        /// Anchor key linking this reference to its definition.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
+    },
+    /// A reviewer/editor comment definition (the comment body). Distinct from
+    /// `FootnoteDefinition` (xberg-io/xberg#300).
+    #[serde(rename = "comment_definition")]
+    CommentDefinition {
+        text: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
+    },
     /// A citation or bibliographic reference.
     #[serde(rename = "citation")]
     Citation {
@@ -357,6 +373,24 @@ fn build_json_document(doc: &InternalDocument) -> JsonDocument {
                 push_to_current(&mut root_body, &mut section_stack, &mut open_blockquote, node);
             }
 
+            ElementKind::CommentRef => {
+                // Not tracked by `FootnoteCollector`, so there is no sequential number —
+                // the anchor id is the only stable link to the definition.
+                let node = JsonNode::CommentRef {
+                    id: elem.anchor.clone(),
+                };
+                push_to_current(&mut root_body, &mut section_stack, &mut open_blockquote, node);
+            }
+
+            ElementKind::CommentDefinition => {
+                flush_list(&mut open_list, &mut root_body, &mut section_stack, &mut open_blockquote);
+                let node = JsonNode::CommentDefinition {
+                    text: elem.text.clone(),
+                    id: elem.anchor.clone(),
+                };
+                push_to_current(&mut root_body, &mut section_stack, &mut open_blockquote, node);
+            }
+
             ElementKind::Citation => {
                 flush_list(&mut open_list, &mut root_body, &mut section_stack, &mut open_blockquote);
                 let node = JsonNode::Citation {
@@ -458,6 +492,18 @@ fn build_json_document(doc: &InternalDocument) -> JsonDocument {
     for elem in &doc.elements {
         if elem.kind == ElementKind::FootnoteDefinition && !is_body_element(elem) {
             root_body.push(JsonNode::FootnoteDefinition {
+                text: elem.text.clone(),
+                id: elem.anchor.clone(),
+            });
+        }
+    }
+
+    // Comment definitions (#300) live on `ContentLayer::Footnote` too, so they hit
+    // the same `is_body_element` filter as footnote definitions above — collect
+    // them the same way instead of silently dropping the comment body.
+    for elem in &doc.elements {
+        if elem.kind == ElementKind::CommentDefinition && !is_body_element(elem) {
+            root_body.push(JsonNode::CommentDefinition {
                 text: elem.text.clone(),
                 id: elem.anchor.clone(),
             });

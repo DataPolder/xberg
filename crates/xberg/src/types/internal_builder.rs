@@ -259,6 +259,38 @@ impl InternalDocumentBuilder {
         )
     }
 
+    /// Push a comment reference marker (e.g. a DOCX reviewer comment anchor).
+    ///
+    /// Creates a `CommentRef` element with `anchor = key` and also records
+    /// a `Relationship` with `RelationshipTarget::Key(key)` so the derivation
+    /// step can resolve it to the definition. Mirrors [`Self::push_footnote_ref`]
+    /// but keeps comments distinguishable from footnotes in `NodeContent`
+    /// (xberg-io/xberg#300).
+    pub fn push_comment_ref(&mut self, marker: &str, key: &str, page: Option<u32>) -> u32 {
+        let idx = self.push_simple(ElementKind::CommentRef, marker, page, None, Vec::new(), None, Some(key));
+        self.doc.push_relationship(Relationship {
+            source: idx,
+            target: RelationshipTarget::Key(key.to_string()),
+            kind: RelationshipKind::FootnoteReference,
+        });
+        idx
+    }
+
+    /// Push a comment definition element with `anchor = key`.
+    ///
+    /// Mirrors [`Self::push_footnote_definition`]; see [`Self::push_comment_ref`].
+    pub fn push_comment_definition(&mut self, text: &str, key: &str, page: Option<u32>) -> u32 {
+        self.push_simple(
+            ElementKind::CommentDefinition,
+            text,
+            page,
+            None,
+            Vec::new(),
+            None,
+            Some(key),
+        )
+    }
+
     /// Push a citation / bibliographic reference element.
     pub fn push_citation(&mut self, text: &str, key: &str, page: Option<u32>) -> u32 {
         self.push_simple(ElementKind::Citation, text, page, None, Vec::new(), None, Some(key))

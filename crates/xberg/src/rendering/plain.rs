@@ -127,6 +127,8 @@ pub(crate) fn render_plain(doc: &InternalDocument) -> String {
             }
             ElementKind::FootnoteRef => {}
             ElementKind::FootnoteDefinition => {}
+            ElementKind::CommentRef => {}
+            ElementKind::CommentDefinition => {}
             ElementKind::Citation => {
                 if !elem.text.is_empty() {
                     out.push_str(&elem.text);
@@ -211,6 +213,23 @@ pub(crate) fn render_plain(doc: &InternalDocument) -> String {
         out.push('\n');
         for elem in &doc.elements {
             if elem.kind == ElementKind::FootnoteDefinition && elem.layer == ContentLayer::Footnote {
+                out.push_str(&elem.text);
+                out.push_str("\n\n");
+            }
+        }
+    }
+
+    // Comment definitions (#300) are furniture, not body flow, just like footnote
+    // definitions — surface them the same way so the comment body is not silently
+    // dropped now that it no longer shares `ElementKind::FootnoteDefinition`.
+    let has_comments = doc
+        .elements
+        .iter()
+        .any(|e| e.kind == ElementKind::CommentDefinition && e.layer == ContentLayer::Footnote);
+    if has_comments {
+        out.push('\n');
+        for elem in &doc.elements {
+            if elem.kind == ElementKind::CommentDefinition && elem.layer == ContentLayer::Footnote {
                 out.push_str(&elem.text);
                 out.push_str("\n\n");
             }

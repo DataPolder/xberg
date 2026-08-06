@@ -366,6 +366,26 @@ fn render_elements(doc: &InternalDocument, p: &str, buf: &mut String) {
                 )
                 .unwrap();
             }
+            ElementKind::CommentDefinition => {
+                let anchor = elem.anchor.as_deref().unwrap_or("");
+                write!(
+                    buf,
+                    r#"<aside class="{p}comment" id="fn-{}">{}</aside>"#,
+                    esc(anchor),
+                    render_inline(doc, elem, p)
+                )
+                .unwrap();
+            }
+            ElementKind::CommentRef => {
+                let anchor = elem.anchor.as_deref().unwrap_or("");
+                write!(
+                    buf,
+                    r##"<sup class="{p}comment-ref"><a href="#fn-{}">{}</a></sup>"##,
+                    esc(anchor),
+                    esc(&elem.text)
+                )
+                .unwrap();
+            }
             ElementKind::Citation => {
                 write!(buf, r#"<cite class="{p}citation">{}</cite>"#, esc(&elem.text)).unwrap();
             }

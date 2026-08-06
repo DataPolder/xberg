@@ -235,12 +235,12 @@ fn build_internal_document(
                         }
                     }
 
-                    // Comment reference markers (#82). There's no dedicated
-                    // `NodeContent`/`ElementKind::Comment` variant, so this reuses the
-                    // footnote-ref/-definition machinery: structurally a comment is
-                    // the same shape as a footnote (a marker in the body, a
-                    // definition elsewhere), just sourced from `word/comments.xml`
-                    // instead of `word/footnotes.xml`.
+                    // Comment reference markers (#82, #300). Structurally a comment is
+                    // the same shape as a footnote (a marker in the body, a definition
+                    // elsewhere), sourced from `word/comments.xml` instead of
+                    // `word/footnotes.xml`, but it is routed through the dedicated
+                    // `CommentRef`/`NodeContent::Comment` machinery so a consumer can
+                    // tell a reviewer comment apart from an authored footnote.
                     let mut search_start = 0;
                     while let Some(start) = text[search_start..].find("[cmt:") {
                         let abs_start = search_start + start;
@@ -248,7 +248,7 @@ fn build_internal_document(
                             let comment_id = &text[abs_start + 5..abs_start + end];
                             if !comment_id.is_empty() {
                                 let key = format!("cmt{}", comment_id);
-                                builder.push_footnote_ref(comment_id, &key, None);
+                                builder.push_comment_ref(comment_id, &key, None);
                             }
                             search_start = abs_start + end + 1;
                         } else {
@@ -411,8 +411,7 @@ fn build_internal_document(
         }
     }
 
-    // Comment definitions (#82) — see the comment-reference scan above for why
-    // these reuse the footnote-definition machinery instead of a dedicated type.
+    // Comment definitions (#82, #300) — see the comment-reference scan above.
     for comment in &doc.comments {
         let text: String = comment
             .paragraphs
@@ -422,7 +421,7 @@ fn build_internal_document(
             .join(" ");
         if !text.is_empty() {
             let key = format!("cmt{}", comment.id);
-            let idx = builder.push_footnote_definition(&text, &key, None);
+            let idx = builder.push_comment_definition(&text, &key, None);
             builder.set_layer(idx, ContentLayer::Footnote);
         }
     }
@@ -2984,10 +2983,102 @@ mod tests {
         let has_comment_definition = doc
             .nodes
             .iter()
-            .any(|n| matches!(&n.content, NodeContent::Footnote { text } if text.contains("This needs revision.")));
+            .any(|n| matches!(&n.content, NodeContent::Comment { text } if text.contains("This needs revision.")));
         assert!(
             has_comment_definition,
             "comment body should be joined to the reference; nodes: {:?}",
+            doc.nodes
+        );
+    }
+
+    /// Regression for #300: a DOCX reviewer comment must produce
+    /// `NodeContent::Comment`, not `NodeContent::Footnote` — the two share the same
+    /// marker/definition machinery internally, but a consumer needs to be able to
+    /// tell them apart. This also proves the fix does not over-fire: a real
+    /// footnote in the same document must still surface as `NodeContent::Footnote`.
+    #[tokio::test]
+    async fn test_issue_300_docx_comment_produces_comment_not_footnote_node() {
+        let document_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:commentRangeStart w:id="0"/>
+      <w:r><w:t>flagged text</w:t></w:r>
+      <w:commentRangeEnd w:id="0"/>
+      <w:r><w:commentReference w:id="0"/></w:r>
+    </w:p>
+    <w:p><w:r><w:t>See note</w:t></w:r><w:r><w:footnoteReference w:id="2"/></w:r></w:p>
+  </w:body>
+</w:document>"#;
+        let comments_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:comment w:id="0" w:author="Alice"><w:p><w:r><w:t>This needs revision.</w:t></w:r></w:p></w:comment>
+</w:comments>"#;
+        let footnotes_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:footnote w:id="0"><w:p><w:r><w:t>separator</w:t></w:r></w:p></w:footnote>
+  <w:footnote w:id="1"><w:p><w:r><w:t>continuation</w:t></w:r></w:p></w:footnote>
+  <w:footnote w:id="2"><w:p><w:r><w:t>This is a real footnote.</w:t></w:r></w:p></w:footnote>
+</w:footnotes>"#;
+
+        let data = build_test_docx_with_files(
+            document_xml,
+            &[
+                ("word/comments.xml", comments_xml),
+                ("word/footnotes.xml", footnotes_xml),
+            ],
+        );
+        let extractor = DocxExtractor::new();
+        let config = ExtractionConfig {
+            include_document_structure: true,
+            ..Default::default()
+        };
+        let internal_doc = extractor
+            .extract_content(
+                &data,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                &config,
+            )
+            .await
+            .expect("extraction should succeed");
+        let result = crate::extraction::derive::derive_extraction_result(
+            internal_doc,
+            true,
+            crate::core::config::OutputFormat::Plain,
+        );
+
+        let doc = result.document.as_ref().expect("DocumentStructure should be present");
+
+        let comment_node = doc
+            .nodes
+            .iter()
+            .find(|n| matches!(&n.content, NodeContent::Comment { text } if text.contains("This needs revision.")));
+        assert_eq!(
+            comment_node.map(|n| &n.content),
+            Some(&NodeContent::Comment {
+                text: "This needs revision.".to_string()
+            }),
+            "a DOCX reviewer comment must produce NodeContent::Comment; nodes: {:?}",
+            doc.nodes
+        );
+
+        let footnote_node = doc.nodes.iter().find(
+            |n| matches!(&n.content, NodeContent::Footnote { text } if text.contains("This is a real footnote.")),
+        );
+        assert_eq!(
+            footnote_node.map(|n| &n.content),
+            Some(&NodeContent::Footnote {
+                text: "This is a real footnote.".to_string()
+            }),
+            "a real footnote must still produce NodeContent::Footnote (no over-fire); nodes: {:?}",
+            doc.nodes
+        );
+
+        assert!(
+            !doc.nodes
+                .iter()
+                .any(|n| matches!(&n.content, NodeContent::Footnote { text } if text.contains("This needs revision."))),
+            "the comment body must not also surface as a Footnote node; nodes: {:?}",
             doc.nodes
         );
     }

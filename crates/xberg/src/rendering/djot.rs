@@ -139,6 +139,8 @@ pub(crate) fn render_djot(doc: &InternalDocument) -> String {
                 }
             }
             ElementKind::FootnoteDefinition => {}
+            ElementKind::CommentRef => {}
+            ElementKind::CommentDefinition => {}
             ElementKind::Citation => {}
             ElementKind::PageBreak => {}
             ElementKind::Slide { number: _ } => {
@@ -241,6 +243,20 @@ pub(crate) fn render_djot(doc: &InternalDocument) -> String {
 
     for elem in &doc.elements {
         if elem.kind == ElementKind::Citation {
+            let key = elem.anchor.as_deref().unwrap_or("?");
+            out.push_str("[^");
+            out.push_str(key);
+            out.push_str("]: ");
+            out.push_str(&elem.text);
+            out.push_str("\n\n");
+        }
+    }
+
+    // Comment definitions (#300) aren't tracked by `FootnoteCollector`, so surface
+    // them the same way `Citation` is above — keyed by anchor rather than assigned
+    // a sequential number — instead of silently dropping the comment body.
+    for elem in &doc.elements {
+        if elem.kind == ElementKind::CommentDefinition {
             let key = elem.anchor.as_deref().unwrap_or("?");
             out.push_str("[^");
             out.push_str(key);

@@ -408,6 +408,17 @@ pub enum NodeContent {
         text: String,
     },
 
+    /// Reviewer/editor comment content (e.g. DOCX comments).
+    ///
+    /// Distinct from [`NodeContent::Footnote`] (xberg-io/xberg#300): comments and
+    /// footnotes both reach the internal document via a marker/definition pair, but
+    /// a consumer needs to tell a reviewer comment apart from an authored footnote.
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
+    Comment {
+        /// The comment body text.
+        text: String,
+    },
+
     /// Logical grouping container (section, key-value area).
     ///
     /// `heading_level` + `heading_text` capture the section heading directly
@@ -503,6 +514,7 @@ impl NodeContent {
             Self::Quote => "quote",
             Self::Formula { .. } => "formula",
             Self::Footnote { .. } => "footnote",
+            Self::Comment { .. } => "comment",
             Self::Group { .. } => "group",
             Self::PageBreak => "page_break",
             Self::Slide { .. } => "slide",
@@ -647,8 +659,8 @@ impl NodeContent {
     /// Get the primary text content of this node, if it carries text.
     ///
     /// Text-carrying nodes: `Title`, `Heading`, `Paragraph`, `ListItem`, `Code`,
-    /// `Formula`, `Footnote`, `Citation` (returns text), `RawBlock` (returns content),
-    /// `DefinitionItem` (returns term only, not definition).
+    /// `Formula`, `Footnote`, `Comment`, `Citation` (returns text), `RawBlock` (returns
+    /// content), `DefinitionItem` (returns term only, not definition).
     ///
     /// Container/marker nodes return `None`: `List`, `Quote`, `Group`, `PageBreak`,
     /// `Slide`, `DefinitionList`, `Admonition`, `MetadataBlock`.
@@ -661,6 +673,7 @@ impl NodeContent {
             | NodeContent::Code { text, .. }
             | NodeContent::Formula { text }
             | NodeContent::Footnote { text }
+            | NodeContent::Comment { text }
             | NodeContent::Citation { text, .. }
             | NodeContent::RawBlock { content: text, .. } => Some(text),
             NodeContent::DefinitionItem { term, .. } => Some(term),
@@ -704,6 +717,7 @@ impl NodeContent {
             | NodeContent::Code { text, .. }
             | NodeContent::Formula { text }
             | NodeContent::Footnote { text }
+            | NodeContent::Comment { text }
             | NodeContent::Citation { text, .. }
             | NodeContent::RawBlock { content: text, .. } => redact(text),
             NodeContent::DefinitionItem { term, definition } => {
@@ -758,6 +772,7 @@ impl NodeContent {
             NodeContent::Quote => "quote",
             NodeContent::Formula { .. } => "formula",
             NodeContent::Footnote { .. } => "footnote",
+            NodeContent::Comment { .. } => "comment",
             NodeContent::Group { .. } => "group",
             NodeContent::PageBreak => "page_break",
             NodeContent::Slide { .. } => "slide",

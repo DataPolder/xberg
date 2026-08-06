@@ -596,6 +596,11 @@ pub enum ElementKind {
     FootnoteDefinition,
     /// Footnote reference marker in body text.
     FootnoteRef,
+    /// Comment content (the definition, not the reference marker). See
+    /// [`NodeContent::Comment`](super::document_structure::NodeContent::Comment).
+    CommentDefinition,
+    /// Comment reference marker in body text.
+    CommentRef,
     /// Citation or bibliographic reference.
     Citation,
     /// Presentation slide container.
@@ -662,6 +667,8 @@ impl ElementKind {
             Self::Formula => "formula",
             Self::FootnoteDefinition => "footnote_definition",
             Self::FootnoteRef => "footnote_ref",
+            Self::CommentDefinition => "comment_definition",
+            Self::CommentRef => "comment_ref",
             Self::Citation => "citation",
             Self::Slide { .. } => "slide",
             Self::DefinitionTerm => "definition_term",

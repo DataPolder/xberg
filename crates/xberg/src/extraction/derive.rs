@@ -36,7 +36,7 @@ const MAX_REPORTED_UNRESOLVED_KEYS: usize = 10;
 pub(crate) fn resolve_relationships(doc: &mut InternalDocument) {
     let mut anchor_map: AHashMap<&str, u32> = AHashMap::new();
     for (idx, elem) in doc.elements.iter().enumerate() {
-        if matches!(elem.kind, ElementKind::FootnoteRef) {
+        if matches!(elem.kind, ElementKind::FootnoteRef | ElementKind::CommentRef) {
             continue;
         }
         if let Some(anchor) = elem.anchor.as_deref() {
@@ -120,7 +120,7 @@ fn derive_document_structure_inner(doc: &mut InternalDocument) -> DocumentStruct
                 close_container(&mut stack, &ds, doc.elements[elem_idx].kind);
                 continue;
             }
-            ElementKind::FootnoteRef => {
+            ElementKind::FootnoteRef | ElementKind::CommentRef => {
                 continue;
             }
             _ => {}
@@ -391,6 +391,9 @@ fn element_to_node_content(
         ElementKind::FootnoteDefinition => NodeContent::Footnote {
             text: std::mem::take(&mut elem.text),
         },
+        ElementKind::CommentDefinition => NodeContent::Comment {
+            text: std::mem::take(&mut elem.text),
+        },
         ElementKind::Citation => NodeContent::Citation {
             key: elem.anchor.clone().unwrap_or_default(),
             text: std::mem::take(&mut elem.text),
@@ -473,7 +476,7 @@ fn element_to_node_content(
             level,
             text: std::mem::take(&mut elem.text),
         },
-        ElementKind::FootnoteRef => NodeContent::Paragraph {
+        ElementKind::FootnoteRef | ElementKind::CommentRef => NodeContent::Paragraph {
             text: std::mem::take(&mut elem.text),
         },
         ElementKind::ListEnd | ElementKind::QuoteEnd | ElementKind::GroupEnd => {
