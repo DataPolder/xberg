@@ -26,6 +26,8 @@ pub mod ner;
 pub mod overrides;
 #[cfg(any(feature = "api", feature = "mcp"))]
 pub mod server;
+#[cfg(feature = "tree-sitter")]
+pub mod tree_sitter;
 
 #[cfg(any(
     feature = "embeddings",

@@ -95,6 +95,57 @@ impl CodeExtractor {
         }
     }
 
+    /// Build the `PackConfig` to apply to TSLP's grammar cache before parsing,
+    /// or `None` when `TreeSitterConfig::cache_dir` is unset.
+    ///
+    /// `languages`/`groups` are deliberately left out of this `PackConfig`:
+    /// they are pre-download hints for the CLI's `tree-sitter download`/`cache
+    /// warm` commands (see `xberg-cli/src/commands/tree_sitter.rs`), not
+    /// per-file gates. Extraction always operates on a single, already
+    /// auto-detected `language` (from the file extension, shebang, or
+    /// content), so there is nothing for a language/group allowlist to filter
+    /// at this call site — `tslp::process` downloads that one language
+    /// on demand regardless.
+    ///
+    /// Unavailable on wasm32 (see `configure_grammar_cache_dir` below) so it
+    /// is gated the same way to avoid a dead-code warning on that target.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn grammar_cache_pack_config(
+        ts_config: Option<&crate::core::config::TreeSitterConfig>,
+    ) -> Option<tslp::PackConfig> {
+        let cache_dir = ts_config.and_then(|c| c.cache_dir.clone())?;
+        Some(tslp::PackConfig {
+            cache_dir: Some(cache_dir),
+            languages: None,
+            groups: None,
+        })
+    }
+
+    /// Point TSLP's on-demand grammar downloader at `TreeSitterConfig::cache_dir`
+    /// before parsing, so a configured cache directory is honoured at
+    /// extraction time too — not just by the CLI `tree-sitter download`/`cache
+    /// warm` commands.
+    ///
+    /// A `None` `cache_dir` is a no-op: TSLP keeps using its own default
+    /// location. Unavailable on wasm32, where TSLP's `download`/`configure`
+    /// API does not exist (grammars are compiled in rather than fetched at
+    /// runtime).
+    #[cfg(not(target_arch = "wasm32"))]
+    fn configure_grammar_cache_dir(ts_config: Option<&crate::core::config::TreeSitterConfig>) -> Result<()> {
+        let Some(pack_config) = Self::grammar_cache_pack_config(ts_config) else {
+            return Ok(());
+        };
+        tslp::configure(&pack_config).map_err(|e| crate::XbergError::Cache {
+            message: format!("failed to configure tree-sitter grammar cache directory: {e}"),
+            source: None,
+        })
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn configure_grammar_cache_dir(_ts_config: Option<&crate::core::config::TreeSitterConfig>) -> Result<()> {
+        Ok(())
+    }
+
     /// Extract from source text with a known language.
     fn extract_with_language(source: &str, language: &str, config: &ExtractionConfig) -> Result<InternalDocument> {
         let ts_config = config.tree_sitter.as_ref();
@@ -102,6 +153,8 @@ impl CodeExtractor {
         if !ts_config.map(|c| c.enabled).unwrap_or(true) {
             return Ok(Self::build_raw_document(source, language));
         }
+
+        Self::configure_grammar_cache_dir(ts_config)?;
 
         let process_config = Self::build_process_config(language, config);
         let content_mode = ts_config.map(|c| c.process.content_mode).unwrap_or_default();
@@ -313,6 +366,48 @@ fn convert_data_node(node: &tslp::DataNode) -> CodeDataNode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
+    use std::path::PathBuf;
+
+    /// `grammar_cache_pack_config` must return `None` when no config is
+    /// supplied at all — there is nothing to configure.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn test_grammar_cache_pack_config_none_when_no_tree_sitter_config() {
+        assert!(CodeExtractor::grammar_cache_pack_config(None).is_none());
+    }
+
+    /// `grammar_cache_pack_config` must return `None` when `cache_dir` is
+    /// unset, even if a `TreeSitterConfig` is present — this is the "no
+    /// override configured" case that must be a pure no-op.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn test_grammar_cache_pack_config_none_when_cache_dir_unset() {
+        let config = crate::core::config::TreeSitterConfig::default();
+        assert!(CodeExtractor::grammar_cache_pack_config(Some(&config)).is_none());
+    }
+
+    /// `grammar_cache_pack_config` must carry `TreeSitterConfig::cache_dir`
+    /// into the resulting `PackConfig` unchanged, with `languages`/`groups`
+    /// left empty (those are CLI pre-download hints, not extraction-time
+    /// gates — see the doc comment on `grammar_cache_pack_config`).
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn test_grammar_cache_pack_config_carries_configured_cache_dir() {
+        let config = crate::core::config::TreeSitterConfig {
+            cache_dir: Some(PathBuf::from("/tmp/my-grammars")),
+            languages: Some(vec!["python".to_string()]),
+            groups: Some(vec!["web".to_string()]),
+            ..Default::default()
+        };
+
+        let pack_config =
+            CodeExtractor::grammar_cache_pack_config(Some(&config)).expect("cache_dir set must produce a PackConfig");
+
+        assert_eq!(pack_config.cache_dir, Some(PathBuf::from("/tmp/my-grammars")));
+        assert!(pack_config.languages.is_none());
+        assert!(pack_config.groups.is_none());
+    }
 
     /// Disabled tree-sitter config must skip TSLP processing entirely and emit the
     /// raw source as a single code element — this path must not call
