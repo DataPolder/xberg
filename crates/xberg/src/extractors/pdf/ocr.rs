@@ -226,7 +226,10 @@ impl NativeTextStats {
     }
 
     /// Convenience method using default thresholds.
-    #[cfg(test)]
+    // Gated to `ocr` to match its only callers, which live in the
+    // `#[cfg(all(test, feature = "ocr"))]` test module below. `ocr-pipeline`
+    // alone (pulled in by `liter-llm`) compiles this file but not them. ~keep
+    #[cfg(all(test, feature = "ocr"))]
     pub(crate) fn from(text: &str) -> Self {
         Self::compute(text, &OcrQualityThresholds::default())
     }
@@ -488,7 +491,9 @@ pub(crate) fn evaluate_per_page_ocr(
 ///
 /// `page_indices` are 0-indexed. Only the requested pages are rendered,
 /// returned as `(page_index, image)` pairs.
-#[cfg(all(test, any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+// Gated to `ocr` rather than `any(ocr, ocr-pipeline)` to match its only
+// callers in the `#[cfg(all(test, feature = "ocr"))]` test module. ~keep
+#[cfg(all(test, feature = "ocr", feature = "pdf"))]
 pub(crate) fn render_selected_pages_for_ocr(
     content: &[u8],
     page_indices: &[usize],
@@ -1136,7 +1141,9 @@ pub(crate) async fn extract_mixed_ocr_native(
 /// skipped rather than applied: an empty OCR result must never overwrite a page's
 /// native text, or a page whose backend produced nothing would silently lose its
 /// already-extracted content.
-#[cfg(all(test, any(feature = "ocr", feature = "ocr-pipeline")))]
+// Gated to `ocr` rather than `any(ocr, ocr-pipeline)` to match its only
+// callers in the `#[cfg(all(test, feature = "ocr"))]` test module. ~keep
+#[cfg(all(test, feature = "ocr"))]
 pub(crate) fn merge_ocr_pages_into_native(
     native_text: &str,
     boundaries: &[crate::types::PageBoundary],

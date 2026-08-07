@@ -50,6 +50,9 @@ fn ner_config() -> xberg::EnrichmentConfig {
     use xberg::enrich::NerEnrichmentConfig;
     use xberg::types::entity::EntityCategory;
 
+    // `EnrichmentConfig` gains fields under other features, so the update is
+    // load-bearing there and only redundant in this narrow combination. ~keep
+    #[allow(clippy::needless_update)]
     EnrichmentConfig {
         ner: Some(NerEnrichmentConfig {
             backend: Arc::new(stub_ner::StubBackend),
