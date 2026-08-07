@@ -373,4 +373,155 @@ mod tests {
             "a hit must not also write back to the cache"
         );
     }
+
+    /// A [`CacheBackend`] backed by a real `HashMap`, so hit/miss behavior reflects
+    /// actual key derivation (content hash + config) rather than a scripted response.
+    #[derive(Default)]
+    struct InMemoryCacheBackend {
+        store: Mutex<std::collections::HashMap<String, Vec<u8>>>,
+        gets: AtomicUsize,
+        puts: AtomicUsize,
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+    impl CacheBackend for InMemoryCacheBackend {
+        async fn get(&self, key: &str) -> Option<Vec<u8>> {
+            self.gets.fetch_add(1, Ordering::SeqCst);
+            self.store
+                .lock()
+                .expect("in-memory cache mutex poisoned")
+                .get(key)
+                .cloned()
+        }
+
+        async fn put(&self, key: &str, value: Vec<u8>, _ttl: Option<Duration>) {
+            self.puts.fetch_add(1, Ordering::SeqCst);
+            self.store
+                .lock()
+                .expect("in-memory cache mutex poisoned")
+                .insert(key.to_string(), value);
+        }
+    }
+
+    // Revert line: remove the `inner.cache.put(...)` call in the `Ok(output)` arm of
+    // `extract_impl::extract` to make this test fail -- `puts` stays 0 after the first
+    // (miss) extraction, and the second identical extract also misses (still 0 entries
+    // in the store), so `puts` never reaches 1 either.
+    #[tokio::test]
+    async fn should_populate_cache_on_miss_and_skip_reextraction_on_identical_second_call() {
+        let cache = Arc::new(InMemoryCacheBackend::default());
+        let engine = Engine::builder().with_cache_backend(cache.clone()).build();
+        let config = ExtractionConfig::default();
+        let bytes = b"identical bytes for cache".to_vec();
+
+        let first = engine
+            .extract(ExtractInput::from_bytes(bytes.clone(), "text/plain", None), &config)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            cache.gets.load(Ordering::SeqCst),
+            1,
+            "the first extract must consult the cache exactly once (a miss)"
+        );
+        assert_eq!(
+            cache.puts.load(Ordering::SeqCst),
+            1,
+            "a successful cache-miss extraction must populate the cache exactly once"
+        );
+
+        let second = engine
+            .extract(ExtractInput::from_bytes(bytes, "text/plain", None), &config)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            cache.gets.load(Ordering::SeqCst),
+            2,
+            "the second identical extract must also consult the cache"
+        );
+        assert_eq!(
+            cache.puts.load(Ordering::SeqCst),
+            1,
+            "a cache hit must short-circuit extraction and must not write back to the cache again"
+        );
+        assert_eq!(
+            first.results[0].content, second.results[0].content,
+            "the cache-hit result must equal the originally-extracted content"
+        );
+    }
+
+    // Revert line: change `content_cache_key` in `extract_impl.rs` to drop
+    // `config_json` from the hash to make this test fail -- both configs would then
+    // derive the same key, the second extract would hit the first extract's cache
+    // entry, and `puts` would stay at 1 instead of reaching 2.
+    #[tokio::test]
+    async fn should_miss_cache_when_extraction_config_changes_for_identical_bytes() {
+        let cache = Arc::new(InMemoryCacheBackend::default());
+        let engine = Engine::builder().with_cache_backend(cache.clone()).build();
+        let bytes = b"same bytes different config".to_vec();
+
+        let config_a = ExtractionConfig::default();
+        engine
+            .extract(ExtractInput::from_bytes(bytes.clone(), "text/plain", None), &config_a)
+            .await
+            .unwrap();
+
+        let config_b = ExtractionConfig {
+            enable_quality_processing: !config_a.enable_quality_processing,
+            ..ExtractionConfig::default()
+        };
+        engine
+            .extract(ExtractInput::from_bytes(bytes, "text/plain", None), &config_b)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            cache.gets.load(Ordering::SeqCst),
+            2,
+            "both extracts must consult the cache once each"
+        );
+        assert_eq!(
+            cache.puts.load(Ordering::SeqCst),
+            2,
+            "a config change must derive a different cache key, forcing a second miss and a second write"
+        );
+    }
+
+    // Revert line: move the `PROGRESS_STAGE_CACHE_HIT` emit in `extract_impl.rs` so it
+    // no longer runs before the early `return Ok(cached_result)` to make this test fail
+    // -- `stages` would then read only `["extract_start"]` instead of including the
+    // cache-hit stage.
+    #[tokio::test]
+    async fn should_emit_start_then_cache_hit_progress_events_on_a_cache_hit() {
+        let sink = Arc::new(RecordingProgressSink::default());
+        let cached_result = ExtractionResult::single(ExtractedDocument {
+            content: "CACHED".to_string(),
+            ..Default::default()
+        });
+        let cache = Arc::new(StubCacheBackend {
+            cached_payload: serde_json::to_vec(&cached_result).unwrap(),
+            gets: AtomicUsize::new(0),
+            puts: AtomicUsize::new(0),
+        });
+        let engine = Engine::builder()
+            .with_progress_sink(sink.clone())
+            .with_cache_backend(cache)
+            .build();
+
+        engine
+            .extract(
+                ExtractInput::from_bytes(b"progress on cache hit".to_vec(), "text/plain", None),
+                &ExtractionConfig::default(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            *sink.stages.lock().expect("recording sink mutex poisoned"),
+            vec!["extract_start".to_string(), "extract_cache_hit".to_string()],
+            "a cache hit must emit start then cache_hit, not complete"
+        );
+    }
 }
