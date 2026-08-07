@@ -6,7 +6,7 @@
 
 import 'dart:io';
 
-import '../lib/src/native_loader.dart';
+import 'package:xberg/src/native_loader.dart';
 
 void main() async {
   try {
