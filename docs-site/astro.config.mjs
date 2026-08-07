@@ -208,6 +208,7 @@ export default defineConfig({
                       label : "Concurrency & Scaling",
                       slug : "guides/concurrency",
                     },
+                    {label : "Observability", slug : "guides/observability"},
                     {
                       label : "MCP Integration",
                       slug : "guides/mcp-integration",
