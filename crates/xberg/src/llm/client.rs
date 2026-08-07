@@ -213,7 +213,7 @@ mod tests {
     fn bedrock_model_config(bedrock: BedrockConfig) -> LlmConfig {
         LlmConfig {
             model: "bedrock/anthropic.claude-3-sonnet-20240229-v1:0".to_string(),
-            bedrock: Some(bedrock),
+            bedrock: Some(Box::new(bedrock)),
             ..LlmConfig::default()
         }
     }

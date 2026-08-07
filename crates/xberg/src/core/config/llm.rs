@@ -83,7 +83,7 @@ pub struct LlmConfig {
     /// AWS environment variables and the default credential chain.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
-    pub bedrock: Option<BedrockConfig>,
+    pub bedrock: Option<Box<BedrockConfig>>,
 }
 
 /// AWS Bedrock configuration for `bedrock/`-prefixed models.
@@ -417,13 +417,13 @@ region = "us-east-1"
             model: "bedrock/anthropic.claude-3-sonnet-20240229-v1:0".to_string(),
             api_key: Some("sk-super-secret".to_string()),
             headers: Some(headers),
-            bedrock: Some(BedrockConfig {
+            bedrock: Some(Box::new(BedrockConfig {
                 region: Some("eu-central-1".to_string()),
                 cross_region_prefix: Some("eu".to_string()),
                 access_key_id: Some("AKIAEXAMPLE".to_string()),
                 secret_access_key: Some("aws-secret".to_string()),
                 session_token: Some("aws-token".to_string()),
-            }),
+            })),
             ..Default::default()
         };
 
