@@ -160,3 +160,11 @@ jobs:
     with:
       setup-rust: true
       setup-python: true
+      # poly delegates Elixir formatting to `mix format` when mix is on PATH, and falls
+      # back to its own built-in Elixir formatter when it is not. The two disagree, so
+      # without a toolchain the `Format check` step flagged all 240 committed .ex files
+      # -- which are correctly mix-formatted (they honour packages/elixir/.formatter.exs:
+      # import_deps: [:rustler], line_length: 140). Reproduced exactly: with mix on PATH
+      # `poly fmt --check packages/elixir` reports "All formatted"; with PATH=/usr/bin:/bin
+      # it reports the same 240 files CI did. ~keep
+      setup-elixir: true
