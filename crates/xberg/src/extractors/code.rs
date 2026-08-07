@@ -35,6 +35,9 @@ use crate::types::metadata::{
 /// `ExtractedDocument.metadata.additional` map.
 pub(crate) const CODE_INTELLIGENCE_SCRATCH_KEY: &str = "__xberg_code_intelligence_process_result";
 
+/// `ProcessingWarning::source` for every warning this extractor emits (#171).
+const CODE_WARNING_SOURCE: &str = "code";
+
 #[cfg_attr(alef, alef(skip))]
 /// Source code extractor using tree-sitter language pack.
 ///
@@ -288,6 +291,11 @@ impl InternalDocumentExtractor for CodeExtractor {
     ) -> Result<InternalDocument> {
         tracing::debug!(format = "code", size_bytes = content.len(), "extraction starting");
         let source = String::from_utf8_lossy(content);
+        // `Cow::Owned` here means `from_utf8_lossy` had to allocate a replacement copy,
+        // which it only does when it found at least one undecodable byte sequence to
+        // substitute U+FFFD for; valid UTF-8 input is returned unchanged as
+        // `Cow::Borrowed` (#171).
+        let decoded_lossily = matches!(source, Cow::Owned(_));
 
         let language = tslp::detect_language_from_content(&source)
             .or_else(|| config.source_name.as_deref().and_then(tslp::detect_language_from_path))
@@ -299,7 +307,14 @@ impl InternalDocumentExtractor for CodeExtractor {
                 )
             })?;
 
-        let doc = Self::extract_with_language(&source, language, config)?;
+        let mut doc = Self::extract_with_language(&source, language, config)?;
+        if decoded_lossily {
+            crate::core::diagnostics::push_lossy_decode_warning(
+                &mut doc.processing_warnings,
+                CODE_WARNING_SOURCE,
+                "source file",
+            );
+        }
         tracing::debug!(
             element_count = doc.elements.len(),
             format = "code",
@@ -325,6 +340,7 @@ impl InternalDocumentExtractor for CodeExtractor {
 impl SyncExtractor for CodeExtractor {
     fn extract_sync(&self, content: &[u8], _mime_type: &str, config: &ExtractionConfig) -> Result<InternalDocument> {
         let source = String::from_utf8_lossy(content);
+        let decoded_lossily = matches!(source, Cow::Owned(_));
 
         let language = tslp::detect_language_from_content(&source)
             .or_else(|| config.source_name.as_deref().and_then(tslp::detect_language_from_path))
@@ -332,7 +348,15 @@ impl SyncExtractor for CodeExtractor {
                 crate::XbergError::UnsupportedFormat("Cannot detect programming language from content".to_string())
             })?;
 
-        Self::extract_with_language(&source, language, config)
+        let mut doc = Self::extract_with_language(&source, language, config)?;
+        if decoded_lossily {
+            crate::core::diagnostics::push_lossy_decode_warning(
+                &mut doc.processing_warnings,
+                CODE_WARNING_SOURCE,
+                "source file",
+            );
+        }
+        Ok(doc)
     }
 }
 
@@ -407,6 +431,70 @@ mod tests {
         assert_eq!(pack_config.cache_dir, Some(PathBuf::from("/tmp/my-grammars")));
         assert!(pack_config.languages.is_none());
         assert!(pack_config.groups.is_none());
+    }
+
+    fn code_warnings(doc: &InternalDocument) -> Vec<String> {
+        doc.processing_warnings
+            .iter()
+            .filter(|w| w.source == CODE_WARNING_SOURCE)
+            .map(|w| w.message.to_string())
+            .collect()
+    }
+
+    /// Config used by the lossy-decode tests below: tree-sitter disabled (so
+    /// `extract_with_language` never needs a grammar download in a test), with
+    /// `source_name` set so language detection falls back to the file extension
+    /// instead of needing a shebang line in the (deliberately garbled) content.
+    fn disabled_tree_sitter_config(source_name: &str) -> ExtractionConfig {
+        ExtractionConfig {
+            source_name: Some(source_name.to_string()),
+            tree_sitter: Some(crate::core::config::TreeSitterConfig {
+                enabled: false,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    /// #171: `String::from_utf8_lossy` silently substitutes U+FFFD for every
+    /// undecodable byte and returns `Ok`, so a source file with invalid UTF-8
+    /// bytes was indistinguishable from a clean one.
+    #[tokio::test]
+    async fn should_warn_when_source_file_is_not_valid_utf8() {
+        let extractor = CodeExtractor::new();
+        let config = disabled_tree_sitter_config("test.py");
+        let content: &[u8] = b"print(\xFF\xFE'hi')";
+
+        let doc = extractor
+            .extract_content(content, SOURCE_CODE_MIME_TYPE, &config)
+            .await
+            .expect("extraction of invalid UTF-8 source must still succeed");
+
+        let warnings = code_warnings(&doc);
+        assert_eq!(warnings.len(), 1, "expected exactly one code warning, got {warnings:?}");
+        assert!(
+            warnings[0].contains("not valid UTF-8") && warnings[0].contains("replacement character"),
+            "warning must describe the lossy decode, got {warnings:?}"
+        );
+    }
+
+    /// A valid UTF-8 source file must not warn.
+    #[tokio::test]
+    async fn valid_utf8_source_file_produces_zero_warnings() {
+        let extractor = CodeExtractor::new();
+        let config = disabled_tree_sitter_config("test.py");
+        let content = b"print('hi')";
+
+        let doc = extractor
+            .extract_content(content, SOURCE_CODE_MIME_TYPE, &config)
+            .await
+            .expect("extraction should succeed");
+
+        assert!(
+            code_warnings(&doc).is_empty(),
+            "valid UTF-8 source must not warn, got {:?}",
+            code_warnings(&doc)
+        );
     }
 
     /// Disabled tree-sitter config must skip TSLP processing entirely and emit the

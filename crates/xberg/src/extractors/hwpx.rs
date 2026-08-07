@@ -17,6 +17,9 @@ use crate::types::document_structure::{AnnotationKind, ContentLayer, TextAnnotat
 use crate::types::internal::InternalDocument;
 use crate::types::internal_builder::InternalDocumentBuilder;
 
+/// `ProcessingWarning::source` for every warning this extractor emits (#171).
+const HWPX_WARNING_SOURCE: &str = "hwpx";
+
 /// Extractor for Hangul Word Processor XML (.hwpx) files.
 ///
 /// Supports HWPX (Open HWPML), the ZIP-based XML successor to the binary HWP 5.0 format.
@@ -164,32 +167,48 @@ fn build_hwpx_internal_document(doc: unhwp::model::Document, mime_type: &str) ->
                     }
 
                     for inline in &p.content {
-                        if let unhwp::model::InlineContent::Image(img_ref) = inline
-                            && let Some(resource) = doc.resources.get(&img_ref.id)
-                        {
-                            let image = ExtractedImage {
-                                data: Bytes::from(resource.data.clone()),
-                                format: mime_to_format(resource.mime_type.as_deref().unwrap_or("")),
-                                image_index: image_index as u32,
-                                page_number: None,
-                                width: img_ref.width,
-                                height: img_ref.height,
-                                colorspace: None,
-                                bits_per_component: None,
-                                is_mask: false,
-                                description: img_ref.alt_text.clone(),
-                                ocr_result: None,
-                                bounding_box: None,
-                                source_path: None,
-                                image_kind: None,
-                                kind_confidence: None,
-                                cluster_id: None,
-                                caption: None,
-                                qr_codes: None,
-                                data_base64: None,
-                            };
-                            builder.push_image(img_ref.alt_text.as_deref(), image, None, None);
-                            image_index += 1;
+                        if let unhwp::model::InlineContent::Image(img_ref) = inline {
+                            if let Some(resource) = doc.resources.get(&img_ref.id) {
+                                let image = ExtractedImage {
+                                    data: Bytes::from(resource.data.clone()),
+                                    format: mime_to_format(resource.mime_type.as_deref().unwrap_or("")),
+                                    image_index: image_index as u32,
+                                    page_number: None,
+                                    width: img_ref.width,
+                                    height: img_ref.height,
+                                    colorspace: None,
+                                    bits_per_component: None,
+                                    is_mask: false,
+                                    description: img_ref.alt_text.clone(),
+                                    ocr_result: None,
+                                    bounding_box: None,
+                                    source_path: None,
+                                    image_kind: None,
+                                    kind_confidence: None,
+                                    cluster_id: None,
+                                    caption: None,
+                                    qr_codes: None,
+                                    data_base64: None,
+                                };
+                                builder.push_image(img_ref.alt_text.as_deref(), image, None, None);
+                                image_index += 1;
+                            } else {
+                                // `img_ref.id` names a resource that `doc.resources` never
+                                // received a binary payload for (a missing/unpacked media
+                                // part). A well-formed HWPX package always has a resource
+                                // entry for every image reference it emits, so this only
+                                // fires on a genuinely incomplete document -- and unlike the
+                                // resolved case above, nothing is pushed for it at all: the
+                                // image is silently absent from the output (#171).
+                                builder.add_warning(crate::core::diagnostics::warning(
+                                    HWPX_WARNING_SOURCE,
+                                    format!(
+                                        "Image reference '{}' has no corresponding entry in the document's \
+                                         resources; the image could not be extracted",
+                                        img_ref.id
+                                    ),
+                                ));
+                            }
                         }
                     }
                 }
@@ -340,6 +359,21 @@ fn cell_plain_text(
 ) -> String {
     let mut lines = Vec::with_capacity(cell.content.len());
     for p in &cell.content {
+        // `build_paragraph_content`'s `InlineContent::Image` arm is a no-op: it relies
+        // on a second pass over `p.content` that only the top-level section/paragraph
+        // loop performs (to reach `doc.resources` for the binary payload). Table cells
+        // never get that second pass, so an image inside a cell is dropped outright --
+        // not even as a placeholder -- unlike a resolvable top-level image (#171).
+        if p.content
+            .iter()
+            .any(|c| matches!(c, unhwp::model::InlineContent::Image(_)))
+        {
+            builder.add_warning(crate::core::diagnostics::warning(
+                HWPX_WARNING_SOURCE,
+                "A table cell contains an image; images inside table cells are not \
+                 extracted and were omitted from the output",
+            ));
+        }
         let (text, _annotations) = build_paragraph_content(builder, p, footnote_counter);
         lines.push(text.trim().to_string());
     }
@@ -644,6 +678,132 @@ mod tests {
             .find(|e| e.kind == ElementKind::FootnoteDefinition)
             .expect("footnote inside a table cell must still produce a definition");
         assert_eq!(definition.text, "cell note");
+    }
+
+    fn hwpx_warnings(doc: &InternalDocument) -> Vec<String> {
+        doc.processing_warnings
+            .iter()
+            .filter(|w| w.source == HWPX_WARNING_SOURCE)
+            .map(|w| w.message.to_string())
+            .collect()
+    }
+
+    /// #171: an `InlineContent::Image` whose `id` has no entry in
+    /// `doc.resources` cannot be resolved to binary data and is dropped
+    /// entirely (no image element, no placeholder).
+    #[test]
+    fn should_warn_when_image_resource_id_is_missing_from_resources() {
+        let mut doc = Document::new();
+        let mut section = Section::new(0);
+        let mut p = Paragraph::new();
+        p.content
+            .push(InlineContent::Image(unhwp::model::ImageRef::new("bin0")));
+        section.content.push(Block::Paragraph(p));
+        doc.sections.push(section);
+        // Deliberately leave `doc.resources` empty: "bin0" is never registered.
+
+        let internal = build_hwpx_internal_document(doc, "application/haansofthwpx");
+
+        let warnings = hwpx_warnings(&internal);
+        assert_eq!(warnings.len(), 1, "expected exactly one hwpx warning, got {warnings:?}");
+        assert!(
+            warnings[0].contains("bin0") && warnings[0].contains("could not be extracted"),
+            "warning must name the unresolved image id, got {warnings:?}"
+        );
+        assert!(
+            internal.images.is_empty(),
+            "an unresolved image must not produce an image element"
+        );
+    }
+
+    /// A resolvable image (its id present in `doc.resources`) must not warn.
+    #[test]
+    fn should_not_warn_when_image_resource_resolves() {
+        let mut doc = Document::new();
+        doc.resources.insert(
+            "bin0".to_string(),
+            unhwp::model::Resource::new(unhwp::model::ResourceType::Image, vec![0x89, 0x50, 0x4E, 0x47]),
+        );
+        let mut section = Section::new(0);
+        let mut p = Paragraph::new();
+        p.content
+            .push(InlineContent::Image(unhwp::model::ImageRef::new("bin0")));
+        section.content.push(Block::Paragraph(p));
+        doc.sections.push(section);
+
+        let internal = build_hwpx_internal_document(doc, "application/haansofthwpx");
+
+        assert!(
+            hwpx_warnings(&internal).is_empty(),
+            "a resolvable image must not warn, got {:?}",
+            hwpx_warnings(&internal)
+        );
+    }
+
+    /// #171: `build_paragraph_content`'s `InlineContent::Image` arm is a no-op
+    /// everywhere; only the top-level section/paragraph loop performs the
+    /// second pass that actually resolves and pushes an image element. A
+    /// table cell never gets that second pass, so an image inside a cell is
+    /// dropped outright.
+    #[test]
+    fn should_warn_when_table_cell_contains_an_image() {
+        let mut doc = Document::new();
+        doc.resources.insert(
+            "bin0".to_string(),
+            unhwp::model::Resource::new(unhwp::model::ResourceType::Image, vec![0x89, 0x50, 0x4E, 0x47]),
+        );
+        let mut section = Section::new(0);
+
+        let mut table = Table::new();
+        let mut row = TableRow::new();
+        let mut cell = TableCell::new();
+        let mut cell_para = Paragraph::new();
+        cell_para
+            .content
+            .push(InlineContent::Image(unhwp::model::ImageRef::new("bin0")));
+        cell.content.push(cell_para);
+        row.cells.push(cell);
+        table.rows.push(row);
+
+        section.content.push(Block::Table(table));
+        doc.sections.push(section);
+
+        let internal = build_hwpx_internal_document(doc, "application/haansofthwpx");
+
+        let warnings = hwpx_warnings(&internal);
+        assert_eq!(warnings.len(), 1, "expected exactly one hwpx warning, got {warnings:?}");
+        assert!(
+            warnings[0].contains("table cell") && warnings[0].contains("not extracted"),
+            "warning must describe the dropped table-cell image, got {warnings:?}"
+        );
+        assert!(
+            internal.images.is_empty(),
+            "an image inside a table cell must not produce an image element"
+        );
+    }
+
+    /// An ordinary table with only text cells must not warn.
+    #[test]
+    fn should_not_warn_for_table_with_only_text_cells() {
+        let mut doc = Document::new();
+        let mut section = Section::new(0);
+
+        let mut table = Table::new();
+        let mut row = TableRow::new();
+        row.cells.push(TableCell::text("Alice"));
+        row.cells.push(TableCell::text("30"));
+        table.rows.push(row);
+
+        section.content.push(Block::Table(table));
+        doc.sections.push(section);
+
+        let internal = build_hwpx_internal_document(doc, "application/haansofthwpx");
+
+        assert!(
+            hwpx_warnings(&internal).is_empty(),
+            "a table with only text cells must not warn, got {:?}",
+            hwpx_warnings(&internal)
+        );
     }
 
     #[test]

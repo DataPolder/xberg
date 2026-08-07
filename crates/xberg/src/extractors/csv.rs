@@ -20,6 +20,9 @@ use async_trait::async_trait;
 static DATE_RE_ISO: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"^\d{4}-\d{2}-\d{2}").unwrap());
 static DATE_RE_US: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"^\d{1,2}/\d{1,2}/\d{2,4}").unwrap());
 static DATE_RE_EU: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"^\d{1,2}\.\d{1,2}\.\d{2,4}").unwrap());
+
+/// `ProcessingWarning::source` for every warning this extractor emits (#171).
+const CSV_WARNING_SOURCE: &str = "csv";
 #[cfg_attr(alef, alef(skip))]
 /// CSV/TSV extractor with proper field parsing.
 ///
@@ -138,6 +141,33 @@ impl InternalDocumentExtractor for CsvExtractor {
         };
 
         let mut builder = InternalDocumentBuilder::new("csv");
+
+        // Unlike the plain `from_utf8_lossy` used by html/rtf/text, `decode_csv_bytes`
+        // cannot leave a detectable "genuinely undecodable" signal in either build (#171):
+        // without `quality`, `decode_csv_bytes_fallback`'s encoding list ends in
+        // windows-1252/iso-8859-1, which the WHATWG Encoding Standard defines a mapping
+        // for every byte 0x00-0xFF, so it always succeeds -- the bytes are reinterpreted
+        // under a (possibly wrong) encoding, never dropped, and the trailing
+        // `String::from_utf8_lossy` fallback is unreachable dead code. With `quality`,
+        // `crate::utils::safe_decode` returns a string that has already had every
+        // replacement character stripped by its internal mojibake cleanup, so no
+        // marker of the loss survives to check for here either. Neither build can be
+        // told apart from a clean decode without changing that shared helper (out of
+        // this extractor's scope), so no lossy-decode warning is emitted for CSV.
+
+        if table
+            .cells
+            .iter()
+            .any(|row| row.iter().any(|cell| cell.contains('|') || cell.contains('\n')))
+        {
+            builder.add_warning(crate::core::diagnostics::warning(
+                CSV_WARNING_SOURCE,
+                "A cell contains a '|' or newline character, which is not escaped in the generated \
+                 Markdown table; the rendered table may have misaligned or split columns even though \
+                 the underlying cell data is intact",
+            ));
+        }
+
         builder.push_table(table, None, None);
 
         let mut doc = builder.build();
@@ -943,5 +973,81 @@ mod tests {
         let text = "# header comment\na,b,c\n  # indented comment\n1,2,3\n";
         let filtered = strip_comment_lines(text, &["#".to_string()]);
         assert_eq!(filtered, "a,b,c\n1,2,3\n");
+    }
+
+    fn csv_warnings(doc: &crate::types::internal::InternalDocument) -> Vec<String> {
+        doc.processing_warnings
+            .iter()
+            .filter(|w| w.source == CSV_WARNING_SOURCE)
+            .map(|w| w.message.to_string())
+            .collect()
+    }
+
+    /// #171: `build_markdown_table` interpolates cell text into `| ... |` rows
+    /// with no escaping. A cell containing a literal `|` inserts a phantom
+    /// column boundary into the rendered Markdown, even though `Table::cells`
+    /// (the underlying data) is untouched.
+    #[tokio::test]
+    async fn should_warn_when_a_cell_contains_an_unescaped_pipe() {
+        let extractor = CsvExtractor::new();
+        let config = ExtractionConfig::default();
+        let csv_data = b"Name,Note\nAlice,\"a | b\"\n";
+
+        let result = extractor
+            .extract_content(csv_data, "text/csv", &config)
+            .await
+            .expect("CSV extraction should succeed");
+
+        let warnings = csv_warnings(&result);
+        assert_eq!(warnings.len(), 1, "expected exactly one csv warning, got {warnings:?}");
+        assert!(
+            warnings[0].contains("'|'") && warnings[0].contains("misaligned"),
+            "warning must describe the unescaped pipe corruption, got {warnings:?}"
+        );
+        // The underlying cell data is untouched -- only the rendered Markdown is at risk.
+        assert_eq!(
+            result.tables[0].cells,
+            vec![
+                vec!["Name".to_string(), "Note".to_string()],
+                vec!["Alice".to_string(), "a | b".to_string()],
+            ]
+        );
+    }
+
+    /// #171: a cell containing an embedded newline (RFC 4180 permits this inside a
+    /// quoted field) breaks the one-row-per-line Markdown table structure the same
+    /// way an unescaped `|` does.
+    #[tokio::test]
+    async fn should_warn_when_a_cell_contains_an_embedded_newline() {
+        let extractor = CsvExtractor::new();
+        let config = ExtractionConfig::default();
+        let csv_data = b"Name,Note\nAlice,\"line one\nline two\"\n";
+
+        let result = extractor
+            .extract_content(csv_data, "text/csv", &config)
+            .await
+            .expect("CSV extraction should succeed");
+
+        let warnings = csv_warnings(&result);
+        assert_eq!(warnings.len(), 1, "expected exactly one csv warning, got {warnings:?}");
+    }
+
+    /// An ordinary CSV file with no pipes or embedded newlines in any cell must not warn.
+    #[tokio::test]
+    async fn plain_csv_with_no_pipes_or_newlines_produces_zero_warnings() {
+        let extractor = CsvExtractor::new();
+        let config = ExtractionConfig::default();
+        let csv_data = b"Name,Age,City\nAlice,30,NYC\nBob,25,LA\n";
+
+        let result = extractor
+            .extract_content(csv_data, "text/csv", &config)
+            .await
+            .expect("CSV extraction should succeed");
+
+        assert!(
+            csv_warnings(&result).is_empty(),
+            "an ordinary CSV file must not warn, got {:?}",
+            csv_warnings(&result)
+        );
     }
 }
