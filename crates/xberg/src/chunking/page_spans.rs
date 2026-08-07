@@ -242,6 +242,8 @@ mod tests {
             content: content.to_string(),
             chunk_type: ChunkType::default(),
             embedding: None,
+            sparse_embedding: None,
+            late_interaction: None,
             metadata: ChunkMetadata {
                 byte_start: 0,
                 byte_end: content.len(),

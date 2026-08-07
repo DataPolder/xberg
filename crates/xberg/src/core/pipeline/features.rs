@@ -378,6 +378,8 @@ fn try_code_chunks(
                 content: chunk.text.clone(),
                 chunk_type: classify_code_chunk(&chunk.node_types),
                 embedding: None,
+                sparse_embedding: None,
+                late_interaction: None,
                 metadata: ChunkMetadata {
                     byte_start: chunk.byte_start,
                     byte_end: chunk.byte_end,

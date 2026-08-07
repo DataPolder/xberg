@@ -744,6 +744,8 @@ mod enrichment_preservation_tests {
             content: content.to_string(),
             chunk_type: ChunkType::default(),
             embedding: Some(vec![0.5, 0.25]),
+            sparse_embedding: None,
+            late_interaction: None,
             metadata: ChunkMetadata {
                 byte_start: 0,
                 byte_end: content.len(),

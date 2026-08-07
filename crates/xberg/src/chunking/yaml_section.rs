@@ -192,6 +192,8 @@ fn build_chunks_from_sections(
                 content,
                 chunk_type: Default::default(),
                 embedding: None,
+                sparse_embedding: None,
+                late_interaction: None,
                 metadata: ChunkMetadata {
                     byte_start: section.byte_start,
                     byte_end: section.byte_end,
@@ -222,6 +224,8 @@ fn build_chunks_from_sections(
                     content: format!("{}\n\n{}", prefix, sub_chunk.content),
                     chunk_type: Default::default(),
                     embedding: None,
+                    sparse_embedding: None,
+                    late_interaction: None,
                     metadata: ChunkMetadata {
                         byte_start: section.byte_start + sub_chunk.metadata.byte_start,
                         byte_end: section.byte_start + sub_chunk.metadata.byte_end,

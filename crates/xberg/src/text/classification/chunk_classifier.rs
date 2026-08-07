@@ -422,6 +422,8 @@ mod tests {
             content: format!("chunk {index}"),
             chunk_type: Default::default(),
             embedding: None,
+            sparse_embedding: None,
+            late_interaction: None,
             metadata: crate::types::ChunkMetadata {
                 byte_start: 0,
                 byte_end: 0,

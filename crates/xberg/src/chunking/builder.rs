@@ -206,6 +206,8 @@ where
             content: chunk_text.to_string(),
             chunk_type: classify_chunk(chunk_text, None),
             embedding: None,
+            sparse_embedding: None,
+            late_interaction: None,
             metadata: ChunkMetadata {
                 byte_start,
                 byte_end,

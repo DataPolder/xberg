@@ -579,6 +579,35 @@ pub struct Chunk {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub embedding: Option<Vec<f32>>,
 
+    /// Optional sparse (SPLADE) learned embedding for this chunk.
+    ///
+    /// Only populated when sparse-embedding generation is configured for chunking.
+    /// `None` otherwise, including on builds without the `sparse-embeddings` feature.
+    ///
+    /// Uses the crate-root [`crate::SparseEmbedding`] alias rather than
+    /// `crate::sparse_embeddings::SparseEmbedding` directly: the `sparse_embeddings`
+    /// module itself only compiles under `sparse-embeddings`/`sparse-embedding-presets`,
+    /// while the crate-root alias is always defined (a field-compatible stub on builds
+    /// without either feature), so this field — and `Chunk` itself — compiles on every
+    /// feature combination, including the crate's default features.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
+    pub sparse_embedding: Option<crate::SparseEmbedding>,
+
+    /// Optional ColBERT-style multi-vector (late-interaction) embedding for this chunk.
+    ///
+    /// Only populated when late-interaction embedding generation is configured for
+    /// chunking. `None` otherwise, including on builds without the `late-interaction`
+    /// feature.
+    ///
+    /// Uses the crate-root [`crate::MultiVectorEmbedding`] alias for the same reason
+    /// `sparse_embedding` uses [`crate::SparseEmbedding`] — see that field's docs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
+    pub late_interaction: Option<crate::MultiVectorEmbedding>,
+
     /// Metadata about this chunk's position and properties.
     pub metadata: ChunkMetadata,
 }
@@ -1268,5 +1297,63 @@ mod tests {
         let bbox = deserialized.form_fields[0].bbox.unwrap();
         assert_eq!(bbox.x0, 72.0);
         assert_eq!(bbox.y1, 320.0);
+    }
+
+    fn empty_chunk(content: &str) -> Chunk {
+        Chunk {
+            content: content.to_string(),
+            chunk_type: ChunkType::default(),
+            embedding: None,
+            sparse_embedding: None,
+            late_interaction: None,
+            metadata: empty_chunk_metadata(),
+        }
+    }
+
+    #[test]
+    fn should_round_trip_exact_sparse_and_late_interaction_vectors_when_populated() {
+        let mut chunk = empty_chunk("hello world");
+        chunk.sparse_embedding = Some(crate::SparseEmbedding {
+            indices: vec![3, 7, 42],
+            values: vec![0.5, 0.25, 0.125],
+        });
+        chunk.late_interaction = Some(crate::MultiVectorEmbedding {
+            num_tokens: 2,
+            dim: 3,
+            data: vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
+        });
+
+        let json = serde_json::to_string(&chunk).expect("serialize");
+        let back: Chunk = serde_json::from_str(&json).expect("deserialize");
+
+        let sparse = back.sparse_embedding.expect("sparse_embedding must round-trip as Some");
+        assert_eq!(sparse.indices, vec![3, 7, 42]);
+        assert_eq!(sparse.values, vec![0.5, 0.25, 0.125]);
+
+        let late = back.late_interaction.expect("late_interaction must round-trip as Some");
+        assert_eq!(late.num_tokens, 2);
+        assert_eq!(late.dim, 3);
+        assert_eq!(late.data, vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6]);
+    }
+
+    #[test]
+    fn should_omit_sparse_and_late_interaction_fields_when_not_configured() {
+        let chunk = empty_chunk("hello world");
+        assert!(chunk.sparse_embedding.is_none());
+        assert!(chunk.late_interaction.is_none());
+
+        let json = serde_json::to_value(&chunk).expect("serialize");
+        assert!(
+            json.get("sparse_embedding").is_none(),
+            "sparse_embedding must be omitted from the wire when None, got: {json:?}"
+        );
+        assert!(
+            json.get("late_interaction").is_none(),
+            "late_interaction must be omitted from the wire when None, got: {json:?}"
+        );
+
+        let back: Chunk = serde_json::from_value(json).expect("deserialize");
+        assert!(back.sparse_embedding.is_none());
+        assert!(back.late_interaction.is_none());
     }
 }

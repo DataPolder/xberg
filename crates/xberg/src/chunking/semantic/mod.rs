@@ -129,6 +129,8 @@ pub(crate) fn chunk_semantic(
             content: mc.text,
             chunk_type,
             embedding: None,
+            sparse_embedding: None,
+            late_interaction: None,
             metadata: ChunkMetadata {
                 byte_start: mc.byte_start,
                 byte_end: mc.byte_end,

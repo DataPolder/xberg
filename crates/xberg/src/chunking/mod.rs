@@ -65,6 +65,7 @@ mod text_splitter;
 #[cfg(feature = "chunking-tokenizers")]
 mod tokenizer_cache;
 pub mod validation;
+pub(crate) mod vectors;
 mod yaml_section;
 
 pub(crate) use builder::heading_path_from_context;
