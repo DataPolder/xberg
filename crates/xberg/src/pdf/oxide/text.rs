@@ -794,6 +794,233 @@ pub(crate) fn reorder_sparse_two_column_page(spans: &mut [pdf_oxide::layout::Tex
     true
 }
 
+// Issue #1397: a dense two-column body (a full page of prose, not the guarded
+// four-span sentence above) is never split by pdf_oxide's own `ColumnAware`
+// XY-Cut on some documents, so xberg's span-level assembler falls through to
+// full-page-width Y order — welding left- and right-column lines at the same
+// height into one interleaved element, mid-sentence, and welding distinct
+// per-column headings (e.g. "Funding" + "References") into one heading
+// element. No downstream reordering pass can repair (2): the interleaving is
+// already baked into the element text by the time it is produced.
+const MIN_DENSE_COLUMN_CONTENT_WIDTH_PTS: f32 = 200.0;
+// 2%, not 3%. On the reporting document (A4, 595pt, columns at x=37.6 and
+// x=306.6) symmetric margins put the left column's right edge at 288.4, so the
+// real gutter is ~18.2pt — against a 3% threshold of 17.85pt that is a 0.35pt
+// margin, and any page whose widest left-column line falls a point short of
+// full justification would silently stop being repaired. 2% gives 11.9pt on
+// A4, still far above the intra-line word spacing (~3-5pt at a 10pt font) that
+// is the only thing this must not mistake for a column boundary.
+const MIN_DENSE_COLUMN_GUTTER_FRACTION: f32 = 0.02;
+const MIN_DENSE_COLUMN_GUTTER_PTS: f32 = 10.0;
+const MIN_DENSE_COLUMN_SPANS_PER_SIDE: usize = 6;
+// A full-width furniture span (running header/footer, page-wide rule,
+// full-width title) spans nearly the entire printable width regardless of
+// the two-column layout beneath it, whereas a genuine column is bounded by
+// the page margins AND the gutter and can never reach much past ~45% of the
+// page width even on a page with unusually narrow margins. On the reporting
+// document from the worked example above (A4, 595pt wide, columns at
+// x=37.6/x=306.6), each column is 250.8pt wide = 42.2% of page width, while
+// a running header spanning x=37.6..557 is 519.4pt = 87.3% of page width.
+// 0.55 sits 13 points above the column ceiling (headroom for
+// justification/kerning noise on an unusually wide column line) and over 30
+// points below a typical full-width furniture span, so it cleanly separates
+// the two without needing per-document calibration.
+const FULL_WIDTH_FURNITURE_FRACTION: f32 = 0.55;
+
+/// Find the single widest vertical gutter that splits `spans` into two
+/// non-empty, non-overlapping-in-x halves, or `None` if no gutter wide enough
+/// to plausibly be a column boundary exists.
+///
+/// This is a horizontal-projection sweep: sort spans by left edge, track the
+/// running rightmost edge seen so far, and record the largest gap between that
+/// running edge and the next span's left edge. A real two-column body has
+/// exactly one such gap spanning the page (the gutter); ordinary word/line
+/// spacing inside a column never produces a gap this wide. Because the sweep
+/// tracks the *running maximum* right edge, every span preceding the gap is
+/// guaranteed to lie entirely left of it and every span following the gap
+/// lies entirely right of it, so the returned midpoint is a clean partition
+/// boundary.
+///
+/// UPDATE (GH#1397 follow-up): a single span that crosses the gutter — a
+/// full-width title, a centred running footer, a page-wide rule — used to
+/// close the projection gap and suppress the split for that whole page. Since
+/// real two-column documents almost always carry exactly this kind of
+/// full-width furniture on every page, that made the repair silently a
+/// no-op on the documents it exists for. This is now handled: any span at
+/// least `FULL_WIDTH_FURNITURE_FRACTION` of the page width is excluded from
+/// the gutter projection below (and, in `reorder_dense_two_column_page`, from
+/// the column partition), so a header/footer/rule/title no longer masks a
+/// real gutter between two columns of ordinary body content.
+///
+/// KNOWN LIMITATION (still unhandled): this is a single global width
+/// threshold, not vertical segmentation. A full-width span that is
+/// nonetheless *narrower* than `FULL_WIDTH_FURNITURE_FRACTION` of the page
+/// (e.g. a furniture line that doesn't reach quite as far as the body
+/// columns' combined span) still closes the gap and suppresses the whole-page
+/// repair, exactly as before. Likewise, furniture interleaved vertically
+/// between column content (e.g. a rule between every few paragraphs) is only
+/// classified relative to the *combined* vertical extent of the two columns
+/// (see `dense_two_column_sort_key`), so a piece of furniture that sits
+/// strictly between the columns' top and bottom lines is emitted between the
+/// two columns -- after all of the left, before all of the right -- rather
+/// than at its true interleaved position. True per-band vertical segmentation
+/// remains a follow-up.
+fn dense_column_split_x(spans: &[pdf_oxide::layout::TextSpan], page_width: f32) -> Option<f32> {
+    if spans.len() < 2 {
+        return None;
+    }
+    let content_left = spans.iter().map(|span| span.bbox.x).fold(f32::INFINITY, f32::min);
+    let content_right = spans
+        .iter()
+        .map(|span| span.bbox.x + span.bbox.width)
+        .fold(f32::NEG_INFINITY, f32::max);
+    if content_right - content_left < MIN_DENSE_COLUMN_CONTENT_WIDTH_PTS {
+        return None;
+    }
+    let min_gutter = (page_width * MIN_DENSE_COLUMN_GUTTER_FRACTION).max(MIN_DENSE_COLUMN_GUTTER_PTS);
+    let furniture_width = page_width * FULL_WIDTH_FURNITURE_FRACTION;
+
+    let mut edges: Vec<(f32, f32)> = spans
+        .iter()
+        .filter(|span| span.bbox.width < furniture_width)
+        .map(|span| (span.bbox.x, span.bbox.x + span.bbox.width))
+        .collect();
+    if edges.len() < 2 {
+        return None;
+    }
+    edges.sort_by(|left, right| left.0.total_cmp(&right.0));
+
+    let mut running_right = edges[0].1;
+    let mut best_gap = 0.0_f32;
+    let mut best_split = None;
+    for &(left, right) in &edges[1..] {
+        let gap = left - running_right;
+        if gap > best_gap {
+            best_gap = gap;
+            best_split = Some((running_right + left) / 2.0);
+        }
+        running_right = running_right.max(right);
+    }
+
+    if best_gap < min_gutter { None } else { best_split }
+}
+
+/// Reorder a dense two-column page (issue #1397) that pdf_oxide's own
+/// `ColumnAware` reading order fails to split.
+///
+/// Unlike `reorder_sparse_two_column_page` above (which repairs a single
+/// guarded four-span sentence), this targets the common case of a full page
+/// of two-column body text. It finds the widest vertical gutter splitting the
+/// page into two halves, classifies each half with pdf_oxide's own
+/// `classify_region`, and only reorders column-major when BOTH halves
+/// positively identify as reorderable prose/reference
+/// (`RegionClass::is_reorderable_column`) — tables, forms, and anything
+/// ambiguous (`RegionClass::Mixed`) are left untouched, matching
+/// `classify_region`'s own contract of degrading gracefully to the
+/// pre-existing geometric behaviour on any doubt.
+///
+/// Full-width furniture spans (`FULL_WIDTH_FURNITURE_FRACTION` of the page
+/// width or wider) are excluded from both the column partition and the
+/// `classify_region` calls — they are not folded into either column — and are
+/// instead placed relative to the combined vertical extent of the two columns
+/// by `dense_two_column_sort_key`: furniture above both columns' top line
+/// (a running header, or a full-width heading sitting above the columns even
+/// mid-page) sorts before all column content, and furniture below both
+/// columns' bottom line (a running footer) sorts after it.
+pub(crate) fn reorder_dense_two_column_page(spans: &mut [pdf_oxide::layout::TextSpan], page_width: f32) -> bool {
+    let Some(split_x) = dense_column_split_x(spans, page_width) else {
+        return false;
+    };
+    let furniture_width = page_width * FULL_WIDTH_FURNITURE_FRACTION;
+
+    let mut left_indices = Vec::new();
+    let mut right_indices = Vec::new();
+    for (index, span) in spans.iter().enumerate() {
+        if span.bbox.width >= furniture_width {
+            continue;
+        }
+        if span.bbox.x < split_x {
+            left_indices.push(index);
+        } else {
+            right_indices.push(index);
+        }
+    }
+    if left_indices.len() < MIN_DENSE_COLUMN_SPANS_PER_SIDE || right_indices.len() < MIN_DENSE_COLUMN_SPANS_PER_SIDE {
+        return false;
+    }
+
+    let left_class = pdf_oxide::layout::classify_region(spans, &left_indices);
+    let right_class = pdf_oxide::layout::classify_region(spans, &right_indices);
+    if !left_class.is_reorderable_column() || !right_class.is_reorderable_column() {
+        return false;
+    }
+
+    let column_top = left_indices
+        .iter()
+        .chain(right_indices.iter())
+        .map(|&index| spans[index].bbox.y)
+        .fold(f32::NEG_INFINITY, f32::max);
+    let column_bottom = left_indices
+        .iter()
+        .chain(right_indices.iter())
+        .map(|&index| spans[index].bbox.y)
+        .fold(f32::INFINITY, f32::min);
+
+    spans.sort_by(|left, right| {
+        let left_key = dense_two_column_sort_key(left, split_x, furniture_width, column_top, column_bottom);
+        let right_key = dense_two_column_sort_key(right, split_x, furniture_width, column_top, column_bottom);
+        left_key
+            .0
+            .cmp(&right_key.0)
+            .then_with(|| left_key.1.total_cmp(&right_key.1))
+            .then_with(|| left_key.2.total_cmp(&right_key.2))
+            .then_with(|| left_key.3.total_cmp(&right_key.3))
+    });
+    true
+}
+
+/// Sort key for `reorder_dense_two_column_page`'s final ordering.
+///
+/// Column spans (width below `furniture_width`) get group `1`, column `0.0`
+/// (left) or `1.0` (right), then top-to-bottom (descending y, via `-y`), then
+/// left-to-right within a line.
+///
+/// Furniture spans (width at or above `furniture_width`) are never assigned
+/// to a column. They get group `0` if they sit above the combined top line of
+/// both columns (`y > column_top`: a header, or a full-width heading above
+/// the columns), group `2` if they sit below the combined bottom line
+/// (`y < column_bottom`: a footer), and group `1` with a neutral `0.5` column
+/// otherwise.
+///
+/// That `0.5` is deterministic, not arbitrary: it sorts between the left
+/// column's `0.0` and the right column's `1.0`, so furniture interleaved
+/// vertically between the columns' own lines is emitted after the whole left
+/// column and before the whole right column, ordered by y among itself. That
+/// is not its true reading position — a column-major order has no well-defined
+/// slot for it — but it keeps the span out of both columns instead of
+/// corrupting one (see the KNOWN LIMITATION note on `dense_column_split_x`).
+fn dense_two_column_sort_key(
+    span: &pdf_oxide::layout::TextSpan,
+    split_x: f32,
+    furniture_width: f32,
+    column_top: f32,
+    column_bottom: f32,
+) -> (u8, f32, f32, f32) {
+    if span.bbox.width >= furniture_width {
+        let group = if span.bbox.y > column_top {
+            0
+        } else if span.bbox.y < column_bottom {
+            2
+        } else {
+            1
+        };
+        (group, 0.5, -span.bbox.y, span.bbox.x)
+    } else {
+        let column = if span.bbox.x >= split_x { 1.0 } else { 0.0 };
+        (1, column, -span.bbox.y, span.bbox.x)
+    }
+}
+
 /// Build a page's `PageText` (spans + derived chars + dimensions), honouring
 /// optional-content (OCG/layer) visibility (issue #67).
 ///
@@ -857,6 +1084,7 @@ fn extract_page_text_column_aware(
     )?;
 
     reorder_sparse_two_column_page(&mut page_text_data.spans, page_text_data.page_width);
+    reorder_dense_two_column_page(&mut page_text_data.spans, page_text_data.page_width);
 
     if is_fragmented_span_list(&page_text_data.spans) {
         tracing::debug!(
@@ -1361,6 +1589,251 @@ mod tests {
         let original = spans.iter().map(|span| span.text.clone()).collect::<Vec<_>>();
 
         assert!(!reorder_sparse_two_column_page(&mut spans, 612.0));
+        assert_eq!(
+            spans.iter().map(|span| span.text.as_str()).collect::<Vec<_>>(),
+            original.iter().map(String::as_str).collect::<Vec<_>>()
+        );
+    }
+
+    /// Build the interleaved (pre-fix) span order a dense two-column page
+    /// naturally arrives in: sorted by full-page-width Y, so left- and
+    /// right-column lines at the same height are adjacent. Each column is one
+    /// coherent paragraph behind a one-word heading, mirroring GH#1397
+    /// ("Funding" / "References" welded together at the same height).
+    fn dense_two_column_spans() -> Vec<TextSpan> {
+        const LEFT_X: f32 = 60.0;
+        const RIGHT_X: f32 = 320.0;
+        let left_heading = span_with_width("Funding", LEFT_X, 830.0, 70.0, 11.0, 11.0);
+        let right_heading = span_with_width("References", RIGHT_X, 830.0, 90.0, 11.0, 11.0);
+        let left_body = [
+            "The committee reviewed annual budget totals",
+            "and approved new funding for the coming year",
+            "after several rounds of careful review by",
+            "senior staff members from every department",
+            "who evaluated priorities across the whole",
+            "organization before reaching a final decision",
+            "that reflected both short and long term goals",
+            "for sustainable growth across all programs",
+        ];
+        let right_body = [
+            "Numerous studies have examined similar",
+            "programs across comparable institutions",
+            "using consistent methodology and controls",
+            "for measuring outcomes over multiple years",
+            "researchers found consistent positive trends",
+            "supporting continued investment going forward",
+            "additional citations appear in the appendix",
+            "for readers seeking further detail here",
+        ];
+
+        let mut spans = vec![left_heading, right_heading];
+        for (row, (left_line, right_line)) in left_body.iter().copied().zip(right_body.iter().copied()).enumerate() {
+            let y = 816.0 - row as f32 * 14.0;
+            spans.push(span_with_width(left_line, LEFT_X, y, 200.0, 11.0, 11.0));
+            spans.push(span_with_width(right_line, RIGHT_X, y, 190.0, 11.0, 11.0));
+        }
+        spans
+    }
+
+    #[test]
+    fn dense_two_column_prose_reorders_by_column() {
+        let mut spans = dense_two_column_spans();
+
+        assert!(reorder_dense_two_column_page(&mut spans, 612.0));
+
+        let texts = spans.iter().map(|span| span.text.as_str()).collect::<Vec<_>>();
+        assert_eq!(
+            texts,
+            [
+                "Funding",
+                "The committee reviewed annual budget totals",
+                "and approved new funding for the coming year",
+                "after several rounds of careful review by",
+                "senior staff members from every department",
+                "who evaluated priorities across the whole",
+                "organization before reaching a final decision",
+                "that reflected both short and long term goals",
+                "for sustainable growth across all programs",
+                "References",
+                "Numerous studies have examined similar",
+                "programs across comparable institutions",
+                "using consistent methodology and controls",
+                "for measuring outcomes over multiple years",
+                "researchers found consistent positive trends",
+                "supporting continued investment going forward",
+                "additional citations appear in the appendix",
+                "for readers seeking further detail here",
+            ]
+        );
+    }
+
+    #[test]
+    fn dense_two_column_prose_assembles_without_interleaving_or_heading_weld() {
+        let mut spans = dense_two_column_spans();
+
+        assert!(reorder_dense_two_column_page(&mut spans, 612.0));
+
+        assert_eq!(
+            assemble_page_text(&spans),
+            "Funding\n\
+             The committee reviewed annual budget totals\n\
+             and approved new funding for the coming year\n\
+             after several rounds of careful review by\n\
+             senior staff members from every department\n\
+             who evaluated priorities across the whole\n\
+             organization before reaching a final decision\n\
+             that reflected both short and long term goals\n\
+             for sustainable growth across all programs\n\n\
+             References\n\
+             Numerous studies have examined similar\n\
+             programs across comparable institutions\n\
+             using consistent methodology and controls\n\
+             for measuring outcomes over multiple years\n\
+             researchers found consistent positive trends\n\
+             supporting continued investment going forward\n\
+             additional citations appear in the appendix\n\
+             for readers seeking further detail here"
+        );
+    }
+
+    #[test]
+    fn dense_two_column_table_keeps_row_order() {
+        const LEFT_X: f32 = 60.0;
+        const RIGHT_X: f32 = 320.0;
+        let left_body = [
+            "The committee reviewed annual budget totals",
+            "and approved new funding for the coming year",
+            "after several rounds of careful review by",
+            "senior staff members from every department",
+            "who evaluated priorities across the whole",
+            "organization before reaching a final decision",
+            "that reflected both short and long term goals",
+            "for sustainable growth across all programs",
+        ];
+        let right_cells = ["12.3", "45.6", "78.9", "10.1", "21.2", "33.4", "45.5", "67.8"];
+
+        let mut spans = Vec::new();
+        for (row, (left_line, right_cell)) in left_body.iter().copied().zip(right_cells.iter().copied()).enumerate() {
+            let y = 816.0 - row as f32 * 14.0;
+            spans.push(span_with_width(left_line, LEFT_X, y, 200.0, 11.0, 11.0));
+            spans.push(span_with_width(right_cell, RIGHT_X, y, 30.0, 11.0, 11.0));
+        }
+        let original = spans.iter().map(|span| span.text.clone()).collect::<Vec<_>>();
+
+        assert!(!reorder_dense_two_column_page(&mut spans, 612.0));
+        assert_eq!(
+            spans.iter().map(|span| span.text.as_str()).collect::<Vec<_>>(),
+            original.iter().map(String::as_str).collect::<Vec<_>>()
+        );
+    }
+
+    /// GH#1397 follow-up: a running header and footer each cross the gutter
+    /// (width 497pt on a 612pt page = 81.2%, well past
+    /// `FULL_WIDTH_FURNITURE_FRACTION`'s 55% threshold), which used to close
+    /// the projection gap and suppress the whole-page repair. The header and
+    /// footer must now be excluded from the gutter search and the column
+    /// partition, and the repair must still fire: header first, then the
+    /// entire left column, then the entire right column, then the footer.
+    #[test]
+    fn dense_two_column_prose_reorders_around_header_and_footer() {
+        let mut spans = vec![span_with_width(
+            "Quarterly Report - Internal Distribution Only",
+            60.0,
+            850.0,
+            497.0,
+            11.0,
+            11.0,
+        )];
+        spans.extend(dense_two_column_spans());
+        spans.push(span_with_width("Page 1 of 12", 60.0, 700.0, 497.0, 11.0, 11.0));
+
+        assert!(reorder_dense_two_column_page(&mut spans, 612.0));
+
+        let texts = spans.iter().map(|span| span.text.as_str()).collect::<Vec<_>>();
+        assert_eq!(
+            texts,
+            [
+                "Quarterly Report - Internal Distribution Only",
+                "Funding",
+                "The committee reviewed annual budget totals",
+                "and approved new funding for the coming year",
+                "after several rounds of careful review by",
+                "senior staff members from every department",
+                "who evaluated priorities across the whole",
+                "organization before reaching a final decision",
+                "that reflected both short and long term goals",
+                "for sustainable growth across all programs",
+                "References",
+                "Numerous studies have examined similar",
+                "programs across comparable institutions",
+                "using consistent methodology and controls",
+                "for measuring outcomes over multiple years",
+                "researchers found consistent positive trends",
+                "supporting continued investment going forward",
+                "additional citations appear in the appendix",
+                "for readers seeking further detail here",
+                "Page 1 of 12",
+            ]
+        );
+    }
+
+    /// GH#1397 follow-up: a full-width heading can sit well above the two
+    /// columns without being at the very top edge of the page ("mid-page"
+    /// furniture) — e.g. a document title printed a few lines above where
+    /// the two-column body starts. It must stay above BOTH columns in the
+    /// output, exactly like a page-top running header, since the rule is
+    /// purely relative to the columns' own vertical extent, not to any
+    /// absolute page position.
+    #[test]
+    fn dense_two_column_prose_keeps_midpage_heading_above_both_columns() {
+        let mut spans = vec![span_with_width(
+            "Annual Committee Findings",
+            60.0,
+            840.0,
+            497.0,
+            11.0,
+            11.0,
+        )];
+        spans.extend(dense_two_column_spans());
+
+        assert!(reorder_dense_two_column_page(&mut spans, 612.0));
+
+        let texts = spans.iter().map(|span| span.text.as_str()).collect::<Vec<_>>();
+        assert_eq!(texts[0], "Annual Committee Findings");
+        let heading_index = 0;
+        let funding_index = texts.iter().position(|&text| text == "Funding").unwrap();
+        let references_index = texts.iter().position(|&text| text == "References").unwrap();
+        assert!(heading_index < funding_index && heading_index < references_index);
+    }
+
+    /// Regression guard: a genuine single-column page with both wide
+    /// (near-furniture-width) and narrow lines must NOT be split. All lines
+    /// share the same left edge (there is only one column to begin with), so
+    /// excluding the wide lines as "furniture" from the gutter search must
+    /// not manufacture an artificial gap among the remaining narrow lines.
+    /// Splitting a genuinely single-column page scrambles correct output,
+    /// which is worse than leaving the (non-existent) repair unapplied.
+    #[test]
+    fn single_column_page_with_wide_and_narrow_lines_is_not_split() {
+        const COLUMN_X: f32 = 60.0;
+        let lines: [(&str, f32); 8] = [
+            ("This is a long justified line of body text filling", 470.0),
+            ("the page width almost completely from margin", 470.0),
+            ("to margin, as ordinary single-column prose does", 470.0),
+            ("Short line.", 90.0),
+            ("Another full-width line of ordinary body text here", 470.0),
+            ("Brief.", 90.0),
+            ("A further wide line completing this single paragraph", 470.0),
+            ("End.", 90.0),
+        ];
+        let mut spans = Vec::new();
+        for (row, (text, width)) in lines.iter().enumerate() {
+            let y = 800.0 - row as f32 * 14.0;
+            spans.push(span_with_width(text, COLUMN_X, y, *width, 11.0, 11.0));
+        }
+        let original = spans.iter().map(|span| span.text.clone()).collect::<Vec<_>>();
+
+        assert!(!reorder_dense_two_column_page(&mut spans, 612.0));
         assert_eq!(
             spans.iter().map(|span| span.text.as_str()).collect::<Vec<_>>(),
             original.iter().map(String::as_str).collect::<Vec<_>>()
