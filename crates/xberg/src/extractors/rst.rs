@@ -39,6 +39,10 @@ use async_trait::async_trait;
 #[cfg(feature = "office")]
 use std::borrow::Cow;
 
+/// `ProcessingWarning::source` for every warning this extractor emits (#171).
+#[cfg(feature = "office")]
+const RST_WARNING_SOURCE: &str = "rst";
+
 /// Native Rust reStructuredText extractor.
 ///
 /// Parses RST documents using document tree parsing and extracts:
@@ -1016,6 +1020,28 @@ impl RstExtractor {
                 continue;
             }
 
+            // `.. include:: path` inlines another file's rendered content at this
+            // point in the source. This parser works on a single in-memory
+            // document and never resolves the reference, so unlike a generic
+            // unhandled directive (whose *own* body is still captured by the
+            // fallback below) the referenced file's content is always missing
+            // from the extracted text (#171).
+            if trimmed.starts_with(".. include::") {
+                let target = trimmed.strip_prefix(".. include::").unwrap_or("").trim();
+                b.add_warning(crate::core::diagnostics::warning(
+                    RST_WARNING_SOURCE,
+                    format!(
+                        "'.. include:: {target}' references an external file that was not read; \
+                         its content is missing from the extracted text"
+                    ),
+                ));
+                i += 1;
+                while i < lines.len() && (lines[i].starts_with("   ") || lines[i].is_empty()) {
+                    i += 1;
+                }
+                continue;
+            }
+
             if trimmed.starts_with(".. contents::") {
                 let title = trimmed.strip_prefix(".. contents::").unwrap_or("").trim();
                 if !title.is_empty() {
@@ -1624,6 +1650,42 @@ Second paragraph.
         assert!(
             !has_image,
             "expected no image placeholder with inject_placeholders=false"
+        );
+    }
+
+    fn rst_warnings(doc: &crate::types::internal::InternalDocument) -> Vec<String> {
+        doc.processing_warnings
+            .iter()
+            .filter(|w| w.source == RST_WARNING_SOURCE)
+            .map(|w| w.message.to_string())
+            .collect()
+    }
+
+    /// #171: `.. include:: path` inlines another file's rendered content, which
+    /// this single-file, line-based parser has no way to read.
+    #[test]
+    fn should_warn_when_rst_include_directive_is_skipped() {
+        let rst = "Intro text\n\n.. include:: chapter1.rst\n\nMore text\n";
+        let doc = RstExtractor::build_internal_document(rst, true);
+
+        let warnings = rst_warnings(&doc);
+        assert_eq!(warnings.len(), 1, "expected exactly one rst warning, got {warnings:?}");
+        assert!(
+            warnings[0].contains("chapter1.rst") && warnings[0].contains("was not read"),
+            "warning must name the skipped include target, got {warnings:?}"
+        );
+    }
+
+    /// A document with no `include` directive must not warn.
+    #[test]
+    fn should_not_warn_for_rst_document_without_include() {
+        let rst = "Intro text\n\n.. note::\n   A note body.\n\nMore text\n";
+        let doc = RstExtractor::build_internal_document(rst, true);
+
+        assert!(
+            rst_warnings(&doc).is_empty(),
+            "a document without .. include:: must not warn, got {:?}",
+            rst_warnings(&doc)
         );
     }
 }

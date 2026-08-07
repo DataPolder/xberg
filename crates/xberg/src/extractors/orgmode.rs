@@ -49,6 +49,10 @@ use std::borrow::Cow;
 ///
 /// Provides native Rust-based Org Mode extraction using the `org` library,
 /// extracting structured content and metadata.
+/// `ProcessingWarning::source` for every warning this extractor emits (#171).
+#[cfg(feature = "office")]
+const ORGMODE_WARNING_SOURCE: &str = "orgmode";
+
 #[cfg_attr(alef, alef(skip))]
 #[cfg(feature = "office")]
 pub struct OrgModeExtractor;
@@ -357,6 +361,17 @@ impl OrgModeExtractor {
                     }
                     let value = val.trim().to_string();
                     if !value.is_empty() {
+                        if key_upper == "INCLUDE" {
+                            // Recorded as preamble metadata below, but the referenced file's
+                            // content itself is never read by this single-file parser (#171).
+                            b.add_warning(crate::core::diagnostics::warning(
+                                ORGMODE_WARNING_SOURCE,
+                                format!(
+                                    "'#+INCLUDE: {value}' references an external file that was not read; \
+                                     its content is missing from the extracted text"
+                                ),
+                            ));
+                        }
                         metadata_entries.push((key_upper, value));
                     }
                 }
@@ -406,6 +421,18 @@ impl OrgModeExtractor {
                         });
                     } else if key_upper == "NAME" && !value.is_empty() {
                         pending_name = Some(value.to_string());
+                    } else if key_upper == "INCLUDE" && !value.is_empty() {
+                        // `#+INCLUDE: "file.org"` inlines another file's rendered content at
+                        // this point. This parser works on a single in-memory document and
+                        // never resolves the reference, so the referenced file's content is
+                        // always missing from the extracted text (#171).
+                        b.add_warning(crate::core::diagnostics::warning(
+                            ORGMODE_WARNING_SOURCE,
+                            format!(
+                                "'#+INCLUDE: {value}' references an external file that was not read; \
+                                 its content is missing from the extracted text"
+                            ),
+                        ));
                     }
                 }
                 i += 1;
@@ -1477,6 +1504,64 @@ mod tests {
         assert!(
             !code_elements.is_empty(),
             "Should produce Code element for lowercase #+begin_example block"
+        );
+    }
+
+    fn orgmode_warnings(doc: &crate::types::internal::InternalDocument) -> Vec<String> {
+        doc.processing_warnings
+            .iter()
+            .filter(|w| w.source == ORGMODE_WARNING_SOURCE)
+            .map(|w| w.message.to_string())
+            .collect()
+    }
+
+    /// #171: `#+INCLUDE: "file.org"` inlines another file's rendered content,
+    /// which this single-file parser has no way to read, whether the keyword
+    /// appears in the document preamble or later in the body.
+    #[test]
+    fn should_warn_when_orgmode_include_keyword_in_preamble_is_skipped() {
+        let org_text = "#+TITLE: Doc\n#+INCLUDE: \"chapter1.org\"\n\n* Heading\nBody text\n";
+        let doc = OrgModeExtractor::build_internal_document(org_text);
+
+        let warnings = orgmode_warnings(&doc);
+        assert_eq!(
+            warnings.len(),
+            1,
+            "expected exactly one orgmode warning, got {warnings:?}"
+        );
+        assert!(
+            warnings[0].contains("chapter1.org") && warnings[0].contains("was not read"),
+            "warning must name the skipped #+INCLUDE target, got {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn should_warn_when_orgmode_include_keyword_in_body_is_skipped() {
+        let org_text = "* Heading\nBody text\n#+INCLUDE: \"chapter2.org\"\nMore text\n";
+        let doc = OrgModeExtractor::build_internal_document(org_text);
+
+        let warnings = orgmode_warnings(&doc);
+        assert_eq!(
+            warnings.len(),
+            1,
+            "expected exactly one orgmode warning, got {warnings:?}"
+        );
+        assert!(
+            warnings[0].contains("chapter2.org"),
+            "warning must name the skipped #+INCLUDE target, got {warnings:?}"
+        );
+    }
+
+    /// A document with no `#+INCLUDE` keyword must not warn.
+    #[test]
+    fn should_not_warn_for_orgmode_document_without_include() {
+        let org_text = "#+TITLE: Doc\n\n* Heading\nBody text\n";
+        let doc = OrgModeExtractor::build_internal_document(org_text);
+
+        assert!(
+            orgmode_warnings(&doc).is_empty(),
+            "a document without #+INCLUDE must not warn, got {:?}",
+            orgmode_warnings(&doc)
         );
     }
 }

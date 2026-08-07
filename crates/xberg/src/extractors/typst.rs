@@ -53,6 +53,10 @@ static CITE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"#cite\(<([^>]+)>
 #[cfg(feature = "office")]
 static AT_CITE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(^|[\s(])@([A-Za-z][A-Za-z0-9_:.-]*)").unwrap());
 
+/// `ProcessingWarning::source` for every warning this extractor emits (#171).
+#[cfg(feature = "office")]
+const TYPST_WARNING_SOURCE: &str = "typst";
+
 /// Typst document extractor
 #[cfg_attr(alef, alef(skip))]
 #[cfg(feature = "office")]
@@ -207,10 +211,25 @@ impl TypstExtractor {
                 continue;
             }
 
+            // `#include "path"` inlines another file's rendered content at this
+            // point; unlike `#import` (which only brings names into scope and
+            // renders nothing itself), skipping it always drops real content
+            // this single-file, line-based parser has no way to read (#171).
+            if let Some(target) = trimmed.strip_prefix("#include ") {
+                builder.add_warning(crate::core::diagnostics::warning(
+                    TYPST_WARNING_SOURCE,
+                    format!(
+                        "#include {} references an external file that was not read; \
+                         its content is missing from the extracted text",
+                        target.trim()
+                    ),
+                ));
+                continue;
+            }
+
             if trimmed.starts_with("#set ")
                 || trimmed.starts_with("#let ")
                 || trimmed.starts_with("#import ")
-                || trimmed.starts_with("#include ")
                 || trimmed.starts_with("#pagebreak")
                 || trimmed.starts_with("#colbreak")
                 || trimmed.starts_with("#v(")
@@ -1627,5 +1646,47 @@ Actual content"#;
         assert!(output.contains("🎉"), "Emoji preserved");
         assert!(output.contains("bold"), "Bold content present");
         assert!(output.contains("🌍"), "Trailing emoji preserved");
+    }
+
+    fn typst_warnings(doc: &InternalDocument) -> Vec<String> {
+        doc.processing_warnings
+            .iter()
+            .filter(|w| w.source == TYPST_WARNING_SOURCE)
+            .map(|w| w.message.to_string())
+            .collect()
+    }
+
+    /// #171: `#include "path"` inlines another file's content, which this
+    /// single-file, line-based parser has no way to read; it must not be
+    /// dropped without a trace.
+    #[test]
+    fn should_warn_when_typst_include_is_skipped() {
+        let content = "#include \"chapter1.typ\"\n\n= Heading\nBody text";
+        let doc = TypstExtractor::build_internal_document(content);
+
+        let warnings = typst_warnings(&doc);
+        assert_eq!(
+            warnings.len(),
+            1,
+            "expected exactly one typst warning, got {warnings:?}"
+        );
+        assert!(
+            warnings[0].contains("#include \"chapter1.typ\"") && warnings[0].contains("was not read"),
+            "warning must name the skipped #include target, got {warnings:?}"
+        );
+    }
+
+    /// `#import` only brings names into scope and renders nothing itself, so
+    /// it must not warn.
+    #[test]
+    fn should_not_warn_for_typst_import() {
+        let content = "#import \"@preview/foo:1.0\"\n\n= Heading\nBody text";
+        let doc = TypstExtractor::build_internal_document(content);
+
+        assert!(
+            typst_warnings(&doc).is_empty(),
+            "#import must not warn, got {:?}",
+            typst_warnings(&doc)
+        );
     }
 }

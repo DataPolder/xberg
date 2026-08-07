@@ -20,6 +20,9 @@ use roxmltree::Document;
 use std::borrow::Cow;
 use std::io::Cursor;
 
+/// `ProcessingWarning::source` for every warning this extractor emits (#171).
+const ODT_WARNING_SOURCE: &str = "odt";
+
 /// High-performance ODT extractor using native Rust XML parsing.
 ///
 /// This extractor provides:
@@ -510,6 +513,19 @@ fn handle_odt_frame(
                 attrs.insert("src".to_string(), h.to_string());
                 builder.set_attributes(idx, attrs);
             }
+            // `image_data` was pre-populated only from `Pictures/` (#171): a
+            // `draw:image` referencing anything else (a linked external file, or a
+            // package member outside the standard directory) has no binary to
+            // attach, so the image silently degrades into a text placeholder.
+            if let Some(h) = href {
+                builder.add_warning(crate::core::diagnostics::warning(
+                    ODT_WARNING_SOURCE,
+                    format!(
+                        "Image reference '{h}' could not be resolved to embedded image data (expected \
+                         under Pictures/); a text placeholder was extracted instead of the image"
+                    ),
+                ));
+            }
         }
     }
 }
@@ -841,6 +857,14 @@ pub(crate) fn build_internal_elements(
                 if !cells.is_empty() {
                     let cell_count: usize = cells.iter().map(|r| r.len()).sum();
                     budget.add_cells(cell_count)?;
+                    if table_has_lossy_repeated_cells(node) {
+                        builder.add_warning(crate::core::diagnostics::warning(
+                            ODT_WARNING_SOURCE,
+                            "A table cell with table:number-columns-repeated and non-empty content was \
+                             collapsed to a single cell; the extracted row is narrower than the source \
+                             table and following columns may be misaligned",
+                        ));
+                    }
                     builder.push_table_from_cells(&cells, None, None);
                 }
             }
@@ -941,6 +965,14 @@ fn extract_odt_internal_headers_footers(
     if let Ok(mut file) = archive.by_name("styles.xml") {
         use std::io::Read;
         if file.read_to_string(&mut styles_xml).is_err() {
+            // The member exists but could not be decoded: unlike a missing
+            // styles.xml (an ODT with no headers/footers at all, which is not a
+            // loss), this is a real document whose header/footer content is now
+            // unreadable (#171).
+            builder.add_warning(crate::core::diagnostics::warning(
+                ODT_WARNING_SOURCE,
+                "styles.xml could not be read as text; any headers and footers it defines were not extracted",
+            ));
             return;
         }
     } else {
@@ -948,6 +980,10 @@ fn extract_odt_internal_headers_footers(
     }
 
     let Ok(doc) = Document::parse(&styles_xml) else {
+        builder.add_warning(crate::core::diagnostics::warning(
+            ODT_WARNING_SOURCE,
+            "styles.xml could not be parsed as XML; any headers and footers it defines were not extracted",
+        ));
         return;
     };
 
@@ -1143,6 +1179,42 @@ pub(crate) fn extract_table_cells(table_node: roxmltree::Node) -> Vec<Vec<String
         }
     }
     rows
+}
+
+/// Detect whether `table_node` has a `table:table-cell` whose
+/// `table:number-columns-repeated` is greater than one and whose content is
+/// non-empty.
+///
+/// [`extract_row_cells`] emits the repeated cell exactly once instead of
+/// `number-columns-repeated` times, so a repeated cell that actually carries
+/// text collapses the row width and misaligns every following column
+/// (#171). A repeated *empty* cell (by far the common case — ODT writers pad
+/// trailing blank columns this way) loses nothing worth naming, so it is
+/// deliberately excluded to avoid warning on ordinary tables.
+fn table_has_lossy_repeated_cells(table_node: roxmltree::Node) -> bool {
+    const TABLE_NS: &str = "urn:oasis:names:tc:opendocument:xmlns:table:1.0";
+
+    let row_has_lossy_cell = |row_node: roxmltree::Node| {
+        row_node.children().any(|cell_node| {
+            if cell_node.tag_name().name() != "table-cell" {
+                return false;
+            }
+            let repeated = cell_node
+                .attribute((TABLE_NS, "number-columns-repeated"))
+                .or_else(|| cell_node.attribute("table:number-columns-repeated"))
+                .and_then(|value| value.parse::<u32>().ok())
+                .unwrap_or(1);
+            repeated > 1 && extract_node_text(cell_node).is_some_and(|text| !text.trim().is_empty())
+        })
+    };
+
+    table_node.children().any(|child| match child.tag_name().name() {
+        "table-row" => row_has_lossy_cell(child),
+        "table-header-rows" => child
+            .children()
+            .any(|row_node| row_node.tag_name().name() == "table-row" && row_has_lossy_cell(row_node)),
+        _ => false,
+    })
 }
 
 /// Extract cell text values from a single table row node.
@@ -1739,6 +1811,223 @@ mod tests {
         assert!(
             has_strikethrough,
             "Strikeout ODT should produce Strikethrough annotations"
+        );
+    }
+
+    /// Build an in-memory ODT ZIP archive from named text members, always
+    /// including `mimetype` and `content.xml`.
+    fn build_odt_zip(text_files: &[(&str, &str)]) -> zip::ZipArchive<Cursor<Vec<u8>>> {
+        use std::io::Write;
+
+        let mut buf = Vec::new();
+        {
+            let mut zip = zip::ZipWriter::new(Cursor::new(&mut buf));
+            let stored = zip::write::FileOptions::<()>::default().compression_method(zip::CompressionMethod::Stored);
+            zip.start_file("mimetype", stored).unwrap();
+            zip.write_all(b"application/vnd.oasis.opendocument.text").unwrap();
+
+            for (name, content) in text_files {
+                let deflated =
+                    zip::write::FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+                zip.start_file(*name, deflated).unwrap();
+                zip.write_all(content.as_bytes()).unwrap();
+            }
+            zip.finish().unwrap();
+        }
+        zip::ZipArchive::new(Cursor::new(buf)).unwrap()
+    }
+
+    const CONTENT_XML_NAMESPACES: &str = r#"xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+        xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+        xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0"
+        xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0"
+        xmlns:xlink="http://www.w3.org/1999/xlink""#;
+
+    fn odt_warnings(doc: &InternalDocument) -> Vec<String> {
+        doc.processing_warnings
+            .iter()
+            .filter(|w| w.source == ODT_WARNING_SOURCE)
+            .map(|w| w.message.to_string())
+            .collect()
+    }
+
+    /// #171: a `draw:image` referencing a path that was never pre-extracted from
+    /// `Pictures/` (a missing member, or a reference outside that directory)
+    /// silently degrades to a text placeholder; the caller must be told.
+    #[tokio::test]
+    async fn should_warn_when_odt_image_reference_is_not_resolved() {
+        let content_xml = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content {CONTENT_XML_NAMESPACES}>
+  <office:body>
+    <office:text>
+      <draw:frame>
+        <draw:image xlink:href="Pictures/missing.png"/>
+      </draw:frame>
+    </office:text>
+  </office:body>
+</office:document-content>"#
+        );
+        let mut archive = build_odt_zip(&[("content.xml", &content_xml)]);
+        let mut budget = SecurityBudget::from_config(&ExtractionConfig::default());
+        let doc = build_internal_document(&mut archive, &mut budget).expect("extraction should succeed");
+
+        let warnings = odt_warnings(&doc);
+        assert_eq!(warnings.len(), 1, "expected exactly one odt warning, got {warnings:?}");
+        assert!(
+            warnings[0].contains("Pictures/missing.png") && warnings[0].contains("could not be resolved"),
+            "warning must name the unresolved image reference, got {warnings:?}"
+        );
+    }
+
+    /// The same reference resolved against a pre-extracted `Pictures/` member
+    /// must not warn.
+    #[tokio::test]
+    async fn should_not_warn_when_odt_image_reference_resolves() {
+        use std::io::Write;
+
+        let content_xml = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content {CONTENT_XML_NAMESPACES}>
+  <office:body>
+    <office:text>
+      <draw:frame>
+        <draw:image xlink:href="Pictures/present.png"/>
+      </draw:frame>
+    </office:text>
+  </office:body>
+</office:document-content>"#
+        );
+
+        let mut buf = Vec::new();
+        {
+            let mut zip = zip::ZipWriter::new(Cursor::new(&mut buf));
+            let stored = zip::write::FileOptions::<()>::default().compression_method(zip::CompressionMethod::Stored);
+            zip.start_file("mimetype", stored).unwrap();
+            zip.write_all(b"application/vnd.oasis.opendocument.text").unwrap();
+            let deflated =
+                zip::write::FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+            zip.start_file("content.xml", deflated).unwrap();
+            zip.write_all(content_xml.as_bytes()).unwrap();
+            let deflated =
+                zip::write::FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+            zip.start_file("Pictures/present.png", deflated).unwrap();
+            zip.write_all(&[0x89, b'P', b'N', b'G', 0, 0, 0, 0]).unwrap();
+            zip.finish().unwrap();
+        }
+        let mut archive = zip::ZipArchive::new(Cursor::new(buf)).unwrap();
+        let mut budget = SecurityBudget::from_config(&ExtractionConfig::default());
+        let doc = build_internal_document(&mut archive, &mut budget).expect("extraction should succeed");
+
+        assert!(
+            odt_warnings(&doc).is_empty(),
+            "a resolvable image reference must not warn, got {:?}",
+            odt_warnings(&doc)
+        );
+    }
+
+    /// #171: `styles.xml` present but not parseable as XML must warn instead of
+    /// silently returning no headers/footers, which is indistinguishable from a
+    /// document that genuinely has none.
+    #[tokio::test]
+    async fn should_warn_when_odt_styles_xml_is_unparseable() {
+        let content_xml = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content {CONTENT_XML_NAMESPACES}>
+  <office:body><office:text><text:p>Body</text:p></office:text></office:body>
+</office:document-content>"#
+        );
+        let mut archive = build_odt_zip(&[("content.xml", &content_xml), ("styles.xml", "<not valid xml")]);
+        let mut budget = SecurityBudget::from_config(&ExtractionConfig::default());
+        let doc = build_internal_document(&mut archive, &mut budget).expect("extraction should succeed");
+
+        let warnings = odt_warnings(&doc);
+        assert_eq!(warnings.len(), 1, "expected exactly one odt warning, got {warnings:?}");
+        assert!(
+            warnings[0].contains("styles.xml could not be parsed as XML"),
+            "warning must name the styles.xml parse failure, got {warnings:?}"
+        );
+    }
+
+    /// A missing `styles.xml` is a normal ODT with no headers/footers, not a
+    /// loss, and must not warn.
+    #[tokio::test]
+    async fn should_not_warn_when_odt_has_no_styles_xml() {
+        let content_xml = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content {CONTENT_XML_NAMESPACES}>
+  <office:body><office:text><text:p>Body</text:p></office:text></office:body>
+</office:document-content>"#
+        );
+        let mut archive = build_odt_zip(&[("content.xml", &content_xml)]);
+        let mut budget = SecurityBudget::from_config(&ExtractionConfig::default());
+        let doc = build_internal_document(&mut archive, &mut budget).expect("extraction should succeed");
+
+        assert!(
+            odt_warnings(&doc).is_empty(),
+            "a document with no styles.xml at all must not warn, got {:?}",
+            odt_warnings(&doc)
+        );
+    }
+
+    /// #171: a non-empty `table:table-cell` repeated via
+    /// `table:number-columns-repeated` is emitted only once by
+    /// `extract_row_cells`, narrowing the row and misaligning later columns.
+    #[tokio::test]
+    async fn should_warn_when_odt_table_collapses_nonempty_repeated_cell() {
+        let content_xml = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content {CONTENT_XML_NAMESPACES}>
+  <office:body>
+    <office:text>
+      <table:table>
+        <table:table-row>
+          <table:table-cell table:number-columns-repeated="3"><text:p>Value</text:p></table:table-cell>
+        </table:table-row>
+      </table:table>
+    </office:text>
+  </office:body>
+</office:document-content>"#
+        );
+        let mut archive = build_odt_zip(&[("content.xml", &content_xml)]);
+        let mut budget = SecurityBudget::from_config(&ExtractionConfig::default());
+        let doc = build_internal_document(&mut archive, &mut budget).expect("extraction should succeed");
+
+        let warnings = odt_warnings(&doc);
+        assert_eq!(warnings.len(), 1, "expected exactly one odt warning, got {warnings:?}");
+        assert!(
+            warnings[0].contains("number-columns-repeated"),
+            "warning must name the repeated-cell collapse, got {warnings:?}"
+        );
+    }
+
+    /// A repeated *empty* trailing cell (the common case for ODT writers
+    /// padding a row to a fixed column count) loses nothing worth naming.
+    #[tokio::test]
+    async fn should_not_warn_when_odt_table_repeats_an_empty_cell() {
+        let content_xml = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content {CONTENT_XML_NAMESPACES}>
+  <office:body>
+    <office:text>
+      <table:table>
+        <table:table-row>
+          <table:table-cell><text:p>Value</text:p></table:table-cell>
+          <table:table-cell table:number-columns-repeated="5"/>
+        </table:table-row>
+      </table:table>
+    </office:text>
+  </office:body>
+</office:document-content>"#
+        );
+        let mut archive = build_odt_zip(&[("content.xml", &content_xml)]);
+        let mut budget = SecurityBudget::from_config(&ExtractionConfig::default());
+        let doc = build_internal_document(&mut archive, &mut budget).expect("extraction should succeed");
+
+        assert!(
+            odt_warnings(&doc).is_empty(),
+            "a repeated empty cell must not warn, got {:?}",
+            odt_warnings(&doc)
         );
     }
 }
