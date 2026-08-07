@@ -148,12 +148,11 @@ jobs:
       # spurious diff. Never run `alef all --clean` here -- `alef generate --lang X`
       # deletes every other language's output, and even the safe `alef all` variant
       # means a full 15-language regen (minutes, not the sub-second cost of verify).
-      # KNOWN RED as of 2026-08-06: crates/xberg-node has drifted from its Rust
-      # source (see the E0004/E0063 cargo check failure tracked separately) --
-      # land this job as non-blocking (continue-on-error) until that drift is
-      # fixed, then flip it to required. ~keep
+      # Blocking as of the b1c7c2a328 regen, which cleared the crates/xberg-node
+      # drift this job was masked for (#323 -- `cargo check -p xberg-node
+      # --all-targets` is clean on that tree). With the mask gone it correctly
+      # goes red on a stale tree, which is the point. ~keep
       - name: Verify alef-generated bindings are current
-        continue-on-error: true
         run: task alef:verify
 
   validate:
