@@ -921,7 +921,13 @@ fn parse_cell_value(storage: &[u8], context: &mut TableFillContext<'_>) -> Resul
     if version == CELL_STORAGE_VERSION {
         parse_v5_cell(storage, context.strings, context.rich_strings)
     } else if version <= 4 {
-        parse_old_cell(storage, context.strings, context.rich_strings, context.table_name, context.warnings)
+        parse_old_cell(
+            storage,
+            context.strings,
+            context.rich_strings,
+            context.table_name,
+            context.warnings,
+        )
     } else {
         tracing::debug!(version, "skipping unsupported Numbers cell storage version");
         Ok(None)
