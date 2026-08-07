@@ -728,7 +728,27 @@ package_name = "@xberg-io/xberg-wasm"
 # limit and broke the docs live demo. The `web` build serves browsers, CDNs,
 # bundlers, Deno (npm:), and Node 22+. ~keep
 targets = ["web"]
-features = ["wasm-target", "url-ingestion"]
+features = [
+  "wasm-target",
+  "url-ingestion",
+  # The following are ALL already compiled into the wasm binary transitively via
+  # `wasm-target` -> `no-ort-target` (see crates/xberg/Cargo.toml). They are listed
+  # here again, literally, because alef's binding generator evaluates `#[cfg(feature
+  # = "...")]` against this exact string list rather than resolving Cargo's feature
+  # graph -- an aggregate alias like "wasm-target" never matches a literal
+  # `#[cfg(feature = "heuristics")]` (or "pdf", "html", etc.) even though Cargo does
+  # turn that leaf feature on. Without the literal name here, alef treats the gate
+  # as unsatisfied and drops the cfg'd struct field/type from the generated bindings
+  # (see #244, #252). Adding these has ZERO additional size/dependency cost: every
+  # one is already active in the compiled wasm binary today. ~keep
+  "heuristics",
+  "keywords-yake",
+  "keywords-rake",
+  "pdf",
+  "html",
+  "layout-types",
+  "transcription-types",
+]
 # tract layout/orientation weights push the release .wasm past jsdelivr's 50MB
 # per-file cap when wasm-pack's default wasm-opt is off. Run wasm-opt -Oz to
 # claw the binary back under the cap. ~keep
