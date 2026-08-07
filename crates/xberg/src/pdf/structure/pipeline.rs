@@ -498,6 +498,9 @@ struct PageInput {
     /// When true, paragraphs classified as `PageFooter` by the layout model are
     /// preserved rather than marked as furniture. Mirrors `ContentFilterConfig::include_footers`.
     include_footers: bool,
+    /// When true, paragraphs classified as `Footnote` by the layout model are
+    /// preserved rather than marked as furniture. Mirrors `ContentFilterConfig::include_footnotes`.
+    include_footnotes: bool,
 }
 
 /// Process a single page's data through Stage 3: classification, text repair,
@@ -526,6 +529,7 @@ fn process_single_page(
         paragraph_gap_ys,
         include_headers,
         include_footers,
+        include_footnotes,
     } = input;
     #[cfg(not(feature = "layout-detection"))]
     let _ = preserve_native_semantics;
@@ -552,7 +556,7 @@ fn process_single_page(
                 0.2,
                 doc_body_font_size,
             );
-            un_mark_layout_furniture_per_config(&mut paragraphs, include_headers, include_footers);
+            un_mark_layout_furniture_per_config(&mut paragraphs, include_headers, include_footers, include_footnotes);
             tracing::debug!(
                 page = i,
                 headings = paragraphs.iter().filter(|p| p.heading_level.is_some()).count(),
@@ -589,6 +593,7 @@ fn process_single_page(
                         doc_body_font_size,
                         include_headers,
                         include_footers,
+                        include_footnotes,
                         page_width_pts,
                         apply_layout_overrides: !preserve_native_semantics,
                     },
@@ -619,7 +624,7 @@ fn process_single_page(
                 0.2,
                 doc_body_font_size,
             );
-            un_mark_layout_furniture_per_config(&mut paragraphs, include_headers, include_footers);
+            un_mark_layout_furniture_per_config(&mut paragraphs, include_headers, include_footers, include_footnotes);
         }
         if page_hints.is_some() {
             tracing::debug!(
@@ -834,6 +839,7 @@ struct LayoutParagraphContext<'a> {
     doc_body_font_size: Option<f32>,
     include_headers: bool,
     include_footers: bool,
+    include_footnotes: bool,
     page_width_pts: Option<f32>,
     apply_layout_overrides: bool,
 }
@@ -903,6 +909,7 @@ fn process_layout_segment_groups(
                 &mut group_paragraphs,
                 context.include_headers,
                 context.include_footers,
+                context.include_footnotes,
             );
         } else {
             super::layout_classify::annotate_layout_classes(&mut group_paragraphs, &group_hints, 0.5, 0.2);
@@ -1660,6 +1667,7 @@ pub(crate) struct SegmentStructureConfig<'a> {
     pub strip_repeating_text: bool,
     pub include_headers: bool,
     pub include_footers: bool,
+    pub include_footnotes: bool,
     pub used_structure_tree: bool,
     pub image_positions: &'a [(u32, u32)],
     pub images: Option<&'a [crate::types::ExtractedImage]>,
@@ -1704,6 +1712,7 @@ pub(crate) fn extract_document_structure_from_segments(
         strip_repeating_text,
         include_headers,
         include_footers,
+        include_footnotes,
         used_structure_tree,
         image_positions,
         images,
@@ -2229,6 +2238,7 @@ pub(crate) fn extract_document_structure_from_segments(
                 paragraph_gap_ys,
                 include_headers,
                 include_footers,
+                include_footnotes,
             }
         })
         .collect();
@@ -3526,14 +3536,20 @@ fn canonical_table_order(left: &crate::types::Table, right: &crate::types::Table
 }
 
 /// Clear `is_page_furniture` on paragraphs whose `layout_class` was set to
-/// `PageHeader` or `PageFooter` by the layout model, when the caller has opted
-/// in to keeping those regions via `include_headers` / `include_footers`.
+/// `PageHeader`, `PageFooter`, or `Footnote` by the layout model, when the
+/// caller has opted in to keeping those regions via `include_headers` /
+/// `include_footers` / `include_footnotes`.
 ///
 /// This must run **before** `retain_page_furniture_safely`, which physically
 /// removes furniture paragraphs via `.retain()`. Un-marking here ensures that
-/// user-opted-in header/footer paragraphs survive that pass.
-fn un_mark_layout_furniture_per_config(paragraphs: &mut [PdfParagraph], include_headers: bool, include_footers: bool) {
-    if !include_headers && !include_footers {
+/// user-opted-in header/footer/footnote paragraphs survive that pass.
+fn un_mark_layout_furniture_per_config(
+    paragraphs: &mut [PdfParagraph],
+    include_headers: bool,
+    include_footers: bool,
+    include_footnotes: bool,
+) {
+    if !include_headers && !include_footers && !include_footnotes {
         return;
     }
     for para in paragraphs.iter_mut() {
@@ -3545,6 +3561,9 @@ fn un_mark_layout_furniture_per_config(paragraphs: &mut [PdfParagraph], include_
                 para.is_page_furniture = false;
             }
             Some(super::types::LayoutHintClass::PageFooter) if include_footers => {
+                para.is_page_furniture = false;
+            }
+            Some(super::types::LayoutHintClass::Footnote) if include_footnotes => {
                 para.is_page_furniture = false;
             }
             _ => {}
@@ -6564,6 +6583,7 @@ where new shares are issued;";
                 paragraph_gap_ys: Vec::new(),
                 include_headers: true,
                 include_footers: true,
+                include_footnotes: false,
             },
             &[],
             None,
@@ -6594,6 +6614,7 @@ where new shares are issued;";
                     paragraph_gap_ys: paragraph_gap_ys.clone(),
                     include_headers: true,
                     include_footers: true,
+                    include_footnotes: false,
                 },
                 &[],
                 None,
@@ -6673,6 +6694,7 @@ where new shares are issued;";
                     paragraph_gap_ys: Vec::new(),
                     include_headers: true,
                     include_footers: true,
+                    include_footnotes: false,
                 },
                 &[],
                 None,
@@ -6746,6 +6768,7 @@ where new shares are issued;";
                 paragraph_gap_ys: Vec::new(),
                 include_headers: true,
                 include_footers: true,
+                include_footnotes: false,
             },
             &[],
             None,
@@ -6782,6 +6805,7 @@ where new shares are issued;";
                 paragraph_gap_ys,
                 include_headers: true,
                 include_footers: true,
+                include_footnotes: false,
             },
             &[],
             None,
@@ -6819,6 +6843,7 @@ where new shares are issued;";
                 paragraph_gap_ys: Vec::new(),
                 include_headers: true,
                 include_footers: true,
+                include_footnotes: false,
             },
             &[],
             None,
@@ -6909,6 +6934,7 @@ where new shares are issued;";
                 paragraph_gap_ys: Vec::new(),
                 include_headers: true,
                 include_footers: true,
+                include_footnotes: false,
             },
             &[],
             None,
@@ -6955,6 +6981,7 @@ where new shares are issued;";
                 paragraph_gap_ys: Vec::new(),
                 include_headers: true,
                 include_footers: true,
+                include_footnotes: false,
             },
             &[],
             Some(12.0),
@@ -7192,7 +7219,7 @@ where new shares are issued;";
     #[test]
     fn test_include_headers_clears_page_header_furniture() {
         let mut paras = vec![furniture_para_with_class(LayoutHintClass::PageHeader)];
-        un_mark_layout_furniture_per_config(&mut paras, true, false);
+        un_mark_layout_furniture_per_config(&mut paras, true, false, false);
         assert!(
             !paras[0].is_page_furniture,
             "PageHeader furniture must be cleared when include_headers=true"
@@ -7202,7 +7229,7 @@ where new shares are issued;";
     #[test]
     fn test_include_footers_clears_page_footer_furniture() {
         let mut paras = vec![furniture_para_with_class(LayoutHintClass::PageFooter)];
-        un_mark_layout_furniture_per_config(&mut paras, false, true);
+        un_mark_layout_furniture_per_config(&mut paras, false, true, false);
         assert!(
             !paras[0].is_page_furniture,
             "PageFooter furniture must be cleared when include_footers=true"
@@ -7212,7 +7239,7 @@ where new shares are issued;";
     #[test]
     fn test_include_headers_false_preserves_page_header_furniture() {
         let mut paras = vec![furniture_para_with_class(LayoutHintClass::PageHeader)];
-        un_mark_layout_furniture_per_config(&mut paras, false, false);
+        un_mark_layout_furniture_per_config(&mut paras, false, false, false);
         assert!(
             paras[0].is_page_furniture,
             "PageHeader furniture must remain when include_headers=false"
@@ -7222,7 +7249,7 @@ where new shares are issued;";
     #[test]
     fn test_include_headers_does_not_clear_page_footer_furniture() {
         let mut paras = vec![furniture_para_with_class(LayoutHintClass::PageFooter)];
-        un_mark_layout_furniture_per_config(&mut paras, true, false);
+        un_mark_layout_furniture_per_config(&mut paras, true, false, false);
         assert!(
             paras[0].is_page_furniture,
             "PageFooter furniture must remain when only include_headers=true"
@@ -7235,7 +7262,7 @@ where new shares are issued;";
         para.is_page_furniture = true;
         para.layout_class = None;
         let mut paras = vec![para];
-        un_mark_layout_furniture_per_config(&mut paras, true, true);
+        un_mark_layout_furniture_per_config(&mut paras, true, true, false);
         assert!(
             paras[0].is_page_furniture,
             "Heuristic furniture (no layout_class) must not be cleared"
@@ -7248,9 +7275,64 @@ where new shares are issued;";
             furniture_para_with_class(LayoutHintClass::PageHeader),
             furniture_para_with_class(LayoutHintClass::PageFooter),
         ];
-        un_mark_layout_furniture_per_config(&mut paras, false, false);
+        un_mark_layout_furniture_per_config(&mut paras, false, false, false);
         assert!(paras[0].is_page_furniture);
         assert!(paras[1].is_page_furniture);
+    }
+
+    #[test]
+    fn should_clear_footnote_furniture_when_include_footnotes_is_true() {
+        let mut paras = vec![furniture_para_with_class(LayoutHintClass::Footnote)];
+        un_mark_layout_furniture_per_config(&mut paras, false, false, true);
+        assert!(
+            !paras[0].is_page_furniture,
+            "Footnote furniture must be cleared when include_footnotes=true"
+        );
+    }
+
+    #[test]
+    fn should_preserve_footnote_furniture_when_include_footnotes_is_false() {
+        let mut paras = vec![furniture_para_with_class(LayoutHintClass::Footnote)];
+        un_mark_layout_furniture_per_config(&mut paras, true, true, false);
+        assert!(
+            paras[0].is_page_furniture,
+            "Footnote furniture must remain when include_footnotes=false, even if header/footer flags are true"
+        );
+    }
+
+    #[test]
+    fn should_drop_footnote_body_when_recovery_knob_is_off_and_survive_when_on() {
+        // Regression test for GH#61: a footnote body classified `Footnote` by the
+        // layout model that is (for whatever reason) already marked page furniture
+        // must be recoverable via `include_footnotes`, exactly like header/footer
+        // furniture is recoverable via `include_headers` / `include_footers`.
+        //
+        // A second, substantive body paragraph is included alongside the footnote so
+        // `retain_page_furniture_safely`'s "don't empty the page" safety valve does not
+        // mask the effect of `include_footnotes` under test.
+        let body_text = "A".repeat(200);
+        let body = {
+            let mut p = para(vec![line(vec![seg(&body_text, 0.0, 400.0)])]);
+            p.text = body_text.clone();
+            p.word_count = 1;
+            p
+        };
+        let footnote_body = furniture_para_with_class(LayoutHintClass::Footnote);
+
+        let mut off = vec![body.clone(), footnote_body.clone()];
+        un_mark_layout_furniture_per_config(&mut off, true, true, false);
+        retain_page_furniture_safely(&mut off);
+        assert_eq!(
+            off.len(),
+            1,
+            "footnote body must be dropped when include_footnotes=false"
+        );
+
+        let mut on = vec![body, footnote_body];
+        un_mark_layout_furniture_per_config(&mut on, false, false, true);
+        retain_page_furniture_safely(&mut on);
+        assert_eq!(on.len(), 2, "footnote body must survive when include_footnotes=true");
+        assert!(!on[1].is_page_furniture);
     }
 
     #[test]
@@ -7929,6 +8011,7 @@ where new shares are issued;";
                 paragraph_gap_ys: vec![],
                 include_headers: true,
                 include_footers: true,
+                include_footnotes: false,
             },
             &[],
             None,
@@ -7983,6 +8066,7 @@ where new shares are issued;";
                 paragraph_gap_ys: vec![],
                 include_headers: true,
                 include_footers: true,
+                include_footnotes: false,
             },
             &[],
             None,

@@ -62,7 +62,7 @@ pub(crate) fn extract_all_from_oxide_document(
     let _span = tracing::debug_span!("extract_pdf_oxide").entered();
 
     #[cfg_attr(not(feature = "layout-detection"), allow(unused_mut))]
-    let (mut native_text, mut boundaries, page_contents, mut pdf_metadata) =
+    let (mut native_text, mut boundaries, mut page_contents, mut pdf_metadata) =
         crate::pdf::oxide::text::extract_text_and_metadata(&mut doc, Some(config)).map_err(|e| {
             crate::error::XbergError::Parsing {
                 message: format!("pdf_oxide text extraction failed: {e}"),
@@ -75,7 +75,7 @@ pub(crate) fn extract_all_from_oxide_document(
         && let Some(hints) = layout_hints
     {
         match apply_reading_order_reordering(&mut doc, &native_text, hints, config.pages.as_ref()) {
-            Ok((reordered, reordered_boundaries)) => {
+            Ok((reordered, reordered_boundaries, reordered_per_page)) => {
                 native_text = reordered;
                 // Reordering rebuilds the text, so boundaries computed against
                 // the original extraction order no longer index it. ~keep
@@ -87,6 +87,7 @@ pub(crate) fn extract_all_from_oxide_document(
                         boundaries = Some(reordered_boundaries);
                     }
                 }
+                apply_reordered_text_to_page_contents(&mut page_contents, reordered_per_page);
             }
             Err(e) => {
                 tracing::warn!(
@@ -228,11 +229,18 @@ pub(crate) fn extract_all_from_oxide_document(
             .map(|h| h.include_bbox)
             .unwrap_or(true);
 
-        let (strip_repeating_text, include_headers, include_footers) = config
+        let (strip_repeating_text, include_headers, include_footers, include_footnotes) = config
             .content_filter
             .as_ref()
-            .map(|cf| (cf.strip_repeating_text, cf.include_headers, cf.include_footers))
-            .unwrap_or((true, false, false));
+            .map(|cf| {
+                (
+                    cf.strip_repeating_text,
+                    cf.include_headers,
+                    cf.include_footers,
+                    cf.include_footnotes,
+                )
+            })
+            .unwrap_or((true, false, false, false));
 
         let (all_page_segments, used_structure_tree) = match extracted_hierarchy_segments.take() {
             Some(segments) => (segments.pages, segments.used_structure_tree),
@@ -264,6 +272,7 @@ pub(crate) fn extract_all_from_oxide_document(
                 strip_repeating_text,
                 include_headers,
                 include_footers,
+                include_footnotes,
                 used_structure_tree,
                 image_positions: &image_positions,
                 images: images.as_deref(),
@@ -364,13 +373,18 @@ pub(crate) fn extract_all_from_oxide_document(
 /// from the original extraction must not be used to index it. An empty
 /// boundary vector means the text was returned unchanged. Page markers from
 /// `page_config` are preserved in the rebuilt text.
+///
+/// Also returns the reordered text for each page individually (no markers or
+/// separators), so callers can patch per-page assemblies — such as
+/// `PageContent::content` — that are built independently of the joined
+/// document text and would otherwise keep the original, unreordered text.
 #[cfg(feature = "layout-detection")]
 fn apply_reading_order_reordering(
     doc: &mut crate::pdf::oxide::OxideDocument,
     native_text: &str,
     layout_hints_per_page: &[Vec<crate::pdf::structure::types::LayoutHint>],
     page_config: Option<&crate::core::config::PageConfig>,
-) -> Result<(String, Vec<crate::types::PageBoundary>)> {
+) -> Result<(String, Vec<crate::types::PageBoundary>, Vec<String>)> {
     use crate::extractors::pdf::reading_order;
 
     let page_count = doc.doc.page_count().map_err(|e| crate::error::XbergError::Parsing {
@@ -413,10 +427,42 @@ fn apply_reading_order_reordering(
     }
 
     if reordered_pages.is_empty() {
-        return Ok((native_text.to_string(), Vec::new()));
+        return Ok((native_text.to_string(), Vec::new(), Vec::new()));
     }
 
-    Ok(join_pages_with_boundaries(&reordered_pages, page_config))
+    let (content, boundaries) = join_pages_with_boundaries(&reordered_pages, page_config);
+    Ok((content, boundaries, reordered_pages))
+}
+
+/// Patch each page's `PageContent::content` (and `is_blank`) with its
+/// reordered text.
+///
+/// `PageContent` is built independently of the joined `native_text`/
+/// `boundaries` returned by `extract_text_and_metadata`'s own per-page split
+/// (see `extract_text_from_oxide_document` in `pdf/oxide/text.rs`), so
+/// reordering only the joined document text — as `apply_reading_order_reordering`
+/// used to do before this patch existed — left every page's own `content`
+/// field stuck with the original, unreordered per-page text. GH#1358: this is
+/// why AUTO and ALWAYS reading-order modes returned byte-identical
+/// `pages[].content` even though the top-level text was already being
+/// reordered — the two were never wired together.
+///
+/// Pairs by position: both vectors are built by iterating `0..page_count` in
+/// the same order, so a short read on either side (mismatched page counts)
+/// simply leaves the excess pages on either side untouched rather than
+/// panicking.
+#[cfg(feature = "layout-detection")]
+fn apply_reordered_text_to_page_contents(
+    page_contents: &mut Option<Vec<PageContent>>,
+    reordered_per_page: Vec<String>,
+) {
+    let Some(pages) = page_contents else {
+        return;
+    };
+    for (page, reordered_text) in pages.iter_mut().zip(reordered_per_page) {
+        page.is_blank = Some(crate::extraction::blank_detection::is_page_text_blank(&reordered_text));
+        page.content = reordered_text;
+    }
 }
 
 /// Join per-page texts, recording each page's byte range in the combined
@@ -484,6 +530,78 @@ mod tests {
             super::effective_layout_acceleration(&config, None).map(|acceleration| &acceleration.provider),
             Some(&ExecutionProviderType::CoreMl)
         );
+    }
+
+    /// Regression test for GH#1358: `pages[].content` is a per-page assembly
+    /// built independently of the joined document text (see
+    /// `extract_text_and_metadata`'s own page split in `pdf/oxide/text.rs`),
+    /// so a fix that only reorders the joined text — leaving this wiring
+    /// out — cannot repair rotated-text scrambling reported through the
+    /// per-page API. This asserts each `PageContent::content` takes the
+    /// reordered per-page text (here, a rotated run reassembled by
+    /// `assemble_reading_order_text` in a prior pass), not the original
+    /// scrambled text produced by `extract_text_and_metadata`.
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn should_patch_page_content_with_reordered_text_not_leave_it_scrambled() {
+        use crate::types::PageContent;
+
+        let mut page_contents = Some(vec![
+            PageContent {
+                page_number: 1,
+                content: "the meet only need oil Engine".to_string(),
+                tables: Vec::new(),
+                image_indices: Vec::new(),
+                hierarchy: None,
+                is_blank: Some(false),
+                layout_regions: None,
+                speaker_notes: None,
+                section_name: None,
+                sheet_name: None,
+            },
+            PageContent {
+                page_number: 2,
+                content: "stale second-page text".to_string(),
+                tables: Vec::new(),
+                image_indices: Vec::new(),
+                hierarchy: None,
+                is_blank: Some(false),
+                layout_regions: None,
+                speaker_notes: None,
+                section_name: None,
+                sheet_name: None,
+            },
+        ]);
+        let reordered_per_page = vec![
+            "Engine oil need only meet the".to_string(),
+            "reordered second-page text".to_string(),
+        ];
+
+        super::apply_reordered_text_to_page_contents(&mut page_contents, reordered_per_page);
+
+        let pages = page_contents.expect("page_contents must stay Some");
+        assert_eq!(
+            pages[0].content, "Engine oil need only meet the",
+            "page 1 content must take the reordered text, not the scrambled original"
+        );
+        assert_eq!(
+            pages[1].content, "reordered second-page text",
+            "page 2 content must also be patched, independent of page 1"
+        );
+        assert_eq!(pages[0].page_number, 1, "page identity must be preserved");
+        assert_eq!(pages[1].page_number, 2, "page identity must be preserved");
+    }
+
+    /// `page_contents == None` (per-page tracking disabled) must be a no-op,
+    /// not a panic.
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn should_leave_none_page_contents_untouched() {
+        let mut page_contents: Option<Vec<crate::types::PageContent>> = None;
+
+        super::apply_reordered_text_to_page_contents(&mut page_contents, vec!["ignored".to_string()]);
+
+        assert!(page_contents.is_none(), "None page_contents must stay None");
     }
 
     /// Boundaries produced alongside reordered text must index it exactly:
