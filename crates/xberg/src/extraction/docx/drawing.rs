@@ -195,10 +195,10 @@ pub(crate) fn parse_drawing(reader: &mut Reader<&[u8]>, budget: &mut SecurityBud
                     }
                     b"txbxContent" => {
                         // Consumes through its own `</w:txbxContent>` end tag, so it
-                        // must not also increment `depth` (#81). Same reasoning applies
-                        // to `budget`: refund the enter above.
-                        let text = collect_txbx_content_text(reader);
-                        budget.leave();
+                        // must not also increment `depth` (#81). `collect_txbx_content_text`
+                        // now threads `budget` through and balances the `enter()` above
+                        // internally, so no manual `budget.leave()` is needed here.
+                        let text = collect_txbx_content_text(reader, budget)?;
                         if !text.is_empty() {
                             drawing.text_box_content = Some(text);
                         }
@@ -352,7 +352,13 @@ fn get_attr_bool(e: &BytesStart, key: &[u8]) -> bool {
 /// consumes events through the matching `</w:txbxContent>` end tag. Paragraphs are
 /// joined with newlines; `w:tab`/`w:br` become `\t`/`\n` within a paragraph, matching
 /// how the main body loop renders inline breaks.
-fn collect_txbx_content_text(reader: &mut Reader<&[u8]>) -> String {
+///
+/// Threads `budget` through every event so nesting and iteration count inside
+/// `w:txbxContent` are measured against the caller's caps instead of passing through
+/// unaccounted (GH#1395/#384). The caller already performed `budget.enter()` for the
+/// opening `<w:txbxContent>` tag; this function balances that when it reaches its own
+/// matching `</w:txbxContent>` (depth 0).
+fn collect_txbx_content_text(reader: &mut Reader<&[u8]>, budget: &mut SecurityBudget) -> Result<String, SecurityError> {
     let mut buf = Vec::new();
     let mut depth = 1u32;
     let mut paragraphs: Vec<String> = Vec::new();
@@ -360,12 +366,16 @@ fn collect_txbx_content_text(reader: &mut Reader<&[u8]>) -> String {
     let mut in_text = false;
 
     loop {
+        budget.step()?;
         match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(ref e)) => match e.local_name().as_ref() {
-                b"txbxContent" => depth += 1,
-                b"t" => in_text = true,
-                _ => {}
-            },
+            Ok(Event::Start(ref e)) => {
+                budget.enter()?;
+                match e.local_name().as_ref() {
+                    b"txbxContent" => depth += 1,
+                    b"t" => in_text = true,
+                    _ => {}
+                }
+            }
             Ok(Event::Empty(ref e)) => match e.local_name().as_ref() {
                 b"tab" => current.push('\t'),
                 b"br" => current.push('\n'),
@@ -376,17 +386,20 @@ fn collect_txbx_content_text(reader: &mut Reader<&[u8]>) -> String {
                     current.push_str(&text);
                 }
             }
-            Ok(Event::End(ref e)) => match e.local_name().as_ref() {
-                b"t" => in_text = false,
-                b"p" => paragraphs.push(std::mem::take(&mut current)),
-                b"txbxContent" => {
-                    depth -= 1;
-                    if depth == 0 {
-                        break;
+            Ok(Event::End(ref e)) => {
+                budget.leave();
+                match e.local_name().as_ref() {
+                    b"t" => in_text = false,
+                    b"p" => paragraphs.push(std::mem::take(&mut current)),
+                    b"txbxContent" => {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
                     }
+                    _ => {}
                 }
-                _ => {}
-            },
+            }
             Ok(Event::Eof) | Err(_) => break,
             _ => {}
         }
@@ -397,26 +410,37 @@ fn collect_txbx_content_text(reader: &mut Reader<&[u8]>) -> String {
         paragraphs.push(current);
     }
 
-    paragraphs
+    Ok(paragraphs
         .into_iter()
         .filter(|p| !p.is_empty())
         .collect::<Vec<_>>()
-        .join("\n")
+        .join("\n"))
 }
 
 /// Parse a `<v:textbox>` element (already open), looking for a nested
 /// `<w:txbxContent>` (#81). Consumes events through the matching `</v:textbox>` end
 /// tag regardless of whether a `w:txbxContent` was found.
-fn parse_vml_textbox(reader: &mut Reader<&[u8]>) -> Option<String> {
+///
+/// Threads `budget` through every event so nesting and iteration count inside
+/// `v:textbox` are measured against the caller's caps instead of passing through
+/// unaccounted (GH#1395/#384). The caller already performed `budget.enter()` for the
+/// opening `<v:textbox>` tag; this function balances that when it reaches its own
+/// matching `</v:textbox>` (depth 0).
+fn parse_vml_textbox(reader: &mut Reader<&[u8]>, budget: &mut SecurityBudget) -> Result<Option<String>, SecurityError> {
     let mut buf = Vec::new();
     let mut depth = 1u32;
     let mut text: Option<String> = None;
 
     loop {
+        budget.step()?;
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(ref e)) => {
+                budget.enter()?;
                 if e.local_name().as_ref() == b"txbxContent" {
-                    let collected = collect_txbx_content_text(reader);
+                    // `collect_txbx_content_text` consumes its own end tag and
+                    // balances the `enter()` above internally, so no manual
+                    // `budget.leave()` is needed here.
+                    let collected = collect_txbx_content_text(reader, budget)?;
                     if !collected.is_empty() {
                         text = Some(collected);
                     }
@@ -425,6 +449,7 @@ fn parse_vml_textbox(reader: &mut Reader<&[u8]>) -> Option<String> {
                 }
             }
             Ok(Event::End(_)) => {
+                budget.leave();
                 depth -= 1;
                 if depth == 0 {
                     break;
@@ -436,7 +461,7 @@ fn parse_vml_textbox(reader: &mut Reader<&[u8]>) -> Option<String> {
         buf.clear();
     }
 
-    text
+    Ok(text)
 }
 
 /// Parse a `<w:pict>` VML fallback wrapper, extracting text-box content from a
@@ -445,22 +470,38 @@ fn parse_vml_textbox(reader: &mut Reader<&[u8]>) -> Option<String> {
 /// Consumes events through the matching `</w:pict>` end tag regardless of whether a
 /// text box was found, so the caller's own event loop never sees `w:pict`'s inner
 /// `v:shape`/`w:p`/`w:r`/`w:t` events leak out as if they were ordinary body content.
-/// Returns `None` when no text box was found (nothing to attach to the document).
-pub(crate) fn parse_vml_pict(reader: &mut Reader<&[u8]>) -> Option<Drawing> {
+/// Returns `Ok(None)` when no text box was found (nothing to attach to the document).
+///
+/// Threads `budget` through every event so nesting and iteration count inside
+/// `w:pict` are measured against the caller's caps instead of passing through
+/// unaccounted (a25335db0a left this delegate unthreaded, unlike every other
+/// budget-aware delegate in this module; see GH#1395/#384). The caller already
+/// performed `budget.enter()` for the opening `<w:pict>` tag; this function balances
+/// that when it reaches its own matching `</w:pict>` (depth 0).
+pub(crate) fn parse_vml_pict(
+    reader: &mut Reader<&[u8]>,
+    budget: &mut SecurityBudget,
+) -> Result<Option<Drawing>, SecurityError> {
     let mut buf = Vec::new();
     let mut depth = 1u32;
     let mut text_box_content: Option<String> = None;
 
     loop {
+        budget.step()?;
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(ref e)) => {
+                budget.enter()?;
                 if e.local_name().as_ref() == b"textbox" {
-                    text_box_content = parse_vml_textbox(reader);
+                    // `parse_vml_textbox` consumes its own end tag and balances
+                    // the `enter()` above internally, so no manual
+                    // `budget.leave()` is needed here.
+                    text_box_content = parse_vml_textbox(reader, budget)?;
                 } else {
                     depth += 1;
                 }
             }
             Ok(Event::End(_)) => {
+                budget.leave();
                 depth -= 1;
                 if depth == 0 {
                     break;
@@ -472,10 +513,10 @@ pub(crate) fn parse_vml_pict(reader: &mut Reader<&[u8]>) -> Option<Drawing> {
         buf.clear();
     }
 
-    text_box_content.map(|text| Drawing {
+    Ok(text_box_content.map(|text| Drawing {
         text_box_content: Some(text),
         ..Default::default()
-    })
+    }))
 }
 
 #[cfg(test)]

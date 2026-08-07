@@ -1849,7 +1849,10 @@ impl<R: Read + Seek> DocxParser<R> {
                             mc_fallback_depth += 1;
                         }
                         b"w:pict" => {
-                            let parsed = super::drawing::parse_vml_pict(reader);
+                            // `parse_vml_pict` now threads `budget` through and balances
+                            // its own `</w:pict>` end tag against the `enter()` above
+                            // internally, so no manual `budget.leave()` is needed here.
+                            let parsed = super::drawing::parse_vml_pict(reader, budget)?;
                             if mc_fallback_depth == 0
                                 && let Some(drawing) = parsed
                                 && drawing.text_box_content.is_some()
@@ -4080,6 +4083,122 @@ mod tests {
                 );
             }
             other => panic!("expected Err(DocxParseError::SecurityLimit(_)) for a deeply-nested tcPr, got {other:?}"),
+        }
+    }
+
+    /// a25335db0a threaded `budget` through every DOCX delegating helper except
+    /// `parse_vml_pict`: it consumes its own `</w:pict>` end tag with a private
+    /// `depth` counter, so the main loop's `Event::End` arm never sees the closing
+    /// tag and `budget.leave()` is never called for it. Confirm the fixed parser
+    /// leaves the depth counter at exactly zero after parsing a single `w:pict`.
+    #[test]
+    fn should_reset_depth_counter_to_zero_after_parsing_pict() {
+        let limits = crate::extractors::security::SecurityLimits {
+            max_nesting_depth: 64,
+            max_xml_depth: 64,
+            ..Default::default()
+        };
+        let mut budget = SecurityBudget::from_limits(&limits);
+        let xml = wrap_body(
+            r#"<w:p><w:r>
+                <w:pict><v:shape xmlns:v="urn:schemas-microsoft-com:vml"><v:textbox><w:txbxContent>
+                    <w:p><w:r><w:t>Legacy VML text box.</w:t></w:r></w:p>
+                </w:txbxContent></v:textbox></v:shape></w:pict>
+            </w:r></w:p>"#,
+        );
+        parse_xml_with_budget(&xml, &mut budget);
+        assert_eq!(
+            probe_remaining_depth(&mut budget, 64),
+            64,
+            "w:pict must not leak a depth level"
+        );
+    }
+
+    /// Regression test for the `w:pict` depth leak (a25335db0a): before this fix,
+    /// each `<w:pict>` element permanently leaked one depth unit (the main loop's
+    /// `enter()` for its opening tag was never matched by a `leave()`), even though
+    /// each element's *real* nesting is trivial and never overlaps with the next.
+    /// Legacy `.doc`-to-`.docx` conversions and documents saved by older Word
+    /// versions commonly contain many `w:pict` elements, so this leak would
+    /// eventually trip `SecurityError::NestingTooDeep` on a perfectly legitimate
+    /// document. Use a count comfortably above the default `max_nesting_depth`
+    /// (1024) so the unfixed code genuinely fails this test.
+    #[test]
+    fn should_extract_all_pict_textboxes_regardless_of_element_count_after_fixing_depth_leak() {
+        fn build_pict_xml(count: usize) -> String {
+            let mut body = String::new();
+            for i in 0..count {
+                body.push_str(&format!(
+                    r#"<w:p><w:r><w:pict><v:shape xmlns:v="urn:schemas-microsoft-com:vml"><v:textbox><w:txbxContent>
+                        <w:p><w:r><w:t>pict{i}</w:t></w:r></w:p>
+                    </w:txbxContent></v:textbox></v:shape></w:pict></w:r></w:p>"#
+                ));
+            }
+            wrap_body(&body)
+        }
+
+        let count = 1500;
+        let mut budget = SecurityBudget::with_defaults();
+        let xml = build_pict_xml(count);
+        let doc = try_parse_xml_with_budget(&xml, &mut budget)
+            .expect("legacy VML w:pict content must not trip the depth cap");
+
+        assert_eq!(
+            doc.drawings.len(),
+            count,
+            "expected exactly {count} extracted text boxes"
+        );
+        assert_eq!(
+            doc.paragraphs.len(),
+            count,
+            "each w:pict is wrapped in its own top-level w:p, so paragraph count must match"
+        );
+        assert_eq!(
+            probe_remaining_depth(&mut budget, 1024),
+            1024,
+            "depth counter must return to zero after {count} w:pict elements"
+        );
+    }
+
+    /// GH#384-style gap for `w:pict`: before this fix, none of `parse_vml_pict`,
+    /// `parse_vml_textbox`, or `collect_txbx_content_text` called `budget.step()`,
+    /// so content nested inside a `w:pict` was completely exempt from the
+    /// iteration-count limit — a single `w:pict` padded with many trivial elements
+    /// was processed with zero budget enforcement. Confirm the fixed parser now
+    /// trips `SecurityError::TooManyIterations` once padding inside `w:pict`
+    /// exceeds the configured cap, with the exact error variant surfaced.
+    #[test]
+    fn should_trip_too_many_iterations_when_pict_subtree_is_padded_beyond_the_iteration_cap() {
+        let limits = crate::extractors::security::SecurityLimits {
+            max_iterations: 50,
+            ..Default::default()
+        };
+        let mut budget = SecurityBudget::from_limits(&limits);
+
+        let padding_count = 200;
+        let mut inner = String::new();
+        for _ in 0..padding_count {
+            inner.push_str("<v:fill/>");
+        }
+
+        let xml = wrap_body(&format!(
+            r#"<w:p><w:r><w:pict><v:shape xmlns:v="urn:schemas-microsoft-com:vml">
+                {inner}
+            </v:shape></w:pict></w:r></w:p>"#
+        ));
+
+        let result = try_parse_xml_with_budget(&xml, &mut budget);
+
+        match result {
+            Err(DocxParseError::SecurityLimit(msg)) => {
+                assert!(
+                    msg.contains("Too many iterations"),
+                    "expected an iteration-count security error, got: {msg}"
+                );
+            }
+            other => {
+                panic!("expected Err(DocxParseError::SecurityLimit(_)) for a padded w:pict subtree, got {other:?}")
+            }
         }
     }
 
