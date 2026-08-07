@@ -646,16 +646,14 @@ fn parse_table(
 
     let mut cells = vec![vec![String::new(); columns]; rows];
     if let Some(tile_storage) = field_bytes(&data_store_fields, field::DATA_STORE_TILES).next() {
-        fill_table_tiles(
-            tile_storage,
-            objects,
-            &strings,
-            &rich_strings,
-            &mut cells,
+        let mut context = TableFillContext {
+            strings: &strings,
+            rich_strings: &rich_strings,
             budget,
-            &name,
+            table_name: &name,
             warnings,
-        )?;
+        };
+        fill_table_tiles(tile_storage, objects, &mut cells, &mut context)?;
     }
     Ok(Some((name, cells)))
 }
@@ -779,21 +777,35 @@ fn parse_rich_text_table(
     Ok(strings)
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Shared string dictionaries plus the mutable resource/diagnostic state threaded through
+/// the table → tile → row filling chain (`fill_table_tiles` → `fill_tile` → `fill_row`).
+///
+/// All three functions need the same five pieces of context alongside their own
+/// tile/row-specific arguments; grouping them here keeps each function's own argument
+/// count small instead of repeating five identical parameters three times.
+struct TableFillContext<'a> {
+    /// Plain-text cell values from the table's string dictionary, keyed by `DATA_LIST_ENTRY_KEY`.
+    strings: &'a HashMap<i32, String>,
+    /// Rich-text cell values from the table's rich-text dictionary, keyed by `DATA_LIST_ENTRY_KEY`.
+    rich_strings: &'a HashMap<i32, String>,
+    /// Extraction resource budget, shared across the whole table parse.
+    budget: &'a mut SecurityBudget,
+    /// Display name of the table being parsed, used only in warning messages.
+    table_name: &'a str,
+    /// Non-fatal parse warnings collected across the whole table parse.
+    warnings: &'a mut Vec<ProcessingWarning>,
+}
+
 fn fill_table_tiles(
     tile_storage: &[u8],
     objects: &IwaObjects,
-    strings: &HashMap<i32, String>,
-    rich_strings: &HashMap<i32, String>,
     cells: &mut [Vec<String>],
-    budget: &mut SecurityBudget,
-    table_name: &str,
-    warnings: &mut Vec<ProcessingWarning>,
+    context: &mut TableFillContext<'_>,
 ) -> Result<()> {
-    let storage_fields = parse_proto_fields(tile_storage, budget)?;
+    let storage_fields = parse_proto_fields(tile_storage, context.budget)?;
     let tile_size = field_usize(&storage_fields, field::TILE_STORAGE_SIZE).unwrap_or(DEFAULT_TILE_SIZE);
     for tile_entry in field_bytes(&storage_fields, field::TILE_STORAGE_TILE) {
-        let tile_fields = parse_proto_fields(tile_entry, budget)?;
+        let tile_fields = parse_proto_fields(tile_entry, context.budget)?;
         let tile_index = field_usize(&tile_fields, field::TILE_INDEX).unwrap_or(0);
         let Some(tile_id) = field_bytes(&tile_fields, field::TILE_REFERENCE)
             .next()
@@ -807,34 +819,20 @@ fn fill_table_tiles(
         let row_offset = tile_index
             .checked_mul(tile_size)
             .ok_or_else(|| numbers_parse_error("Numbers tile row offset overflow"))?;
-        fill_tile(
-            &tile.payload,
-            row_offset,
-            strings,
-            rich_strings,
-            cells,
-            budget,
-            table_name,
-            warnings,
-        )?;
+        fill_tile(&tile.payload, row_offset, cells, context)?;
     }
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn fill_tile(
     payload: &[u8],
     row_offset: usize,
-    strings: &HashMap<i32, String>,
-    rich_strings: &HashMap<i32, String>,
     cells: &mut [Vec<String>],
-    budget: &mut SecurityBudget,
-    table_name: &str,
-    warnings: &mut Vec<ProcessingWarning>,
+    context: &mut TableFillContext<'_>,
 ) -> Result<()> {
-    let fields = parse_proto_fields(payload, budget)?;
+    let fields = parse_proto_fields(payload, context.budget)?;
     for row_info in field_bytes(&fields, field::TILE_ROW_INFO) {
-        let row_fields = parse_proto_fields(row_info, budget)?;
+        let row_fields = parse_proto_fields(row_info, context.budget)?;
         let Some(row_index) =
             field_usize(&row_fields, field::ROW_INDEX).and_then(|index| row_offset.checked_add(index))
         else {
@@ -861,32 +859,17 @@ fn fill_tile(
                 false,
             ),
         };
-        fill_row(
-            row,
-            storage,
-            offsets,
-            wide_offsets,
-            strings,
-            rich_strings,
-            budget,
-            table_name,
-            warnings,
-        )?;
+        fill_row(row, storage, offsets, wide_offsets, context)?;
     }
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn fill_row(
     row: &mut [String],
     storage: &[u8],
     offsets: &[u8],
     wide_offsets: bool,
-    strings: &HashMap<i32, String>,
-    rich_strings: &HashMap<i32, String>,
-    budget: &mut SecurityBudget,
-    table_name: &str,
-    warnings: &mut Vec<ProcessingWarning>,
+    context: &mut TableFillContext<'_>,
 ) -> Result<()> {
     let parsed_offsets = parse_cell_offsets(offsets, row.len(), wide_offsets)?;
 
@@ -903,8 +886,14 @@ fn fill_row(
         if start > end || end > storage.len() {
             return Err(numbers_parse_error("Numbers cell storage offset is out of bounds"));
         }
-        if let Some(value) = parse_cell_value(&storage[start..end], strings, rich_strings, table_name, warnings)? {
-            budget.account_text(value.len())?;
+        if let Some(value) = parse_cell_value(
+            &storage[start..end],
+            context.strings,
+            context.rich_strings,
+            context.table_name,
+            context.warnings,
+        )? {
+            context.budget.account_text(value.len())?;
             row[column] = value;
         }
     }
@@ -1566,11 +1555,13 @@ mod tests {
                 &storage,
                 &offsets,
                 false,
-                &strings,
-                &rich_strings,
-                &mut budget,
-                "Table 1",
-                &mut warnings,
+                &mut TableFillContext {
+                    strings: &strings,
+                    rich_strings: &rich_strings,
+                    budget: &mut budget,
+                    table_name: "Table 1",
+                    warnings: &mut warnings,
+                },
             ),
             Err(XbergError::Security { .. })
         ));
@@ -1648,12 +1639,14 @@ mod tests {
         fill_tile(
             &tile,
             0,
-            &strings,
-            &HashMap::new(),
             &mut cells,
-            &mut budget,
-            "Table 1",
-            &mut warnings,
+            &mut TableFillContext {
+                strings: &strings,
+                rich_strings: &HashMap::new(),
+                budget: &mut budget,
+                table_name: "Table 1",
+                warnings: &mut warnings,
+            },
         )
         .unwrap();
 
