@@ -1,17 +1,24 @@
-//! Regression tests for issue #337.
+//! Regression tests for issue #337, superseded by the #1393 revised design.
 //!
-//! `ChunkingConfig::breadcrumb_target` controls *where* the Markdown heading-path
-//! breadcrumb is written when `prepend_heading_context` is enabled: into chunk
-//! `content` (good for dense/embedding retrieval), into `ChunkMetadata::heading_path`
-//! only (good for lexical retrieval, since every chunk under a heading otherwise
-//! repeats the same tokens and collapses that heading word's IDF toward zero), or
-//! both. Before this knob existed, a caller who wanted clean `content` for a BM25
-//! index had to fragile-string-strip the breadcrumb prefix back off using
-//! `heading_path` — this suite locks down all three variants plus the default.
+//! `ChunkingConfig::breadcrumb_target` originally controlled *where* the Markdown
+//! heading-path breadcrumb was written when `prepend_heading_context` was enabled:
+//! into chunk `content` (good for dense/embedding retrieval), or into
+//! `ChunkMetadata::heading_path` only (good for lexical retrieval, since every
+//! chunk under a heading otherwise repeats the same tokens and collapses that
+//! heading word's IDF toward zero).
+//!
+//! GH#1393's follow-up discussion replaced that design: `chunk.content` is now
+//! **always** the exact `[byte_start, byte_end)` source span, for both
+//! `BreadcrumbTarget` variants and regardless of `prepend_heading_context`.
+//! Prepending the breadcrumb is now a rendering step a consumer applies at index
+//! time via [`render_heading_breadcrumb`], not a mutation the chunker performs.
+//! Both config fields are deprecated and inert; this suite locks down that they
+//! no longer change chunking output, and that the explicit renderer reproduces
+//! the old inline form on demand.
 #![cfg(feature = "chunking")]
 
 use xberg::BreadcrumbTarget;
-use xberg::chunking::{ChunkerType, ChunkingConfig, chunk_for_rag};
+use xberg::chunking::{ChunkerType, ChunkingConfig, chunk_for_rag, render_heading_breadcrumb};
 
 /// A single H1 heading (`# Setup`) at byte offset 0, followed by prose long enough
 /// (with `max_characters` below) to force multiple chunks. The heading text is the
@@ -46,11 +53,12 @@ fn config(breadcrumb_target: BreadcrumbTarget) -> ChunkingConfig {
 }
 
 #[test]
-fn default_breadcrumb_target_pins_todays_content_prepending_behaviour() {
+fn default_breadcrumb_target_is_still_content_even_though_it_is_now_inert() {
     assert_eq!(
         ChunkingConfig::default().breadcrumb_target,
         BreadcrumbTarget::Content,
-        "the default must preserve the content-prepend behaviour that existed before this option (#337)"
+        "the default variant is unchanged for wire compatibility (#337); it no longer prepends \
+         anything since #1393 made the whole enum inert, which is what the other tests here pin"
     );
 }
 
@@ -115,45 +123,60 @@ fn metadata_target_still_populates_heading_path() {
     }
 }
 
+/// Supersedes the pre-#1393 `content_target_prepends_breadcrumb_for_chunks_starting_after_the_heading_line`
+/// test, which pinned `Content` mode mutating `chunk.content` in place. That mutation is
+/// gone: `Content` mode now behaves identically to `Metadata` mode, `content` is always the
+/// exact `[byte_start, byte_end)` source span (closing the #1294 offset-desync class of bug),
+/// and a caller who wants the old inline breadcrumb form calls `render_heading_breadcrumb`
+/// explicitly at index time.
 #[test]
-fn content_target_prepends_breadcrumb_for_chunks_starting_after_the_heading_line() {
-    let metadata_result = chunk_for_rag(MARKDOWN, &config(BreadcrumbTarget::Metadata)).unwrap();
+fn content_target_no_longer_mutates_content_render_heading_breadcrumb_does_it_explicitly() {
     let content_result = chunk_for_rag(MARKDOWN, &config(BreadcrumbTarget::Content)).unwrap();
-
-    assert_eq!(metadata_result.chunks.len(), content_result.chunks.len());
     assert!(
-        metadata_result.chunks.len() >= 2,
+        content_result.chunks.len() >= 2,
         "MAX_CHARACTERS must be small enough relative to MARKDOWN to force multiple chunks; got {} chunk(s)",
-        metadata_result.chunks.len()
+        content_result.chunks.len()
     );
 
     let mut checked_a_later_chunk = false;
-    for (baseline, mutated) in metadata_result.chunks.iter().zip(content_result.chunks.iter()) {
-        if baseline.metadata.byte_start == 0 {
+    for chunk in &content_result.chunks {
+        assert_eq!(
+            chunk.content,
+            &MARKDOWN[chunk.metadata.byte_start..chunk.metadata.byte_end],
+            "content must be byte-identical to its own [byte_start, byte_end) source span, got: {:?}",
+            chunk.content
+        );
+
+        if chunk.metadata.byte_start == 0 {
             // The first chunk starts with the literal "# Setup" heading line, whose
             // exact transformed shape depends on the heading-stripping logic this
             // test intentionally does not re-derive. Every later chunk below already
-            // proves the breadcrumb is written into `content`.
+            // proves content is untouched and the explicit renderer works.
             continue;
         }
 
         assert_eq!(
-            baseline.metadata.heading_path,
+            chunk.metadata.heading_path,
             vec!["Setup".to_string()],
             "every chunk must resolve heading_context from the single leading heading"
         );
         assert!(
-            !baseline.content.starts_with('#'),
+            !chunk.content.starts_with('#'),
             "a chunk starting after byte 0 cannot contain the document's only '#', got: {:?}",
-            baseline.content
+            chunk.content
         );
 
-        let expected = format!("# Setup\n\n{}", baseline.content);
+        let heading_context = chunk
+            .metadata
+            .heading_context
+            .as_ref()
+            .expect("a chunk with a non-empty heading_path must carry heading_context");
+        let rendered = render_heading_breadcrumb(&chunk.content, heading_context);
+        let expected = format!("# Setup\n\n{}", chunk.content);
         assert_eq!(
-            mutated.content, expected,
-            "Content target must prepend the breadcrumb ahead of the untouched chunk body"
+            rendered, expected,
+            "render_heading_breadcrumb must reproduce the old Content-mode inline form on demand"
         );
-        assert_eq!(mutated.metadata.heading_path, vec!["Setup".to_string()]);
         checked_a_later_chunk = true;
     }
     assert!(

@@ -225,11 +225,24 @@ pub struct ChunkingConfig {
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub sizing: ChunkSizing,
 
-    /// When `true` and `chunker_type` is `Markdown`, prepend the heading hierarchy
-    /// path (e.g. `"# Title > ## Section\n\n"`) to each chunk's content string.
+    /// **Deprecated and inert** (#1393): no longer prepends anything into
+    /// `content`. Setting this field has no observable effect on chunking output
+    /// any more.
     ///
-    /// This is useful for RAG pipelines where each chunk needs self-contained
-    /// context about its position in the document structure.
+    /// Previously, when `true` and `chunker_type` was `Markdown`, this prepended
+    /// the heading hierarchy path (e.g. `"# Title > ## Section\n\n"`) directly
+    /// into each chunk's `content` string. `content` now always equals the exact
+    /// `[byte_start, byte_end)` source span regardless of this flag — see
+    /// [`BreadcrumbTarget`](crate::core::config::extraction::BreadcrumbTarget) for
+    /// the full rationale. `heading_context`/`heading_path` on `ChunkMetadata` are
+    /// populated independently of this flag, so callers lose no information —
+    /// only the in-place mutation is gone.
+    ///
+    /// Call [`render_heading_breadcrumb`](crate::chunking::render_heading_breadcrumb)
+    /// explicitly at index time instead, for the retrieval consumer that wants the
+    /// breadcrumb inline.
+    ///
+    /// Kept only so existing callers keep compiling.
     ///
     /// Default: `false`
     #[serde(default)]
@@ -258,14 +271,14 @@ pub struct ChunkingConfig {
     #[serde(default)]
     pub table_chunking: TableChunkingMode,
 
-    /// Where the heading-path breadcrumb is written when `prepend_heading_context`
-    /// is `true`. See
+    /// **Deprecated and inert** (#1393): see
     /// [`BreadcrumbTarget`](crate::core::config::extraction::BreadcrumbTarget) for
-    /// the dense-vs-lexical retrieval trade-off. Has no effect when
-    /// `prepend_heading_context` is `false`.
+    /// the full explanation. Neither variant has any effect on `content` any
+    /// more — call
+    /// [`render_heading_breadcrumb`](crate::chunking::render_heading_breadcrumb)
+    /// explicitly at index time instead. Kept only for backward compatibility.
     ///
-    /// Default: `Content` — preserves the pre-existing behaviour of prepending the
-    /// breadcrumb into chunk `content`.
+    /// Default: `Content`.
     #[serde(default)]
     #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
     pub breadcrumb_target: crate::core::config::extraction::BreadcrumbTarget,
