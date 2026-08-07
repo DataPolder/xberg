@@ -103,6 +103,21 @@ jobs:
       - name: Verify submodule gitlinks are reachable on their remotes
         run: scripts/ci/check-submodule-gitlinks.sh --on-fetch-failure=fail
 
+  alef-readme-paths:
+    name: Alef readme/docs paths resolve
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Task
+        uses: xberg-io/actions/install-task@v1
+      # Static check: every readme/docs path alef.toml points at (templates,
+      # snippets_dir + snippet_language overrides, CLI/MCP doc sources, skills
+      # template_dir) must resolve on disk. Catches a class of bug that
+      # previously needed a full ~10-minute `alef all` regen cycle per broken
+      # path to discover -- this finds all of them in under a second. ~keep
+      - name: Verify alef.toml readme/docs paths resolve
+        run: task alef:verify:readme-paths
+
   alef-bindings-freshness:
     name: Alef-generated bindings freshness
     runs-on: ubuntu-latest

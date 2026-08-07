@@ -251,6 +251,11 @@ tasks:
     cmds:
       - alef docs
 
+  alef:verify:readme-paths:
+    desc: "Check every alef.toml readme/docs path (templates, snippets) resolves on disk"
+    cmds:
+      - python3 scripts/ci/check-alef-readme-paths.py alef.toml
+
   e2e:generate:
     desc: "Generate E2E tests for all languages from fixtures"
     cmds:
