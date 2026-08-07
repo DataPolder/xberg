@@ -183,17 +183,20 @@ pub(crate) async fn extract_batch(
     // plugins/extractor/trait.rs) and wasm32 has no OS threads to run them on regardless. Use
     // the sequential path there even though `tokio-runtime` is active (it's pulled in by
     // `chunking-tokenizers`/`static-embeddings`, not concurrency support). ~keep
-    let batch = async move {
-        #[cfg(all(feature = "tokio-runtime", not(target_arch = "wasm32")))]
-        {
-            extract_batch_concurrent(inner, inputs, config).await
-        }
+    // Type-erased for the same reason as the single-extract path above: leaving the
+    // inner future's concrete type visible here makes callers that `tokio::spawn` a
+    // batch exceed the recursion limit proving `Send`. That bit the generated
+    // xberg-node binding (`run_bounded_batch_tasks`), which cannot carry a
+    // `#![recursion_limit]` of its own because it is regenerated from scratch. ~keep
+    #[cfg(all(feature = "tokio-runtime", not(target_arch = "wasm32")))]
+    let batch: std::pin::Pin<Box<dyn std::future::Future<Output = Result<ExtractionResult>> + Send>> =
+        Box::pin(extract_batch_concurrent(inner, inputs, config));
 
-        #[cfg(any(not(feature = "tokio-runtime"), target_arch = "wasm32"))]
-        {
-            let _ = inner;
-            extract_batch_sequential(inputs, config).await
-        }
+    // No `+ Send` on wasm32: extractor futures are `!Send` there (async_trait(?Send)).
+    #[cfg(any(not(feature = "tokio-runtime"), target_arch = "wasm32"))]
+    let batch: std::pin::Pin<Box<dyn std::future::Future<Output = Result<ExtractionResult>>>> = {
+        let _ = inner;
+        Box::pin(extract_batch_sequential(inputs, config))
     };
 
     #[cfg(feature = "otel")]
@@ -326,7 +329,17 @@ async fn extract_batch_concurrent(
             let timeout_secs = resolved_config.extraction_timeout_secs;
             let cancel_token = resolved_config.cancel_token.clone();
             let item = run_batch_item(index, source, timeout_secs, cancel_token, || async move {
-                Box::pin(extract_one_resolved(input, &resolved_config, index)).await
+                // Type-erased, not merely boxed. `run_bounded_batch_tasks` requires the
+                // enclosing async block to be `Send`, and proving that walks the whole
+                // nested future type -- which reaches h2/hyper/slab through reqwest and
+                // overflows rustc's 128 auto-trait recursion limit (E0275) in the
+                // alef-generated binding crates, which cannot carry `#![recursion_limit]`.
+                // A bare `Box::pin` does not help: it yields `Pin<Box<ConcreteFuture>>`,
+                // so the concrete type stays in the proof. Coercing to `dyn Future` cuts
+                // the chain here.
+                let extraction: std::pin::Pin<Box<dyn Future<Output = Result<ExtractionResult>> + Send + '_>> =
+                    Box::pin(extract_one_resolved(input, &resolved_config, index));
+                extraction.await
             });
 
             #[cfg(feature = "otel")]

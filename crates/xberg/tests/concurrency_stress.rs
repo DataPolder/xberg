@@ -1,4 +1,5 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)]
+// ~keep: test/bench binaries print by design; org logging policy exempts tests
 // `tokio::spawn`ing an extraction future requires proving it `Send`. Under `full`
 // features that proof walks into h2's `PollMessage` -> `slab::Entry` -> `PhantomData`
 // chain (reqwest/hyper, pulled in by api/mcp/liter-llm), which exceeds the default
