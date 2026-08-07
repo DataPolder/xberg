@@ -370,6 +370,11 @@ root = "packages/elixir"
 "e2e/**/*.py" = ["A001", "N801"]
 "packages/**" = ["comment", "doc-comment"]
 "packages/python/**/api.py" = ["RET504"]
+# `ProbeStatus.pass_ = "pass"` -- `pass` is a Python keyword, so alef emits the
+# trailing-underscore form for the enum variant. S105 reads the `"pass"` value as a
+# hardcoded password. It is a false positive, and the file is alef-generated, so it
+# cannot carry a `noqa` that would survive the next regen. ~keep
+"packages/python/**/options.py" = ["S105"]
 "packages/python/build.py" = ["INP001"]
 "scripts/**/*.py" = [
   "B023",
@@ -387,6 +392,10 @@ root = "packages/elixir"
   "PLR0915",
   "PLW2901",
   "PT018",
+  # These are genuine `unittest.TestCase` modules run via `unittest.main()`, not pytest
+  # tests -- `assertRaisesRegex` is the correct API for them and pytest is not a
+  # dependency of the CI scripts. Same rationale as PT018 above. ~keep
+  "PT027",
   "PTH108",
   "PTH123",
   "S101",
