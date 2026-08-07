@@ -256,6 +256,8 @@ pub(crate) async fn vlm_ocr(
     request.messages = vec![message];
     request.temperature = config.temperature;
     request.max_tokens = config.max_tokens;
+    request.reasoning_effort = super::client::parse_reasoning_effort(config)?;
+    request.extra_body = config.extra_body.clone();
 
     let response = client.chat(request).await.map_err(|e| {
         crate::XbergError::ocr(format!(

@@ -212,6 +212,8 @@ async fn complete_with_json_schema(
         })],
         temperature: config.temperature,
         max_tokens: config.max_tokens,
+        reasoning_effort: crate::llm::client::parse_reasoning_effort(config)?,
+        extra_body: config.extra_body.clone(),
         response_format: Some(liter_llm::ResponseFormat::JsonSchema {
             json_schema: liter_llm::JsonSchemaFormat {
                 name: "entity_list".to_string(),

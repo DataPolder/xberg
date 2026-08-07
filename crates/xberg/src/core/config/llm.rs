@@ -62,6 +62,32 @@ pub struct LlmConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u64>,
 
+    /// Reasoning effort level for extended-thinking models, applied to individual
+    /// requests built from this config.
+    ///
+    /// Mirrors liter-llm's `ChatCompletionRequest::reasoning_effort`
+    /// (`types::chat::ReasoningEffort`). A request-time parameter like `temperature`/
+    /// `max_tokens` above, not a client-level setting — `into_client_builder` does not
+    /// map it. Accepted as a plain string — one of `"low"`, `"medium"`, `"high"`,
+    /// `"minimal"`, `"max"` (case-insensitive; liter-llm's own
+    /// `#[serde(rename_all = "lowercase")]` spelling) — rather than importing
+    /// liter-llm's enum, because this module compiles even when the `liter-llm`
+    /// feature is disabled. See [`crate::llm::client::parse_reasoning_effort`] for the
+    /// conversion into `liter_llm::ReasoningEffort`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.2.0"))]
+    pub reasoning_effort: Option<String>,
+
+    /// Provider-specific extra parameters merged into the request body (guardrails,
+    /// safety settings, grounding config, etc.), applied to individual requests built
+    /// from this config.
+    ///
+    /// Mirrors liter-llm's `ChatCompletionRequest::extra_body`. A request-time
+    /// parameter like `temperature`/`max_tokens` above, not a client-level setting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.2.0"))]
+    pub extra_body: Option<serde_json::Value>,
+
     /// Whether liter-llm should load provider credentials from environment variables.
     ///
     /// Mirrors liter-llm's `ClientConfigBuilder::load_env`. When `None`, liter-llm's
@@ -314,6 +340,8 @@ impl std::fmt::Debug for LlmConfig {
             .field("max_retries", &self.max_retries)
             .field("temperature", &self.temperature)
             .field("max_tokens", &self.max_tokens)
+            .field("reasoning_effort", &self.reasoning_effort)
+            .field("extra_body", &self.extra_body)
             .field("load_env", &self.load_env)
             .field("headers", &redacted_headers)
             .field("providers", &self.providers)
@@ -462,6 +490,8 @@ mod tests {
         assert!(cfg.max_retries.is_none());
         assert!(cfg.temperature.is_none());
         assert!(cfg.max_tokens.is_none());
+        assert!(cfg.reasoning_effort.is_none());
+        assert!(cfg.extra_body.is_none());
         assert!(cfg.load_env.is_none());
         assert!(cfg.headers.is_none());
         assert!(cfg.providers.is_none());
@@ -490,6 +520,8 @@ mod tests {
         assert!(cfg.max_retries.is_none());
         assert!(cfg.temperature.is_none());
         assert!(cfg.max_tokens.is_none());
+        assert!(cfg.reasoning_effort.is_none());
+        assert!(cfg.extra_body.is_none());
         assert!(cfg.load_env.is_none());
         assert!(cfg.headers.is_none());
         assert!(cfg.providers.is_none());
@@ -536,6 +568,14 @@ load_env = true
             ..Default::default()
         };
         let json = serde_json::to_string(&cfg).expect("serialize");
+        assert!(
+            !json.contains("reasoning_effort"),
+            "reasoning_effort should be omitted when None: {json}"
+        );
+        assert!(
+            !json.contains("extra_body"),
+            "extra_body should be omitted when None: {json}"
+        );
         assert!(
             !json.contains("load_env"),
             "load_env should be omitted when None: {json}"
@@ -641,6 +681,49 @@ window_seconds = 60
         let round_tripped: LlmConfig =
             serde_json::from_str(&serde_json::to_string(&cfg).expect("serialize")).expect("deserialize");
         assert_eq!(round_tripped, cfg);
+    }
+
+    /// Regression test for https://github.com/xberg-io/xberg/issues/1381
+    ///
+    /// `reasoning_effort` and `extra_body` must survive a TOML load and a JSON
+    /// round-trip so they are settable from a config file and from every language
+    /// binding, matching liter-llm's `ChatCompletionRequest` request-time fields.
+    #[test]
+    fn test_llm_config_reasoning_effort_and_extra_body_round_trip_through_toml_and_json() {
+        let toml_src = r#"
+model = "openai/gpt-4o"
+reasoning_effort = "high"
+
+[extra_body]
+safety_settings = { harassment = "block_none" }
+"#;
+        let cfg: LlmConfig = toml::from_str(toml_src).expect("deserialize LlmConfig from TOML");
+
+        assert_eq!(cfg.reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(
+            cfg.extra_body,
+            Some(serde_json::json!({"safety_settings": {"harassment": "block_none"}}))
+        );
+
+        let round_tripped: LlmConfig =
+            serde_json::from_str(&serde_json::to_string(&cfg).expect("serialize")).expect("deserialize");
+        assert_eq!(round_tripped, cfg);
+    }
+
+    /// `Debug` prints `reasoning_effort` and `extra_body` verbatim — neither is a
+    /// credential.
+    #[test]
+    fn test_llm_config_debug_prints_reasoning_effort_and_extra_body_verbatim() {
+        let cfg = LlmConfig {
+            model: "openai/gpt-4o".to_string(),
+            reasoning_effort: Some("high".to_string()),
+            extra_body: Some(serde_json::json!({"foo": "bar"})),
+            ..Default::default()
+        };
+        let rendered = format!("{cfg:?}");
+        assert!(rendered.contains(r#"reasoning_effort: Some("high")"#), "{rendered}");
+        assert!(rendered.contains(r#"extra_body: Some(Object"#), "{rendered}");
+        assert!(rendered.contains("bar"), "{rendered}");
     }
 
     /// `Debug` prints the new passthrough fields verbatim — none of them are
