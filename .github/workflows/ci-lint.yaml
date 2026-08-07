@@ -117,6 +117,15 @@ jobs:
       # path to discover -- this finds all of them in under a second. ~keep
       - name: Verify alef.toml readme/docs paths resolve
         run: task alef:verify:readme-paths
+      # GH#1387: the FFI crate selects core features by hand (it cannot use `full`
+      # -- cf7fa0533d dropped it to keep libheif/candle out of Swift's zigbuild
+      # Linux targets), and that hand list silently lost eight formats. The fix was
+      # applied to the GENERATED manifest, so the next regen reverted it invisibly:
+      # `alef verify` compares an inputs hash, not content, and is green on a
+      # manifest faithfully generated from a wrong source. This asserts alef.toml
+      # AND the generated manifest both carry the formats. ~keep
+      - name: Verify the native FFI build still selects every document format
+        run: task alef:verify:ffi-formats
 
   alef-bindings-freshness:
     name: Alef-generated bindings freshness
