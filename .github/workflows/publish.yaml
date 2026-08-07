@@ -803,6 +803,11 @@ jobs:
     if: ${{ needs.prepare.outputs.release_wasm == 'true' && (needs.check-npm.outputs.wasm_exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    # The WASM package is a best-effort publish gate, not part of the core release: a WASM
+    # build failure must not block publishing the crate/PyPI/npm/Maven/etc. artifacts that
+    # depend only on `prepare`. downstream `publish-wasm` requires
+    # needs.wasm-bindings.result == 'success', so a failure here still correctly skips
+    # publishing a broken WASM package -- it just doesn't fail the whole run. ~keep
     continue-on-error: true
     env:
       CARGO_BUILD_JOBS: 1

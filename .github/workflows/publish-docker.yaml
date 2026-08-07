@@ -345,6 +345,11 @@ jobs:
 
       - name: Download digests
         if: ${{ steps.gate.outputs.go == 'true' }}
+        # A variant whose build legs were all cancelled/failed (rc.36 #1299) has zero
+        # matching digest-* artifacts, which makes download-artifact error even though that
+        # is a legitimate "skip this variant" outcome. The very next step (Verify digests
+        # present) is the real gate: it counts what came down and fails loudly if the count
+        # is nonzero-but-incomplete, so a genuine partial failure still fails the job. ~keep
         continue-on-error: true
         uses: actions/download-artifact@v8
         with:

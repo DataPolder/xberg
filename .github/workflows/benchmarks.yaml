@@ -1272,6 +1272,10 @@ jobs:
     steps:
       - name: Create GitHub App token (if credentials available)
         id: app-token
+        # Optional: BOT_APP_ID/BOT_APP_PRIVATE_KEY may be unset (e.g. forked runs), and the
+        # token is only used to widen downstream write permissions, not required for the
+        # aggregation itself. Losing it degrades to default GITHUB_TOKEN, it does not mask a
+        # benchmark result. ~keep
         continue-on-error: true
         uses: actions/create-github-app-token@v2
         with:
@@ -1326,6 +1330,12 @@ jobs:
           ort-version: ${{ env.ORT_VERSION }}
 
       - name: Download all benchmark artifacts
+        # Some cohort jobs are allowed to fail independently (this job's own `if: always()`
+        # gate above tolerates that) and produce no benchmarks-*-<run_id> artifact, so the
+        # wildcard pattern can legitimately match nothing for a subset of cohorts.
+        # "Partition artifacts", "Log downloaded benchmark artifact inventory", and
+        # "Validate benchmark artifacts" below all explicitly handle missing per-cohort
+        # directories and fail the job if a cohort that should have produced results didn't. ~keep
         continue-on-error: true
         uses: actions/download-artifact@v8
         with:
