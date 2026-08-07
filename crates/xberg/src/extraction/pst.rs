@@ -39,6 +39,15 @@ use outlook_pst::{
 #[cfg(feature = "email")]
 use std::rc::Rc;
 
+/// A folder queued for traversal: the folder handle itself, its recursion depth
+/// (0 at the top level), and its display path (used only for warning messages).
+///
+/// Named to keep this shape out of `walk_folder_tree`'s signature and the seed
+/// lists built by [`extract_from_store`] and [`discover_non_ipm_top_level_folders`]
+/// (see issue #162), which otherwise trips clippy's `type_complexity` lint.
+#[cfg(feature = "email")]
+type PstFolderSeed = (Rc<dyn PstFolder>, u32, String);
+
 /// Safety cap on rows read from a single PST contents/hierarchy table in one
 /// pass.
 ///
@@ -190,7 +199,7 @@ fn extract_from_store(
         .properties()
         .display_name()
         .unwrap_or_else(|_| "Top of Personal Folders".to_string());
-    let seeds: Vec<(Rc<dyn PstFolder>, u32, String)> = vec![(root_folder, 0, root_name)];
+    let seeds: Vec<PstFolderSeed> = vec![(root_folder, 0, root_name)];
 
     // `discover_non_ipm_top_level_folders` (issue #162c) is deliberately NOT called here.
     // See that function's doc comment: `outlook_pst::Store::root_hierarchy_table()`
@@ -237,10 +246,6 @@ fn extract_from_store(
 /// the upstream bug is fixed (or `outlook-pst` is upgraded past it). Do not call
 /// this from any code path that runs against a real `outlook_pst`-backed `Store`
 /// until then.
-/// A top-level folder seed: the folder itself, its node id, and its display name.
-#[cfg(feature = "email")]
-type PstFolderSeed = (Rc<dyn PstFolder>, u32, String);
-
 #[cfg(feature = "email")]
 #[allow(dead_code)]
 fn discover_non_ipm_top_level_folders(
@@ -328,7 +333,7 @@ fn discover_non_ipm_top_level_folders(
 #[cfg(feature = "email")]
 fn walk_folder_tree(
     store: &dyn outlook_pst::messaging::store::Store,
-    mut folder_stack: Vec<(Rc<dyn PstFolder>, u32, String)>,
+    mut folder_stack: Vec<PstFolderSeed>,
 ) -> (Vec<EmailExtractionResult>, Vec<ProcessingWarning>) {
     let mut messages = Vec::new();
     let mut warnings = Vec::new();
