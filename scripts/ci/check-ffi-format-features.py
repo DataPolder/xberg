@@ -154,7 +154,9 @@ def check(alef_toml: Path) -> int:
         )
         return 1
 
-    print(f"OK: all {len(REQUIRED_FORMAT_FEATURES)} required format features present in both alef.toml and {FFI_MANIFEST}")
+    print(
+        f"OK: all {len(REQUIRED_FORMAT_FEATURES)} required format features present in both alef.toml and {FFI_MANIFEST}"
+    )
     return 0
 
 

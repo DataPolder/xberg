@@ -99,9 +99,7 @@ def find_line(lines: list[str], section: str, key: str) -> int:
     raise LookupError(f"could not locate `{key}` under [{section}] in alef.toml")
 
 
-def add_file_refs(
-    refs: list[PathRef], lines: list[str], section: str, key: str, paths: list[str]
-) -> None:
+def add_file_refs(refs: list[PathRef], lines: list[str], section: str, key: str, paths: list[str]) -> None:
     if not paths:
         return
     line_number = find_line(lines, section, key)
@@ -115,9 +113,7 @@ def add_file_refs(
         )
 
 
-def add_dir_ref(
-    refs: list[PathRef], lines: list[str], section: str, key: str, path: str | None
-) -> None:
+def add_dir_ref(refs: list[PathRef], lines: list[str], section: str, key: str, path: str | None) -> None:
     if not path:
         return
     refs.append(
@@ -134,12 +130,8 @@ def build_refs(config: dict, lines: list[str]) -> list[PathRef]:
     refs: list[PathRef] = []
 
     docs = config.get("workspace", {}).get("docs", {})
-    add_file_refs(
-        refs, lines, "workspace.docs.cli", "sources", docs.get("cli", {}).get("sources", [])
-    )
-    add_file_refs(
-        refs, lines, "workspace.docs.mcp", "sources", docs.get("mcp", {}).get("sources", [])
-    )
+    add_file_refs(refs, lines, "workspace.docs.cli", "sources", docs.get("cli", {}).get("sources", []))
+    add_file_refs(refs, lines, "workspace.docs.mcp", "sources", docs.get("mcp", {}).get("sources", []))
     add_dir_ref(
         refs,
         lines,
@@ -197,9 +189,7 @@ def build_refs(config: dict, lines: list[str]) -> list[PathRef]:
                     refs.append(
                         PathRef(
                             description=f"{section}.snippets.{snippet_key}",
-                            relative_path=str(
-                                Path(snippets_dir) / snippet_lang / snippet_path
-                            ),
+                            relative_path=str(Path(snippets_dir) / snippet_lang / snippet_path),
                             line_number=line_number,
                         )
                     )
@@ -241,8 +231,7 @@ def main() -> int:
     for ref in sorted(failures, key=lambda r: r.line_number):
         kind = "directory" if ref.must_be_dir else "file"
         print(
-            f"  alef.toml:{ref.line_number}: {ref.description} -> "
-            f"{ref.relative_path} (missing {kind})",
+            f"  alef.toml:{ref.line_number}: {ref.description} -> {ref.relative_path} (missing {kind})",
             file=sys.stderr,
         )
     return 1
