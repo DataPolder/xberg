@@ -14,6 +14,9 @@ on:
       - "rust-toolchain.toml"
       - ".github/workflows/ci-rust.yaml"
       - "scripts/ci/rust/**"
+      # The gitlink selects which corpus fixtures the include_bytes! tests compile against, so a
+      # pin bump changes what this workflow actually verifies. ~keep
+      - "test_documents"
   pull_request:
     branches: [main]
     paths:
@@ -27,6 +30,9 @@ on:
       - "rust-toolchain.toml"
       - ".github/workflows/ci-rust.yaml"
       - "scripts/ci/rust/**"
+      # The gitlink selects which corpus fixtures the include_bytes! tests compile against, so a
+      # pin bump changes what this workflow actually verifies. ~keep
+      - "test_documents"
   workflow_dispatch:
 
 concurrency:
