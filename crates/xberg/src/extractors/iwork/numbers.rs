@@ -778,11 +778,12 @@ fn parse_rich_text_table(
 }
 
 /// Shared string dictionaries plus the mutable resource/diagnostic state threaded through
-/// the table → tile → row filling chain (`fill_table_tiles` → `fill_tile` → `fill_row`).
+/// the table → tile → row → cell filling chain (`fill_table_tiles` → `fill_tile` → `fill_row`
+/// → `parse_cell_value`).
 ///
-/// All three functions need the same five pieces of context alongside their own
-/// tile/row-specific arguments; grouping them here keeps each function's own argument
-/// count small instead of repeating five identical parameters three times.
+/// Every function in that chain needs the same pieces of context alongside its own
+/// tile/row/cell-specific arguments; grouping them here keeps each function's own argument
+/// count small instead of repeating the same parameters at every level.
 struct TableFillContext<'a> {
     /// Plain-text cell values from the table's string dictionary, keyed by `DATA_LIST_ENTRY_KEY`.
     strings: &'a HashMap<i32, String>,
@@ -886,13 +887,7 @@ fn fill_row(
         if start > end || end > storage.len() {
             return Err(numbers_parse_error("Numbers cell storage offset is out of bounds"));
         }
-        if let Some(value) = parse_cell_value(
-            &storage[start..end],
-            context.strings,
-            context.rich_strings,
-            context.table_name,
-            context.warnings,
-        )? {
+        if let Some(value) = parse_cell_value(&storage[start..end], context)? {
             context.budget.account_text(value.len())?;
             row[column] = value;
         }
@@ -919,20 +914,14 @@ fn parse_cell_offsets(offsets: &[u8], column_count: usize, wide_offsets: bool) -
         .collect()
 }
 
-fn parse_cell_value(
-    storage: &[u8],
-    strings: &HashMap<i32, String>,
-    rich_strings: &HashMap<i32, String>,
-    table_name: &str,
-    warnings: &mut Vec<ProcessingWarning>,
-) -> Result<Option<String>> {
+fn parse_cell_value(storage: &[u8], context: &mut TableFillContext<'_>) -> Result<Option<String>> {
     let Some(version) = storage.first().copied() else {
         return Err(numbers_parse_error("Numbers cell storage is truncated"));
     };
     if version == CELL_STORAGE_VERSION {
-        parse_v5_cell(storage, strings, rich_strings)
+        parse_v5_cell(storage, context.strings, context.rich_strings)
     } else if version <= 4 {
-        parse_old_cell(storage, strings, rich_strings, table_name, warnings)
+        parse_old_cell(storage, context.strings, context.rich_strings, context.table_name, context.warnings)
     } else {
         tracing::debug!(version, "skipping unsupported Numbers cell storage version");
         Ok(None)
@@ -1574,9 +1563,20 @@ mod tests {
         cell[0] = CELL_STORAGE_VERSION;
         cell[1] = u8::MAX;
         let mut warnings = Vec::new();
+        let mut budget = SecurityBudget::for_iwork(&SecurityLimits::default());
 
         assert_eq!(
-            parse_cell_value(&cell, &strings, &HashMap::new(), "Table 1", &mut warnings).unwrap(),
+            parse_cell_value(
+                &cell,
+                &mut TableFillContext {
+                    strings: &strings,
+                    rich_strings: &HashMap::new(),
+                    budget: &mut budget,
+                    table_name: "Table 1",
+                    warnings: &mut warnings,
+                },
+            )
+            .unwrap(),
             None
         );
     }
@@ -1611,11 +1611,21 @@ mod tests {
         ];
 
         let mut warnings = Vec::new();
+        let mut budget = SecurityBudget::for_iwork(&SecurityLimits::default());
         for (cell, expected) in cases {
             assert_eq!(
-                parse_cell_value(&cell, &strings, &rich_strings, "Table 1", &mut warnings)
-                    .unwrap()
-                    .as_deref(),
+                parse_cell_value(
+                    &cell,
+                    &mut TableFillContext {
+                        strings: &strings,
+                        rich_strings: &rich_strings,
+                        budget: &mut budget,
+                        table_name: "Table 1",
+                        warnings: &mut warnings,
+                    },
+                )
+                .unwrap()
+                .as_deref(),
                 expected
             );
         }
