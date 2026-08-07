@@ -125,6 +125,59 @@ pub(crate) fn decode_with_provenance(byte_data: &[u8], encoding: Option<&str>) -
     }
 }
 
+#[cfg(any(all(feature = "layout-detection", feature = "pdf"), feature = "office"))]
+use std::borrow::Cow;
+
+/// Escape `&`, `<`, and `>` in text destined for markdown/HTML output.
+///
+/// Underscores are intentionally **not** escaped. In extracted PDF text they are
+/// literal content (e.g. identifiers like `CTC_ARP_01`), not markdown italic
+/// delimiters.
+///
+/// Uses a single-pass scan: if no special characters are found, returns a
+/// borrowed `Cow` with no allocation.
+#[cfg(all(feature = "layout-detection", feature = "pdf"))]
+#[inline]
+pub(crate) fn escape_html_entities(text: &str) -> Cow<'_, str> {
+    let needs_amp = text.contains('&');
+    let needs_lt = text.contains('<');
+    let needs_gt = text.contains('>');
+
+    if !needs_amp && !needs_lt && !needs_gt {
+        return Cow::Borrowed(text);
+    }
+
+    let mut result = String::with_capacity(text.len() + 16);
+    for ch in text.chars() {
+        match ch {
+            '&' => result.push_str("&amp;"),
+            '<' => result.push_str("&lt;"),
+            '>' => result.push_str("&gt;"),
+            _ => result.push(ch),
+        }
+    }
+    Cow::Owned(result)
+}
+
+/// Normalizes whitespace by collapsing multiple whitespace characters into single spaces.
+/// Returns Cow::Borrowed if no normalization needed.
+#[cfg(feature = "office")]
+#[inline]
+#[cfg_attr(alef, alef(skip))]
+pub(crate) fn normalize_whitespace(s: &str) -> Cow<'_, str> {
+    let needs_normalization = s
+        .as_bytes()
+        .windows(2)
+        .any(|w| w[0].is_ascii_whitespace() && w[1].is_ascii_whitespace())
+        || s.bytes().any(|b| b != b' ' && b.is_ascii_whitespace());
+
+    if needs_normalization {
+        Cow::Owned(s.split_whitespace().collect::<Vec<_>>().join(" "))
+    } else {
+        Cow::Borrowed(s)
+    }
+}
+
 #[cfg(test)]
 mod decode_provenance_tests {
     use super::*;
@@ -224,58 +277,5 @@ mod decode_provenance_tests {
         assert_eq!(outcome.text, "");
         assert!(!outcome.fell_back);
         assert!(!outcome.replaced_characters);
-    }
-}
-
-#[cfg(any(all(feature = "layout-detection", feature = "pdf"), feature = "office"))]
-use std::borrow::Cow;
-
-/// Escape `&`, `<`, and `>` in text destined for markdown/HTML output.
-///
-/// Underscores are intentionally **not** escaped. In extracted PDF text they are
-/// literal content (e.g. identifiers like `CTC_ARP_01`), not markdown italic
-/// delimiters.
-///
-/// Uses a single-pass scan: if no special characters are found, returns a
-/// borrowed `Cow` with no allocation.
-#[cfg(all(feature = "layout-detection", feature = "pdf"))]
-#[inline]
-pub(crate) fn escape_html_entities(text: &str) -> Cow<'_, str> {
-    let needs_amp = text.contains('&');
-    let needs_lt = text.contains('<');
-    let needs_gt = text.contains('>');
-
-    if !needs_amp && !needs_lt && !needs_gt {
-        return Cow::Borrowed(text);
-    }
-
-    let mut result = String::with_capacity(text.len() + 16);
-    for ch in text.chars() {
-        match ch {
-            '&' => result.push_str("&amp;"),
-            '<' => result.push_str("&lt;"),
-            '>' => result.push_str("&gt;"),
-            _ => result.push(ch),
-        }
-    }
-    Cow::Owned(result)
-}
-
-/// Normalizes whitespace by collapsing multiple whitespace characters into single spaces.
-/// Returns Cow::Borrowed if no normalization needed.
-#[cfg(feature = "office")]
-#[inline]
-#[cfg_attr(alef, alef(skip))]
-pub(crate) fn normalize_whitespace(s: &str) -> Cow<'_, str> {
-    let needs_normalization = s
-        .as_bytes()
-        .windows(2)
-        .any(|w| w[0].is_ascii_whitespace() && w[1].is_ascii_whitespace())
-        || s.bytes().any(|b| b != b' ' && b.is_ascii_whitespace());
-
-    if needs_normalization {
-        Cow::Owned(s.split_whitespace().collect::<Vec<_>>().join(" "))
-    } else {
-        Cow::Borrowed(s)
     }
 }
