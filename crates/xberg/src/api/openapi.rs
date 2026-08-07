@@ -339,6 +339,36 @@ mod tests {
         }
     }
 
+    /// `/extract` and `/extract-async` both reject an unsupported request `Content-Type`
+    /// with HTTP 415 (see `UnifiedExtractRequest::from_request`), but the OpenAPI document
+    /// did not declare 415 as a possible response for either operation — an undocumented
+    /// status code that fails contract testing (schemathesis) even though the handler
+    /// behavior is correct.
+    #[test]
+    #[cfg(feature = "api")]
+    fn should_declare_415_for_unsupported_content_type_on_extract_operations() {
+        let document: serde_json::Value =
+            serde_json::from_str(&openapi_json()).expect("OpenAPI document must be valid JSON");
+        let paths = &document["paths"];
+
+        for (path, method) in [("/extract", "post"), ("/extract-async", "post")] {
+            let responses = &paths[path][method]["responses"];
+            assert_eq!(
+                responses["415"]["description"].as_str(),
+                Some("Unsupported Content-Type"),
+                "{path} {method} must declare a 415 response"
+            );
+
+            let mut refs = Vec::new();
+            collect_refs(&responses["415"], &mut refs);
+            assert_eq!(
+                refs,
+                vec!["#/components/schemas/ErrorResponse"],
+                "{path} {method}'s 415 response must reference exactly ErrorResponse"
+            );
+        }
+    }
+
     /// Every `$ref` in the document must resolve to a node that actually exists.
     ///
     /// utoipa only emits a component schema for a type listed in `components(schemas(..))`.

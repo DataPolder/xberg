@@ -620,6 +620,7 @@ fn toon_response(results: &ExtractionResult) -> Result<axum::response::Response<
         (status = 200, description = "Extraction successful", body = crate::core::config::ExtractionResult),
         (status = 400, description = "Bad request", body = crate::api::types::ErrorResponse),
         (status = 413, description = "Payload too large", body = crate::api::types::ErrorResponse),
+        (status = 415, description = "Unsupported Content-Type", body = crate::api::types::ErrorResponse),
         (status = 500, description = "Internal server error", body = crate::api::types::ErrorResponse),
     )
 )]
@@ -976,6 +977,7 @@ pub(crate) async fn cache_manifest_handler() -> Json<ManifestResponse> {
     responses(
         (status = 200, description = "Models warmed", body = WarmResponse),
         (status = 400, description = "Bad request - unknown or empty model name, or requested warmer feature is unavailable", body = crate::api::types::ErrorResponse),
+        (status = 415, description = "Unsupported Content-Type", body = crate::api::types::ErrorResponse),
         (status = 422, description = "Unprocessable entity - invalid JSON body", body = crate::api::types::ErrorResponse),
         (status = 500, description = "Internal server error", body = crate::api::types::ErrorResponse),
         (status = 502, description = "Bad gateway - upstream model download failed", body = crate::api::types::ErrorResponse),
@@ -1158,6 +1160,11 @@ fn resolve_cache_base() -> std::path::PathBuf {
         (status = 202, description = "Job accepted", body = AsyncJobResponse),
         (status = 400, description = "Bad request", body = crate::api::types::ErrorResponse),
         (status = 413, description = "Payload too large", body = crate::api::types::ErrorResponse),
+        (status = 415, description = "Unsupported Content-Type", body = crate::api::types::ErrorResponse),
+        // Returned below when MAX_ACTIVE_JOBS is reached. Declared for the same reason as
+        // 415: an undeclared status that the handler can actually return is a contract
+        // violation, and the API conformance suite fails on it. ~keep
+        (status = 429, description = "Too many active jobs", body = crate::api::types::ErrorResponse),
     )
 )]
 pub(crate) async fn extract_async_handler(
