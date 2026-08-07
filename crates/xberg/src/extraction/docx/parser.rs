@@ -1885,11 +1885,17 @@ impl<R: Read + Seek> DocxParser<R> {
                         b"w:tblPr" => {
                             if let Some(ctx) = table_stack.last_mut() {
                                 ctx.table.properties = Some(super::table::parse_table_properties(reader));
+                                // `parse_table_properties` reads through its own `</w:tblPr>`,
+                                // so the outer `Event::End` arm never sees it. Refund the
+                                // `budget.enter()` above or every table leaks one depth level.
+                                budget.leave();
                             }
                         }
                         b"w:tblGrid" => {
                             if let Some(ctx) = table_stack.last_mut() {
                                 ctx.table.grid = Some(super::table::parse_table_grid(reader));
+                                // Same as `w:tblPr`: consumes its own end tag.
+                                budget.leave();
                             }
                         }
                         b"w:tr" => {
@@ -1902,6 +1908,8 @@ impl<R: Read + Seek> DocxParser<R> {
                                 && let Some(ref mut row) = ctx.current_row
                             {
                                 row.properties = Some(super::table::parse_row_properties(reader));
+                                // Same as `w:tblPr`: consumes its own end tag.
+                                budget.leave();
                             }
                         }
                         b"w:tc" => {
@@ -1914,6 +1922,8 @@ impl<R: Read + Seek> DocxParser<R> {
                                 && let Some(ref mut cell) = ctx.current_cell
                             {
                                 cell.properties = Some(super::table::parse_cell_properties(reader));
+                                // Same as `w:tblPr`: consumes its own end tag.
+                                budget.leave();
                             }
                         }
                         b"w:b" | b"w:i" | b"w:u" | b"w:strike" | b"w:dstrike" | b"w:vertAlign" | b"w:sz"
@@ -1941,6 +1951,9 @@ impl<R: Read + Seek> DocxParser<R> {
                             let idx = out.drawings.len();
                             out.drawings.push(drawing);
                             out.elements.push(DocumentElement::Drawing(idx));
+                            // `parse_drawing` reads through its own `</w:drawing>`, so the
+                            // outer `Event::End` arm never sees it. Refund the enter above.
+                            budget.leave();
                         }
                         b"w:br" => {
                             apply_break(e, &table_stack, &mut current_run, &mut out.elements);
@@ -1951,6 +1964,10 @@ impl<R: Read + Seek> DocxParser<R> {
                         b"w:sectPr" => {
                             let sect_props = super::section::parse_section_properties_streaming(reader);
                             out.sections.push(sect_props);
+                            // `parse_section_properties_streaming` reads through its own
+                            // `</w:sectPr>`, so the outer `Event::End` arm never sees it.
+                            // Refund the enter above.
+                            budget.leave();
                         }
                         b"w:ins" => {
                             revision_kind = Some(RevisionKind::Insertion);
@@ -3710,6 +3727,268 @@ mod tests {
                 .unwrap();
         }
         document
+    }
+
+    /// Helper: parse document XML through DocxParser, threading a caller-supplied
+    /// budget instead of a fresh default one, so the caller can inspect the budget's
+    /// residual state (e.g. leaked nesting depth, GH#1395) after parsing completes.
+    fn parse_xml_with_budget(xml: &str, budget: &mut SecurityBudget) -> Document {
+        let parser_struct = DocxParser {
+            archive: zip::ZipArchive::new(std::io::Cursor::new(create_minimal_zip())).unwrap(),
+            relationships: AHashMap::new(),
+            styles: None,
+            theme: None,
+        };
+        let mut document = Document::new();
+        parser_struct.parse_document_xml(xml, &mut document, budget).unwrap();
+        document
+    }
+
+    /// Test-only probe (GH#1395): count how many more `budget.enter()` calls succeed
+    /// before the depth cap trips. A freshly-built budget accepts exactly `max_depth`
+    /// more entries; if parsing leaked N depth levels, only `max_depth - N` succeed.
+    /// This makes the *value* of the private depth counter observable through the
+    /// budget's existing public API, without touching `extractors/security.rs`.
+    fn probe_remaining_depth(budget: &mut SecurityBudget, max_depth: usize) -> usize {
+        let mut successes = 0usize;
+        for _ in 0..=max_depth {
+            if budget.enter().is_ok() {
+                successes += 1;
+            } else {
+                break;
+            }
+        }
+        successes
+    }
+
+    /// GH#1395: a single `w:tblPr` inside a table must not leave the depth counter
+    /// above zero after parsing — `parse_table_properties` consumes its own
+    /// `</w:tblPr>`, so the outer loop's `Event::End` arm never runs for it.
+    #[test]
+    fn should_reset_depth_counter_to_zero_after_parsing_tblpr() {
+        let limits = crate::extractors::security::SecurityLimits {
+            max_nesting_depth: 64,
+            max_xml_depth: 64,
+            ..Default::default()
+        };
+        let mut budget = SecurityBudget::from_limits(&limits);
+        let xml = wrap_body(
+            r#"<w:tbl>
+                <w:tblPr><w:tblStyle w:val="TableGrid"/></w:tblPr>
+                <w:tr><w:tc><w:p><w:r><w:t>x</w:t></w:r></w:p></w:tc></w:tr>
+            </w:tbl>"#,
+        );
+        parse_xml_with_budget(&xml, &mut budget);
+        assert_eq!(
+            probe_remaining_depth(&mut budget, 64),
+            64,
+            "w:tblPr must not leak a depth level"
+        );
+    }
+
+    /// GH#1395: same as `w:tblPr` — `parse_table_grid` consumes its own `</w:tblGrid>`.
+    #[test]
+    fn should_reset_depth_counter_to_zero_after_parsing_tblgrid() {
+        let limits = crate::extractors::security::SecurityLimits {
+            max_nesting_depth: 64,
+            max_xml_depth: 64,
+            ..Default::default()
+        };
+        let mut budget = SecurityBudget::from_limits(&limits);
+        let xml = wrap_body(
+            r#"<w:tbl>
+                <w:tblGrid><w:gridCol w:w="2500"/></w:tblGrid>
+                <w:tr><w:tc><w:p><w:r><w:t>x</w:t></w:r></w:p></w:tc></w:tr>
+            </w:tbl>"#,
+        );
+        parse_xml_with_budget(&xml, &mut budget);
+        assert_eq!(
+            probe_remaining_depth(&mut budget, 64),
+            64,
+            "w:tblGrid must not leak a depth level"
+        );
+    }
+
+    /// GH#1395: `parse_row_properties` consumes its own `</w:trPr>`.
+    #[test]
+    fn should_reset_depth_counter_to_zero_after_parsing_trpr() {
+        let limits = crate::extractors::security::SecurityLimits {
+            max_nesting_depth: 64,
+            max_xml_depth: 64,
+            ..Default::default()
+        };
+        let mut budget = SecurityBudget::from_limits(&limits);
+        let xml = wrap_body(
+            r#"<w:tbl>
+                <w:tr>
+                    <w:trPr><w:tblHeader/></w:trPr>
+                    <w:tc><w:p><w:r><w:t>x</w:t></w:r></w:p></w:tc>
+                </w:tr>
+            </w:tbl>"#,
+        );
+        parse_xml_with_budget(&xml, &mut budget);
+        assert_eq!(
+            probe_remaining_depth(&mut budget, 64),
+            64,
+            "w:trPr must not leak a depth level"
+        );
+    }
+
+    /// GH#1395: `parse_cell_properties` consumes its own `</w:tcPr>`.
+    #[test]
+    fn should_reset_depth_counter_to_zero_after_parsing_tcpr() {
+        let limits = crate::extractors::security::SecurityLimits {
+            max_nesting_depth: 64,
+            max_xml_depth: 64,
+            ..Default::default()
+        };
+        let mut budget = SecurityBudget::from_limits(&limits);
+        let xml = wrap_body(
+            r#"<w:tbl>
+                <w:tr>
+                    <w:tc>
+                        <w:tcPr><w:tcW w:w="2500" w:type="dxa"/></w:tcPr>
+                        <w:p><w:r><w:t>x</w:t></w:r></w:p>
+                    </w:tc>
+                </w:tr>
+            </w:tbl>"#,
+        );
+        parse_xml_with_budget(&xml, &mut budget);
+        assert_eq!(
+            probe_remaining_depth(&mut budget, 64),
+            64,
+            "w:tcPr must not leak a depth level"
+        );
+    }
+
+    /// GH#1395: `parse_drawing` consumes its own `</w:drawing>`.
+    #[test]
+    fn should_reset_depth_counter_to_zero_after_parsing_drawing() {
+        let limits = crate::extractors::security::SecurityLimits {
+            max_nesting_depth: 64,
+            max_xml_depth: 64,
+            ..Default::default()
+        };
+        let mut budget = SecurityBudget::from_limits(&limits);
+        let xml = wrap_body(
+            r#"<w:p><w:r>
+                <w:drawing>
+                    <wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">
+                        <wp:extent cx="914400" cy="914400"/>
+                        <wp:docPr id="1" name="Picture 1"/>
+                    </wp:inline>
+                </w:drawing>
+            </w:r></w:p>"#,
+        );
+        parse_xml_with_budget(&xml, &mut budget);
+        assert_eq!(
+            probe_remaining_depth(&mut budget, 64),
+            64,
+            "w:drawing must not leak a depth level"
+        );
+    }
+
+    /// GH#1395: `parse_section_properties_streaming` consumes its own `</w:sectPr>`.
+    #[test]
+    fn should_reset_depth_counter_to_zero_after_parsing_sectpr() {
+        let limits = crate::extractors::security::SecurityLimits {
+            max_nesting_depth: 64,
+            max_xml_depth: 64,
+            ..Default::default()
+        };
+        let mut budget = SecurityBudget::from_limits(&limits);
+        let xml = wrap_body(
+            r#"<w:p><w:r><w:t>Content</w:t></w:r></w:p>
+            <w:sectPr>
+                <w:pgSz w:w="12240" w:h="15840"/>
+            </w:sectPr>"#,
+        );
+        parse_xml_with_budget(&xml, &mut budget);
+        assert_eq!(
+            probe_remaining_depth(&mut budget, 64),
+            64,
+            "w:sectPr must not leak a depth level"
+        );
+    }
+
+    /// GH#1395: `m:oMath` and `m:oMathPara` already thread `budget` through to
+    /// `collect_and_convert_omath{,_para}`, which recursively balance every
+    /// `enter()`/`leave()` pair themselves — including the enter made by the
+    /// outer loop for the `m:oMath`/`m:oMathPara` start tag itself, refunded when
+    /// the recursive `collect_children` consumes the matching end tag. Confirm
+    /// they are NOT double-leaking (over-refunding would also be a bug: it would
+    /// silently mask genuinely deep documents by under-counting).
+    #[test]
+    fn should_reset_depth_counter_to_zero_after_parsing_omath_para() {
+        let limits = crate::extractors::security::SecurityLimits {
+            max_nesting_depth: 64,
+            max_xml_depth: 64,
+            ..Default::default()
+        };
+        let mut budget = SecurityBudget::from_limits(&limits);
+        let xml = wrap_body(
+            r#"<w:p><w:r>
+                <m:oMathPara xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math">
+                    <m:oMath>
+                        <m:r><m:rPr><m:sty m:val="p"/></m:rPr><m:t>x</m:t></m:r>
+                        <m:sSup>
+                            <m:e><m:r><m:t>y</m:t></m:r></m:e>
+                            <m:sup><m:r><m:t>2</m:t></m:r></m:sup>
+                        </m:sSup>
+                    </m:oMath>
+                </m:oMathPara>
+            </w:r></w:p>"#,
+        );
+        parse_xml_with_budget(&xml, &mut budget);
+        assert_eq!(
+            probe_remaining_depth(&mut budget, 64),
+            64,
+            "m:oMathPara/m:oMath (with nested m:rPr and m:sSup) must not leak a depth level"
+        );
+    }
+
+    /// GH#1395: the reporter's reproducer — a flat one-column table whose real
+    /// nesting depth is small (~8) leaked `2*rows + 3` levels because every row's
+    /// `w:tcPr` and `w:trPr` each leaked one level. At 600 rows that is 1203 leaked
+    /// levels, enough to trip the default 1024-level cap outright with no partial
+    /// result. Assert the fixed parser extracts the full table at both 400 and 600
+    /// rows, with identical, exact structural counts — proving the row count no
+    /// longer influences whether extraction succeeds.
+    #[test]
+    fn should_extract_full_table_regardless_of_row_count_after_fixing_depth_leak() {
+        fn build_table_xml(rows: usize) -> String {
+            // Deliberately `<w:tblPr></w:tblPr>` (Start+End events), not the
+            // self-closing `<w:tblPr/>` form (a single Empty event) — only the
+            // Start/End form goes through the leaking `parse_table_properties`
+            // delegation path this test is guarding against.
+            let mut body = String::from("<w:tbl><w:tblPr></w:tblPr><w:tblGrid><w:gridCol w:w=\"2500\"/></w:tblGrid>");
+            for i in 0..rows {
+                body.push_str(&format!(
+                    "<w:tr><w:trPr></w:trPr><w:tc><w:tcPr></w:tcPr><w:p><w:r><w:t>row{i}</w:t></w:r></w:p></w:tc></w:tr>"
+                ));
+            }
+            body.push_str("</w:tbl>");
+            wrap_body(&body)
+        }
+
+        for rows in [400usize, 600usize] {
+            let mut budget = SecurityBudget::with_defaults();
+            let xml = build_table_xml(rows);
+            let doc = parse_xml_with_budget(&xml, &mut budget);
+
+            assert_eq!(doc.tables.len(), 1, "rows={rows}: expected exactly 1 table");
+            assert_eq!(doc.tables[0].rows.len(), rows, "rows={rows}: row count mismatch");
+            assert_eq!(
+                doc.elements.len(),
+                1,
+                "rows={rows}: a single top-level table must yield exactly 1 document element"
+            );
+            assert_eq!(
+                probe_remaining_depth(&mut budget, 1024),
+                1024,
+                "rows={rows}: depth counter must return to zero after a {rows}-row table"
+            );
+        }
     }
 
     /// Helper: parse document XML with custom relationships.
