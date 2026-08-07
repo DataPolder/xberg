@@ -20,7 +20,7 @@ use pdf_oxide::PdfDocument;
 use pdf_oxide::annotation_types::AnnotationSubtype;
 use pdf_oxide::document::ReadingOrder;
 
-use super::rules::{GRID_EDGE_ALIGN_TOLERANCE_PTS, RULED_LINE_MIN_LENGTH_PTS, count_rules};
+use super::rules::{GRID_EDGE_ALIGN_TOLERANCE_PTS, count_rules};
 
 /// Pages with fewer spans than this look like slides, posters, or covers:
 /// too little text to trust geometry, so the model runs.
@@ -164,9 +164,9 @@ pub(crate) struct PageGateSignals {
     pub spans: Vec<SpanBox>,
     /// Non-whitespace characters in the native text layer.
     pub text_chars: usize,
-    /// Horizontal rules at least [`RULED_LINE_MIN_LENGTH_PTS`] long.
+    /// Horizontal rules at least [`super::rules::RULED_LINE_MIN_LENGTH_PTS`] long.
     pub horizontal_rules: usize,
-    /// Vertical rules at least [`RULED_LINE_MIN_LENGTH_PTS`] long.
+    /// Vertical rules at least [`super::rules::RULED_LINE_MIN_LENGTH_PTS`] long.
     pub vertical_rules: usize,
     /// Fraction of the page under raster images plus vector paths, `[0, 1]`.
     ///
