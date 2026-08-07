@@ -101,8 +101,16 @@ impl Engine {
     }
 
     /// Extract content from a single bytes or URI input.
+    ///
+    /// Honours the injected [`CacheBackend`] and [`ProgressSink`] seams: a bytes
+    /// input whose content-hash cache key already has an entry short-circuits
+    /// straight to the cached [`ExtractionResult`], and every call emits coarse
+    /// `ProgressEvent`s (start, then either completion or error, plus a
+    /// cache-hit event when one occurs). Both seams default to no-ops
+    /// ([`NoopCache`], [`NoopProgressSink`]), so callers who inject nothing see
+    /// byte-identical behavior to before this wiring existed.
     pub async fn extract(&self, input: ExtractInput, config: &ExtractionConfig) -> Result<ExtractionResult> {
-        extract_impl::extract(input, config).await
+        extract_impl::extract(&self.inner, input, config).await
     }
 
     /// Extract content from multiple bytes or URI inputs.
@@ -231,5 +239,138 @@ impl EngineBuilder {
                 .unwrap_or_else(|| Arc::new(DefaultModelProvider::default())),
         };
         Engine { inner: Arc::new(inner) }
+    }
+}
+
+#[cfg(all(test, feature = "tokio-runtime"))]
+mod tests {
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    use super::*;
+    use crate::types::ExtractedDocument;
+    use seams::ProgressEvent;
+
+    /// A [`ProgressSink`] that records the stage of every emitted event, in order.
+    #[derive(Default)]
+    struct RecordingProgressSink {
+        stages: Mutex<Vec<String>>,
+    }
+
+    impl ProgressSink for RecordingProgressSink {
+        fn emit(&self, event: ProgressEvent) {
+            self.stages
+                .lock()
+                .expect("recording sink mutex poisoned")
+                .push(event.stage);
+        }
+    }
+
+    // Revert line: change `Engine::extract` back to
+    // `extract_impl::extract(input, config).await` (dropping `&self.inner`) to make
+    // this test fail — `RecordingProgressSink::emit` is then never called and
+    // `stages` stays empty.
+    #[tokio::test]
+    async fn should_emit_start_then_complete_progress_events_for_a_successful_bytes_extraction() {
+        let sink = Arc::new(RecordingProgressSink::default());
+        let engine = Engine::builder().with_progress_sink(sink.clone()).build();
+
+        let output = engine
+            .extract(
+                ExtractInput::from_bytes(b"hello progress".to_vec(), "text/plain", None),
+                &ExtractionConfig::default(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(output.results.len(), 1);
+        assert_eq!(
+            *sink.stages.lock().expect("recording sink mutex poisoned"),
+            vec!["extract_start".to_string(), "extract_complete".to_string()],
+            "expected exactly a start event followed by a complete event, in that order"
+        );
+    }
+
+    #[tokio::test]
+    async fn should_emit_start_then_error_progress_events_for_a_failed_extraction() {
+        let sink = Arc::new(RecordingProgressSink::default());
+        let engine = Engine::builder().with_progress_sink(sink.clone()).build();
+
+        let error = engine
+            .extract(
+                ExtractInput::from_uri("s3://bucket/file.txt"),
+                &ExtractionConfig::default(),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("unsupported URI scheme"));
+        assert_eq!(
+            *sink.stages.lock().expect("recording sink mutex poisoned"),
+            vec!["extract_start".to_string(), "extract_error".to_string()],
+            "expected exactly a start event followed by an error event, in that order"
+        );
+    }
+
+    /// A [`CacheBackend`] that always serves one fixed payload and counts lookups,
+    /// so a test can prove a hit was actually consulted (not just that the result
+    /// happens to match).
+    struct StubCacheBackend {
+        cached_payload: Vec<u8>,
+        gets: AtomicUsize,
+        puts: AtomicUsize,
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+    impl CacheBackend for StubCacheBackend {
+        async fn get(&self, _key: &str) -> Option<Vec<u8>> {
+            self.gets.fetch_add(1, Ordering::SeqCst);
+            Some(self.cached_payload.clone())
+        }
+
+        async fn put(&self, _key: &str, _value: Vec<u8>, _ttl: Option<Duration>) {
+            self.puts.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    // Revert line: change `content_cache_key` in `extract_impl.rs` to always
+    // `return None;` to make this test fail — with no cache key, `extract` never
+    // calls `inner.cache.get`, `gets` stays 0, and the real (uncached) extraction
+    // result ("this is not the cached content") is returned instead.
+    #[tokio::test]
+    async fn should_return_cached_result_and_skip_extraction_on_cache_hit() {
+        let cached_result = ExtractionResult::single(ExtractedDocument {
+            content: "CACHED-RESULT-NOT-REEXTRACTED".to_string(),
+            ..Default::default()
+        });
+        let cache = Arc::new(StubCacheBackend {
+            cached_payload: serde_json::to_vec(&cached_result).unwrap(),
+            gets: AtomicUsize::new(0),
+            puts: AtomicUsize::new(0),
+        });
+        let engine = Engine::builder().with_cache_backend(cache.clone()).build();
+
+        let output = engine
+            .extract(
+                ExtractInput::from_bytes(b"this is not the cached content".to_vec(), "text/plain", None),
+                &ExtractionConfig::default(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(output.results.len(), 1);
+        assert_eq!(output.results[0].content, "CACHED-RESULT-NOT-REEXTRACTED");
+        assert_eq!(
+            cache.gets.load(Ordering::SeqCst),
+            1,
+            "the cache backend must be consulted exactly once"
+        );
+        assert_eq!(
+            cache.puts.load(Ordering::SeqCst),
+            0,
+            "a hit must not also write back to the cache"
+        );
     }
 }

@@ -35,18 +35,133 @@ use crate::types::{ExtractedDocument, UriKind};
 use crate::{Result, XbergError};
 
 use crate::core::extractor::{extract_bytes, extract_file};
+use crate::engine::seams::ProgressEvent;
 
 const HTTP_SCHEME: &str = "http://";
 const HTTPS_SCHEME: &str = "https://";
 const FILE_SCHEME: &str = "file://";
 
+/// Stable progress-sink stage labels for the single-input [`extract`] entry point.
+///
+/// Chosen at coarse, stable lifecycle points only (session start, cache hit,
+/// completion, error) — never per-page or per-chunk — per the [`ProgressSink`]
+/// "coarse progress" contract (`crate::engine::seams::ProgressSink`).
+const PROGRESS_STAGE_START: &str = "extract_start";
+const PROGRESS_STAGE_CACHE_HIT: &str = "extract_cache_hit";
+const PROGRESS_STAGE_COMPLETE: &str = "extract_complete";
+const PROGRESS_STAGE_ERROR: &str = "extract_error";
+
+/// Namespace prefix mixed into the content-hash cache key so a future,
+/// incompatible key derivation can never collide with entries this version wrote.
+const CACHE_KEY_NAMESPACE: &[u8] = b"xberg-engine-extract-v1";
+
 /// Extract content from a single bytes or URI input.
-pub(crate) async fn extract(input: ExtractInput, config: &ExtractionConfig) -> Result<ExtractionResult> {
+///
+/// Honours the injected [`CacheBackend`](crate::engine::seams::CacheBackend) and
+/// [`ProgressSink`](crate::engine::seams::ProgressSink) seams: a content-hash cache
+/// hit (bytes inputs only, keyed on the raw bytes plus the resolved
+/// [`ExtractionConfig`]) returns the cached [`ExtractionResult`] and skips
+/// extraction entirely; a miss runs extraction as before and, on success,
+/// populates the cache for next time. Both seams default to no-ops
+/// ([`NoopCache`](crate::engine::seams::NoopCache),
+/// [`NoopProgressSink`](crate::engine::seams::NoopProgressSink)), so callers who
+/// inject nothing see byte-identical behavior.
+pub(crate) async fn extract(
+    inner: &super::EngineInner,
+    input: ExtractInput,
+    config: &ExtractionConfig,
+) -> Result<ExtractionResult> {
+    inner.progress.emit(ProgressEvent {
+        stage: PROGRESS_STAGE_START.to_string(),
+        message: None,
+        fraction: Some(0.0),
+    });
+
+    let cache_key = content_cache_key(&input, config);
+    if let Some(key) = cache_key.as_deref()
+        && let Some(cached_bytes) = inner.cache.get(key).await
+        && let Ok(cached_result) = serde_json::from_slice::<ExtractionResult>(&cached_bytes)
+    {
+        inner.progress.emit(ProgressEvent {
+            stage: PROGRESS_STAGE_CACHE_HIT.to_string(),
+            message: None,
+            fraction: Some(1.0),
+        });
+        return Ok(cached_result);
+    }
+
+    // Type-erased so `extract`'s future does not nest `extract_uncached`'s whole
+    // (already very deep) future type inside its own. Without this the compiler
+    // exceeds the recursion limit proving `Send` for the combined future, and any
+    // caller doing `tokio::spawn(xberg::extract(..))` — the canonical usage — fails
+    // to compile with E0275. ~keep
+    let uncached: std::pin::Pin<Box<dyn std::future::Future<Output = Result<ExtractionResult>> + Send>> =
+        Box::pin(extract_uncached(input, config));
+    let result = uncached.await;
+
+    match &result {
+        Ok(output) => {
+            if let Some(key) = cache_key
+                && let Ok(serialized) = serde_json::to_vec(output)
+            {
+                inner.cache.put(&key, serialized, None).await;
+            }
+            inner.progress.emit(ProgressEvent {
+                stage: PROGRESS_STAGE_COMPLETE.to_string(),
+                message: None,
+                fraction: Some(1.0),
+            });
+        }
+        Err(error) => {
+            inner.progress.emit(ProgressEvent {
+                stage: PROGRESS_STAGE_ERROR.to_string(),
+                message: Some(error.to_string()),
+                fraction: None,
+            });
+        }
+    }
+
+    result
+}
+
+/// The extraction path proper, unwrapped from cache/progress bookkeeping so
+/// [`extract`] can wrap it uniformly for both the cache-hit and cache-miss cases.
+async fn extract_uncached(input: ExtractInput, config: &ExtractionConfig) -> Result<ExtractionResult> {
     let mut seen = initial_seen_urls(std::slice::from_ref(&input));
     let seed_hosts = initial_seed_hosts(std::slice::from_ref(&input));
     let mut output = Box::pin(extract_one(input, config, 0)).await?;
     follow_recursive_document_urls(&mut output, config, &mut seen, &seed_hosts).await?;
     Ok(output)
+}
+
+/// Derive a content-hash cache key for `input`, or `None` when the input is not
+/// eligible for caching.
+///
+/// Only `bytes` inputs are cached, per the cache-key contract (content-hash of
+/// file bytes + config, never path-based): a `uri` input's content is not yet
+/// known at this point without fetching it, which would defeat the purpose of a
+/// pre-extraction cache check. The key mixes the byte length and content, the
+/// MIME/filename hints, and the fully-resolved [`ExtractionConfig`] (base config
+/// merged with any per-input override), so a config or override change is a
+/// guaranteed cache miss.
+fn content_cache_key(input: &ExtractInput, base_config: &ExtractionConfig) -> Option<String> {
+    if input.kind != ExtractInputKind::Bytes {
+        return None;
+    }
+    let bytes = input.bytes.as_deref()?;
+    let resolved_config = resolve_input_config(input, base_config);
+    let config_json = serde_json::to_vec(&resolved_config).ok()?;
+
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(CACHE_KEY_NAMESPACE);
+    hasher.update(&(bytes.len() as u64).to_le_bytes());
+    hasher.update(bytes);
+    hasher.update(input.mime_type.as_deref().unwrap_or_default().as_bytes());
+    hasher.update(b"\0");
+    hasher.update(input.filename.as_deref().unwrap_or_default().as_bytes());
+    hasher.update(b"\0");
+    hasher.update(&config_json);
+    Some(hasher.finalize().to_hex().to_string())
 }
 
 /// Extract content from multiple bytes or URI inputs.
