@@ -62,9 +62,10 @@ from __future__ import annotations
 
 import re
 import sys
-import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+
+import tomllib
 
 
 @dataclass(frozen=True)
@@ -213,10 +214,7 @@ def main() -> int:
     failures: list[PathRef] = []
     for ref in refs:
         resolved = repo_root / ref.relative_path
-        if ref.must_be_dir:
-            ok = resolved.is_dir()
-        else:
-            ok = resolved.is_file()
+        ok = resolved.is_dir() if ref.must_be_dir else resolved.is_file()
         if not ok:
             failures.append(ref)
 

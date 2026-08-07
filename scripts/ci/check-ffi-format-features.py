@@ -37,8 +37,9 @@ Exit codes: 0 = all good, 1 = a required format is missing, 2 = malformed input.
 from __future__ import annotations
 
 import sys
-import tomllib
 from pathlib import Path
+
+import tomllib
 
 # The eight formats `cf7fa0533d` dropped when it replaced `features = ["full", ...]`
 # with a hand-maintained list. These are the ones GH#1387 reported as missing from
