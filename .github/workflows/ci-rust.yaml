@@ -205,10 +205,13 @@ jobs:
         shell: bash
 
   # GH#1389 regression guard: `cargo add xberg --features full` then `cargo build` on
-  # x86_64-pc-windows-msvc used to die at LINK with
-  #   LNK2038: RuntimeLibrary mismatch: 'MT_StaticRelease' (libesaxx_rs) vs
-  #            'MD_DynamicRelease' (libxberg_tesseract capi.obj)
-  # because model2vec-rs's tokenizers instance used to pull `tokenizers/esaxx_fast` (=
+  # x86_64-pc-windows-msvc used to die at LINK with an LNK2038 RuntimeLibrary mismatch,
+  # 'MT_StaticRelease' (libesaxx_rs) against 'MD_DynamicRelease' (libxberg_tesseract
+  # capi.obj). That wording is reconstructed from the mechanism, not copied from a CI
+  # log -- do not grep past runs for it verbatim. This job is what will produce the real
+  # line if it ever regresses; it had never executed as of 2026-08-07, so treat it as
+  # unexercised rather than passing until a Windows run reports on it.
+  # The cause: model2vec-rs's tokenizers instance used to pull `tokenizers/esaxx_fast` (=
   # `esaxx-rs/cpp`, whose build.rs forces `.static_crt(true)` i.e. /MT) while the Tesseract
   # capi object links dynamically (/MD). The fix (crates/xberg/Cargo.toml, 2026-08-06) takes
   # neither of model2vec-rs's regex features and instead hands its shared tokenizers 0.21
