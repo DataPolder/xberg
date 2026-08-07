@@ -383,52 +383,52 @@ pub struct ExtractionConfig {
     /// Named-entity recognition configuration. When set, the NER post-processor runs at
     /// the Middle stage and populates `ExtractedDocument::entities`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "alef-meta", alef(since = "5.0.0"))]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.0.0"))]
     pub ner: Option<super::super::ner::NerConfig>,
 
     /// Redaction / anonymisation configuration. When set, the redaction post-processor
     /// runs at the Late stage and rewrites every textual field in `ExtractedDocument`,
     /// emitting an audit trail in `ExtractedDocument::redaction_report`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "alef-meta", alef(since = "5.0.0"))]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.0.0"))]
     pub redaction: Option<super::super::redaction::RedactionConfig>,
 
     /// Summarisation configuration. When set, the summarisation post-processor runs at
     /// the Middle stage and populates `ExtractedDocument::summary`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "alef-meta", alef(since = "5.0.0"))]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.0.0"))]
     pub summarization: Option<super::super::summarization::SummarizationConfig>,
 
     /// Translation configuration. When set, the translation post-processor runs at the
     /// Middle stage and populates `ExtractedDocument::translation`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "alef-meta", alef(since = "5.0.0"))]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.0.0"))]
     pub translation: Option<super::super::translation::TranslationConfig>,
 
     /// Per-page classification configuration. When set, the classification post-processor
     /// runs at the Middle stage and populates `ExtractedDocument::page_classifications`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "alef-meta", alef(since = "5.0.0"))]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.0.0"))]
     pub page_classification: Option<super::super::classification::PageClassificationConfig>,
 
     /// Per-chunk multi-label classification configuration. When set, the
     /// chunk-classification post-processor runs at the Middle stage (after
     /// chunking) and populates `ChunkMetadata::classifications` on every chunk.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "alef-meta", alef(since = "5.0.0"))]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.0.0"))]
     pub chunk_classification: Option<super::super::chunk_classification::ChunkClassificationConfig>,
 
     /// VLM captioning configuration for extracted images. When set, the captioning
     /// post-processor runs at the Middle stage and writes a caption into each
     /// `ExtractedImage::caption`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "alef-meta", alef(since = "5.0.0"))]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.0.0"))]
     pub captioning: Option<super::super::captioning::CaptioningConfig>,
 
     /// Enable QR-code detection in extracted images. When `true`, the QR post-processor
     /// runs at the Middle stage and populates `ExtractedImage::qr_codes`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "alef-meta", alef(since = "5.0.0"))]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.0.0"))]
     pub qr_codes: Option<bool>,
 
     /// Cancellation token for this extraction (None = no external cancellation).
