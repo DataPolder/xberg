@@ -1884,18 +1884,15 @@ impl<R: Read + Seek> DocxParser<R> {
                         }
                         b"w:tblPr" => {
                             if let Some(ctx) = table_stack.last_mut() {
-                                ctx.table.properties = Some(super::table::parse_table_properties(reader));
-                                // `parse_table_properties` reads through its own `</w:tblPr>`,
-                                // so the outer `Event::End` arm never sees it. Refund the
-                                // `budget.enter()` above or every table leaks one depth level.
-                                budget.leave();
+                                // `parse_table_properties` now threads `budget` through and
+                                // balances its own `</w:tblPr>` end tag against the `enter()`
+                                // above internally, so no manual `budget.leave()` is needed here.
+                                ctx.table.properties = Some(super::table::parse_table_properties(reader, budget)?);
                             }
                         }
                         b"w:tblGrid" => {
                             if let Some(ctx) = table_stack.last_mut() {
-                                ctx.table.grid = Some(super::table::parse_table_grid(reader));
-                                // Same as `w:tblPr`: consumes its own end tag.
-                                budget.leave();
+                                ctx.table.grid = Some(super::table::parse_table_grid(reader, budget)?);
                             }
                         }
                         b"w:tr" => {
@@ -1907,9 +1904,7 @@ impl<R: Read + Seek> DocxParser<R> {
                             if let Some(ctx) = table_stack.last_mut()
                                 && let Some(ref mut row) = ctx.current_row
                             {
-                                row.properties = Some(super::table::parse_row_properties(reader));
-                                // Same as `w:tblPr`: consumes its own end tag.
-                                budget.leave();
+                                row.properties = Some(super::table::parse_row_properties(reader, budget)?);
                             }
                         }
                         b"w:tc" => {
@@ -1921,9 +1916,7 @@ impl<R: Read + Seek> DocxParser<R> {
                             if let Some(ctx) = table_stack.last_mut()
                                 && let Some(ref mut cell) = ctx.current_cell
                             {
-                                cell.properties = Some(super::table::parse_cell_properties(reader));
-                                // Same as `w:tblPr`: consumes its own end tag.
-                                budget.leave();
+                                cell.properties = Some(super::table::parse_cell_properties(reader, budget)?);
                             }
                         }
                         b"w:b" | b"w:i" | b"w:u" | b"w:strike" | b"w:dstrike" | b"w:vertAlign" | b"w:sz"
@@ -1947,13 +1940,13 @@ impl<R: Read + Seek> DocxParser<R> {
                             }
                         }
                         b"w:drawing" => {
-                            let drawing = super::drawing::parse_drawing(reader);
+                            // `parse_drawing` now threads `budget` through and balances its
+                            // own `</w:drawing>` end tag against the `enter()` above
+                            // internally, so no manual `budget.leave()` is needed here.
+                            let drawing = super::drawing::parse_drawing(reader, budget)?;
                             let idx = out.drawings.len();
                             out.drawings.push(drawing);
                             out.elements.push(DocumentElement::Drawing(idx));
-                            // `parse_drawing` reads through its own `</w:drawing>`, so the
-                            // outer `Event::End` arm never sees it. Refund the enter above.
-                            budget.leave();
                         }
                         b"w:br" => {
                             apply_break(e, &table_stack, &mut current_run, &mut out.elements);
@@ -1962,12 +1955,12 @@ impl<R: Read + Seek> DocxParser<R> {
                             out.elements.push(DocumentElement::PageBreak);
                         }
                         b"w:sectPr" => {
-                            let sect_props = super::section::parse_section_properties_streaming(reader);
+                            // `parse_section_properties_streaming` now threads `budget`
+                            // through and balances its own `</w:sectPr>` end tag against the
+                            // `enter()` above internally, so no manual `budget.leave()` is
+                            // needed here.
+                            let sect_props = super::section::parse_section_properties_streaming(reader, budget)?;
                             out.sections.push(sect_props);
-                            // `parse_section_properties_streaming` reads through its own
-                            // `</w:sectPr>`, so the outer `Event::End` arm never sees it.
-                            // Refund the enter above.
-                            budget.leave();
                         }
                         b"w:ins" => {
                             revision_kind = Some(RevisionKind::Insertion);
@@ -3744,6 +3737,21 @@ mod tests {
         document
     }
 
+    /// Helper: parse document XML through DocxParser, returning the raw `Result`
+    /// instead of unwrapping (GH#384) — needed to assert on the exact error variant
+    /// produced once nesting inside a delegating helper's subtree trips the depth cap.
+    fn try_parse_xml_with_budget(xml: &str, budget: &mut SecurityBudget) -> Result<Document, DocxParseError> {
+        let parser_struct = DocxParser {
+            archive: zip::ZipArchive::new(std::io::Cursor::new(create_minimal_zip())).unwrap(),
+            relationships: AHashMap::new(),
+            styles: None,
+            theme: None,
+        };
+        let mut document = Document::new();
+        parser_struct.parse_document_xml(xml, &mut document, budget)?;
+        Ok(document)
+    }
+
     /// Test-only probe (GH#1395): count how many more `budget.enter()` calls succeed
     /// before the depth cap trips. A freshly-built budget accepts exactly `max_depth`
     /// more entries; if parsing leaked N depth levels, only `max_depth - N` succeed.
@@ -3989,6 +3997,162 @@ mod tests {
                 "rows={rows}: depth counter must return to zero after a {rows}-row table"
             );
         }
+    }
+
+    /// GH#384: the GH#1395 fix only stopped the depth counter from *leaking* at each
+    /// delegating call site — it left the content *inside* those helpers completely
+    /// unmeasured. `parse_drawing` is one of them: before this fix it read through its
+    /// own `</w:drawing>` without ever calling `budget.enter()`/`leave()` for anything
+    /// nested inside. Confirm a genuinely deeply-nested drawing subtree now trips the
+    /// depth cap instead of sailing through unaccounted, and that the exact error
+    /// variant surfaces (not just "parsing failed somehow").
+    #[test]
+    fn should_trip_nesting_too_deep_when_drawing_subtree_nests_beyond_the_depth_cap() {
+        let limits = crate::extractors::security::SecurityLimits {
+            max_nesting_depth: 10,
+            max_xml_depth: 10,
+            ..Default::default()
+        };
+        let mut budget = SecurityBudget::from_limits(&limits);
+
+        let nest_depth = 20;
+        let mut inner = String::from("<a:sp>");
+        for _ in 0..nest_depth {
+            inner.push_str("<a:grp>");
+        }
+        for _ in 0..nest_depth {
+            inner.push_str("</a:grp>");
+        }
+        inner.push_str("</a:sp>");
+
+        let xml = wrap_body(&format!(
+            "<w:p><w:r><w:drawing><wp:inline>{inner}</wp:inline></w:drawing></w:r></w:p>"
+        ));
+
+        let result = try_parse_xml_with_budget(&xml, &mut budget);
+
+        match result {
+            Err(DocxParseError::SecurityLimit(msg)) => {
+                assert!(
+                    msg.contains("Nesting too deep"),
+                    "expected a nesting-depth security error, got: {msg}"
+                );
+            }
+            other => {
+                panic!("expected Err(DocxParseError::SecurityLimit(_)) for a deeply-nested drawing, got {other:?}")
+            }
+        }
+    }
+
+    /// GH#384: same gap as `parse_drawing`, but for `parse_cell_properties` — nesting
+    /// inside a `w:tcPr` subtree was completely invisible to the depth budget before
+    /// this fix. Confirm it now trips the depth cap with the exact `SecurityLimit`
+    /// error variant.
+    #[test]
+    fn should_trip_nesting_too_deep_when_tcpr_subtree_nests_beyond_the_depth_cap() {
+        let limits = crate::extractors::security::SecurityLimits {
+            max_nesting_depth: 10,
+            max_xml_depth: 10,
+            ..Default::default()
+        };
+        let mut budget = SecurityBudget::from_limits(&limits);
+
+        let nest_depth = 20;
+        let mut inner = String::new();
+        for _ in 0..nest_depth {
+            inner.push_str("<evil>");
+        }
+        for _ in 0..nest_depth {
+            inner.push_str("</evil>");
+        }
+
+        let xml = wrap_body(&format!(
+            "<w:tbl><w:tr><w:tc><w:tcPr>{inner}</w:tcPr><w:p><w:r><w:t>x</w:t></w:r></w:p></w:tc></w:tr></w:tbl>"
+        ));
+
+        let result = try_parse_xml_with_budget(&xml, &mut budget);
+
+        match result {
+            Err(DocxParseError::SecurityLimit(msg)) => {
+                assert!(
+                    msg.contains("Nesting too deep"),
+                    "expected a nesting-depth security error, got: {msg}"
+                );
+            }
+            other => panic!("expected Err(DocxParseError::SecurityLimit(_)) for a deeply-nested tcPr, got {other:?}"),
+        }
+    }
+
+    /// GH#384: threading `budget` into the table/drawing/section delegating helpers
+    /// must not turn ordinary, real-world-shaped documents into false rejections.
+    /// Parses a table with populated `tblPr`/`tblGrid`/`trPr`/`tcPr`, an inline
+    /// drawing, and a section — all well within the default depth cap — and asserts
+    /// the structural results are still fully populated, not just that parsing
+    /// returned `Ok`.
+    #[test]
+    fn should_extract_realistic_table_and_drawing_without_false_rejection() {
+        let xml = wrap_body(
+            r#"<w:tbl>
+                <w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:w="5000" w:type="dxa"/></w:tblPr>
+                <w:tblGrid><w:gridCol w:w="2500"/><w:gridCol w:w="2500"/></w:tblGrid>
+                <w:tr>
+                    <w:trPr><w:tblHeader/></w:trPr>
+                    <w:tc>
+                        <w:tcPr>
+                            <w:tcW w:w="2500" w:type="dxa"/>
+                            <w:shd w:val="clear" w:color="auto" w:fill="D9E2F3"/>
+                        </w:tcPr>
+                        <w:p><w:r><w:t>Header A</w:t></w:r></w:p>
+                    </w:tc>
+                    <w:tc>
+                        <w:tcPr><w:tcW w:w="2500" w:type="dxa"/></w:tcPr>
+                        <w:p><w:r><w:t>Header B</w:t></w:r></w:p>
+                    </w:tc>
+                </w:tr>
+                <w:tr>
+                    <w:tc>
+                        <w:tcPr><w:tcW w:w="2500" w:type="dxa"/></w:tcPr>
+                        <w:p><w:r><w:t>Row 1</w:t></w:r></w:p>
+                    </w:tc>
+                    <w:tc>
+                        <w:tcPr><w:tcW w:w="2500" w:type="dxa"/></w:tcPr>
+                        <w:p><w:r><w:t>Value</w:t></w:r></w:p>
+                    </w:tc>
+                </w:tr>
+            </w:tbl>
+            <w:p><w:r>
+                <w:drawing>
+                    <wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">
+                        <wp:extent cx="914400" cy="457200"/>
+                        <wp:docPr id="1" name="Picture 1"/>
+                    </wp:inline>
+                </w:drawing>
+            </w:r></w:p>
+            <w:sectPr>
+                <w:pgSz w:w="12240" w:h="15840"/>
+                <w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"
+                         w:header="720" w:footer="720" w:gutter="0"/>
+            </w:sectPr>"#,
+        );
+
+        let mut budget = SecurityBudget::with_defaults();
+        let doc = try_parse_xml_with_budget(&xml, &mut budget)
+            .expect("a realistic table + drawing + section must not trip the default depth cap");
+
+        assert_eq!(doc.tables.len(), 1, "expected exactly one table");
+        assert_eq!(doc.tables[0].rows.len(), 2, "expected a header row and a data row");
+        assert!(
+            doc.tables[0].properties.is_some(),
+            "table properties must still be populated"
+        );
+        assert!(doc.tables[0].grid.is_some(), "table grid must still be populated");
+        assert_eq!(doc.drawings.len(), 1, "expected exactly one drawing");
+        assert_eq!(doc.sections.len(), 1, "expected exactly one section");
+        assert_eq!(
+            doc.sections[0].page_width_twips,
+            Some(12240),
+            "section properties must still be populated"
+        );
     }
 
     /// Helper: parse document XML with custom relationships.

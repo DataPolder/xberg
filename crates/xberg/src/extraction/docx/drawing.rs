@@ -4,6 +4,7 @@
 //! from DOCX documents. Drawing objects can be inline or anchored and may contain
 //! images or shapes.
 
+use crate::extractors::security::{SecurityBudget, SecurityError};
 use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
 use serde::{Deserialize, Serialize};
@@ -120,7 +121,13 @@ pub enum WrapType {
 ///
 /// This function reads events until it encounters the closing `</w:drawing>` tag,
 /// parsing the drawing type (inline or anchored), extent, properties, and image references.
-pub(crate) fn parse_drawing(reader: &mut Reader<&[u8]>) -> Drawing {
+///
+/// Threads `budget` through every event so nesting inside `w:drawing` is measured
+/// against the caller's depth cap instead of passing through unaccounted (GH#384).
+/// The local `depth` counter below is a separate, pre-existing mechanism: it tracks
+/// same-named nesting so this function can find its *own* matching `</w:drawing>`
+/// end tag, and is unrelated to `budget`'s document-wide depth accounting.
+pub(crate) fn parse_drawing(reader: &mut Reader<&[u8]>, budget: &mut SecurityBudget) -> Result<Drawing, SecurityError> {
     let mut drawing = Drawing {
         drawing_type: DrawingType::Inline,
         extent: None,
@@ -133,8 +140,10 @@ pub(crate) fn parse_drawing(reader: &mut Reader<&[u8]>) -> Drawing {
     let mut buf = Vec::new();
 
     loop {
+        budget.step()?;
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(ref e)) => {
+                budget.enter()?;
                 let local = e.local_name();
                 let local_name = local.as_ref();
 
@@ -156,6 +165,9 @@ pub(crate) fn parse_drawing(reader: &mut Reader<&[u8]>) -> Drawing {
                     b"positionH" => {
                         let relative_from = get_attr(e, b"relativeFrom").unwrap_or_else(|| "page".to_string());
                         let position = parse_position(reader, "positionH");
+                        // `parse_position` reads through its own `</wp:positionH>`
+                        // without touching `budget`; refund the enter above.
+                        budget.leave();
                         if let DrawingType::Anchored(ref mut anchor) = drawing.drawing_type {
                             anchor.position_h = Some(Position {
                                 relative_from,
@@ -166,6 +178,8 @@ pub(crate) fn parse_drawing(reader: &mut Reader<&[u8]>) -> Drawing {
                     b"positionV" => {
                         let relative_from = get_attr(e, b"relativeFrom").unwrap_or_else(|| "paragraph".to_string());
                         let position = parse_position(reader, "positionV");
+                        // Same as `positionH`: consumes its own end tag.
+                        budget.leave();
                         if let DrawingType::Anchored(ref mut anchor) = drawing.drawing_type {
                             anchor.position_v = Some(Position {
                                 relative_from,
@@ -181,8 +195,10 @@ pub(crate) fn parse_drawing(reader: &mut Reader<&[u8]>) -> Drawing {
                     }
                     b"txbxContent" => {
                         // Consumes through its own `</w:txbxContent>` end tag, so it
-                        // must not also increment `depth` (#81).
+                        // must not also increment `depth` (#81). Same reasoning applies
+                        // to `budget`: refund the enter above.
                         let text = collect_txbx_content_text(reader);
+                        budget.leave();
                         if !text.is_empty() {
                             drawing.text_box_content = Some(text);
                         }
@@ -253,6 +269,7 @@ pub(crate) fn parse_drawing(reader: &mut Reader<&[u8]>) -> Drawing {
                 }
             }
             Ok(Event::End(e)) => {
+                budget.leave();
                 depth -= 1;
                 if e.local_name().as_ref() as &[u8] == b"drawing" && depth == 0 {
                     break;
@@ -269,7 +286,7 @@ pub(crate) fn parse_drawing(reader: &mut Reader<&[u8]>) -> Drawing {
         buf.clear();
     }
 
-    drawing
+    Ok(drawing)
 }
 
 /// Parse position offset from positionH or positionV element.
@@ -498,7 +515,8 @@ mod tests {
             buf.clear();
         }
 
-        parse_drawing(&mut reader)
+        let mut budget = SecurityBudget::with_defaults();
+        parse_drawing(&mut reader, &mut budget).expect("parse_drawing should not exceed the default budget")
     }
 
     #[test]
