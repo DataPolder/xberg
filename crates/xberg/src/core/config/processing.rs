@@ -194,6 +194,10 @@ pub struct ChunkingConfig {
     /// When set, sparse vectors are generated for each chunk's content and attached
     /// via [`crate::types::Chunk::sparse_embedding`]. Requires the `sparse-embeddings`
     /// feature; without it, a warning is emitted and no sparse vectors are attached.
+    ///
+    /// Config-file only: like [`super::reranker::RerankerConfig`] and the local-ONNX branch of
+    /// `embedding`, this has no CLI flag and no environment variable. Only the secret/identity
+    /// fields of LLM-routed configs (model, API key, base URL) get that reach. ~keep
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
     pub sparse_embedding: Option<super::sparse_embedding::SparseEmbeddingConfig>,
@@ -204,6 +208,8 @@ pub struct ChunkingConfig {
     /// attached via [`crate::types::Chunk::late_interaction`]. Requires the
     /// `late-interaction` feature; without it, a warning is emitted and no
     /// late-interaction vectors are attached.
+    ///
+    /// Config-file only, for the same reason as `sparse_embedding` above. ~keep
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
     pub late_interaction: Option<super::late_interaction::LateInteractionConfig>,

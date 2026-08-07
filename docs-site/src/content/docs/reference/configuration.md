@@ -440,7 +440,71 @@ credentials in `BedrockConfig` are never printed.
 | `max_tokens` | `int \| None` | `None` | Maximum tokens to generate. |
 | `load_env` | `bool \| None` | `None` | Whether liter-llm should load provider credentials from environment variables. Mirrors liter-llm's `ClientConfigBuilder.load_env`. When `None`, liter-llm's own default behavior applies. |
 | `headers` | `dict\[str, str\] \| None` | `{}` | Extra HTTP headers sent with every request to the provider. Mirrors liter-llm's `ClientConfigBuilder.header`, for gateways or providers that require custom auth/routing headers. |
+| `providers` | `list[LlmProviderConfig] \| None` | `None` | Custom provider configurations, in addition to liter-llm's built-in catalog. Mirrors liter-llm's `LlmConfig.providers`. Round-trips through config load/serialization but is **not currently wired into a live client** — liter-llm's own `into_client_builder` does not map it either. Setting this field has no effect on request routing today; do not rely on it. |
+| `cache` | `LlmCacheConfig \| None` | `None` | Response cache configuration. Mirrors liter-llm's `LlmConfig.cache`. Only takes effect when liter-llm's `tower` feature is compiled in; otherwise the value is accepted but unused. |
+| `budget` | `LlmBudgetConfig \| None` | `None` | Budget enforcement configuration. Mirrors liter-llm's `LlmConfig.budget`. Only takes effect when liter-llm's `tower` feature is compiled in; otherwise the value is accepted but unused. |
+| `rate_limit` | `LlmRateLimitConfig \| None` | `None` | Per-model rate limiting configuration. Mirrors liter-llm's `LlmConfig.rate_limit`. Only takes effect when liter-llm's `tower` feature is compiled in; otherwise the value is accepted but unused. |
+| `cost_tracking` | `bool \| None` | `None` | Enable per-request cost tracking. Mirrors liter-llm's `LlmConfig.cost_tracking`. Only takes effect when liter-llm's `tower` feature is compiled in; otherwise the value is accepted but unused. |
+| `tracing` | `bool \| None` | `None` | Enable OpenTelemetry-compatible tracing spans. Mirrors liter-llm's `LlmConfig.tracing`. Only takes effect when liter-llm's `tower` feature is compiled in; otherwise the value is accepted but unused. |
+| `cooldown_secs` | `int \| None` | `None` | Cooldown duration after transient errors, in seconds. Mirrors liter-llm's `LlmConfig.cooldown_secs`. Only takes effect when liter-llm's `tower` feature is compiled in; otherwise the value is accepted but unused. |
+| `health_check_secs` | `int \| None` | `None` | Background health check interval, in seconds. Mirrors liter-llm's `LlmConfig.health_check_secs`. Only takes effect when liter-llm's `tower` feature is compiled in; otherwise the value is accepted but unused. |
 | `bedrock` | `BedrockConfig \| None` | `None` | AWS Bedrock settings (region, cross-region routing, explicit credentials). Only consulted for `bedrock/`-prefixed models. When `None` — or when an individual field inside it is `None` — liter-llm falls back to the standard AWS environment variables and the default credential chain. |
+
+:::note[Credentials are redacted in Debug, not in serialized output]
+`api_key` and the `BedrockConfig` credential fields (`access_key_id`, `secret_access_key`, `session_token`) are hidden by the hand-written `Debug` impl but **are present in serialized TOML/JSON output** by design — this is the config-file persistence path. If you write a config file containing these fields to disk, treat it like any other secrets file (restrictive permissions, not world-readable, not committed to version control).
+:::
+
+---
+
+### LlmProviderConfig
+
+A custom provider configuration entry, in addition to liter-llm's built-in providers. Mirrors liter-llm's `LlmProviderConfig`.
+
+Accepted by `LlmConfig.providers` but **not currently consumed by request routing** — see the note above. Document your provider here for forward compatibility, but do not expect it to change which endpoint a model routes to today.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `name` | `str` | — | Provider name, used to key model prefix matching. |
+| `base_url` | `str` | — | Base URL for the provider's OpenAI-compatible API. |
+| `auth_header` | `str \| None` | `None` | Header name used to carry the API key (defaults to `Authorization` when unset). |
+| `model_prefixes` | `list[str]` | `[]` | Model name prefixes routed to this provider (e.g. `["my-provider/"]`). |
+
+---
+
+### LlmCacheConfig
+
+Response cache configuration. Mirrors liter-llm's `LlmCacheConfig`. Only takes effect when liter-llm's `tower` feature is compiled in; otherwise the value round-trips through configuration but is not consulted at request time.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `max_entries` | `int \| None` | `None` | Maximum number of cached entries. |
+| `ttl_seconds` | `int \| None` | `None` | Cache entry time-to-live, in seconds. |
+| `backend` | `str \| None` | `None` | Cache backend name (e.g. `"memory"`, or an `opendal` scheme). |
+| `backend_config` | `dict[str, str] \| None` | `None` | Backend-specific configuration key/value pairs. |
+
+---
+
+### LlmBudgetConfig
+
+Budget enforcement configuration. Mirrors liter-llm's `LlmBudgetConfig`. Only takes effect when liter-llm's `tower` feature is compiled in; otherwise the value round-trips through configuration but is not enforced at request time.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `global_limit` | `float \| None` | `None` | Global spend limit in USD. |
+| `model_limits` | `dict[str, float] \| None` | `None` | Per-model spend limits in USD, keyed by model name. |
+| `enforcement` | `str \| None` | `None` | Enforcement mode: `"hard"` (reject over-budget requests) or `"soft"` (log only). |
+
+---
+
+### LlmRateLimitConfig
+
+Per-model rate limiting configuration. Mirrors liter-llm's `LlmRateLimitConfig`. Only takes effect when liter-llm's `tower` feature is compiled in; otherwise the value round-trips through configuration but is not enforced at request time.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `rpm` | `int \| None` | `None` | Requests per minute limit. |
+| `tpm` | `int \| None` | `None` | Tokens per minute limit. |
+| `window_seconds` | `int \| None` | `None` | Rate limit window, in seconds. |
 
 ---
 

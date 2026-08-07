@@ -13,18 +13,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Dependency bumps: `crawlberg` 1.1.4, `liter-llm` 1.16.0, `sceptre` 0.4.0,
   `tree-sitter-language-pack` 1.14.3.
+- `LlmConfig` now passes through liter-llm's full configuration surface instead of a hand-tracked
+  subset: `providers`, `cache`, `budget`, `rate_limit`, `cost_tracking`, `tracing`,
+  `cooldown_secs`, and `health_check_secs`. `providers` round-trips as configuration but is not
+  wired to a live client — liter-llm's own builder ignores it too — and `cache`, `budget`,
+  `rate_limit`, `cost_tracking`, `tracing`, `cooldown_secs`, and `health_check_secs` only take
+  effect when liter-llm's `tower` feature is compiled in; otherwise they are accepted but unused.
+- The OpenAPI document now declares the `415 Unsupported Media Type` response on `/extract`,
+  `/extract-async`, and `/cache/warm`, and the `429 Too Many Requests` response on
+  `/extract-async`. These responses were already possible at runtime; clients generated from the
+  spec previously had no typed way to handle them.
+- **Breaking (Rust API):** `EmbeddingModelType::Llm` and `RerankerModelType::Llm` now hold
+  `Box<LlmConfig>` instead of `LlmConfig`. Code that constructs either variant directly in Rust
+  must wrap the config in `Box::new(..)`; `match` arms are unaffected.
 
 ### Fixed
 
-- Two-column PDF reading order repair is no longer suppressed by full-width page furniture (running
-  headers/footers, titles). A full-width element used to make the page look single-column to the
-  repair heuristic, so genuinely two-column pages with such furniture kept their columns interleaved
-  line-by-line instead of read top-to-bottom within each column.
+- Two-column PDF reading order is now detected per horizontal band instead of per page. Page
+  furniture (running headers/footers, titles, rules) used to make the whole page look
+  single-column to the repair heuristic, so genuinely two-column pages kept their columns
+  interleaved line-by-line; furniture also now emits at its true position between bands rather
+  than between the two columns.
 - The Python and PHP bindings' `StructuredDataResult` gain the `value` and `flattened` fields already
   present in the other language bindings, restoring parity after a binding regeneration gap.
 - The Dart package passes `dart analyze` again: the generated `xberg.dart` exported `traits.dart`
   without importing it, leaving every plugin-trait doc reference unresolvable, and also carried an
   unused `dart:typed_data` import; `bin/download_libs.dart` reached into `lib/` by relative path.
+- DOCX documents with many legacy VML `w:pict` picture elements are no longer falsely rejected for
+  exceeding the nesting-depth limit: each `w:pict` was leaking one extra level of nesting budget,
+  and content inside it was also exempt from the iteration cap.
+- Archive, AsciiDoc, VTT, and XML extraction now report when a decode lost bytes to a U+FFFD
+  replacement, instead of silently returning mangled text. The XML declared-encoding path also
+  gained the mojibake repair already applied by every other extractor.
 
 ## [1.1.0] - 2026-08-07
 
