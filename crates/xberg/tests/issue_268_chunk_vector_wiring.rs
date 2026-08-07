@@ -55,6 +55,14 @@ mod vectors_unset {
     }
 }
 
+// Gated to the union of its two callers below. Without this, a narrow-feature leg that
+// enables neither `sparse-embeddings` nor `late-interaction` (CI's `--no-default-features
+// --features "ocr,auto-rotate-tract"` clippy run) sees an uncalled function and fails on
+// `-D warnings`. ~keep
+#[cfg(all(
+    feature = "chunking",
+    any(feature = "sparse-embeddings", feature = "late-interaction")
+))]
 fn should_skip_live() -> bool {
     std::env::var("XBERG_SKIP_LIVE_HF").is_ok()
 }
