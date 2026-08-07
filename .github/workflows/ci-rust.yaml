@@ -204,6 +204,68 @@ jobs:
           done
         shell: bash
 
+  # GH#1389 regression guard: `cargo add xberg --features full` then `cargo build` on
+  # x86_64-pc-windows-msvc used to die at LINK with
+  #   LNK2038: RuntimeLibrary mismatch: 'MT_StaticRelease' (libesaxx_rs) vs
+  #            'MD_DynamicRelease' (libxberg_tesseract capi.obj)
+  # because model2vec-rs's tokenizers instance used to pull `tokenizers/esaxx_fast` (=
+  # `esaxx-rs/cpp`, whose build.rs forces `.static_crt(true)` i.e. /MT) while the Tesseract
+  # capi object links dynamically (/MD). The fix (crates/xberg/Cargo.toml, 2026-08-06) takes
+  # neither of model2vec-rs's regex features and instead hands its shared tokenizers 0.21
+  # instance `fancy-regex` via the `tokenizers-model2vec` alias dep, so esaxx_fast is never
+  # activated. That fix was previously verified only via `cargo tree` feature inspection and
+  # an isolated macOS compile probe -- nothing exercised the actual MSVC LINK step, so a
+  # future dependency bump silently re-enabling `esaxx_fast` would go undetected.
+  #
+  # `--features "ocr,static-embeddings"` (not `--no-default-features --features full`) is
+  # the minimal combination that genuinely reproduces both halves of the mismatch:
+  #   - `ocr` pulls `dep:xberg-tesseract`, whose native capi object is the /MD side.
+  #   - `static-embeddings` pulls `dep:model2vec-rs` + `dep:tokenizers-model2vec`, the path
+  #     that used to pull the /MT `esaxx-rs/cpp` object.
+  # Neither feature needs ONNX Runtime (static-embeddings's whole point is a pure-Rust,
+  # ORT-free embedder), so this leg skips the ORT setup step entirely and stays cheap
+  # relative to a `full` build.
+  #
+  # `cargo test --no-run` (not `cargo check`, which never invokes link.exe, and not plain
+  # `cargo build`, which only produces an rlib) builds the crate's test harness binary --
+  # a real MSVC link of every native object, including the two above -- without spending
+  # time actually running the (fixture-heavy) test suite.
+  windows-static-embeddings-link:
+    name: Rust (windows-latest, static-embeddings link)
+    if: github.repository == 'xberg-io/xberg' && github.actor != 'dependabot[bot]'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      # `--lib` (not `--all-targets`) keeps the fixture surface to extraction::image's
+      # ocr-gated `#[cfg(test)]` modules, whose include_bytes! fixtures must exist at
+      # compile time even though the tests never run -- so `images/**` is sufficient.
+      # `static-embeddings`'s test fixtures are synthetic in-memory safetensors bytes.
+      - name: Fetch test_documents fixtures
+        uses: xberg-io/actions/fetch-test-documents@v1
+        with:
+          include: |
+            images/**
+
+      - name: Setup Rust
+        uses: xberg-io/actions/setup-rust@v1
+        with:
+          target: x86_64-pc-windows-msvc
+          cache-key-prefix: rust-windows-static-embeddings
+          use-sccache: "true"
+
+      # Provisions Tesseract (for `ocr`'s xberg-tesseract capi object) on Windows. No ORT
+      # setup is needed here -- neither `ocr` nor `static-embeddings` links ONNX Runtime.
+      - name: Install system dependencies
+        uses: ./.github/actions/install-system-deps
+
+      - name: Build xberg test harness (ocr + static-embeddings, real MSVC link)
+        run: cargo test --locked -p xberg --no-default-features --features "ocr,static-embeddings" --lib --no-run
+        shell: bash
+
   # `cfg(target_os = "windows")` dependency blocks (ureq/tokenizers/liter-llm).
   # Also the only job that builds/tests xberg-libwpd on Windows.
   clippy-windows:
