@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Dependency bumps: `crawlberg` 1.1.4, `liter-llm` 1.16.0, `sceptre` 0.4.0,
+  `tree-sitter-language-pack` 1.14.3.
+
+### Fixed
+
+- Two-column PDF reading order repair is no longer suppressed by full-width page furniture (running
+  headers/footers, titles). A full-width element used to make the page look single-column to the
+  repair heuristic, so genuinely two-column pages with such furniture kept their columns interleaved
+  line-by-line instead of read top-to-bottom within each column.
+- The Python and PHP bindings' `StructuredDataResult` gain the `value` and `flattened` fields already
+  present in the other language bindings, restoring parity after a binding regeneration gap.
+- The Dart package passes `dart analyze` again: the generated `xberg.dart` exported `traits.dart`
+  without importing it, leaving every plugin-trait doc reference unresolvable, and also carried an
+  unused `dart:typed_data` import; `bin/download_libs.dart` reached into `lib/` by relative path.
+
 ## [1.1.0] - 2026-08-07
 
 ### Added
