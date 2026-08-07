@@ -73,11 +73,20 @@ fn build_client_config(config: &LlmConfig) -> crate::Result<ClientConfig> {
 ///
 /// When `api_key` is `None`, liter-llm falls back to the provider's standard
 /// environment variable (e.g., `OPENAI_API_KEY`).
+///
+/// For a `bedrock/`-prefixed model, liter-llm's own provider validation runs
+/// here and rejects the request up front — with a message naming the required
+/// AWS credentials and how to supply them — when neither explicit
+/// [`BedrockConfig`](crate::core::config::BedrockConfig) credentials nor
+/// `AWS_ACCESS_KEY_ID` in the environment are available. That upstream message
+/// is wrapped with the model that failed to build, so the resulting error names
+/// the operation (building the LLM client), the input (the model string), and
+/// (via the wrapped source) a concrete suggestion.
 pub(crate) fn create_client(config: &LlmConfig) -> crate::Result<DefaultClient> {
     let client_config = build_client_config(config)?;
 
     DefaultClient::new(client_config, Some(&config.model)).map_err(|e| {
-        let msg = format!("Failed to build LLM client: {e}");
+        let msg = format!("Failed to build LLM client for model '{}': {e}", config.model);
         crate::XbergError::Validation {
             message: msg,
             source: Some(Box::new(e)),
@@ -297,5 +306,130 @@ mod tests {
         assert_eq!(client_config.bedrock_access_key_id, None);
         assert_eq!(client_config.bedrock_secret_access_key, None);
         assert_eq!(client_config.bedrock_session_token, None);
+    }
+
+    /// Regression test for https://github.com/xberg-io/xberg/issues/1381
+    ///
+    /// A `bedrock/`-prefixed model with no explicit `BedrockConfig` credentials
+    /// and no `AWS_ACCESS_KEY_ID` in the environment must fail fast at
+    /// `create_client` time with a clear, actionable error instead of a bare
+    /// "failed to build client" message or a confusing runtime request failure.
+    /// `#[serial]` because the test mutates the process-wide `AWS_ACCESS_KEY_ID`
+    /// environment variable, matching the save/restore convention used by the
+    /// other env-mutating tests in this crate (see
+    /// `core::server_config::tests::env_tests`).
+    ///
+    /// `#[allow(unsafe_code)]` is scoped to this one function rather than the module:
+    /// the crate sets `#![deny(unsafe_code)]` (lib.rs:36), and `std::env::set_var` /
+    /// `remove_var` are `unsafe` as of edition 2024. `core::server_config::tests::env_tests`
+    /// takes the same exemption, but as a file-level `#![allow]` — it can, because it is a
+    /// dedicated test file. These tests sit inline in a production module, so a
+    /// module-scoped allow would also cover `create_client` itself. ~keep
+    #[allow(unsafe_code)]
+    #[serial_test::serial]
+    #[test]
+    fn test_create_client_reports_clear_error_for_unconfigured_bedrock() {
+        let original = std::env::var("AWS_ACCESS_KEY_ID").ok();
+        // SAFETY: guarded by #[serial_test::serial] — no other test in this
+        // process observes AWS_ACCESS_KEY_ID concurrently while this one runs.
+        unsafe {
+            std::env::remove_var("AWS_ACCESS_KEY_ID");
+        }
+
+        let config = bedrock_model_config(BedrockConfig::default());
+        let result = create_client(&config);
+
+        // SAFETY: see above.
+        unsafe {
+            match &original {
+                Some(val) => std::env::set_var("AWS_ACCESS_KEY_ID", val),
+                None => std::env::remove_var("AWS_ACCESS_KEY_ID"),
+            }
+        }
+
+        match result {
+            Err(crate::XbergError::Validation { message, .. }) => {
+                assert!(
+                    message.contains("bedrock/anthropic.claude-3-sonnet-20240229-v1:0"),
+                    "error should name the model (the input) that failed to build: {message}"
+                );
+                assert!(
+                    message.contains("AWS credentials"),
+                    "error should name the root cause (missing AWS credentials): {message}"
+                );
+                assert!(
+                    message.contains("AWS_ACCESS_KEY_ID") && message.contains("AWS_SECRET_ACCESS_KEY"),
+                    "error should suggest how to fix it (set explicit config or the AWS env vars): {message}"
+                );
+            }
+            Err(other) => panic!("expected a Validation error, got: {other}"),
+            Ok(_) => panic!("expected create_client to reject an unconfigured bedrock model"),
+        }
+    }
+
+    /// Once Bedrock credentials actually reach liter-llm's own `ClientConfig`
+    /// (built by `build_client_config`), that type's `Debug` impl — not xberg's
+    /// `LlmConfig`/`BedrockConfig` impls — is the last line of defense against a
+    /// credential reaching a log via an accidental `tracing::debug!("{config:?}")`
+    /// or panic dump. This proves the credential survives the xberg -> liter-llm
+    /// boundary redacted, using real-looking (but fake) values.
+    #[test]
+    fn test_build_client_config_debug_never_leaks_bedrock_credentials() {
+        let config = bedrock_model_config(BedrockConfig {
+            region: Some("us-east-1".to_string()),
+            access_key_id: Some("AKIAEXAMPLEFAKE".to_string()),
+            secret_access_key: Some("example-fake-secret".to_string()),
+            session_token: Some("example-fake-token".to_string()),
+            ..BedrockConfig::default()
+        });
+
+        let client_config = build_client_config(&config).expect("build client config");
+        let rendered = format!("{client_config:?}");
+
+        for secret in ["AKIAEXAMPLEFAKE", "example-fake-secret", "example-fake-token"] {
+            assert!(
+                !rendered.contains(secret),
+                "liter-llm ClientConfig Debug leaked {secret}: {rendered}"
+            );
+        }
+        assert!(
+            rendered.contains("us-east-1"),
+            "non-secret region should stay visible for diagnosability: {rendered}"
+        );
+    }
+
+    /// A misconfigured request (invalid header) on a model that also carries
+    /// live-looking Bedrock credentials must never leak those credentials into
+    /// the resulting error — the error's `Display` output is exactly the string
+    /// that reaches xberg's logs and callers, so this is the real "does a
+    /// credential reach a log" boundary (as opposed to the config-file
+    /// persistence `Serialize` impl, which legitimately carries a credential the
+    /// caller explicitly set, the same way `api_key` already does).
+    #[test]
+    fn test_create_client_error_never_leaks_bedrock_credentials() {
+        let mut headers = std::collections::HashMap::new();
+        headers.insert("X-Bad\r\nInjected".to_string(), "value".to_string());
+        let mut config = bedrock_model_config(BedrockConfig {
+            region: Some("us-east-1".to_string()),
+            access_key_id: Some("AKIAEXAMPLEFAKE".to_string()),
+            secret_access_key: Some("example-fake-secret".to_string()),
+            session_token: Some("example-fake-token".to_string()),
+            ..BedrockConfig::default()
+        });
+        config.headers = Some(headers);
+
+        // Not `expect_err`: that needs `T: Debug` and liter-llm's `DefaultClient` does not
+        // implement it, so the success arm has to be discarded by hand.
+        let Err(err) = create_client(&config) else {
+            panic!("invalid header must reject the request");
+        };
+        let rendered = format!("{err}");
+
+        for secret in ["AKIAEXAMPLEFAKE", "example-fake-secret", "example-fake-token"] {
+            assert!(
+                !rendered.contains(secret),
+                "create_client error leaked {secret}: {rendered}"
+            );
+        }
     }
 }
