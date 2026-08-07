@@ -62,8 +62,8 @@ def _fail(message: str) -> None:
     print(f"FAIL: {message}", file=sys.stderr)
 
 
-def alef_ffi_features(alef_toml: Path) -> list[str]:
-    """Return the feature list alef will generate the ffi manifest from."""
+def alef_crate_features(alef_toml: Path, table: str) -> list[str]:
+    """Return the feature list alef will generate `[crates.<table>]`'s manifest from."""
     with alef_toml.open("rb") as handle:
         config = tomllib.load(handle)
 
@@ -71,13 +71,13 @@ def alef_ffi_features(alef_toml: Path) -> list[str]:
     if not isinstance(crates, list) or not crates:
         raise ValueError(f"{alef_toml}: expected a non-empty [[crates]] array")
 
-    ffi = crates[0].get("ffi")
-    if not isinstance(ffi, dict):
-        raise ValueError(f"{alef_toml}: crates[0] has no [crates.ffi] table")
+    entry = crates[0].get(table)
+    if not isinstance(entry, dict):
+        raise ValueError(f"{alef_toml}: crates[0] has no [crates.{table}] table")
 
-    features = ffi.get("features")
+    features = entry.get("features")
     if not isinstance(features, list):
-        raise ValueError(f"{alef_toml}: crates[0].ffi has no `features` list")
+        raise ValueError(f"{alef_toml}: crates[0].{table} has no `features` list")
 
     return [f for f in features if isinstance(f, str)]
 
@@ -113,7 +113,14 @@ def manifest_core_features(manifest: Path) -> tuple[str, list[str]]:
 
 def check(alef_toml: Path) -> int:
     try:
-        source_features = alef_ffi_features(alef_toml)
+        source_features = alef_crate_features(alef_toml, "ffi")
+        # The swift crate keeps its own hand-maintained copy of the same list. It has no
+        # output-side counterpart to check: the generated packages/swift/rust/Cargo.toml reaches
+        # the formats through `ffi_features = ["full-no-heic"]` on the xberg-ffi edge, not through
+        # a granular list. Guarding the source side is what stops the two drifting -- swift was
+        # missing `wordperfect` while ffi had all eight, and this script did not catch it because
+        # it only ever looked at ffi. ~keep
+        swift_features = alef_crate_features(alef_toml, "swift")
         desktop_cfg, generated_features = manifest_core_features(FFI_MANIFEST)
     except (OSError, ValueError, tomllib.TOMLDecodeError) as error:
         _fail(str(error))
@@ -121,9 +128,28 @@ def check(alef_toml: Path) -> int:
 
     failed = False
 
-    for label, features, path in (
-        ("alef.toml crates[0].ffi.features", source_features, alef_toml),
-        (f"{FFI_MANIFEST} xberg.features under target.'{desktop_cfg}'", generated_features, FFI_MANIFEST),
+    ffi_consequence = (
+        "Every native artifact built from this crate (Go, the C tarball, Java natives, "
+        ".NET natives) ships without those formats -- this is GH#1387."
+    )
+    swift_consequence = (
+        "The swift crate keeps its own copy of this list. A missing leaf is inert for codegen "
+        "today (nothing in the parsed sources is gated on these literals) and the formats still "
+        "reach the build through `ffi_features = [\"full-no-heic\"]` -- but that makes the dep "
+        "array correct only by accident of what the ffi edge carries. Narrow that edge the way "
+        "cf7fa0533d narrowed `full` and swift silently loses the format while the format table "
+        "keeps advertising it."
+    )
+
+    for label, features, path, consequence in (
+        ("alef.toml crates[0].ffi.features", source_features, alef_toml, ffi_consequence),
+        ("alef.toml crates[0].swift.features", swift_features, alef_toml, swift_consequence),
+        (
+            f"{FFI_MANIFEST} xberg.features under target.'{desktop_cfg}'",
+            generated_features,
+            FFI_MANIFEST,
+            ffi_consequence,
+        ),
     ):
         if "full" in features:
             _fail(
@@ -139,9 +165,7 @@ def check(alef_toml: Path) -> int:
         if missing:
             _fail(
                 f"{label} is missing {len(missing)} format feature(s): "
-                f"{', '.join(missing)}. Every native artifact built from this crate "
-                f"(Go, the C tarball, Java natives, .NET natives) ships without those "
-                f"formats -- this is GH#1387. Add them to {path}."
+                f"{', '.join(missing)}. {consequence} Add them to {path}."
             )
             failed = True
 
@@ -155,7 +179,8 @@ def check(alef_toml: Path) -> int:
         return 1
 
     print(
-        f"OK: all {len(REQUIRED_FORMAT_FEATURES)} required format features present in both alef.toml and {FFI_MANIFEST}"
+        f"OK: all {len(REQUIRED_FORMAT_FEATURES)} required format features present in "
+        f"alef.toml's ffi and swift lists and in {FFI_MANIFEST}"
     )
     return 0
 

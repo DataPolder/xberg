@@ -1339,6 +1339,13 @@ features = [
   "hwp",
   "hwpx",
   "iwork",
+  # `wordperfect` is inert for codegen -- nothing in the parsed sources is gated on the
+  # literal feature, so it adds no binding surface, and libwpd is already compiled in via
+  # `ffi_features = ["full-no-heic"]` above. It is listed anyway so this dep array stays
+  # correct on its own rather than only by accident of what the ffi edge happens to carry:
+  # if that edge is ever narrowed the way `full` was in cf7fa0533d, swift would silently
+  # lose .wpd extraction while the format table kept advertising it -- the GH#1387 shape. ~keep
+  "wordperfect",
   "email",
   "html",
   "xml",
