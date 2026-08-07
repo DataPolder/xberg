@@ -9,7 +9,7 @@
     <link rel="icon" type="image/x-icon" href="https://cdn.jsdelivr.net/gh/xberg-io/assets@v1/favicon/favicon.ico" />
     <meta
       name="description"
-      content="Extract text, tables, and metadata from 101 file formats directly in your browser using WebAssembly. No uploading to a server required."
+      content="Extract text, tables, and metadata from a wide range of document formats directly in your browser using WebAssembly. No uploading to a server required."
     />
     <meta property="og:title" content="Xberg | Live Demo" />
     <meta
@@ -632,10 +632,13 @@
               const mod = await import(cdnBase + '/pkg/web/xberg_wasm.js');
               self.postMessage({ type: 'progress', msg: 'Initializing…' });
               await mod.default(cdnBase + '/pkg/web/xberg_wasm_bg.wasm');
-              // enableOcr is optional and not present in every release — best-effort.
-              if (typeof mod.enableOcr === 'function') {
-                try { await mod.enableOcr(); } catch (_) { /* OCR stays off */ }
-              }
+              // No OCR here, deliberately. The WASM OCR bridge dispatches to an
+              // externally-injected JS backend and has no in-binary fallback, and the
+              // injection point is only reachable through XbergEngine::new(config,
+              // injection) -- not the free extract() this worker calls. A previous
+              // `if (typeof mod.enableOcr === 'function')` probe was dead code: no
+              // such export has ever existed. Scanned PDFs and images therefore
+              // return whatever text layer they already carry, and nothing more.
               self.postMessage({ type: 'progress', msg: 'Extracting content…' });
               // extraction_timeout_secs is a no-op in WASM (no tokio-runtime) and the
               // config validator rejects the default non-null value, so pin it to null.
