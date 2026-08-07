@@ -197,6 +197,67 @@ fn select_reading_order(
     }
 }
 
+/// Reorder a page's spans into reading order for the element-based
+/// extraction path (GH#1397).
+///
+/// Applies the guarded sparse-column repair unconditionally, then attempts
+/// the dense two-column band-split repair
+/// (`super::text::reorder_dense_two_column_page`). That repair carries its
+/// own conservative gates (minimum content width, per-line gutter agreement,
+/// a minimum span count per column per band, and a prose/table region gate —
+/// see its doc comment), so once it reports success the page's reading order
+/// is already correct. pdf_oxide's own `ColumnAware` XY-Cut pass is then
+/// skipped entirely: XY-Cut re-orders the whole span list from scratch and
+/// would otherwise silently discard the band order just applied. This
+/// matters because XY-Cut's own valley detection can miss exactly the narrow
+/// gutter the dense repair's per-line detector picks up (XY-Cut's default
+/// `min_valley_width` is wider than the dense repair's own gutter floor),
+/// which is why GH#1397 saw identical output whether `ColumnAware` or
+/// `TopToBottom` was requested — XY-Cut was never actually splitting the
+/// page. When the dense repair does not apply (single-column page,
+/// table-shaped columns, an undetectable gutter, etc.) the previous
+/// heuristic-selected XY-Cut fallback runs exactly as before, so non-dense
+/// pages are unaffected.
+fn reorder_page_reading_order(
+    spans: &mut Vec<pdf_oxide::layout::TextSpan>,
+    page_width: f32,
+    page_height: f32,
+    page_index: usize,
+) {
+    super::text::reorder_sparse_two_column_page(spans, page_width);
+    if super::text::reorder_dense_two_column_page(spans, page_width) {
+        return;
+    }
+    apply_xy_cut_if_column_aware(spans, page_width, page_height, page_index);
+}
+
+/// Run pdf_oxide's `ColumnAware` XY-Cut pass when `select_reading_order`
+/// judges the page a balanced two-column prose layout.
+///
+/// A failed XY-Cut pass is logged and leaves `spans` in top-to-bottom order
+/// (the pre-existing fallback behavior).
+fn apply_xy_cut_if_column_aware(
+    spans: &mut Vec<pdf_oxide::layout::TextSpan>,
+    page_width: f32,
+    page_height: f32,
+    page_index: usize,
+) {
+    use pdf_oxide::pipeline::{ReadingOrderContext, ReadingOrderStrategy, XYCutStrategy};
+
+    let order = select_reading_order(spans.as_slice(), page_width, page_height);
+    if order != pdf_oxide::document::ReadingOrder::ColumnAware {
+        return;
+    }
+    let context = ReadingOrderContext::new().with_page(page_index as u32);
+    match XYCutStrategy::new().apply(spans.clone(), &context) {
+        Ok(ordered) => *spans = ordered.into_iter().map(|item| item.span).collect(),
+        Err(error) => tracing::debug!(
+            page = page_index,
+            "pdf_oxide column-aware hierarchy ordering failed; retaining top-to-bottom order: {error}"
+        ),
+    }
+}
+
 fn rejoin_inline_scripts(spans: Vec<pdf_oxide::layout::TextSpan>) -> Vec<pdf_oxide::layout::TextSpan> {
     let mut by_base: HashMap<usize, Vec<ScriptAttachment>> = HashMap::new();
     let mut attached = vec![false; spans.len()];
@@ -517,24 +578,12 @@ fn extract_segments_from_page_inner(
             return Ok(Vec::new());
         }
     };
-    super::text::reorder_sparse_two_column_page(&mut page_text_data.spans, page_text_data.page_width);
-    let reading_order = select_reading_order(
-        &page_text_data.spans,
+    reorder_page_reading_order(
+        &mut page_text_data.spans,
         page_text_data.page_width,
         page_text_data.page_height,
+        page_index,
     );
-    if reading_order == pdf_oxide::document::ReadingOrder::ColumnAware {
-        use pdf_oxide::pipeline::{ReadingOrderContext, ReadingOrderStrategy, XYCutStrategy};
-
-        let context = ReadingOrderContext::new().with_page(page_index as u32);
-        match XYCutStrategy::new().apply(page_text_data.spans.clone(), &context) {
-            Ok(ordered) => page_text_data.spans = ordered.into_iter().map(|item| item.span).collect(),
-            Err(error) => tracing::debug!(
-                page = page_index,
-                "pdf_oxide column-aware hierarchy ordering failed; retaining top-to-bottom order: {error}"
-            ),
-        }
-    }
     let spans = rejoin_inline_scripts(page_text_data.spans);
 
     let segments: Vec<SegmentData> = spans
@@ -1038,6 +1087,141 @@ mod tests {
         assert_eq!(
             super::select_reading_order(&prose_columns(), 612.0, 792.0),
             ReadingOrder::ColumnAware
+        );
+    }
+
+    /// Page width shared by the GH#1397 element-path fixtures below, matching
+    /// the other `select_reading_order` tests in this module.
+    const GH1397_PAGE_WIDTH: f32 = 612.0;
+    const GH1397_PAGE_HEIGHT: f32 = 792.0;
+
+    /// Eight-row two-column prose page (GH#1397) with a gutter that clears
+    /// `reorder_dense_two_column_page`'s own floor
+    /// (`max(page_width * 0.02, 10.0)` = 12.24pt at `GH1397_PAGE_WIDTH`) but
+    /// sits under pdf_oxide XY-Cut's default 15pt `min_valley_width`
+    /// (`pdf_oxide::pipeline::XYCutStrategy::default().min_valley_width`) —
+    /// the shape that let the reported document's `ColumnAware` and
+    /// `TopToBottom` reading orders come out byte-identical: XY-Cut's own
+    /// valley search never found a gutter this narrow.
+    fn dense_two_column_spans_narrow_gutter() -> Vec<TextSpan> {
+        const LEFT_X: f32 = 60.0;
+        const LEFT_WIDTH: f32 = 200.0;
+        const NARROW_GUTTER_PTS: f32 = 13.0;
+        const RIGHT_X: f32 = LEFT_X + LEFT_WIDTH + NARROW_GUTTER_PTS;
+        const RIGHT_WIDTH: f32 = 190.0;
+        const ROW_HEIGHT_PTS: f32 = 14.0;
+        const TOP_Y: f32 = 816.0;
+
+        let left_body = [
+            "The committee reviewed annual budget totals",
+            "and approved new funding for the coming year",
+            "after several rounds of careful review by",
+            "senior staff members from every department",
+            "who evaluated priorities across the whole",
+            "organization before reaching a final decision",
+            "that reflected both short and long term goals",
+            "for sustainable growth across all programs",
+        ];
+        let right_body = [
+            "Numerous studies have examined similar",
+            "programs across comparable institutions",
+            "using consistent methodology and controls",
+            "for measuring outcomes over multiple years",
+            "researchers found consistent positive trends",
+            "supporting continued investment going forward",
+            "additional citations appear in the appendix",
+            "for readers seeking further detail here",
+        ];
+
+        let mut spans = Vec::new();
+        for (row, (left_line, right_line)) in left_body.iter().copied().zip(right_body.iter().copied()).enumerate() {
+            let y = TOP_Y - row as f32 * ROW_HEIGHT_PTS;
+            spans.push(text_span(left_line, LEFT_X, y, LEFT_WIDTH));
+            spans.push(text_span(right_line, RIGHT_X, y, RIGHT_WIDTH));
+        }
+        spans
+    }
+
+    /// GH#1397: the element-based extraction path (`extract_segments_from_page_inner`,
+    /// via `reorder_page_reading_order`) must apply the same dense
+    /// two-column band-split repair the plain-text path already used
+    /// (`super::text::reorder_dense_two_column_page`), not rely solely on
+    /// pdf_oxide's own `ColumnAware` XY-Cut pass.
+    ///
+    /// Revert check: reverting `reorder_page_reading_order` to its pre-fix
+    /// form (drop the `reorder_dense_two_column_page` call and unconditionally
+    /// run `apply_xy_cut_if_column_aware`, i.e. restore the old
+    /// `extract_segments_from_page_inner` body) makes this test fail, because
+    /// `select_reading_order` selects `ColumnAware` for this fixture (its
+    /// gutter test only requires an 8pt gap) and XY-Cut's own 15pt
+    /// `min_valley_width` floor then leaves the 13pt-gutter page in
+    /// unrepaired top-to-bottom (row-interleaved) order.
+    #[test]
+    fn element_path_reorders_narrow_gutter_dense_two_column_page() {
+        let mut spans = dense_two_column_spans_narrow_gutter();
+
+        super::reorder_page_reading_order(&mut spans, GH1397_PAGE_WIDTH, GH1397_PAGE_HEIGHT, 0);
+
+        let texts: Vec<&str> = spans.iter().map(|span| span.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            [
+                "The committee reviewed annual budget totals",
+                "and approved new funding for the coming year",
+                "after several rounds of careful review by",
+                "senior staff members from every department",
+                "who evaluated priorities across the whole",
+                "organization before reaching a final decision",
+                "that reflected both short and long term goals",
+                "for sustainable growth across all programs",
+                "Numerous studies have examined similar",
+                "programs across comparable institutions",
+                "using consistent methodology and controls",
+                "for measuring outcomes over multiple years",
+                "researchers found consistent positive trends",
+                "supporting continued investment going forward",
+                "additional citations appear in the appendix",
+                "for readers seeking further detail here",
+            ],
+            "dense two-column band-split repair must run in the element path and group each column together"
+        );
+    }
+
+    /// Regression guard for GH#1397: a genuine single-column page (numbered
+    /// lines beside monospace code, from `single_column_code_gutter_uses_top_to_bottom`
+    /// above) must come out of `reorder_page_reading_order` byte-identical to
+    /// its input order. `reorder_dense_two_column_page`'s own gate rejects it
+    /// (pdf_oxide's region classifier does not treat monospace code as a
+    /// reorderable prose column), and `select_reading_order` already returns
+    /// `TopToBottom` for this shape, so XY-Cut is never invoked either.
+    #[test]
+    fn element_path_leaves_single_column_code_page_unchanged() {
+        let mut spans = Vec::new();
+        for index in 0..6 {
+            spans.push(text_span(
+                &(index + 1).to_string(),
+                50.0,
+                700.0 - index as f32 * 14.0,
+                12.0,
+            ));
+            let mut code = text_span(
+                "fn parse_value(input: &str) {",
+                90.0,
+                700.0 - index as f32 * 14.0,
+                240.0,
+            );
+            code.is_monospace = true;
+            spans.push(code);
+        }
+        let original: Vec<String> = spans.iter().map(|span| span.text.clone()).collect();
+
+        super::reorder_page_reading_order(&mut spans, GH1397_PAGE_WIDTH, GH1397_PAGE_HEIGHT, 0);
+
+        let texts: Vec<&str> = spans.iter().map(|span| span.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            original.iter().map(String::as_str).collect::<Vec<_>>(),
+            "a single-column page must not be reordered by either the dense repair or XY-Cut"
         );
     }
 
