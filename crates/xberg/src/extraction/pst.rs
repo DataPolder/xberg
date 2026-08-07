@@ -34,7 +34,7 @@ use std::collections::HashMap;
 use outlook_pst::{
     ltp::{prop_context::PropertyValue, table_context::TableContext},
     messaging::{folder::Folder as PstFolder, message::Message as PstMessage, store::EntryId},
-    ndb::node_id::NodeId,
+    ndb::node_id::{NID_ROOT_FOLDER, NodeId},
 };
 #[cfg(feature = "email")]
 use std::rc::Rc;
@@ -199,17 +199,12 @@ fn extract_from_store(
         .properties()
         .display_name()
         .unwrap_or_else(|_| "Top of Personal Folders".to_string());
-    let seeds: Vec<PstFolderSeed> = vec![(root_folder, 0, root_name)];
+    let ipm_node_id = u32::from(ipm_entry.node_id());
+    let mut seeds: Vec<PstFolderSeed> = vec![(root_folder, 0, root_name)];
 
-    // `discover_non_ipm_top_level_folders` (issue #162c) is deliberately NOT called here.
-    // See that function's doc comment: `outlook_pst::Store::root_hierarchy_table()`
-    // unconditionally deadlocks (self-relock of the same non-reentrant file-reader
-    // `Mutex` on the calling thread), so invoking it hangs extraction on every PST,
-    // not just malformed ones. There is no bounded-read or fail-soft wrapper that can
-    // save us here: the deadlock happens synchronously, before any row is read, so it
-    // can't be guarded the way `collect_row_ids`/`MAX_TABLE_ROWS` guard unbounded
-    // iteration. It also can't be satisfied by an alternate `Store` API — trait
-    // `outlook_pst::messaging::store::Store` exposes exactly one method for this.
+    let (non_ipm_seeds, mut discovery_warnings) = discover_non_ipm_top_level_folders(store, ipm_node_id);
+    seeds.extend(non_ipm_seeds);
+    warnings.append(&mut discovery_warnings);
 
     let (messages, mut traversal_warnings) = walk_folder_tree(store, seeds);
     warnings.append(&mut traversal_warnings);
@@ -217,37 +212,49 @@ fn extract_from_store(
     (messages, warnings)
 }
 
-/// Enumerate the PST store's true top-level folders (`Store::root_hierarchy_table()`)
-/// and return every one that is *not* the already-handled IPM (mail) sub-tree,
-/// ready to seed [`walk_folder_tree`] alongside it.
+/// Enumerate the PST store's true top-level folders and return every one
+/// that is *not* the already-handled IPM (mail) sub-tree, ready to seed
+/// [`walk_folder_tree`] alongside it.
 ///
 /// Split out from `extract_from_store` (issue #162) so the enumeration can be
 /// exercised without a fully-populated `StoreProperties` — every id is either
 /// opened as a seed folder or reported via a `ProcessingWarning`, traversal
 /// never aborts because one non-IPM folder failed to open.
 ///
-/// # NOT called from `extract_from_store` — blocked on an upstream deadlock
+/// # Reaches the root hierarchy table via a workaround, not `Store::root_hierarchy_table()`
 ///
-/// `outlook_pst::messaging::store::Store::root_hierarchy_table()` (the first line
-/// of this function) deadlocks unconditionally in `outlook-pst` 1.2.0: its default
-/// implementation locks the PST file-reader `Mutex` to resolve the root folder's
-/// B-tree node, keeps that `MutexGuard` alive, and then calls
-/// `TableContextInner::read`, which tries to lock the *same* `Mutex` again on the
-/// same thread. `std::sync::Mutex` is not reentrant, so the second `.lock()` call
-/// blocks forever — this happens before a single row is read, on every PST file
-/// (malformed or not), not only ones with unusual structure. That means it cannot
-/// be fixed by bounding row iteration (`collect_row_ids`/`MAX_TABLE_ROWS` guard a
-/// different failure mode: an unbounded row *iterator*, not a synchronous
-/// self-deadlock during table construction) and there is no alternate `Store`
-/// trait method to enumerate root children instead.
+/// `outlook_pst::messaging::store::Store::root_hierarchy_table()` deadlocks
+/// unconditionally in `outlook-pst` 1.2.0 (the version on crates.io, and the
+/// version this crate depends on): its default implementation locks the PST
+/// file-reader `Mutex` to resolve the root folder's B-tree node, keeps that
+/// `MutexGuard` alive, and then calls `TableContextInner::read`, which tries
+/// to lock the *same* `Mutex` again on the same thread. `std::sync::Mutex` is
+/// not reentrant, so the second `.lock()` call blocks forever — this happens
+/// before a single row is read, on every PST file, not only malformed ones.
+/// Upstream fixed this on `main` (PR #55) by scoping the lock guard to a block
+/// that ends before `TableContext::read` runs, but nothing has been published:
+/// crates.io tops out at 1.2.0 and the `outlook-pst` release workflow has no
+/// `release-pr` job, so no 1.2.1 appears without a maintainer manually
+/// bumping the version.
 ///
-/// This function and [`non_ipm_top_level_ids`] are kept, with unit test coverage,
-/// so the enumeration logic is ready to wire back into `extract_from_store` once
-/// the upstream bug is fixed (or `outlook-pst` is upgraded past it). Do not call
-/// this from any code path that runs against a real `outlook_pst`-backed `Store`
-/// until then.
+/// Instead of calling `root_hierarchy_table()`, this function reaches the
+/// identical node (`NodeId::new(HierarchyTable, NID_ROOT_FOLDER.index())`)
+/// through a path that is *already* correctly scoped in 1.2.0:
+/// `FolderInner::read_table` binds its B-tree node inside a block, so the
+/// file-reader lock is dropped before `TableContext::read` is called. Opening
+/// the root folder through the public API —
+/// `store.properties().make_entry_id(NID_ROOT_FOLDER)` ->
+/// `store.open_folder(&entry_id)` -> `folder.hierarchy_table()` — is exactly
+/// how upstream's own `FolderInner::read` expects the root to be opened:
+/// `NID_ROOT_FOLDER`'s type bits (`0x122 & 0x1F == 0x02`) satisfy the
+/// `NormalFolder | SearchFolder` gate, and `read` even special-cases
+/// `entry_id.node_id() == NID_ROOT_FOLDER` when computing the folder type.
+///
+/// `Folder::hierarchy_table()` returns `Option`, not `Result` (it swallows
+/// the underlying read error via `.ok()` internally), so its `None` case is
+/// reported below as its own `ProcessingWarning` distinct from the two error
+/// arms above it — never silently treated as "no folders found".
 #[cfg(feature = "email")]
-#[allow(dead_code)]
 fn discover_non_ipm_top_level_folders(
     store: &dyn outlook_pst::messaging::store::Store,
     ipm_node_id: u32,
@@ -255,14 +262,38 @@ fn discover_non_ipm_top_level_folders(
     let mut seeds = Vec::new();
     let mut warnings = Vec::new();
 
-    let root_table = match store.root_hierarchy_table() {
-        Ok(t) => t,
+    let root_entry_id = match store.properties().make_entry_id(NID_ROOT_FOLDER) {
+        Ok(e) => e,
         Err(e) => {
             warnings.push(ProcessingWarning {
                 source: Cow::Borrowed("pst_extraction"),
                 message: Cow::Owned(format!(
-                    "Failed to enumerate non-IPM top-level folders in PST store: {e}"
+                    "Failed to build entry ID for PST root folder while enumerating non-IPM top-level folders: {e}"
                 )),
+            });
+            return (seeds, warnings);
+        }
+    };
+    let root_folder = match store.open_folder(&root_entry_id) {
+        Ok(f) => f,
+        Err(e) => {
+            warnings.push(ProcessingWarning {
+                source: Cow::Borrowed("pst_extraction"),
+                message: Cow::Owned(format!(
+                    "Failed to open PST root folder while enumerating non-IPM top-level folders: {e}"
+                )),
+            });
+            return (seeds, warnings);
+        }
+    };
+    let root_table = match root_folder.hierarchy_table() {
+        Some(t) => t.clone(),
+        None => {
+            warnings.push(ProcessingWarning {
+                source: Cow::Borrowed("pst_extraction"),
+                message: Cow::Owned(
+                    "PST root folder has no hierarchy table; cannot enumerate non-IPM top-level folders".to_string(),
+                ),
             });
             return (seeds, warnings);
         }
@@ -330,6 +361,31 @@ fn discover_non_ipm_top_level_folders(
 /// without the latter, a table whose row iterator never terminates hangs this
 /// function forever regardless of the depth cap, because the hang happens
 /// while reading rows *within* one folder, before depth is ever considered.
+///
+/// # No de-duplication of messages across folders (investigated for issue #162)
+///
+/// [`discover_non_ipm_top_level_folders`] can seed genuine PST *search*
+/// folders (`NodeIdType::SearchFolder`), whose contents tables, per
+/// [MS-PST] 2.4.8.6, are specified to reference messages that physically live
+/// in another (non-search) folder — a real aliasing hazard for a naive
+/// per-folder walk. This was investigated against the vendored `outlook-pst`
+/// 1.2.0 source rather than assumed: `Folder::contents_table()`
+/// (`FolderInner::contents_table` in `messaging/folder.rs`) is *not*
+/// type-aware — for every folder, search or normal, it unconditionally reads
+/// `NodeIdType::ContentsTable` (nid type `0x0E`). A search folder's actual
+/// linked-message rows live under the distinct `NodeIdType::SearchContentsTable`
+/// (nid type `0x10`, same node index, different type tag per `NodeId::new`'s
+/// bit layout in `ndb/node_id.rs`) — a variant that exists only as an enum
+/// case in `ndb/node_id.rs` and is never referenced anywhere else in the
+/// crate. So `contents_table()` on a search folder looks up a node id that a
+/// search folder never has, and returns `None` (`read_table` maps a missing
+/// B-tree entry to `Ok(None)`, not an error). No messages are ever read back
+/// from a search folder through this API today, so no message can be emitted
+/// twice — de-duplication would guard against a code path that cannot
+/// currently execute. If a future `outlook-pst` upgrade adds real
+/// `SearchContentsTable` support to `contents_table()`, this analysis must be
+/// redone and de-duplication (preferring the real IPM `folder_path` over the
+/// search folder's) added at that point.
 #[cfg(feature = "email")]
 fn walk_folder_tree(
     store: &dyn outlook_pst::messaging::store::Store,
@@ -673,6 +729,7 @@ mod tests {
     use super::*;
     use outlook_pst::{
         ltp::prop_context::PropertyValue,
+        messaging::folder::{Folder, FolderProperties},
         messaging::store::{EntryId, Store, StoreProperties, StoreRecordKey},
         ndb::node_id::NodeId,
     };
@@ -871,6 +928,261 @@ mod tests {
         );
     }
 
+    /// Regression test for issue #162(c): if the PST root folder's entry ID
+    /// cannot be built (e.g. the store's record key is missing),
+    /// `discover_non_ipm_top_level_folders` must report a `ProcessingWarning`
+    /// and return no seeds -- never panic or silently return nothing.
+    #[test]
+    fn test_discover_non_ipm_top_level_folders_warns_when_entry_id_creation_fails() {
+        let store = FakeStoreWithoutIpmSubtree {
+            properties: StoreProperties::default(),
+        };
+
+        let (seeds, warnings) = discover_non_ipm_top_level_folders(&store, 0);
+
+        assert!(
+            seeds.is_empty(),
+            "no seeds should be produced when the root entry ID cannot be built"
+        );
+        assert_eq!(warnings.len(), 1, "exactly one warning should be emitted");
+        assert_eq!(warnings[0].source.as_ref(), "pst_extraction");
+        assert!(
+            warnings[0]
+                .message
+                .contains("Failed to build entry ID for PST root folder"),
+            "unexpected warning message: {}",
+            warnings[0].message
+        );
+    }
+
+    /// Absolute path to the only PST fixture checked into the repo
+    /// (`test_documents/email/empty.pst`), resolved the same way integration
+    /// tests under `crates/xberg/tests/helpers/mod.rs` do: two levels up from
+    /// this crate's manifest directory is the workspace root.
+    fn empty_pst_fixture_path() -> std::path::PathBuf {
+        let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("crates/xberg should have a parent directory")
+            .parent()
+            .expect("crates/xberg should have a workspace root two levels up")
+            .to_path_buf();
+
+        workspace_root.join("test_documents/email/empty.pst")
+    }
+
+    /// Wraps a real `Store` (opened from the `empty.pst` fixture, which has a
+    /// genuine record key that `StoreProperties` provides no public
+    /// constructor for outside `outlook_pst`) so a single method can be
+    /// overridden to simulate a failure while everything else -- crucially
+    /// `properties()` and its real record key -- still comes from the real
+    /// store.
+    struct StoreWithFailingOpenFolder {
+        inner: Rc<dyn Store>,
+    }
+
+    impl Store for StoreWithFailingOpenFolder {
+        fn properties(&self) -> &StoreProperties {
+            self.inner.properties()
+        }
+
+        fn root_hierarchy_table(&self) -> io::Result<Rc<dyn outlook_pst::ltp::table_context::TableContext>> {
+            self.inner.root_hierarchy_table()
+        }
+
+        fn unique_value(&self) -> u32 {
+            self.inner.unique_value()
+        }
+
+        fn open_folder(&self, _entry_id: &EntryId) -> io::Result<Rc<dyn Folder>> {
+            Err(io::Error::other("simulated open_folder failure for test"))
+        }
+
+        fn open_message(
+            &self,
+            entry_id: &EntryId,
+            prop_ids: Option<&[u16]>,
+        ) -> io::Result<Rc<dyn outlook_pst::messaging::message::Message>> {
+            self.inner.open_message(entry_id, prop_ids)
+        }
+
+        fn named_property_map(&self) -> io::Result<Rc<dyn outlook_pst::messaging::named_prop::NamedPropertyMap>> {
+            self.inner.named_property_map()
+        }
+
+        fn search_update_queue(&self) -> io::Result<Rc<dyn outlook_pst::messaging::search::SearchUpdateQueue>> {
+            self.inner.search_update_queue()
+        }
+    }
+
+    /// Regression test for issue #162(c): if the PST root folder cannot be
+    /// opened, `discover_non_ipm_top_level_folders` must report a
+    /// `ProcessingWarning` distinct from the entry-ID-creation failure above,
+    /// and still return no seeds. Wraps the real `empty.pst` fixture's `Store`
+    /// so `properties().make_entry_id(NID_ROOT_FOLDER)` succeeds for real and
+    /// only `open_folder` is made to fail.
+    #[test]
+    fn test_discover_non_ipm_top_level_folders_warns_when_root_folder_cannot_be_opened() {
+        let fixture = empty_pst_fixture_path();
+        assert!(fixture.exists(), "PST test fixture not found: {fixture:?}");
+        let real_store = outlook_pst::open_store(&fixture).expect("should open empty.pst fixture");
+        let store = StoreWithFailingOpenFolder { inner: real_store };
+
+        let (seeds, warnings) = discover_non_ipm_top_level_folders(&store, 0);
+
+        assert!(
+            seeds.is_empty(),
+            "no seeds should be produced when the root folder cannot be opened"
+        );
+        assert_eq!(warnings.len(), 1, "exactly one warning should be emitted");
+        assert_eq!(warnings[0].source.as_ref(), "pst_extraction");
+        assert!(
+            warnings[0].message.contains("Failed to open PST root folder"),
+            "unexpected warning message: {}",
+            warnings[0].message
+        );
+    }
+
+    /// A `Folder` whose `hierarchy_table()` always returns `None`, simulating
+    /// `FolderInner::read_table`'s internal `.ok()` swallowing a read error.
+    struct FolderWithNoHierarchyTable;
+
+    impl Folder for FolderWithNoHierarchyTable {
+        fn store(&self) -> Rc<dyn Store> {
+            unreachable!("discover_non_ipm_top_level_folders never calls Folder::store on the root")
+        }
+
+        fn properties(&self) -> &FolderProperties {
+            unreachable!("discover_non_ipm_top_level_folders never calls Folder::properties on the root")
+        }
+
+        fn hierarchy_table(&self) -> Option<&Rc<dyn outlook_pst::ltp::table_context::TableContext>> {
+            None
+        }
+
+        fn contents_table(&self) -> Option<&Rc<dyn outlook_pst::ltp::table_context::TableContext>> {
+            None
+        }
+
+        fn associated_table(&self) -> Option<&Rc<dyn outlook_pst::ltp::table_context::TableContext>> {
+            None
+        }
+    }
+
+    /// Wraps a real `Store` so `open_folder` returns a `Folder` whose
+    /// `hierarchy_table()` is `None`, exercising the branch that
+    /// `Store::root_hierarchy_table()`'s plain `Result` return type never had.
+    struct StoreWithNoHierarchyTableRoot {
+        inner: Rc<dyn Store>,
+    }
+
+    impl Store for StoreWithNoHierarchyTableRoot {
+        fn properties(&self) -> &StoreProperties {
+            self.inner.properties()
+        }
+
+        fn root_hierarchy_table(&self) -> io::Result<Rc<dyn outlook_pst::ltp::table_context::TableContext>> {
+            self.inner.root_hierarchy_table()
+        }
+
+        fn unique_value(&self) -> u32 {
+            self.inner.unique_value()
+        }
+
+        fn open_folder(&self, _entry_id: &EntryId) -> io::Result<Rc<dyn Folder>> {
+            Ok(Rc::new(FolderWithNoHierarchyTable))
+        }
+
+        fn open_message(
+            &self,
+            entry_id: &EntryId,
+            prop_ids: Option<&[u16]>,
+        ) -> io::Result<Rc<dyn outlook_pst::messaging::message::Message>> {
+            self.inner.open_message(entry_id, prop_ids)
+        }
+
+        fn named_property_map(&self) -> io::Result<Rc<dyn outlook_pst::messaging::named_prop::NamedPropertyMap>> {
+            self.inner.named_property_map()
+        }
+
+        fn search_update_queue(&self) -> io::Result<Rc<dyn outlook_pst::messaging::search::SearchUpdateQueue>> {
+            self.inner.search_update_queue()
+        }
+    }
+
+    /// Regression test for issue #162(c): `Folder::hierarchy_table()` returns
+    /// `Option`, not `Result` -- its `None` case (the underlying read error is
+    /// swallowed inside `outlook_pst`) must surface its own distinct
+    /// `ProcessingWarning`, never be treated the same as "no non-IPM folders
+    /// found" (i.e. an empty, warning-free result).
+    #[test]
+    fn test_discover_non_ipm_top_level_folders_warns_when_hierarchy_table_is_none() {
+        let fixture = empty_pst_fixture_path();
+        assert!(fixture.exists(), "PST test fixture not found: {fixture:?}");
+        let real_store = outlook_pst::open_store(&fixture).expect("should open empty.pst fixture");
+        let store = StoreWithNoHierarchyTableRoot { inner: real_store };
+
+        let (seeds, warnings) = discover_non_ipm_top_level_folders(&store, 0);
+
+        assert!(
+            seeds.is_empty(),
+            "no seeds should be produced when the root has no hierarchy table"
+        );
+        assert_eq!(warnings.len(), 1, "exactly one warning should be emitted");
+        assert_eq!(warnings[0].source.as_ref(), "pst_extraction");
+        assert_eq!(
+            warnings[0].message.as_ref(),
+            "PST root folder has no hierarchy table; cannot enumerate non-IPM top-level folders"
+        );
+    }
+
+    /// Proves the workaround does not reintroduce the deadlock a prior commit
+    /// hit (see `crates/xberg/tests/pst_warnings_and_structure_test.rs`) when
+    /// `discover_non_ipm_top_level_folders` was wired in using
+    /// `Store::root_hierarchy_table()` directly: this calls it against the
+    /// real, parsed `empty.pst` fixture. If the workaround reintroduced the
+    /// deadlock, this test would hang rather than fail an assertion --
+    /// running it under a timeout the first time is recommended.
+    ///
+    /// `empty.pst` actually has three non-IPM top-level folders -- "Search
+    /// Root", "SPAM Search Folder 2", and "IPM_COMMON_VIEWS" -- all at depth
+    /// 0. This test's primary job is proving the absence of the deadlock
+    /// described above, not asserting an empty result; the exact folder set
+    /// is pinned so a regression in discovery is still caught.
+    #[test]
+    fn test_discover_non_ipm_top_level_folders_against_real_empty_pst_fixture_issue_162c() {
+        let fixture = empty_pst_fixture_path();
+        assert!(fixture.exists(), "PST test fixture not found: {fixture:?}");
+        let store = outlook_pst::open_store(&fixture).expect("should open empty.pst fixture");
+
+        let ipm_entry = store
+            .properties()
+            .ipm_sub_tree_entry_id()
+            .expect("empty.pst fixture should have a locatable IPM sub-tree");
+        let ipm_node_id = u32::from(ipm_entry.node_id());
+
+        let (seeds, warnings) = discover_non_ipm_top_level_folders(store.as_ref(), ipm_node_id);
+
+        assert_eq!(
+            warnings.len(),
+            0,
+            "well-formed empty.pst fixture should not produce warnings, got: {warnings:?}"
+        );
+
+        let mut names: Vec<&str> = seeds.iter().map(|(_, _, name)| name.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(
+            names,
+            vec!["IPM_COMMON_VIEWS", "SPAM Search Folder 2", "Search Root"],
+            "unexpected non-IPM top-level folder set discovered in empty.pst"
+        );
+        assert_eq!(seeds.len(), 3, "expected exactly three non-IPM top-level folders");
+        assert!(
+            seeds.iter().all(|(_, depth, _)| *depth == 0),
+            "all non-IPM top-level folders must be reported at depth 0, got: {:?}",
+            seeds.iter().map(|(_, depth, name)| (depth, name)).collect::<Vec<_>>()
+        );
+    }
+
     /// [`non_ipm_top_level_ids`] must exclude exactly the id equal to
     /// `ipm_node_id`, preserving the order and every other id (including
     /// duplicates) from `top_level_ids`.
@@ -920,5 +1232,45 @@ mod tests {
         let top_level_ids = [7, 7, 8, 7];
 
         assert_eq!(non_ipm_top_level_ids(&top_level_ids, Some(7)), vec![8]);
+    }
+
+    /// Pins the finding behind `walk_folder_tree`'s "no de-duplication needed"
+    /// doc comment: `outlook_pst::messaging::folder::Folder::contents_table()`
+    /// (`outlook-pst` 1.2.0) is not type-aware for search folders. It always
+    /// reads `NodeIdType::ContentsTable`, never the distinct
+    /// `NodeIdType::SearchContentsTable` a real search folder's linked-message
+    /// rows live under, so it returns `None` for a genuine search folder
+    /// rather than the aliased messages a naive walk would need to
+    /// de-duplicate. `empty.pst`'s "SPAM Search Folder 2" is exactly such a
+    /// search folder (discovered as a non-IPM top-level seed). If a future
+    /// `outlook-pst` upgrade starts returning `Some(_)` here, the "no
+    /// aliasing risk" analysis in `walk_folder_tree`'s doc comment no longer
+    /// holds and de-duplication must be added.
+    #[test]
+    fn test_search_folder_contents_table_is_none_no_message_aliasing_issue_162() {
+        let fixture = empty_pst_fixture_path();
+        assert!(fixture.exists(), "PST test fixture not found: {fixture:?}");
+        let store = outlook_pst::open_store(&fixture).expect("should open empty.pst fixture");
+
+        let ipm_entry = store
+            .properties()
+            .ipm_sub_tree_entry_id()
+            .expect("empty.pst fixture should have a locatable IPM sub-tree");
+        let ipm_node_id = u32::from(ipm_entry.node_id());
+
+        let (seeds, warnings) = discover_non_ipm_top_level_folders(store.as_ref(), ipm_node_id);
+        assert_eq!(warnings.len(), 0, "unexpected warnings: {warnings:?}");
+
+        let (search_folder, _, _) = seeds
+            .iter()
+            .find(|(_, _, name)| name == "SPAM Search Folder 2")
+            .expect("empty.pst fixture should contain the 'SPAM Search Folder 2' search folder");
+
+        assert!(
+            search_folder.contents_table().is_none(),
+            "outlook-pst's Folder::contents_table() unexpectedly returned Some(_) for a search \
+             folder -- this crate now exposes real search-folder contents, so walk_folder_tree's \
+             'no aliasing risk' analysis is stale and de-duplication must be added"
+        );
     }
 }
