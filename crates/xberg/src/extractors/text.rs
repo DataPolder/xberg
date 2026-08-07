@@ -9,6 +9,9 @@ use crate::types::internal_builder::InternalDocumentBuilder;
 use crate::types::metadata::Metadata;
 use async_trait::async_trait;
 
+/// `ProcessingWarning::source` for every warning this extractor emits (#171).
+const TEXT_WARNING_SOURCE: &str = "text";
+
 /// Plain text extractor.
 ///
 /// Extracts content from plain text files (.txt).
@@ -95,10 +98,23 @@ impl InternalDocumentExtractor for PlainTextExtractor {
         mime_type: &str,
         _config: &ExtractionConfig,
     ) -> Result<InternalDocument> {
-        #[cfg(feature = "quality")]
-        let decoded = crate::utils::safe_decode(content, None);
-        #[cfg(not(feature = "quality"))]
-        let decoded = String::from_utf8_lossy(content).into_owned();
+        // Both builds must answer "was any content actually lost?" the same way (#171,
+        // #395). Inspecting the decoded string for U+FFFD only works without `quality`:
+        // there `String::from_utf8_lossy` substitutes one per undecodable byte, and the
+        // extra `from_utf8` check keeps a document that legitimately *contains* U+FFFD
+        // from being reported as damaged. Under `quality` that check is structurally
+        // blind, because `safe_decode`'s mojibake cleanup strips every replacement
+        // character before returning. So take the answer from the decoder itself, which
+        // records it at the point of loss.
+        //
+        // Note the deliberate asymmetry with `fell_back`: reinterpreting bytes under a
+        // detected single-byte encoding is not data loss (windows-1252 and iso-8859-1
+        // map every byte 0x00-0xFF and can never fail), so only `replaced_characters`
+        // warrants a warning. ~keep
+        let outcome = crate::utils::decode_with_provenance(content, None);
+        let decoded_lossily = outcome.replaced_characters;
+        let decoded = outcome.text;
+
         let text = crate::utils::strip_bom(&decoded)
             .trim_end_matches('\n')
             .trim_end_matches('\r')
@@ -108,6 +124,13 @@ impl InternalDocumentExtractor for PlainTextExtractor {
         let character_count = text.chars().count();
 
         let mut doc = Self::build_internal_document(&text);
+        if decoded_lossily {
+            crate::core::diagnostics::push_lossy_decode_warning(
+                &mut doc.processing_warnings,
+                TEXT_WARNING_SOURCE,
+                "text source",
+            );
+        }
 
         doc.metadata = Metadata {
             format: Some(crate::types::FormatMetadata::Text(crate::types::TextMetadata {
@@ -166,6 +189,62 @@ mod tests {
         };
         assert_eq!(text_meta.line_count, 2);
         assert_eq!(text_meta.word_count, 6);
+    }
+
+    fn text_warnings(doc: &crate::types::internal::InternalDocument) -> Vec<String> {
+        doc.processing_warnings
+            .iter()
+            .filter(|w| w.source == TEXT_WARNING_SOURCE)
+            .map(|w| w.message.to_string())
+            .collect()
+    }
+
+    /// #171: invalid UTF-8 bytes are decoded lossily, which without `quality` is a
+    /// deterministic property of `String::from_utf8_lossy` -- every undecodable byte
+    /// is replaced, so `decode_with_provenance` reports `replaced_characters`.
+    ///
+    /// Deliberately not run under `quality` (#395): there chardetng resolves these
+    /// bytes to a single-byte encoding that maps all of 0x00-0xFF, so nothing is
+    /// *replaced* -- the bytes are reinterpreted. That is `fell_back`, not data loss,
+    /// and reporting no warning for it is now correct rather than a blind spot.
+    #[cfg(not(feature = "quality"))]
+    #[tokio::test]
+    async fn should_warn_when_text_source_is_not_valid_utf8() {
+        let extractor = PlainTextExtractor::new();
+        let config = ExtractionConfig::default();
+        let content: &[u8] = &[b'A', 0xFF, 0xFE, b'B'];
+
+        let result = extractor
+            .extract_content(content, "text/plain", &config)
+            .await
+            .expect("extraction of invalid UTF-8 must still succeed");
+
+        let warnings = text_warnings(&result);
+        assert_eq!(warnings.len(), 1, "expected exactly one text warning, got {warnings:?}");
+        assert!(
+            warnings[0].contains("not valid UTF-8") && warnings[0].contains("replacement character"),
+            "warning must describe the lossy decode, got {warnings:?}"
+        );
+    }
+
+    /// A valid UTF-8 document -- including one that happens to contain a literal
+    /// U+FFFD character of its own -- must not warn.
+    #[tokio::test]
+    async fn valid_utf8_text_produces_zero_warnings() {
+        let extractor = PlainTextExtractor::new();
+        let config = ExtractionConfig::default();
+        let content = "Hello, World!\nThis contains a literal \u{FFFD} character.".as_bytes();
+
+        let result = extractor
+            .extract_content(content, "text/plain", &config)
+            .await
+            .expect("extraction should succeed");
+
+        assert!(
+            text_warnings(&result).is_empty(),
+            "valid UTF-8 must not warn even with a literal U+FFFD, got {:?}",
+            text_warnings(&result)
+        );
     }
 
     #[test]
