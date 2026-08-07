@@ -1,10 +1,104 @@
 //! LLM client factory — converts xberg's LlmConfig to a liter-llm DefaultClient.
 
-use std::time::Duration;
+use liter_llm::client::{ClientConfig, DefaultClient};
 
-use liter_llm::client::{ClientConfig, ClientConfigBuilder, DefaultClient};
+use crate::core::config::{
+    BedrockConfig, LlmBudgetConfig, LlmCacheConfig, LlmConfig, LlmProviderConfig, LlmRateLimitConfig,
+};
 
-use crate::core::config::LlmConfig;
+/// Translate xberg's [`BedrockConfig`] into liter-llm's own (unboxed) `client::BedrockConfig`.
+fn to_liter_llm_bedrock(bedrock: &BedrockConfig) -> liter_llm::client::BedrockConfig {
+    liter_llm::client::BedrockConfig {
+        region: bedrock.region.clone(),
+        cross_region_prefix: bedrock.cross_region_prefix.clone(),
+        access_key_id: bedrock.access_key_id.clone(),
+        secret_access_key: bedrock.secret_access_key.clone(),
+        session_token: bedrock.session_token.clone(),
+    }
+}
+
+/// Translate xberg's [`LlmProviderConfig`] into liter-llm's own `client::LlmProviderConfig`.
+fn to_liter_llm_provider(provider: &LlmProviderConfig) -> liter_llm::client::LlmProviderConfig {
+    liter_llm::client::LlmProviderConfig {
+        name: provider.name.clone(),
+        base_url: provider.base_url.clone(),
+        auth_header: provider.auth_header.clone(),
+        model_prefixes: provider.model_prefixes.clone(),
+    }
+}
+
+/// Translate xberg's [`LlmCacheConfig`] into liter-llm's own `client::LlmCacheConfig`.
+fn to_liter_llm_cache(cache: &LlmCacheConfig) -> liter_llm::client::LlmCacheConfig {
+    liter_llm::client::LlmCacheConfig {
+        max_entries: cache.max_entries,
+        ttl_seconds: cache.ttl_seconds,
+        backend: cache.backend.clone(),
+        backend_config: cache.backend_config.clone(),
+    }
+}
+
+/// Translate xberg's [`LlmBudgetConfig`] into liter-llm's own `client::LlmBudgetConfig`.
+fn to_liter_llm_budget(budget: &LlmBudgetConfig) -> liter_llm::client::LlmBudgetConfig {
+    liter_llm::client::LlmBudgetConfig {
+        global_limit: budget.global_limit,
+        model_limits: budget.model_limits.clone(),
+        enforcement: budget.enforcement.clone(),
+    }
+}
+
+/// Translate xberg's [`LlmRateLimitConfig`] into liter-llm's own `client::LlmRateLimitConfig`.
+fn to_liter_llm_rate_limit(rate_limit: &LlmRateLimitConfig) -> liter_llm::client::LlmRateLimitConfig {
+    liter_llm::client::LlmRateLimitConfig {
+        rpm: rate_limit.rpm,
+        tpm: rate_limit.tpm,
+        window_seconds: rate_limit.window_seconds,
+    }
+}
+
+/// Translate xberg's [`LlmConfig`] into liter-llm's own canonical `client::LlmConfig`,
+/// field for field, so the two never drift silently: every field the two types share
+/// (by name and type, by construction — see the `LlmConfig` module doc) is copied
+/// here without any per-field re-derivation of liter-llm's own mapping semantics.
+///
+/// Two deliberate exceptions:
+/// - `headers` is left `None`. liter-llm's `into_client_builder` silently drops any
+///   header that fails to parse as an HTTP header name/value pair, while xberg's
+///   [`build_client_config`] validates headers explicitly and returns a
+///   [`crate::XbergError::Validation`] naming the offending header — so headers are
+///   applied separately, after conversion, on the builder this function's caller
+///   gets back from `into_client_builder()`.
+/// - `base_url` is trimmed of a trailing slash before being handed to liter-llm,
+///   which does not perform this normalization itself; without it a base URL like
+///   `"https://api.openai.com/v1/"` would join with a request path into a doubled
+///   `//`.
+fn to_liter_llm_config(config: &LlmConfig) -> liter_llm::client::LlmConfig {
+    liter_llm::client::LlmConfig {
+        model: config.model.clone(),
+        api_key: config.api_key.clone(),
+        base_url: config
+            .base_url
+            .as_deref()
+            .map(|url| url.trim_end_matches('/').to_string()),
+        timeout_secs: config.timeout_secs,
+        max_retries: config.max_retries,
+        temperature: config.temperature,
+        max_tokens: config.max_tokens,
+        load_env: config.load_env,
+        headers: None,
+        providers: config
+            .providers
+            .as_ref()
+            .map(|providers| providers.iter().map(to_liter_llm_provider).collect()),
+        cache: config.cache.as_deref().map(to_liter_llm_cache),
+        budget: config.budget.as_deref().map(to_liter_llm_budget),
+        rate_limit: config.rate_limit.as_deref().map(to_liter_llm_rate_limit),
+        cost_tracking: config.cost_tracking,
+        tracing: config.tracing,
+        cooldown_secs: config.cooldown_secs,
+        health_check_secs: config.health_check_secs,
+        bedrock: config.bedrock.as_deref().map(to_liter_llm_bedrock),
+    }
+}
 
 /// Translate xberg's [`LlmConfig`] into a liter-llm [`ClientConfig`].
 ///
@@ -12,27 +106,23 @@ use crate::core::config::LlmConfig;
 /// client-level settings; they are deliberately carried on [`LlmConfig`] without
 /// being mapped here, matching liter-llm's own `LlmConfig::into_client_builder`.
 ///
+/// The actual field-by-field wiring (`base_url`, `timeout_secs`, `max_retries`,
+/// `load_env`, `cache`, `budget`, `rate_limit`, `cost_tracking`, `tracing`,
+/// `cooldown_secs`, `health_check_secs`, `bedrock`) is delegated to liter-llm's
+/// own [`liter_llm::client::LlmConfig::into_client_builder`] via
+/// [`to_liter_llm_config`], rather than re-implemented here, so this function
+/// cannot drift from liter-llm's own mapping as new fields are added upstream.
+/// `headers` is applied separately (see [`to_liter_llm_config`]). `providers`
+/// has no equivalent on [`ClientConfig`] at all — see the module-level note on
+/// `to_liter_llm_config` and the dedicated test below.
+///
 /// Split out of [`create_client`] so the mapping is observable in tests without
 /// constructing a live HTTP client.
 fn build_client_config(config: &LlmConfig) -> crate::Result<ClientConfig> {
-    let api_key = config.api_key.as_deref().unwrap_or_default();
-    let mut builder = ClientConfigBuilder::new(api_key);
+    let mut builder = to_liter_llm_config(config).into_client_builder();
 
-    if let Some(ref base_url) = config.base_url {
-        let sanitized = base_url.trim_end_matches('/');
-        builder = builder.base_url(sanitized.to_string());
-    }
-    if let Some(timeout) = config.timeout_secs {
-        builder = builder.timeout(Duration::from_secs(timeout));
-    }
-    if let Some(max_retries) = config.max_retries {
-        builder = builder.max_retries(max_retries);
-    }
-    if let Some(load_env) = config.load_env {
-        builder = builder.load_env(load_env);
-    }
     if let Some(ref headers) = config.headers {
-        for (key, value) in headers {
+        for (key, value) in headers.iter() {
             builder = builder.header(key.as_str(), value.as_str()).map_err(|e| {
                 let msg = format!("Invalid LLM header '{key}': {e}");
                 crate::XbergError::Validation {
@@ -40,26 +130,6 @@ fn build_client_config(config: &LlmConfig) -> crate::Result<ClientConfig> {
                     source: Some(Box::new(e)),
                 }
             })?;
-        }
-    }
-
-    // Bedrock: only fields the caller actually set are forwarded, so anything left
-    // unset keeps liter-llm's env-var fallback (`AWS_REGION`, `AWS_ACCESS_KEY_ID`,
-    // ...) and the default AWS credential chain. Credentials are applied when
-    // either half is present, matching liter-llm's own `into_client_builder`.
-    if let Some(ref bedrock) = config.bedrock {
-        if let Some(ref region) = bedrock.region {
-            builder = builder.bedrock_region(region.clone());
-        }
-        if let Some(ref prefix) = bedrock.cross_region_prefix {
-            builder = builder.bedrock_cross_region_prefix(prefix.clone());
-        }
-        if bedrock.access_key_id.is_some() || bedrock.secret_access_key.is_some() {
-            builder = builder.bedrock_credentials(
-                bedrock.access_key_id.clone().unwrap_or_default(),
-                bedrock.secret_access_key.clone().unwrap_or_default(),
-                bedrock.session_token.clone(),
-            );
         }
     }
 
@@ -189,7 +259,7 @@ mod tests {
             model: "openai/gpt-4o".to_string(),
             api_key: Some("test-key".to_string()),
             load_env: Some(true),
-            headers: Some(headers),
+            headers: Some(Box::new(headers)),
             ..LlmConfig::default()
         };
 
@@ -206,7 +276,7 @@ mod tests {
         let config = LlmConfig {
             model: "openai/gpt-4o".to_string(),
             api_key: Some("test-key".to_string()),
-            headers: Some(headers),
+            headers: Some(Box::new(headers)),
             ..LlmConfig::default()
         };
 
@@ -416,7 +486,7 @@ mod tests {
             session_token: Some("example-fake-token".to_string()),
             ..BedrockConfig::default()
         });
-        config.headers = Some(headers);
+        config.headers = Some(Box::new(headers));
 
         // Not `expect_err`: that needs `T: Debug` and liter-llm's `DefaultClient` does not
         // implement it, so the success arm has to be discarded by hand.
@@ -431,5 +501,246 @@ mod tests {
                 "create_client error leaked {secret}: {rendered}"
             );
         }
+    }
+
+    /// Regression test for https://github.com/xberg-io/xberg/issues/1381
+    ///
+    /// The response cache configuration must reach liter-llm's `ClientConfig`
+    /// unchanged, via the delegated `into_client_builder` mapping.
+    #[test]
+    fn test_build_client_config_maps_cache_settings() {
+        let config = LlmConfig {
+            model: "openai/gpt-4o".to_string(),
+            api_key: Some("test-key".to_string()),
+            cache: Some(Box::new(LlmCacheConfig {
+                max_entries: Some(128),
+                ttl_seconds: Some(90),
+                backend: Some("memory".to_string()),
+                backend_config: None,
+            })),
+            ..LlmConfig::default()
+        };
+
+        let client_config = build_client_config(&config).expect("build client config");
+        let cache = client_config.cache_config.expect("cache_config present");
+
+        assert_eq!(cache.max_entries, 128);
+        assert_eq!(cache.ttl, std::time::Duration::from_secs(90));
+        assert!(matches!(cache.backend, liter_llm::tower::CacheBackend::Memory));
+    }
+
+    /// Without the `opendal-cache` liter-llm feature, a non-memory cache backend
+    /// name gracefully degrades to the in-memory backend instead of failing —
+    /// matching liter-llm's own `into_client_builder` fallback exactly.
+    #[test]
+    fn test_build_client_config_cache_backend_falls_back_to_memory_without_opendal_cache() {
+        let config = LlmConfig {
+            model: "openai/gpt-4o".to_string(),
+            api_key: Some("test-key".to_string()),
+            cache: Some(Box::new(LlmCacheConfig {
+                backend: Some("s3".to_string()),
+                ..LlmCacheConfig::default()
+            })),
+            ..LlmConfig::default()
+        };
+
+        let client_config = build_client_config(&config).expect("build client config");
+        let cache = client_config.cache_config.expect("cache_config present");
+
+        assert!(matches!(cache.backend, liter_llm::tower::CacheBackend::Memory));
+    }
+
+    /// Regression test for https://github.com/xberg-io/xberg/issues/1381
+    ///
+    /// Budget limits, per-model limits, and enforcement mode must all reach
+    /// liter-llm's `ClientConfig`.
+    #[test]
+    fn test_build_client_config_maps_budget_settings() {
+        let mut model_limits = std::collections::HashMap::new();
+        model_limits.insert("openai/gpt-4o".to_string(), 25.0);
+        let config = LlmConfig {
+            model: "openai/gpt-4o".to_string(),
+            api_key: Some("test-key".to_string()),
+            budget: Some(Box::new(LlmBudgetConfig {
+                global_limit: Some(100.0),
+                model_limits: Some(model_limits),
+                enforcement: Some("soft".to_string()),
+            })),
+            ..LlmConfig::default()
+        };
+
+        let client_config = build_client_config(&config).expect("build client config");
+        let budget = client_config.budget_config.expect("budget_config present");
+
+        assert_eq!(budget.global_limit, Some(100.0));
+        assert_eq!(budget.model_limits.get("openai/gpt-4o"), Some(&25.0));
+        assert_eq!(budget.enforcement, liter_llm::tower::Enforcement::Soft);
+    }
+
+    /// An unrecognized enforcement string must fall back to liter-llm's own
+    /// default (`Hard`), matching `into_client_builder`'s `_ => Enforcement::Hard`.
+    #[test]
+    fn test_build_client_config_defaults_unknown_enforcement_to_hard() {
+        let config = LlmConfig {
+            model: "openai/gpt-4o".to_string(),
+            api_key: Some("test-key".to_string()),
+            budget: Some(Box::new(LlmBudgetConfig {
+                global_limit: Some(10.0),
+                enforcement: Some("not-a-real-mode".to_string()),
+                ..LlmBudgetConfig::default()
+            })),
+            ..LlmConfig::default()
+        };
+
+        let client_config = build_client_config(&config).expect("build client config");
+        let budget = client_config.budget_config.expect("budget_config present");
+
+        assert_eq!(budget.enforcement, liter_llm::tower::Enforcement::Hard);
+    }
+
+    /// Regression test for https://github.com/xberg-io/xberg/issues/1381
+    ///
+    /// Rate limit RPM/TPM/window must reach liter-llm's `ClientConfig`.
+    #[test]
+    fn test_build_client_config_maps_rate_limit_settings() {
+        let config = LlmConfig {
+            model: "openai/gpt-4o".to_string(),
+            api_key: Some("test-key".to_string()),
+            rate_limit: Some(Box::new(LlmRateLimitConfig {
+                rpm: Some(60),
+                tpm: Some(100_000),
+                window_seconds: Some(30),
+            })),
+            ..LlmConfig::default()
+        };
+
+        let client_config = build_client_config(&config).expect("build client config");
+        let rate_limit = client_config.rate_limit_config.expect("rate_limit_config present");
+
+        assert_eq!(rate_limit.rpm, Some(60));
+        assert_eq!(rate_limit.tpm, Some(100_000));
+        assert_eq!(rate_limit.window, std::time::Duration::from_secs(30));
+    }
+
+    /// Regression test for https://github.com/xberg-io/xberg/issues/1381
+    ///
+    /// `cost_tracking` and `tracing` flags must reach liter-llm's `ClientConfig`.
+    #[test]
+    fn test_build_client_config_maps_cost_tracking_and_tracing_flags() {
+        let config = LlmConfig {
+            model: "openai/gpt-4o".to_string(),
+            api_key: Some("test-key".to_string()),
+            cost_tracking: Some(true),
+            tracing: Some(true),
+            ..LlmConfig::default()
+        };
+
+        let client_config = build_client_config(&config).expect("build client config");
+
+        assert!(client_config.enable_cost_tracking);
+        assert!(client_config.enable_tracing);
+    }
+
+    /// Regression test for https://github.com/xberg-io/xberg/issues/1381
+    ///
+    /// `cooldown_secs` and `health_check_secs` must reach liter-llm's
+    /// `ClientConfig` as `Duration`s.
+    #[test]
+    fn test_build_client_config_maps_cooldown_and_health_check_intervals() {
+        let config = LlmConfig {
+            model: "openai/gpt-4o".to_string(),
+            api_key: Some("test-key".to_string()),
+            cooldown_secs: Some(15),
+            health_check_secs: Some(45),
+            ..LlmConfig::default()
+        };
+
+        let client_config = build_client_config(&config).expect("build client config");
+
+        assert_eq!(
+            client_config.cooldown_duration,
+            Some(std::time::Duration::from_secs(15))
+        );
+        assert_eq!(
+            client_config.health_check_interval,
+            Some(std::time::Duration::from_secs(45))
+        );
+    }
+
+    /// With none of the new liter-llm passthrough fields set, every corresponding
+    /// `ClientConfig` slot must stay at liter-llm's own default/unset state.
+    #[test]
+    fn test_build_client_config_leaves_new_passthrough_fields_unset_when_absent() {
+        let config = LlmConfig {
+            model: "openai/gpt-4o".to_string(),
+            api_key: Some("test-key".to_string()),
+            ..LlmConfig::default()
+        };
+
+        let client_config = build_client_config(&config).expect("build client config");
+
+        assert!(client_config.cache_config.is_none());
+        assert!(client_config.budget_config.is_none());
+        assert!(client_config.rate_limit_config.is_none());
+        assert!(client_config.cooldown_duration.is_none());
+        assert!(client_config.health_check_interval.is_none());
+        assert!(!client_config.enable_cost_tracking);
+        assert!(!client_config.enable_tracing);
+    }
+
+    /// Header validation must still run even when the request also carries the
+    /// new tower-backed passthrough fields — `to_liter_llm_config` deliberately
+    /// leaves `headers` unset on the DTO handed to `into_client_builder`, so this
+    /// validation (not liter-llm's own silent-drop-on-parse-failure behavior) is
+    /// what actually runs.
+    #[test]
+    fn test_build_client_config_still_validates_headers_with_tower_fields_set() {
+        let mut headers = std::collections::HashMap::new();
+        headers.insert("X-Bad\r\nInjected".to_string(), "value".to_string());
+        let config = LlmConfig {
+            model: "openai/gpt-4o".to_string(),
+            api_key: Some("test-key".to_string()),
+            headers: Some(Box::new(headers)),
+            cost_tracking: Some(true),
+            ..LlmConfig::default()
+        };
+
+        match build_client_config(&config) {
+            Err(crate::XbergError::Validation { message, .. }) => {
+                assert!(message.contains("Invalid LLM header"), "unexpected message: {message}");
+            }
+            Err(other) => panic!("expected a Validation error, got: {other}"),
+            Ok(_) => panic!("expected build_client_config to reject the invalid header"),
+        }
+    }
+
+    /// `providers` has no equivalent field on liter-llm's `ClientConfig` at all —
+    /// liter-llm's own `into_client_builder` does not map it either. Custom
+    /// providers are instead registered through the process-wide
+    /// `liter_llm::provider::custom::register_custom_provider` registry, which is
+    /// out of scope for a pure, side-effect-free per-client config builder. This
+    /// test proves the one boundary xberg does control — the DTO-to-DTO
+    /// conversion in `to_liter_llm_config` — is lossless for `providers`.
+    #[test]
+    fn test_to_liter_llm_config_forwards_providers_into_the_dto_boundary() {
+        let config = LlmConfig {
+            model: "openai/gpt-4o".to_string(),
+            providers: Some(Box::new(vec![LlmProviderConfig {
+                name: "my-provider".to_string(),
+                base_url: "https://my-llm.example.com/v1".to_string(),
+                auth_header: Some("X-Api-Key".to_string()),
+                model_prefixes: vec!["my-provider/".to_string()],
+            }])),
+            ..LlmConfig::default()
+        };
+
+        let upstream = to_liter_llm_config(&config);
+        let providers = upstream.providers.expect("providers present");
+
+        assert_eq!(providers.len(), 1);
+        assert_eq!(providers[0].name, "my-provider");
+        assert_eq!(providers[0].base_url, "https://my-llm.example.com/v1");
+        assert_eq!(providers[0].auth_header.as_deref(), Some("X-Api-Key"));
+        assert_eq!(providers[0].model_prefixes, vec!["my-provider/".to_string()]);
     }
 }

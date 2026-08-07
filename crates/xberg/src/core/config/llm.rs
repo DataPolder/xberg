@@ -74,7 +74,80 @@ pub struct LlmConfig {
     /// Mirrors liter-llm's `ClientConfigBuilder::header`, for gateways or providers
     /// that require custom auth/routing headers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub headers: Option<HashMap<String, String>>,
+    pub headers: Option<Box<HashMap<String, String>>>,
+
+    /// Custom provider configurations, in addition to liter-llm's built-in providers.
+    ///
+    /// Mirrors liter-llm's `LlmConfig::providers`, for OpenAI-compatible gateways
+    /// and self-hosted model servers that are not in the built-in provider catalog.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
+    pub providers: Option<Box<Vec<LlmProviderConfig>>>,
+
+    /// Response cache configuration.
+    ///
+    /// Mirrors liter-llm's `LlmConfig::cache`. Only takes effect when liter-llm's
+    /// `tower` feature is compiled in; otherwise the value is accepted but unused.
+    ///
+    /// Boxed for the same reason as `bedrock` (a4579589ac): `LlmConfig` is the payload
+    /// of `EmbeddingModelType::Llm` and `RerankerModelType::Llm`, whose other variants
+    /// are tens of bytes. Inlining this and the two sub-configs below pushed that
+    /// variant to 480 bytes and tripped `clippy::large_enum_variant` on the
+    /// `--features full` leg. ~keep
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
+    pub cache: Option<Box<LlmCacheConfig>>,
+
+    /// Budget enforcement configuration.
+    ///
+    /// Mirrors liter-llm's `LlmConfig::budget`. Only takes effect when liter-llm's
+    /// `tower` feature is compiled in; otherwise the value is accepted but unused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
+    pub budget: Option<Box<LlmBudgetConfig>>,
+
+    /// Per-model rate limiting configuration.
+    ///
+    /// Mirrors liter-llm's `LlmConfig::rate_limit`. Only takes effect when liter-llm's
+    /// `tower` feature is compiled in; otherwise the value is accepted but unused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
+    pub rate_limit: Option<Box<LlmRateLimitConfig>>,
+
+    /// Enable per-request cost tracking.
+    ///
+    /// Mirrors liter-llm's `LlmConfig::cost_tracking`. Only takes effect when
+    /// liter-llm's `tower` feature is compiled in; otherwise the value is accepted
+    /// but unused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
+    pub cost_tracking: Option<bool>,
+
+    /// Enable OpenTelemetry-compatible tracing spans.
+    ///
+    /// Mirrors liter-llm's `LlmConfig::tracing`. Only takes effect when liter-llm's
+    /// `tower` feature is compiled in; otherwise the value is accepted but unused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
+    pub tracing: Option<bool>,
+
+    /// Cooldown duration after transient errors, in seconds.
+    ///
+    /// Mirrors liter-llm's `LlmConfig::cooldown_secs`. Only takes effect when
+    /// liter-llm's `tower` feature is compiled in; otherwise the value is accepted
+    /// but unused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
+    pub cooldown_secs: Option<u64>,
+
+    /// Background health check interval, in seconds.
+    ///
+    /// Mirrors liter-llm's `LlmConfig::health_check_secs`. Only takes effect when
+    /// liter-llm's `tower` feature is compiled in; otherwise the value is accepted
+    /// but unused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
+    pub health_check_secs: Option<u64>,
 
     /// AWS Bedrock settings (region, cross-region routing, explicit credentials).
     ///
@@ -84,6 +157,98 @@ pub struct LlmConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
     pub bedrock: Option<Box<BedrockConfig>>,
+}
+
+/// A custom provider configuration entry, in addition to liter-llm's built-in providers.
+///
+/// Mirrors liter-llm's `LlmProviderConfig`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "api", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
+pub struct LlmProviderConfig {
+    /// Provider name, used to key model prefix matching.
+    pub name: String,
+
+    /// Base URL for the provider's OpenAI-compatible API.
+    pub base_url: String,
+
+    /// Header name used to carry the API key (defaults to `Authorization` when unset).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_header: Option<String>,
+
+    /// Model name prefixes routed to this provider (e.g. `["my-provider/"]`).
+    #[serde(default)]
+    pub model_prefixes: Vec<String>,
+}
+
+/// Response cache configuration.
+///
+/// Mirrors liter-llm's `LlmCacheConfig`. Only takes effect when liter-llm's `tower`
+/// feature is compiled in; otherwise the value round-trips through configuration
+/// but is not consulted at request time.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "api", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
+pub struct LlmCacheConfig {
+    /// Maximum number of cached entries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_entries: Option<usize>,
+
+    /// Cache entry time-to-live, in seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttl_seconds: Option<u64>,
+
+    /// Cache backend name (e.g. `"memory"`, or an `opendal` scheme).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend: Option<String>,
+
+    /// Backend-specific configuration key/value pairs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend_config: Option<HashMap<String, String>>,
+}
+
+/// Budget enforcement configuration.
+///
+/// Mirrors liter-llm's `LlmBudgetConfig`. Only takes effect when liter-llm's `tower`
+/// feature is compiled in; otherwise the value round-trips through configuration
+/// but is not enforced at request time.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "api", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
+pub struct LlmBudgetConfig {
+    /// Global spend limit in USD.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub global_limit: Option<f64>,
+
+    /// Per-model spend limits in USD, keyed by model name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_limits: Option<HashMap<String, f64>>,
+
+    /// Enforcement mode: `"hard"` (reject over-budget requests) or `"soft"` (log only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enforcement: Option<String>,
+}
+
+/// Per-model rate limiting configuration.
+///
+/// Mirrors liter-llm's `LlmRateLimitConfig`. Only takes effect when liter-llm's
+/// `tower` feature is compiled in; otherwise the value round-trips through
+/// configuration but is not enforced at request time.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "api", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
+pub struct LlmRateLimitConfig {
+    /// Requests per minute limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rpm: Option<u32>,
+
+    /// Tokens per minute limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tpm: Option<u64>,
+
+    /// Rate limit window, in seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_seconds: Option<u64>,
 }
 
 /// AWS Bedrock configuration for `bedrock/`-prefixed models.
@@ -151,6 +316,14 @@ impl std::fmt::Debug for LlmConfig {
             .field("max_tokens", &self.max_tokens)
             .field("load_env", &self.load_env)
             .field("headers", &redacted_headers)
+            .field("providers", &self.providers)
+            .field("cache", &self.cache)
+            .field("budget", &self.budget)
+            .field("rate_limit", &self.rate_limit)
+            .field("cost_tracking", &self.cost_tracking)
+            .field("tracing", &self.tracing)
+            .field("cooldown_secs", &self.cooldown_secs)
+            .field("health_check_secs", &self.health_check_secs)
             .field("bedrock", &self.bedrock)
             .finish()
     }
@@ -291,6 +464,14 @@ mod tests {
         assert!(cfg.max_tokens.is_none());
         assert!(cfg.load_env.is_none());
         assert!(cfg.headers.is_none());
+        assert!(cfg.providers.is_none());
+        assert!(cfg.cache.is_none());
+        assert!(cfg.budget.is_none());
+        assert!(cfg.rate_limit.is_none());
+        assert!(cfg.cost_tracking.is_none());
+        assert!(cfg.tracing.is_none());
+        assert!(cfg.cooldown_secs.is_none());
+        assert!(cfg.health_check_secs.is_none());
         assert!(cfg.bedrock.is_none());
     }
 
@@ -311,6 +492,14 @@ mod tests {
         assert!(cfg.max_tokens.is_none());
         assert!(cfg.load_env.is_none());
         assert!(cfg.headers.is_none());
+        assert!(cfg.providers.is_none());
+        assert!(cfg.cache.is_none());
+        assert!(cfg.budget.is_none());
+        assert!(cfg.rate_limit.is_none());
+        assert!(cfg.cost_tracking.is_none());
+        assert!(cfg.tracing.is_none());
+        assert!(cfg.cooldown_secs.is_none());
+        assert!(cfg.health_check_secs.is_none());
         assert!(cfg.bedrock.is_none());
     }
 
@@ -352,7 +541,131 @@ load_env = true
             "load_env should be omitted when None: {json}"
         );
         assert!(!json.contains("headers"), "headers should be omitted when None: {json}");
+        assert!(
+            !json.contains("providers"),
+            "providers should be omitted when None: {json}"
+        );
+        assert!(!json.contains("cache"), "cache should be omitted when None: {json}");
+        assert!(!json.contains("budget"), "budget should be omitted when None: {json}");
+        assert!(
+            !json.contains("rate_limit"),
+            "rate_limit should be omitted when None: {json}"
+        );
+        assert!(
+            !json.contains("cost_tracking"),
+            "cost_tracking should be omitted when None: {json}"
+        );
+        assert!(!json.contains("tracing"), "tracing should be omitted when None: {json}");
+        assert!(
+            !json.contains("cooldown_secs"),
+            "cooldown_secs should be omitted when None: {json}"
+        );
+        assert!(
+            !json.contains("health_check_secs"),
+            "health_check_secs should be omitted when None: {json}"
+        );
         assert!(!json.contains("bedrock"), "bedrock should be omitted when None: {json}");
+    }
+
+    /// Regression test for https://github.com/xberg-io/xberg/issues/1381
+    ///
+    /// `providers`, `cache`, `budget`, `rate_limit`, `cost_tracking`, `tracing`,
+    /// `cooldown_secs`, and `health_check_secs` must survive a TOML load and a
+    /// JSON round-trip so they are settable from a config file and from every
+    /// language binding, matching liter-llm's canonical `client::LlmConfig`.
+    #[test]
+    fn test_llm_config_full_passthrough_fields_round_trip_through_toml_and_json() {
+        let toml_src = r#"
+model = "openai/gpt-4o"
+cost_tracking = true
+tracing = false
+cooldown_secs = 30
+health_check_secs = 60
+
+[[providers]]
+name = "my-provider"
+base_url = "https://my-llm.example.com/v1"
+auth_header = "X-Api-Key"
+model_prefixes = ["my-provider/"]
+
+[cache]
+max_entries = 512
+ttl_seconds = 600
+backend = "memory"
+
+[budget]
+global_limit = 100.0
+enforcement = "hard"
+
+[budget.model_limits]
+"openai/gpt-4o" = 25.0
+
+[rate_limit]
+rpm = 60
+tpm = 100000
+window_seconds = 60
+"#;
+        let cfg: LlmConfig = toml::from_str(toml_src).expect("deserialize LlmConfig from TOML");
+
+        assert_eq!(cfg.cost_tracking, Some(true));
+        assert_eq!(cfg.tracing, Some(false));
+        assert_eq!(cfg.cooldown_secs, Some(30));
+        assert_eq!(cfg.health_check_secs, Some(60));
+
+        let providers = cfg.providers.as_ref().expect("providers present");
+        assert_eq!(providers.len(), 1);
+        assert_eq!(providers[0].name, "my-provider");
+        assert_eq!(providers[0].base_url, "https://my-llm.example.com/v1");
+        assert_eq!(providers[0].auth_header.as_deref(), Some("X-Api-Key"));
+        assert_eq!(providers[0].model_prefixes, vec!["my-provider/".to_string()]);
+
+        let cache = cfg.cache.as_ref().expect("cache present");
+        assert_eq!(cache.max_entries, Some(512));
+        assert_eq!(cache.ttl_seconds, Some(600));
+        assert_eq!(cache.backend.as_deref(), Some("memory"));
+        assert_eq!(cache.backend_config, None);
+
+        let budget = cfg.budget.as_ref().expect("budget present");
+        assert_eq!(budget.global_limit, Some(100.0));
+        assert_eq!(budget.enforcement.as_deref(), Some("hard"));
+        assert_eq!(
+            budget.model_limits.as_ref().and_then(|m| m.get("openai/gpt-4o")),
+            Some(&25.0)
+        );
+
+        let rate_limit = cfg.rate_limit.as_ref().expect("rate_limit present");
+        assert_eq!(rate_limit.rpm, Some(60));
+        assert_eq!(rate_limit.tpm, Some(100_000));
+        assert_eq!(rate_limit.window_seconds, Some(60));
+
+        let round_tripped: LlmConfig =
+            serde_json::from_str(&serde_json::to_string(&cfg).expect("serialize")).expect("deserialize");
+        assert_eq!(round_tripped, cfg);
+    }
+
+    /// `Debug` prints the new passthrough fields verbatim — none of them are
+    /// credentials, unlike `api_key`, header values, and the Bedrock secrets.
+    #[test]
+    fn test_llm_config_debug_prints_new_passthrough_fields_verbatim() {
+        let cfg = LlmConfig {
+            model: "openai/gpt-4o".to_string(),
+            cost_tracking: Some(true),
+            tracing: Some(true),
+            cooldown_secs: Some(15),
+            health_check_secs: Some(45),
+            rate_limit: Some(Box::new(LlmRateLimitConfig {
+                rpm: Some(30),
+                tpm: None,
+                window_seconds: None,
+            })),
+            ..Default::default()
+        };
+        let rendered = format!("{cfg:?}");
+        assert!(rendered.contains("cost_tracking: Some(true)"), "{rendered}");
+        assert!(rendered.contains("tracing: Some(true)"), "{rendered}");
+        assert!(rendered.contains("cooldown_secs: Some(15)"), "{rendered}");
+        assert!(rendered.contains("health_check_secs: Some(45)"), "{rendered}");
+        assert!(rendered.contains("rpm: Some(30)"), "{rendered}");
     }
 
     /// Regression test for https://github.com/xberg-io/xberg/issues/1381
@@ -416,7 +729,7 @@ region = "us-east-1"
         let cfg = LlmConfig {
             model: "bedrock/anthropic.claude-3-sonnet-20240229-v1:0".to_string(),
             api_key: Some("sk-super-secret".to_string()),
-            headers: Some(headers),
+            headers: Some(Box::new(headers)),
             bedrock: Some(Box::new(BedrockConfig {
                 region: Some("eu-central-1".to_string()),
                 cross_region_prefix: Some("eu".to_string()),

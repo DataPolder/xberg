@@ -5286,6 +5286,7 @@ dependencies = [
  "bytes",
  "dashmap 6.2.1",
  "futures-core",
+ "futures-util",
  "gcp_auth",
  "gloo-timers",
  "memchr",
@@ -5302,6 +5303,8 @@ dependencies = [
  "tokio",
  "tokio-util",
  "toml 1.1.4+spec-1.1.0",
+ "tower",
+ "tower-http 0.7.0",
  "tracing",
  "tracing-opentelemetry",
  "url",
@@ -10103,6 +10106,7 @@ checksum = "ebe5ef63511595f1344e2d5cfa636d973292adc0eec1f0ad45fae9f0851ab1d4"
 dependencies = [
  "futures-core",
  "futures-util",
+ "indexmap 2.14.0",
  "pin-project-lite",
  "sync_wrapper",
  "tokio",
@@ -10153,9 +10157,11 @@ dependencies = [
  "pin-project-lite",
  "tokio",
  "tokio-util",
+ "tower",
  "tower-layer",
  "tower-service",
  "tracing",
+ "url",
  "uuid",
 ]
 

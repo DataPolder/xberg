@@ -1118,8 +1118,14 @@ xberg-tesseract = { path = "../xberg-tesseract", optional = true }
 zeroize = { version = "1", optional = true }
 zip = { version = ">=7.0.0", optional = true, default-features = false, features = ["deflate-flate2"] }
 
+# `tower` (GH#1381) unlocks the `cache`/`budget`/`rate_limit`/`cost_tracking`/`tracing`/
+# `cooldown_secs`/`health_check_secs` fields on liter-llm's `client::ClientConfigBuilder` —
+# without it those `LlmConfig::into_client_builder` branches compile out and the
+# corresponding xberg `LlmConfig` fields, while still round-tripping through
+# config files, reach nothing. `tower`/`tower-http`/`futures-util` are pure-Rust
+# and native-http-only (this target block excludes wasm32), so this is safe here.
 [target.'cfg(all(not(target_os = "windows"), not(target_arch = "wasm32")))'.dependencies]
-liter-llm = { workspace = true, optional = true, features = ["native-http", "bedrock"] }
+liter-llm = { workspace = true, optional = true, features = ["native-http", "bedrock", "tower"] }
 # Xberg resolves pretrained tokenizer files through its shared hf-hub 1 client;
 # keep tokenizers' separate `http` client disabled to avoid a second cache stack.
 tokenizers = { version = "0.23", default-features = false, features = ["fancy-regex"], optional = true }
@@ -1150,8 +1156,9 @@ ureq = { version = "3.3", default-features = false, features = [
 # trusts the Windows system certificate store via WinCrypt (#1146). hf-hub is declared once in
 # the target-independent `not(wasm32)` block below (1.0 uses reqwest/rustls → aws-lc-sys, which
 # builds on Windows MSVC — same stack liter-llm already relies on here).
+# `tower` addition: see the matching comment on the non-Windows liter-llm entry above.
 [target.'cfg(all(target_os = "windows", not(target_arch = "wasm32")))'.dependencies]
-liter-llm = { workspace = true, optional = true, features = ["native-http", "bedrock"] }
+liter-llm = { workspace = true, optional = true, features = ["native-http", "bedrock", "tower"] }
 # Keep tokenizers' separate `http` client disabled; Xberg uses the shared hf-hub 1 resolver.
 tokenizers = { version = "0.23", default-features = false, features = ["fancy-regex"], optional = true }
 # ureq on Windows: ring-backed rustls + platform-verifier (WinCrypt OS trust store, no openssl).
