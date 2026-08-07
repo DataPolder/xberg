@@ -241,7 +241,8 @@ pub fn list_command(downloaded_only: bool, filter: Option<String>, format: WireF
 )]
 pub fn cache_dir_command(format: WireFormat) -> Result<()> {
     let dir = tree_sitter_language_pack::cache_dir().context("Failed to determine tree-sitter cache directory")?;
-    let dir_str = dir.to_string_lossy();
+    // `cache_dir()` already yields a String, not a PathBuf.
+    let dir_str = dir;
 
     match format {
         WireFormat::Text => {
