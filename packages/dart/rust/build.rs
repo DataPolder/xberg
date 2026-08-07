@@ -645,8 +645,8 @@ fn carry_frb_cfg_gates() {
         let dispatch = format!("=> wire__crate__{name}_impl(");
         let mut index = 0;
         while index < lines.len() {
-            let hit = lines[index].trim_start().starts_with(definition.as_str())
-                || lines[index].contains(dispatch.as_str());
+            let hit =
+                lines[index].trim_start().starts_with(definition.as_str()) || lines[index].contains(dispatch.as_str());
             if hit && !lines[index.saturating_sub(1)].trim_start().starts_with("#[cfg(") {
                 let indent = " ".repeat(lines[index].len() - lines[index].trim_start().len());
                 lines.insert(index, format!("{indent}{attribute}"));
