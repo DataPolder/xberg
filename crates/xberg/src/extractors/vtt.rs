@@ -367,11 +367,13 @@ impl InternalDocumentExtractor for WebVttExtractor {
         let mut budget = SecurityBudget::from_config(config);
         budget.account_text(content.len())?;
 
-        #[cfg(feature = "quality")]
-        let decoded = crate::utils::safe_decode(content, None);
-        #[cfg(not(feature = "quality"))]
-        let decoded = String::from_utf8_lossy(content).into_owned();
-        let source = normalize_line_endings(crate::utils::strip_bom(&decoded));
+        // See the identical rationale on `extractors::text::PlainTextExtractor::extract_content`
+        // (#171, #395): `replaced_characters` is recorded by the decoder itself, at the point
+        // data is actually lost, so it stays accurate under `quality`'s mojibake cleanup where
+        // scanning the decoded text for U+FFFD afterwards would not.
+        let outcome = crate::utils::decode_with_provenance(content, None);
+        let decoded_lossily = outcome.replaced_characters;
+        let source = normalize_line_endings(crate::utils::strip_bom(&outcome.text));
 
         let parsed = parse_track(&source);
 
@@ -421,6 +423,13 @@ impl InternalDocumentExtractor for WebVttExtractor {
 
         let mut document = builder.build();
         document.mime_type = mime_type.to_string();
+        if decoded_lossily {
+            crate::core::diagnostics::push_lossy_decode_warning(
+                &mut document.processing_warnings,
+                "vtt",
+                "WebVTT source",
+            );
+        }
         Ok(document)
     }
 
@@ -516,5 +525,66 @@ mod tests {
 
         assert_eq!(attributes.get("start").map(String::as_str), Some("00:00:01.000"));
         assert_eq!(attributes.get("end").map(String::as_str), Some("00:00:02.500"));
+    }
+
+    /// Warnings emitted for a lossy decode specifically, identified by message content
+    /// since `"vtt"` is also the source of unrelated grammar warnings (e.g. a missing
+    /// signature line).
+    fn decode_warnings(doc: &InternalDocument) -> Vec<String> {
+        doc.processing_warnings
+            .iter()
+            .filter(|w| w.message.contains("not valid UTF-8"))
+            .map(|w| w.message.to_string())
+            .collect()
+    }
+
+    /// #395: invalid UTF-8 bytes must be reported via `processing_warnings`, not just
+    /// silently replaced -- `decode_with_provenance` captures the loss at decode time
+    /// so it survives regardless of the `quality` feature's downstream mojibake cleanup.
+    ///
+    /// Deliberately not run under `quality`: there chardetng resolves these bytes to a
+    /// single-byte encoding that maps all of 0x00-0xFF, so nothing is *replaced* -- see
+    /// the identical note on `extractors::text::should_warn_when_text_source_is_not_valid_utf8`.
+    #[cfg(not(feature = "quality"))]
+    #[tokio::test]
+    async fn should_warn_when_vtt_source_is_not_valid_utf8() {
+        let extractor = WebVttExtractor::new();
+        let config = ExtractionConfig::default();
+        let content: &[u8] = &[b'A', 0xFF, 0xFE, b'B'];
+
+        let result = extractor
+            .extract_content(content, "text/vtt", &config)
+            .await
+            .expect("extraction of invalid UTF-8 must still succeed");
+
+        let warnings = decode_warnings(&result);
+        assert_eq!(
+            warnings.len(),
+            1,
+            "expected exactly one decode warning, got {warnings:?}"
+        );
+        assert!(
+            warnings[0].contains("replacement character"),
+            "warning must describe the lossy decode, got {warnings:?}"
+        );
+    }
+
+    /// A valid UTF-8 track must not produce a lossy-decode warning.
+    #[tokio::test]
+    async fn valid_utf8_vtt_source_produces_zero_decode_warnings() {
+        let extractor = WebVttExtractor::new();
+        let config = ExtractionConfig::default();
+        let content = b"WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHello\n";
+
+        let result = extractor
+            .extract_content(content, "text/vtt", &config)
+            .await
+            .expect("extraction should succeed");
+
+        assert!(
+            decode_warnings(&result).is_empty(),
+            "valid UTF-8 must not warn about a lossy decode, got {:?}",
+            decode_warnings(&result)
+        );
     }
 }
