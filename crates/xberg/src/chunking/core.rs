@@ -976,6 +976,95 @@ mod tests {
     }
 
     #[test]
+    fn should_join_heading_levels_with_the_configured_separator() {
+        use crate::types::HeadingLevel;
+
+        let context = HeadingContext {
+            headings: vec![
+                HeadingLevel {
+                    level: 1,
+                    text: "Guide".to_string(),
+                },
+                HeadingLevel {
+                    level: 2,
+                    text: "Setup".to_string(),
+                },
+                HeadingLevel {
+                    level: 3,
+                    text: "Prerequisites".to_string(),
+                },
+            ],
+        };
+
+        let rendered = render_heading_breadcrumb("Install the dependencies.", &context);
+
+        assert_eq!(
+            rendered, "# Guide > ## Setup > ### Prerequisites\n\nInstall the dependencies.",
+            "each heading level must render as ATX hashes and join with ' > ', in order"
+        );
+    }
+
+    #[test]
+    fn should_render_single_heading_without_a_separator() {
+        use crate::types::HeadingLevel;
+
+        let context = HeadingContext {
+            headings: vec![HeadingLevel {
+                level: 2,
+                text: "Setup".to_string(),
+            }],
+        };
+
+        let rendered = render_heading_breadcrumb("Install the dependencies.", &context);
+
+        assert_eq!(
+            rendered, "## Setup\n\nInstall the dependencies.",
+            "a single heading must not have a ' > ' separator appended"
+        );
+    }
+
+    #[test]
+    fn should_prepend_only_a_blank_line_when_there_are_no_headings() {
+        let context = HeadingContext { headings: vec![] };
+
+        let rendered = render_heading_breadcrumb("Install the dependencies.", &context);
+
+        assert_eq!(
+            rendered, "\n\nInstall the dependencies.",
+            "no headings means no breadcrumb text, but the blank-line separator is still emitted \
+             and content is passed through unstripped"
+        );
+    }
+
+    #[test]
+    fn should_strip_a_leading_duplicate_of_the_deepest_heading_from_content() {
+        use crate::types::HeadingLevel;
+
+        let context = HeadingContext {
+            headings: vec![
+                HeadingLevel {
+                    level: 1,
+                    text: "Guide".to_string(),
+                },
+                HeadingLevel {
+                    level: 2,
+                    text: "Setup".to_string(),
+                },
+            ],
+        };
+
+        // The Markdown splitter commonly keeps the opening heading as the first
+        // line of a section's first chunk; render_heading_breadcrumb must strip
+        // that one leading occurrence so the heading is not duplicated.
+        let rendered = render_heading_breadcrumb("## Setup\n\nInstall the dependencies.", &context);
+
+        assert_eq!(
+            rendered, "# Guide > ## Setup\n\nInstall the dependencies.",
+            "a leading occurrence of the deepest heading in content must be stripped, not duplicated"
+        );
+    }
+
+    #[test]
     fn test_strip_leading_heading_basic() {
         assert_eq!(strip_leading_heading("## Section\n\nBody", 2, "Section"), "Body");
     }
