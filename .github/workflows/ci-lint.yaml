@@ -159,6 +159,12 @@ jobs:
     uses: xberg-io/actions/.github/workflows/reusable-validate.yml@v1
     with:
       setup-rust: true
+      # poly's cargo-clippy hook builds the whole workspace, and
+      # tools/benchmark-harness depends on xberg with `full`, which pulls
+      # heic -> xberg-libheif -> libheif-sys. Its build script shells out to
+      # `pkg-config libheif >= 1.21` and Ubuntu Noble only ships 1.17.6, so
+      # without this the Lint step dies before linting anything. ~keep
+      install-system-deps: true
       setup-python: true
       # poly delegates Elixir formatting to `mix format` when mix is on PATH, and falls
       # back to its own built-in Elixir formatter when it is not. The two disagree, so
