@@ -135,7 +135,7 @@ def check(alef_toml: Path) -> int:
     swift_consequence = (
         "The swift crate keeps its own copy of this list. A missing leaf is inert for codegen "
         "today (nothing in the parsed sources is gated on these literals) and the formats still "
-        "reach the build through `ffi_features = [\"full-no-heic\"]` -- but that makes the dep "
+        'reach the build through `ffi_features = ["full-no-heic"]` -- but that makes the dep '
         "array correct only by accident of what the ffi edge carries. Narrow that edge the way "
         "cf7fa0533d narrowed `full` and swift silently loses the format while the format table "
         "keeps advertising it."

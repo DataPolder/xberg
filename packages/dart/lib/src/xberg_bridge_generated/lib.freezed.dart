@@ -2564,6 +2564,10 @@ class EmbeddingModelType_Llm extends EmbeddingModelType {
 
 
 /// LLM provider configuration specifying the model and API credentials.
+///
+/// Boxed because `LlmConfig` carries liter-llm's full configuration surface and is
+/// an order of magnitude larger than the other variants, which would otherwise make
+/// every `Preset`/`Custom` value pay for it. ~keep
  final  LlmConfig llm;
 
 /// Create a copy of EmbeddingModelType
@@ -10827,6 +10831,9 @@ class RerankerModelType_Llm extends RerankerModelType {
 
 
 /// LLM provider configuration specifying the model and API credentials.
+///
+/// Boxed for the same reason as `EmbeddingModelType::Llm` -- kept in step so the two
+/// parallel enums present one shape to the generated bindings. ~keep
  final  LlmConfig llm;
 
 /// Create a copy of RerankerModelType

@@ -579,6 +579,61 @@ void *__swift_bridge__$Vec_LlmConfig$get_mut(void *vec_ptr, uintptr_t index);
 uintptr_t __swift_bridge__$Vec_LlmConfig$len(void *vec_ptr);
 void *__swift_bridge__$Vec_LlmConfig$as_ptr(void *vec_ptr);
 
+typedef struct LlmProviderConfig LlmProviderConfig;
+void __swift_bridge__$LlmProviderConfig$_free(void *self);
+
+void *__swift_bridge__$Vec_LlmProviderConfig$new(void);
+void __swift_bridge__$Vec_LlmProviderConfig$drop(void *vec_ptr);
+void __swift_bridge__$Vec_LlmProviderConfig$push(void *vec_ptr, void *item_ptr);
+void *__swift_bridge__$Vec_LlmProviderConfig$pop(void *vec_ptr);
+void *__swift_bridge__$Vec_LlmProviderConfig$get(void *vec_ptr,
+                                                 uintptr_t index);
+void *__swift_bridge__$Vec_LlmProviderConfig$get_mut(void *vec_ptr,
+                                                     uintptr_t index);
+uintptr_t __swift_bridge__$Vec_LlmProviderConfig$len(void *vec_ptr);
+void *__swift_bridge__$Vec_LlmProviderConfig$as_ptr(void *vec_ptr);
+
+typedef struct LlmCacheConfig LlmCacheConfig;
+void __swift_bridge__$LlmCacheConfig$_free(void *self);
+
+void *__swift_bridge__$Vec_LlmCacheConfig$new(void);
+void __swift_bridge__$Vec_LlmCacheConfig$drop(void *vec_ptr);
+void __swift_bridge__$Vec_LlmCacheConfig$push(void *vec_ptr, void *item_ptr);
+void *__swift_bridge__$Vec_LlmCacheConfig$pop(void *vec_ptr);
+void *__swift_bridge__$Vec_LlmCacheConfig$get(void *vec_ptr, uintptr_t index);
+void *__swift_bridge__$Vec_LlmCacheConfig$get_mut(void *vec_ptr,
+                                                  uintptr_t index);
+uintptr_t __swift_bridge__$Vec_LlmCacheConfig$len(void *vec_ptr);
+void *__swift_bridge__$Vec_LlmCacheConfig$as_ptr(void *vec_ptr);
+
+typedef struct LlmBudgetConfig LlmBudgetConfig;
+void __swift_bridge__$LlmBudgetConfig$_free(void *self);
+
+void *__swift_bridge__$Vec_LlmBudgetConfig$new(void);
+void __swift_bridge__$Vec_LlmBudgetConfig$drop(void *vec_ptr);
+void __swift_bridge__$Vec_LlmBudgetConfig$push(void *vec_ptr, void *item_ptr);
+void *__swift_bridge__$Vec_LlmBudgetConfig$pop(void *vec_ptr);
+void *__swift_bridge__$Vec_LlmBudgetConfig$get(void *vec_ptr, uintptr_t index);
+void *__swift_bridge__$Vec_LlmBudgetConfig$get_mut(void *vec_ptr,
+                                                   uintptr_t index);
+uintptr_t __swift_bridge__$Vec_LlmBudgetConfig$len(void *vec_ptr);
+void *__swift_bridge__$Vec_LlmBudgetConfig$as_ptr(void *vec_ptr);
+
+typedef struct LlmRateLimitConfig LlmRateLimitConfig;
+void __swift_bridge__$LlmRateLimitConfig$_free(void *self);
+
+void *__swift_bridge__$Vec_LlmRateLimitConfig$new(void);
+void __swift_bridge__$Vec_LlmRateLimitConfig$drop(void *vec_ptr);
+void __swift_bridge__$Vec_LlmRateLimitConfig$push(void *vec_ptr,
+                                                  void *item_ptr);
+void *__swift_bridge__$Vec_LlmRateLimitConfig$pop(void *vec_ptr);
+void *__swift_bridge__$Vec_LlmRateLimitConfig$get(void *vec_ptr,
+                                                  uintptr_t index);
+void *__swift_bridge__$Vec_LlmRateLimitConfig$get_mut(void *vec_ptr,
+                                                      uintptr_t index);
+uintptr_t __swift_bridge__$Vec_LlmRateLimitConfig$len(void *vec_ptr);
+void *__swift_bridge__$Vec_LlmRateLimitConfig$as_ptr(void *vec_ptr);
+
 typedef struct BedrockConfig BedrockConfig;
 void __swift_bridge__$BedrockConfig$_free(void *self);
 
@@ -4637,13 +4692,18 @@ __swift_bridge__$LayoutDetectionConfig$table_overlap_preference(void *self);
 void *__swift_bridge__$LayoutDetectionConfig$acceleration(void *self);
 bool __swift_bridge__$LayoutDetectionConfig$enable_chart_understanding(
     void *self);
-void *__swift_bridge__$LlmConfig$new(void *model, void *api_key, void *base_url,
-                                     struct __private__OptionU64 timeout_secs,
-                                     struct __private__OptionU32 max_retries,
-                                     struct __private__OptionF64 temperature,
-                                     struct __private__OptionU64 max_tokens,
-                                     struct __private__OptionBool load_env,
-                                     void *headers, void *bedrock);
+void *__swift_bridge__$LlmConfig$new(
+    void *model, void *api_key, void *base_url,
+    struct __private__OptionU64 timeout_secs,
+    struct __private__OptionU32 max_retries,
+    struct __private__OptionF64 temperature,
+    struct __private__OptionU64 max_tokens,
+    struct __private__OptionBool load_env, void *headers, void *providers,
+    void *cache, void *budget, void *rate_limit,
+    struct __private__OptionBool cost_tracking,
+    struct __private__OptionBool tracing,
+    struct __private__OptionU64 cooldown_secs,
+    struct __private__OptionU64 health_check_secs, void *bedrock);
 void *__swift_bridge__$LlmConfig$model(void *self);
 void *__swift_bridge__$LlmConfig$api_key(void *self);
 void *__swift_bridge__$LlmConfig$base_url(void *self);
@@ -4653,7 +4713,49 @@ struct __private__OptionF64 __swift_bridge__$LlmConfig$temperature(void *self);
 struct __private__OptionU64 __swift_bridge__$LlmConfig$max_tokens(void *self);
 struct __private__OptionBool __swift_bridge__$LlmConfig$load_env(void *self);
 void *__swift_bridge__$LlmConfig$headers(void *self);
+void *__swift_bridge__$LlmConfig$providers(void *self);
+void *__swift_bridge__$LlmConfig$cache(void *self);
+void *__swift_bridge__$LlmConfig$budget(void *self);
+void *__swift_bridge__$LlmConfig$rate_limit(void *self);
+struct __private__OptionBool
+__swift_bridge__$LlmConfig$cost_tracking(void *self);
+struct __private__OptionBool __swift_bridge__$LlmConfig$tracing(void *self);
+struct __private__OptionU64
+__swift_bridge__$LlmConfig$cooldown_secs(void *self);
+struct __private__OptionU64
+__swift_bridge__$LlmConfig$health_check_secs(void *self);
 void *__swift_bridge__$LlmConfig$bedrock(void *self);
+void *__swift_bridge__$LlmProviderConfig$new(void *name, void *base_url,
+                                             void *auth_header,
+                                             void *model_prefixes);
+void *__swift_bridge__$LlmProviderConfig$name(void *self);
+void *__swift_bridge__$LlmProviderConfig$base_url(void *self);
+void *__swift_bridge__$LlmProviderConfig$auth_header(void *self);
+void *__swift_bridge__$LlmProviderConfig$model_prefixes(void *self);
+void *
+__swift_bridge__$LlmCacheConfig$new(struct __private__OptionUsize max_entries,
+                                    struct __private__OptionU64 ttl_seconds,
+                                    void *backend, void *backend_config);
+struct __private__OptionUsize
+__swift_bridge__$LlmCacheConfig$max_entries(void *self);
+struct __private__OptionU64
+__swift_bridge__$LlmCacheConfig$ttl_seconds(void *self);
+void *__swift_bridge__$LlmCacheConfig$backend(void *self);
+void *__swift_bridge__$LlmCacheConfig$backend_config(void *self);
+void *
+__swift_bridge__$LlmBudgetConfig$new(struct __private__OptionF64 global_limit,
+                                     void *model_limits, void *enforcement);
+struct __private__OptionF64
+__swift_bridge__$LlmBudgetConfig$global_limit(void *self);
+void *__swift_bridge__$LlmBudgetConfig$model_limits(void *self);
+void *__swift_bridge__$LlmBudgetConfig$enforcement(void *self);
+void *__swift_bridge__$LlmRateLimitConfig$new(
+    struct __private__OptionU32 rpm, struct __private__OptionU64 tpm,
+    struct __private__OptionU64 window_seconds);
+struct __private__OptionU32 __swift_bridge__$LlmRateLimitConfig$rpm(void *self);
+struct __private__OptionU64 __swift_bridge__$LlmRateLimitConfig$tpm(void *self);
+struct __private__OptionU64
+__swift_bridge__$LlmRateLimitConfig$window_seconds(void *self);
 void *__swift_bridge__$BedrockConfig$new(void *region,
                                          void *cross_region_prefix,
                                          void *access_key_id,
@@ -6562,6 +6664,14 @@ __swift_bridge__$layout_detection_config_from_json(void *json);
 struct __private__ResultPtrAndPtr
 __swift_bridge__$llm_config_from_json(void *json);
 struct __private__ResultPtrAndPtr
+__swift_bridge__$llm_provider_config_from_json(void *json);
+struct __private__ResultPtrAndPtr
+__swift_bridge__$llm_cache_config_from_json(void *json);
+struct __private__ResultPtrAndPtr
+__swift_bridge__$llm_budget_config_from_json(void *json);
+struct __private__ResultPtrAndPtr
+__swift_bridge__$llm_rate_limit_config_from_json(void *json);
+struct __private__ResultPtrAndPtr
 __swift_bridge__$bedrock_config_from_json(void *json);
 struct __private__ResultPtrAndPtr
 __swift_bridge__$structured_extraction_config_from_json(void *json);
@@ -7105,6 +7215,10 @@ void *__swift_bridge__$__alef_phantom_vec_token_reduction_options(void);
 void *__swift_bridge__$__alef_phantom_vec_language_detection_config(void);
 void *__swift_bridge__$__alef_phantom_vec_late_interaction_config(void);
 void *__swift_bridge__$__alef_phantom_vec_llm_config(void);
+void *__swift_bridge__$__alef_phantom_vec_llm_provider_config(void);
+void *__swift_bridge__$__alef_phantom_vec_llm_cache_config(void);
+void *__swift_bridge__$__alef_phantom_vec_llm_budget_config(void);
+void *__swift_bridge__$__alef_phantom_vec_llm_rate_limit_config(void);
 void *__swift_bridge__$__alef_phantom_vec_bedrock_config(void);
 void *__swift_bridge__$__alef_phantom_vec_structured_extraction_config(void);
 void *__swift_bridge__$__alef_phantom_vec_ner_config(void);

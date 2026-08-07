@@ -22,79 +22,79 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   CrossPlatformFinalizerArg
   get rust_arc_decrement_strong_count_ArcDocumentExtractorPtr => wire
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynDocumentExtractorSendSync;
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynDocumentExtractorSendSync;
 
   CrossPlatformFinalizerArg
   get rust_arc_decrement_strong_count_ArcEmbeddingBackendPtr => wire
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynEmbeddingBackendSendSync;
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynEmbeddingBackendSendSync;
 
   CrossPlatformFinalizerArg
   get rust_arc_decrement_strong_count_ArcOcrBackendPtr => wire
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynOcrBackendSendSync;
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynOcrBackendSendSync;
 
   CrossPlatformFinalizerArg
   get rust_arc_decrement_strong_count_ArcPostProcessorPtr => wire
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynPostProcessorSendSync;
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynPostProcessorSendSync;
 
   CrossPlatformFinalizerArg
   get rust_arc_decrement_strong_count_ArcRendererPtr => wire
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynRendererSendSync;
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynRendererSendSync;
 
   CrossPlatformFinalizerArg
   get rust_arc_decrement_strong_count_ArcRerankerBackendPtr => wire
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynRerankerBackendSendSync;
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynRerankerBackendSendSync;
 
   CrossPlatformFinalizerArg
   get rust_arc_decrement_strong_count_ArcTokenizerBackendPtr => wire
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynTokenizerBackendSendSync;
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynTokenizerBackendSendSync;
 
   CrossPlatformFinalizerArg
   get rust_arc_decrement_strong_count_ArcValidatorPtr => wire
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynValidatorSendSync;
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynValidatorSendSync;
 
   CrossPlatformFinalizerArg
   get rust_arc_decrement_strong_count_DocumentExtractorDartImplPtr => wire
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerDocumentExtractorDartImpl;
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerDocumentExtractorDartImpl;
 
   CrossPlatformFinalizerArg
   get rust_arc_decrement_strong_count_EmbeddingBackendDartImplPtr => wire
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerEmbeddingBackendDartImpl;
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerEmbeddingBackendDartImpl;
 
   CrossPlatformFinalizerArg
   get rust_arc_decrement_strong_count_MetaSchemaPtr => wire
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerMetaSchema;
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerMetaSchema;
 
   CrossPlatformFinalizerArg
   get rust_arc_decrement_strong_count_OcrBackendDartImplPtr => wire
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerOcrBackendDartImpl;
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerOcrBackendDartImpl;
 
   CrossPlatformFinalizerArg
   get rust_arc_decrement_strong_count_PostProcessorDartImplPtr => wire
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerPostProcessorDartImpl;
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerPostProcessorDartImpl;
 
   CrossPlatformFinalizerArg
   get rust_arc_decrement_strong_count_RegistryPtr => wire
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRegistry;
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRegistry;
 
   CrossPlatformFinalizerArg
   get rust_arc_decrement_strong_count_RendererDartImplPtr => wire
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRendererDartImpl;
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRendererDartImpl;
 
   CrossPlatformFinalizerArg
   get rust_arc_decrement_strong_count_RerankerBackendDartImplPtr => wire
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRerankerBackendDartImpl;
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRerankerBackendDartImpl;
 
   CrossPlatformFinalizerArg
   get rust_arc_decrement_strong_count_TokenCounterPtr => wire
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTokenCounter;
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTokenCounter;
 
   CrossPlatformFinalizerArg
   get rust_arc_decrement_strong_count_TokenizerBackendDartImplPtr => wire
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTokenizerBackendDartImpl;
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTokenizerBackendDartImpl;
 
   CrossPlatformFinalizerArg
   get rust_arc_decrement_strong_count_ValidatorDartImplPtr => wire
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerValidatorDartImpl;
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerValidatorDartImpl;
 
   @protected
   AnyhowException dco_decode_AnyhowException(dynamic raw);
@@ -424,6 +424,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   Map<String, String> dco_decode_Map_String_String_None(dynamic raw);
+
+  @protected
+  Map<String, double> dco_decode_Map_String_f_64_None(dynamic raw);
 
   @protected
   Map<String, PlatformInt64> dco_decode_Map_String_i_64_None(dynamic raw);
@@ -778,7 +781,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  LlmBudgetConfig dco_decode_box_autoadd_llm_budget_config(dynamic raw);
+
+  @protected
+  LlmCacheConfig dco_decode_box_autoadd_llm_cache_config(dynamic raw);
+
+  @protected
   LlmConfig dco_decode_box_autoadd_llm_config(dynamic raw);
+
+  @protected
+  LlmRateLimitConfig dco_decode_box_autoadd_llm_rate_limit_config(dynamic raw);
 
   @protected
   MultiVectorEmbedding dco_decode_box_autoadd_multi_vector_embedding(
@@ -1549,6 +1561,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<Float64List> dco_decode_list_list_prim_f_64_strict(dynamic raw);
 
   @protected
+  List<LlmProviderConfig> dco_decode_list_llm_provider_config(dynamic raw);
+
+  @protected
   List<LlmUsage> dco_decode_list_llm_usage(dynamic raw);
 
   @protected
@@ -1620,6 +1635,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<QrCode> dco_decode_list_qr_code(dynamic raw);
 
   @protected
+  List<(String, double)> dco_decode_list_record_string_f_64(dynamic raw);
+
+  @protected
   List<(String, PlatformInt64)> dco_decode_list_record_string_i_64(dynamic raw);
 
   @protected
@@ -1666,7 +1684,19 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ListType dco_decode_list_type(dynamic raw);
 
   @protected
+  LlmBudgetConfig dco_decode_llm_budget_config(dynamic raw);
+
+  @protected
+  LlmCacheConfig dco_decode_llm_cache_config(dynamic raw);
+
+  @protected
   LlmConfig dco_decode_llm_config(dynamic raw);
+
+  @protected
+  LlmProviderConfig dco_decode_llm_provider_config(dynamic raw);
+
+  @protected
+  LlmRateLimitConfig dco_decode_llm_rate_limit_config(dynamic raw);
 
   @protected
   LlmUsage dco_decode_llm_usage(dynamic raw);
@@ -1760,6 +1790,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   Map<String, String>? dco_decode_opt_Map_String_String_None(dynamic raw);
+
+  @protected
+  Map<String, double>? dco_decode_opt_Map_String_f_64_None(dynamic raw);
 
   @protected
   Map<String, PlatformInt64>? dco_decode_opt_Map_String_i_64_None(dynamic raw);
@@ -1913,7 +1946,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  LlmBudgetConfig? dco_decode_opt_box_autoadd_llm_budget_config(dynamic raw);
+
+  @protected
+  LlmCacheConfig? dco_decode_opt_box_autoadd_llm_cache_config(dynamic raw);
+
+  @protected
   LlmConfig? dco_decode_opt_box_autoadd_llm_config(dynamic raw);
+
+  @protected
+  LlmRateLimitConfig? dco_decode_opt_box_autoadd_llm_rate_limit_config(
+    dynamic raw,
+  );
 
   @protected
   MultiVectorEmbedding? dco_decode_opt_box_autoadd_multi_vector_embedding(
@@ -2107,6 +2151,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<List<String>>? dco_decode_opt_list_list_String(dynamic raw);
 
   @protected
+  List<LlmProviderConfig>? dco_decode_opt_list_llm_provider_config(dynamic raw);
+
+  @protected
   List<LlmUsage>? dco_decode_opt_list_llm_usage(dynamic raw);
 
   @protected
@@ -2278,6 +2325,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RecognizedTable dco_decode_recognized_table(dynamic raw);
+
+  @protected
+  (String, double) dco_decode_record_string_f_64(dynamic raw);
 
   @protected
   (String, PlatformInt64) dco_decode_record_string_i_64(dynamic raw);
@@ -2751,6 +2801,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  Map<String, double> sse_decode_Map_String_f_64_None(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   Map<String, PlatformInt64> sse_decode_Map_String_i_64_None(
     SseDeserializer deserializer,
   );
@@ -3181,7 +3236,22 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  LlmBudgetConfig sse_decode_box_autoadd_llm_budget_config(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  LlmCacheConfig sse_decode_box_autoadd_llm_cache_config(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   LlmConfig sse_decode_box_autoadd_llm_config(SseDeserializer deserializer);
+
+  @protected
+  LlmRateLimitConfig sse_decode_box_autoadd_llm_rate_limit_config(
+    SseDeserializer deserializer,
+  );
 
   @protected
   MultiVectorEmbedding sse_decode_box_autoadd_multi_vector_embedding(
@@ -4114,6 +4184,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  List<LlmProviderConfig> sse_decode_list_llm_provider_config(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<LlmUsage> sse_decode_list_llm_usage(SseDeserializer deserializer);
 
   @protected
@@ -4201,6 +4276,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<QrCode> sse_decode_list_qr_code(SseDeserializer deserializer);
 
   @protected
+  List<(String, double)> sse_decode_list_record_string_f_64(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<(String, PlatformInt64)> sse_decode_list_record_string_i_64(
     SseDeserializer deserializer,
   );
@@ -4263,7 +4343,23 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ListType sse_decode_list_type(SseDeserializer deserializer);
 
   @protected
+  LlmBudgetConfig sse_decode_llm_budget_config(SseDeserializer deserializer);
+
+  @protected
+  LlmCacheConfig sse_decode_llm_cache_config(SseDeserializer deserializer);
+
+  @protected
   LlmConfig sse_decode_llm_config(SseDeserializer deserializer);
+
+  @protected
+  LlmProviderConfig sse_decode_llm_provider_config(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  LlmRateLimitConfig sse_decode_llm_rate_limit_config(
+    SseDeserializer deserializer,
+  );
 
   @protected
   LlmUsage sse_decode_llm_usage(SseDeserializer deserializer);
@@ -4371,6 +4467,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   Map<String, String>? sse_decode_opt_Map_String_String_None(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  Map<String, double>? sse_decode_opt_Map_String_f_64_None(
     SseDeserializer deserializer,
   );
 
@@ -4580,7 +4681,22 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  LlmBudgetConfig? sse_decode_opt_box_autoadd_llm_budget_config(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  LlmCacheConfig? sse_decode_opt_box_autoadd_llm_cache_config(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   LlmConfig? sse_decode_opt_box_autoadd_llm_config(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  LlmRateLimitConfig? sse_decode_opt_box_autoadd_llm_rate_limit_config(
     SseDeserializer deserializer,
   );
 
@@ -4850,6 +4966,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  List<LlmProviderConfig>? sse_decode_opt_list_llm_provider_config(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<LlmUsage>? sse_decode_opt_list_llm_usage(SseDeserializer deserializer);
 
   @protected
@@ -5049,6 +5170,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RecognizedTable sse_decode_recognized_table(SseDeserializer deserializer);
+
+  @protected
+  (String, double) sse_decode_record_string_f_64(SseDeserializer deserializer);
 
   @protected
   (String, PlatformInt64) sse_decode_record_string_i_64(
@@ -5718,6 +5842,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_Map_String_f_64_None(
+    Map<String, double> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_Map_String_i_64_None(
     Map<String, PlatformInt64> self,
     SseSerializer serializer,
@@ -6253,8 +6383,26 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_llm_budget_config(
+    LlmBudgetConfig self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_llm_cache_config(
+    LlmCacheConfig self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_llm_config(
     LlmConfig self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_llm_rate_limit_config(
+    LlmRateLimitConfig self,
     SseSerializer serializer,
   );
 
@@ -7495,6 +7643,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_llm_provider_config(
+    List<LlmProviderConfig> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_llm_usage(List<LlmUsage> self, SseSerializer serializer);
 
   @protected
@@ -7615,6 +7769,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_list_qr_code(List<QrCode> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_record_string_f_64(
+    List<(String, double)> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_record_string_i_64(
     List<(String, PlatformInt64)> self,
     SseSerializer serializer,
@@ -7693,7 +7853,31 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_list_type(ListType self, SseSerializer serializer);
 
   @protected
+  void sse_encode_llm_budget_config(
+    LlmBudgetConfig self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_llm_cache_config(
+    LlmCacheConfig self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_llm_config(LlmConfig self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_llm_provider_config(
+    LlmProviderConfig self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_llm_rate_limit_config(
+    LlmRateLimitConfig self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_llm_usage(LlmUsage self, SseSerializer serializer);
@@ -7827,6 +8011,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_Map_String_String_None(
     Map<String, String>? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_Map_String_f_64_None(
+    Map<String, double>? self,
     SseSerializer serializer,
   );
 
@@ -8074,8 +8264,26 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_opt_box_autoadd_llm_budget_config(
+    LlmBudgetConfig? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_llm_cache_config(
+    LlmCacheConfig? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_llm_config(
     LlmConfig? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_llm_rate_limit_config(
+    LlmRateLimitConfig? self,
     SseSerializer serializer,
   );
 
@@ -8401,6 +8609,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_opt_list_llm_provider_config(
+    List<LlmProviderConfig>? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_list_llm_usage(
     List<LlmUsage>? self,
     SseSerializer serializer,
@@ -8655,6 +8869,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_recognized_table(
     RecognizedTable self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_record_string_f_64(
+    (String, double) self,
     SseSerializer serializer,
   );
 
@@ -9040,305 +9260,305 @@ class RustLibWire implements BaseWire {
   rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynDocumentExtractorSendSync(
     int ptr,
   ) => wasmModule
-  .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynDocumentExtractorSendSync(
-    ptr,
-  );
+      .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynDocumentExtractorSendSync(
+        ptr,
+      );
 
   void
   rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynDocumentExtractorSendSync(
     int ptr,
   ) => wasmModule
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynDocumentExtractorSendSync(
-    ptr,
-  );
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynDocumentExtractorSendSync(
+        ptr,
+      );
 
   void
   rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynEmbeddingBackendSendSync(
     int ptr,
   ) => wasmModule
-  .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynEmbeddingBackendSendSync(
-    ptr,
-  );
+      .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynEmbeddingBackendSendSync(
+        ptr,
+      );
 
   void
   rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynEmbeddingBackendSendSync(
     int ptr,
   ) => wasmModule
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynEmbeddingBackendSendSync(
-    ptr,
-  );
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynEmbeddingBackendSendSync(
+        ptr,
+      );
 
   void
   rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynOcrBackendSendSync(
     int ptr,
   ) => wasmModule
-  .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynOcrBackendSendSync(
-    ptr,
-  );
+      .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynOcrBackendSendSync(
+        ptr,
+      );
 
   void
   rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynOcrBackendSendSync(
     int ptr,
   ) => wasmModule
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynOcrBackendSendSync(
-    ptr,
-  );
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynOcrBackendSendSync(
+        ptr,
+      );
 
   void
   rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynPostProcessorSendSync(
     int ptr,
   ) => wasmModule
-  .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynPostProcessorSendSync(
-    ptr,
-  );
+      .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynPostProcessorSendSync(
+        ptr,
+      );
 
   void
   rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynPostProcessorSendSync(
     int ptr,
   ) => wasmModule
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynPostProcessorSendSync(
-    ptr,
-  );
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynPostProcessorSendSync(
+        ptr,
+      );
 
   void
   rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynRendererSendSync(
     int ptr,
   ) => wasmModule
-  .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynRendererSendSync(
-    ptr,
-  );
+      .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynRendererSendSync(
+        ptr,
+      );
 
   void
   rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynRendererSendSync(
     int ptr,
   ) => wasmModule
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynRendererSendSync(
-    ptr,
-  );
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynRendererSendSync(
+        ptr,
+      );
 
   void
   rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynRerankerBackendSendSync(
     int ptr,
   ) => wasmModule
-  .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynRerankerBackendSendSync(
-    ptr,
-  );
+      .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynRerankerBackendSendSync(
+        ptr,
+      );
 
   void
   rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynRerankerBackendSendSync(
     int ptr,
   ) => wasmModule
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynRerankerBackendSendSync(
-    ptr,
-  );
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynRerankerBackendSendSync(
+        ptr,
+      );
 
   void
   rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynTokenizerBackendSendSync(
     int ptr,
   ) => wasmModule
-  .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynTokenizerBackendSendSync(
-    ptr,
-  );
+      .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynTokenizerBackendSendSync(
+        ptr,
+      );
 
   void
   rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynTokenizerBackendSendSync(
     int ptr,
   ) => wasmModule
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynTokenizerBackendSendSync(
-    ptr,
-  );
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynTokenizerBackendSendSync(
+        ptr,
+      );
 
   void
   rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynValidatorSendSync(
     int ptr,
   ) => wasmModule
-  .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynValidatorSendSync(
-    ptr,
-  );
+      .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynValidatorSendSync(
+        ptr,
+      );
 
   void
   rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynValidatorSendSync(
     int ptr,
   ) => wasmModule
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynValidatorSendSync(
-    ptr,
-  );
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerArcdynValidatorSendSync(
+        ptr,
+      );
 
   void
   rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerDocumentExtractorDartImpl(
     int ptr,
   ) => wasmModule
-  .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerDocumentExtractorDartImpl(
-    ptr,
-  );
+      .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerDocumentExtractorDartImpl(
+        ptr,
+      );
 
   void
   rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerDocumentExtractorDartImpl(
     int ptr,
   ) => wasmModule
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerDocumentExtractorDartImpl(
-    ptr,
-  );
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerDocumentExtractorDartImpl(
+        ptr,
+      );
 
   void
   rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerEmbeddingBackendDartImpl(
     int ptr,
   ) => wasmModule
-  .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerEmbeddingBackendDartImpl(
-    ptr,
-  );
+      .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerEmbeddingBackendDartImpl(
+        ptr,
+      );
 
   void
   rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerEmbeddingBackendDartImpl(
     int ptr,
   ) => wasmModule
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerEmbeddingBackendDartImpl(
-    ptr,
-  );
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerEmbeddingBackendDartImpl(
+        ptr,
+      );
 
   void
   rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerMetaSchema(
     int ptr,
   ) => wasmModule
-  .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerMetaSchema(
-    ptr,
-  );
+      .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerMetaSchema(
+        ptr,
+      );
 
   void
   rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerMetaSchema(
     int ptr,
   ) => wasmModule
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerMetaSchema(
-    ptr,
-  );
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerMetaSchema(
+        ptr,
+      );
 
   void
   rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerOcrBackendDartImpl(
     int ptr,
   ) => wasmModule
-  .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerOcrBackendDartImpl(
-    ptr,
-  );
+      .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerOcrBackendDartImpl(
+        ptr,
+      );
 
   void
   rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerOcrBackendDartImpl(
     int ptr,
   ) => wasmModule
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerOcrBackendDartImpl(
-    ptr,
-  );
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerOcrBackendDartImpl(
+        ptr,
+      );
 
   void
   rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerPostProcessorDartImpl(
     int ptr,
   ) => wasmModule
-  .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerPostProcessorDartImpl(
-    ptr,
-  );
+      .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerPostProcessorDartImpl(
+        ptr,
+      );
 
   void
   rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerPostProcessorDartImpl(
     int ptr,
   ) => wasmModule
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerPostProcessorDartImpl(
-    ptr,
-  );
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerPostProcessorDartImpl(
+        ptr,
+      );
 
   void
   rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRegistry(
     int ptr,
   ) => wasmModule
-  .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRegistry(
-    ptr,
-  );
+      .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRegistry(
+        ptr,
+      );
 
   void
   rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRegistry(
     int ptr,
   ) => wasmModule
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRegistry(
-    ptr,
-  );
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRegistry(
+        ptr,
+      );
 
   void
   rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRendererDartImpl(
     int ptr,
   ) => wasmModule
-  .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRendererDartImpl(
-    ptr,
-  );
+      .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRendererDartImpl(
+        ptr,
+      );
 
   void
   rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRendererDartImpl(
     int ptr,
   ) => wasmModule
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRendererDartImpl(
-    ptr,
-  );
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRendererDartImpl(
+        ptr,
+      );
 
   void
   rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRerankerBackendDartImpl(
     int ptr,
   ) => wasmModule
-  .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRerankerBackendDartImpl(
-    ptr,
-  );
+      .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRerankerBackendDartImpl(
+        ptr,
+      );
 
   void
   rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRerankerBackendDartImpl(
     int ptr,
   ) => wasmModule
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRerankerBackendDartImpl(
-    ptr,
-  );
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRerankerBackendDartImpl(
+        ptr,
+      );
 
   void
   rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTokenCounter(
     int ptr,
   ) => wasmModule
-  .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTokenCounter(
-    ptr,
-  );
+      .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTokenCounter(
+        ptr,
+      );
 
   void
   rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTokenCounter(
     int ptr,
   ) => wasmModule
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTokenCounter(
-    ptr,
-  );
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTokenCounter(
+        ptr,
+      );
 
   void
   rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTokenizerBackendDartImpl(
     int ptr,
   ) => wasmModule
-  .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTokenizerBackendDartImpl(
-    ptr,
-  );
+      .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTokenizerBackendDartImpl(
+        ptr,
+      );
 
   void
   rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTokenizerBackendDartImpl(
     int ptr,
   ) => wasmModule
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTokenizerBackendDartImpl(
-    ptr,
-  );
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTokenizerBackendDartImpl(
+        ptr,
+      );
 
   void
   rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerValidatorDartImpl(
     int ptr,
   ) => wasmModule
-  .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerValidatorDartImpl(
-    ptr,
-  );
+      .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerValidatorDartImpl(
+        ptr,
+      );
 
   void
   rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerValidatorDartImpl(
     int ptr,
   ) => wasmModule
-  .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerValidatorDartImpl(
-    ptr,
-  );
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerValidatorDartImpl(
+        ptr,
+      );
 }
 
 @JS('wasm_bindgen')
