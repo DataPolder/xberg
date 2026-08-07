@@ -35,6 +35,14 @@ exclude = [
   "**/*.diff",
   "**/*.patch",
   "**/frb_generated.rs",
+  # Sibling outputs of the same flutter_rust_bridge run as `frb_generated.rs` above, plus
+  # the cbindgen headers. All are generator-owned: `cargo build` re-emits the headers and
+  # `flutter_rust_bridge_codegen` re-emits the dart, both unformatted. Committing a
+  # poly-formatted copy is an unstable equilibrium -- the next local build reverts it and
+  # the Format check goes red again. Let the generator's output be authoritative. ~keep
+  "**/xberg_bridge_generated/**",
+  "crates/xberg-ffi/include/*.h",
+  "packages/go/include/*.h",
   "charts/**",
   "plugin/.claude-plugin/**",
   "plugin/.codex-plugin/**",
