@@ -29,7 +29,7 @@ classifiers = [
   "Topic :: Text Processing :: Indexing",
   "Typing :: Typed",
 ]
-dependencies = ["xberg>=1.1.0,<1.1", "llama-index-core>=0.14.23,<0.15"]
+dependencies = ["xberg>=1.0.14,<2", "llama-index-core>=0.14.23,<0.15"]
 urls.Homepage = "https://github.com/xberg-io/xberg/tree/main/integrations/python/llama-index/readers/llama-index-readers-xberg"
 urls.Issues = "https://github.com/xberg-io/xberg/issues"
 urls.Repository = "https://github.com/xberg-io/xberg/tree/main/integrations/python/llama-index/readers/llama-index-readers-xberg"
