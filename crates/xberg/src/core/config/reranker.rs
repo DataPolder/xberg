@@ -197,7 +197,10 @@ pub enum RerankerModelType {
     /// (e.g. `"cohere/rerank-english-v3.0"`).
     Llm {
         /// LLM provider configuration specifying the model and API credentials.
-        llm: LlmConfig,
+        ///
+        /// Boxed for the same reason as `EmbeddingModelType::Llm` -- kept in step so the two
+        /// parallel enums present one shape to the generated bindings. ~keep
+        llm: Box<LlmConfig>,
     },
 
     /// In-process reranker registered via the plugin system.

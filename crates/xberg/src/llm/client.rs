@@ -122,7 +122,7 @@ fn build_client_config(config: &LlmConfig) -> crate::Result<ClientConfig> {
     let mut builder = to_liter_llm_config(config).into_client_builder();
 
     if let Some(ref headers) = config.headers {
-        for (key, value) in headers.iter() {
+        for (key, value) in headers {
             builder = builder.header(key.as_str(), value.as_str()).map_err(|e| {
                 let msg = format!("Invalid LLM header '{key}': {e}");
                 crate::XbergError::Validation {
@@ -259,7 +259,7 @@ mod tests {
             model: "openai/gpt-4o".to_string(),
             api_key: Some("test-key".to_string()),
             load_env: Some(true),
-            headers: Some(Box::new(headers)),
+            headers: Some(headers),
             ..LlmConfig::default()
         };
 
@@ -276,7 +276,7 @@ mod tests {
         let config = LlmConfig {
             model: "openai/gpt-4o".to_string(),
             api_key: Some("test-key".to_string()),
-            headers: Some(Box::new(headers)),
+            headers: Some(headers),
             ..LlmConfig::default()
         };
 
@@ -486,7 +486,7 @@ mod tests {
             session_token: Some("example-fake-token".to_string()),
             ..BedrockConfig::default()
         });
-        config.headers = Some(Box::new(headers));
+        config.headers = Some(headers);
 
         // Not `expect_err`: that needs `T: Debug` and liter-llm's `DefaultClient` does not
         // implement it, so the success arm has to be discarded by hand.
@@ -700,7 +700,7 @@ mod tests {
         let config = LlmConfig {
             model: "openai/gpt-4o".to_string(),
             api_key: Some("test-key".to_string()),
-            headers: Some(Box::new(headers)),
+            headers: Some(headers),
             cost_tracking: Some(true),
             ..LlmConfig::default()
         };
@@ -725,12 +725,12 @@ mod tests {
     fn test_to_liter_llm_config_forwards_providers_into_the_dto_boundary() {
         let config = LlmConfig {
             model: "openai/gpt-4o".to_string(),
-            providers: Some(Box::new(vec![LlmProviderConfig {
+            providers: Some(vec![LlmProviderConfig {
                 name: "my-provider".to_string(),
                 base_url: "https://my-llm.example.com/v1".to_string(),
                 auth_header: Some("X-Api-Key".to_string()),
                 model_prefixes: vec!["my-provider/".to_string()],
-            }])),
+            }]),
             ..LlmConfig::default()
         };
 

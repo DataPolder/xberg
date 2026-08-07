@@ -1247,11 +1247,11 @@ mod tests {
     async fn test_embed_texts_llm_inside_runtime_does_not_panic() {
         let config = crate::core::config::EmbeddingConfig {
             model: crate::core::config::EmbeddingModelType::Llm {
-                llm: crate::core::config::LlmConfig {
+                llm: Box::new(crate::core::config::LlmConfig {
                     model: "openai/text-embedding-3-small".to_string(),
                     api_key: Some("invalid-key-for-test".to_string()),
                     ..Default::default()
-                },
+                }),
             },
             ..Default::default()
         };

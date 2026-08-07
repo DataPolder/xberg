@@ -74,7 +74,7 @@ pub struct LlmConfig {
     /// Mirrors liter-llm's `ClientConfigBuilder::header`, for gateways or providers
     /// that require custom auth/routing headers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub headers: Option<Box<HashMap<String, String>>>,
+    pub headers: Option<HashMap<String, String>>,
 
     /// Custom provider configurations, in addition to liter-llm's built-in providers.
     ///
@@ -82,7 +82,7 @@ pub struct LlmConfig {
     /// and self-hosted model servers that are not in the built-in provider catalog.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
-    pub providers: Option<Box<Vec<LlmProviderConfig>>>,
+    pub providers: Option<Vec<LlmProviderConfig>>,
 
     /// Response cache configuration.
     ///
@@ -729,7 +729,7 @@ region = "us-east-1"
         let cfg = LlmConfig {
             model: "bedrock/anthropic.claude-3-sonnet-20240229-v1:0".to_string(),
             api_key: Some("sk-super-secret".to_string()),
-            headers: Some(Box::new(headers)),
+            headers: Some(headers),
             bedrock: Some(Box::new(BedrockConfig {
                 region: Some("eu-central-1".to_string()),
                 cross_region_prefix: Some("eu".to_string()),

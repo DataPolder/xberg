@@ -409,12 +409,12 @@ impl ExtractionConfig {
             if let Some(ref mut chunking) = self.chunking {
                 chunking.embedding = Some(super::super::processing::EmbeddingConfig {
                     model: super::super::processing::EmbeddingModelType::Llm {
-                        llm: super::super::llm::LlmConfig {
+                        llm: Box::new(super::super::llm::LlmConfig {
                             model: value,
                             api_key: None,
                             base_url: None,
                             ..Default::default()
-                        },
+                        }),
                     },
                     ..super::super::processing::EmbeddingConfig::default()
                 });

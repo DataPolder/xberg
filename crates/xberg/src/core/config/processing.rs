@@ -474,7 +474,11 @@ pub enum EmbeddingModelType {
     /// `"openai/text-embedding-3-small"`).
     Llm {
         /// LLM provider configuration specifying the model and API credentials.
-        llm: super::llm::LlmConfig,
+        ///
+        /// Boxed because `LlmConfig` carries liter-llm's full configuration surface and is
+        /// an order of magnitude larger than the other variants, which would otherwise make
+        /// every `Preset`/`Custom` value pay for it. ~keep
+        llm: Box<super::llm::LlmConfig>,
     },
 
     /// In-process embedding backend registered via the plugin system.
@@ -801,10 +805,10 @@ mod tests {
     #[test]
     fn test_embedding_model_type_llm_roundtrip() {
         let model_type = EmbeddingModelType::Llm {
-            llm: crate::core::config::llm::LlmConfig {
+            llm: Box::new(crate::core::config::llm::LlmConfig {
                 model: "openai/text-embedding-3-small".to_string(),
                 ..Default::default()
-            },
+            }),
         };
         let json = serde_json::to_string(&model_type).unwrap();
         assert!(json.contains("\"type\":\"llm\""));
