@@ -474,6 +474,53 @@ pub(super) fn execute_chunking(
                 });
             }
 
+            #[cfg(feature = "sparse-embeddings")]
+            if let Some(ref sparse_config) = resolved_config.sparse_embedding
+                && let Some(ref mut chunks) = result.chunks
+                && let Err(e) = crate::chunking::vectors::generate_sparse_vectors_for_chunks(chunks, sparse_config)
+            {
+                tracing::warn!("Sparse-embedding generation failed: {e}. Check that ONNX Runtime is installed.");
+                result.processing_warnings.push(ProcessingWarning {
+                    source: Cow::Borrowed("sparse_embedding"),
+                    message: Cow::Owned(e.to_string()),
+                });
+            }
+
+            #[cfg(not(feature = "sparse-embeddings"))]
+            if resolved_config.sparse_embedding.is_some() {
+                tracing::warn!(
+                    "Sparse-embedding config provided but sparse-embeddings feature is not enabled. Recompile with --features sparse-embeddings."
+                );
+                result.processing_warnings.push(ProcessingWarning {
+                    source: Cow::Borrowed("sparse_embedding"),
+                    message: Cow::Borrowed("sparse-embeddings feature not enabled"),
+                });
+            }
+
+            #[cfg(feature = "late-interaction")]
+            if let Some(ref late_config) = resolved_config.late_interaction
+                && let Some(ref mut chunks) = result.chunks
+                && let Err(e) =
+                    crate::chunking::vectors::generate_late_interaction_vectors_for_chunks(chunks, late_config)
+            {
+                tracing::warn!("Late-interaction generation failed: {e}. Check that ONNX Runtime is installed.");
+                result.processing_warnings.push(ProcessingWarning {
+                    source: Cow::Borrowed("late_interaction"),
+                    message: Cow::Owned(e.to_string()),
+                });
+            }
+
+            #[cfg(not(feature = "late-interaction"))]
+            if resolved_config.late_interaction.is_some() {
+                tracing::warn!(
+                    "Late-interaction config provided but late-interaction feature is not enabled. Recompile with --features late-interaction."
+                );
+                result.processing_warnings.push(ProcessingWarning {
+                    source: Cow::Borrowed("late_interaction"),
+                    message: Cow::Borrowed("late-interaction feature not enabled"),
+                });
+            }
+
             return Ok(());
         }
 
@@ -621,6 +668,53 @@ pub(super) fn execute_chunking(
                     result.processing_warnings.push(ProcessingWarning {
                         source: Cow::Borrowed("embedding"),
                         message: Cow::Borrowed("Embeddings feature not enabled"),
+                    });
+                }
+
+                #[cfg(feature = "sparse-embeddings")]
+                if let Some(ref sparse_config) = chunking_config.sparse_embedding
+                    && let Some(ref mut chunks) = result.chunks
+                    && let Err(e) = crate::chunking::vectors::generate_sparse_vectors_for_chunks(chunks, sparse_config)
+                {
+                    tracing::warn!("Sparse-embedding generation failed: {e}. Check that ONNX Runtime is installed.");
+                    result.processing_warnings.push(ProcessingWarning {
+                        source: Cow::Borrowed("sparse_embedding"),
+                        message: Cow::Owned(e.to_string()),
+                    });
+                }
+
+                #[cfg(not(feature = "sparse-embeddings"))]
+                if chunking_config.sparse_embedding.is_some() {
+                    tracing::warn!(
+                        "Sparse-embedding config provided but sparse-embeddings feature is not enabled. Recompile with --features sparse-embeddings."
+                    );
+                    result.processing_warnings.push(ProcessingWarning {
+                        source: Cow::Borrowed("sparse_embedding"),
+                        message: Cow::Borrowed("sparse-embeddings feature not enabled"),
+                    });
+                }
+
+                #[cfg(feature = "late-interaction")]
+                if let Some(ref late_config) = chunking_config.late_interaction
+                    && let Some(ref mut chunks) = result.chunks
+                    && let Err(e) =
+                        crate::chunking::vectors::generate_late_interaction_vectors_for_chunks(chunks, late_config)
+                {
+                    tracing::warn!("Late-interaction generation failed: {e}. Check that ONNX Runtime is installed.");
+                    result.processing_warnings.push(ProcessingWarning {
+                        source: Cow::Borrowed("late_interaction"),
+                        message: Cow::Owned(e.to_string()),
+                    });
+                }
+
+                #[cfg(not(feature = "late-interaction"))]
+                if chunking_config.late_interaction.is_some() {
+                    tracing::warn!(
+                        "Late-interaction config provided but late-interaction feature is not enabled. Recompile with --features late-interaction."
+                    );
+                    result.processing_warnings.push(ProcessingWarning {
+                        source: Cow::Borrowed("late_interaction"),
+                        message: Cow::Borrowed("late-interaction feature not enabled"),
                     });
                 }
             }

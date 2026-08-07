@@ -189,6 +189,25 @@ pub struct ChunkingConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub embedding: Option<EmbeddingConfig>,
 
+    /// Optional sparse (SPLADE) embedding configuration for chunk embeddings.
+    ///
+    /// When set, sparse vectors are generated for each chunk's content and attached
+    /// via [`crate::types::Chunk::sparse_embedding`]. Requires the `sparse-embeddings`
+    /// feature; without it, a warning is emitted and no sparse vectors are attached.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
+    pub sparse_embedding: Option<super::sparse_embedding::SparseEmbeddingConfig>,
+
+    /// Optional late-interaction (ColBERT) embedding configuration for chunk embeddings.
+    ///
+    /// When set, multi-vector embeddings are generated for each chunk's content and
+    /// attached via [`crate::types::Chunk::late_interaction`]. Requires the
+    /// `late-interaction` feature; without it, a warning is emitted and no
+    /// late-interaction vectors are attached.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
+    pub late_interaction: Option<super::late_interaction::LateInteractionConfig>,
+
     /// Use a preset configuration (overrides individual settings if provided).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preset: Option<String>,
@@ -298,6 +317,8 @@ impl ChunkingConfig {
             max_characters: preset.chunk_size,
             overlap: preset.overlap,
             embedding,
+            sparse_embedding: self.sparse_embedding.clone(),
+            late_interaction: self.late_interaction.clone(),
             trim: self.trim,
             chunker_type: self.chunker_type,
             preset: self.preset.clone(),
@@ -327,6 +348,8 @@ impl Default for ChunkingConfig {
             trim: true,
             chunker_type: ChunkerType::Text,
             embedding: None,
+            sparse_embedding: None,
+            late_interaction: None,
             preset: None,
             sizing: ChunkSizing::default(),
             prepend_heading_context: false,
@@ -926,5 +949,61 @@ mod tests {
     fn table_chunking_mode_defaults_to_split_when_field_absent() {
         let c: ChunkingConfig = serde_json::from_str("{}").unwrap();
         assert_eq!(c.table_chunking, TableChunkingMode::Split);
+    }
+
+    /// Regression guard for #268: a `ChunkingConfig` JSON payload written before
+    /// `sparse_embedding`/`late_interaction` existed (i.e. missing both keys) must still
+    /// deserialize, with both fields defaulting to `None`. `ChunkingConfig` is nested inside
+    /// `ExtractionConfig`, which is `#[serde(deny_unknown_fields)]` — this guards the other
+    /// direction of that contract: old payloads must not become invalid just because the
+    /// schema grew new optional fields.
+    #[test]
+    fn sparse_and_late_interaction_configs_default_to_none_when_absent_from_json() {
+        let c: ChunkingConfig = serde_json::from_str("{}").unwrap();
+        assert!(c.sparse_embedding.is_none());
+        assert!(c.late_interaction.is_none());
+    }
+
+    /// `ChunkingConfig::default()` must leave both new vector configs unset (#268) — no
+    /// behaviour change for existing callers who never opt in.
+    #[test]
+    fn chunking_config_default_has_no_sparse_or_late_interaction_config() {
+        let config = ChunkingConfig::default();
+        assert!(config.sparse_embedding.is_none());
+        assert!(config.late_interaction.is_none());
+    }
+
+    /// `resolve_preset()` must carry an explicitly-set `sparse_embedding`/`late_interaction`
+    /// config through unchanged (#268), the same way it already preserves `embedding`.
+    #[cfg(any(feature = "embeddings", feature = "chunking"))]
+    #[test]
+    fn resolve_preset_preserves_explicit_sparse_and_late_interaction_configs() {
+        let config = ChunkingConfig {
+            preset: Some("balanced".to_string()),
+            sparse_embedding: Some(crate::core::config::SparseEmbeddingConfig {
+                batch_size: 4,
+                ..Default::default()
+            }),
+            late_interaction: Some(crate::core::config::LateInteractionConfig {
+                batch_size: 8,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let resolved = config.resolve_preset();
+        assert_eq!(
+            resolved
+                .sparse_embedding
+                .expect("sparse_embedding must survive resolve_preset")
+                .batch_size,
+            4
+        );
+        assert_eq!(
+            resolved
+                .late_interaction
+                .expect("late_interaction must survive resolve_preset")
+                .batch_size,
+            8
+        );
     }
 }

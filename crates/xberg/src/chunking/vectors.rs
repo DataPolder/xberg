@@ -11,20 +11,18 @@
 //! [`crate::sparse_embeddings::embed_sparse`] / [`crate::late_interaction::embed_multi_vector`]
 //! engines and are gated behind the same Cargo features those functions require.
 //!
-//! # Pipeline wiring status (as of this writing)
+//! # Pipeline wiring
 //!
 //! [`crate::core::config::ChunkingConfig`] (defined in
-//! `crates/xberg/src/core/config/processing.rs`) has no `sparse_embedding` /
-//! `late_interaction` config fields, so
-//! `crate::core::pipeline::features::execute_chunking` cannot yet call
+//! `crates/xberg/src/core/config/processing.rs`) carries `sparse_embedding:
+//! Option<SparseEmbeddingConfig>` and `late_interaction: Option<LateInteractionConfig>`
+//! fields alongside the existing `embedding: Option<EmbeddingConfig>`.
+//! `crate::core::pipeline::features::execute_chunking` calls
 //! [`generate_sparse_vectors_for_chunks`] / [`generate_late_interaction_vectors_for_chunks`]
-//! automatically from a user-supplied config. Once `ChunkingConfig` grows
-//! `sparse_embedding: Option<SparseEmbeddingConfig>` and
-//! `late_interaction: Option<LateInteractionConfig>` fields (alongside the existing
-//! `embedding: Option<EmbeddingConfig>`), `execute_chunking` should call these functions
-//! the same way it calls `crate::embeddings::generate_embeddings_for_chunks` today —
-//! guarded by an `if let Some(ref config) = chunking_config.sparse_embedding` check, with
-//! failures pushed onto `result.processing_warnings` rather than aborting extraction.
+//! the same way it calls `crate::embeddings::generate_embeddings_for_chunks` — guarded by
+//! an `if let Some(ref config) = chunking_config.sparse_embedding` (respectively
+//! `late_interaction`) check, with failures pushed onto `result.processing_warnings`
+//! rather than aborting extraction.
 
 use crate::error::{Result, XbergError};
 use crate::types::Chunk;
@@ -64,18 +62,15 @@ pub(crate) fn apply_sparse_vectors(chunks: &mut [Chunk], vectors: Vec<crate::Spa
 /// Generate sparse (SPLADE) embeddings for `chunks`' content and attach them via
 /// [`apply_sparse_vectors`].
 ///
-/// Mirrors [`crate::embeddings::generate_embeddings_for_chunks`]. See the module docs
-/// for the pending pipeline call-site wiring.
+/// Mirrors [`crate::embeddings::generate_embeddings_for_chunks`]. Called from
+/// `crate::core::pipeline::features::execute_chunking` when
+/// `ChunkingConfig::sparse_embedding` is set — see the module docs.
 ///
 /// # Errors
 ///
 /// Returns an error if sparse-embedding generation fails (model load, ONNX Runtime
 /// unavailable, etc.) or if the returned vector count does not match `chunks.len()`.
-///
-/// `#[allow(dead_code)]`: not yet called from `execute_chunking` — see the module docs
-/// for the `ChunkingConfig` field this needs before it can be wired up.
 #[cfg(feature = "sparse-embeddings")]
-#[allow(dead_code)]
 pub(crate) fn generate_sparse_vectors_for_chunks(
     chunks: &mut [Chunk],
     config: &crate::core::config::SparseEmbeddingConfig,
@@ -128,18 +123,14 @@ pub(crate) fn apply_late_interaction_vectors(
 /// Generate ColBERT late-interaction embeddings for `chunks`' content (as documents,
 /// i.e. `is_query = false`) and attach them via [`apply_late_interaction_vectors`].
 ///
-/// See [`generate_sparse_vectors_for_chunks`] and the module docs for the pending
-/// pipeline call-site wiring.
+/// See [`generate_sparse_vectors_for_chunks`] and the module docs for the pipeline
+/// call-site wiring.
 ///
 /// # Errors
 ///
 /// Returns an error if late-interaction generation fails (model load, ONNX Runtime
 /// unavailable, etc.) or if the returned vector count does not match `chunks.len()`.
-///
-/// `#[allow(dead_code)]`: not yet called from `execute_chunking` — see the module docs
-/// for the `ChunkingConfig` field this needs before it can be wired up.
 #[cfg(feature = "late-interaction")]
-#[allow(dead_code)]
 pub(crate) fn generate_late_interaction_vectors_for_chunks(
     chunks: &mut [Chunk],
     config: &crate::core::config::LateInteractionConfig,
