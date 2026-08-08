@@ -8281,7 +8281,10 @@ fn wire__crate__map_url_impl(
         },
     )
 }
-#[cfg(any(any(feature = "late-interaction-presets", feature = "late-interaction"),feature = "late-interaction-presets"))]
+#[cfg(any(
+    any(feature = "late-interaction-presets", feature = "late-interaction"),
+    feature = "late-interaction-presets"
+))]
 fn wire__crate__max_sim_rank_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -8311,7 +8314,10 @@ fn wire__crate__max_sim_rank_impl(
         },
     )
 }
-#[cfg(any(any(feature = "late-interaction-presets", feature = "late-interaction"),feature = "late-interaction-presets"))]
+#[cfg(any(
+    any(feature = "late-interaction-presets", feature = "late-interaction"),
+    feature = "late-interaction-presets"
+))]
 fn wire__crate__max_sim_score_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -9284,6 +9290,40 @@ const _: fn() = || {
         let _: bool = CrawlConfig.save_browser_profile;
         let _: crate::SsrfPolicy = CrawlConfig.ssrf;
     }
+    match None::<crate::CredentialProviderConfig>.unwrap() {
+        crate::CredentialProviderConfig::AzureAd {
+            tenant_id,
+            client_id,
+            client_secret,
+            scope,
+        } => {
+            let _: String = tenant_id;
+            let _: String = client_id;
+            let _: String = client_secret;
+            let _: String = scope;
+        }
+        crate::CredentialProviderConfig::VertexOauth2 {
+            service_account_key_file,
+            scope,
+        } => {
+            let _: String = service_account_key_file;
+            let _: String = scope;
+        }
+        crate::CredentialProviderConfig::VertexAdc { scope } => {
+            let _: String = scope;
+        }
+        crate::CredentialProviderConfig::BedrockWebIdentity {
+            role_arn,
+            token_file,
+            session_name,
+            region,
+        } => {
+            let _: String = role_arn;
+            let _: String = token_file;
+            let _: String = session_name;
+            let _: String = region;
+        }
+    }
     {
         let CsvConfig = None::<crate::CsvConfig>.unwrap();
         let _: Option<String> = CsvConfig.delimiter;
@@ -10224,6 +10264,8 @@ const _: fn() = || {
         let _: Option<i64> = LlmConfig.max_retries;
         let _: Option<f64> = LlmConfig.temperature;
         let _: Option<i64> = LlmConfig.max_tokens;
+        let _: Option<String> = LlmConfig.reasoning_effort;
+        let _: Option<String> = LlmConfig.extra_body;
         let _: Option<bool> = LlmConfig.load_env;
         let _: Option<std::collections::HashMap<String, String>> = LlmConfig.headers;
         let _: Option<Vec<crate::LlmProviderConfig>> = LlmConfig.providers;
@@ -10235,6 +10277,7 @@ const _: fn() = || {
         let _: Option<i64> = LlmConfig.cooldown_secs;
         let _: Option<i64> = LlmConfig.health_check_secs;
         let _: Option<crate::BedrockConfig> = LlmConfig.bedrock;
+        let _: Option<crate::CredentialProviderConfig> = LlmConfig.credential_provider;
     }
     {
         let LlmProviderConfig = None::<crate::LlmProviderConfig>.unwrap();
@@ -13457,6 +13500,54 @@ impl SseDecode for crate::CrawlConfig {
             save_browser_profile: var_saveBrowserProfile,
             ssrf: var_ssrf,
         };
+    }
+}
+
+impl SseDecode for crate::CredentialProviderConfig {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut tag_ = <i32>::sse_decode(deserializer);
+        match tag_ {
+            0 => {
+                let mut var_tenantId = <String>::sse_decode(deserializer);
+                let mut var_clientId = <String>::sse_decode(deserializer);
+                let mut var_clientSecret = <String>::sse_decode(deserializer);
+                let mut var_scope = <String>::sse_decode(deserializer);
+                return crate::CredentialProviderConfig::AzureAd {
+                    tenant_id: var_tenantId,
+                    client_id: var_clientId,
+                    client_secret: var_clientSecret,
+                    scope: var_scope,
+                };
+            }
+            1 => {
+                let mut var_serviceAccountKeyFile = <String>::sse_decode(deserializer);
+                let mut var_scope = <String>::sse_decode(deserializer);
+                return crate::CredentialProviderConfig::VertexOauth2 {
+                    service_account_key_file: var_serviceAccountKeyFile,
+                    scope: var_scope,
+                };
+            }
+            2 => {
+                let mut var_scope = <String>::sse_decode(deserializer);
+                return crate::CredentialProviderConfig::VertexAdc { scope: var_scope };
+            }
+            3 => {
+                let mut var_roleArn = <String>::sse_decode(deserializer);
+                let mut var_tokenFile = <String>::sse_decode(deserializer);
+                let mut var_sessionName = <String>::sse_decode(deserializer);
+                let mut var_region = <String>::sse_decode(deserializer);
+                return crate::CredentialProviderConfig::BedrockWebIdentity {
+                    role_arn: var_roleArn,
+                    token_file: var_tokenFile,
+                    session_name: var_sessionName,
+                    region: var_region,
+                };
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
     }
 }
 
@@ -16862,6 +16953,8 @@ impl SseDecode for crate::LlmConfig {
         let mut var_maxRetries = <Option<i64>>::sse_decode(deserializer);
         let mut var_temperature = <Option<f64>>::sse_decode(deserializer);
         let mut var_maxTokens = <Option<i64>>::sse_decode(deserializer);
+        let mut var_reasoningEffort = <Option<String>>::sse_decode(deserializer);
+        let mut var_extraBody = <Option<String>>::sse_decode(deserializer);
         let mut var_loadEnv = <Option<bool>>::sse_decode(deserializer);
         let mut var_headers = <Option<std::collections::HashMap<String, String>>>::sse_decode(deserializer);
         let mut var_providers = <Option<Vec<crate::LlmProviderConfig>>>::sse_decode(deserializer);
@@ -16873,6 +16966,7 @@ impl SseDecode for crate::LlmConfig {
         let mut var_cooldownSecs = <Option<i64>>::sse_decode(deserializer);
         let mut var_healthCheckSecs = <Option<i64>>::sse_decode(deserializer);
         let mut var_bedrock = <Option<crate::BedrockConfig>>::sse_decode(deserializer);
+        let mut var_credentialProvider = <Option<crate::CredentialProviderConfig>>::sse_decode(deserializer);
         return crate::LlmConfig {
             model: var_model,
             api_key: var_apiKey,
@@ -16881,6 +16975,8 @@ impl SseDecode for crate::LlmConfig {
             max_retries: var_maxRetries,
             temperature: var_temperature,
             max_tokens: var_maxTokens,
+            reasoning_effort: var_reasoningEffort,
+            extra_body: var_extraBody,
             load_env: var_loadEnv,
             headers: var_headers,
             providers: var_providers,
@@ -16892,6 +16988,7 @@ impl SseDecode for crate::LlmConfig {
             cooldown_secs: var_cooldownSecs,
             health_check_secs: var_healthCheckSecs,
             bedrock: var_bedrock,
+            credential_provider: var_credentialProvider,
         };
     }
 }
@@ -17869,6 +17966,17 @@ impl SseDecode for Option<crate::CoreProperties> {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         if (<bool>::sse_decode(deserializer)) {
             return Some(<crate::CoreProperties>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::CredentialProviderConfig> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::CredentialProviderConfig>::sse_decode(deserializer));
         } else {
             return None;
         }
@@ -21487,9 +21595,15 @@ fn pde_ffi_dispatcher_primary_impl(
         278 => wire__crate__list_validators_impl(port, ptr, rust_vec_len, data_len),
         #[cfg(feature = "url-ingestion")]
         279 => wire__crate__map_url_impl(port, ptr, rust_vec_len, data_len),
-        #[cfg(any(any(feature = "late-interaction-presets", feature = "late-interaction"),feature = "late-interaction-presets"))]
+        #[cfg(any(
+            any(feature = "late-interaction-presets", feature = "late-interaction"),
+            feature = "late-interaction-presets"
+        ))]
         280 => wire__crate__max_sim_rank_impl(port, ptr, rust_vec_len, data_len),
-        #[cfg(any(any(feature = "late-interaction-presets", feature = "late-interaction"),feature = "late-interaction-presets"))]
+        #[cfg(any(
+            any(feature = "late-interaction-presets", feature = "late-interaction"),
+            feature = "late-interaction-presets"
+        ))]
         281 => wire__crate__max_sim_score_impl(port, ptr, rust_vec_len, data_len),
         282 => wire__crate__register_document_extractor_impl(port, ptr, rust_vec_len, data_len),
         283 => wire__crate__register_embedding_backend_impl(port, ptr, rust_vec_len, data_len),
@@ -22928,6 +23042,62 @@ impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::CrawlConfig> {
 impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for FrbWrapper<crate::CrawlConfig> {}
 impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<crate::CrawlConfig>> for crate::CrawlConfig {
     fn into_into_dart(self) -> FrbWrapper<crate::CrawlConfig> {
+        self.into()
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::CredentialProviderConfig> {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self.0 {
+            crate::CredentialProviderConfig::AzureAd {
+                tenant_id,
+                client_id,
+                client_secret,
+                scope,
+            } => [
+                0.into_dart(),
+                tenant_id.into_into_dart().into_dart(),
+                client_id.into_into_dart().into_dart(),
+                client_secret.into_into_dart().into_dart(),
+                scope.into_into_dart().into_dart(),
+            ]
+            .into_dart(),
+            crate::CredentialProviderConfig::VertexOauth2 {
+                service_account_key_file,
+                scope,
+            } => [
+                1.into_dart(),
+                service_account_key_file.into_into_dart().into_dart(),
+                scope.into_into_dart().into_dart(),
+            ]
+            .into_dart(),
+            crate::CredentialProviderConfig::VertexAdc { scope } => {
+                [2.into_dart(), scope.into_into_dart().into_dart()].into_dart()
+            }
+            crate::CredentialProviderConfig::BedrockWebIdentity {
+                role_arn,
+                token_file,
+                session_name,
+                region,
+            } => [
+                3.into_dart(),
+                role_arn.into_into_dart().into_dart(),
+                token_file.into_into_dart().into_dart(),
+                session_name.into_into_dart().into_dart(),
+                region.into_into_dart().into_dart(),
+            ]
+            .into_dart(),
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for FrbWrapper<crate::CredentialProviderConfig> {}
+impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<crate::CredentialProviderConfig>>
+    for crate::CredentialProviderConfig
+{
+    fn into_into_dart(self) -> FrbWrapper<crate::CredentialProviderConfig> {
         self.into()
     }
 }
@@ -25270,6 +25440,8 @@ impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::LlmConfig> {
             self.0.max_retries.into_into_dart().into_dart(),
             self.0.temperature.into_into_dart().into_dart(),
             self.0.max_tokens.into_into_dart().into_dart(),
+            self.0.reasoning_effort.into_into_dart().into_dart(),
+            self.0.extra_body.into_into_dart().into_dart(),
             self.0.load_env.into_into_dart().into_dart(),
             self.0.headers.into_into_dart().into_dart(),
             self.0.providers.into_into_dart().into_dart(),
@@ -25281,6 +25453,7 @@ impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::LlmConfig> {
             self.0.cooldown_secs.into_into_dart().into_dart(),
             self.0.health_check_secs.into_into_dart().into_dart(),
             self.0.bedrock.into_into_dart().into_dart(),
+            self.0.credential_provider.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -29585,6 +29758,53 @@ impl SseEncode for crate::CrawlConfig {
     }
 }
 
+impl SseEncode for crate::CredentialProviderConfig {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        match self {
+            crate::CredentialProviderConfig::AzureAd {
+                tenant_id,
+                client_id,
+                client_secret,
+                scope,
+            } => {
+                <i32>::sse_encode(0, serializer);
+                <String>::sse_encode(tenant_id, serializer);
+                <String>::sse_encode(client_id, serializer);
+                <String>::sse_encode(client_secret, serializer);
+                <String>::sse_encode(scope, serializer);
+            }
+            crate::CredentialProviderConfig::VertexOauth2 {
+                service_account_key_file,
+                scope,
+            } => {
+                <i32>::sse_encode(1, serializer);
+                <String>::sse_encode(service_account_key_file, serializer);
+                <String>::sse_encode(scope, serializer);
+            }
+            crate::CredentialProviderConfig::VertexAdc { scope } => {
+                <i32>::sse_encode(2, serializer);
+                <String>::sse_encode(scope, serializer);
+            }
+            crate::CredentialProviderConfig::BedrockWebIdentity {
+                role_arn,
+                token_file,
+                session_name,
+                region,
+            } => {
+                <i32>::sse_encode(3, serializer);
+                <String>::sse_encode(role_arn, serializer);
+                <String>::sse_encode(token_file, serializer);
+                <String>::sse_encode(session_name, serializer);
+                <String>::sse_encode(region, serializer);
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+
 impl SseEncode for crate::CsvConfig {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -32191,6 +32411,8 @@ impl SseEncode for crate::LlmConfig {
         <Option<i64>>::sse_encode(self.max_retries, serializer);
         <Option<f64>>::sse_encode(self.temperature, serializer);
         <Option<i64>>::sse_encode(self.max_tokens, serializer);
+        <Option<String>>::sse_encode(self.reasoning_effort, serializer);
+        <Option<String>>::sse_encode(self.extra_body, serializer);
         <Option<bool>>::sse_encode(self.load_env, serializer);
         <Option<std::collections::HashMap<String, String>>>::sse_encode(self.headers, serializer);
         <Option<Vec<crate::LlmProviderConfig>>>::sse_encode(self.providers, serializer);
@@ -32202,6 +32424,7 @@ impl SseEncode for crate::LlmConfig {
         <Option<i64>>::sse_encode(self.cooldown_secs, serializer);
         <Option<i64>>::sse_encode(self.health_check_secs, serializer);
         <Option<crate::BedrockConfig>>::sse_encode(self.bedrock, serializer);
+        <Option<crate::CredentialProviderConfig>>::sse_encode(self.credential_provider, serializer);
     }
 }
 
@@ -32969,6 +33192,16 @@ impl SseEncode for Option<crate::CoreProperties> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <crate::CoreProperties>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::CredentialProviderConfig> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::CredentialProviderConfig>::sse_encode(value, serializer);
         }
     }
 }

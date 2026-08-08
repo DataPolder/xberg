@@ -31,10 +31,6 @@
 			"value": 10
 		}
 	],
-	"skip": {
-		"languages": ["wasm"],
-		"reason": "WASM cannot access filesystem; use bytes input with file content instead"
-	},
 	"config": {
 		"security_limits": {
 			"max_archive_size": 104857600,

@@ -37,10 +37,6 @@
 			"values": ["May 5, 2023", "To Whom it May Concern"]
 		}
 	],
-	"skip": {
-		"languages": ["wasm"],
-		"reason": "WASM cannot access filesystem; use bytes input with file content instead"
-	},
 	"call": "extract",
 	"config": {}
 }

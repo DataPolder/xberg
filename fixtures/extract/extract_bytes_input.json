@@ -4,10 +4,6 @@
 	"description": "extract bytes input from PDF document",
 	"tags": ["extract", "bytes", "api"],
 	"call": "extract",
-	"skip": {
-		"languages": ["wasm"],
-		"reason": "WASM e2e uses dedicated browser-safe fixtures for bytes input"
-	},
 	"input": {
 		"kind": "bytes",
 		"bytes": [

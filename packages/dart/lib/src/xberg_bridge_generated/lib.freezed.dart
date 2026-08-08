@@ -1853,6 +1853,471 @@ as PlatformInt64,
 }
 
 /// @nodoc
+mixin _$CredentialProviderConfig {
+
+
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is CredentialProviderConfig);
+}
+
+
+@override
+int get hashCode => runtimeType.hashCode;
+
+@override
+String toString() {
+  return 'CredentialProviderConfig()';
+}
+
+
+}
+
+/// @nodoc
+class $CredentialProviderConfigCopyWith<$Res>  {
+$CredentialProviderConfigCopyWith(CredentialProviderConfig _, $Res Function(CredentialProviderConfig) __);
+}
+
+
+/// Adds pattern-matching-related methods to [CredentialProviderConfig].
+extension CredentialProviderConfigPatterns on CredentialProviderConfig {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( CredentialProviderConfig_AzureAd value)?  azureAd,TResult Function( CredentialProviderConfig_VertexOauth2 value)?  vertexOauth2,TResult Function( CredentialProviderConfig_VertexAdc value)?  vertexAdc,TResult Function( CredentialProviderConfig_BedrockWebIdentity value)?  bedrockWebIdentity,required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case CredentialProviderConfig_AzureAd() when azureAd != null:
+return azureAd(_that);case CredentialProviderConfig_VertexOauth2() when vertexOauth2 != null:
+return vertexOauth2(_that);case CredentialProviderConfig_VertexAdc() when vertexAdc != null:
+return vertexAdc(_that);case CredentialProviderConfig_BedrockWebIdentity() when bedrockWebIdentity != null:
+return bedrockWebIdentity(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( CredentialProviderConfig_AzureAd value)  azureAd,required TResult Function( CredentialProviderConfig_VertexOauth2 value)  vertexOauth2,required TResult Function( CredentialProviderConfig_VertexAdc value)  vertexAdc,required TResult Function( CredentialProviderConfig_BedrockWebIdentity value)  bedrockWebIdentity,}){
+final _that = this;
+switch (_that) {
+case CredentialProviderConfig_AzureAd():
+return azureAd(_that);case CredentialProviderConfig_VertexOauth2():
+return vertexOauth2(_that);case CredentialProviderConfig_VertexAdc():
+return vertexAdc(_that);case CredentialProviderConfig_BedrockWebIdentity():
+return bedrockWebIdentity(_that);}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( CredentialProviderConfig_AzureAd value)?  azureAd,TResult? Function( CredentialProviderConfig_VertexOauth2 value)?  vertexOauth2,TResult? Function( CredentialProviderConfig_VertexAdc value)?  vertexAdc,TResult? Function( CredentialProviderConfig_BedrockWebIdentity value)?  bedrockWebIdentity,}){
+final _that = this;
+switch (_that) {
+case CredentialProviderConfig_AzureAd() when azureAd != null:
+return azureAd(_that);case CredentialProviderConfig_VertexOauth2() when vertexOauth2 != null:
+return vertexOauth2(_that);case CredentialProviderConfig_VertexAdc() when vertexAdc != null:
+return vertexAdc(_that);case CredentialProviderConfig_BedrockWebIdentity() when bedrockWebIdentity != null:
+return bedrockWebIdentity(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( String tenantId,  String clientId,  String clientSecret,  String scope)?  azureAd,TResult Function( String serviceAccountKeyFile,  String scope)?  vertexOauth2,TResult Function( String scope)?  vertexAdc,TResult Function( String roleArn,  String tokenFile,  String sessionName,  String region)?  bedrockWebIdentity,required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case CredentialProviderConfig_AzureAd() when azureAd != null:
+return azureAd(_that.tenantId,_that.clientId,_that.clientSecret,_that.scope);case CredentialProviderConfig_VertexOauth2() when vertexOauth2 != null:
+return vertexOauth2(_that.serviceAccountKeyFile,_that.scope);case CredentialProviderConfig_VertexAdc() when vertexAdc != null:
+return vertexAdc(_that.scope);case CredentialProviderConfig_BedrockWebIdentity() when bedrockWebIdentity != null:
+return bedrockWebIdentity(_that.roleArn,_that.tokenFile,_that.sessionName,_that.region);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( String tenantId,  String clientId,  String clientSecret,  String scope)  azureAd,required TResult Function( String serviceAccountKeyFile,  String scope)  vertexOauth2,required TResult Function( String scope)  vertexAdc,required TResult Function( String roleArn,  String tokenFile,  String sessionName,  String region)  bedrockWebIdentity,}) {final _that = this;
+switch (_that) {
+case CredentialProviderConfig_AzureAd():
+return azureAd(_that.tenantId,_that.clientId,_that.clientSecret,_that.scope);case CredentialProviderConfig_VertexOauth2():
+return vertexOauth2(_that.serviceAccountKeyFile,_that.scope);case CredentialProviderConfig_VertexAdc():
+return vertexAdc(_that.scope);case CredentialProviderConfig_BedrockWebIdentity():
+return bedrockWebIdentity(_that.roleArn,_that.tokenFile,_that.sessionName,_that.region);}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( String tenantId,  String clientId,  String clientSecret,  String scope)?  azureAd,TResult? Function( String serviceAccountKeyFile,  String scope)?  vertexOauth2,TResult? Function( String scope)?  vertexAdc,TResult? Function( String roleArn,  String tokenFile,  String sessionName,  String region)?  bedrockWebIdentity,}) {final _that = this;
+switch (_that) {
+case CredentialProviderConfig_AzureAd() when azureAd != null:
+return azureAd(_that.tenantId,_that.clientId,_that.clientSecret,_that.scope);case CredentialProviderConfig_VertexOauth2() when vertexOauth2 != null:
+return vertexOauth2(_that.serviceAccountKeyFile,_that.scope);case CredentialProviderConfig_VertexAdc() when vertexAdc != null:
+return vertexAdc(_that.scope);case CredentialProviderConfig_BedrockWebIdentity() when bedrockWebIdentity != null:
+return bedrockWebIdentity(_that.roleArn,_that.tokenFile,_that.sessionName,_that.region);case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+
+
+class CredentialProviderConfig_AzureAd extends CredentialProviderConfig {
+  const CredentialProviderConfig_AzureAd({required this.tenantId, required this.clientId, required this.clientSecret, required this.scope}): super._();
+
+
+/// Azure AD tenant ID.
+ final  String tenantId;
+/// Application (client) ID.
+ final  String clientId;
+/// Client secret value. Secret — never logged.
+ final  String clientSecret;
+/// OAuth2 scope. Defaults to liter-llm's own
+/// `https://cognitiveservices.azure.com/.default` when unset.
+ final  String scope;
+
+/// Create a copy of CredentialProviderConfig
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$CredentialProviderConfig_AzureAdCopyWith<CredentialProviderConfig_AzureAd> get copyWith => _$CredentialProviderConfig_AzureAdCopyWithImpl<CredentialProviderConfig_AzureAd>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is CredentialProviderConfig_AzureAd&&(identical(other.tenantId, tenantId) || other.tenantId == tenantId)&&(identical(other.clientId, clientId) || other.clientId == clientId)&&(identical(other.clientSecret, clientSecret) || other.clientSecret == clientSecret)&&(identical(other.scope, scope) || other.scope == scope));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,tenantId,clientId,clientSecret,scope);
+
+@override
+String toString() {
+  return 'CredentialProviderConfig.azureAd(tenantId: $tenantId, clientId: $clientId, clientSecret: $clientSecret, scope: $scope)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $CredentialProviderConfig_AzureAdCopyWith<$Res> implements $CredentialProviderConfigCopyWith<$Res> {
+  factory $CredentialProviderConfig_AzureAdCopyWith(CredentialProviderConfig_AzureAd value, $Res Function(CredentialProviderConfig_AzureAd) _then) = _$CredentialProviderConfig_AzureAdCopyWithImpl;
+@useResult
+$Res call({
+ String tenantId, String clientId, String clientSecret, String scope
+});
+
+
+
+
+}
+/// @nodoc
+class _$CredentialProviderConfig_AzureAdCopyWithImpl<$Res>
+    implements $CredentialProviderConfig_AzureAdCopyWith<$Res> {
+  _$CredentialProviderConfig_AzureAdCopyWithImpl(this._self, this._then);
+
+  final CredentialProviderConfig_AzureAd _self;
+  final $Res Function(CredentialProviderConfig_AzureAd) _then;
+
+/// Create a copy of CredentialProviderConfig
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? tenantId = null,Object? clientId = null,Object? clientSecret = null,Object? scope = null,}) {
+  return _then(CredentialProviderConfig_AzureAd(
+tenantId: null == tenantId ? _self.tenantId : tenantId // ignore: cast_nullable_to_non_nullable
+as String,clientId: null == clientId ? _self.clientId : clientId // ignore: cast_nullable_to_non_nullable
+as String,clientSecret: null == clientSecret ? _self.clientSecret : clientSecret // ignore: cast_nullable_to_non_nullable
+as String,scope: null == scope ? _self.scope : scope // ignore: cast_nullable_to_non_nullable
+as String,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class CredentialProviderConfig_VertexOauth2 extends CredentialProviderConfig {
+  const CredentialProviderConfig_VertexOauth2({required this.serviceAccountKeyFile, required this.scope}): super._();
+
+
+/// Path to a Google service-account JSON key file (the same file
+/// `GOOGLE_APPLICATION_CREDENTIALS` would point to).
+ final  String serviceAccountKeyFile;
+/// OAuth2 scope. Defaults to liter-llm's own Vertex AI scope when unset.
+ final  String scope;
+
+/// Create a copy of CredentialProviderConfig
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$CredentialProviderConfig_VertexOauth2CopyWith<CredentialProviderConfig_VertexOauth2> get copyWith => _$CredentialProviderConfig_VertexOauth2CopyWithImpl<CredentialProviderConfig_VertexOauth2>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is CredentialProviderConfig_VertexOauth2&&(identical(other.serviceAccountKeyFile, serviceAccountKeyFile) || other.serviceAccountKeyFile == serviceAccountKeyFile)&&(identical(other.scope, scope) || other.scope == scope));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,serviceAccountKeyFile,scope);
+
+@override
+String toString() {
+  return 'CredentialProviderConfig.vertexOauth2(serviceAccountKeyFile: $serviceAccountKeyFile, scope: $scope)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $CredentialProviderConfig_VertexOauth2CopyWith<$Res> implements $CredentialProviderConfigCopyWith<$Res> {
+  factory $CredentialProviderConfig_VertexOauth2CopyWith(CredentialProviderConfig_VertexOauth2 value, $Res Function(CredentialProviderConfig_VertexOauth2) _then) = _$CredentialProviderConfig_VertexOauth2CopyWithImpl;
+@useResult
+$Res call({
+ String serviceAccountKeyFile, String scope
+});
+
+
+
+
+}
+/// @nodoc
+class _$CredentialProviderConfig_VertexOauth2CopyWithImpl<$Res>
+    implements $CredentialProviderConfig_VertexOauth2CopyWith<$Res> {
+  _$CredentialProviderConfig_VertexOauth2CopyWithImpl(this._self, this._then);
+
+  final CredentialProviderConfig_VertexOauth2 _self;
+  final $Res Function(CredentialProviderConfig_VertexOauth2) _then;
+
+/// Create a copy of CredentialProviderConfig
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? serviceAccountKeyFile = null,Object? scope = null,}) {
+  return _then(CredentialProviderConfig_VertexOauth2(
+serviceAccountKeyFile: null == serviceAccountKeyFile ? _self.serviceAccountKeyFile : serviceAccountKeyFile // ignore: cast_nullable_to_non_nullable
+as String,scope: null == scope ? _self.scope : scope // ignore: cast_nullable_to_non_nullable
+as String,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class CredentialProviderConfig_VertexAdc extends CredentialProviderConfig {
+  const CredentialProviderConfig_VertexAdc({required this.scope}): super._();
+
+
+/// OAuth2 scope. Defaults to liter-llm's own Vertex AI scope when unset.
+ final  String scope;
+
+/// Create a copy of CredentialProviderConfig
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$CredentialProviderConfig_VertexAdcCopyWith<CredentialProviderConfig_VertexAdc> get copyWith => _$CredentialProviderConfig_VertexAdcCopyWithImpl<CredentialProviderConfig_VertexAdc>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is CredentialProviderConfig_VertexAdc&&(identical(other.scope, scope) || other.scope == scope));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,scope);
+
+@override
+String toString() {
+  return 'CredentialProviderConfig.vertexAdc(scope: $scope)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $CredentialProviderConfig_VertexAdcCopyWith<$Res> implements $CredentialProviderConfigCopyWith<$Res> {
+  factory $CredentialProviderConfig_VertexAdcCopyWith(CredentialProviderConfig_VertexAdc value, $Res Function(CredentialProviderConfig_VertexAdc) _then) = _$CredentialProviderConfig_VertexAdcCopyWithImpl;
+@useResult
+$Res call({
+ String scope
+});
+
+
+
+
+}
+/// @nodoc
+class _$CredentialProviderConfig_VertexAdcCopyWithImpl<$Res>
+    implements $CredentialProviderConfig_VertexAdcCopyWith<$Res> {
+  _$CredentialProviderConfig_VertexAdcCopyWithImpl(this._self, this._then);
+
+  final CredentialProviderConfig_VertexAdc _self;
+  final $Res Function(CredentialProviderConfig_VertexAdc) _then;
+
+/// Create a copy of CredentialProviderConfig
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? scope = null,}) {
+  return _then(CredentialProviderConfig_VertexAdc(
+scope: null == scope ? _self.scope : scope // ignore: cast_nullable_to_non_nullable
+as String,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class CredentialProviderConfig_BedrockWebIdentity extends CredentialProviderConfig {
+  const CredentialProviderConfig_BedrockWebIdentity({required this.roleArn, required this.tokenFile, required this.sessionName, required this.region}): super._();
+
+
+/// ARN of the IAM role to assume.
+ final  String roleArn;
+/// Path to a file containing the OIDC JWT (the same file
+/// `AWS_WEB_IDENTITY_TOKEN_FILE` would point to).
+ final  String tokenFile;
+/// STS session name. Defaults to liter-llm's own default (`"liter-llm-session"`) when
+/// unset.
+ final  String sessionName;
+/// AWS region. Defaults to liter-llm's own default (`"us-east-1"`) when unset.
+ final  String region;
+
+/// Create a copy of CredentialProviderConfig
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$CredentialProviderConfig_BedrockWebIdentityCopyWith<CredentialProviderConfig_BedrockWebIdentity> get copyWith => _$CredentialProviderConfig_BedrockWebIdentityCopyWithImpl<CredentialProviderConfig_BedrockWebIdentity>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is CredentialProviderConfig_BedrockWebIdentity&&(identical(other.roleArn, roleArn) || other.roleArn == roleArn)&&(identical(other.tokenFile, tokenFile) || other.tokenFile == tokenFile)&&(identical(other.sessionName, sessionName) || other.sessionName == sessionName)&&(identical(other.region, region) || other.region == region));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,roleArn,tokenFile,sessionName,region);
+
+@override
+String toString() {
+  return 'CredentialProviderConfig.bedrockWebIdentity(roleArn: $roleArn, tokenFile: $tokenFile, sessionName: $sessionName, region: $region)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $CredentialProviderConfig_BedrockWebIdentityCopyWith<$Res> implements $CredentialProviderConfigCopyWith<$Res> {
+  factory $CredentialProviderConfig_BedrockWebIdentityCopyWith(CredentialProviderConfig_BedrockWebIdentity value, $Res Function(CredentialProviderConfig_BedrockWebIdentity) _then) = _$CredentialProviderConfig_BedrockWebIdentityCopyWithImpl;
+@useResult
+$Res call({
+ String roleArn, String tokenFile, String sessionName, String region
+});
+
+
+
+
+}
+/// @nodoc
+class _$CredentialProviderConfig_BedrockWebIdentityCopyWithImpl<$Res>
+    implements $CredentialProviderConfig_BedrockWebIdentityCopyWith<$Res> {
+  _$CredentialProviderConfig_BedrockWebIdentityCopyWithImpl(this._self, this._then);
+
+  final CredentialProviderConfig_BedrockWebIdentity _self;
+  final $Res Function(CredentialProviderConfig_BedrockWebIdentity) _then;
+
+/// Create a copy of CredentialProviderConfig
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? roleArn = null,Object? tokenFile = null,Object? sessionName = null,Object? region = null,}) {
+  return _then(CredentialProviderConfig_BedrockWebIdentity(
+roleArn: null == roleArn ? _self.roleArn : roleArn // ignore: cast_nullable_to_non_nullable
+as String,tokenFile: null == tokenFile ? _self.tokenFile : tokenFile // ignore: cast_nullable_to_non_nullable
+as String,sessionName: null == sessionName ? _self.sessionName : sessionName // ignore: cast_nullable_to_non_nullable
+as String,region: null == region ? _self.region : region // ignore: cast_nullable_to_non_nullable
+as String,
+  ));
+}
+
+
+}
+
+/// @nodoc
 mixin _$DiffLine {
 
  String get field0;

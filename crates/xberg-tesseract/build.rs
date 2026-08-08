@@ -1,3 +1,7 @@
+//! Build script for xberg-tesseract: when `build-tesseract`/`build-tesseract-wasm` is
+//! enabled, downloads and builds vendored Leptonica and Tesseract via CMake, resolving
+//! a per-platform cache directory for the compiled artifacts.
+
 #![allow(clippy::uninlined_format_args)]
 
 #[cfg(any(feature = "build-tesseract", feature = "build-tesseract-wasm"))]

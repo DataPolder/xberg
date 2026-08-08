@@ -3307,6 +3307,21 @@ void *__swift_bridge__$Vec_LayoutStrategy$get_mut(void *vec_ptr,
 uintptr_t __swift_bridge__$Vec_LayoutStrategy$len(void *vec_ptr);
 void *__swift_bridge__$Vec_LayoutStrategy$as_ptr(void *vec_ptr);
 
+typedef struct CredentialProviderConfig CredentialProviderConfig;
+void __swift_bridge__$CredentialProviderConfig$_free(void *self);
+
+void *__swift_bridge__$Vec_CredentialProviderConfig$new(void);
+void __swift_bridge__$Vec_CredentialProviderConfig$drop(void *vec_ptr);
+void __swift_bridge__$Vec_CredentialProviderConfig$push(void *vec_ptr,
+                                                        void *item_ptr);
+void *__swift_bridge__$Vec_CredentialProviderConfig$pop(void *vec_ptr);
+void *__swift_bridge__$Vec_CredentialProviderConfig$get(void *vec_ptr,
+                                                        uintptr_t index);
+void *__swift_bridge__$Vec_CredentialProviderConfig$get_mut(void *vec_ptr,
+                                                            uintptr_t index);
+uintptr_t __swift_bridge__$Vec_CredentialProviderConfig$len(void *vec_ptr);
+void *__swift_bridge__$Vec_CredentialProviderConfig$as_ptr(void *vec_ptr);
+
 typedef struct CallMode CallMode;
 void __swift_bridge__$CallMode$_free(void *self);
 
@@ -4697,13 +4712,14 @@ void *__swift_bridge__$LlmConfig$new(
     struct __private__OptionU64 timeout_secs,
     struct __private__OptionU32 max_retries,
     struct __private__OptionF64 temperature,
-    struct __private__OptionU64 max_tokens,
-    struct __private__OptionBool load_env, void *headers, void *providers,
-    void *cache, void *budget, void *rate_limit,
+    struct __private__OptionU64 max_tokens, void *reasoning_effort,
+    void *extra_body, struct __private__OptionBool load_env, void *headers,
+    void *providers, void *cache, void *budget, void *rate_limit,
     struct __private__OptionBool cost_tracking,
     struct __private__OptionBool tracing,
     struct __private__OptionU64 cooldown_secs,
-    struct __private__OptionU64 health_check_secs, void *bedrock);
+    struct __private__OptionU64 health_check_secs, void *bedrock,
+    void *credential_provider);
 void *__swift_bridge__$LlmConfig$model(void *self);
 void *__swift_bridge__$LlmConfig$api_key(void *self);
 void *__swift_bridge__$LlmConfig$base_url(void *self);
@@ -4711,6 +4727,8 @@ struct __private__OptionU64 __swift_bridge__$LlmConfig$timeout_secs(void *self);
 struct __private__OptionU32 __swift_bridge__$LlmConfig$max_retries(void *self);
 struct __private__OptionF64 __swift_bridge__$LlmConfig$temperature(void *self);
 struct __private__OptionU64 __swift_bridge__$LlmConfig$max_tokens(void *self);
+void *__swift_bridge__$LlmConfig$reasoning_effort(void *self);
+void *__swift_bridge__$LlmConfig$extra_body(void *self);
 struct __private__OptionBool __swift_bridge__$LlmConfig$load_env(void *self);
 void *__swift_bridge__$LlmConfig$headers(void *self);
 void *__swift_bridge__$LlmConfig$providers(void *self);
@@ -4725,6 +4743,7 @@ __swift_bridge__$LlmConfig$cooldown_secs(void *self);
 struct __private__OptionU64
 __swift_bridge__$LlmConfig$health_check_secs(void *self);
 void *__swift_bridge__$LlmConfig$bedrock(void *self);
+void *__swift_bridge__$LlmConfig$credential_provider(void *self);
 void *__swift_bridge__$LlmProviderConfig$new(void *name, void *base_url,
                                              void *auth_header,
                                              void *model_prefixes);
@@ -6447,6 +6466,7 @@ void *__swift_bridge__$LateInteractionModelType$to_string(void *self);
 void *__swift_bridge__$TableModel$to_string(void *self);
 void *__swift_bridge__$TableOverlapPreference$to_string(void *self);
 void *__swift_bridge__$LayoutStrategy$to_string(void *self);
+void *__swift_bridge__$CredentialProviderConfig$to_string(void *self);
 void *__swift_bridge__$CallMode$to_string(void *self);
 void *__swift_bridge__$MergeMode$to_string(void *self);
 void *__swift_bridge__$NerBackendKind$to_string(void *self);
@@ -7065,6 +7085,8 @@ __swift_bridge__$table_overlap_preference_from_json(void *json);
 struct __private__ResultPtrAndPtr
 __swift_bridge__$layout_strategy_from_json(void *json);
 struct __private__ResultPtrAndPtr
+__swift_bridge__$credential_provider_config_from_json(void *json);
+struct __private__ResultPtrAndPtr
 __swift_bridge__$call_mode_from_json(void *json);
 struct __private__ResultPtrAndPtr
 __swift_bridge__$merge_mode_from_json(void *json);
@@ -7358,6 +7380,7 @@ void *__swift_bridge__$__alef_phantom_vec_breadcrumb_target(void);
 void *__swift_bridge__$__alef_phantom_vec_output_format(void);
 void *__swift_bridge__$__alef_phantom_vec_jupyter_cell_rendering(void);
 void *__swift_bridge__$__alef_phantom_vec_late_interaction_model_type(void);
+void *__swift_bridge__$__alef_phantom_vec_credential_provider_config(void);
 void *__swift_bridge__$__alef_phantom_vec_call_mode(void);
 void *__swift_bridge__$__alef_phantom_vec_merge_mode(void);
 void *__swift_bridge__$__alef_phantom_vec_ner_backend_kind(void);

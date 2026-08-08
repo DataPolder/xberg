@@ -1293,6 +1293,9 @@ public func tableOverlapPreferenceFromJson<GenericIntoRustString: IntoRustString
 public func layoutStrategyFromJson<GenericIntoRustString: IntoRustString>(_ json: GenericIntoRustString) throws -> LayoutStrategy {
     try { let val = __swift_bridge__$layout_strategy_from_json({ let rustString = json.intoRustString(); rustString.isOwned = false; return rustString.ptr }()); if val.is_ok { return LayoutStrategy(ptr: val.ok_or_err!) } else { throw RustString(ptr: val.ok_or_err!) } }()
 }
+public func credentialProviderConfigFromJson<GenericIntoRustString: IntoRustString>(_ json: GenericIntoRustString) throws -> CredentialProviderConfig {
+    try { let val = __swift_bridge__$credential_provider_config_from_json({ let rustString = json.intoRustString(); rustString.isOwned = false; return rustString.ptr }()); if val.is_ok { return CredentialProviderConfig(ptr: val.ok_or_err!) } else { throw RustString(ptr: val.ok_or_err!) } }()
+}
 public func callModeFromJson<GenericIntoRustString: IntoRustString>(_ json: GenericIntoRustString) throws -> CallMode {
     try { let val = __swift_bridge__$call_mode_from_json({ let rustString = json.intoRustString(); rustString.isOwned = false; return rustString.ptr }()); if val.is_ok { return CallMode(ptr: val.ok_or_err!) } else { throw RustString(ptr: val.ok_or_err!) } }()
 }
@@ -1979,6 +1982,9 @@ public func __alef_phantom_vec_jupyter_cell_rendering() -> RustVec<JupyterCellRe
 }
 public func __alef_phantom_vec_late_interaction_model_type() -> RustVec<LateInteractionModelType> {
     RustVec(ptr: __swift_bridge__$__alef_phantom_vec_late_interaction_model_type())
+}
+public func __alef_phantom_vec_credential_provider_config() -> RustVec<CredentialProviderConfig> {
+    RustVec(ptr: __swift_bridge__$__alef_phantom_vec_credential_provider_config())
 }
 public func __alef_phantom_vec_call_mode() -> RustVec<CallMode> {
     RustVec(ptr: __swift_bridge__$__alef_phantom_vec_call_mode())
@@ -5000,8 +5006,8 @@ public class LlmConfig: LlmConfigRefMut {
     }
 }
 extension LlmConfig {
-    public convenience init<GenericIntoRustString: IntoRustString>(_ model: GenericIntoRustString, _ api_key: Optional<GenericIntoRustString>, _ base_url: Optional<GenericIntoRustString>, _ timeout_secs: Optional<UInt64>, _ max_retries: Optional<UInt32>, _ temperature: Optional<Double>, _ max_tokens: Optional<UInt64>, _ load_env: Optional<Bool>, _ headers: GenericIntoRustString, _ providers: Optional<RustVec<LlmProviderConfig>>, _ cache: Optional<LlmCacheConfig>, _ budget: Optional<LlmBudgetConfig>, _ rate_limit: Optional<LlmRateLimitConfig>, _ cost_tracking: Optional<Bool>, _ tracing: Optional<Bool>, _ cooldown_secs: Optional<UInt64>, _ health_check_secs: Optional<UInt64>, _ bedrock: Optional<BedrockConfig>) {
-        self.init(ptr: __swift_bridge__$LlmConfig$new({ let rustString = model.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { if let rustString = optionalStringIntoRustString(api_key) { rustString.isOwned = false; return rustString.ptr } else { return nil } }(), { if let rustString = optionalStringIntoRustString(base_url) { rustString.isOwned = false; return rustString.ptr } else { return nil } }(), timeout_secs.intoFfiRepr(), max_retries.intoFfiRepr(), temperature.intoFfiRepr(), max_tokens.intoFfiRepr(), load_env.intoFfiRepr(), { let rustString = headers.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { if let val = providers { val.isOwned = false; return val.ptr } else { return nil } }(), { if let val = cache { val.isOwned = false; return val.ptr } else { return nil } }(), { if let val = budget { val.isOwned = false; return val.ptr } else { return nil } }(), { if let val = rate_limit { val.isOwned = false; return val.ptr } else { return nil } }(), cost_tracking.intoFfiRepr(), tracing.intoFfiRepr(), cooldown_secs.intoFfiRepr(), health_check_secs.intoFfiRepr(), { if let val = bedrock { val.isOwned = false; return val.ptr } else { return nil } }()))
+    public convenience init<GenericIntoRustString: IntoRustString>(_ model: GenericIntoRustString, _ api_key: Optional<GenericIntoRustString>, _ base_url: Optional<GenericIntoRustString>, _ timeout_secs: Optional<UInt64>, _ max_retries: Optional<UInt32>, _ temperature: Optional<Double>, _ max_tokens: Optional<UInt64>, _ reasoning_effort: Optional<GenericIntoRustString>, _ extra_body: Optional<GenericIntoRustString>, _ load_env: Optional<Bool>, _ headers: GenericIntoRustString, _ providers: Optional<RustVec<LlmProviderConfig>>, _ cache: Optional<LlmCacheConfig>, _ budget: Optional<LlmBudgetConfig>, _ rate_limit: Optional<LlmRateLimitConfig>, _ cost_tracking: Optional<Bool>, _ tracing: Optional<Bool>, _ cooldown_secs: Optional<UInt64>, _ health_check_secs: Optional<UInt64>, _ bedrock: Optional<BedrockConfig>, _ credential_provider: Optional<CredentialProviderConfig>) {
+        self.init(ptr: __swift_bridge__$LlmConfig$new({ let rustString = model.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { if let rustString = optionalStringIntoRustString(api_key) { rustString.isOwned = false; return rustString.ptr } else { return nil } }(), { if let rustString = optionalStringIntoRustString(base_url) { rustString.isOwned = false; return rustString.ptr } else { return nil } }(), timeout_secs.intoFfiRepr(), max_retries.intoFfiRepr(), temperature.intoFfiRepr(), max_tokens.intoFfiRepr(), { if let rustString = optionalStringIntoRustString(reasoning_effort) { rustString.isOwned = false; return rustString.ptr } else { return nil } }(), { if let rustString = optionalStringIntoRustString(extra_body) { rustString.isOwned = false; return rustString.ptr } else { return nil } }(), load_env.intoFfiRepr(), { let rustString = headers.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { if let val = providers { val.isOwned = false; return val.ptr } else { return nil } }(), { if let val = cache { val.isOwned = false; return val.ptr } else { return nil } }(), { if let val = budget { val.isOwned = false; return val.ptr } else { return nil } }(), { if let val = rate_limit { val.isOwned = false; return val.ptr } else { return nil } }(), cost_tracking.intoFfiRepr(), tracing.intoFfiRepr(), cooldown_secs.intoFfiRepr(), health_check_secs.intoFfiRepr(), { if let val = bedrock { val.isOwned = false; return val.ptr } else { return nil } }(), { if let val = credential_provider { val.isOwned = false; return val.ptr } else { return nil } }()))
     }
 }
 public class LlmConfigRefMut: LlmConfigRef {
@@ -5043,6 +5049,14 @@ extension LlmConfigRef {
 
     public func maxTokens() -> Optional<UInt64> {
         __swift_bridge__$LlmConfig$max_tokens(ptr).intoSwiftRepr()
+    }
+
+    public func reasoningEffort() -> Optional<RustString> {
+        { let val = __swift_bridge__$LlmConfig$reasoning_effort(ptr); if val != nil { return RustString(ptr: val!) } else { return nil } }()
+    }
+
+    public func extraBody() -> Optional<RustString> {
+        { let val = __swift_bridge__$LlmConfig$extra_body(ptr); if val != nil { return RustString(ptr: val!) } else { return nil } }()
     }
 
     public func loadEnv() -> Optional<Bool> {
@@ -5087,6 +5101,10 @@ extension LlmConfigRef {
 
     public func bedrock() -> Optional<BedrockConfig> {
         { let val = __swift_bridge__$LlmConfig$bedrock(ptr); if val != nil { return BedrockConfig(ptr: val!) } else { return nil } }()
+    }
+
+    public func credentialProvider() -> Optional<RustString> {
+        { let val = __swift_bridge__$LlmConfig$credential_provider(ptr); if val != nil { return RustString(ptr: val!) } else { return nil } }()
     }
 }
 extension LlmConfig: Vectorizable {
@@ -26085,6 +26103,86 @@ extension LayoutStrategy: Vectorizable {
 
     public static func vecOfSelfLen(vecPtr: UnsafeMutableRawPointer) -> UInt {
         __swift_bridge__$Vec_LayoutStrategy$len(vecPtr)
+    }
+}
+
+
+public class CredentialProviderConfig: CredentialProviderConfigRefMut {
+    public var isOwned: Bool = true
+
+    public override init(ptr: UnsafeMutableRawPointer) {
+        super.init(ptr: ptr)
+    }
+
+    deinit {
+        if isOwned {
+            __swift_bridge__$CredentialProviderConfig$_free(ptr)
+        }
+    }
+}
+public class CredentialProviderConfigRefMut: CredentialProviderConfigRef {
+    public override init(ptr: UnsafeMutableRawPointer) {
+        super.init(ptr: ptr)
+    }
+}
+public class CredentialProviderConfigRef {
+    public var ptr: UnsafeMutableRawPointer
+
+    public init(ptr: UnsafeMutableRawPointer) {
+        self.ptr = ptr
+    }
+}
+extension CredentialProviderConfigRef {
+    public func to_string() -> RustString {
+        RustString(ptr: __swift_bridge__$CredentialProviderConfig$to_string(ptr))
+    }
+}
+extension CredentialProviderConfig: Vectorizable {
+    public static func vecOfSelfNew() -> UnsafeMutableRawPointer {
+        __swift_bridge__$Vec_CredentialProviderConfig$new()
+    }
+
+    public static func vecOfSelfFree(vecPtr: UnsafeMutableRawPointer) {
+        __swift_bridge__$Vec_CredentialProviderConfig$drop(vecPtr)
+    }
+
+    public static func vecOfSelfPush(vecPtr: UnsafeMutableRawPointer, value: CredentialProviderConfig) {
+        __swift_bridge__$Vec_CredentialProviderConfig$push(vecPtr, {value.isOwned = false; return value.ptr;}())
+    }
+
+    public static func vecOfSelfPop(vecPtr: UnsafeMutableRawPointer) -> Optional<Self> {
+        let pointer = __swift_bridge__$Vec_CredentialProviderConfig$pop(vecPtr)
+        if pointer == nil {
+            return nil
+        } else {
+            return (CredentialProviderConfig(ptr: pointer!) as! Self)
+        }
+    }
+
+    public static func vecOfSelfGet(vecPtr: UnsafeMutableRawPointer, index: UInt) -> Optional<CredentialProviderConfigRef> {
+        let pointer = __swift_bridge__$Vec_CredentialProviderConfig$get(vecPtr, index)
+        if pointer == nil {
+            return nil
+        } else {
+            return CredentialProviderConfigRef(ptr: pointer!)
+        }
+    }
+
+    public static func vecOfSelfGetMut(vecPtr: UnsafeMutableRawPointer, index: UInt) -> Optional<CredentialProviderConfigRefMut> {
+        let pointer = __swift_bridge__$Vec_CredentialProviderConfig$get_mut(vecPtr, index)
+        if pointer == nil {
+            return nil
+        } else {
+            return CredentialProviderConfigRefMut(ptr: pointer!)
+        }
+    }
+
+    public static func vecOfSelfAsPtr(vecPtr: UnsafeMutableRawPointer) -> UnsafePointer<CredentialProviderConfigRef> {
+        UnsafePointer<CredentialProviderConfigRef>(OpaquePointer(__swift_bridge__$Vec_CredentialProviderConfig$as_ptr(vecPtr)))
+    }
+
+    public static func vecOfSelfLen(vecPtr: UnsafeMutableRawPointer) -> UInt {
+        __swift_bridge__$Vec_CredentialProviderConfig$len(vecPtr)
     }
 }
 

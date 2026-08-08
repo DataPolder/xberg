@@ -1,5 +1,5 @@
 [workspace]
-alef_version = "0.56.0"
+alef_version = "0.58.0"
 # -D warnings (emitted into every generated Rust binding as #![allow(...)]).
 extra_clippy_allows = ["redundant_field_names"]
 languages = [
@@ -731,6 +731,24 @@ targets = ["web"]
 features = [
   "wasm-target",
   "url-ingestion",
+  # Unlike the entries below, this is a genuinely new dependency, not something
+  # already compiled in transitively: `simd-utf8` is only pulled in by the
+  # `default` feature set, and xberg-wasm's Cargo.toml depends on xberg with
+  # `default-features = false`, so it has never been active here. Pure-Rust
+  # `simdutf8` crate: an explicit `target_arch = "wasm32", target_feature =
+  # "simd128"` path with a scalar fallback when simd128 is absent, no other
+  # deps. Expect a small (not free) size increase -- watch the 50MB jsDelivr
+  # cap when measuring the regen.
+  "simd-utf8",
+  # Deliberately NOT swapped for "url-ingestion-browser": that alias is
+  # `url-ingestion + crawlberg/browser`, and in crawlberg's own Cargo.toml
+  # `browser = ["browser-chromiumoxide"]` -> `dep:chromiumoxide, dep:dirs,
+  # native-runtime`. chromiumoxide drives a real Chrome process over CDP; it
+  # is an unconditional (non-target-gated) optional dependency in crawlberg,
+  # not vetted for wasm32, and its own feature re-enables `native-runtime`
+  # rather than replacing it -- so both runtimes would end up active at once,
+  # which is worse than the status quo. Making the two mutually exclusive
+  # needs an upstream crawlberg change; until then this stays "url-ingestion".
   # Listed literally because alef matches `#[cfg(feature = "...")]` against this
   # exact list rather than resolving Cargo's feature graph, so the `wasm-target`
   # alias alone satisfies no leaf gate and the generator drops the gated field
@@ -738,13 +756,44 @@ features = [
   # -> keywords, so this adds no dependency and no wasm bytes.
   "keywords-yake",
   "keywords-rake",
-  # NOT listed, deliberately: "heuristics", "pdf", "html", "layout-types",
-  # "transcription-types". Adding them makes alef's wasm backend emit serde mirror
-  # structs that reference `xberg::ConversionOptions` and
-  # `xberg::ExtractionConfidence` at the crate root -- neither is exported there --
-  # plus a WasmPageRange/PageRange mismatch. The wasm backend has no per-type
-  # wrapper the way the node backend does, so this needs an alef fix before those
-  # fields can be exposed (#252, and the extraction_confidence half of #244). ~keep
+  # Same reasoning as keywords-yake/keywords-rake above (#244): both are already
+  # active transitively via wasm-target -> no-ort-target -> pdf / -> heuristics,
+  # so listing them here adds no dependency and no wasm bytes -- it only makes
+  # them visible to alef's literal cfg match.
+  # "pdf": PdfConfig/HierarchyConfig are plain scalars + Option<Vec<String>> +
+  # a crate-root-exported nested config -- no foreign types, no known blocker.
+  "pdf",
+  # "heuristics": fixes the extraction_confidence half of #244. The blocker was
+  # never a missing feature flag -- ExtractionConfidence was never re-exported
+  # at the crate root (see crates/xberg/src/lib.rs), so any codegen referencing
+  # it would have failed regardless of this list. Re-export added; the type's
+  # only field dependency (SchemaCompliance) is already crate-root exported
+  # under this same feature. The ConversionOptions and WasmPageRange/PageRange
+  # objections below do not apply to this field.
+  "heuristics",
+  # (#252) layout-types / transcription-types are `[]` in xberg's Cargo.toml --
+  # zero-dependency, type-only leaves -- and "html" is already compiled into
+  # xberg-wasm unconditionally (html-to-markdown-rs is a direct dependency in
+  # crates/xberg-wasm/Cargo.toml), so adding it as a leaf here adds only the
+  # small v_htmlescape crate. Listing all three makes their gated binding
+  # fields survive generation without adding meaningful wasm bytes. ~keep
+  "layout-types",
+  "transcription-types",
+  "html",
+  # NOT listed yet, pending a one-at-a-time regen: "layout-types",
+  # "transcription-types", "html".
+  # - "layout-types" / "transcription-types": LayoutDetectionConfig, LayoutStrategy,
+  #   TableModel, TranscriptionConfig, WhisperModel are all crate-root exported,
+  #   plain scalar/enum fields. No known blocker; untried in isolation.
+  # - "html": html_options: Option<html_to_markdown_rs::ConversionOptions> is a
+  #   foreign type with no crate-root re-export and no TypeDef in the IR, so
+  #   alef's first_unknown_named_type check should drop it via the ALEF-OMITTED
+  #   marker rather than hard-failing -- but grep -c ALEF-OMITTED
+  #   crates/xberg-wasm/src/lib.rs is 0 today, so that path is untested here.
+  #   HtmlOutputConfig.css_file (PathBuf) maps through WasmMapper::path() -> String
+  #   and should be fine. The prior "WasmPageRange/PageRange mismatch" concern
+  #   does not appear anywhere in alef's wasm backend source -- treat it as
+  #   unverified until an actual regen surfaces it. ~keep
 ]
 # tract layout/orientation weights push the release .wasm past jsdelivr's 50MB
 # per-file cap when wasm-pack's default wasm-opt is off. Run wasm-opt -Oz to

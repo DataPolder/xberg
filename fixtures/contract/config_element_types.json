@@ -31,10 +31,6 @@
 			"value": 1
 		}
 	],
-	"skip": {
-		"languages": ["wasm"],
-		"reason": "WASM cannot access filesystem; use bytes input with file content instead"
-	},
 	"config": {
 		"result_format": "element_based"
 	}

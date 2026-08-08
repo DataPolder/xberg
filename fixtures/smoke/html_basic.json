@@ -37,10 +37,6 @@
 			"values": ["Sample Data Table", "Laptop", "Electronics", "Product"]
 		}
 	],
-	"skip": {
-		"languages": ["wasm"],
-		"reason": "WASM cannot access filesystem; use bytes input with file content instead"
-	},
 	"call": "extract",
 	"config": {}
 }

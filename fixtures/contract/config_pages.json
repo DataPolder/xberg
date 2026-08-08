@@ -36,10 +36,6 @@
 			"values": ["PAGE"]
 		}
 	],
-	"skip": {
-		"languages": ["wasm"],
-		"reason": "WASM cannot access filesystem; use bytes input with file content instead"
-	},
 	"config": {
 		"pages": {
 			"extract_pages": true,

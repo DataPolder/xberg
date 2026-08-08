@@ -586,9 +586,5 @@
 			"field": "results[0].content",
 			"values": ["May 5, 2023", "Mallori"]
 		}
-	],
-	"skip": {
-		"languages": ["wasm"],
-		"reason": "WASM e2e uses dedicated browser-safe fixtures for bytes input"
-	}
+	]
 }

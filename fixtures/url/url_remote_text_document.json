@@ -56,9 +56,5 @@
 			"field": "summary.remote_urls",
 			"value": 1
 		}
-	],
-	"skip": {
-		"languages": ["wasm"],
-		"reason": "WASM e2e does not enable URL ingestion"
-	}
+	]
 }
