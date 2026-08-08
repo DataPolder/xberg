@@ -2781,6 +2781,17 @@ jobs:
             crates/xberg-node/package.json > "$tmp_pkg_json"
           mv "$tmp_pkg_json" crates/xberg-node/package.json
 
+      # ~keep This job is gated only on the MAIN package being absent from npm
+      # (check-npm.outputs.node_exists), so a re-run after a partial failure re-publishes
+      # every platform sub-package and the ones that already landed answer 403
+      # EPUBLISHCONFLICT. Failing the step on that would make a partially-published
+      # release unrecoverable, which is why the tolerance exists. What it must NOT be
+      # allowed to do is let the main package ship while a sub-package is genuinely
+      # absent: the main package's optionalDependencies are stamped from the tarballs
+      # this job packed, not from the registry, so a silently-skipped sub-package would
+      # publish @xberg-io/xberg pointing at a version nobody can install. The
+      # "Assert every optionalDependency is installable" step below is the real gate for
+      # that -- it queries the registry instead of trusting this step's exit code.
       - name: Publish platform sub-packages
         continue-on-error: true
         uses: xberg-io/actions/publish-npm@v1
@@ -2808,6 +2819,44 @@ jobs:
           package: "@xberg-io/xberg-linux-arm64-gnu"
           version: ${{ needs.prepare.outputs.version }}
           max-attempts: "60"
+
+      # The two waits above only cover the two glibc Linux platforms; darwin, win32 and
+      # the musl targets had no check at all. Assert that EVERY name in the main
+      # package's optionalDependencies actually resolves on the registry at the exact
+      # stamped version before publishing it -- otherwise `npm install @xberg-io/xberg`
+      # resolves an optionalDependency that 404s. Optional deps are installed
+      # best-effort by npm, so a missing one does not fail the consumer's install; it
+      # fails later at import time with "Failed to load native binding", which is the
+      # failure mode this gate exists to prevent.
+      - name: Assert every optionalDependency is installable
+        if: ${{ needs.prepare.outputs.dry_run != 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          entries="$(jq -r '.optionalDependencies // {} | to_entries[] | "\(.key)\t\(.value)"' \
+            crates/xberg-node/package.json)"
+          if [[ -z "$entries" ]]; then
+            echo "FATAL: crates/xberg-node/package.json has no optionalDependencies -- the staging step stamped nothing, so the main package would ship with no platform binaries at all." >&2
+            exit 1
+          fi
+          missing=0
+          while IFS=$'\t' read -r name version; do
+            [[ -n "$name" ]] || continue
+            for _ in $(seq 1 30); do
+              if npm view "${name}@${version}" version >/dev/null 2>&1; then
+                echo "OK: ${name}@${version}"
+                continue 2
+              fi
+              sleep 10
+            done
+            echo "FATAL: ${name}@${version} is not on the npm registry" >&2
+            missing=1
+          done <<<"$entries"
+          if [[ "$missing" -ne 0 ]]; then
+            echo "FATAL: refusing to publish @xberg-io/xberg -- it would reference platform sub-packages that were never published (the 'Publish platform sub-packages' step is continue-on-error, so check its log)." >&2
+            exit 1
+          fi
+          echo "OK: every optionalDependency resolves on the npm registry"
 
       - name: Publish main @xberg-io/xberg package
         uses: xberg-io/actions/publish-npm@v1

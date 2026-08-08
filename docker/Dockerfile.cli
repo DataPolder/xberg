@@ -7,6 +7,11 @@ ARG RUST_TOOLCHAIN=nightly-2026-03-10
 
 WORKDIR /build
 
+# Alpine's /bin/sh is busybox ash, which supports `-o pipefail`. Without it the
+# `curl ... | sh` rustup bootstrap below reports only sh's status, so a failed or
+# truncated download silently installs nothing. (hadolint DL4006)
+SHELL ["/bin/ash", "-o", "pipefail", "-c"]
+
 RUN apk add --no-cache \
     curl musl-dev cmake make pkgconf \
     perl linux-headers git file && \

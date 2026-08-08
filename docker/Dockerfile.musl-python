@@ -6,6 +6,12 @@ ARG TARGET=x86_64-unknown-linux-musl
 
 WORKDIR /build
 
+# Alpine's /bin/sh is busybox ash, which supports `-o pipefail`. Without it the
+# `curl ... | sh` rustup bootstrap below reports only sh's status, so a failed or
+# truncated download silently installs nothing and the failure surfaces much
+# later as a confusing "cargo: not found". (hadolint DL4006)
+SHELL ["/bin/ash", "-o", "pipefail", "-c"]
+
 RUN apk add --no-cache \
     curl musl-dev cmake make pkgconf bash patchelf zip unzip \
     perl linux-headers git file python3 python3-dev py3-pip && \

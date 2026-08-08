@@ -8,6 +8,14 @@ ARG ONNXRUNTIME_VERSION=1.24.2
 
 WORKDIR /build
 
+# The manylinux base images ship bash, so use it with `-o pipefail`: without it
+# the `curl ... | sh` rustup bootstrap below reports only sh's status (a failed
+# or truncated download would silently install nothing) and the readelf NEEDED
+# linkage assertion reports success on an empty pipe.
+# The GLIBC-floor probe at the end of that same step keeps its explicit failure
+# tolerance, so it stays advisory. (hadolint DL4006)
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
 RUN dnf -y install epel-release || \
     dnf -y install https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
 RUN dnf -y module enable nodejs:20 && \

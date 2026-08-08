@@ -63,6 +63,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # x86_64 Linux is the primary distribution target (manylinux wheels, the
+          # linux-x64-gnu node binding, the CLI tarball, every Docker image) and it had
+          # no leg here at all -- the workspace unit suite ran only on Linux aarch64 and
+          # macOS. That also meant the `full` feature set was never unit-tested anywhere
+          # on x86_64 Linux: scripts/ci/rust/run-unit-tests.sh substitutes
+          # `full-no-heic,heic` on Linux aarch64 (candle's gemm-f16 needs fullfp16), so
+          # the candle backends' tests only ever ran on Apple Silicon. ~keep
+          - os: ubuntu-latest
           - os: ubuntu-24.04-arm
           - os: macos-latest
     steps:
