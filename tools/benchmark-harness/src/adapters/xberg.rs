@@ -25,14 +25,14 @@ const SCEPTRE_TRACT_OPTIONS_JSON: &str = r#"{"model":{"backend":"tract"}}"#;
 /// match `crates/xberg-cli/src/commands/extract.rs::STAGE_TIMING_ENV_VAR`).
 ///
 /// Passed unconditionally to every xberg subprocess invocation this adapter spawns. This is
-/// cheap for the CLI to check (a single `std::env::var` read gated behind an `if`) and lets
-/// `xberg extract --format json` include a `stage_timings` object that the harness can parse
-/// out of the subprocess's stdout for cold-start attribution (see
-/// `tools/benchmark-harness/src/types.rs::StageTimings`).
+/// cheap for the CLI to check (a single `std::env::var` read gated behind an `if`) and makes
+/// `xberg extract --format json` include a `stage_timings` object in its stdout.
 ///
-/// Note: parsing `stage_timings` out of the subprocess's JSON stdout happens in
-/// `SubprocessAdapter::parse_output` (`adapters/subprocess.rs`), which is out of scope for this
-/// change — see the module-level TODO below.
+/// Known gap: nothing consumes that object yet. `SubprocessAdapter::parse_output`
+/// (`adapters/subprocess.rs`) does not extract it, and no benchmark result type carries it, so
+/// [`crate::types::StageTimings`] is currently only exercised by its own round-trip tests. The
+/// data is emitted and discarded; cold-start attribution needs the parse, a result field, and
+/// reporting wired together before it is available.
 const STAGE_TIMING_ENV_VAR: &str = "XBERG_EMIT_STAGE_TIMING";
 const NATIVE_BENCHMARK_CONFIG_JSON: &str = r#"{"extraction_timeout_secs":1740,"use_cache":false}"#;
 const TESSERACT_BENCHMARK_CONFIG_JSON: &str = r#"{
