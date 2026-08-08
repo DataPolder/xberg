@@ -160,6 +160,47 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      # alef.toml's [[crates.source_crates]] entries hash Rust sources living in
+      # sibling polyrepo checkouts (`../crawlberg`, `../html-to-markdown`), so
+      # `alef e2e generate` cannot even compute its input hashes without them --
+      # it died with `failed to stat source
+      # ../crawlberg/crates/crawlberg/src/net/ssrf.rs`. actions/checkout refuses a
+      # path outside $GITHUB_WORKSPACE, so they are cloned inside it and then moved
+      # up next to the workspace, reproducing the polyrepo layout. xberg itself
+      # stays at the workspace root because install-alef resolves the pinned
+      # version by reading ./alef.toml. ~keep
+      # Both siblings are ordinary crates.io dependencies, so their checkouts must
+      # match the *resolved* versions rather than whatever their default branches
+      # currently hold -- hashing newer sources than the code actually compiled
+      # against would make this job red for a change nobody made. The refs are
+      # derived from Cargo.lock so a dependency bump cannot silently desync them.
+      - name: Resolve sibling crate versions from Cargo.lock
+        id: siblings
+        run: |
+          set -euo pipefail
+          crawlberg="$(awk '/^name = "crawlberg"$/{getline; gsub(/[^0-9.]/,""); print; exit}' Cargo.lock)"
+          html_to_markdown="$(awk '/^name = "html-to-markdown-rs"$/{getline; gsub(/[^0-9.]/,""); print; exit}' Cargo.lock)"
+          if [ -z "$crawlberg" ] || [ -z "$html_to_markdown" ]; then
+            echo "::error::could not resolve sibling crate versions from Cargo.lock"
+            exit 1
+          fi
+          echo "crawlberg=v$crawlberg" >>"$GITHUB_OUTPUT"
+          echo "html_to_markdown=v$html_to_markdown" >>"$GITHUB_OUTPUT"
+      - uses: actions/checkout@v6
+        with:
+          repository: xberg-io/crawlberg
+          ref: ${{ steps.siblings.outputs.crawlberg }}
+          path: .polyrepo-siblings/crawlberg
+      - uses: actions/checkout@v6
+        with:
+          repository: xberg-io/html-to-markdown
+          ref: ${{ steps.siblings.outputs.html_to_markdown }}
+          path: .polyrepo-siblings/html-to-markdown
+      - name: Place sibling checkouts where alef.toml expects them
+        run: |
+          mv .polyrepo-siblings/crawlberg ../crawlberg
+          mv .polyrepo-siblings/html-to-markdown ../html-to-markdown
+          rmdir .polyrepo-siblings
       - name: Install Task
         uses: xberg-io/actions/install-task@v1
       - name: Install alef CLI
