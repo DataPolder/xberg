@@ -48,7 +48,7 @@ dbg_macro = "deny"
 [workspace.dependencies]
 ahash = { version = "0.8.12", features = ["serde"] }
 anyhow = "1.0"
-async-trait = "0.1.91"
+async-trait = "0.1.92"
 base64 = "0.23.1"
 blake3 = "1"
 bytes = { version = "1", features = ["serde"] }
@@ -98,7 +98,7 @@ reqwest = { version = "0.13.4", default-features = false }
 # drops text, system-fonts, memmap-fonts, raster-images — all pure-Rust, WASM-safe).
 resvg = { version = "0.48", default-features = false }
 rusqlite = { version = "0.40", features = ["bundled"] }
-sceptre = { version = "0.4.0", default-features = false }
+sceptre = { version = "0.6.0", default-features = false }
 
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.151" }
@@ -108,7 +108,7 @@ similar = "3"
 sqlite-vec = "0.1"
 tar = "0.4"
 tempfile = "3.27.0"
-thiserror = "2.0.19"
+thiserror = "2.0.20"
 # `process`, `fs`, and `rt-multi-thread` are deliberately excluded from this baseline: tokio's
 # own wasm32 gate (tokio-1.x src/lib.rs) hard-`compile_error!`s unless only
 # sync/macros/io-util/rt/time are active (`process` additionally pulls mio's
