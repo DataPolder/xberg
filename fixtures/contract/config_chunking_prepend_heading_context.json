@@ -1,8 +1,9 @@
 {
 	"id": "config_chunking_prepend_heading_context",
-	"description": "Tests markdown chunker prepends heading hierarchy to chunk content",
+	"description": "Tests markdown chunker records heading hierarchy on chunk metadata",
 	"tags": ["contract", "config", "chunking", "heading-context"],
 	"call": "extract",
+	"assertion_recipes": ["chunks", "streaming"],
 	"input": {
 		"kind": "uri",
 		"uri": "markdown/extraction_test.md"
@@ -12,28 +13,39 @@
 			"type": "min_length",
 			"field": "results[0].content",
 			"value": 10
+		},
+		{
+			"type": "count_min",
+			"field": "chunks",
+			"value": 2
+		},
+		{
+			"type": "is_true",
+			"field": "chunks_have_content"
+		},
+		{
+			"type": "is_true",
+			"field": "chunks_have_heading_context"
+		},
+		{
+			"type": "is_true",
+			"field": "first_chunk_starts_with_heading"
 		}
 	],
 	"skip": {
 		"languages": [
 			"python",
-			"rust",
 			"node",
-			"go",
 			"ruby",
 			"elixir",
-			"wasm",
-			"java",
-			"csharp",
 			"php",
-			"r",
+			"zig",
 			"dart",
 			"kotlin_android",
 			"swift",
-			"zig",
 			"homebrew"
 		],
-		"reason": "Fixture needs streaming assertions which alef v0.23.2+ enforces; not all languages support chunks streaming"
+		"reason": "python/node/ruby/elixir/php/zig run their e2e suite from e2e/<lang>/ without a chdir to test_documents/, so the relative uri cannot resolve; ruby, php and zig additionally have no generator support for the chunks_have_heading_context / first_chunk_starts_with_heading synthetic fields, and dart, kotlin_android and swift have no synthetic chunk assertions at all. homebrew is a CLI test_app with no result object to assert on."
 	},
 	"config": {
 		"chunking": {
