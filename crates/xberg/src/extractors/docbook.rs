@@ -1189,7 +1189,11 @@ fn extract_para_with_annotations(
                                 let url = href_clone.as_deref().unwrap_or("");
                                 builder::link(actual_start, end, url, None)
                             }
-                            _ => unreachable!(),
+                            // `inline_stack` is only ever pushed to with "bold"/"italic" (from
+                            // "emphasis"), "code" (from "literal"/"command"), "link" (from
+                            // "link"/"ulink"), "subscript", or "superscript" — every one of
+                            // those six kinds is handled above, so no other value can appear.
+                            _ => unreachable!("inline_stack only ever holds the six kinds handled above"),
                         };
                         annotations.push(annotation);
                     }

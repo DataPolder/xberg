@@ -219,12 +219,18 @@ fn apply_stopword_whitelist(map: &mut AHashMap<String, AHashSet<String>>) {
 pub(crate) fn get_stopwords(lang: &str) -> Option<&'static AHashSet<String>> {
     let normalized = lang.to_lowercase();
 
-    let lang_code = if let Some(pos) = normalized.find(&['-', '_'][..]) {
+    // Take the first two *characters* (not bytes) as the language-code prefix. `-`/`_`
+    // are single-byte ASCII, so slicing at `pos` from `find` is always char-boundary-safe.
+    // The no-separator branch must instead find the byte offset of the third character
+    // (via `char_indices`), since a byte offset of 2 can land inside a multi-byte
+    // character (e.g. most CJK characters are 3 bytes in UTF-8) and panic otherwise.
+    let lang_code = if let Some(pos) = normalized.find(['-', '_']) {
         &normalized[..pos]
-    } else if normalized.len() >= 2 {
-        &normalized[..2]
     } else {
-        &normalized
+        match normalized.char_indices().nth(2) {
+            Some((byte_idx, _)) => &normalized[..byte_idx],
+            None => normalized.as_str(),
+        }
     };
 
     STOPWORDS.get(lang_code)
@@ -826,8 +832,6 @@ mod tests {
 
     #[test]
     fn test_get_stopwords_unicode_characters() {
-        // NOTE: Current implementation has a limitation - it uses byte slicing which can panic
-
         let result = get_stopwords("zh-中文");
         assert!(result.is_some());
 
@@ -839,8 +843,18 @@ mod tests {
 
         assert!(get_stopwords("xx").is_none());
         assert!(get_stopwords("yy").is_none());
+    }
 
-        // NOTE: The following would panic due to byte slicing on multi-byte chars:
+    #[test]
+    fn should_not_panic_when_lang_hint_is_multibyte_without_separator() {
+        // Regression test for a reachable panic: with no '-'/'_' separator, `get_stopwords`
+        // used to byte-slice `&normalized[..2]`. When the first character is multi-byte in
+        // UTF-8 (most CJK characters are 3 bytes), byte offset 2 lands inside that character
+        // and is not a char boundary, panicking with "byte index 2 is not a char boundary".
+        // Before the fix, both calls below panicked; a plain word like "中文" (2 chars, 6
+        // bytes, first char 3 bytes wide) is enough to reproduce it.
+        assert!(get_stopwords("中文").is_none());
+        assert!(get_stopwords("日本語").is_none());
     }
 
     #[test]
