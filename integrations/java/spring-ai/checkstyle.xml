@@ -33,23 +33,42 @@
     <module name="MethodParamPad" />
     <module name="NoWhitespaceAfter" />
     <module name="NoWhitespaceBefore" />
-    <module name="OperatorWrap">
-      <property name="option" value="nl" />
-      <property
-        name="tokens"
-        value="BAND, BOR, BSR, BXOR, DIV, EQUAL, GE, GT, LAND, LE, LITERAL_INSTANCEOF, LOR, LT, MINUS, MOD, NOT_EQUAL, PLUS, QUESTION, SL, SR, STAR, METHOD_REF "
-      />
-    </module>
+    <!--
+      OperatorWrap is dropped, not retuned. poly's formatter owns the style of this file and
+      emits BOTH conventions: `+` at the start of the continuation line for split string
+      literals (XbergDocumentReader.java:235, 248, 338) and at the end of the line for the
+      surrounding boolean and concatenation expressions. No single `option` value can accept
+      both, so the rule is unsatisfiable here in either mode — verified by running
+      `mvn -o checkstyle:check` under `nl` (7 errors) and `eol` (4 different errors).
+
+      With `nl` the two tools demanded mutually exclusive output and the file flip-flopped:
+      eb29b0aa80 fixed the violations by hand and the regen in 4e52342c00 reverted every one
+      of them 30 minutes later, leaving CI Integrations permanently red. ~keep
+    -->
     <module name="ParenPad" />
     <module name="TypecastParenPad" />
     <module name="WhitespaceAfter" />
-    <module name="WhitespaceAround" />
+    <!--
+      The empty-body allowances exist because poly's formatter writes `private Builder() {}`
+      with no inner space; the rule is otherwise kept at full strength. ~keep
+    -->
+    <module name="WhitespaceAround">
+      <property name="allowEmptyConstructors" value="true" />
+      <property name="allowEmptyMethods" value="true" />
+      <property name="allowEmptyTypes" value="true" />
+    </module>
 
     <module name="ModifierOrder" />
     <module name="RedundantModifier" />
 
     <module name="EmptyBlock" />
-    <module name="LeftCurly" />
+    <!--
+      LeftCurly is dropped rather than retuned: poly's formatter collapses short bodies onto
+      one line (`static Builder builder() { return new Builder(); }`) and checkstyle has no
+      property that permits that under any `option` value, so the rule cannot be reconciled
+      the way OperatorWrap and WhitespaceAround above were. RightCurly and NeedBraces still
+      apply, so brace omission is still caught. ~keep
+    -->
     <module name="NeedBraces" />
     <module name="RightCurly" />
 
