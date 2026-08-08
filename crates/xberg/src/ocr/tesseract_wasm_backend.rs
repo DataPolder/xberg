@@ -241,7 +241,7 @@ fn resolve_psm(config: &OcrConfig) -> TessPageSegMode {
     config
         .tesseract_config
         .as_ref()
-        .and_then(|c| TessPageSegMode::try_from_int(c.psm as i32))
+        .and_then(|c| TessPageSegMode::try_from_int(c.psm))
         .unwrap_or(DEFAULT_WASM_PSM)
 }
 
