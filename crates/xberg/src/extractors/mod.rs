@@ -492,7 +492,7 @@ mod tests {
         let extractor_names = reg.list();
 
         #[allow(unused_mut)]
-        let mut expected_count = 7;
+        let mut expected_count = 8;
         assert!(extractor_names.contains(&"plain-text-extractor".to_string()));
         assert!(extractor_names.contains(&"asciidoc-extractor".to_string()));
         assert!(extractor_names.contains(&"webvtt-extractor".to_string()));
