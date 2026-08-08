@@ -101,7 +101,6 @@ enum PdfDocumentOrigin {
 /// neither is guaranteed LF-only: `crate::pdf::text::fix_pdf_control_chars` explicitly
 /// whitelists `\r` as a character to preserve, and the VLM OCR backend returns model
 /// markdown verbatim from an HTTP response. Normalize before splitting (#316).
-#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 fn flat_pdf_document(text: &str, mime_type: &str) -> InternalDocument {
     let mut doc = InternalDocument::new("pdf");
     doc.mime_type = mime_type.to_string();
@@ -110,6 +109,76 @@ fn flat_pdf_document(text: &str, mime_type: &str) -> InternalDocument {
         doc.push_element(InternalElement::text(ElementKind::Paragraph, paragraph, 0));
     }
     doc
+}
+
+const MIN_NATIVE_TOKENS_FOR_STRUCTURE_COVERAGE: usize = 20;
+const MIN_STRUCTURED_NATIVE_TOKEN_COVERAGE: f64 = 0.70;
+
+fn normalized_pdf_tokens(text: &str) -> impl Iterator<Item = String> + '_ {
+    text.split_whitespace()
+        .map(|word| {
+            word.trim_matches(|character: char| character.is_ascii_punctuation())
+                .to_lowercase()
+        })
+        .filter(|word| !word.is_empty())
+}
+
+fn structured_native_token_coverage(document: &InternalDocument, native_text: &str) -> Option<f64> {
+    let native_tokens = normalized_pdf_tokens(native_text).collect::<Vec<_>>();
+    if native_tokens.len() < MIN_NATIVE_TOKENS_FOR_STRUCTURE_COVERAGE {
+        return None;
+    }
+    let native_token_count = native_tokens.len();
+
+    let mut represented = ahash::AHashMap::<String, usize>::new();
+    for token in document
+        .elements
+        .iter()
+        .flat_map(|element| normalized_pdf_tokens(&element.text))
+        .chain(
+            document
+                .tables
+                .iter()
+                .flat_map(|table| table.cells.iter().flatten())
+                .flat_map(|cell| normalized_pdf_tokens(cell)),
+        )
+    {
+        *represented.entry(token).or_default() += 1;
+    }
+
+    let mut matched = 0usize;
+    for token in native_tokens {
+        if let Some(remaining) = represented.get_mut(&token)
+            && *remaining > 0
+        {
+            *remaining -= 1;
+            matched += 1;
+        }
+    }
+    Some(matched as f64 / native_token_count as f64)
+}
+
+fn select_native_pdf_document(
+    text: &str,
+    mime_type: &str,
+    pre_rendered_doc: Option<InternalDocument>,
+) -> (InternalDocument, bool) {
+    let Some(mut document) = pre_rendered_doc else {
+        return (flat_pdf_document(text, mime_type), false);
+    };
+    document.mime_type = mime_type.to_string();
+
+    let coverage = structured_native_token_coverage(&document, text);
+    if coverage.is_none_or(|coverage| coverage >= MIN_STRUCTURED_NATIVE_TOKEN_COVERAGE) {
+        return (document, true);
+    }
+
+    tracing::warn!(
+        coverage = coverage.unwrap_or_default(),
+        minimum_coverage = MIN_STRUCTURED_NATIVE_TOKEN_COVERAGE,
+        "PDF structure omitted substantial native text; using complete native text"
+    );
+    (flat_pdf_document(text, mime_type), false)
 }
 
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
@@ -123,10 +192,10 @@ fn select_pdf_document(
     structured_ocr_pages: Option<&ahash::AHashMap<u32, InternalDocument>>,
 ) -> (InternalDocument, PdfDocumentOrigin, bool) {
     let (mut doc, origin, structured) = match extraction_method {
-        ExtractionMethod::Native => match pre_rendered_doc {
-            Some(doc) => (doc, PdfDocumentOrigin::Native, true),
-            None => (flat_pdf_document(text, mime_type), PdfDocumentOrigin::Native, false),
-        },
+        ExtractionMethod::Native => {
+            let (document, structured) = select_native_pdf_document(text, mime_type, pre_rendered_doc);
+            (document, PdfDocumentOrigin::Native, structured)
+        }
         ExtractionMethod::Mixed => match pre_rendered_doc {
             Some(mut doc) => {
                 if let Some(results) = ocr_results {
@@ -1241,23 +1310,7 @@ impl PdfExtractor {
             structured_ocr_pages.as_ref(),
         );
         #[cfg(not(any(feature = "ocr", feature = "ocr-pipeline")))]
-        let (mut doc, document_is_structured) = match pre_rendered_doc {
-            Some(mut pre_doc) => {
-                pre_doc.mime_type = mime_type.to_string();
-                (pre_doc, true)
-            }
-            None => {
-                let mut d = InternalDocument::new("pdf");
-                d.mime_type = mime_type.to_string();
-                for paragraph in text.split("\n\n") {
-                    let trimmed = paragraph.trim();
-                    if !trimmed.is_empty() {
-                        d.push_element(InternalElement::text(ElementKind::Paragraph, trimmed, 0));
-                    }
-                }
-                (d, false)
-            }
-        };
+        let (mut doc, document_is_structured) = select_native_pdf_document(&text, mime_type, pre_rendered_doc);
         #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
         tracing::debug!(?document_origin, document_is_structured, "selected PDF document origin");
 
@@ -1612,6 +1665,66 @@ mod tests {
     use crate::core::config::OcrQualityThresholds;
     #[cfg(all(feature = "pdf", feature = "ocr"))]
     use serial_test::serial;
+
+    fn coverage_native_text() -> String {
+        (0..MIN_NATIVE_TOKENS_FOR_STRUCTURE_COVERAGE)
+            .map(|index| format!("token{index}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    #[test]
+    fn should_fall_back_to_native_text_when_structure_drops_substantial_content() {
+        let native_text = coverage_native_text();
+        let represented = native_text.split_whitespace().take(13).collect::<Vec<_>>().join(" ");
+        let mut structured = InternalDocument::new("pdf");
+        structured.push_element(InternalElement::text(ElementKind::Heading { level: 1 }, represented, 0));
+
+        let (selected, is_structured) = select_native_pdf_document(&native_text, "application/pdf", Some(structured));
+
+        assert!(!is_structured);
+        assert_eq!(selected.elements.len(), 1);
+        assert_eq!(selected.elements[0].text, native_text);
+    }
+
+    #[test]
+    fn should_keep_structure_when_native_token_coverage_meets_floor() {
+        let native_text = coverage_native_text();
+        let represented = native_text.split_whitespace().take(14).collect::<Vec<_>>().join(" ");
+        let mut structured = InternalDocument::new("pdf");
+        structured.push_element(InternalElement::text(ElementKind::Heading { level: 1 }, represented, 0));
+
+        let (selected, is_structured) = select_native_pdf_document(&native_text, "application/pdf", Some(structured));
+
+        assert!(is_structured);
+        assert!(matches!(selected.elements[0].kind, ElementKind::Heading { level: 1 }));
+    }
+
+    #[test]
+    fn should_count_table_cells_as_structured_native_text() {
+        let native_text = coverage_native_text();
+        let mut structured = InternalDocument::new("pdf");
+        structured.tables.push(crate::types::Table {
+            cells: vec![native_text.split_whitespace().map(str::to_string).collect()],
+            ..Default::default()
+        });
+
+        let (_, is_structured) = select_native_pdf_document(&native_text, "application/pdf", Some(structured));
+
+        assert!(is_structured);
+    }
+
+    #[test]
+    fn should_not_apply_structure_coverage_gate_to_trivial_native_text() {
+        let mut structured = InternalDocument::new("pdf");
+        structured.push_element(InternalElement::text(ElementKind::Heading { level: 1 }, "Title", 0));
+
+        let (selected, is_structured) =
+            select_native_pdf_document("Title and body", "application/pdf", Some(structured));
+
+        assert!(is_structured);
+        assert!(matches!(selected.elements[0].kind, ElementKind::Heading { level: 1 }));
+    }
 
     #[cfg(all(feature = "pdf", feature = "layout-detection"))]
     fn gate_decision(run_layout: bool) -> crate::pdf::layout_gate::PageGateDecision {

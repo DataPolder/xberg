@@ -302,14 +302,14 @@ const PDFIUM_GROUND_TRUTH: &[(&str, f64)] = &[
 // nougat_026, pdfa_001). nics-background-checks also recovered but only to
 // 0.922 vs its 0.92 floor — kept skipped pending cross-platform confirmation.
 // After each pdf_oxide bump, re-measure every entry below and remove the ones
-// that clear all three gates. (Three of those recoveries did not hold: pr-136-example,
-// nougat_026 and pdfa_001 have regressed again and are re-listed in group 4 below.)
+// that clear all three gates. The six post-calibration regressions tracked by
+// #1406 were restored by the native-coverage safeguard and are enabled again.
 //
 // To re-enable a doc once the regression is fixed: remove from this
 // list. Do not lower the threshold — fix the regression at its source.
 //
 // The list is grouped by *why* an entry is here. Group 1 is a capability gap (the document
-// cannot be extracted at all with the current feature set). Groups 2-4 are quality
+// cannot be extracted at all with the current feature set). Groups 2-3 are quality
 // regressions: extraction used to score the recorded value and now scores less. Keep new
 // entries in the group that describes them, and always record measured / today / delta so
 // the size of what is being suppressed stays visible at the point of suppression.
@@ -347,19 +347,6 @@ const PDFIUM_KNOWN_REGRESSIONS: &[&str] = &[
     // entries to the gate once the offending post-processor is identified. ~keep
     "nics-background-checks-2015-11-rotated", // md / djot 0.724 < 0.92
     "issue-1181",                             // plain 0.500 ≤ 0.50 floor (tip-over)
-    // ── 4. BROKEN: post-calibration extraction regressions — added 2026-08-07 ──
-    // Extraction got WORSE on these; the thresholds are correct and are deliberately left
-    // untouched. Each line records the score this document was calibrated at, the score it
-    // produces today, and the drop. Do not lower a floor to make one of these pass — that
-    // hides the defect. Delete the entry only when today's score is back above the floor.
-    // Seven documents failed; only six are listed. nougat_026 was the seventh and is the same
-    // file as pdfa_001 (identical md5) — its duplicate table row was removed, so pdfa_001 covers it.
-    "issue-1147-example", // calibrated 0.414 → today 0.317 (Δ -0.097, -23%); floor 0.34
-    "pr-136-example",     // calibrated 0.436 → today 0.326 (Δ -0.110, -25%); floor 0.36
-    "nougat_004",         // calibrated 0.950 → today 0.794 (Δ -0.156, -16%); floor 0.88
-    "pdfa_001",           // calibrated 0.993 → today 0.905 (Δ -0.088,  -9%); floor 0.92
-    "pdfa_031",           // calibrated 0.903 → today 0.723 (Δ -0.180, -20%); floor 0.83
-    "pdfa_045",           // calibrated 0.802 → today 0.701 (Δ -0.101, -13%); floor 0.73
 ];
 
 /// Extract a PDF with the given output format.

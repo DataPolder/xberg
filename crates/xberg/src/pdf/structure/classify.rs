@@ -1495,7 +1495,10 @@ pub(super) fn mark_cross_page_repeating_text(all_pages: &mut [Vec<PdfParagraph>]
 
         let mut seen: ahash::AHashSet<String> = ahash::AHashSet::new();
         for para in page {
-            if para.is_page_furniture {
+            // Positioned paragraphs are handled by the margin-aware first tier.
+            // Restrict this broad fallback to unpositioned structure-tree text so
+            // repeated semantic form fields in the page body are not discarded.
+            if para.is_page_furniture || para.block_bbox.is_some() {
                 continue;
             }
 
@@ -1562,7 +1565,7 @@ pub(super) fn mark_cross_page_repeating_text(all_pages: &mut [Vec<PdfParagraph>]
         let bottom_margin_y = page_h * margin_frac;
 
         for para in page.iter_mut() {
-            if para.is_page_furniture {
+            if para.is_page_furniture || para.block_bbox.is_some() {
                 continue;
             }
             let in_margin = para
@@ -3145,7 +3148,11 @@ mod tests {
     fn test_cross_page_repeating_short_text_preserves_first_occurrence() {
         let title = "Xberg Conference Proceedings 2024";
         let mut pages: Vec<Vec<PdfParagraph>> = (0..5)
-            .map(|_| vec![make_margin_body(title), make_body_center("section body")])
+            .map(|_| {
+                let mut header = make_margin_body(title);
+                header.block_bbox = None;
+                vec![header, make_body_center("section body")]
+            })
             .collect();
         mark_cross_page_repeating_short_text(&mut pages);
 
@@ -3159,6 +3166,15 @@ mod tests {
                 "page {i} short repeating text should be furniture"
             );
         }
+    }
+
+    #[test]
+    fn test_cross_page_repeating_short_text_preserves_positioned_body_fields() {
+        let mut pages: Vec<Vec<PdfParagraph>> = (0..5).map(|_| vec![make_body_center("Report Status")]).collect();
+
+        mark_cross_page_repeating_short_text(&mut pages);
+
+        assert!(pages.iter().all(|page| !page[0].is_page_furniture));
     }
 }
 
