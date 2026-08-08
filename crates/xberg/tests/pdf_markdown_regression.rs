@@ -302,14 +302,16 @@ const PDFIUM_GROUND_TRUTH: &[(&str, f64)] = &[
 // nougat_026, pdfa_001). nics-background-checks also recovered but only to
 // 0.922 vs its 0.92 floor — kept skipped pending cross-platform confirmation.
 // After each pdf_oxide bump, re-measure every entry below and remove the ones
-// that clear all three gates. The six post-calibration regressions tracked by
-// #1406 were restored by the native-coverage safeguard and are enabled again.
+// that clear all three gates. Of the six post-calibration regressions tracked by
+// #1406, the native-coverage safeguard restored four (issue-1147-example,
+// nougat_004, pdfa_045, pr-136-example) and they are enabled again. The other two
+// did not recover and stay listed in group 4 with their measured scores.
 //
 // To re-enable a doc once the regression is fixed: remove from this
 // list. Do not lower the threshold — fix the regression at its source.
 //
 // The list is grouped by *why* an entry is here. Group 1 is a capability gap (the document
-// cannot be extracted at all with the current feature set). Groups 2-3 are quality
+// cannot be extracted at all with the current feature set). Groups 2-4 are quality
 // regressions: extraction used to score the recorded value and now scores less. Keep new
 // entries in the group that describes them, and always record measured / today / delta so
 // the size of what is being suppressed stays visible at the point of suppression.
@@ -347,6 +349,21 @@ const PDFIUM_KNOWN_REGRESSIONS: &[&str] = &[
     // entries to the gate once the offending post-processor is identified. ~keep
     "nics-background-checks-2015-11-rotated", // md / djot 0.724 < 0.92
     "issue-1181",                             // plain 0.500 ≤ 0.50 floor (tip-over)
+    // ── 4. BROKEN: post-calibration extraction regressions the safeguard did not reach ──
+    // Six documents were listed here on 2026-08-07. The native-coverage safeguard recovered
+    // four of them; these two it did not. The thresholds are correct and are deliberately left
+    // untouched — do not lower a floor to make one of these pass, that hides the defect.
+    // Delete the entry only when today's score is back above the floor.
+    //
+    // The safeguard moved pdfa_001 not at all (0.905 both before and after) and pdfa_031 by
+    // +0.010, so neither is a partial fix awaiting one more nudge. The two fail differently and
+    // need separate diagnoses: pdfa_001 loses content (97.6% precision against 84.4% recall),
+    // while pdfa_031 emits surplus text (58.9% precision against 97.1% recall).
+    //
+    // nougat_026 is the same file as pdfa_001 (identical md5); its duplicate table row was
+    // removed, so the pdfa_001 entry covers both. ~keep
+    "pdfa_001", // calibrated 0.993 → today 0.905 (Δ -0.088,  -9%); floor 0.92
+    "pdfa_031", // calibrated 0.903 → today 0.733 (Δ -0.170, -19%); floor 0.83
 ];
 
 /// Extract a PDF with the given output format.
