@@ -1811,6 +1811,7 @@ mod tests {
                 is_italic: false,
                 is_monospace: false,
                 baseline_y: 700.0,
+                rotation_degrees: 0.0,
                 assigned_role: None,
             })
             .collect();
@@ -1962,6 +1963,7 @@ mod tests {
                 is_italic: false,
                 is_monospace: false,
                 baseline_y: 700.0,
+                rotation_degrees: 0.0,
                 assigned_role: None,
             })
             .collect();
@@ -2348,6 +2350,7 @@ mod tests {
             is_italic: false,
             is_monospace: false,
             baseline_y: 700.0,
+            rotation_degrees: 0.0,
             assigned_role: None,
         }];
         let lines = vec![super::super::types::PdfLine {

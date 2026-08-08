@@ -14,7 +14,7 @@ use super::classify::{
     mark_arxiv_noise, mark_cross_page_repeating_short_text, mark_cross_page_repeating_text, refine_heading_hierarchy,
 };
 use super::constants::{FULL_LINE_FRACTION, MIN_BLOCKS_FOR_FONT_HEADING, MIN_HEADING_FONT_GAP, MIN_HEADING_FONT_RATIO};
-use super::lines::is_cjk_char;
+use super::lines::{is_cjk_char, segments_need_space};
 use super::paragraphs::{merge_continuation_paragraphs, split_embedded_list_items};
 use super::text_repair::{
     apply_to_all_segments, clean_duplicate_punctuation, collapse_spaced_hyphens,
@@ -807,11 +807,79 @@ fn segments_to_paragraphs(
     heading_map: &[(f32, Option<u8>)],
     paragraph_gap_ys: &[f32],
 ) -> Vec<PdfParagraph> {
+    let segments = order_segments_in_reading_frames(segments);
     let mut paragraphs = blocks_to_paragraphs(segments, heading_map, paragraph_gap_ys);
     apply_text_repair_to_structure_tree_paragraphs(&mut paragraphs, true);
     merge_continuation_paragraphs(&mut paragraphs);
     synchronize_paragraph_text_metadata(&mut paragraphs);
     paragraphs
+}
+
+/// Repair reading order inside maximal rotated runs without touching upright
+/// stream order or moving content across a rotation boundary.
+fn order_segments_in_reading_frames(segments: Vec<SegmentData>) -> Vec<SegmentData> {
+    if segments.iter().all(SegmentData::is_unrotated) {
+        return segments;
+    }
+
+    let mut groups: Vec<Vec<SegmentData>> = Vec::new();
+    for segment in segments {
+        match groups.last_mut() {
+            Some(group) if group[0].has_same_rotation(&segment) => group.push(segment),
+            _ => groups.push(vec![segment]),
+        }
+    }
+
+    groups
+        .into_iter()
+        .flat_map(|group| {
+            if group[0].is_unrotated() {
+                group
+            } else {
+                order_rotated_segment_group(group)
+            }
+        })
+        .collect()
+}
+
+fn order_rotated_segment_group(mut segments: Vec<SegmentData>) -> Vec<SegmentData> {
+    segments.sort_by(|first, second| {
+        second
+            .upright_baseline()
+            .total_cmp(&first.upright_baseline())
+            .then_with(|| {
+                first
+                    .upright_advance_extent()
+                    .0
+                    .total_cmp(&second.upright_advance_extent().0)
+            })
+    });
+
+    let mut visual_lines: Vec<Vec<SegmentData>> = Vec::new();
+    for segment in segments {
+        let belongs_to_last_line = visual_lines.last().is_some_and(|line| {
+            let anchor = &line[0];
+            let tolerance = anchor.height.max(segment.height).max(anchor.font_size * 0.5) * 0.5;
+            (anchor.upright_baseline() - segment.upright_baseline()).abs() <= tolerance
+        });
+        if belongs_to_last_line {
+            if let Some(line) = visual_lines.last_mut() {
+                line.push(segment);
+            }
+        } else {
+            visual_lines.push(vec![segment]);
+        }
+    }
+
+    for line in &mut visual_lines {
+        line.sort_by(|first, second| {
+            first
+                .upright_advance_extent()
+                .0
+                .total_cmp(&second.upright_advance_extent().0)
+        });
+    }
+    visual_lines.into_iter().flatten().collect()
 }
 
 #[cfg(feature = "layout-detection")]
@@ -1072,11 +1140,31 @@ fn compute_paragraph_gap_ys(segments: &[SegmentData]) -> Vec<f32> {
         return Vec::new();
     }
 
+    if segments.iter().all(SegmentData::is_unrotated) {
+        return compute_paragraph_gap_ys_in_shared_frame(segments);
+    }
+
+    let mut gaps = Vec::new();
+    let mut group_start = 0;
+    for index in 1..=segments.len() {
+        let ends_group = index == segments.len() || !segments[index - 1].has_same_rotation(&segments[index]);
+        if ends_group {
+            gaps.extend(compute_paragraph_gap_ys_in_shared_frame(&segments[group_start..index]));
+            group_start = index;
+        }
+    }
+    gaps
+}
+
+fn compute_paragraph_gap_ys_in_shared_frame(segments: &[SegmentData]) -> Vec<f32> {
+    if segments.len() < 2 {
+        return Vec::new();
+    }
+
     let mut order: Vec<usize> = (0..segments.len()).collect();
     order.sort_by(|&a, &b| {
-        segments[b]
-            .y
-            .partial_cmp(&segments[a].y)
+        paragraph_gap_axis(&segments[b])
+            .partial_cmp(&paragraph_gap_axis(&segments[a]))
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
@@ -1090,20 +1178,26 @@ fn compute_paragraph_gap_ys(segments: &[SegmentData]) -> Vec<f32> {
     let mut lines: Vec<LineBand> = Vec::new();
     for &i in &order {
         let seg = &segments[i];
+        let (bottom, top) = if seg.is_unrotated() {
+            (seg.y, seg.y + seg.height)
+        } else {
+            seg.upright_cross_extent()
+        };
+        let baseline = paragraph_gap_axis(seg);
         let tolerance = (seg.height * 0.5).max(1.0);
         match lines.last_mut() {
-            Some(line) if (seg.y - line.anchor_y).abs() <= tolerance => {
-                line.top = line.top.max(seg.y + seg.height);
-                line.bottom = line.bottom.min(seg.y);
+            Some(line) if (baseline - line.anchor_y).abs() <= tolerance => {
+                line.top = line.top.max(top);
+                line.bottom = line.bottom.min(bottom);
                 line.height = line.height.max(seg.height);
                 line.monospace &= seg.is_monospace;
             }
             _ => lines.push(LineBand {
-                top: seg.y + seg.height,
-                bottom: seg.y,
+                top,
+                bottom,
                 height: seg.height,
                 monospace: seg.is_monospace,
-                anchor_y: seg.y,
+                anchor_y: baseline,
             }),
         }
     }
@@ -1123,6 +1217,14 @@ fn compute_paragraph_gap_ys(segments: &[SegmentData]) -> Vec<f32> {
         }
     }
     gap_ys
+}
+
+fn paragraph_gap_axis(segment: &SegmentData) -> f32 {
+    if segment.is_unrotated() {
+        segment.y
+    } else {
+        segment.upright_baseline()
+    }
 }
 
 /// Convert a flat list of text segments into grouped paragraphs.
@@ -1153,10 +1255,13 @@ fn blocks_to_paragraphs(
             let role_change = line.assigned_role != prev.assigned_role;
             let bold_change =
                 line.is_bold != prev.is_bold && !is_inline_style_transition(current_is_single_visual_line, prev, line);
-            let starts_new_line = (line.baseline_y - prev.baseline_y).abs() > INLINE_STYLE_BASELINE_TOLERANCE;
-            let has_same_line_follower = lines
-                .get(line_idx + 1)
-                .is_some_and(|next| (next.baseline_y - line.baseline_y).abs() <= INLINE_STYLE_BASELINE_TOLERANCE);
+            let rotation_change = !line.has_same_rotation(prev);
+            let starts_new_line = rotation_change
+                || (line.upright_baseline() - prev.upright_baseline()).abs() > INLINE_STYLE_BASELINE_TOLERANCE;
+            let has_same_line_follower = lines.get(line_idx + 1).is_some_and(|next| {
+                next.has_same_rotation(line)
+                    && (next.upright_baseline() - line.upright_baseline()).abs() <= INLINE_STYLE_BASELINE_TOLERANCE
+            });
             let is_list = starts_new_line
                 && (looks_like_list_item(&line.text) || (has_same_line_follower && is_bare_list_marker(&line.text)));
             // A numbered section heading always begins a new element. Without this
@@ -1171,14 +1276,16 @@ fn blocks_to_paragraphs(
             // break its paragraph. See #1386. ~keep
             let starts_section = starts_new_line && super::classify::is_numbered_section_heading(&line.text);
             let crossed_gap = paragraph_gap_ys.iter().any(|&gap_y| {
-                let (upper, lower) = if prev.baseline_y > line.baseline_y {
-                    (prev.baseline_y, line.baseline_y)
+                let previous_baseline = prev.upright_baseline();
+                let current_baseline = line.upright_baseline();
+                let (upper, lower) = if previous_baseline > current_baseline {
+                    (previous_baseline, current_baseline)
                 } else {
-                    (line.baseline_y, prev.baseline_y)
+                    (current_baseline, previous_baseline)
                 };
                 gap_y < upper && gap_y > lower
             });
-            font_change || role_change || bold_change || is_list || starts_section || crossed_gap
+            rotation_change || font_change || role_change || bold_change || is_list || starts_section || crossed_gap
         };
 
         if should_break && !current_lines.is_empty() {
@@ -1189,8 +1296,8 @@ fn blocks_to_paragraphs(
             current_is_single_visual_line = true;
         }
         if let Some(first) = current_lines.first() {
-            current_is_single_visual_line &=
-                (line.baseline_y - first.baseline_y).abs() <= INLINE_STYLE_BASELINE_TOLERANCE;
+            current_is_single_visual_line &= line.has_same_rotation(first)
+                && (line.upright_baseline() - first.upright_baseline()).abs() <= INLINE_STYLE_BASELINE_TOLERANCE;
         }
         current_lines.push(line);
     }
@@ -1224,30 +1331,35 @@ fn is_inline_style_transition(current_is_single_visual_line: bool, previous: &Se
     {
         return false;
     }
+    if !previous.has_same_rotation(next) {
+        return false;
+    }
     if !previous.font_size.is_finite()
         || !next.font_size.is_finite()
         || previous.font_size <= 0.0
         || next.font_size <= 0.0
-        || !previous.baseline_y.is_finite()
-        || !next.baseline_y.is_finite()
+        || !previous.upright_baseline().is_finite()
+        || !next.upright_baseline().is_finite()
         || !previous.x.is_finite()
         || !next.x.is_finite()
         || !previous.width.is_finite()
         || !next.width.is_finite()
         || previous.width < 0.0
         || next.width < 0.0
-        || next.x < previous.x
     {
         return false;
     }
-    if (next.baseline_y - previous.baseline_y).abs() > INLINE_STYLE_BASELINE_TOLERANCE {
+    if (next.upright_baseline() - previous.upright_baseline()).abs() > INLINE_STYLE_BASELINE_TOLERANCE {
         return false;
     }
 
     let font_size = previous.font_size.max(next.font_size);
-    let horizontal_gap = next.x - (previous.x + previous.width);
-    horizontal_gap >= -(font_size * INLINE_STYLE_MAX_OVERLAP_FONT_FACTOR)
-        && horizontal_gap <= font_size * INLINE_STYLE_MAX_FORWARD_GAP_FONT_FACTOR
+    let (previous_start, previous_end) = previous.upright_advance_extent();
+    let (next_start, _) = next.upright_advance_extent();
+    let advance_gap = next_start - previous_end;
+    next_start >= previous_start
+        && advance_gap >= -(font_size * INLINE_STYLE_MAX_OVERLAP_FONT_FACTOR)
+        && advance_gap <= font_size * INLINE_STYLE_MAX_FORWARD_GAP_FONT_FACTOR
 }
 
 /// Reconstruct PdfLine objects from a flat list of SegmentData, grouping by baseline_y.
@@ -1261,11 +1373,14 @@ fn reconstruct_pdf_lines(segments: &[&SegmentData]) -> Vec<super::types::PdfLine
     }
 
     let mut lines: Vec<super::types::PdfLine> = Vec::new();
-    let mut current_baseline = segments[0].baseline_y;
+    let mut current_baseline = segments[0].upright_baseline();
+    let mut current_rotation = segments[0].rotation_degrees;
     let mut current_segments: Vec<SegmentData> = Vec::new();
 
     for seg in segments {
-        if (seg.baseline_y - current_baseline).abs() > 0.5 {
+        let same_rotation = (seg.rotation_degrees - current_rotation).abs() <= f32::EPSILON;
+        let segment_baseline = seg.upright_baseline();
+        if !same_rotation || (segment_baseline - current_baseline).abs() > 0.5 {
             if !current_segments.is_empty() {
                 let dominant_font_size = current_segments.iter().map(|s| s.font_size).fold(0.0, |a, b| {
                     if a > 0.0 && b > a / 2.0 && b < a * 2.0 {
@@ -1284,7 +1399,8 @@ fn reconstruct_pdf_lines(segments: &[&SegmentData]) -> Vec<super::types::PdfLine
                     is_monospace,
                 });
             }
-            current_baseline = seg.baseline_y;
+            current_baseline = segment_baseline;
+            current_rotation = seg.rotation_degrees;
             current_segments.clear();
         }
         current_segments.push((*seg).clone());
@@ -1313,6 +1429,44 @@ fn reconstruct_pdf_lines(segments: &[&SegmentData]) -> Vec<super::types::PdfLine
 }
 
 /// Build a PdfParagraph from a group of consecutive lines with compatible font properties.
+fn paragraph_text(lines: &[&SegmentData]) -> String {
+    if lines.iter().all(|segment| segment.is_unrotated()) {
+        return lines
+            .iter()
+            .map(|segment| segment.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+    }
+
+    let mut text = String::new();
+    let mut previous: Option<&SegmentData> = None;
+    for segment in lines {
+        if let Some(previous) = previous {
+            if !previous.has_same_rotation(segment) {
+                text.push_str("\n\n");
+            } else {
+                let same_line = (previous.upright_baseline() - segment.upright_baseline()).abs()
+                    < previous.height.max(segment.height).max(segment.font_size * 0.5) * 0.5;
+                if same_line {
+                    let previous_word = previous.text.split_whitespace().next_back().unwrap_or("");
+                    let next_word = segment.text.split_whitespace().next().unwrap_or("");
+                    if !text.ends_with(char::is_whitespace)
+                        && !segment.text.starts_with(char::is_whitespace)
+                        && segments_need_space(previous, previous_word, segment, next_word)
+                    {
+                        text.push(' ');
+                    }
+                } else {
+                    text.push('\n');
+                }
+            }
+        }
+        text.push_str(&segment.text);
+        previous = Some(segment);
+    }
+    text
+}
+
 fn finalize_paragraph(
     lines: &[&SegmentData],
     heading_map: &[(f32, Option<u8>)],
@@ -1322,7 +1476,7 @@ fn finalize_paragraph(
         return None;
     }
 
-    let text: String = lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join("\n");
+    let text = paragraph_text(lines);
 
     let trimmed = text.trim();
     if trimmed.is_empty() {
@@ -1340,7 +1494,8 @@ fn finalize_paragraph(
     let reconstructed_lines = reconstruct_pdf_lines(lines);
     let starts_with_split_list_marker = lines.get(1).is_some_and(|body| {
         is_bare_list_marker(&first.text)
-            && (body.baseline_y - first.baseline_y).abs() <= INLINE_STYLE_BASELINE_TOLERANCE
+            && body.has_same_rotation(first)
+            && (body.upright_baseline() - first.upright_baseline()).abs() <= INLINE_STYLE_BASELINE_TOLERANCE
             && !body.text.trim().is_empty()
     });
     let is_list_candidate = looks_like_list_item(trimmed) || starts_with_split_list_marker;
@@ -5626,6 +5781,7 @@ mod tests {
             is_italic: false,
             is_monospace: false,
             baseline_y: 700.0,
+            rotation_degrees: 0.0,
             assigned_role,
         }
     }
@@ -5848,6 +6004,7 @@ mod tests {
             is_italic: false,
             is_monospace: false,
             baseline_y,
+            rotation_degrees: 0.0,
             assigned_role: None,
         }
     }
@@ -5949,6 +6106,7 @@ mod tests {
             is_italic: false,
             is_monospace: false,
             baseline_y: 0.0,
+            rotation_degrees: 0.0,
             assigned_role: None,
         }
     }
@@ -7642,6 +7800,7 @@ where new shares are issued;";
             is_italic: false,
             is_monospace: false,
             baseline_y: 700.0,
+            rotation_degrees: 0.0,
             assigned_role: None,
         }
     }
@@ -7658,8 +7817,57 @@ where new shares are issued;";
             is_italic: false,
             is_monospace: monospace,
             baseline_y: y,
+            rotation_degrees: 0.0,
             assigned_role: None,
         }
+    }
+
+    fn rotated_seg(text: &str, x: f32, y: f32, width: f32, rotation_degrees: f32) -> SegmentData {
+        let mut segment = seg_at(text, x, y, 10.0, false);
+        segment.width = width;
+        segment.font_size = 10.0;
+        segment.rotation_degrees = rotation_degrees;
+        segment
+    }
+
+    #[test]
+    fn test_order_segments_in_reading_frames_repairs_scrambled_rotated_table() {
+        let segments = vec![
+            rotated_seg("B2", 200.0, 130.0, 10.0, 90.0),
+            rotated_seg("A2", 100.0, 130.0, 10.0, 90.0),
+            rotated_seg("B1", 200.0, 100.0, 10.0, 90.0),
+            rotated_seg("A1", 100.0, 100.0, 10.0, 90.0),
+        ];
+
+        let ordered = order_segments_in_reading_frames(segments);
+        let text = ordered.iter().map(|segment| segment.text.as_str()).collect::<Vec<_>>();
+        assert_eq!(text, ["A1", "A2", "B1", "B2"]);
+    }
+
+    #[test]
+    fn test_order_segments_in_reading_frames_leaves_upright_order_byte_identical() {
+        let segments = vec![
+            rotated_seg("second", 200.0, 100.0, 10.0, 0.0),
+            rotated_seg("first", 100.0, 100.0, 10.0, 0.0),
+        ];
+
+        let ordered = order_segments_in_reading_frames(segments);
+        let text = ordered.iter().map(|segment| segment.text.as_str()).collect::<Vec<_>>();
+        assert_eq!(text, ["second", "first"]);
+    }
+
+    #[test]
+    fn test_blocks_to_paragraphs_separates_rotated_body_from_upright_footer() {
+        let segments = vec![
+            rotated_seg("Engine", 100.0, 100.0, 20.0, 90.0),
+            rotated_seg("oil", 100.0, 125.0, 10.0, 90.0),
+            rotated_seg("264", 280.0, 20.0, 15.0, 0.0),
+        ];
+
+        let paragraphs = blocks_to_paragraphs(order_segments_in_reading_frames(segments), &[], &[]);
+        assert_eq!(paragraphs.len(), 2);
+        assert_eq!(paragraphs[0].text, "Engine oil");
+        assert_eq!(paragraphs[1].text, "264");
     }
 
     #[test]
@@ -7676,6 +7884,19 @@ where new shares are issued;";
             "gap midpoint between the paragraphs, got {}",
             gaps[0]
         );
+    }
+
+    #[test]
+    fn test_compute_paragraph_gap_ys_uses_rotated_cross_axis() {
+        let segments = vec![
+            rotated_seg("line one", 100.0, 100.0, 20.0, 90.0),
+            rotated_seg("line two", 116.0, 100.0, 20.0, 90.0),
+            rotated_seg("new paragraph", 156.0, 100.0, 20.0, 90.0),
+        ];
+
+        let gaps = compute_paragraph_gap_ys(&segments);
+        assert_eq!(gaps.len(), 1);
+        assert!((gaps[0] + 131.0).abs() < 1e-3, "unexpected rotated-frame gap: {gaps:?}");
     }
 
     #[test]
@@ -7982,6 +8203,7 @@ where new shares are issued;";
             is_italic: false,
             is_monospace: false,
             baseline_y,
+            rotation_degrees: 0.0,
             assigned_role: None,
         }
     }

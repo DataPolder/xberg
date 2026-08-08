@@ -562,6 +562,7 @@ mod tests {
             is_italic: false,
             is_monospace: false,
             baseline_y: y,
+            rotation_degrees: 0.0,
             assigned_role: None,
         }
     }

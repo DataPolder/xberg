@@ -62,6 +62,10 @@ pub(super) fn segments_need_space(
         return true;
     }
 
+    if !prev_seg.has_same_rotation(next_seg) {
+        return true;
+    }
+
     if prev_seg.is_bold != next_seg.is_bold
         || prev_seg.is_italic != next_seg.is_italic
         || prev_seg.is_monospace != next_seg.is_monospace
@@ -70,14 +74,15 @@ pub(super) fn segments_need_space(
     }
 
     let eff_height = next_seg.height.max(prev_seg.height).max(next_seg.font_size * 0.5);
-    let same_line = (prev_seg.baseline_y - next_seg.baseline_y).abs() < eff_height * 0.5;
+    let same_line = (prev_seg.upright_baseline() - next_seg.upright_baseline()).abs() < eff_height * 0.5;
     if !same_line {
         return true;
     }
 
-    let prev_end_x = prev_seg.x + prev_seg.width;
-    let x_gap = next_seg.x - prev_end_x;
-    x_gap > next_seg.font_size * SEGMENT_GAP_SPACE_RATIO
+    let (_, prev_end) = prev_seg.upright_advance_extent();
+    let (next_start, _) = next_seg.upright_advance_extent();
+    let advance_gap = next_start - prev_end;
+    advance_gap > next_seg.font_size * SEGMENT_GAP_SPACE_RATIO
 }
 
 #[cfg(test)]
@@ -113,6 +118,7 @@ mod tests {
             is_italic: false,
             is_monospace: false,
             baseline_y,
+            rotation_degrees: 0.0,
             assigned_role: None,
         }
     }
@@ -194,5 +200,24 @@ mod tests {
         let prev = segment("\u{4E00} ", 100.0, 12.0, 12.0, 700.0);
         let next = segment("\u{4E01}", 112.0, 12.0, 12.0, 700.0);
         assert!(!segments_need_space(&prev, "\u{4E00}", &next, "\u{4E01}"));
+    }
+
+    #[test]
+    fn test_segments_need_space_uses_rotated_advance_axis() {
+        let mut prev = segment("Engine", 100.0, 20.0, 10.0, 100.0);
+        prev.rotation_degrees = 90.0;
+        let mut next = segment("oil", 100.0, 10.0, 10.0, 125.0);
+        next.rotation_degrees = 90.0;
+
+        assert!(segments_need_space(&prev, "Engine", &next, "oil"));
+    }
+
+    #[test]
+    fn test_segments_need_space_separates_different_rotation_frames() {
+        let prev = segment("body", 100.0, 20.0, 10.0, 100.0);
+        let mut next = segment("footer", 120.0, 20.0, 10.0, 100.0);
+        next.rotation_degrees = 90.0;
+
+        assert!(segments_need_space(&prev, "body", &next, "footer"));
     }
 }

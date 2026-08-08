@@ -47,6 +47,7 @@ pub(super) fn merge_continuation_paragraphs(paragraphs: &mut Vec<PdfParagraph>) 
         let bold_compatible = current.is_bold == next.is_bold;
         let continuation_signal = !ends_with_sentence_terminator(&current) || starts_with_lowercase_continuation(&next);
         let same_region = current.layout_region_path == next.layout_region_path;
+        let same_rotation = paragraphs_share_rotation(&current, &next);
         let vertical_gap_compatible = baselines_within_continuation_gap(&current, &next);
         // A numbered section heading starts a new logical element and must never be
         // absorbed as a continuation. A heading does not end in `.?!:;`, so
@@ -60,6 +61,7 @@ pub(super) fn merge_continuation_paragraphs(paragraphs: &mut Vec<PdfParagraph>) 
             && bold_compatible
             && continuation_signal
             && same_region
+            && same_rotation
             && vertical_gap_compatible
             && !next_starts_section;
 
@@ -74,6 +76,15 @@ pub(super) fn merge_continuation_paragraphs(paragraphs: &mut Vec<PdfParagraph>) 
     }
 
     paragraphs.push(current);
+}
+
+fn paragraphs_share_rotation(current: &PdfParagraph, next: &PdfParagraph) -> bool {
+    let current_rotation = current.lines.last().and_then(|line| line.segments.last());
+    let next_rotation = next.lines.first().and_then(|line| line.segments.first());
+    match (current_rotation, next_rotation) {
+        (Some(current), Some(next)) => current.has_same_rotation(next),
+        _ => true,
+    }
 }
 
 /// Whether `next`'s first baseline is close enough below `current`'s last
@@ -224,6 +235,7 @@ fn text_to_paragraph(text: &str, font_size: f32, is_bold: bool, is_list_item: bo
             is_italic: false,
             is_monospace: false,
             baseline_y: 0.0,
+            rotation_degrees: 0.0,
             assigned_role: None,
         })
         .collect();
@@ -274,6 +286,7 @@ mod tests {
             is_italic: false,
             is_monospace: false,
             baseline_y: 700.0,
+            rotation_degrees: 0.0,
             assigned_role: None,
         }];
 
@@ -301,6 +314,18 @@ mod tests {
             block_bbox: None,
             word_count,
         }
+    }
+
+    #[test]
+    fn should_not_merge_paragraphs_across_rotation_boundary() {
+        let mut rotated = make_body_paragraph("Engine oil need only meet the", 12.0);
+        rotated.lines[0].segments[0].rotation_degrees = 90.0;
+        let footer = make_body_paragraph("vehicle footer", 12.0);
+        let mut paragraphs = vec![rotated, footer];
+
+        merge_continuation_paragraphs(&mut paragraphs);
+
+        assert_eq!(paragraphs.len(), 2);
     }
 
     fn make_body_paragraph_at(text: &str, font_size: f32, baseline_y: f32) -> PdfParagraph {

@@ -767,6 +767,7 @@ fn make_ocr_pdf_line(
         is_italic: false,
         is_monospace: false,
         baseline_y,
+        rotation_degrees: 0.0,
         assigned_role: None,
     };
     types::PdfLine {

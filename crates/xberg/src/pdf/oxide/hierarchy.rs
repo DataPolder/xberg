@@ -614,6 +614,7 @@ fn extract_segments_from_page_inner(
                 is_italic: span.is_italic,
                 is_monospace: span.is_monospace,
                 baseline_y: pdf_baseline_y,
+                rotation_degrees: span.rotation_degrees,
                 assigned_role,
             }
         })
@@ -648,7 +649,10 @@ fn dedupe_redrawn_segments(segments: Vec<SegmentData>) -> Vec<SegmentData> {
         if let Some(prev) = kept[window_start..].iter_mut().find(|prev| {
             let dx_tol = (prev.width.min(seg.width) * 0.5).max(REDRAWN_MIN_TOLERANCE_PTS);
             let dy_tol = (prev.height.min(seg.height) * 0.5).max(REDRAWN_MIN_TOLERANCE_PTS);
-            prev.text == seg.text && (prev.x - seg.x).abs() <= dx_tol && (prev.y - seg.y).abs() <= dy_tol
+            prev.has_same_rotation(&seg)
+                && prev.text == seg.text
+                && (prev.x - seg.x).abs() <= dx_tol
+                && (prev.y - seg.y).abs() <= dy_tol
         }) {
             prev.is_bold |= seg.is_bold;
             prev.is_italic |= seg.is_italic;
@@ -1316,6 +1320,7 @@ mod tests {
             is_italic: false,
             is_monospace: false,
             baseline_y: y,
+            rotation_degrees: 0.0,
             assigned_role: None,
         }
     }
@@ -1612,6 +1617,17 @@ mod tests {
             seg("a", 72.0, 700.0, 10.0, false),
             seg("b", 72.0, 700.0, 10.0, false),
         ]);
+        assert_eq!(out.len(), 2);
+    }
+
+    #[test]
+    fn should_keep_identical_text_in_different_rotation_frames() {
+        let upright = seg("label", 100.0, 200.0, 10.0, false);
+        let mut rotated = upright.clone();
+        rotated.rotation_degrees = 90.0;
+
+        let out = super::dedupe_redrawn_segments(vec![upright, rotated]);
+
         assert_eq!(out.len(), 2);
     }
 }
