@@ -1,16 +1,19 @@
-//! Multi-Token Prediction decoding loop for GLM-OCR.
+//! Token decoding loop for GLM-OCR.
 //!
-//! Phase 1 stub. GLM-OCR's decoder predicts multiple tokens per forward pass
-//! to improve throughput. The loop consumes the assembled vision-prefix
-//! `input_embeds` and the GLM-4 decoder, sampling tokens until EOS or
-//! `max_new_tokens`.
+//! Consumes the assembled vision-prefix `input_embeds` and the GLM-4 decoder: prefills the KV
+//! cache, then samples one token per forward pass — greedy or nucleus, with an optional
+//! repetition penalty — until an EOS token or `max_new_tokens`. `generate_mrope` threads
+//! explicit M-RoPE position ids through prefill and each decode step; `generate` uses plain
+//! sequence-length offsets.
+//!
+//! Despite the `MtpConfig` name, no multi-token prediction happens — see `num_tokens_per_step`.
 
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MtpConfig {
-    /// Number of tokens predicted per decoder forward pass. `1` reduces to
-    /// vanilla autoregressive decoding.
+    /// Intended number of tokens predicted per decoder forward pass. Currently inert: neither
+    /// `generate` nor `generate_mrope` reads it, and decoding is always one token per pass.
     pub num_tokens_per_step: usize,
     /// Greedy when `false`; nucleus sampling when `true`.
     pub sample: bool,
@@ -142,8 +145,9 @@ mod imp {
     /// 3. For each token: embed and forward at the current seqlen_offset
     /// 4. Stop on EOS or `max_new_tokens`
     ///
-    /// Note: num_tokens_per_step is configured but not yet used for multi-token
-    /// prediction. Currently set to 1 for autoregressive decoding; future optimization.
+    /// Note: `config.num_tokens_per_step` is never read. Every forward pass emits exactly one
+    /// token regardless of the configured value (default 4), so throughput is that of plain
+    /// autoregressive decoding, not multi-token prediction.
     pub fn generate(
         decoder: &mut Glm4Decoder,
         input_embeds: &Tensor,

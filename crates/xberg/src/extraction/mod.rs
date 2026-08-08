@@ -6,7 +6,6 @@ pub(crate) mod doctags;
 pub(crate) mod grid_flatten;
 pub mod image_kind;
 pub mod structured;
-pub mod text;
 pub mod transform;
 
 #[cfg(feature = "hwp")]

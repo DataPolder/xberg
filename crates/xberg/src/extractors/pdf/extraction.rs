@@ -41,7 +41,9 @@ fn effective_layout_acceleration<'a>(
 ///
 /// # Notes
 ///
-/// - Layout detection is not yet supported on the oxide path.
+/// - With the `layout-detection` feature, layout images, per-page layout results, the configured
+///   table model and table-overlap preference, and the resolved layout acceleration are threaded
+///   into `SegmentStructureConfig`; layout hints additionally drive reading-order reordering.
 /// - When output format is Markdown/Djot/HTML, the oxide hierarchy module extracts font
 ///   metrics and feeds them into the backend-agnostic structure pipeline for heading detection.
 /// - Font encoding issue detection is not available; the flag is always `false`.

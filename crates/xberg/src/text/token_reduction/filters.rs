@@ -202,7 +202,6 @@ impl FilterPipeline {
 
 #[cfg(all(test, feature = "stopwords"))]
 mod tests {
-    use super::general::split_word_boundaries;
     use super::*;
 
     #[test]
@@ -678,57 +677,6 @@ mod tests {
 
         assert!(!result.contains(" the "));
         assert!(result.contains("quick"));
-    }
-
-    #[test]
-    fn test_split_word_boundaries() {
-        let (prefix, core, suffix) = split_word_boundaries("(hello)");
-        assert_eq!(prefix, "(");
-        assert_eq!(core, "hello");
-        assert_eq!(suffix, ")");
-
-        let (prefix2, core2, suffix2) = split_word_boundaries("world!");
-        assert_eq!(prefix2, "");
-        assert_eq!(core2, "world");
-        assert_eq!(suffix2, "!");
-
-        let (prefix3, core3, suffix3) = split_word_boundaries("'test");
-        assert_eq!(prefix3, "'");
-        assert_eq!(core3, "test");
-        assert_eq!(suffix3, "");
-
-        let (prefix4, core4, suffix4) = split_word_boundaries("simple");
-        assert_eq!(prefix4, "");
-        assert_eq!(core4, "simple");
-        assert_eq!(suffix4, "");
-
-        let (prefix5, core5, suffix5) = split_word_boundaries("\"example!!!\"");
-        assert_eq!(prefix5, "\"");
-        assert_eq!(core5, "example");
-        assert_eq!(suffix5, "!!!\"");
-    }
-
-    #[test]
-    fn test_split_word_boundaries_edge_cases() {
-        let (prefix, core, suffix) = split_word_boundaries("!!!");
-        assert_eq!(prefix, "!!!");
-        assert_eq!(core, "");
-        assert_eq!(suffix, "");
-
-        let (prefix2, core2, suffix2) = split_word_boundaries("");
-        assert_eq!(prefix2, "");
-        assert_eq!(core2, "");
-        assert_eq!(suffix2, "");
-
-        let (prefix3, core3, suffix3) = split_word_boundaries("a");
-        assert_eq!(prefix3, "");
-        assert_eq!(core3, "a");
-        assert_eq!(suffix3, "");
-
-        let (prefix4, core4, suffix4) = split_word_boundaries("(café)");
-        assert_eq!(prefix4, "(");
-        assert_eq!(core4, "café");
-        assert_eq!(suffix4, ")");
     }
 
     #[test]

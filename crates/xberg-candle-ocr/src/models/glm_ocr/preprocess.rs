@@ -1,9 +1,10 @@
 //! Image preprocessing for GLM-OCR.
 //!
-//! Phase 1 stub. GLM-OCR uses CogViT-style patch tiling with a configurable
-//! `t_patch_size` and a max-pixel budget. The output is a normalised
-//! `(1, C, H, W)` BF16 pixel tensor and a grid descriptor that downstream
-//! code uses to compute the number of vision tokens.
+//! Decodes image bytes, smart-resizes them to a multiple of `patch_size * t_patch_size`
+//! within the configured min/max pixel budget, and normalises with the CogViT mean/std.
+//! Returns a `(1, C, H, W)` pixel tensor in the requested dtype plus a `(1, 3)`
+//! `[T, H_patches, W_patches]` grid descriptor that downstream code uses to compute the
+//! number of vision tokens.
 
 use serde::{Deserialize, Serialize};
 
