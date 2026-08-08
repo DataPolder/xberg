@@ -207,3 +207,10 @@ jobs:
       # `poly fmt --check packages/elixir` reports "All formatted"; with PATH=/usr/bin:/bin
       # it reports the same 240 files CI did. ~keep
       setup-elixir: true
+      # poly's rubocop and steep hooks both run `bundle exec` with root =
+      # packages/ruby (poly.toml:644,650). Without a Ruby toolchain the Lint step
+      # dies with `poly-hook: 1: bundle: not found` -- which is what it started
+      # doing once install-system-deps got it past the libheif failure above.
+      # The reusable workflow's ruby-working-directory already defaults to
+      # packages/ruby, so it needs no override. ~keep
+      setup-ruby: true
