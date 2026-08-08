@@ -1,3 +1,7 @@
+//! Issue #66: a PDF's `/PageLabels` numbering scheme must surface in
+//! `metadata.additional["page_labels"]`, and must be absent entirely when the PDF
+//! defines no `/PageLabels` at all.
+
 #![cfg(feature = "pdf")]
 
 mod helpers;

@@ -1,3 +1,8 @@
+//! Issue #291 / GH#1364: a structurally invalid `/Font` resource makes `pdf_oxide`
+//! drop every glyph painted with that font while the page still renders `Ok`. Asserts
+//! the dropped glyphs surface as one deduped `ProcessingWarning` per distinct cause,
+//! with a resolvable-font case as the negative control.
+
 #![cfg(feature = "pdf")]
 
 use xberg::ProcessingWarning;

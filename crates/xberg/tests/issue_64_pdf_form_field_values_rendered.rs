@@ -1,3 +1,7 @@
+//! Issue #64: form field values that live only in Widget annotations (never in the
+//! page content stream) must still be rendered into extracted output, covering the
+//! interactive, non-flattened PDF form pattern.
+
 #![cfg(feature = "pdf")]
 
 mod helpers;

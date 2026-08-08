@@ -1,3 +1,7 @@
+//! Proves `Gliner2Candle::from_bytes` compiles, links, and runs on wasm32 (via
+//! wasm-bindgen-test under Node.js), and that empty weights yield a clean error
+//! rather than a panic or trap.
+
 #![cfg(all(target_arch = "wasm32", feature = "candle"))]
 use wasm_bindgen_test::*;
 

@@ -1,3 +1,7 @@
+//! Network-gated smoke test for GLM-OCR end-to-end inference: constructs the engine,
+//! runs OCR on a fixture image, and checks the output text for expected content and
+//! for degenerate repeated-token runs. Ignored by default; downloads ~3GB of weights.
+
 #![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(feature = "glm-ocr")]
 

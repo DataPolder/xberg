@@ -1,3 +1,7 @@
+//! Issue #65: when a PDF's Info dictionary carries no `/Title`/`/Author` but its
+//! catalog `/Metadata` stream carries an XMP packet with `dc:title`/`dc:creator`,
+//! that XMP-only metadata must still be surfaced.
+
 #![cfg(feature = "pdf")]
 
 mod helpers;

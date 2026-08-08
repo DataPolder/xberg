@@ -1,3 +1,7 @@
+//! Issue #62: a tagged PDF's `Figure` structure element `/Alt` text must reach
+//! `ExtractedImage::description`, which was previously hardcoded to `None` for
+//! every image regardless of tagged alt text.
+
 #![cfg(feature = "pdf")]
 
 mod helpers;

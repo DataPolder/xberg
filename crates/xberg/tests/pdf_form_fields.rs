@@ -1,3 +1,7 @@
+//! Issue #1120: form field values that live only in Widget annotations, with no
+//! trace in the page content stream, must still be recovered by PDF form field
+//! extraction — the interactive (non-flattened) PDF pattern.
+
 #![cfg(feature = "pdf")]
 
 mod helpers;

@@ -1,3 +1,7 @@
+//! Smoke test for the GLM-OCR `process_image_with_task` paired-mode dispatch path,
+//! plus the shared degenerate-repeated-n-gram detector used across GLM-OCR tests.
+//! Ignored by default; downloads ~3GB of weights.
+
 #![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(feature = "glm-ocr")]
 

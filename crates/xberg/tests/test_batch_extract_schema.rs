@@ -1,3 +1,7 @@
+//! Issue #877: the generated JSON schema for `ExtractBatchParams` must declare
+//! `inputs.items` as an object (not boolean `true`) and document the `kind`
+//! discriminator, since Moonshot AI rejects boolean `items` schemas.
+
 #![cfg(feature = "mcp")]
 
 use rmcp::schemars::schema_for;

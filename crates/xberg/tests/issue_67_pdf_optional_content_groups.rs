@@ -1,3 +1,7 @@
+//! Issue #67: text belonging to an optional-content group (OCG/layer) that is OFF by
+//! default (`/OCProperties/D/OFF`) must not be surfaced by text extraction, which
+//! previously ignored `/OCProperties` entirely.
+
 #![cfg(feature = "pdf")]
 
 mod helpers;

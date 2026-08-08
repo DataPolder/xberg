@@ -1,3 +1,7 @@
+//! Issue #73: a malformed `/AcroForm` (present but not a dictionary) must surface
+//! `ProcessingWarning`s sourced `pdf_forms` rather than degrading silently, so it is
+//! distinguishable from a PDF with no form at all.
+
 #![cfg(feature = "pdf")]
 
 mod helpers;
