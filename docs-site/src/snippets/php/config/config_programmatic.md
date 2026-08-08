@@ -5,23 +5,20 @@ declare(strict_types=1);
 use Xberg\XbergApi;
 use Xberg\Xberg;
 use Xberg\ExtractionConfig;
-use Xberg\OcrConfig;
-use Xberg\ChunkingConfig;
-use Xberg\TesseractConfig;
 
-$config = new ExtractionConfig(
-    useCache: true,
-    ocr: new OcrConfig(
-        backend: 'tesseract',
-        language: 'eng+deu',
-        tesseractConfig: new TesseractConfig(psm: 6)
-    ),
-    chunking: new ChunkingConfig(
-        maxCharacters: 1000,
-        overlap: 200
-    ),
-    enableQualityProcessing: true
-);
+$config = ExtractionConfig::from_json(json_encode([
+    'useCache' => true,
+    'ocr' => [
+        'backend' => 'tesseract',
+        'language' => ['eng', 'deu'],
+        'tesseractConfig' => ['psm' => 6],
+    ],
+    'chunking' => [
+        'maxCharacters' => 1000,
+        'overlap' => 200,
+    ],
+    'enableQualityProcessing' => true,
+]));
 
 $resultOutput = Xberg::extract(\Xberg\ExtractInput::fromUri('document.pdf'), $config);
 

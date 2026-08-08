@@ -5,20 +5,16 @@ declare(strict_types=1);
 use Xberg\XbergApi;
 use Xberg\Xberg;
 use Xberg\ExtractionConfig;
-use Xberg\PdfConfig;
-use Xberg\HierarchyConfig;
 
-$config = new ExtractionConfig(
-    pdfOptions: new PdfConfig(
-        hierarchy: new HierarchyConfig(
-            enabled: true,
-            detectionThreshold: 0.75,
-            ocrCoverageThreshold: 0.8,
-            minLevel: 1,
-            maxLevel: 5
-        )
-    )
-);
+$config = ExtractionConfig::from_json(json_encode([
+    'pdfOptions' => [
+        'hierarchy' => [
+            'enabled' => true,
+            'kClusters' => 6,
+            'includeBbox' => true,
+        ],
+    ],
+]));
 
 $resultOutput = Xberg::extract(\Xberg\ExtractInput::fromUri('document.pdf'), $config);
 

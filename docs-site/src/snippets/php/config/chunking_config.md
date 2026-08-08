@@ -5,15 +5,14 @@ declare(strict_types=1);
 use Xberg\XbergApi;
 use Xberg\Xberg;
 use Xberg\ExtractionConfig;
-use Xberg\ChunkingConfig;
 
 // Basic chunking
-$config = new ExtractionConfig(
-    chunking: new ChunkingConfig(
-        maxCharacters: 1000,
-        overlap: 200
-    )
-);
+$config = ExtractionConfig::from_json(json_encode([
+    'chunking' => [
+        'maxCharacters' => 1000,
+        'overlap' => 200,
+    ],
+]));
 
 $resultOutput = Xberg::extract(\Xberg\ExtractInput::fromUri('document.pdf'), $config);
 
@@ -32,16 +31,15 @@ declare(strict_types=1);
 
 use Xberg\XbergApi;
 use Xberg\ExtractionConfig;
-use Xberg\ChunkingConfig;
 
-$config = new ExtractionConfig(
-    chunking: new ChunkingConfig(
-        maxCharacters: 500,
-        overlap: 50,
-        chunkerType: 'markdown',
-        prependHeadingContext: true
-    )
-);
+$config = ExtractionConfig::from_json(json_encode([
+    'chunking' => [
+        'maxCharacters' => 500,
+        'overlap' => 50,
+        'chunkerType' => 'markdown',
+        'prependHeadingContext' => true,
+    ],
+]));
 
 $resultOutput = Xberg::extract(\Xberg\ExtractInput::fromUri('document.md'), $config);
 

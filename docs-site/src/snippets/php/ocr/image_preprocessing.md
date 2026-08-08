@@ -6,25 +6,25 @@ require_once __DIR__ . '/vendor/autoload.php';
 
 use Xberg\XbergApi;
 use Xberg\ExtractionConfig;
-use Xberg\OcrConfig;
-use Xberg\ImagePreprocessingConfig;
 
 // Enhance OCR accuracy with image preprocessing
-$config = new ExtractionConfig(
-    ocr: new OcrConfig(
-        backend: 'tesseract',
-        language: 'eng',
-        imagePreprocessing: new ImagePreprocessingConfig(
-            targetDpi: 300,
-            autoRotate: true,
-            deskew: true,
-            denoise: true,
-            contrastEnhance: true,
-            binarizationMethod: 'otsu',
-            invertColors: false
-        )
-    )
-);
+$config = ExtractionConfig::from_json(json_encode([
+    'ocr' => [
+        'backend' => 'tesseract',
+        'language' => ['eng'],
+        'tesseractConfig' => [
+            'preprocessing' => [
+                'targetDpi' => 300,
+                'autoRotate' => true,
+                'deskew' => true,
+                'denoise' => true,
+                'contrastEnhance' => true,
+                'binarizationMethod' => 'otsu',
+                'invertColors' => false,
+            ],
+        ],
+    ],
+]));
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('scanned_document.pdf'), $config ?? \Xberg\ExtractionConfig::default());
 $result = $output->getResults()[0];

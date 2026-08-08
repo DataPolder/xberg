@@ -9,10 +9,8 @@ require_once __DIR__ . '/vendor/autoload.php';
 
 use Xberg\XbergApi;
 use Xberg\ExtractionConfig;
-use Xberg\LlmConfig;
-use Xberg\StructuredExtractionConfig;
 
-$schema = json_encode([
+$schema = [
     'type' => 'object',
     'properties' => [
         'title' => ['type' => 'string'],
@@ -21,29 +19,18 @@ $schema = json_encode([
     ],
     'required' => ['title', 'authors', 'date'],
     'additionalProperties' => false,
-], JSON_THROW_ON_ERROR);
+];
 
-$llm = new LlmConfig(
-    model: 'openai/gpt-4o-mini',
-    apiKey: null,
-    baseUrl: null,
-    timeoutSecs: null,
-    maxRetries: null,
-    temperature: null,
-    maxTokens: null,
-);
-
-$structured = StructuredExtractionConfig::from_json(json_encode([
-    'schema' => json_decode($schema, true),
-    'schema_name' => 'paper_metadata',
-    'strict' => true,
-    'llm' => [
-        'model' => $llm->model,
+$config = ExtractionConfig::from_json(json_encode([
+    'structuredExtraction' => [
+        'schema' => $schema,
+        'schemaName' => 'paper_metadata',
+        'strict' => true,
+        'llm' => [
+            'model' => 'openai/gpt-4o-mini',
+        ],
     ],
 ], JSON_THROW_ON_ERROR));
-
-$config = \Xberg\ExtractionConfig::default();
-$config->structured_extraction = $structured;
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('paper.pdf'), $config ?? \Xberg\ExtractionConfig::default());
 $result = $output->getResults()[0];

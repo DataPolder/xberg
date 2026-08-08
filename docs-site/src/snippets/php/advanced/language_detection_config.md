@@ -5,15 +5,14 @@ declare(strict_types=1);
 use Xberg\XbergApi;
 use Xberg\Xberg;
 use Xberg\ExtractionConfig;
-use Xberg\LanguageDetectionConfig;
 
-$config = new ExtractionConfig(
-    languageDetection: new LanguageDetectionConfig(
-        enabled: true,
-        minConfidence: 0.8,
-        detectMultiple: false
-    )
-);
+$config = ExtractionConfig::from_json(json_encode([
+    'languageDetection' => [
+        'enabled' => true,
+        'minConfidence' => 0.8,
+        'detectMultiple' => false,
+    ],
+]));
 
 $resultOutput = Xberg::extract(\Xberg\ExtractInput::fromUri('document.pdf'), $config);
 

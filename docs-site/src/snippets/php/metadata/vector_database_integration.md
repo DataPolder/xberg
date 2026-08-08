@@ -4,25 +4,18 @@
 use Xberg\XbergApi;
 use Xberg\Xberg;
 use Xberg\ExtractionConfig;
-use Xberg\ChunkingConfig;
-use Xberg\EmbeddingConfig;
 
 // Configure chunking with embedding generation for vector database
-$chunkConfig = new ChunkingConfig(
-    enableChunking: true,
-    chunkSize: 512,
-    chunkOverlap: 50,
-    chunker: "semantic"
-);
-
-$embeddingConfig = new EmbeddingConfig(
-    generateEmbeddings: true,
-    modelName: "all-minilm-l6-v2"
-);
-
-$config = ExtractionConfig::default();
-$config->chunking = $chunkConfig;
-$config->embeddings = $embeddingConfig;
+$config = ExtractionConfig::from_json(json_encode([
+    'chunking' => [
+        'maxCharacters' => 512,
+        'overlap' => 50,
+        'chunkerType' => 'semantic',
+        'embedding' => [
+            'normalize' => true,
+        ],
+    ],
+]));
 
 $resultOutput = Xberg::extract(\Xberg\ExtractInput::fromUri("document.pdf"), $config);
 

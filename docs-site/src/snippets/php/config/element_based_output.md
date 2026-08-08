@@ -5,8 +5,9 @@ use Xberg\XbergApi;
 use Xberg\Xberg;
 
 // Configure element-based output
-$config = ExtractionConfig::default();
-$config->setOutputFormat('element_based');
+$config = ExtractionConfig::from_json(json_encode([
+    'resultFormat' => 'element_based',
+]));
 
 // Extract document
 $resultOutput = Xberg::extract(\Xberg\ExtractInput::fromUri('document.pdf'), $config);

@@ -7,15 +7,14 @@ require_once __DIR__ . '/vendor/autoload.php';
 use Xberg\XbergApi;
 use Xberg\Xberg;
 use Xberg\ExtractionConfig;
-use Xberg\OcrConfig;
 
 // Basic OCR extraction with Tesseract
-$config = new ExtractionConfig(
-    ocr: new OcrConfig(
-        backend: 'tesseract',
-        language: 'eng'
-    )
-);
+$config = ExtractionConfig::from_json(json_encode([
+    'ocr' => [
+        'backend' => 'tesseract',
+        'language' => ['eng'],
+    ],
+]));
 
 $resultOutput = Xberg::extract(\Xberg\ExtractInput::fromUri('scanned_document.pdf'), $config);
 $result = $resultOutput->getResults()[0];

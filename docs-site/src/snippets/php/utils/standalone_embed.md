@@ -2,14 +2,14 @@
 <?php
 use Xberg\XbergApi;
 use Xberg\EmbeddingConfig;
-use Xberg\EmbeddingModelType;
-
 
 // Embed with default config (balanced preset)
 $embeddings = $xberg->embed(["Hello world", "How are you?"]);
 
 // Embed with specific preset
-$config = new EmbeddingConfig(model: EmbeddingModelType::preset("fast"));
+$config = EmbeddingConfig::from_json(json_encode([
+    'model' => ['type' => 'preset', 'name' => 'fast'],
+]));
 $embeddings = $xberg->embed(["Hello world"], $config);
 
 // Each embedding is a float array

@@ -5,14 +5,13 @@ declare(strict_types=1);
 use Xberg\XbergApi;
 use Xberg\Xberg;
 use Xberg\ExtractionConfig;
-use Xberg\TokenReductionOptions;
 
-$config = new ExtractionConfig(
-    tokenReduction: new TokenReductionOptions(
-        mode: 'moderate',
-        preserveImportantWords: true
-    )
-);
+$config = ExtractionConfig::from_json(json_encode([
+    'tokenReduction' => [
+        'mode' => 'moderate',
+        'preserveImportantWords' => true,
+    ],
+]));
 
 $resultOutput = Xberg::extract(\Xberg\ExtractInput::fromUri('document.pdf'), $config);
 

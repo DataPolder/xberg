@@ -5,8 +5,6 @@ declare(strict_types=1);
 use Xberg\XbergApi;
 use Xberg\Xberg;
 use Xberg\ExtractionConfig;
-use Xberg\ChunkingConfig;
-use Xberg\EmbeddingConfig;
 
 class VectorRecord {
     public function __construct(
@@ -21,16 +19,16 @@ function extractAndVectorize(
     string $documentPath,
     string $documentId
 ): array {
-    $config = new ExtractionConfig(
-        chunking: new ChunkingConfig(
-            maxCharacters: 512,
-            overlap: 50,
-            embedding: new EmbeddingConfig(
-                normalize: true,
-                batchSize: 32
-            )
-        )
-    );
+    $config = ExtractionConfig::from_json(json_encode([
+        'chunking' => [
+            'maxCharacters' => 512,
+            'overlap' => 50,
+            'embedding' => [
+                'normalize' => true,
+                'batchSize' => 32,
+            ],
+        ],
+    ]));
 
     $resultOutput = Xberg::extract(\Xberg\ExtractInput::fromUri($documentPath), $config);
 

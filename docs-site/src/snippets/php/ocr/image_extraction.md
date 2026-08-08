@@ -6,16 +6,15 @@ require_once __DIR__ . '/vendor/autoload.php';
 
 use Xberg\XbergApi;
 use Xberg\ExtractionConfig;
-use Xberg\ImageExtractionConfig;
 
 // Extract images from documents alongside text
-$config = new ExtractionConfig(
-    images: new ImageExtractionConfig(
-        extractImages: true,
-        embedAsBase64: false,  // Save images to disk
-        maxImagesPerPage: 10
-    )
-);
+$config = ExtractionConfig::from_json(json_encode([
+    'images' => [
+        'extractImages' => true,
+        'includeDataBase64' => false, // Save images to disk
+        'maxImagesPerPage' => 10,
+    ],
+]));
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('document_with_images.pdf'), $config ?? \Xberg\ExtractionConfig::default());
 $result = $output->getResults()[0];

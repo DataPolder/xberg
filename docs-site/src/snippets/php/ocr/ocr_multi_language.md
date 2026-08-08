@@ -6,16 +6,15 @@ require_once __DIR__ . '/vendor/autoload.php';
 
 use Xberg\XbergApi;
 use Xberg\ExtractionConfig;
-use Xberg\OcrConfig;
 
 // Extract text from multilingual documents
-// Specify multiple language codes separated by plus (+)
-$config = new ExtractionConfig(
-    ocr: new OcrConfig(
-        backend: 'tesseract',
-        language: 'eng+fra+deu'  // English, French, German
-    )
-);
+// Specify multiple language codes as a list
+$config = ExtractionConfig::from_json(json_encode([
+    'ocr' => [
+        'backend' => 'tesseract',
+        'language' => ['eng', 'fra', 'deu'], // English, French, German
+    ],
+]));
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('multilingual_document.pdf'), $config ?? \Xberg\ExtractionConfig::default());
 $result = $output->getResults()[0];
@@ -26,12 +25,12 @@ echo "Extracted content:\n";
 echo $result->content . "\n\n";
 
 // Language detection with multi-language support
-$autoDetectConfig = new ExtractionConfig(
-    ocr: new OcrConfig(
-        backend: 'tesseract',
-        language: 'eng+spa+fra+deu+ita+por'  // Multiple European languages
-    )
-);
+$autoDetectConfig = ExtractionConfig::from_json(json_encode([
+    'ocr' => [
+        'backend' => 'tesseract',
+        'language' => ['eng', 'spa', 'fra', 'deu', 'ita', 'por'], // Multiple European languages
+    ],
+]));
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('european_document.pdf'), $config ?? \Xberg\ExtractionConfig::default());
 $result = $output->getResults()[0];
@@ -41,12 +40,12 @@ echo "Extracted " . strlen($result->content) . " characters\n";
 echo "Preview: " . substr($result->content, 0, 300) . "...\n\n";
 
 // Mixed language with language detection
-$mixedConfig = new ExtractionConfig(
-    ocr: new OcrConfig(
-        backend: 'tesseract',
-        language: 'eng+jpn+chi_sim'  // English, Japanese, Chinese Simplified
-    )
-);
+$mixedConfig = ExtractionConfig::from_json(json_encode([
+    'ocr' => [
+        'backend' => 'tesseract',
+        'language' => ['eng', 'jpn', 'chi_sim'], // English, Japanese, Chinese Simplified
+    ],
+]));
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('asian_document.pdf'), $config ?? \Xberg\ExtractionConfig::default());
 $result = $output->getResults()[0];

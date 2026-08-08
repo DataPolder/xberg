@@ -4,17 +4,15 @@
 use Xberg\XbergApi;
 use Xberg\Xberg;
 use Xberg\ExtractionConfig;
-use Xberg\LanguageDetectionConfig;
 
 // Configure language detection with confidence threshold
-$langConfig = new LanguageDetectionConfig(
-    enabled: true,
-    minConfidence: 0.7,
-    detectMultiple: false
-);
-
-$config = ExtractionConfig::default();
-$config->language_detection = $langConfig;
+$config = ExtractionConfig::from_json(json_encode([
+    'languageDetection' => [
+        'enabled' => true,
+        'minConfidence' => 0.7,
+        'detectMultiple' => false,
+    ],
+]));
 
 $resultOutput = Xberg::extract(\Xberg\ExtractInput::fromUri("document.pdf"), $config);
 

@@ -5,18 +5,16 @@ declare(strict_types=1);
 use Xberg\XbergApi;
 use Xberg\Xberg;
 use Xberg\ExtractionConfig;
-use Xberg\ChunkingConfig;
-use Xberg\PageConfig;
 
-$config = new ExtractionConfig(
-    chunking: new ChunkingConfig(
-        maxCharacters: 500,
-        overlap: 50
-    ),
-    pages: new PageConfig(
-        extractPages: true
-    )
-);
+$config = ExtractionConfig::from_json(json_encode([
+    'chunking' => [
+        'maxCharacters' => 500,
+        'overlap' => 50,
+    ],
+    'pages' => [
+        'extractPages' => true,
+    ],
+]));
 
 $resultOutput = Xberg::extract(\Xberg\ExtractInput::fromUri('document.pdf'), $config);
 

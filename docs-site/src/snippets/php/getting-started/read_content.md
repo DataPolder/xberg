@@ -5,10 +5,10 @@ declare(strict_types=1);
 use Xberg\XbergApi;
 use Xberg\Xberg;
 use Xberg\ExtractionConfig;
-use Xberg\ChunkingConfig;
 
-$config = ExtractionConfig::default();
-$config->setChunking(new ChunkingConfig());
+$config = ExtractionConfig::from_json(json_encode([
+    'chunking' => [],
+]));
 $resultOutput = Xberg::extract(\Xberg\ExtractInput::fromUri('document.pdf'), $config);
 $result = $resultOutput->getResults()[0];
 

@@ -4,14 +4,14 @@
 use Xberg\XbergApi;
 use Xberg\Xberg;
 use Xberg\ExtractionConfig;
-use Xberg\PageConfig;
 
-$config = ExtractionConfig::default();
-$config->pages = new PageConfig(
-    extractPages: true,
-    insertPageMarkers: false,
-    markerFormat: "\n\n<!-- PAGE {page_num} -->\n\n"
-);
+$config = ExtractionConfig::from_json(json_encode([
+    'pages' => [
+        'extractPages' => true,
+        'insertPageMarkers' => false,
+        'markerFormat' => "\n\n<!-- PAGE {page_num} -->\n\n",
+    ],
+]));
 
 $resultOutput = Xberg::extract(\Xberg\ExtractInput::fromUri("document.pdf"), $config);
 

@@ -8,24 +8,22 @@ require_once __DIR__ . '/vendor/autoload.php';
 use Xberg\XbergApi;
 use Xberg\Xberg;
 use Xberg\ExtractionConfig;
-use Xberg\PdfConfig;
 
 /**
  * PDF configuration with hierarchy detection
  */
-$config = new ExtractionConfig(
-    pdf: new PdfConfig(
-        extractImages: true,
-        extractMetadata: true,
-        passwords: ['password1', 'password2'],
-        hierarchy: [
+$config = ExtractionConfig::from_json(json_encode([
+    'pdfOptions' => [
+        'extractImages' => true,
+        'extractMetadata' => true,
+        'passwords' => ['password1', 'password2'],
+        'hierarchy' => [
             'enabled' => true,
-            'k_clusters' => 6,
-            'include_bbox' => true,
-            'ocr_coverage_threshold' => 0.5
-        ]
-    )
-);
+            'kClusters' => 6,
+            'includeBbox' => true,
+        ],
+    ],
+]));
 
 $resultOutput = Xberg::extract(\Xberg\ExtractInput::fromUri('document.pdf'), $config);
 $result = $resultOutput->getResults()[0];

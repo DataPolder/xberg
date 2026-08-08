@@ -4,17 +4,15 @@
 use Xberg\XbergApi;
 use Xberg\Xberg;
 use Xberg\ExtractionConfig;
-use Xberg\LanguageDetectionConfig;
 
 // Configure multilingual language detection
-$langConfig = new LanguageDetectionConfig(
-    enabled: true,
-    minConfidence: 0.6,
-    detectMultiple: true
-);
-
-$config = ExtractionConfig::default();
-$config->language_detection = $langConfig;
+$config = ExtractionConfig::from_json(json_encode([
+    'languageDetection' => [
+        'enabled' => true,
+        'minConfidence' => 0.6,
+        'detectMultiple' => true,
+    ],
+]));
 
 $resultOutput = Xberg::extract(\Xberg\ExtractInput::fromUri("multilingual_document.pdf"), $config);
 

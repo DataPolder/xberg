@@ -5,15 +5,14 @@ declare(strict_types=1);
 use Xberg\XbergApi;
 use Xberg\Xberg;
 use Xberg\ExtractionConfig;
-use Xberg\OcrConfig;
 
-$ocrConfig = new OcrConfig();
-$ocrConfig->setBackend('tesseract');
-$ocrConfig->setLanguage('eng');
-
-$config = ExtractionConfig::default();
-$config->setForceOcr(true);
-$config->setOcr($ocrConfig);
+$config = ExtractionConfig::from_json(json_encode([
+    'forceOcr' => true,
+    'ocr' => [
+        'backend' => 'tesseract',
+        'language' => ['eng'],
+    ],
+]));
 
 $resultOutput = Xberg::extract(\Xberg\ExtractInput::fromUri('scanned.pdf'), $config);
 

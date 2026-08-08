@@ -6,14 +6,13 @@ require_once __DIR__ . '/vendor/autoload.php';
 
 use Xberg\XbergApi;
 use Xberg\ExtractionConfig;
-use Xberg\OcrConfig;
 
-$config = new ExtractionConfig(
-    ocr: new OcrConfig(
-        backend: 'paddle-ocr',
-        language: 'en'
-    )
-);
+$config = ExtractionConfig::from_json(json_encode([
+    'ocr' => [
+        'backend' => 'paddle-ocr',
+        'language' => ['en'],
+    ],
+]));
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('scanned.pdf'), $config ?? \Xberg\ExtractionConfig::default());
 $result = $output->getResults()[0];

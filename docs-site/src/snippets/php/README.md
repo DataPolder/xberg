@@ -183,12 +183,10 @@ echo $result->content;
 
 ```php title="With Configuration"
 use Xberg\ExtractionConfig;
-use Xberg\OcrConfig;
 
-$config = new ExtractionConfig(
-    ocr: new OcrConfig(backend: 'tesseract', language: 'eng'),
-    extractTables: true
-);
+$config = ExtractionConfig::from_json(json_encode([
+    'ocr' => ['backend' => 'tesseract', 'language' => ['eng']],
+]));
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('scanned.pdf'), $config ?? \Xberg\ExtractionConfig::default());
 $result = $output->getResults()[0];

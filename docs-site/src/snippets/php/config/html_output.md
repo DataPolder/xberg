@@ -5,14 +5,13 @@ declare(strict_types=1);
 use Xberg\XbergApi;
 use Xberg\Xberg;
 use Xberg\ExtractionConfig;
-use Xberg\HtmlOutputConfig;
 
-$config = new ExtractionConfig(
-    resultFormat: 'html',
-    htmlOutput: new HtmlOutputConfig(
-        theme: 'github'
-    )
-);
+$config = ExtractionConfig::from_json(json_encode([
+    'outputFormat' => 'html',
+    'htmlOutput' => [
+        'theme' => 'github',
+    ],
+]));
 
 $resultOutput = Xberg::extract(\Xberg\ExtractInput::fromUri('document.pdf'), $config);
 
