@@ -522,6 +522,62 @@ mod tests {
     // four `telemetry::conventions` cache constants are never emitted.
     // ---------------------------------------------------------------------
 
+    /// Make every callsite in the process permanently interesting, once.
+    ///
+    /// `tracing`'s callsite-interest cache is process-global, but `with_default`
+    /// installs a subscriber on the calling thread only. `tracing_core`'s
+    /// `Rebuilder::JustOne` fast path (callsite.rs) resolves interest by asking the
+    /// *calling thread's* default subscriber, so whenever a callsite is first reached on
+    /// a thread that has no subscriber — which, in a test binary with no global default,
+    /// is every thread but the one capturing — that callsite is cached as
+    /// `Interest::never()` for the whole process, including for a thread that is actively
+    /// capturing. Whichever event lost that race simply vanished from an otherwise
+    /// healthy capture, which is how `cache_write` went missing from between two
+    /// `cache_lookup` events under full-suite contention (#301).
+    ///
+    /// Installing a global default that is interested in everything means there is no
+    /// longer any such thing as a subscriber-less thread, so the cache stays permissive
+    /// and the thread-local capture below sees every event. The global subscriber
+    /// discards what it receives; only the thread-local one records.
+    fn install_permissive_global_subscriber() {
+        struct AlwaysInterested;
+
+        impl tracing::Subscriber for AlwaysInterested {
+            fn register_callsite(&self, _: &'static tracing::Metadata<'static>) -> tracing::subscriber::Interest {
+                tracing::subscriber::Interest::always()
+            }
+
+            fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
+                true
+            }
+
+            fn max_level_hint(&self) -> Option<tracing::level_filters::LevelFilter> {
+                Some(tracing::level_filters::LevelFilter::TRACE)
+            }
+
+            fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::Id {
+                tracing::Id::from_u64(1)
+            }
+
+            fn record(&self, _: &tracing::Id, _: &tracing::span::Record<'_>) {}
+            fn record_follows_from(&self, _: &tracing::Id, _: &tracing::Id) {}
+            fn event(&self, _: &tracing::Event<'_>) {}
+            fn enter(&self, _: &tracing::Id) {}
+            fn exit(&self, _: &tracing::Id) {}
+        }
+
+        static INSTALLED: std::sync::Once = std::sync::Once::new();
+        INSTALLED.call_once(|| {
+            // An error means some other test already installed a global default. That is
+            // fine — any global default at all closes the subscriber-less-thread hole.
+            let _ = tracing::subscriber::set_global_default(AlwaysInterested);
+            // Callsites reached before this point are still cached from whatever answered
+            // then; re-evaluate them now that a permissive global default exists. Safe to
+            // call here because this thread now resolves to that global default.
+            tracing::callsite::rebuild_interest_cache();
+        });
+    }
+
     /// Capture `tracing` output emitted on this thread while `body` runs.
     fn capture_logs<T>(body: impl FnOnce() -> T) -> (T, String) {
         use std::sync::{Arc, Mutex};
@@ -550,14 +606,8 @@ mod tests {
             .with_writer(move || capture.clone())
             .finish();
 
-        // `with_default` installs a *thread-local* subscriber, but `tracing`'s callsite
-        // interest cache is process-global. When these tests run in parallel with others
-        // that emit at a higher level, a callsite can retain a cached "not interested"
-        // verdict from before this subscriber existed, and the `debug!` events this test
-        // asserts on are then never emitted at all — which showed up as a rare, otherwise
-        // inexplicable failure under full-suite contention (#301). Forcing a rebuild makes
-        // the capture depend only on the subscriber we just installed.
-        tracing::callsite::rebuild_interest_cache();
+        install_permissive_global_subscriber();
+
         let value = tracing::subscriber::with_default(subscriber, body);
         let logs =
             String::from_utf8(buffer.lock().expect("log buffer poisoned").clone()).expect("log output must be UTF-8");
