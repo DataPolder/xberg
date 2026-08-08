@@ -12,8 +12,11 @@ use std::str::FromStr;
 /// Controls the format of the `content` field in `ExtractedDocument`.
 /// When set to `Markdown`, `Djot`, or `Html`, the output uses that format.
 /// `Plain` returns the raw extracted text.
-/// `Structured` returns JSON with full OCR element data including bounding
-/// boxes and confidence scores.
+/// `Structured` is currently a metadata-only label: `derive_extraction_result`
+/// returns `None` for it (see `extraction/derive.rs`), so no renderer runs and
+/// the content is left exactly as `Plain` would leave it. Only
+/// `metadata.output_format` differs. It does NOT attach OCR element data,
+/// bounding boxes or confidence scores.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum OutputFormat {
@@ -28,7 +31,9 @@ pub enum OutputFormat {
     Html,
     /// JSON tree format with heading-driven sections.
     Json,
-    /// Structured JSON format with full OCR element metadata.
+    /// Metadata-only label; content is identical to [`OutputFormat::Plain`].
+    /// No dedicated renderer exists yet, so this attaches no OCR element
+    /// metadata. See the enum-level docs above.
     Structured,
     /// Docling DocTags format (tables rendered as OTSL).
     DocTags,

@@ -283,7 +283,11 @@ pub struct OcrPipelineStage {
     pub priority: u32,
 
     /// Language override for this stage (None = use parent OcrConfig.language).
-    /// Accepts either a single language code ("eng") or a list (["eng", "deu"]).
+    ///
+    /// A list is the canonical form and the only form accepted by the binding
+    /// object APIs: `["eng", "deu"]`. When deserializing from a config file,
+    /// JSON body, or the REST/MCP API, a single string is also accepted,
+    /// either as one code ("eng") or "+"-joined ("eng+deu").
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -514,9 +518,14 @@ pub struct OcrConfig {
     #[serde(default = "default_tesseract_backend")]
     pub backend: String,
 
-    /// Language code(s) for OCR recognition.
-    /// Accepts either a single language code ("eng") or a list (["eng", "deu"]).
-    /// Defaults to ["eng"]. For Tesseract, languages are joined with "+".
+    /// Language code(s) for OCR recognition. Defaults to `["eng"]`. For Tesseract,
+    /// languages are joined with "+".
+    ///
+    /// A list is the canonical form and the only form accepted by the binding
+    /// object APIs (Python, Node, PHP, WASM, etc.): `["eng", "deu"]`. When
+    /// deserializing from a config file, JSON body, or the REST/MCP API, a
+    /// single string is also accepted, either as one code ("eng") or
+    /// "+"-joined ("eng+deu").
     #[serde(default = "default_eng", deserialize_with = "deserialize_languages")]
     pub language: Vec<String>,
 

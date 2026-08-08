@@ -45,6 +45,12 @@ pub fn apply_output_format(result: ExtractedDocument, output_format: OutputForma
         OutputFormat::Djot => "djot",
         OutputFormat::Html => "html",
         OutputFormat::Json => "json",
+        // `Structured` has no dedicated renderer: `derive_extraction_result` never
+        // populates `formatted_content` for it (see
+        // `extraction::derive::derive_extraction_result`), so this arm only swaps
+        // the metadata label. The `content` field stays whatever plain text the
+        // extractor and post-processors produced — identical to `Plain` — until a
+        // real structured (OCR element / bounding-box) renderer is implemented.
         OutputFormat::Structured => "structured",
         OutputFormat::DocTags => "doctags",
         OutputFormat::Custom(ref name) => {
