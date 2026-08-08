@@ -214,3 +214,18 @@ jobs:
       # The reusable workflow's ruby-working-directory already defaults to
       # packages/ruby, so it needs no override. ~keep
       setup-ruby: true
+      # The three hooks below were the remaining `×` in the Lint step once setup-ruby got
+      # rubocop and steep to `✓`. None of them was a code-quality failure -- each was a
+      # missing or mismatched toolchain, so the hook could never report anything useful.
+      #
+      # checkstyle died with `UnsupportedClassVersionError:
+      # com/puppycrawl/tools/checkstyle/api/CheckstyleException has been compiled by a more
+      # recent version of Java`. java-version is 25, not the workflow's 21 default, to match
+      # packages/java/pom.xml:40 `<maven.compiler.release>25</maven.compiler.release>`; 21
+      # clears checkstyle 13.9.0's own floor but not the bindings' target bytecode. ~keep
+      setup-java: true
+      java-version: "25"
+      # golangci-lint failed with `poly-hook: 1: golangci-lint: not found`. ~keep
+      setup-go: true
+      # dart-analyze failed with no Dart SDK present. ~keep
+      setup-dart: true
