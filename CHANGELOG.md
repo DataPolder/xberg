@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The benchmark harness now has an exact `pdf-regressions` cohort for the six unique PDFs tracked
+  by #1406, with checked document paths, ground-truth references, and byte sizes. This provides a
+  stable baseline/layout comparison target without weakening the existing calibrated quality floors.
 - `LlmConfig` gains a `credential_provider` field for managed OAuth2/STS authentication modes
   liter-llm cannot express via a static `api_key`: Azure AD client-credentials, Google Vertex AI
   OAuth2 (service-account key file), Vertex AI Application Default Credentials, and AWS STS
@@ -257,6 +260,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- PDF Markdown and Djot extraction now falls back to complete native text when the structured
+  hierarchy retains less than 70% of native tokens, including tokens represented in table cells.
+  Repeating-text cleanup is also limited to unpositioned fallback content, preserving semantic form
+  fields and restoring the six quality regressions tracked by #1406 without lowering quality floors.
+- Rotated PDF text now keeps its text-matrix rotation through hierarchy extraction and performs
+  ordering, line/paragraph grouping, spacing, and gap detection in the run's upright frame. This
+  restores natural order for sideways tables while keeping mixed upright page furniture separate
+  and leaving rotation-zero extraction unchanged (#1358).
+- Tesseract source caches now require a valid source-tree marker instead of trusting directory
+  existence alone. Incomplete Leptonica or Tesseract trees are removed and downloaded again for
+  both native and WebAssembly builds, with WebAssembly patches reapplied after recovery (#1401).
 - Two-column PDF reading order is now detected per horizontal band instead of per page. Page
   furniture (running headers/footers, titles, rules) used to make the whole page look
   single-column to the repair heuristic, so genuinely two-column pages kept their columns
