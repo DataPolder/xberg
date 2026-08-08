@@ -134,7 +134,9 @@ tasks:
       - poly lint .
 
   lint:check:
-    desc: "Lint all code WITHOUT auto-fix (check-only)"
+    # `poly lint` never writes -- there is no autofix mode to opt out of, so
+    # this is a plain alias of `lint`, not a stricter check-only variant. ~keep
+    desc: "Lint all code via poly (alias of lint; poly lint never auto-fixes)"
     cmds:
       - poly lint .
 
@@ -300,9 +302,11 @@ tasks:
       - git diff --exit-code e2e/
 
   e2e:lang:
-    desc: "Run e2e tests for a specific language via LANG variable (e.g., task e2e:lang LANG=python)"
+    desc: "Run e2e tests for a specific language via E2E_LANG variable (e.g., task e2e:lang E2E_LANG=python)"
+    vars:
+      E2E_LANG: '{{.E2E_LANG | default "rust"}}'
     cmds:
-      - task: ${LANG:-rust}:e2e
+      - task: "{{.E2E_LANG}}:e2e"
 
   rust:e2e:
     desc: "Run Rust e2e tests via alef"

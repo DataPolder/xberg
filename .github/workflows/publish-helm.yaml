@@ -89,13 +89,23 @@ jobs:
 
       - name: Install kubeconform
         run: |
+          set -euo pipefail
           curl -fsSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
             | sudo tar -xz -C /usr/local/bin kubeconform
 
+      # Render to a file and validate the file rather than piping helm into
+      # kubeconform: GitHub's default `bash -e {0}` shell has no pipefail, so a
+      # `helm template` failure would otherwise be swallowed, kubeconform would
+      # read empty stdin, print "0 resources found ... 0 errors", and exit 0 --
+      # the chart's only manifest-validation gate passing while validating
+      # nothing. `set -euo pipefail` still applies so the render step itself
+      # fails loudly too. ~keep
       - name: Lint chart
         run: |
+          set -euo pipefail
           helm lint --strict charts/xberg/
-          helm template charts/xberg/ | kubeconform -strict -summary -
+          helm template charts/xberg/ > /tmp/xberg-chart.yaml
+          kubeconform -strict -summary /tmp/xberg-chart.yaml
 
       - name: Publish chart
         uses: xberg-io/actions/publish-helm-chart@v1
@@ -118,6 +128,7 @@ jobs:
       - name: Registry login
         if: steps.meta.outputs.dry_run != 'true'
         run: |
+          set -euo pipefail
           echo "${{ secrets.GITHUB_TOKEN }}" \
             | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
 
@@ -128,6 +139,7 @@ jobs:
         env:
           COSIGN_YES: "true"
         run: |
+          set -euo pipefail
           DIGEST="$(oras manifest fetch --descriptor \
             ghcr.io/xberg-io/charts/xberg:${{ steps.meta.outputs.version }} | jq -r .digest)"
           echo "Signing ghcr.io/xberg-io/charts/xberg@${DIGEST}"

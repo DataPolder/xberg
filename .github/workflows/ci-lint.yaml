@@ -155,6 +155,39 @@ jobs:
       - name: Verify alef-generated bindings are current
         run: task alef:verify
 
+  e2e-freshness:
+    name: Generated e2e suites freshness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Task
+        uses: xberg-io/actions/install-task@v1
+      - name: Install alef CLI
+        uses: xberg-io/actions/install-alef@v1
+      # `task e2e:verify` (`alef e2e generate` then `git diff --exit-code e2e/`)
+      # was previously invoked by nothing -- it was only named in a comment on
+      # the alef-bindings-freshness job above as though it ran. Wiring it here
+      # fails whenever a fixture changes without the generated e2e suites being
+      # regenerated and committed alongside it. ~keep
+      - name: Verify generated e2e suites are current
+        run: task e2e:verify
+
+  docs-snippets:
+    name: Docs snippets gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Task
+        uses: xberg-io/actions/install-task@v1
+      - name: Install alef CLI
+        uses: xberg-io/actions/install-alef@v1
+      # `task docs:snippets:all` (audit + gaps + syntax-validate) is described
+      # as the "canonical docs:snippets gate" in .task/tools/docs.yml, but
+      # nothing invoked it -- a broken or orphaned snippet could land
+      # undetected. ~keep
+      - name: Run docs snippets gate
+        run: task docs:snippets:all
+
   validate:
     uses: xberg-io/actions/.github/workflows/reusable-validate.yml@v1
     with:

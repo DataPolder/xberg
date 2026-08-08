@@ -75,13 +75,6 @@ jobs:
           cache-from: type=gha,scope=ci-docker-${{ matrix.variant }}
           cache-to: type=gha,mode=max,scope=ci-docker-${{ matrix.variant }}
 
-      - name: Save Docker image
-        shell: bash
-        run: |
-          mkdir -p /tmp
-          docker save xberg:${{ matrix.variant }} | gzip > /tmp/xberg-${{ matrix.variant }}.tar.gz
-          ls -lh /tmp/xberg-${{ matrix.variant }}.tar.gz
-
       - name: Check image size
         uses: xberg-io/actions/check-docker-image-size@v1
         with:
