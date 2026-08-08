@@ -30,8 +30,12 @@ use serde::{Deserialize, Serialize};
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranscriptionConfig {
-    /// Master switch. When false the block is ignored and audio files fall back
-    /// to the normal "unsupported format" path.
+    /// Master switch. When `false`, the transcription pipeline is not run.
+    ///
+    /// The extractor is registered for audio/video MIME types whenever the `transcription`
+    /// feature is compiled in, independently of this flag, so an audio/video input with
+    /// `enabled = false` fails with an `XbergError::Transcription` explaining how to turn
+    /// transcription on — it does not fall through to another extractor.
     #[serde(default = "default_true")]
     pub enabled: bool,
 
@@ -51,8 +55,10 @@ pub struct TranscriptionConfig {
 
     /// Whether to request segment-level timestamps.
     ///
-    /// Accepted for forward compatibility. The current engine always uses
-    /// `<|notimestamps|>` and does not emit segment metadata yet.
+    /// When `true`, the decoder prompt omits `<|notimestamps|>` so the model emits
+    /// `<|x.xx|>` tokens, and each transcript segment becomes its own paragraph element
+    /// carrying `start_ms` / `end_ms` attributes. When `false` (default), all segment
+    /// text is joined into a single flat paragraph with no timing attributes.
     #[serde(default)]
     pub timestamps: bool,
 
@@ -72,8 +78,14 @@ pub struct TranscriptionConfig {
 
     /// Wall-clock timeout for the entire transcription operation (ms).
     ///
-    /// Default: 10 minutes. Reserved for timeout enforcement; the current
-    /// extractor does not enforce this field yet.
+    /// Bounds audio decode, model resolution/download, and inference together. On expiry
+    /// the extraction fails with an `XbergError::Transcription`. `None` disables the bound
+    /// and lets the operation run unbounded (not recommended for untrusted input).
+    ///
+    /// Enforced on the async extraction path only; the size and duration caps
+    /// (`max_bytes`, `max_duration_ms`) are checked on every path.
+    ///
+    /// Default: 10 minutes.
     #[serde(default = "default_timeout_ms")]
     pub timeout_ms: Option<u64>,
 

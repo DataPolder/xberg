@@ -151,10 +151,11 @@ async fn enrich_ner_with_stub_backend_populates_entities() {
     assert!(enriched.captions.is_none());
 }
 
-/// When `transcription` is `Some`, `enrich` must return an error (not yet implemented).
+/// A `Some` `transcription` must not fail the call: `enrich` records a non-fatal
+/// `ProcessingWarning` naming the extraction-time alternative and leaves the rest intact.
 #[cfg(feature = "transcription-types")]
 #[tokio::test]
-async fn enrich_transcription_returns_not_implemented_error() {
+async fn enrich_transcription_records_warning_and_preserves_other_stages() {
     use xberg::core::config::TranscriptionConfig;
 
     let extraction = bare_result("audio transcript placeholder");
@@ -163,15 +164,17 @@ async fn enrich_transcription_returns_not_implemented_error() {
         ..Default::default()
     };
 
-    let result = enrich(extraction, &config).await;
-    match result {
-        Ok(_) => panic!("transcription must return an error until the backend lands"),
-        Err(e) => {
-            let msg = e.to_string();
-            assert!(
-                msg.contains("transcription"),
-                "error message should mention transcription; got: {msg}"
-            );
-        }
-    }
+    let enriched = enrich(extraction, &config)
+        .await
+        .expect("transcription must not fail enrich");
+
+    let warnings = &enriched.extraction.processing_warnings;
+    assert_eq!(warnings.len(), 1, "expected exactly one warning, got {warnings:?}");
+    assert_eq!(warnings[0].source, "transcription");
+    assert!(
+        warnings[0].message.contains("ExtractionConfig::transcription"),
+        "warning must point at the extraction-time path; got: {}",
+        warnings[0].message
+    );
+    assert_eq!(enriched.extraction.content, "audio transcript placeholder");
 }

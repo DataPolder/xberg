@@ -1146,8 +1146,9 @@ pub use captioning::caption_image_file;
 #[cfg_attr(alef, alef(skip))]
 pub use captioning::caption_images;
 
-/// Unified post-extraction enrichment: classification, NER, captioning, and
-/// (future) transcription in a single composable call.
+/// Unified post-extraction enrichment: classification, chunk classification, NER
+/// and captioning in a single composable call. Transcription is not an enrichment
+/// stage — it runs at extraction time via [`core::config::ExtractionConfig`].
 pub mod enrich;
 #[cfg_attr(alef, alef(skip))]
 pub use enrich::enrich;
