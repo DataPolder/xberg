@@ -1,6 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
-#![allow(clippy::len_zero, clippy::unnecessary_get_then_check, clippy::single_match)]
-#![cfg(feature = "office")]
 //! Comprehensive behavioral tests for Typst extractor against Pandoc baselines.
 //!
 //! These tests expose the critical bugs found in code review:
@@ -13,6 +10,10 @@
 //!
 //! The tests are designed to FAIL initially, exposing real bugs that need fixing.
 //! They compare extracted output against Pandoc baseline outputs for behavioral parity.
+
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
+#![allow(clippy::len_zero, clippy::unnecessary_get_then_check, clippy::single_match)]
+#![cfg(feature = "office")]
 
 mod helpers;
 use helpers::extract_bytes_document;

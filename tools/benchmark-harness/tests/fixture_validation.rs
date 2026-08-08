@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Comprehensive fixture validation integration tests
 //!
 //! This module ensures the fixture corpus maintains quality and consistency by:
@@ -9,6 +8,8 @@
 //! - Validating ground truth files exist
 //! - Detecting duplicate document references
 //! - Ensuring format coverage for core formats
+
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 
 use benchmark_harness::Fixture;
 use serde_json::json;

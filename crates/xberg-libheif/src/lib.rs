@@ -1,5 +1,3 @@
-#![deny(clippy::print_stdout, clippy::print_stderr)]
-#![cfg_attr(test, allow(clippy::print_stdout, clippy::print_stderr))]
 //! # xberg-libheif
 //!
 //! Vendored from [libheif-rs](https://github.com/Cykooz/libheif-rs) v2.7.0 — MIT,
@@ -8,6 +6,8 @@
 //! Safe wrapper around the `libheif-sys` crate for parsing HEIF / HEIC / AVIF
 //! files. The public API mirrors upstream libheif-rs v2.7.0.
 
+#![deny(clippy::print_stdout, clippy::print_stderr)]
+#![cfg_attr(test, allow(clippy::print_stdout, clippy::print_stderr))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 extern crate core;
 

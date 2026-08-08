@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Live integration test for per-image VLM captioning.
 //!
 //! Mirrors the skip-without-keys pattern in `tests/llm_integration.rs`. Skips
@@ -12,6 +11,7 @@
 //!   --test captioning_smoke -- --nocapture --test-threads=1
 //! ```
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(all(feature = "captioning", not(target_os = "windows")))]
 
 mod helpers;

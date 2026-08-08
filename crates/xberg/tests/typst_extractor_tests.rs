@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Comprehensive TDD test suite for Typst document extraction.
 //!
 //! This test suite validates Typst document extraction against expected outputs.
@@ -13,6 +12,7 @@
 //!
 //! Each test document is extracted and validated for correct content extraction.
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(feature = "office")]
 
 mod helpers;

@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Comprehensive TDD test suite for Org Mode extraction
 //!
 //! This test suite validates Org Mode extraction capabilities.
@@ -15,6 +14,7 @@
 //! - Unicode and special character handling
 //! - Content quality validation
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(feature = "office")]
 
 mod helpers;

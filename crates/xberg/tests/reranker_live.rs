@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Live HuggingFace reranker integration tests.
 //!
 //! Downloads every preset model from HF Hub and runs real cross-encoder
@@ -25,6 +24,7 @@
 //! Local opt-out (for laptop dev without network): set
 //! `XBERG_SKIP_LIVE_HF=1` to skip these tests.
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(all(feature = "reranker", feature = "reranker-presets", feature = "tokio-runtime"))]
 
 use std::path::PathBuf;

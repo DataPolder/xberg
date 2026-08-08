@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Smoke test for the LLM translation post-processor.
 //!
 //! Hits a real provider (defaults to OpenAI) and skips when no API key is set,
@@ -8,6 +7,7 @@
 //! cargo test -p xberg --features full --test llm_translation_smoke -- --nocapture
 //! ```
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(all(feature = "translation", feature = "liter-llm", not(target_os = "windows")))]
 
 use std::borrow::Cow;

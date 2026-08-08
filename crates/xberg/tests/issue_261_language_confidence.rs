@@ -1,4 +1,3 @@
-#![cfg(feature = "language-detection")]
 //! Regression test for #261.
 //!
 //! `ExtractedDocument::detected_languages` only ever carried ISO codes, so a
@@ -13,6 +12,8 @@
 //! the fixture immune to whatlang misclassifying one Romance language as a
 //! neighbouring one — Latin vs. Mandarin script leaves no ambiguity) and
 //! checks the exact chunk-share proportions and the dominance ordering.
+
+#![cfg(feature = "language-detection")]
 
 use std::borrow::Cow;
 

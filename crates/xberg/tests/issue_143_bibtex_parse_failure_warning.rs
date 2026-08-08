@@ -1,11 +1,12 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
-#![cfg(feature = "office")]
 //! Regression test for issue #143: when `BibtexExtractor` fails to parse a
 //! `.bib` file, it silently falls back to returning the raw text as a code
 //! block. Under the default build (no `otel` feature), the only diagnostic was
 //! a `tracing::warn!` call gated behind `#[cfg(feature = "otel")]`, so callers
 //! had no way to learn that parsing failed. The fix adds an unconditional
 //! `ProcessingWarning` describing the fallback.
+
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
+#![cfg(feature = "office")]
 
 mod helpers;
 use helpers::extract_bytes_document;

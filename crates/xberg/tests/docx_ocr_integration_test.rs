@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Regression test for https://github.com/xberg-io/xberg/issues/781
 //!
 //! DOCX OCR extraction was failing because the pipeline was deriving the document
@@ -8,6 +7,7 @@
 //! This test verifies that OCR results for images in a DOCX file are successfully
 //! injected into the final content.
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(feature = "ocr")]
 #![cfg(feature = "office")]
 

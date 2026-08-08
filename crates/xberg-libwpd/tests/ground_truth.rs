@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Full-decode tests against the WordPerfect corpus in the `test_documents`
 //! submodule, covering WP 4.2 through Corel WP6 and the Macintosh variants.
 //!
@@ -10,6 +9,8 @@
 //!
 //! Every test skips when the submodule is not checked out (or its LFS objects
 //! are not pulled), matching the other corpus-backed tests in this workspace.
+
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 
 use std::path::PathBuf;
 use xberg_libwpd::{WpdDocument, WpdEvent};

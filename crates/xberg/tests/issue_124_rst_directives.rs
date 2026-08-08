@@ -1,4 +1,3 @@
-#![cfg(feature = "office")]
 //! Regression tests for #124: RST `.. figure::`, `.. list-table::`, and `.. csv-table::`
 //! directive handling.
 //!
@@ -8,6 +7,8 @@
 //! rows). These tests assert the directives are now turned into proper structured content:
 //! a figure becomes an image reference plus its caption text, and list-table/csv-table become
 //! real table structures with the expected rows and cells.
+
+#![cfg(feature = "office")]
 
 use xberg::core::config::ExtractionConfig;
 

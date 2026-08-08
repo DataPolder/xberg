@@ -1,5 +1,3 @@
-#![deny(clippy::print_stdout, clippy::print_stderr)]
-#![cfg_attr(test, allow(clippy::print_stdout, clippy::print_stderr))]
 //! WordPerfect structured document extraction for Xberg.
 //!
 //! Thin, safe wrapper over [libwpd](https://libwpd.sourceforge.net/) and its
@@ -22,6 +20,9 @@
 //! is left to the caller. WordPerfect support targets Linux, macOS and
 //! Windows; on other platforms [`extract_document`] returns
 //! [`WpdError::UnsupportedPlatform`].
+
+#![deny(clippy::print_stdout, clippy::print_stderr)]
+#![cfg_attr(test, allow(clippy::print_stdout, clippy::print_stderr))]
 
 mod dto;
 mod error;

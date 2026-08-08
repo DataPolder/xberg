@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: org logging policy exempts tests
 //! Regression coverage for issue #209.
 //!
 //! `ImageExtractionConfig::{target_dpi, max_image_dimension, auto_adjust_dpi,
@@ -21,6 +20,7 @@
 //! dimensions depend on that unrelated heuristic instead of purely on
 //! `ImageExtractionConfig`.
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: org logging policy exempts tests
 #![cfg(feature = "ocr")]
 
 mod helpers;

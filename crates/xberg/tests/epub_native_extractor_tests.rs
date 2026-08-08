@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Integration tests for the native EPUB extractor
 //!
 //! These tests validate the native Rust EPUB extractor (EpubExtractor)
@@ -7,6 +6,7 @@
 //! This test suite verifies the fix for the two-pass OPF parsing bug that
 //! caused 99.84% content loss due to single-pass manifest/spine resolution.
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(feature = "office")]
 
 use std::path::PathBuf;

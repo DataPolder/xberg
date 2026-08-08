@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Regression tests for issue #316: the remaining `.split("\n\n")` paragraph
 //! boundaries outside the plain-text extractor fixed in #227.
 //!
@@ -18,6 +17,8 @@
 //!
 //! Each test asserts the exact paragraph count *and* the exact paragraph contents,
 //! so a regression that merely produces "more than one" paragraph still fails.
+
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 
 mod helpers;
 

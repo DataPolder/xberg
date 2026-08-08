@@ -1,5 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
-#![cfg(feature = "office")]
 //! Regression test for issue #144: `CitationExtractor::extract_content` returned
 //! an empty `InternalDocument` wrapped in `Ok(...)` when invoked with a MIME
 //! type outside `supported_mime_types()`, silently discarding the input bytes
@@ -7,6 +5,9 @@
 //! registry (MIME routing only ever dispatches a supported type to this
 //! extractor), but it is latent defensive-code that must fail loudly if ever
 //! invoked directly (e.g. by a caller bypassing the registry).
+
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
+#![cfg(feature = "office")]
 
 use xberg::XbergError;
 use xberg::core::config::ExtractionConfig;

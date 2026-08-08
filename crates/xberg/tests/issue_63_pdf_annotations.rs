@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Regression test for issue #63: PDF annotation subtype widening + rendering.
 //!
 //! Before this fix, `crates/xberg/src/pdf/oxide/annotations.rs` collapsed
@@ -15,6 +14,7 @@
 //!   (b) the Highlight's `marked_text` captures the highlighted text via QuadPoints,
 //!   (c) the rendered document (Markdown output) contains the annotation appendix.
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(feature = "pdf")]
 
 mod helpers;

@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! GPU acceleration integration tests for all ORT-backed subsystems.
 //!
 //! Covers every code path that uses AccelerationConfig → apply_execution_providers:
@@ -21,6 +20,7 @@
 //! feature compiles in `ort::ep::CUDA` (gated out of `full` by default — see
 //! `ort_discovery.rs` — since the plain `download-binaries` prebuilt has no CUDA support).
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![allow(dead_code)]
 
 mod helpers;

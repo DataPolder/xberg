@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Baseline validation tests for benchmark infrastructure
 //!
 //! These tests verify that the benchmark infrastructure fixes (Phase 1.1-1.3) are working
@@ -8,6 +7,8 @@
 //! - CPU measurement accuracy (>5% for CPU-bound work, not 0.13%)
 //! - Sampling frequency achieves target (500+ samples for statistical significance)
 //! - Variance within tolerance (coefficient of variation <10%)
+
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 
 use benchmark_harness::monitoring::ResourceMonitor;
 use std::time::Duration;

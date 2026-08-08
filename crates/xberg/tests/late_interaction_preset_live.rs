@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Live validation for the self-hosted ColBERT late-interaction preset.
 //!
 //! Downloads the `"colbert"` preset's ONNX model (`colbert-small-v1`, 96-dim)
@@ -8,6 +7,7 @@
 //! query to a fixed token-row count while the document stays unpadded. Opt
 //! out on offline dev with `XBERG_SKIP_LIVE_HF=1`.
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(feature = "late-interaction")]
 
 use xberg::MultiVectorEmbedding;

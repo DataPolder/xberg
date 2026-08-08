@@ -1,4 +1,3 @@
-#![cfg(all(feature = "pdf", feature = "ocr"))]
 //! Regression test for #340: `crate::extractors::pdf::mod` must drain
 //! `crate::pdf::render::take_pdf_oxide_render_warnings()` into the returned
 //! document's `processing_warnings`, not just leave them sitting in the
@@ -27,6 +26,9 @@
 //! identity of render and drain provably the same, so this test cannot pass by
 //! luck of scheduling the way a multi-thread-runtime or layout-path version
 //! could.
+
+#![cfg(all(feature = "pdf", feature = "ocr"))]
+
 mod helpers;
 
 use helpers::extract_bytes_document;

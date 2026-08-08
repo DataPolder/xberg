@@ -1,4 +1,3 @@
-#![cfg(all(feature = "qr-codes", feature = "chunking"))]
 //! Regression tests for #302: decoded QR payloads must participate in the
 //! downstream enrichment stages (chunking, and therefore embeddings, which are
 //! generated per chunk inside `execute_chunking`) exactly like ordinary
@@ -14,6 +13,8 @@
 //!
 //! The QR fixture is generated in-process with the `qrcode` dev-dependency;
 //! `test_documents/` carries no QR image.
+
+#![cfg(all(feature = "qr-codes", feature = "chunking"))]
 
 use std::io::Cursor;
 

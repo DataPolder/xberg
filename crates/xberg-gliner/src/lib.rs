@@ -1,10 +1,11 @@
-#![deny(clippy::print_stdout, clippy::print_stderr)]
-#![cfg_attr(test, allow(clippy::print_stdout, clippy::print_stderr))]
 //! Span-mode GLiNER ONNX inference.
 //!
 //! This crate vendors the span-mode preprocessing and decoding path from the
 //! `gline-rs` project and replaces its pipeline wrapper with direct `ort`
 //! session management.
+
+#![deny(clippy::print_stdout, clippy::print_stderr)]
+#![cfg_attr(test, allow(clippy::print_stdout, clippy::print_stderr))]
 
 #[cfg(feature = "candle")]
 pub mod candle;

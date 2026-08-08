@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! OCR error-not-silence regression tests (issue #1223).
 //!
 //! A scanned / image-only PDF has no native text layer, so extraction must fall
@@ -14,6 +13,7 @@
 //!
 //! These tests exercise the public extraction API against generated fixtures.
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(feature = "ocr")]
 
 mod helpers;

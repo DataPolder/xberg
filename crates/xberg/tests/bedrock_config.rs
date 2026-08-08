@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test binaries print by design; org logging policy exempts tests
 //! Regression tests for https://github.com/xberg-io/xberg/issues/1381
 //! ("enable full liter-llm configuration" / AWS Bedrock SigV4 signing).
 //!
@@ -22,6 +21,7 @@
 //! cargo test -p xberg --features "liter-llm,pdf" --test bedrock_config
 //! ```
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test binaries print by design; org logging policy exempts tests
 #![cfg(feature = "liter-llm")]
 
 use serial_test::serial;

@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! End-to-end integration test for the candle TrOCR engine.
 //!
 //! Marked `#[ignore]` because it pulls ~1.5 GB of safetensors from
@@ -14,6 +13,7 @@
 //! invoke `cargo test -- --ignored` without unconditionally requiring
 //! network and ~1.5 GB of model cache.
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(all(feature = "trocr", not(target_arch = "wasm32")))]
 
 use std::path::PathBuf;

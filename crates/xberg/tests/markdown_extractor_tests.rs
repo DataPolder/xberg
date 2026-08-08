@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Comprehensive Markdown Extractor Tests
 //!
 //! This test suite uses Pandoc as a baseline for validating markdown extraction capabilities.
@@ -7,6 +6,8 @@
 //! - Table extraction from various markdown table formats
 //! - Complex formatting and structure preservation
 //! - Comparison with Pandoc's metadata extraction capabilities
+
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 
 use std::path::PathBuf;
 

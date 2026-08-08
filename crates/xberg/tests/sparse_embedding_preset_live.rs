@@ -1,10 +1,10 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Live validation for self-hosted SPLADE sparse-embedding presets.
 //!
 //! Downloads the preset's ONNX model from `xberg-io/sparse-embeddings` and runs
 //! real inference, asserting a non-empty, in-vocab, strictly-positive sparse
 //! vector. Opt out on offline dev with `XBERG_SKIP_LIVE_HF=1`.
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(feature = "sparse-embeddings")]
 
 use xberg::core::config::{SparseEmbeddingConfig, SparseEmbeddingModelType};

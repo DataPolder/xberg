@@ -1,8 +1,8 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Regression tests for issue #131: OPML `<outline>` elements carrying a `_note`
 //! attribute (used by outliner tools such as OmniOutliner to attach free-text
 //! notes) must have that note content captured in the extraction output.
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(feature = "office")]
 
 use xberg::core::config::ExtractionConfig;

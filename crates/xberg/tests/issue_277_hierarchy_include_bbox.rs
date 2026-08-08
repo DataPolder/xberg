@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Regression test for issue #277: `HierarchyConfig::include_bbox` had zero readers.
 //!
 //! `HierarchyConfig::k_clusters` (its sibling) was already threaded into
@@ -6,6 +5,7 @@
 //! struct was reached during extraction — only `include_bbox` was ignored, meaning bounding-box
 //! coordinates were always attached to hierarchy blocks regardless of the configured value.
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(feature = "pdf")]
 
 mod helpers;

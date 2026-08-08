@@ -1,10 +1,10 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Integration tests for OCR table inlining into markdown content (issue #421).
 //!
 //! Verifies that when `output_format = Markdown` and OCR detects tables,
 //! the tables are inlined into `result.content` at their correct positions
 //! rather than only appearing in `result.tables`.
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(feature = "ocr")]
 
 mod helpers;

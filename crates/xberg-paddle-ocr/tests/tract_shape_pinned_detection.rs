@@ -1,4 +1,3 @@
-#![cfg(feature = "tract")] // ~keep: exercises the tract-only shape-pinned detection path
 //! End-to-end check that DBNet loads and detects under `tract`, which can only run a plan built
 //! for one concrete input shape.
 //!
@@ -19,6 +18,8 @@
 //! cargo test --release -p xberg-paddle-ocr --no-default-features --features tract \
 //!     --test tract_shape_pinned_detection -- --ignored --nocapture
 //! ```
+
+#![cfg(feature = "tract")] // ~keep: exercises the tract-only shape-pinned detection path
 
 use std::path::PathBuf;
 

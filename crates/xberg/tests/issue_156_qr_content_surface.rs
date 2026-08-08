@@ -1,9 +1,10 @@
-#![cfg(feature = "qr-codes")]
 //! Regression test for #156: a decoded QR payload must reach document
 //! `content`. Previously the payload was written only to
 //! `ExtractedImage::qr_codes`, and nothing under `rendering/` read that field,
 //! so the text never surfaced anywhere a consumer (search, chunking,
 //! embeddings) could see it.
+
+#![cfg(feature = "qr-codes")]
 
 use std::borrow::Cow;
 use std::io::Cursor;

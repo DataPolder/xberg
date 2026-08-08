@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Comprehensive TDD test suite for ODT (OpenDocument Text) extraction
 //!
 //! This test suite validates ODT extraction capabilities using Pandoc's output as the baseline.
@@ -15,6 +14,7 @@
 //!
 //! Note: These tests require the `office` feature to be enabled and Pandoc to be installed.
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(feature = "office")]
 
 use std::path::{Path, PathBuf};

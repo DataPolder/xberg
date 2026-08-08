@@ -1,5 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
-#![cfg(feature = "office")]
 //! Regression tests for issue #137: the Typst extractor must correctly handle
 //! multi-line display math blocks, `#figure(image(...), caption: [...])`
 //! figure/caption pairs, and `#cite(<key>)` / `@key` citation references
@@ -9,6 +7,9 @@
 //! and predictable: `ElementKind::Formula`/`Citation` render as
 //! `"{text}\n\n"`, `ElementKind::Paragraph` renders as `"{text}\n\n"`, so the
 //! resulting `extraction.content` string can be asserted on exactly.
+
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
+#![cfg(feature = "office")]
 
 mod helpers;
 use helpers::extract_bytes_document;

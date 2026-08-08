@@ -1,7 +1,8 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Regression tests for #155 (structural rendering for YAML/TOML/JSONL and
 //! top-level JSON arrays) and #166 (surfacing the flattened structured-data
 //! view instead of discarding it).
+
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 
 use xberg::core::config::ExtractionConfig;
 

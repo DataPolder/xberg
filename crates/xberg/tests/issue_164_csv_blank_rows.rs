@@ -1,7 +1,8 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Regression test for #164: a genuinely blank CSV row mid-file must be kept
 //! as its own row instead of being silently dropped, which used to shift
 //! every subsequent row's index.
+
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 
 use xberg::core::config::ExtractionConfig;
 

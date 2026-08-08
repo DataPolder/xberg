@@ -1,7 +1,8 @@
-#![cfg(feature = "qr-codes")]
 //! Regression test for #168: a QR image-decode failure must be observable —
 //! previously it only logged at `tracing::debug!`, indistinguishable at
 //! default log levels from "ran a clean scan and found nothing".
+
+#![cfg(feature = "qr-codes")]
 
 use std::sync::{Arc, Mutex};
 

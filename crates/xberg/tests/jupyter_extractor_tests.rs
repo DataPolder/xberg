@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Comprehensive TDD test suite for Jupyter notebook extraction.
 //!
 //! This test suite validates Jupyter notebook extraction against Pandoc's output
@@ -10,6 +9,8 @@
 //!
 //! Each test notebook is extracted and compared against Pandoc's markdown output
 //! to ensure correct content extraction and transformation.
+
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 
 use std::{fs, path::PathBuf};
 use xberg::core::config::ExtractionConfig;

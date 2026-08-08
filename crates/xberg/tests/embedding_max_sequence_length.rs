@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Regression test for hardcoded 512-token embedding truncation (issue #1223).
 //!
 //! Before the fix, `get_or_init_engine` always configured the tokenizer with a
@@ -18,6 +17,7 @@
 //! vectors; with the fix, raising `max_sequence_length` past 512 lets the tail of
 //! a long chunk contribute, so the vectors diverge.
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(feature = "embeddings")]
 
 use xberg::core::config::{EmbeddingConfig, EmbeddingModelType};

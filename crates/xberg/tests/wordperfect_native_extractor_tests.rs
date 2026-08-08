@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Integration tests for the native WordPerfect extractor.
 //!
 //! These drive the full public extraction path — `WordPerfectExtractor::extract`
@@ -13,6 +12,7 @@
 //! covered by unit tests here and in `xberg-libwpd`. Every test skips when the
 //! submodule is absent or its LFS objects are unfetched.
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(feature = "wordperfect")]
 
 use std::path::PathBuf;

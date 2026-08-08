@@ -1,5 +1,3 @@
-#![deny(clippy::print_stdout, clippy::print_stderr)]
-#![cfg_attr(test, allow(clippy::print_stdout, clippy::print_stderr))]
 //! # xberg-paddle-ocr
 //!
 //! PaddleOCR via ONNX Runtime for Xberg - high-performance text detection and recognition.
@@ -16,6 +14,8 @@
 //! The original paddle-ocr-rs is licensed under Apache-2.0.
 //! This vendored version is relicensed to MIT with the original author's copyright retained.
 
+#![deny(clippy::print_stdout, clippy::print_stderr)]
+#![cfg_attr(test, allow(clippy::print_stdout, clippy::print_stderr))]
 #![allow(clippy::too_many_arguments)]
 #![allow(missing_docs)]
 

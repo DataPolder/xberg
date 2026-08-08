@@ -1,4 +1,3 @@
-#![cfg(feature = "tree-sitter")]
 //! Investigation for #147: does the code extractor's default content mode drop
 //! top-level source between tree-sitter chunks (module docstrings, imports)?
 //!
@@ -13,6 +12,8 @@
 //!
 //! This test proves that end-to-end: an import statement preceding a function
 //! definition must still appear in the extracted content.
+
+#![cfg(feature = "tree-sitter")]
 
 mod helpers;
 use helpers::extract_bytes_document;

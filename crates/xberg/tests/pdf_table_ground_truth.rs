@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Ground truth-based PDF table detection and markdown quality tests.
 //!
 //! These tests establish baselines for table detection and markdown output quality.
@@ -14,6 +13,7 @@
 //!   # Comprehensive baseline snapshot:
 //!   cargo test -p xberg --features "pdf,ocr" --test pdf_table_ground_truth -- --ignored --nocapture
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(feature = "pdf")]
 
 mod helpers;

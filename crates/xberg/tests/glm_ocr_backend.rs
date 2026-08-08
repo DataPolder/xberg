@@ -1,6 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
-#![cfg(feature = "candle-glm-ocr")]
-
 //! End-to-end integration test for `GlmOcrBackend` through the `OcrBackend` trait.
 //!
 //! Constructs the backend directly via its public constructor and drives
@@ -10,6 +7,9 @@
 //!
 //! Run with:
 //! `cargo test -p xberg --features candle-glm-ocr --test glm_ocr_backend -- --ignored --nocapture`
+
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
+#![cfg(feature = "candle-glm-ocr")]
 
 use xberg::candle_ocr::{GlmOcrBackend, glm_ocr_backend::LayoutMode};
 use xberg::core::config::OcrConfig;

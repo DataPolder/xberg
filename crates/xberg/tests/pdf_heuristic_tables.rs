@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Integration tests for the heuristic PDF table extraction added for #897.
 //!
 //! These exercise the public `extract_bytes_document_blocking` API to confirm:
@@ -12,6 +11,7 @@
 //!
 //! Regression tests for issue #897 and supersedes PR #933.
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(feature = "pdf")]
 
 mod helpers;

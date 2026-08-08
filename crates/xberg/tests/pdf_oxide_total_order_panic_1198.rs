@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Regression tests for issue #1198 — pdf_oxide reading-order sort panics with
 //! "user-provided comparison function does not correctly implement a total order".
 //!
@@ -25,6 +24,7 @@
 //! assert extraction completes deterministically instead of panicking. They are
 //! skipped when the submodule is not checked out (e.g. CI without submodules).
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(feature = "pdf")]
 
 mod helpers;

@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Wiring tests for #268: sparse (SPLADE) and late-interaction (ColBERT) vectors attached
 //! to chunks via `ChunkingConfig::sparse_embedding` / `ChunkingConfig::late_interaction`.
 //!
@@ -11,6 +10,8 @@
 //! a chunk is bit-for-bit identical to calling the standalone `xberg::embed_sparse` /
 //! `xberg::embed_multi_vector` producer directly on the same chunk content. Opt out on
 //! offline dev with `XBERG_SKIP_LIVE_HF=1`.
+
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 
 mod helpers;
 

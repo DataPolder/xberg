@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr)] // ~keep: test binaries print by design; org logging policy exempts tests
 //! End-to-end tests for the data the CLI surfaces from an extraction.
 //!
 //! These cover the defects where the CLI discarded most of the extraction envelope:
@@ -12,6 +11,8 @@
 //!
 //! The binary under test is located via `CARGO_BIN_EXE_xberg`, which Cargo builds with the same
 //! feature set as this test target. Nothing here shells out to `cargo`.
+
+#![allow(clippy::print_stdout, clippy::print_stderr)] // ~keep: test binaries print by design; org logging policy exempts tests
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

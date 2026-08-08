@@ -1,9 +1,9 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! PDF markdown extraction integration tests.
 //!
 //! Tests that the new markdown rendering pipeline produces structured output
 //! with headings, proper paragraph breaks, and no mid-sentence line breaks.
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(feature = "pdf")]
 
 mod helpers;

@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Regression test for issue #227: the shared paragraph-splitting helper used by
 //! the element-based ("elements") output transform (`crate::extraction::transform`)
 //! assumed bare `\n\n` paragraph boundaries. Windows-authored CRLF (`\r\n`) text,
@@ -11,6 +10,8 @@
 //! These tests exercise the public `extract` API end-to-end with
 //! `ResultFormat::ElementBased`, asserting the exact NarrativeText element
 //! boundaries and exact text content produced for each line-ending style.
+
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 
 mod helpers;
 use helpers::extract_bytes_document;

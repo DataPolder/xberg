@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Integration tests for the JSON timing envelope added to `xberg extract` and
 //! `xberg batch`.
 //!
@@ -7,6 +6,8 @@
 //!  - `batch --format json` emits `{ results, total_ms, per_file_ms }` shape
 //!  - `result.metadata.ocr_used` exists as a bool field
 //!  - `--pdf-backend xyz` exits non-zero and mentions "pdf-oxide"
+
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

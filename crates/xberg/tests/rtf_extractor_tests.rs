@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Comprehensive TDD test suite for RTF extraction.
 //!
 //! This test suite validates RTF extraction capabilities.
@@ -29,6 +28,7 @@
 //!
 //! Note: These tests require the `office` feature to be enabled.
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(feature = "office")]
 #![allow(clippy::doc_suspicious_footnotes)]
 

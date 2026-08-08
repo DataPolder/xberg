@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Cross-format output parity tests.
 //!
 //! Verify that all output formats (Markdown, HTML, Djot, Plain) produce
@@ -8,6 +7,8 @@
 //!
 //! Usage:
 //!   cargo test -p xberg --test cross_format_parity -- --nocapture
+
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 
 mod helpers;
 use helpers::extract_uri_document_blocking;

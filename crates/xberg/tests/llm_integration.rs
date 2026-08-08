@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Live integration tests for liter-llm features.
 //!
 //! These tests hit real provider APIs and require API keys in the workspace
@@ -17,6 +16,7 @@
 //! `ExtractionConfig`), matching how downstream callers (xberg-enterprise,
 //! xberg-py) invoke the engine.
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(feature = "liter-llm")]
 
 mod helpers;

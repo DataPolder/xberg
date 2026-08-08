@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Issue #210 — `split_and_extract` must preserve enrichment, not just pages/tables/images.
 //!
 //! These are the end-to-end assertions for the enrichment fields that a fixture PDF can
@@ -12,6 +11,7 @@
 //! Fixture required (relative to `test_documents/`):
 //! - `pdf/multi_page.pdf` — the 5-page native-text PDF also used by `split_and_extract.rs`.
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(all(
     feature = "pdf",
     feature = "chunking",

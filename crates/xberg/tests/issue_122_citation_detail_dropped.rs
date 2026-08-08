@@ -1,11 +1,12 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
-#![cfg(feature = "office")]
 //! Regression test for issue #122: `CitationExtractor` built a `formatted_content`
 //! detail body (journal/year/volume/DOI/PMID/abstract/keywords) for each parsed
 //! citation but only ever pushed it into the document on the parse-failure
 //! fallback path. On success, `push_citation(title, key, None)` discarded the
 //! detail body entirely, so the abstract, DOI, and other bibliographic detail
 //! never made it into the extracted document body.
+
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
+#![cfg(feature = "office")]
 
 mod helpers;
 use helpers::extract_bytes_document;

@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Registry-routing and `parse_options` tests for the Candle VLM-OCR backends.
 //!
 //! These tests verify that:
@@ -33,6 +32,7 @@
 //! cargo test -p xberg --features candle-vlm-ocr --test candle_backends -- --ignored --nocapture
 //! ```
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(feature = "candle-ocr")]
 
 use xberg::core::config::OcrConfig;

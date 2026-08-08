@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! PDF extraction regression tests using ground truth.
 //!
 //! These tests ensure extraction quality does not regress across all output formats
@@ -16,6 +15,7 @@
 //!   # Include OCR path tests (slow, needs tesseract):
 //!   cargo test -p xberg --features "pdf,ocr" --test pdf_markdown_regression -- --ignored --nocapture
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(feature = "pdf")]
 
 mod helpers;

@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: org logging policy exempts tests
 //! Integration coverage for the Tesseract OCR execution-path fixes:
 //!
 //! - #177: table detection now clusters words into independent spatial regions
@@ -16,6 +15,7 @@
 //! - #175/#191: block type, justification, and crown/list-item paragraph
 //!   metadata are present on every word-level `OcrElement`.
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: org logging policy exempts tests
 #![cfg(feature = "ocr")]
 
 mod helpers;

@@ -1,5 +1,3 @@
-#![deny(clippy::print_stdout, clippy::print_stderr)]
-#![cfg_attr(test, allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro))]
 //! # xberg-candle-ocr
 //!
 //! Candle-based VLM OCR engines for Xberg. Pure-Rust transformer OCR.
@@ -21,6 +19,8 @@
 //!
 //! Pass-through features to candle: `cuda`, `metal`, `mkl`, `accelerate`.
 
+#![deny(clippy::print_stdout, clippy::print_stderr)]
+#![cfg_attr(test, allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro))]
 #![allow(clippy::too_many_arguments)]
 
 pub mod device;

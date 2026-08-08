@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Reading-order reconstruction tests for multi-column PDFs.
 //!
 //! Tests verify that:
@@ -15,6 +14,7 @@
 //! XBERG_RUN_LAYOUT_TESTS=1 cargo test -p xberg --features full --test reading_order -- --nocapture
 //! ```
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(all(feature = "pdf", feature = "layout-detection", not(target_arch = "wasm32")))]
 
 mod helpers;

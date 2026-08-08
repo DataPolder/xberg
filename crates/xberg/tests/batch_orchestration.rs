@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Batch processing orchestration tests.
 //!
 //! Validates efficient parallel processing at multiple levels:
@@ -7,6 +6,8 @@
 //! - OCR across pages
 //! - File I/O optimization
 //! - Resource utilization (CPU cores)
+
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 
 mod helpers;
 use helpers::{BytesInput, UriBatchInput, extract_bytes_documents, extract_uri_documents};

@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Regression guard for xberg-io/xberg#1223: an XLSX merged header must keep
 //! every following cell in its own column. calamine's `worksheet_range` returns
 //! a dense grid where a merged region carries its value in the origin cell and
@@ -6,6 +5,7 @@
 //! pins that behavior — the same aligned blank-continuation the DOCX/HTML merge
 //! fix settled on — so a future naive re-index can't silently shift columns.
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(feature = "excel")]
 
 mod helpers;

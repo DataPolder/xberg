@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Regression tests for PPTX/PPSX extraction bugs
 //!
 //! GitHub Issue #321: PPTX extraction fails on shapes without txBody (image placeholders) + PPSX not supported
@@ -8,6 +7,7 @@
 //! Bug 2: PPSX not supported - PowerPoint Show files rejected entirely
 //! Bug 3: Image page numbers reversed - image on slide 1 reports page_number=2
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(feature = "office")]
 
 mod helpers;

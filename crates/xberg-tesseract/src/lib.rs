@@ -1,17 +1,3 @@
-#![deny(clippy::print_stdout, clippy::print_stderr)]
-#![cfg_attr(test, allow(clippy::print_stdout, clippy::print_stderr))]
-#![cfg_attr(
-    not(any(feature = "build-tesseract", feature = "build-tesseract-wasm")),
-    allow(unused_variables, dead_code)
-)]
-#![allow(clippy::arc_with_non_send_sync)]
-#![allow(clippy::missing_transmute_annotations)]
-#![allow(clippy::type_complexity)]
-#![allow(clippy::new_without_default)]
-#![allow(clippy::not_unsafe_ptr_arg_deref)]
-#![allow(clippy::cmp_null)]
-#![allow(missing_docs)]
-
 //! # xberg-tesseract
 //!
 //! `xberg-tesseract` provides safe Rust bindings for Tesseract OCR with built-in compilation
@@ -130,6 +116,21 @@
 //!     Ok(())
 //! }
 //! ```
+
+#![deny(clippy::print_stdout, clippy::print_stderr)]
+#![cfg_attr(test, allow(clippy::print_stdout, clippy::print_stderr))]
+#![cfg_attr(
+    not(any(feature = "build-tesseract", feature = "build-tesseract-wasm")),
+    allow(unused_variables, dead_code)
+)]
+#![allow(clippy::arc_with_non_send_sync)]
+#![allow(clippy::missing_transmute_annotations)]
+#![allow(clippy::type_complexity)]
+#![allow(clippy::new_without_default)]
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
+#![allow(clippy::cmp_null)]
+#![allow(missing_docs)]
+
 /// Declare FFI functions with `extern "C-unwind"` on native targets (to catch
 /// C++ exceptions from Tesseract/Leptonica) and `extern "C"` on WASM (where
 /// the LLVM backend does not support `cleanupret` / C++ unwinding).

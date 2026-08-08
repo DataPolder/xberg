@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! PDF table detection comprehensive test.
 //!
 //! This test file analyzes table detection across all PDF test documents
@@ -13,6 +12,7 @@
 //! - Dimensions of each table (rows x cols)
 //! - First 3 cells of each table (to verify legitimacy)
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(feature = "pdf")]
 
 mod helpers;

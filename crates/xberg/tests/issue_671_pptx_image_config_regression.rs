@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Regression tests for https://github.com/xberg-io/xberg/issues/671
 //!
 //! ImageExtractionConfig.inject_placeholders was silently ignored on PPTX:
@@ -9,6 +8,8 @@
 //! Root cause: inject_placeholders was defined in ImageExtractionConfig but
 //! never read. Image references were injected unconditionally in
 //! Slide::to_markdown regardless of the flag value.
+
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 
 mod helpers;
 use helpers::extract_uri_document_blocking;

@@ -1,4 +1,3 @@
-#![cfg(feature = "tree-sitter")]
 //! Regression test for #259.
 //!
 //! `ExtractedDocument.code_intelligence` is documented (`types/extraction.rs`) as
@@ -16,6 +15,8 @@
 //! fixture) and must therefore be entirely absent from the JSON rather than present as
 //! empty placeholders — the upstream `ProcessResult` type skips empty/`None` fields when
 //! serializing.
+
+#![cfg(feature = "tree-sitter")]
 
 mod helpers;
 use helpers::extract_bytes_document;

@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Integration tests verifying that chunk `first_page`/`last_page` are populated
 //! for all chunks when extracting single-page and multi-page PDFs with chunking enabled.
 //!
@@ -7,6 +6,7 @@
 //! - `pdf/single_page.pdf` — any native-text PDF with exactly 1 page; place the
 //!   reporter's `single-page.pdf` from issue #1105 here to keep the regression locked
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(all(feature = "pdf", feature = "chunking"))]
 
 mod helpers;

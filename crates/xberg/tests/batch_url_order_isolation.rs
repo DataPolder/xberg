@@ -1,5 +1,3 @@
-#![cfg(feature = "url-ingestion")]
-
 //! Shared-URL batch extraction: input-order preservation, duplicate-URL
 //! mapping, per-URL error isolation, and the batch timeout nuance.
 //!
@@ -9,6 +7,8 @@
 //! COMPLETION order; the engine must remap them back to INPUT order and isolate
 //! per-URL failures. These tests drive that path through local HTTP fixtures
 //! (wiremock) and a dead loopback port — no real network access.
+
+#![cfg(feature = "url-ingestion")]
 
 use serde_json::Value;
 use wiremock::matchers::{method, path};

@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Integration tests for PaddleOCR functionality.
 //!
 //! These tests require:
@@ -15,6 +14,7 @@
 //! deliberately narrowed to crate-internal visibility, which the rewritten
 //! suite below no longer needs.
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(paddle_ocr)]
 
 use std::path::PathBuf;

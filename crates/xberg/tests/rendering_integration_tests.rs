@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Integration tests for the new rendering layer.
 //!
 //! These tests construct `InternalDocument` instances via the builder API,
@@ -7,6 +6,8 @@
 //!
 //! Usage:
 //!   cargo test -p xberg --test rendering_integration_tests
+
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 
 mod helpers;
 

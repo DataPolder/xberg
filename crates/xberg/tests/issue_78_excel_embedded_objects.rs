@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! xberg-io/xberg#78: Excel workbooks may carry embedded objects under `xl/embeddings/`
 //! (e.g. an embedded text file, spreadsheet, or OLE object pasted into a cell). Those
 //! bytes must not be silently dropped — the extractor reuses the shared
@@ -6,6 +5,7 @@
 //! DOCX/PPTX) with the `xl/embeddings/` prefix, attaching results to
 //! `ExtractedDocument.children`.
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(feature = "office")]
 
 use std::io::Write as _;

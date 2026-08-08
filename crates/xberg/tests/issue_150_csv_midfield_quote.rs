@@ -1,7 +1,8 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Regression test for #150: a stray, non-leading quote inside an unquoted CSV
 //! field must not flip the parser into quote mode and swallow subsequent
 //! delimiters/newlines.
+
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 
 use xberg::core::config::ExtractionConfig;
 

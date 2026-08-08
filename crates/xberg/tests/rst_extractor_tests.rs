@@ -1,4 +1,3 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! Comprehensive TDD test suite for RST (reStructuredText) extraction
 //!
 //! Tests RST extraction using Pandoc as the baseline for quality validation.
@@ -10,6 +9,7 @@
 //! - Table extraction (simple and grid tables)
 //! - Reference links and images
 
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(feature = "office")]
 //! - Comments and special blocks
 //! - Content quality validation

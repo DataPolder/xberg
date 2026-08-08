@@ -1,9 +1,10 @@
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 //! HTML table parsing tests for `html-to-markdown-rs`.
 //!
 //! Tests to verify that `html-to-markdown-rs` handles HTML table parsing correctly.
 //! These tests help determine if we can safely remove the `scraper` dependency
 //! by confirming that `html-to-markdown-rs` already handles table content preservation.
+
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 
 #[cfg(feature = "html")]
 mod html_table_tests {
