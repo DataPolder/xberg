@@ -10,7 +10,7 @@ async def main() -> None:
             "embed_css": True,
         },
     )
-    result = await extract(ExtractInput.from_uri("document.pdf"), config)
+    result = await extract(ExtractInput(uri="document.pdf"), config)
     print(result.results[0].content)  # HTML with kb-* classes and GitHub theme
 
 asyncio.run(main())

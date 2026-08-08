@@ -23,7 +23,7 @@ async def main() -> None:
             )
         )
     )
-    result = await extract(ExtractInput.from_uri("scanned.pdf"), config)
+    result = await extract(ExtractInput(uri="scanned.pdf"), config)
     print(f"Content: {result.results[0].content[:100]}")
 
 asyncio.run(main())

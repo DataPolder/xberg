@@ -11,7 +11,7 @@ async def main() -> None:
             tesseract_config=TesseractConfig(psm=3)
         )
     )
-    result = await extract(ExtractInput.from_uri("scanned.pdf"), config)
+    result = await extract(ExtractInput(uri="scanned.pdf"), config)
     print(result.results[0].content)
     print(f"Detected Languages: {result.results[0].detected_languages}")
 

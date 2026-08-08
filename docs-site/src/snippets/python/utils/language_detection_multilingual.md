@@ -10,8 +10,8 @@ async def main() -> None:
             detect_multiple=True
         )
     )
-    result = await extract(ExtractInput.from_uri("multilingual_document.pdf"), config)
-    languages: list[str] = result.detected_languages or []
+    result = await extract(ExtractInput(uri="multilingual_document.pdf"), config)
+    languages: list[str] = result.results[0].detected_languages or []
     print(f"Detected {len(languages)} languages: {languages}")
 
 asyncio.run(main())

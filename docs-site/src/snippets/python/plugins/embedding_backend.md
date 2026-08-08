@@ -1,12 +1,20 @@
 ```python title="Python"
+import asyncio
 from collections.abc import Iterable
 
-from xberg import register_embedding_backend, EmbeddingConfig, embed_texts
+from xberg import (
+    register_embedding_backend,
+    ChunkingConfig,
+    EmbeddingConfig,
+    EmbeddingModelType,
+    ExtractInput,
+    ExtractionConfig,
+    extract,
+)
 from sentence_transformers import SentenceTransformer
 
 # Wrap an already-loaded embedder (e.g. sentence-transformers, llama-cpp-python,
-# or a tuned ONNX session) so xberg can call back into it during chunking
-# and standalone embed requests.
+# or a tuned ONNX session) so xberg can call back into it during chunking.
 class MyEmbedder:
     def __init__(self):
         self._model = SentenceTransformer("BAAI/bge-base-en-v1.5")
@@ -40,10 +48,20 @@ class MyEmbedder:
 # Register once at startup. Reference by name in config.
 register_embedding_backend(MyEmbedder())
 
-config: EmbeddingConfig = {
-    "model": {"type": "plugin", "name": "my-embedder"},
-    # Optional: bound the wait on a hung backend (default: 60s; None disables)
-    "max_embed_duration_secs": 30,
-}
-vectors = embed_texts(["Hello, world!", "Second text"], config)
+async def main() -> None:
+    config = ExtractionConfig(
+        chunking=ChunkingConfig(
+            embedding=EmbeddingConfig(
+                model=EmbeddingModelType.plugin("my-embedder"),
+                # Optional: bound the wait on a hung backend (default: 60s; None disables)
+                max_embed_duration_secs=30,
+            ),
+        ),
+    )
+    result = await extract(ExtractInput(uri="document.pdf"), config)
+    for chunk in result.results[0].chunks or []:
+        if chunk.embedding is not None:
+            print(len(chunk.embedding))
+
+asyncio.run(main())
 ```

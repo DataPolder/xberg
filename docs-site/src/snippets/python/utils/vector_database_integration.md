@@ -12,15 +12,15 @@ from xberg import (
 async def main() -> None:
     config: ExtractionConfig = ExtractionConfig(
         chunking=ChunkingConfig(
-            max_chars=512,
-            max_overlap=50,
+            max_characters=512,
+            overlap=50,
             embedding=EmbeddingConfig(
                 model=EmbeddingModelType.preset("balanced"), normalize=True
             ),
         )
     )
-    result = await extract(ExtractInput.from_uri("document.pdf"), config)
-    chunks = result.chunks or []
+    result = await extract(ExtractInput(uri="document.pdf"), config)
+    chunks = result.results[0].chunks or []
     for i, chunk in enumerate(chunks):
         chunk_id: str = f"doc_chunk_{i}"
         print(f"Chunk {chunk_id}: {chunk.content[:50]}")

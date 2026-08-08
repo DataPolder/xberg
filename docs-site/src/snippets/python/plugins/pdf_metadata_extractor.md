@@ -1,5 +1,5 @@
 ```python title="Python"
-from xberg import register_post_processor, ExtractedDocument
+from xberg import register_post_processor, ExtractedDocument, ExtractionConfig
 import logging
 
 logger = logging.getLogger(__name__)
@@ -15,21 +15,17 @@ class PdfMetadataExtractor:
         return "1.0.0"
 
     def description(self) -> str:
-        return "Extracts and enriches PDF metadata"
+        return "Logs PDF processing activity"
 
     def processing_stage(self) -> str:
         return "early"
 
-    def should_process(self, result: ExtractedDocument) -> bool:
+    def should_process(self, result: ExtractedDocument, config: ExtractionConfig) -> bool:
         return result.mime_type == "application/pdf"
 
-    def process(self, result: ExtractedDocument) -> ExtractedDocument:
+    def process(self, result: ExtractedDocument, config: ExtractionConfig) -> None:
         self.processed_count += 1
-        result.metadata["pdf_processed"] = True
-        result.metadata["pdf_order"] = self.processed_count
-        result.metadata["content_length"] = len(result.content)
-        result.metadata["pdf_processor_version"] = "1.0.0"
-        return result
+        logger.info(f"Processed PDF #{self.processed_count} ({len(result.content)} chars)")
 
     def initialize(self) -> None:
         logger.info("PDF metadata extractor initialized")

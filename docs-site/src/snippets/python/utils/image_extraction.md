@@ -12,7 +12,7 @@ async def main() -> None:
             auto_adjust_dpi=True,
         )
     )
-    result = await extract(ExtractInput.from_uri("document.pdf"), config)
+    result = await extract(ExtractInput(uri="document.pdf"), config)
     print(f"Extracted: {result.results[0].content[:100]}")
 
 asyncio.run(main())

@@ -1,14 +1,12 @@
 ```python title="Python"
-import pytest
-from xberg import ExtractedDocument
+from xberg import ExtractInput, ExtractionConfig
 
 def test_custom_extractor() -> None:
     extractor = CustomJsonExtractor()
     json_data: bytes = b'{"message": "Hello, world!"}'
-    config: dict = {}
-    result: ExtractedDocument = extractor.extract(
-        json_data, "application/json", config
-    )
-    assert "Hello, world!" in result.content
-    assert result.mime_type == "application/json"
+    input = ExtractInput(kind="bytes", bytes=json_data, mime_type="application/json")
+    config = ExtractionConfig()
+    result: dict = extractor.extract(input, config)
+    assert "Hello, world!" in result["content"]
+    assert result["mime_type"] == "application/json"
 ```

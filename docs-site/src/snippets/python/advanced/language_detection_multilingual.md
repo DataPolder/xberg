@@ -12,7 +12,7 @@ async def main() -> None:
         )
     )
 
-    result = await extract(ExtractInput.from_uri("multilingual_document.pdf"), config)
+    result = await extract(ExtractInput(uri="multilingual_document.pdf"), config)
 
     print(f"Detected languages: {result.results[0].detected_languages}")
 

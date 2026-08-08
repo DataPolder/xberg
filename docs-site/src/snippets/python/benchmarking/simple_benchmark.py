@@ -6,7 +6,7 @@ from xberg import ExtractInput, ExtractionConfig, extract
 
 async def benchmark_extractions():
     config = ExtractionConfig(use_cache=False)
-    input = ExtractInput.from_uri("document.pdf")
+    input = ExtractInput(uri="document.pdf")
     num_runs = 10
 
     start = time.perf_counter()

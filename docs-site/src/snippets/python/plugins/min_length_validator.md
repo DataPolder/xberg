@@ -1,5 +1,5 @@
 ```python title="Python"
-from xberg import register_validator, ExtractedDocument, ValidationError
+from xberg import register_validator, ExtractedDocument, ExtractionConfig, ValidationError
 
 class MinLengthValidator:
     def __init__(self, min_length: int = 100):
@@ -14,12 +14,12 @@ class MinLengthValidator:
     def priority(self) -> int:
         return 100
 
-    def validate(self, result: ExtractedDocument) -> None:
+    def validate(self, result: ExtractedDocument, config: ExtractionConfig) -> None:
         content_len: int = len(result.content)
         if content_len < self.min_length:
             raise ValidationError(f"Content too short: {content_len}")
 
-    def should_validate(self, result: ExtractedDocument) -> bool:
+    def should_validate(self, result: ExtractedDocument, config: ExtractionConfig) -> bool:
         return True
 
     def initialize(self) -> None:

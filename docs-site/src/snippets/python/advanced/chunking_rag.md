@@ -22,7 +22,7 @@ async def main() -> None:
         )
     )
 
-    result = await extract(ExtractInput.from_uri("research_paper.pdf"), config)
+    result = await extract(ExtractInput(uri="research_paper.pdf"), config)
 
     for chunk in result.results[0].chunks or []:
         print(

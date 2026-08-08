@@ -1,12 +1,10 @@
 ```python title="Python"
-from xberg import ExtractionConfig, TokenReductionConfig, ReductionLevel
+from xberg import ExtractionConfig, TokenReductionOptions
 
 config: ExtractionConfig = ExtractionConfig(
-    token_reduction=TokenReductionConfig(
-        level=ReductionLevel.MODERATE,
-        preserve_markdown=True,
-        preserve_code=True,
-        language_hint="eng",
+    token_reduction=TokenReductionOptions(
+        mode="moderate",
+        preserve_important_words=True,
     )
 )
 ```

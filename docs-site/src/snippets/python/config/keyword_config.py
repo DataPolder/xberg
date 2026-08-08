@@ -24,7 +24,7 @@ async def basic_yake() -> None:
         )
     )
 
-    output = await extract(ExtractInput.from_uri("document.pdf"), config)
+    output = await extract(ExtractInput(uri="document.pdf"), config)
     result = output.results[0]
     print(f"Keywords: {result.extracted_keywords}")
 
@@ -45,7 +45,7 @@ async def advanced_yake() -> None:
         )
     )
 
-    output = await extract(ExtractInput.from_uri("document.pdf"), config)
+    output = await extract(ExtractInput(uri="document.pdf"), config)
     result = output.results[0]
     print(f"Keywords: {result.extracted_keywords}")
 
@@ -67,7 +67,7 @@ async def rake_config() -> None:
         )
     )
 
-    output = await extract(ExtractInput.from_uri("document.pdf"), config)
+    output = await extract(ExtractInput(uri="document.pdf"), config)
     result = output.results[0]
     print(f"Keywords: {result.extracted_keywords}")
 

@@ -1,11 +1,15 @@
 ```python title="Python"
+import asyncio
 from xberg import ExtractInput, extract, ExtractionConfig, XbergError
 
-config = ExtractionConfig()
+async def main() -> None:
+    config = ExtractionConfig()
 
-try:
-    result = extract(ExtractInput.from_uri("missing.pdf"), config)
-except XbergError as e:
-    print(f"Extraction failed: {e}")
-    raise
+    try:
+        result = await extract(ExtractInput(uri="missing.pdf"), config)
+    except XbergError as e:
+        print(f"Extraction failed: {e}")
+        raise
+
+asyncio.run(main())
 ```

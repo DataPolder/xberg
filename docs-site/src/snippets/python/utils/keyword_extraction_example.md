@@ -10,7 +10,7 @@ async def main() -> None:
             min_score=0.3
         )
     )
-    output = await extract(ExtractInput.from_uri("research_paper.pdf"), config)
+    output = await extract(ExtractInput(uri="research_paper.pdf"), config)
     result = output.results[0]
 
     keywords: list = result.extracted_keywords or []

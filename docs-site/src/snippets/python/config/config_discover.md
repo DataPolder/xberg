@@ -4,7 +4,7 @@ from xberg import ExtractInput, ExtractionConfig, extract
 
 async def main() -> None:
     config: ExtractionConfig = ExtractionConfig()
-    result = await extract(ExtractInput.from_uri("document.pdf"), config)
+    result = await extract(ExtractInput(uri="document.pdf"), config)
 
     content: str = result.results[0].content
     content_preview: str = content[:100]

@@ -1,8 +1,8 @@
 ```python title="Python"
-from xberg import ExtractionConfig, TokenReductionConfig
+from xberg import ExtractionConfig, TokenReductionOptions
 
 config: ExtractionConfig = ExtractionConfig(
-    token_reduction=TokenReductionConfig(
+    token_reduction=TokenReductionOptions(
         mode="moderate",
         preserve_important_words=True,
     )

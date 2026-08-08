@@ -9,9 +9,9 @@ async def main() -> None:
             max_tokens=200,
         ),
     )
-    result = await extract(ExtractInput.from_uri("report.pdf"), config)
-    if result.summary:
-        print(result.summary.text)
+    result = await extract(ExtractInput(uri="report.pdf"), config)
+    if result.results[0].summary:
+        print(result.results[0].summary.text)
 
 asyncio.run(main())
 ```

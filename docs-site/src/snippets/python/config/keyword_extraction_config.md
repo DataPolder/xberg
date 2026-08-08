@@ -17,9 +17,9 @@ async def main() -> None:
             language="en"
         )
     )
-    output = await extract(ExtractInput.from_uri("document.pdf"), config)
+    output = await extract(ExtractInput(uri="document.pdf"), config)
     result = output.results[0]
-    print(f"Content extracted: {len(result.results[0].content)} chars")
+    print(f"Content extracted: {len(result.content)} chars")
 
 asyncio.run(main())
 ```

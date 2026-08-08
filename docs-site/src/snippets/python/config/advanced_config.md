@@ -40,7 +40,6 @@ async def main() -> None:
             algorithm="yake",
             max_keywords=10,
             min_score=0.1,
-            ngram_range=[1, 3],
             language="en",
         ),
         token_reduction=TokenReductionOptions(
@@ -50,12 +49,13 @@ async def main() -> None:
         postprocessor=PostProcessorConfig(enabled=True),
     )
 
-    result = await extract(ExtractInput.from_uri("document.pdf"), config)
-    print(f"Content: {result.results[0].content[:100]}")
-    if result.detected_languages:
-        print(f"Languages: {result.detected_languages}")
-    if result.chunks:
-        print(f"Chunks: {len(result.chunks)}")
+    result = await extract(ExtractInput(uri="document.pdf"), config)
+    document = result.results[0]
+    print(f"Content: {document.content[:100]}")
+    if document.detected_languages:
+        print(f"Languages: {document.detected_languages}")
+    if document.chunks:
+        print(f"Chunks: {len(document.chunks)}")
 
 asyncio.run(main())
 ```

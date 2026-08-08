@@ -54,10 +54,9 @@ embedding_config = EmbeddingConfig(
 # Integration with ChunkingConfig
 # Add embeddings to your chunking configuration:
 chunking_with_embeddings = ChunkingConfig(
-    max_chars=1024,
-    max_overlap=100,
-    preset="balanced",
-    embedding=EmbeddingConfig(),  # Uses balanced preset
+    max_characters=1024,
+    overlap=100,
+    embedding=EmbeddingConfig(model=EmbeddingModelType.preset("balanced")),
 )
 
 extraction_config = ExtractionConfig(

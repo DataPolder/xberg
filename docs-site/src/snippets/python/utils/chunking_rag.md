@@ -12,8 +12,8 @@ from xberg import (
 async def main() -> None:
     config: ExtractionConfig = ExtractionConfig(
         chunking=ChunkingConfig(
-            max_chars=500,
-            max_overlap=50,
+            max_characters=500,
+            overlap=50,
             embedding=EmbeddingConfig(
                 model=EmbeddingModelType.preset("balanced"),
                 normalize=True,
@@ -21,10 +21,10 @@ async def main() -> None:
             )
         )
     )
-    result = await extract(ExtractInput.from_uri("research_paper.pdf"), config)
+    result = await extract(ExtractInput(uri="research_paper.pdf"), config)
 
     chunks_with_embeddings: list = []
-    for chunk in result.chunks or []:
+    for chunk in result.results[0].chunks or []:
         if chunk.embedding:
             chunks_with_embeddings.append({
                 "content": chunk.content[:100],

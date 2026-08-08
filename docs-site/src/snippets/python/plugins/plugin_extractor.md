@@ -1,5 +1,5 @@
 ```python title="Python"
-from xberg import register_document_extractor, ExtractedDocument
+from xberg import register_document_extractor, ExtractInput, ExtractionConfig
 import json
 
 class CustomJsonExtractor:
@@ -15,10 +15,8 @@ class CustomJsonExtractor:
     def priority(self) -> int:
         return 50
 
-    def extract(
-        self, content: bytes, mime_type: str, config: dict
-    ) -> ExtractedDocument:
-        data: dict = json.loads(content)
+    def extract(self, input: ExtractInput, config: ExtractionConfig) -> dict:
+        data: dict = json.loads(input.bytes)
         text: str = self._extract_text(data)
         return {"content": text, "mime_type": "application/json"}
 

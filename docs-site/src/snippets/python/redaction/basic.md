@@ -9,9 +9,9 @@ async def main() -> None:
             strategy="mask",
         ),
     )
-    result = await extract(ExtractInput.from_uri("contract.pdf"), config)
+    result = await extract(ExtractInput(uri="contract.pdf"), config)
     print(result.results[0].content)
-    print(f"Redacted {result.redaction_report.total_redacted} spans")
+    print(f"Redacted {result.results[0].redaction_report.total_redacted} spans")
 
 asyncio.run(main())
 ```

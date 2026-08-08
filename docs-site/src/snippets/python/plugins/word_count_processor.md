@@ -1,5 +1,8 @@
 ```python title="Python"
-from xberg import register_post_processor, ExtractedDocument
+import logging
+from xberg import register_post_processor, ExtractedDocument, ExtractionConfig
+
+logger = logging.getLogger(__name__)
 
 class WordCountProcessor:
     def name(self) -> str:
@@ -11,12 +14,11 @@ class WordCountProcessor:
     def processing_stage(self) -> str:
         return "early"
 
-    def process(self, result: ExtractedDocument) -> ExtractedDocument:
+    def process(self, result: ExtractedDocument, config: ExtractionConfig) -> None:
         word_count: int = len(result.content.split())
-        result.metadata["word_count"] = word_count
-        return result
+        logger.info(f"Word count: {word_count}")
 
-    def should_process(self, result: ExtractedDocument) -> bool:
+    def should_process(self, result: ExtractedDocument, config: ExtractionConfig) -> bool:
         return bool(result.content)
 
     def initialize(self) -> None:

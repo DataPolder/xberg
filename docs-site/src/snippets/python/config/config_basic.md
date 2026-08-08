@@ -7,7 +7,7 @@ async def main() -> None:
         use_cache=True,
         enable_quality_processing=True
     )
-    result = await extract(ExtractInput.from_uri("document.pdf"), config)
+    result = await extract(ExtractInput(uri="document.pdf"), config)
     print(result.results[0].content)
 
 asyncio.run(main())

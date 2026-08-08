@@ -6,12 +6,13 @@ async def main() -> None:
     config = ExtractionConfig(
         translation=TranslationConfig(
             target_lang="de",
+            preserve_markup=True,
             llm=LlmConfig(model="openai/gpt-4o-mini"),
         ),
     )
-    result = await extract(ExtractInput.from_uri("contract.pdf"), config)
-    if result.translation:
-        print(result.translation.content)
+    result = await extract(ExtractInput(uri="contract.pdf"), config)
+    if result.results[0].translation:
+        print(result.results[0].translation.content)
 
 asyncio.run(main())
 ```

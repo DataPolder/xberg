@@ -8,8 +8,8 @@ async def main() -> None:
             enabled=True, min_confidence=0.9, detect_multiple=True
         )
     )
-    result = await extract(ExtractInput.from_uri("document.pdf"), config)
-    print(f"Languages: {result.detected_languages}")
+    result = await extract(ExtractInput(uri="document.pdf"), config)
+    print(f"Languages: {result.results[0].detected_languages}")
 
 asyncio.run(main())
 ```

@@ -35,7 +35,7 @@ async def extract_and_vectorize(
         )
     )
 
-    result = await extract(ExtractInput.from_uri(document_path), config)
+    result = await extract(ExtractInput(uri=document_path), config)
 
     records: list[VectorRecord] = []
     for index, chunk in enumerate(result.results[0].chunks or []):

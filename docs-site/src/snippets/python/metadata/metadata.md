@@ -1,80 +1,76 @@
 ```python title="Python"
+import asyncio
 from xberg import ExtractInput, extract, ExtractionConfig
 
-result = extract(ExtractInput.from_uri("document.pdf"), ExtractionConfig())
+async def main() -> None:
+    result = await extract(ExtractInput(uri="document.pdf"), ExtractionConfig())
 
-# Metadata is flat — format-specific fields are at the top level
-metadata = result.results[0].metadata
-if metadata.get("page_count"):
-    print(f"Pages: {metadata['page_count']}")
-if metadata.get("title"):
-    print(f"Title: {metadata['title']}")
-if metadata.get("authors"):
-    print(f"Authors: {', '.join(metadata['authors'])}")
+    # Common fields live directly on Metadata
+    metadata = result.results[0].metadata
+    pdf_metadata = metadata.format.pdf if metadata.format else None
+    if pdf_metadata and pdf_metadata.page_count:
+        print(f"Pages: {pdf_metadata.page_count}")
+    if metadata.title:
+        print(f"Title: {metadata.title}")
+    if metadata.authors:
+        print(f"Authors: {', '.join(metadata.authors)}")
 
-result = extract(ExtractInput.from_uri("page.html"), ExtractionConfig())
-metadata = result.results[0].metadata
-if metadata.get("title"):
-    print(f"Title: {metadata['title']}")
-if metadata.get("description"):
-    print(f"Description: {metadata['description']}")
+    html_result = await extract(ExtractInput(uri="page.html"), ExtractionConfig())
+    html_metadata = html_result.results[0].metadata
+    html_format = html_metadata.format.html if html_metadata.format else None
+    if html_format:
+        if html_format.title:
+            print(f"Title: {html_format.title}")
+        if html_format.description:
+            print(f"Description: {html_format.description}")
 
-# Access keywords as array
-keywords = metadata.get('keywords', [])
-if keywords:
-    print(f"Keywords: {', '.join(keywords)}")
+        # Access keywords as array
+        if html_format.keywords:
+            print(f"Keywords: {', '.join(html_format.keywords)}")
 
-# Access canonical URL (renamed from canonical)
-canonical_url = metadata.get('canonical_url')
-if canonical_url:
-    print(f"Canonical URL: {canonical_url}")
+        # Access canonical URL
+        if html_format.canonical_url:
+            print(f"Canonical URL: {html_format.canonical_url}")
 
-# Access Open Graph fields from map
-open_graph = metadata.get('open_graph', {})
-if open_graph:
-    if 'image' in open_graph:
-        print(f"Open Graph Image: {open_graph['image']}")
-    if 'title' in open_graph:
-        print(f"Open Graph Title: {open_graph['title']}")
-    if 'type' in open_graph:
-        print(f"Open Graph Type: {open_graph['type']}")
+        # Access Open Graph fields from map
+        if html_format.open_graph:
+            if "image" in html_format.open_graph:
+                print(f"Open Graph Image: {html_format.open_graph['image']}")
+            if "title" in html_format.open_graph:
+                print(f"Open Graph Title: {html_format.open_graph['title']}")
+            if "type" in html_format.open_graph:
+                print(f"Open Graph Type: {html_format.open_graph['type']}")
 
-# Access Twitter Card fields from map
-twitter_card = metadata.get('twitter_card', {})
-if twitter_card:
-    if 'card' in twitter_card:
-        print(f"Twitter Card Type: {twitter_card['card']}")
-    if 'creator' in twitter_card:
-        print(f"Twitter Creator: {twitter_card['creator']}")
+        # Access Twitter Card fields from map
+        if html_format.twitter_card:
+            if "card" in html_format.twitter_card:
+                print(f"Twitter Card Type: {html_format.twitter_card['card']}")
+            if "creator" in html_format.twitter_card:
+                print(f"Twitter Creator: {html_format.twitter_card['creator']}")
 
-# Access new fields
-language = metadata.get('language')
-if language:
-    print(f"Language: {language}")
+        if html_format.language:
+            print(f"Language: {html_format.language}")
 
-text_direction = metadata.get('text_direction')
-if text_direction:
-    print(f"Text Direction: {text_direction}")
+        if html_format.text_direction:
+            print(f"Text Direction: {html_format.text_direction}")
 
-# Access headers
-headers = metadata.get('headers', [])
-if headers:
-    print(f"Headers: {', '.join([h['text'] for h in headers])}")
+        # Access headers
+        if html_format.headers:
+            print(f"Headers: {', '.join(h.text for h in html_format.headers)}")
 
-# Access links
-links = metadata.get('links', [])
-if links:
-    for link in links:
-        print(f"Link: {link.get('href')} ({link.get('text')})")
+        # Access links
+        if html_format.links:
+            for link in html_format.links:
+                print(f"Link: {link.href} ({link.text})")
 
-# Access images
-images = metadata.get('images', [])
-if images:
-    for image in images:
-        print(f"Image: {image.get('src')}")
+        # Access images
+        if html_format.images:
+            for image in html_format.images:
+                print(f"Image: {image}")
 
-# Access structured data
-structured_data = metadata.get('structured_data', [])
-if structured_data:
-    print(f"Structured data items: {len(structured_data)}")
+        # Access structured data
+        if html_format.structured_data:
+            print(f"Structured data items: {len(html_format.structured_data)}")
+
+asyncio.run(main())
 ```

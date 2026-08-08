@@ -10,7 +10,7 @@ async def main() -> None:
             overlap=200,
         )
     )
-    result = await extract(ExtractInput.from_uri("document.pdf"), config)
+    result = await extract(ExtractInput(uri="document.pdf"), config)
     for chunk in result.results[0].chunks or []:
         print(f"Length: {len(chunk.content)}")
 
@@ -27,7 +27,7 @@ async def main() -> None:
     config: ExtractionConfig = ExtractionConfig(
         chunking=ChunkingConfig(chunker_type="semantic")
     )
-    result = await extract(ExtractInput.from_uri("document.pdf"), config)
+    result = await extract(ExtractInput(uri="document.pdf"), config)
     for chunk in result.results[0].chunks or []:
         print(f"Content: {chunk.content[:100]}...")
 
@@ -49,7 +49,7 @@ async def main() -> None:
             prepend_heading_context=True,
         )
     )
-    result = await extract(ExtractInput.from_uri("document.md"), config)
+    result = await extract(ExtractInput(uri="document.md"), config)
     for chunk in result.results[0].chunks or []:
         # Each chunk's content is prefixed with its heading breadcrumb
         print(f"Content: {chunk.content[:100]}...")

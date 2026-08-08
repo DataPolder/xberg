@@ -23,14 +23,14 @@ async def main() -> None:
         ),
         pdf_options=PdfConfig(extract_images=True),
         chunking=ChunkingConfig(
-            max_chars=1000,
-            max_overlap=200,
+            max_characters=1000,
+            overlap=200,
             embedding=EmbeddingConfig(
-                model=EmbeddingModelType.preset("all-MiniLM-L6-v2")
+                model=EmbeddingModelType.preset("balanced")
             ),
         ),
     )
-    result = await extract(ExtractInput.from_uri("document.pdf"), config)
+    result = await extract(ExtractInput(uri="document.pdf"), config)
     print(f"Content: {result.results[0].content[:100]}")
 
 asyncio.run(main())

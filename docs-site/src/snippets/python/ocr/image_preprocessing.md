@@ -1,4 +1,5 @@
 ```python title="Python"
+import asyncio
 from xberg import (
     ExtractInput,
     extract,
@@ -8,23 +9,26 @@ from xberg import (
     TesseractConfig,
 )
 
-preprocessing: ImagePreprocessingConfig = ImagePreprocessingConfig(
-    target_dpi=300,
-    denoise=True,
-    deskew=True,
-    contrast_enhance=True,
-    binarization_method="otsu",
-)
-
-config: ExtractionConfig = ExtractionConfig(
-    ocr=OcrConfig(
-        backend="tesseract",
-        language="eng",
-        tesseract_config=TesseractConfig(preprocessing=preprocessing),
+async def main() -> None:
+    preprocessing: ImagePreprocessingConfig = ImagePreprocessingConfig(
+        target_dpi=300,
+        denoise=True,
+        deskew=True,
+        contrast_enhance=True,
+        binarization_method="otsu",
     )
-)
 
-result = extract(ExtractInput.from_uri("document.pdf"), config)
+    config: ExtractionConfig = ExtractionConfig(
+        ocr=OcrConfig(
+            backend="tesseract",
+            language="eng",
+            tesseract_config=TesseractConfig(preprocessing=preprocessing),
+        )
+    )
 
-print(f"Content length: {len(result.results[0].content)} characters")
+    result = await extract(ExtractInput(uri="document.pdf"), config)
+
+    print(f"Content length: {len(result.results[0].content)} characters")
+
+asyncio.run(main())
 ```

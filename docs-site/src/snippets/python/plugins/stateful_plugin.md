@@ -1,6 +1,6 @@
 ```python title="Python"
 import threading
-from xberg import ExtractedDocument
+from xberg import ExtractedDocument, ExtractionConfig
 
 class StatefulPlugin:
     def __init__(self):
@@ -14,11 +14,13 @@ class StatefulPlugin:
     def version(self) -> str:
         return "1.0.0"
 
-    def process(self, result: ExtractedDocument) -> ExtractedDocument:
+    def processing_stage(self) -> str:
+        return "early"
+
+    def process(self, result: ExtractedDocument, config: ExtractionConfig) -> None:
         with self.lock:
             self.call_count += 1
             self.cache["last_mime"] = result.mime_type
-        return result
 
     def initialize(self) -> None:
         pass

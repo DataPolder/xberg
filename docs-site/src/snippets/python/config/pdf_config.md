@@ -11,7 +11,7 @@ async def main() -> None:
             hierarchy=HierarchyConfig(enabled=True, k_clusters=6)
         )
     )
-    result = await extract(ExtractInput.from_uri("document.pdf"), config)
+    result = await extract(ExtractInput(uri="document.pdf"), config)
     print(f"Content: {result.results[0].content[:100]}")
 
 asyncio.run(main())

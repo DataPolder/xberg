@@ -3,21 +3,20 @@ import asyncio
 from xberg import (
     ExtractInput,
     ExtractionConfig,
-    TokenReductionConfig,
-    ReductionLevel,
+    TokenReductionOptions,
     extract,
 )
 
 
 async def main() -> None:
     config: ExtractionConfig = ExtractionConfig(
-        token_reduction=TokenReductionConfig(
-            level=ReductionLevel.MODERATE,
-            preserve_markdown=True,
+        token_reduction=TokenReductionOptions(
+            mode="moderate",
+            preserve_important_words=True,
         )
     )
 
-    result = await extract(ExtractInput.from_uri("verbose_document.pdf"), config)
+    result = await extract(ExtractInput(uri="verbose_document.pdf"), config)
 
     print(f"Reduced content length: {len(result.results[0].content)} chars")
 
