@@ -299,6 +299,147 @@ Batch-level concerns like `max_concurrent_extractions`, `use_cache`, and
 [Configuration Reference](/reference/configuration/#fileextractionconfig)
 for the full list of overridable fields.
 
+## Archive and XML Bomb Protections
+
+Every archive-bearing format (`.zip`, `.docx`, `.pptx`, `.xlsx`, `.odt`, `.ods`,
+`.odp`, `.epub`, `.hwpx`, and the iWork formats `.pages`/`.key`/`.numbers`) and
+every XML-bearing format is checked against `SecurityLimits` before or during
+parsing. These checks exist to stop a hostile input from exhausting memory or
+CPU rather than to validate document correctness — a legitimate large document
+should never come close to the defaults below.
+
+| Limit                    | Defends against                                                              | Default        |
+| ------------------------ | ----------------------------------------------------------------------------| -------------- |
+| `max_archive_size`       | ZIP bombs — declared uncompressed size accumulated across entries           | 500 MiB        |
+| `max_compression_ratio`  | ZIP bombs — a single entry or the archive total expanding beyond a sane ratio | 100:1          |
+| `max_files_in_archive`   | Archives with an unreasonable number of member files                        | 10,000         |
+| `max_nesting_depth`      | Deeply nested containers (nested archives, iWork protobuf messages)         | 1,024 levels   |
+| `max_xml_depth`          | Deeply nested XML elements                                                  | 1,024 levels   |
+| `max_entity_length`      | Billion-laughs-class attacks — a single XML entity/attribute/token expanding to hundreds of MB | 1 MiB |
+| `max_content_size`       | Aggregate text growth across a whole document (catches long-tail expansion that `max_entity_length` alone would miss) | 100 MB |
+| `max_iterations`         | Infinite or near-infinite parser loops (XML token loop, HTML tokenizer, JSON parser) | 10,000,000 |
+| `max_table_cells`        | Documents claiming an unreasonable number of table cells (CSV, XLSX, HTML tables) | 100,000 |
+
+When both `max_nesting_depth` and `max_xml_depth` apply to the same parse, the
+tighter of the two wins — lowering either one alone is enough to clamp nesting.
+
+Archive-specific checks (`max_archive_size`, `max_compression_ratio`,
+`max_files_in_archive`) are enforced by `ZipBombValidator` against the ZIP
+central directory before any entry is decompressed, so an oversized or
+over-compressed archive is rejected without ever running the decompressor.
+
+### Configuring limits
+
+`SecurityLimits` is set on `ExtractionConfig.security_limits` and applies to
+the whole extraction (it cannot be overridden per file in a batch).
+
+<Tabs syncKey="lang">
+<TabItem label="Python">
+
+```python title="security_limits.py"
+from xberg import ExtractInput, ExtractionConfig, SecurityLimits, extract
+
+config = ExtractionConfig(
+    security_limits=SecurityLimits(
+        max_archive_size=100 * 1024 * 1024,  # 100 MiB
+        max_files_in_archive=1_000,
+    ),
+)
+
+output = await extract(ExtractInput(kind="uri", uri="archive.zip"), config=config)
+```
+
+</TabItem>
+<TabItem label="TypeScript">
+
+```typescript title="security-limits.ts"
+import { ExtractInputKind, extract } from "@xberg-io/xberg";
+
+const output = await extract(
+  { kind: ExtractInputKind.Uri, uri: "archive.zip" },
+  {
+    securityLimits: {
+      maxArchiveSize: 100 * 1024 * 1024, // 100 MiB
+      maxFilesInArchive: 1_000,
+    },
+  },
+);
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust title="security_limits.rs"
+use xberg::{extract, ExtractInput, ExtractionConfig, SecurityLimits};
+
+let config = ExtractionConfig {
+    security_limits: Some(SecurityLimits {
+        max_archive_size: 100 * 1024 * 1024, // 100 MiB
+        max_files_in_archive: 1_000,
+        ..Default::default()
+    }),
+    ..Default::default()
+};
+
+let output = extract(ExtractInput::from_uri("archive.zip"), &config).await?;
+```
+
+</TabItem>
+<TabItem label="WebAssembly">
+
+```javascript title="security-limits-wasm.js"
+import { ExtractionConfig, SecurityLimits } from "@xberg-io/xberg-wasm";
+
+const config = new ExtractionConfig();
+config.securityLimits = new SecurityLimits(
+  100 * 1024 * 1024, // maxArchiveSize
+  undefined,          // maxCompressionRatio
+  1_000,              // maxFilesInArchive
+  // ...remaining fields fall back to defaults when undefined
+);
+```
+
+</TabItem>
+<TabItem label="C">
+
+```c title="security_limits.c"
+// Build a SecurityLimits handle from JSON and read a field back.
+XBERGSecurityLimits *limits = xberg_security_limits_from_json(
+    "{\"max_archive_size\":104857600,\"max_files_in_archive\":1000}"
+);
+size_t max_files = xberg_security_limits_max_files_in_archive(limits);
+xberg_security_limits_free(limits);
+```
+
+</TabItem>
+</Tabs>
+
+Any field left unset falls back to the `SecurityLimits::default()` value shown
+in the table above.
+
+**PHP note:** `SecurityLimits` is constructible and readable in PHP, but
+`ExtractionConfig` does not accept a `SecurityLimits` argument in its
+constructor — the `getSecurityLimits()` getter always reflects the defaults.
+PHP callers cannot currently tighten or loosen these limits; if you need
+non-default limits from PHP, extract via another binding or the CLI.
+
+### What happens when a limit is hit
+
+All of these checks raise the same error family:
+
+- **Rust** — `XbergError::Security { message, source }`, where `source` is a
+  boxed `SecurityError` (`ZipBombDetected`, `ArchiveTooLarge`, `TooManyFiles`,
+  `NestingTooDeep`, `ContentTooLarge`, `EntityTooLong`, `TooManyIterations`,
+  `XmlDepthExceeded`, `TooManyCells`, or `UnreadableEntry` for an archive entry
+  whose header could not be read at all).
+- **Python** — a `xberg.SecurityError` exception (subclass of `xberg.XbergError`).
+- **Other bindings** — an error/result whose kind/name is `"Security"` (or the
+  language's equivalent typed error), carrying the same human-readable message.
+
+The extraction is aborted for that input; it does not silently truncate or
+return partial content for a security violation the way a format-parsing
+warning would.
+
 ## Content Filtering
 
 Xberg strips running headers, footers, watermarks, and cross-page repeating text
