@@ -29,8 +29,3 @@ strict = true
 explicit_package_bases = true
 mypy_path = "readers/llama-index-readers-xberg:node_parsers/llama-index-node-parser-xberg"
 overrides = [{ module = ["xberg", "xberg.*"], follow_imports = "skip" }]
-
-[tool.uv]
-# xberg ships as a pre-release (1.0.0rcN) until the 1.0.0 GA; persist prerelease
-# resolution so the lockfile is authoritative and `uv run` does not re-resolve. ~keep
-prerelease = "allow"
