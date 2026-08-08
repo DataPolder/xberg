@@ -130,9 +130,9 @@ pub mod heuristics;
 #[cfg(feature = "heuristics")]
 pub use heuristics::{
     BoundaryReason, ChunkInfo, ChunkPlan, ChunkingDecision, ChunkingReason, ConfidenceSignals, ConfidenceWeights,
-    DocumentBoundary, DocumentMetadata, HeuristicsConfig, HeuristicsError, MultidocInput, MultidocThresholds,
-    NoChunkingReason, PageRange, PageSignals, SchemaCompliance, StructuredCallMode, StructuredInput,
-    StructuredThresholds, UserChunkConfig, analyze_document, analyze_with_user_chunks,
+    DocumentBoundary, DocumentMetadata, ExtractionConfidence, HeuristicsConfig, HeuristicsError, MultidocInput,
+    MultidocThresholds, NoChunkingReason, PageRange, PageSignals, SchemaCompliance, StructuredCallMode,
+    StructuredInput, StructuredThresholds, UserChunkConfig, analyze_document, analyze_with_user_chunks,
     boundaries_from_extraction_result, calculate_chunk_plan, calculate_plan_from_overrides, check_format_limits,
     choose_call_mode, detect_boundaries, score_confidence,
 };
@@ -376,6 +376,13 @@ pub use core::config::{HierarchyConfig, PdfConfig};
 
 #[cfg(feature = "html")]
 pub use core::config::{HtmlOutputConfig, HtmlTheme};
+// `ExtractionConfig::html_options` and `FileConfig::html_options` are public fields of this
+// external type, so callers already have to name it; without this re-export they must take a
+// direct `html-to-markdown-rs` dependency and keep its version in lockstep with ours. It is
+// also what the generated bindings resolve against — the wasm serde mirror emits
+// `xberg::ConversionOptions`, which is the same path every sibling config type uses. ~keep
+#[cfg(feature = "html")]
+pub use html_to_markdown_rs::ConversionOptions;
 #[cfg(feature = "html")]
 pub use rendering::StyledHtmlRenderer;
 
