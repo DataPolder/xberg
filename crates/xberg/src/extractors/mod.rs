@@ -155,6 +155,8 @@ pub mod epub;
 #[cfg(feature = "office")]
 pub mod fictionbook;
 
+pub mod doctags;
+
 pub mod markdown;
 
 #[cfg(feature = "mdx")]
@@ -210,6 +212,7 @@ pub use code::CodeExtractor;
 
 pub use asciidoc::AsciiDocExtractor;
 pub use csv::CsvExtractor;
+pub use doctags::DocTagsExtractor;
 pub use markdown::MarkdownExtractor;
 pub use structured::StructuredExtractor;
 pub use text::PlainTextExtractor;
@@ -376,6 +379,7 @@ pub(crate) fn register_default_extractors() -> Result<()> {
     registry.register_internal(Arc::new(MarkdownExtractor::new()))?;
     registry.register_internal(Arc::new(StructuredExtractor::new()))?;
     registry.register_internal(Arc::new(CsvExtractor::new()))?;
+    registry.register_internal(Arc::new(DocTagsExtractor::new()))?;
 
     #[cfg(any(feature = "ocr", feature = "ocr-wasm", feature = "ocr-pipeline"))]
     registry.register_internal(Arc::new(ImageExtractor::new()))?;
@@ -496,6 +500,7 @@ mod tests {
         assert!(extractor_names.contains(&"structured-extractor".to_string()));
         assert!(extractor_names.contains(&"djot-extractor".to_string()));
         assert!(extractor_names.contains(&"csv-extractor".to_string()));
+        assert!(extractor_names.contains(&"doctags-extractor".to_string()));
 
         #[cfg(any(feature = "ocr", feature = "ocr-wasm", feature = "ocr-pipeline"))]
         {

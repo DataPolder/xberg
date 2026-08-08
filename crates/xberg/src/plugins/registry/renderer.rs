@@ -98,6 +98,21 @@ impl InternalRenderer for DjotRenderer {
     }
 }
 
+/// Built-in Docling DocTags renderer.
+struct DocTagsRenderer;
+
+impl Plugin for DocTagsRenderer {
+    fn name(&self) -> &str {
+        "doctags"
+    }
+}
+
+impl InternalRenderer for DocTagsRenderer {
+    fn render(&self, doc: &InternalDocument) -> Result<String> {
+        Ok(crate::rendering::render_doctags(doc))
+    }
+}
+
 /// Built-in plain text renderer.
 struct PlainRenderer;
 
@@ -129,7 +144,7 @@ impl InternalRenderer for PlainRenderer {
 ///
 /// let registry = RendererRegistry::new();
 /// let available = registry.list();
-/// // Built-in renderers: "markdown", "html", "djot", "plain"
+/// // Built-in renderers: "markdown", "html", "djot", "doctags", "plain"
 /// ```
 #[cfg_attr(alef, alef(skip))]
 pub struct RendererRegistry {
@@ -143,6 +158,7 @@ impl RendererRegistry {
     /// - `markdown` — GFM Markdown (via comrak)
     /// - `html` — HTML5 (via comrak)
     /// - `djot` — Djot markup
+    /// - `doctags` — Docling DocTags (tables as OTSL)
     /// - `plain` — Plain text (no formatting)
     pub fn new() -> Self {
         let mut registry = Self {
@@ -172,6 +188,10 @@ impl RendererRegistry {
             .insert("html".to_string(), RegisteredRenderer::internal(Arc::new(HtmlRenderer)));
         self.renderers
             .insert("djot".to_string(), RegisteredRenderer::internal(Arc::new(DjotRenderer)));
+        self.renderers.insert(
+            "doctags".to_string(),
+            RegisteredRenderer::internal(Arc::new(DocTagsRenderer)),
+        );
         self.renderers.insert(
             "plain".to_string(),
             RegisteredRenderer::internal(Arc::new(PlainRenderer)),
@@ -302,6 +322,7 @@ mod tests {
         assert!(names.contains(&"markdown".to_string()));
         assert!(names.contains(&"html".to_string()));
         assert!(names.contains(&"djot".to_string()));
+        assert!(names.contains(&"doctags".to_string()));
         assert!(names.contains(&"plain".to_string()));
     }
 
@@ -450,6 +471,15 @@ mod tests {
 
         let result = registry.render("djot", &doc).unwrap();
         let _ = result;
+    }
+
+    #[test]
+    fn test_renderer_registry_builtin_doctags_renders() {
+        let registry = RendererRegistry::new();
+        let doc = InternalDocument::new("text/plain");
+
+        let result = registry.render("doctags", &doc).unwrap();
+        assert_eq!(result, "<doctag></doctag>");
     }
 
     #[test]
