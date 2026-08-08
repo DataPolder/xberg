@@ -41,6 +41,19 @@ const PROMOTION_VALIDATION_DOCS: &[&str] = &[
     concat!("pb_f", "qr-retail-blackrock-global-allocation-fund-inc_page8"),
 ];
 
+/// Issue #1406 regressions awaiting post-fix baseline/layout guardrail calibration.
+///
+/// Keep this exact set as the focused comparison integration point. Add score contracts to
+/// `guardrails.json` only after fresh fixed outputs have been measured.
+const PDF_REGRESSION_DOCS: &[&str] = &[
+    "issue-1147-example",
+    "nougat_004",
+    "pdfa_001",
+    "pdfa_031",
+    "pdfa_045",
+    "pr-136-example",
+];
+
 pub const GROUPS: &[BenchmarkGroup] = &[
     BenchmarkGroup {
         name: "hotspot",
@@ -55,6 +68,15 @@ pub const GROUPS: &[BenchmarkGroup] = &[
             "pb_fqr-retail-blackrock-global-allocation-fund-inc_page4",
             "pb_sample_page_16_page1",
         ],
+        size_tiers: &[],
+        roles: &[],
+        excluded_roles: &[],
+        cohorts: &[],
+    },
+    BenchmarkGroup {
+        name: "pdf-regressions",
+        description: "Exact issue #1406 PDF quality regression cohort",
+        docs: PDF_REGRESSION_DOCS,
         size_tiers: &[],
         roles: &[],
         excluded_roles: &[],
@@ -328,5 +350,23 @@ mod tests {
             expected,
             "promotion-minus-smoke must remain the frozen validation set"
         );
+    }
+
+    #[test]
+    fn pdf_regression_group_resolves_exact_public_fixtures() {
+        let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/pdf");
+        let group = find_group("pdf-regressions").unwrap();
+        let mut resolved = BTreeSet::new();
+
+        for name in PDF_REGRESSION_DOCS {
+            let fixture = crate::fixture::Fixture::from_file(fixtures.join(format!("{name}.json")))
+                .unwrap_or_else(|error| panic!("failed to load public PDF regression fixture {name}: {error}"));
+            let document = doc(name, serde_json::to_value(fixture.metadata).unwrap());
+            assert!(group.matches(&document), "PDF regression group must match {name}");
+            resolved.insert((*name).to_string());
+        }
+
+        let expected = PDF_REGRESSION_DOCS.iter().map(|name| (*name).to_string()).collect();
+        assert_eq!(resolved, expected);
     }
 }
