@@ -46,6 +46,7 @@ pub fn apply_output_format(result: ExtractedDocument, output_format: OutputForma
         OutputFormat::Html => "html",
         OutputFormat::Json => "json",
         OutputFormat::Structured => "structured",
+        OutputFormat::DocTags => "doctags",
         OutputFormat::Custom(ref name) => {
             if custom_fallback_to_plain {
                 "plain"
@@ -139,6 +140,24 @@ mod tests {
 
         assert_eq!(result.content, "# Djot heading");
         assert_eq!(result.metadata.output_format, Some("djot".to_string()));
+    }
+
+    /// `DocTags` must get its own "doctags" metadata label, not be mislabeled by
+    /// the `Custom` fallback logic — it is a first-class variant with a renderer
+    /// that always exists, unlike `Custom`, which can legitimately have none.
+    #[test]
+    fn should_label_doctags_metadata_with_its_own_format_name() {
+        let result = ExtractedDocument {
+            content: "plain text".to_string(),
+            mime_type: Cow::Borrowed("text/plain"),
+            formatted_content: Some("<doctag><text>Hello</text></doctag>".to_string()),
+            ..Default::default()
+        };
+
+        let result = apply_output_format(result, OutputFormat::DocTags);
+
+        assert_eq!(result.content, "<doctag><text>Hello</text></doctag>");
+        assert_eq!(result.metadata.output_format, Some("doctags".to_string()));
     }
 
     #[test]

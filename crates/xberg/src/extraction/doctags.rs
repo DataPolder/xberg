@@ -121,14 +121,26 @@ pub(crate) fn tokenize(input: &str) -> Vec<Token<'_>> {
 }
 
 /// Index of the `Close` matching the `Open` at `open_at`, or the slice end.
+///
+/// Tracks a stack of open tag *names*, not just nesting depth: a `Close`
+/// only pops when it names the innermost open tag. Without that check, a
+/// stray `</text>` sitting inside an unrelated `<otsl>...</otsl>` region
+/// would still decrement a name-blind depth counter and could close the
+/// wrong element early, truncating or misattributing its content.
 fn matching_close(tokens: &[Token<'_>], open_at: usize) -> usize {
-    let mut depth = 0usize;
-    for (index, token) in tokens.iter().enumerate().skip(open_at) {
+    let Some(Token::Open(open_name)) = tokens.get(open_at) else {
+        return tokens.len();
+    };
+    let mut stack = vec![*open_name];
+    for (index, token) in tokens.iter().enumerate().skip(open_at + 1) {
         match token {
-            Token::Open(name) if is_paired(name) => depth += 1,
-            Token::Close(name) if is_paired(name) => {
-                depth = depth.saturating_sub(1);
-                if depth == 0 {
+            Token::Open(name) if is_paired(name) => stack.push(*name),
+            // A close that does not name the innermost open tag belongs to some
+            // other element, so it falls through to the catch-all and is ignored
+            // rather than decrementing this element's nesting.
+            Token::Close(name) if is_paired(name) && stack.last() == Some(name) => {
+                stack.pop();
+                if stack.is_empty() {
                     return index;
                 }
             }
@@ -149,6 +161,14 @@ fn take_location(tokens: &[Token<'_>]) -> (Option<BoundingBox>, usize) {
         let Token::Open(name) = token else { break };
         let Some(raw) = name.strip_prefix("loc_") else { break };
         let Ok(value) = raw.parse::<f64>() else { break };
+        // A hostile or corrupt `<loc_nan>` / `<loc_-1>` token must not
+        // silently become a plausible-looking box, so reject rather than
+        // clamp; this reuses the `values.len() != 4` absent-location path
+        // below and mirrors the renderer's `is_finite` guard in
+        // `rendering::doctags::loc_tokens`.
+        if !value.is_finite() || !(0.0..=LOC_GRID).contains(&value) {
+            break;
+        }
         values.push(value);
     }
     if values.len() != 4 {
@@ -244,14 +264,19 @@ pub(crate) fn parse_doctags(input: &str) -> InternalDocument {
     let mut page: u32 = 1;
     let mut pages_seen: u32 = 1;
     let mut index = 0;
+    let mut stray_text_warned = false;
 
     while index < tokens.len() {
         let token = tokens[index];
         let Token::Open(name) = token else {
-            if let Token::Close(name) = token
-                && (name == "ordered_list" || name == "unordered_list")
-            {
-                builder.end_list();
+            match token {
+                Token::Close(name) if name == "ordered_list" || name == "unordered_list" => {
+                    builder.end_list();
+                }
+                Token::Text(text) => {
+                    push_stray_text(&mut builder, text, page, &mut stray_text_warned);
+                }
+                _ => {}
             }
             index += 1;
             continue;
@@ -308,6 +333,36 @@ fn reconstructed_pages(count: u32) -> crate::types::PageStructure {
                 })
                 .collect(),
         ),
+    }
+}
+
+/// Source tag used on `ProcessingWarning`s raised while parsing DocTags.
+const DOCTAGS_WARNING_SOURCE: &str = "doctags";
+
+/// Keep text found outside any recognised tag rather than discarding it.
+///
+/// A truncated or corrupted stream — or a plain-text file misrouted to this
+/// extractor — may carry no recognised wrapper tags at all; dropping that
+/// text would turn a partial or malformed input into an empty, falsely
+/// "successful" extraction. It is kept as an ordinary paragraph instead,
+/// following the same philosophy as the orphaned-caption path in
+/// `push_element`: text that survives is content, even without structure
+/// around it. Whitespace-only runs between recognised tags (e.g. the `\n`
+/// DocTags emits between elements) are not content and are ignored.
+fn push_stray_text(builder: &mut InternalDocumentBuilder, text: &str, page: u32, warned: &mut bool) {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    builder.push_paragraph(trimmed, Vec::new(), Some(page), None);
+    if !*warned {
+        builder.add_warning(crate::core::diagnostics::warning(
+            DOCTAGS_WARNING_SOURCE,
+            "Text appeared outside any recognised DocTags tag; it was kept as a plain \
+             paragraph, but the page, table or list structure it belonged to could not \
+             be reconstructed",
+        ));
+        *warned = true;
     }
 }
 
@@ -565,9 +620,18 @@ mod tests {
                 checked += 1;
             }
         }
-        if checked == 0 {
-            eprintln!("test_documents not populated, skipping corpus parse");
-        }
+        // `test_documents` is bucket-fetched, not vendored, so a fresh checkout
+        // has none of these files; CI fetches it before running tests. Fail
+        // unless the opt-out is set explicitly, so this — the only test
+        // validating against real Docling output rather than our own
+        // assumptions — cannot pass while silently checking nothing.
+        assert!(
+            checked > 0 || std::env::var_os("XBERG_SKIP_TEST_DOCUMENTS").is_some(),
+            "no vendored DocTags fixtures were found under {}; run \
+             `python3 test_documents/scripts/fetch_corpus.py` to populate test_documents, \
+             or set XBERG_SKIP_TEST_DOCUMENTS=1 to skip this check locally",
+            root.display()
+        );
     }
 
     #[test]
@@ -601,5 +665,95 @@ mod tests {
         let once = render_doctags(&parse_doctags(first));
         let twice = render_doctags(&parse_doctags(&once));
         assert_eq!(once, twice, "parse/render is not idempotent");
+    }
+
+    #[test]
+    fn should_drop_bbox_when_location_token_is_nan() {
+        let doc = parse_doctags("<doctag><text><loc_nan><loc_0><loc_1><loc_1>x</text>\n</doctag>");
+        assert_eq!(doc.elements.len(), 1);
+        assert_eq!(doc.elements[0].bbox, None);
+        assert_eq!(doc.elements[0].text, "x");
+    }
+
+    #[test]
+    fn should_drop_bbox_when_location_token_is_infinite() {
+        let doc = parse_doctags("<doctag><text><loc_inf><loc_0><loc_1><loc_1>x</text>\n</doctag>");
+        assert_eq!(doc.elements[0].bbox, None);
+        assert_eq!(doc.elements[0].text, "x");
+    }
+
+    #[test]
+    fn should_drop_bbox_when_location_token_is_negative() {
+        let doc = parse_doctags("<doctag><text><loc_-1><loc_0><loc_1><loc_1>x</text>\n</doctag>");
+        assert_eq!(doc.elements[0].bbox, None);
+        assert_eq!(doc.elements[0].text, "x");
+    }
+
+    #[test]
+    fn should_drop_bbox_when_location_token_exceeds_grid() {
+        let doc = parse_doctags("<doctag><text><loc_501><loc_0><loc_1><loc_1>x</text>\n</doctag>");
+        assert_eq!(doc.elements[0].bbox, None);
+        assert_eq!(doc.elements[0].text, "x");
+    }
+
+    #[test]
+    fn should_keep_finite_in_range_bbox_at_the_grid_boundary() {
+        // 500 is the top of the grid (`LOC_GRID`) and must stay valid, unlike
+        // the out-of-range rejection above.
+        let doc = parse_doctags("<doctag><text><loc_0><loc_0><loc_500><loc_500>x</text>\n</doctag>");
+        let bbox = doc.elements[0].bbox.expect("bbox should survive boundary values");
+        assert_eq!(bbox.x0, 0.0);
+        assert_eq!(bbox.x1, 500.0);
+        assert_eq!(bbox.y0, 0.0);
+        assert_eq!(bbox.y1, 500.0);
+    }
+
+    #[test]
+    fn should_capture_text_as_paragraph_when_no_tags_are_recognised() {
+        let doc = parse_doctags("This is a corrupted stream with no doctags markup at all.");
+        assert_eq!(doc.elements.len(), 1);
+        assert_eq!(
+            doc.elements[0].text,
+            "This is a corrupted stream with no doctags markup at all."
+        );
+        assert_eq!(doc.processing_warnings.len(), 1);
+        assert_eq!(doc.processing_warnings[0].source, DOCTAGS_WARNING_SOURCE);
+    }
+
+    #[test]
+    fn should_ignore_whitespace_only_text_between_recognised_tags() {
+        // The `\n` DocTags emits between elements must not become a stray
+        // paragraph or trigger the unwrapped-text warning.
+        let doc = parse_doctags("<doctag><title>Doc</title>\n<text>Body.</text>\n</doctag>");
+        assert_eq!(doc.elements.len(), 2);
+        assert!(doc.processing_warnings.is_empty());
+    }
+
+    #[test]
+    fn should_warn_once_when_multiple_stray_text_runs_occur() {
+        let doc = parse_doctags("stray one <text>Body.</text> stray two");
+        assert_eq!(doc.elements.len(), 3);
+        assert_eq!(doc.elements[0].text, "stray one");
+        assert_eq!(doc.elements[1].text, "Body.");
+        assert_eq!(doc.elements[2].text, "stray two");
+        assert_eq!(
+            doc.processing_warnings.len(),
+            1,
+            "repeated stray text should collapse to one warning: {:?}",
+            doc.processing_warnings
+        );
+    }
+
+    #[test]
+    fn should_preserve_all_table_rows_when_a_close_tag_is_misnested() {
+        // The stray `</text>` here has no matching `<text>` open; a
+        // name-blind depth counter would still treat it as closing the
+        // `<otsl>` early and lose the `y` row.
+        let doc = parse_doctags("<doctag><otsl><ched>A<nl><fcel>x</text><nl><fcel>y<nl></otsl>\n</doctag>");
+        let table = &doc.tables[0];
+        assert_eq!(
+            table.cells,
+            vec![vec!["A".to_string()], vec!["x".to_string()], vec!["y".to_string()],]
+        );
     }
 }

@@ -33,6 +33,27 @@ fn effective_layout_acceleration<'a>(
     acceleration_override.or_else(|| config.resolved_layout_acceleration())
 }
 
+/// Whether the PDF pipeline must retain the full oxide hierarchy/geometry pass
+/// rather than take the cheaper flat-text path.
+///
+/// `Custom(_)` is deliberately excluded: `OutputFormat::from_str` never rejects an
+/// unknown string (any typo becomes `Custom(other)`), so treating every `Custom`
+/// value as structure-hungry ran the full hierarchy pass — `extract_all_segments`
+/// plus `extract_document_structure_from_segments`, including k-means heading
+/// clustering — for a typo'd or unregistered format, only to discard the result
+/// and fall back to plain text during derivation
+/// (`core/pipeline/format.rs`'s `custom_fallback_to_plain`). `DocTags` is a real,
+/// always-registered built-in renderer that needs the same geometry and headings
+/// as Markdown/Djot/HTML, so it gets its own explicit arm instead.
+fn needs_structured_extraction(hierarchy_enabled: bool, output_format: &OutputFormat, ocr_inline_images: bool) -> bool {
+    hierarchy_enabled
+        || matches!(
+            output_format,
+            OutputFormat::Markdown | OutputFormat::Djot | OutputFormat::Html | OutputFormat::DocTags
+        )
+        || ocr_inline_images
+}
+
 /// Extract text, metadata, tables, and annotations from a PDF document using the pdf_oxide backend.
 ///
 /// Accepts an authenticated `OxideDocument`, then delegates to each oxide extraction module.
@@ -111,16 +132,7 @@ pub(crate) fn extract_all_from_oxide_document(
         .pdf_options
         .as_ref()
         .is_some_and(|options| options.hierarchy.as_ref().is_some_and(|hierarchy| hierarchy.enabled));
-    // `Custom` covers renderers registered in the `RendererRegistry`, e.g.
-    // `doctags`. They consume structure and geometry exactly as the built-in
-    // markup formats do, and the flat path would leave their elements with no
-    // headings and no bounding boxes at all.
-    let needs_structured = hierarchy_enabled
-        || matches!(
-            config.output_format,
-            OutputFormat::Markdown | OutputFormat::Djot | OutputFormat::Html | OutputFormat::Custom(_)
-        )
-        || ocr_inline_images;
+    let needs_structured = needs_structured_extraction(hierarchy_enabled, &config.output_format, ocr_inline_images);
     let retain_hierarchy_segments = needs_structured && !config.force_ocr;
 
     let extract_tables_flag = config.pdf_options.as_ref().is_none_or(|opts| opts.extract_tables);
@@ -504,6 +516,53 @@ fn join_pages_with_boundaries(
 
 #[cfg(test)]
 mod tests {
+    use super::needs_structured_extraction;
+    use crate::core::config::OutputFormat;
+
+    /// Regression test for the defective `Custom(_)` catch-all shipped in #1388:
+    /// `OutputFormat::FromStr` never rejects an unknown string, so a typo like
+    /// `Custom("markdwon")` must not trigger the expensive oxide hierarchy pass —
+    /// it can only ever fall back to plain text (`custom_fallback_to_plain` in
+    /// `core/pipeline/format.rs`), so running the full structure pass for it was
+    /// pure waste.
+    #[test]
+    fn should_not_trigger_structured_extraction_for_unregistered_custom_format() {
+        let output_format = OutputFormat::Custom("markdwon".to_string());
+        assert!(!needs_structured_extraction(false, &output_format, false));
+    }
+
+    /// `DocTags` is a real, always-registered built-in renderer (see
+    /// `plugins::registry::renderer::RendererRegistry`) and needs the same
+    /// geometry/headings as Markdown, Djot, and HTML.
+    #[test]
+    fn should_trigger_structured_extraction_for_doctags_format() {
+        assert!(needs_structured_extraction(false, &OutputFormat::DocTags, false));
+    }
+
+    /// The pre-existing markup formats must keep triggering the structured path.
+    #[test]
+    fn should_trigger_structured_extraction_for_markdown_djot_and_html() {
+        assert!(needs_structured_extraction(false, &OutputFormat::Markdown, false));
+        assert!(needs_structured_extraction(false, &OutputFormat::Djot, false));
+        assert!(needs_structured_extraction(false, &OutputFormat::Html, false));
+    }
+
+    /// `Plain`, `Json`, and `Structured` must not trigger the structured path on
+    /// their own — only `hierarchy_enabled` or `ocr_inline_images` can force it.
+    #[test]
+    fn should_not_trigger_structured_extraction_for_plain_json_or_structured() {
+        assert!(!needs_structured_extraction(false, &OutputFormat::Plain, false));
+        assert!(!needs_structured_extraction(false, &OutputFormat::Json, false));
+        assert!(!needs_structured_extraction(false, &OutputFormat::Structured, false));
+    }
+
+    /// `hierarchy_enabled` and `ocr_inline_images` must force the structured path
+    /// regardless of output format.
+    #[test]
+    fn should_trigger_structured_extraction_when_hierarchy_or_ocr_inline_images_enabled() {
+        assert!(needs_structured_extraction(true, &OutputFormat::Plain, false));
+        assert!(needs_structured_extraction(false, &OutputFormat::Plain, true));
+    }
 
     #[cfg(feature = "layout-detection")]
     #[test]

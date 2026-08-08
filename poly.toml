@@ -224,7 +224,7 @@ root = "packages/elixir"
 [per-file-ignores]
 "**/api.py" = ["F401", "I001", "TC006", "UP035"]
 "**/*.pyi" = ["A002", "F401", "I001", "PYI033", "TC006", "UP035"]
-"**/options.py" = ["F401", "I001", "RUF100"]
+"**/options.py" = ["F401", "I001", "RUF100", "S105"]
 "**/__init__.py" = ["I001"]
 "**/tests/**" = [
   "ANN",
@@ -581,6 +581,21 @@ fmt = { exclude = [
   ".ai-rulez-generated.json",
 ] }
 file_safety = { exclude = [
+  "crates/xberg-ffi/include/**",
+  "crates/xberg-ffi/src/lib.rs",
+  "crates/xberg-node/src/lib.rs",
+  "crates/xberg-php/src/lib.rs",
+  "crates/xberg-php/stubs/**",
+  "crates/xberg-py/src/lib.rs",
+  "crates/xberg-wasm/src/lib.rs",
+  "packages/dart/lib/src/xberg_bridge_generated/**",
+  "packages/dart/rust/src/lib.rs",
+  "packages/elixir/native/xberg_nif/src/lib.rs",
+  "packages/go/binding.go",
+  "packages/go/include/**",
+  "packages/ruby/ext/xberg_rb/src/lib.rs",
+  "packages/swift/Sources/Xberg/Xberg.swift",
+  "packages/swift/rust/src/lib.rs",
   "**/*.freezed.dart",
   "**/*.g.dart",
   "**/*.jinja",

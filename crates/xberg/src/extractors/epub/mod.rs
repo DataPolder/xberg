@@ -123,7 +123,10 @@ impl EpubExtractor {
         index: usize,
         config: &ExtractionConfig,
     ) -> RenderedSpineDocument {
-        let wants_markup = matches!(config.output_format, OutputFormat::Markdown | OutputFormat::Djot);
+        let wants_markup = matches!(
+            config.output_format,
+            OutputFormat::Markdown | OutputFormat::Djot | OutputFormat::DocTags
+        );
         let mut warnings = Vec::new();
 
         let (content_fragment, content_fully_converted) = if wants_markup {
@@ -226,7 +229,10 @@ impl EpubExtractor {
 
         let mut builder = InternalDocumentBuilder::new("epub");
 
-        let wants_markup = matches!(config.output_format, OutputFormat::Markdown | OutputFormat::Djot);
+        let wants_markup = matches!(
+            config.output_format,
+            OutputFormat::Markdown | OutputFormat::Djot | OutputFormat::DocTags
+        );
         let mut pre_rendered_fragments = Vec::new();
         let mut all_converted_successfully = wants_markup;
 
@@ -542,6 +548,13 @@ impl EpubExtractor {
             }
 
             doc.pre_rendered_content = Some(combined);
+            // Deliberately not `OutputFormat::DocTags => "doctags"`: `combined` came from
+            // `convert_html_to_markdown_with_metadata`, which has no DocTags mode and falls
+            // back to Markdown-flavored text for it (`extraction::html::converter::map_output_format`).
+            // Tagging that text "doctags" would make `derive_extraction_result`'s DocTags arm
+            // take it verbatim instead of rendering the (correctly structured) element tree
+            // via `render_doctags`. Falling through to "plain" here is intentional: it makes
+            // the tag mismatch so the DocTags arm always renders from `doc.elements` instead.
             let format_name = match config.output_format {
                 OutputFormat::Markdown => "markdown",
                 OutputFormat::Djot => "djot",

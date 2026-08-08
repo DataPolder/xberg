@@ -10,6 +10,12 @@ use crate::types::internal::InternalDocument;
 use async_trait::async_trait;
 
 /// Extractor for Docling DocTags documents.
+///
+/// Skipped for binding generation like every sibling extractor: `extract_content`
+/// returns `InternalDocument`, which is itself binding-excluded, so alef would
+/// sanitize the return type to `String` and emit a lossy surface. Extractors are
+/// reached through the registry, never constructed directly by binding callers.
+#[cfg_attr(alef, alef(skip))]
 #[derive(Debug, Default)]
 pub struct DocTagsExtractor;
 

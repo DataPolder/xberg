@@ -3,12 +3,10 @@
 
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
-import 'package:xberg/src/native_loader.dart';
+import '../native_loader.dart';
 import 'dart:ffi';
 import 'dart:isolate';
 import 'dart:io';
-import 'dart:core' as _DartCore;
-import 'dart:core';
 import 'dart:async';
 import 'dart:convert';
 import 'frb_generated.dart';
@@ -23,6 +21,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   static final instance = RustLib._();
 
   RustLib._();
+
   /// Resolve the prebuilt native library from the environment, the package's bundled
   /// natives, or the versioned user cache — downloading it if the cache is cold.
   ///
@@ -117,8 +116,9 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
 
       final rid = computeRid();
       if (rid != null) {
-        final packageRoot =
-        await Isolate.resolvePackageUri(_DartCore.Uri.parse('package:xberg/xberg.dart'));
+        final packageRoot = await Isolate.resolvePackageUri(
+          Uri.parse('package:xberg/xberg.dart'),
+        );
         if (packageRoot != null) {
           final ridDir = packageRoot.resolve('src/native/$rid/');
           for (final candidate in candidates) {
@@ -132,8 +132,9 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
       }
 
       // Check legacy package-installed location as fallback.
-      final packageRoot =
-      await Isolate.resolvePackageUri(_DartCore.Uri.parse('package:xberg/xberg.dart'));
+      final packageRoot = await Isolate.resolvePackageUri(
+        Uri.parse('package:xberg/xberg.dart'),
+      );
       if (packageRoot != null) {
         final libDir = packageRoot.resolve('src/xberg_bridge_generated/');
         for (final candidate in candidates) {
@@ -159,8 +160,8 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
       try {
         final scriptPath = Platform.script.toFilePath();
         var dir = File(scriptPath).absolute.parent;
-        while (dir.parent.path != dir.path
-          && !File('${dir.path}/pubspec.yaml').existsSync()) {
+        while (dir.parent.path != dir.path &&
+          !File('${dir.path}/pubspec.yaml').existsSync()) {
           dir = dir.parent;
         }
         if (File('${dir.path}/pubspec.yaml').existsSync()) {
@@ -18084,6 +18085,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       case 5:
       return OutputFormat_Structured();
       case 6:
+      return OutputFormat_DocTags();
+      case 7:
       return OutputFormat_Custom(field0: dco_decode_String(raw[1]));
       default:
       throw Exception("unreachable");
@@ -27847,6 +27850,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       case 5:
       return OutputFormat_Structured();
       case 6:
+      return OutputFormat_DocTags();
+      case 7:
       var var_field0 = sse_decode_String(deserializer);
       return OutputFormat_Custom(field0: var_field0);
       default:
@@ -37187,8 +37192,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       sse_encode_i_32(4, serializer);
       case OutputFormat_Structured():
       sse_encode_i_32(5, serializer);
-      case OutputFormat_Custom(field0: final field0):
+      case OutputFormat_DocTags():
       sse_encode_i_32(6, serializer);
+      case OutputFormat_Custom(field0: final field0):
+      sse_encode_i_32(7, serializer);
       sse_encode_String(field0, serializer);
     }
   }

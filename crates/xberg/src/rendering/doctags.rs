@@ -36,9 +36,14 @@ const UNKNOWN_LANGUAGE: &str = "<_unknown_>";
 /// DocTags normalises bounding boxes onto a fixed square grid of this size.
 const LOC_GRID: f64 = 500.0;
 
+/// Rough average serialised length of one element in bytes, used only to
+/// presize the output buffer and avoid reallocation churn on typical
+/// documents. Not a correctness bound — the buffer grows past this freely.
+const AVG_ELEMENT_BYTES: usize = 96;
+
 /// Render an `InternalDocument` to Docling DocTags.
 pub(crate) fn render_doctags(doc: &InternalDocument) -> String {
-    let mut out = String::with_capacity(doc.elements.len() * 96);
+    let mut out = String::with_capacity(doc.elements.len() * AVG_ELEMENT_BYTES);
     let captions = collect_captions(doc);
     let dims = page_dimensions(doc);
 
@@ -76,17 +81,37 @@ pub(crate) fn render_doctags(doc: &InternalDocument) -> String {
 
         match elem.kind {
             ElementKind::QuoteStart | ElementKind::QuoteEnd | ElementKind::GroupStart | ElementKind::GroupEnd => {}
-            ElementKind::FootnoteRef => {}
-            // Reviewer comments are annotations on the document, not content of
-            // it. djot, plain and the comrak bridge all drop them here too.
-            ElementKind::CommentRef | ElementKind::CommentDefinition => {}
+            // The marker itself carries no content DocTags can address — the reference is
+            // resolved through `Relationship`, and the definition is emitted on its own below.
+            //
+            // `CommentDefinition` is deliberately NOT dropped alongside these, which is where
+            // this diverges from #1408. That fix reasoned that plain, djot and the comrak
+            // bridge drop reviewer comments here too — true of this first match, but each of
+            // them re-emits the body in a later pass (plain.rs:232 for the footnote layer,
+            // djot.rs:259, comrak_bridge.rs:1024), and json.rs:385 / html_styled.rs:369 emit
+            // it directly. This renderer has no second pass, so dropping it here would make
+            // DocTags the only renderer that loses the comment text outright. It falls
+            // through to the text arm below instead.
+            ElementKind::FootnoteRef | ElementKind::CommentRef => {}
             ElementKind::PageBreak => {
                 out.push_str("<page_break>\n");
             }
             ElementKind::Table { table_index } => {
-                if let Some(table) = doc.tables.get(table_index as usize) {
-                    let caption = captions.caption_payload(doc, index, &dims);
-                    push_otsl(&mut out, &table.cells, loc, caption.as_deref());
+                let rendered = match doc.tables.get(table_index as usize) {
+                    Some(table) => {
+                        let caption = captions.caption_payload(doc, index, &dims);
+                        push_otsl(&mut out, &table.cells, loc, caption.as_deref())
+                    }
+                    None => false,
+                };
+                // `push_otsl` drops empty/degenerate tables (no cells, or no columns).
+                // Unlike Image and Code, which always call `push_element` and so always
+                // carry a nested `<caption>`, a dropped table takes its caption down with
+                // it unless it is rescued here. This mirrors the parser's own philosophy
+                // (`extraction/doctags.rs`): a caption whose target was dropped still
+                // carries text, so it stays as an ordinary text element.
+                if !rendered {
+                    push_orphaned_caption(&mut out, doc, &captions, index, &dims);
                 }
             }
             ElementKind::Image { image_index } => {
@@ -109,9 +134,15 @@ pub(crate) fn render_doctags(doc: &InternalDocument) -> String {
                 push_element(&mut out, "formula", loc, &normalize_inline_text(&elem.text), None);
             }
             ElementKind::Admonition => {
+                // `InternalDocumentBuilder::push_admonition` stores exactly one string —
+                // `elem.text` is set to `title.unwrap_or(kind)` at construction, and
+                // `get_admonition_title`/`get_admonition_kind` read the same "title"/"kind"
+                // attributes back out. There is no separate body to distinguish from the
+                // label, and DocTags itself has no admonition/callout tag (the vendored
+                // Docling corpus has none), so this renders as an ordinary text element,
+                // exactly once.
                 let label = get_admonition_title(elem).unwrap_or_else(|| get_admonition_kind(elem));
-                push_text_element(&mut out, elem.layer, loc, label);
-                push_text_element(&mut out, elem.layer, loc, &normalize_inline_text(&elem.text));
+                push_text_element(&mut out, elem.layer, loc, &normalize_inline_text(label));
             }
             ElementKind::MetadataBlock => {
                 let entries = parse_metadata_entries(&elem.text);
@@ -137,7 +168,12 @@ pub(crate) fn render_doctags(doc: &InternalDocument) -> String {
             ElementKind::FootnoteDefinition => {
                 push_element(&mut out, "footnote", loc, &normalize_inline_text(&elem.text), None);
             }
-            ElementKind::Paragraph
+            // DocTags has no comment tag, so the definition renders through its content
+            // layer: `<footnote>` when the extractor marked it as such, `<text>` otherwise.
+            // Dropping it instead would lose the text outright — unlike the plain and comrak
+            // renderers, this one has no second pass that re-emits comment bodies.
+            ElementKind::CommentDefinition
+            | ElementKind::Paragraph
             | ElementKind::Citation
             | ElementKind::Slide { .. }
             | ElementKind::DefinitionTerm
@@ -170,10 +206,19 @@ struct ListState {
 
 impl ListState {
     fn open(&mut self, out: &mut String, ordered: bool) {
-        if self.explicit.is_empty() && self.implicit.is_none() {
-            push_list_open(out, ordered);
-            self.implicit = Some(ordered);
+        if !self.explicit.is_empty() {
+            return;
         }
+        // A bare item whose ordering differs from the currently open implicit
+        // wrapper (no explicit ListStart/ListEnd in between) must close that
+        // wrapper and open a new one of the right kind, rather than being
+        // silently absorbed into the wrong one.
+        if self.implicit == Some(ordered) {
+            return;
+        }
+        self.close_implicit(out);
+        push_list_open(out, ordered);
+        self.implicit = Some(ordered);
     }
 
     fn open_explicit(&mut self, out: &mut String, ordered: bool) {
@@ -343,13 +388,17 @@ fn layer_tag(layer: ContentLayer, body_tag: &str) -> &str {
 /// The first row is treated as the header (matching `render_table_markdown`).
 /// Ragged rows are padded with `<ecel>` so every row has the same cell count,
 /// which OTSL requires.
-fn push_otsl(out: &mut String, cells: &[Vec<String>], loc: Option<&str>, caption: Option<&str>) {
+///
+/// Returns `false` without writing anything when the table is empty or has no
+/// columns — callers must handle that case (e.g. a caption that would
+/// otherwise have nested inside the dropped `<otsl>`).
+fn push_otsl(out: &mut String, cells: &[Vec<String>], loc: Option<&str>, caption: Option<&str>) -> bool {
     if cells.is_empty() {
-        return;
+        return false;
     }
     let columns = cells.iter().map(|row| row.len()).max().unwrap_or(0);
     if columns == 0 {
-        return;
+        return false;
     }
 
     out.push_str("<otsl>");
@@ -374,6 +423,7 @@ fn push_otsl(out: &mut String, cells: &[Vec<String>], loc: Option<&str>, caption
         out.push_str("</caption>");
     }
     out.push_str("</otsl>\n");
+    true
 }
 
 /// Caption relationships, indexed both ways.
@@ -398,6 +448,29 @@ impl Captions {
             None => text,
         })
     }
+}
+
+/// Render a caption as an ordinary text element when its target did not
+/// render (e.g. an empty table dropped by `push_otsl`).
+///
+/// Mirrors `extraction::doctags`'s parse-side behaviour: a caption whose
+/// target was dropped still carries text, so it stays as a plain element
+/// rather than being discarded along with the target it described.
+fn push_orphaned_caption(
+    out: &mut String,
+    doc: &InternalDocument,
+    captions: &Captions,
+    target: u32,
+    dims: &AHashMap<u32, (f64, f64)>,
+) {
+    let Some(&source) = captions.targets.get(&target) else {
+        return;
+    };
+    let Some(elem) = doc.elements.get(source as usize) else {
+        return;
+    };
+    let loc = element_loc(elem, dims);
+    push_text_element(out, elem.layer, loc.as_deref(), &normalize_inline_text(&elem.text));
 }
 
 fn collect_captions(doc: &InternalDocument) -> Captions {
@@ -738,6 +811,18 @@ mod tests {
         assert!(loc_tokens(&bbox(0.0, 0.0, f64::INFINITY, 10.0), (PAGE_W, PAGE_H)).is_none());
     }
 
+    /// Every other geometry test uses US Letter (612.0 x 792.0), which divides
+    /// evenly into the 0-500 grid and so never exercises fractional rounding.
+    /// A4 does not divide evenly, pinning `to_grid`'s rounding behaviour at
+    /// fractional positions.
+    #[test]
+    fn test_loc_tokens_round_correctly_on_odd_page_dimensions() {
+        const A4_W: f64 = 595.32;
+        const A4_H: f64 = 841.92;
+        let out = loc_tokens(&bbox(100.0, 100.0, 400.0, 700.0), (A4_W, A4_H)).unwrap();
+        assert_eq!(out, "<loc_84><loc_84><loc_336><loc_441>");
+    }
+
     #[test]
     fn test_render_doctags_emits_loc_tokens_when_geometry_is_available() {
         let mut b = InternalDocumentBuilder::new("pdf");
@@ -865,6 +950,13 @@ mod tests {
     /// encoding our own idea of the format rather than the format itself.
     /// Vocabulary and OTSL checks are omitted: two corpus files predate OTSL
     /// and still carry legacy `<table>`/`<tr>`/`<td>` markup.
+    ///
+    /// `test_documents` is bucket-fetched (see
+    /// `test_documents/scripts/fetch_corpus.py`) and absent from a bare
+    /// checkout. Silently doing nothing when it is missing let this test pass
+    /// in CI while validating zero files, so it now fails loudly by default;
+    /// set `XBERG_SKIP_TEST_DOCUMENTS=1` to explicitly opt an intentionally
+    /// unfetched checkout out of this check.
     #[test]
     fn test_validator_accepts_the_vendored_docling_corpus() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test_documents");
@@ -894,10 +986,16 @@ mod tests {
                 checked += 1;
             }
         }
-        // Self-skips when the submodule is absent, matching the repo convention.
-        if checked == 0 {
-            eprintln!("test_documents not populated, skipping corpus validation");
+        if checked == 0 && std::env::var_os("XBERG_SKIP_TEST_DOCUMENTS").is_some() {
+            return;
         }
+        assert!(
+            checked > 0,
+            "no *.doctags.txt fixtures found under {} — run \
+             `python3 test_documents/scripts/fetch_corpus.py`, or set \
+             XBERG_SKIP_TEST_DOCUMENTS=1 to explicitly skip this check",
+            root.display()
+        );
     }
 
     #[test]
@@ -991,6 +1089,23 @@ mod tests {
         );
     }
 
+    /// Two bare list items with no explicit `ListStart`/`ListEnd` between them
+    /// but differing `ordered` flags must not be silently absorbed into the
+    /// first item's wrapper — the wrapper must close and reopen as the right
+    /// kind.
+    #[test]
+    fn test_render_doctags_bare_list_items_reopen_wrapper_when_ordering_changes() {
+        let mut b = InternalDocumentBuilder::new("test");
+        b.push_list_item("Alpha", false, vec![], None, None);
+        b.push_list_item("One", true, vec![], None, None);
+        let out = render_doctags(&b.build());
+        assert_eq!(
+            out,
+            "<doctag><unordered_list><list_item>Alpha</list_item>\n</unordered_list>\n\
+             <ordered_list><list_item>One</list_item>\n</ordered_list>\n</doctag>"
+        );
+    }
+
     #[test]
     fn test_render_doctags_unterminated_list_closes_at_end() {
         let mut b = InternalDocumentBuilder::new("test");
@@ -1043,6 +1158,23 @@ mod tests {
         b.push_table_from_cells(&[], None, None);
         let out = render_doctags(&b.build());
         assert_eq!(out, "<doctag></doctag>");
+    }
+
+    /// Regression test for a shipped bug: `push_otsl` drops empty/degenerate
+    /// tables silently, but the caption-nesting pass upstream had already
+    /// decided the caption would render *inside* the (never-emitted) `<otsl>`
+    /// and so skipped rendering it on its own. The net effect was that a
+    /// caption on an empty table vanished with no trace. This mirrors the
+    /// parser's own stated behaviour: a caption whose target was dropped
+    /// still carries text, so it stays as an ordinary text element.
+    #[test]
+    fn test_render_doctags_empty_table_caption_survives_as_text() {
+        let mut b = InternalDocumentBuilder::new("test");
+        let table = b.push_table_from_cells(&[], None, None);
+        let caption = b.push_paragraph("Table 1. Empty.", vec![], None, None);
+        b.push_relationship(caption, RelationshipTarget::Index(table), RelationshipKind::Caption);
+        let out = render_doctags(&b.build());
+        assert_eq!(out, "<doctag><text>Table 1. Empty.</text>\n</doctag>");
     }
 
     #[test]
@@ -1197,12 +1329,28 @@ mod tests {
         assert!(out.contains("<text>Date: 2026</text>"), "got: {}", out);
     }
 
+    /// Regression test for a shipped bug: the old implementation pushed the
+    /// label (title-or-kind) *and* `elem.text` as two separate `<text>`
+    /// elements. Since `push_admonition` sets `elem.text` to
+    /// `title.unwrap_or(kind)`, those two strings are always identical, so
+    /// every admonition rendered its label twice. Asserting the exact,
+    /// complete output (rather than `contains`) is what makes this fail
+    /// against the old code — `contains("<text>Be careful</text>")` was true
+    /// whether the line appeared once or twice.
     #[test]
-    fn test_render_doctags_admonition_emits_label_then_body() {
+    fn test_render_doctags_admonition_with_title_renders_once() {
         let mut b = InternalDocumentBuilder::new("test");
         b.push_admonition("warning", Some("Be careful"), None);
         let out = render_doctags(&b.build());
-        assert!(out.contains("<text>Be careful</text>"), "got: {}", out);
+        assert_eq!(out, "<doctag><text>Be careful</text>\n</doctag>");
+    }
+
+    #[test]
+    fn test_render_doctags_admonition_without_title_uses_kind_as_label_once() {
+        let mut b = InternalDocumentBuilder::new("test");
+        b.push_admonition("note", None, None);
+        let out = render_doctags(&b.build());
+        assert_eq!(out, "<doctag><text>note</text>\n</doctag>");
     }
 
     #[test]
@@ -1244,33 +1392,42 @@ mod tests {
         assert!(!out.contains("alt text"), "got: {}", out);
     }
 
-    /// The renderer is reachable without an `OutputFormat` variant: an unknown
-    /// format string parses to `Custom`, which `derive_extraction_result` routes
-    /// through the renderer registry. This is what makes `output_format="doctags"`
-    /// work from every language binding.
+    /// `"doctags"` resolves to the first-class `OutputFormat::DocTags` variant.
+    ///
+    /// This test previously pinned `Custom("doctags")`, from when the renderer was
+    /// reachable only through the registry fallback that `FromStr` gives every
+    /// unrecognised string. Promoting DocTags to a real variant changed what these
+    /// two entry points return, so the expectation is updated rather than the code:
+    /// `FromStr` is the API-handler path and serde is the path the language bindings
+    /// take (e.g. Python's `OutputFormat("doctags")`), and both must now agree on the
+    /// variant. The `Custom` route is asserted separately below because it stays
+    /// live for anyone who constructed it explicitly.
     #[test]
-    fn test_doctags_is_reachable_via_custom_output_format() {
+    fn test_doctags_string_resolves_to_the_first_class_variant() {
         use crate::core::config::OutputFormat;
         use std::str::FromStr;
 
-        // `FromStr` is the API-handler path; serde is the path the language
-        // bindings take (e.g. Python's `OutputFormat("doctags")`).
-        let format = OutputFormat::from_str("doctags").unwrap();
-        assert_eq!(format, OutputFormat::Custom("doctags".to_string()));
+        assert_eq!(OutputFormat::from_str("doctags").unwrap(), OutputFormat::DocTags);
         assert_eq!(
             serde_json::from_str::<OutputFormat>("\"doctags\"").unwrap(),
-            OutputFormat::Custom("doctags".to_string())
+            OutputFormat::DocTags
         );
 
-        let mut b = InternalDocumentBuilder::new("test");
-        b.push_title("Doc", None, None);
-        b.push_paragraph("Body text.", vec![], None, None);
+        const EXPECTED: &str = "<doctag><title>Doc</title>\n<text>Body text.</text>\n</doctag>";
 
-        let result = crate::extraction::derive::derive_extraction_result(b.build(), false, format);
+        let render_with = |format: OutputFormat| {
+            let mut b = InternalDocumentBuilder::new("test");
+            b.push_title("Doc", None, None);
+            b.push_paragraph("Body text.", vec![], None, None);
+            crate::extraction::derive::derive_extraction_result(b.build(), false, format).formatted_content
+        };
 
+        assert_eq!(render_with(OutputFormat::DocTags).as_deref(), Some(EXPECTED));
+        // Backward compatibility: an explicitly constructed `Custom("doctags")` still
+        // routes through the renderer registry and produces identical output.
         assert_eq!(
-            result.formatted_content.as_deref(),
-            Some("<doctag><title>Doc</title>\n<text>Body text.</text>\n</doctag>")
+            render_with(OutputFormat::Custom("doctags".to_string())).as_deref(),
+            Some(EXPECTED)
         );
     }
 

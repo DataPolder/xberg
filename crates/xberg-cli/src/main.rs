@@ -681,6 +681,8 @@ enum ContentOutputFormatArg {
     Html,
     /// JSON tree format with heading-driven sections
     Json,
+    /// Docling DocTags tag-stream format (tables as OTSL)
+    DocTags,
 }
 
 impl From<ContentOutputFormatArg> for ContentOutputFormat {
@@ -691,6 +693,7 @@ impl From<ContentOutputFormatArg> for ContentOutputFormat {
             ContentOutputFormatArg::Djot => ContentOutputFormat::Djot,
             ContentOutputFormatArg::Html => ContentOutputFormat::Html,
             ContentOutputFormatArg::Json => ContentOutputFormat::Json,
+            ContentOutputFormatArg::DocTags => ContentOutputFormat::DocTags,
         }
     }
 }

@@ -663,8 +663,16 @@ fn parse_docx_core(
     mut budget: SecurityBudget,
 ) -> crate::error::Result<DocxParseResult> {
     let mut doc = crate::extraction::docx::parser::parse_document(content, &mut budget)?;
+    // `is_markdown` gates `to_markdown()` (which bakes `![desc](image_N)` placeholders into
+    // the flat text) vs. `to_plain_text()`. That placeholder is what the image-to-page
+    // association below (`text.find(&placeholder)`) relies on; without it every image
+    // silently defaults to page 1. DocTags needs the same per-image page fidelity as
+    // Markdown, so it takes the same branch here.
     let (text, page_boundaries) = doc.extract_text_with_boundaries(
-        matches!(output_format, crate::core::config::OutputFormat::Markdown),
+        matches!(
+            output_format,
+            crate::core::config::OutputFormat::Markdown | crate::core::config::OutputFormat::DocTags
+        ),
         inject_placeholders,
     );
 

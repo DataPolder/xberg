@@ -9864,7 +9864,7 @@ extension OutputFormatPatterns on OutputFormat {
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( OutputFormat_Plain value)?  plain,TResult Function( OutputFormat_Markdown value)?  markdown,TResult Function( OutputFormat_Djot value)?  djot,TResult Function( OutputFormat_Html value)?  html,TResult Function( OutputFormat_Json value)?  json,TResult Function( OutputFormat_Structured value)?  structured,TResult Function( OutputFormat_Custom value)?  custom,required TResult orElse(),}){
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( OutputFormat_Plain value)?  plain,TResult Function( OutputFormat_Markdown value)?  markdown,TResult Function( OutputFormat_Djot value)?  djot,TResult Function( OutputFormat_Html value)?  html,TResult Function( OutputFormat_Json value)?  json,TResult Function( OutputFormat_Structured value)?  structured,TResult Function( OutputFormat_DocTags value)?  docTags,TResult Function( OutputFormat_Custom value)?  custom,required TResult orElse(),}){
 final _that = this;
 switch (_that) {
 case OutputFormat_Plain() when plain != null:
@@ -9873,7 +9873,8 @@ return markdown(_that);case OutputFormat_Djot() when djot != null:
 return djot(_that);case OutputFormat_Html() when html != null:
 return html(_that);case OutputFormat_Json() when json != null:
 return json(_that);case OutputFormat_Structured() when structured != null:
-return structured(_that);case OutputFormat_Custom() when custom != null:
+return structured(_that);case OutputFormat_DocTags() when docTags != null:
+return docTags(_that);case OutputFormat_Custom() when custom != null:
 return custom(_that);case _:
   return orElse();
 
@@ -9892,7 +9893,7 @@ return custom(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( OutputFormat_Plain value)  plain,required TResult Function( OutputFormat_Markdown value)  markdown,required TResult Function( OutputFormat_Djot value)  djot,required TResult Function( OutputFormat_Html value)  html,required TResult Function( OutputFormat_Json value)  json,required TResult Function( OutputFormat_Structured value)  structured,required TResult Function( OutputFormat_Custom value)  custom,}){
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( OutputFormat_Plain value)  plain,required TResult Function( OutputFormat_Markdown value)  markdown,required TResult Function( OutputFormat_Djot value)  djot,required TResult Function( OutputFormat_Html value)  html,required TResult Function( OutputFormat_Json value)  json,required TResult Function( OutputFormat_Structured value)  structured,required TResult Function( OutputFormat_DocTags value)  docTags,required TResult Function( OutputFormat_Custom value)  custom,}){
 final _that = this;
 switch (_that) {
 case OutputFormat_Plain():
@@ -9901,7 +9902,8 @@ return markdown(_that);case OutputFormat_Djot():
 return djot(_that);case OutputFormat_Html():
 return html(_that);case OutputFormat_Json():
 return json(_that);case OutputFormat_Structured():
-return structured(_that);case OutputFormat_Custom():
+return structured(_that);case OutputFormat_DocTags():
+return docTags(_that);case OutputFormat_Custom():
 return custom(_that);}
 }
 /// A variant of `map` that fallback to returning `null`.
@@ -9916,7 +9918,7 @@ return custom(_that);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( OutputFormat_Plain value)?  plain,TResult? Function( OutputFormat_Markdown value)?  markdown,TResult? Function( OutputFormat_Djot value)?  djot,TResult? Function( OutputFormat_Html value)?  html,TResult? Function( OutputFormat_Json value)?  json,TResult? Function( OutputFormat_Structured value)?  structured,TResult? Function( OutputFormat_Custom value)?  custom,}){
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( OutputFormat_Plain value)?  plain,TResult? Function( OutputFormat_Markdown value)?  markdown,TResult? Function( OutputFormat_Djot value)?  djot,TResult? Function( OutputFormat_Html value)?  html,TResult? Function( OutputFormat_Json value)?  json,TResult? Function( OutputFormat_Structured value)?  structured,TResult? Function( OutputFormat_DocTags value)?  docTags,TResult? Function( OutputFormat_Custom value)?  custom,}){
 final _that = this;
 switch (_that) {
 case OutputFormat_Plain() when plain != null:
@@ -9925,7 +9927,8 @@ return markdown(_that);case OutputFormat_Djot() when djot != null:
 return djot(_that);case OutputFormat_Html() when html != null:
 return html(_that);case OutputFormat_Json() when json != null:
 return json(_that);case OutputFormat_Structured() when structured != null:
-return structured(_that);case OutputFormat_Custom() when custom != null:
+return structured(_that);case OutputFormat_DocTags() when docTags != null:
+return docTags(_that);case OutputFormat_Custom() when custom != null:
 return custom(_that);case _:
   return null;
 
@@ -9943,7 +9946,7 @@ return custom(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function()?  plain,TResult Function()?  markdown,TResult Function()?  djot,TResult Function()?  html,TResult Function()?  json,TResult Function()?  structured,TResult Function( String field0)?  custom,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function()?  plain,TResult Function()?  markdown,TResult Function()?  djot,TResult Function()?  html,TResult Function()?  json,TResult Function()?  structured,TResult Function()?  docTags,TResult Function( String field0)?  custom,required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case OutputFormat_Plain() when plain != null:
 return plain();case OutputFormat_Markdown() when markdown != null:
@@ -9951,7 +9954,8 @@ return markdown();case OutputFormat_Djot() when djot != null:
 return djot();case OutputFormat_Html() when html != null:
 return html();case OutputFormat_Json() when json != null:
 return json();case OutputFormat_Structured() when structured != null:
-return structured();case OutputFormat_Custom() when custom != null:
+return structured();case OutputFormat_DocTags() when docTags != null:
+return docTags();case OutputFormat_Custom() when custom != null:
 return custom(_that.field0);case _:
   return orElse();
 
@@ -9970,7 +9974,7 @@ return custom(_that.field0);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function()  plain,required TResult Function()  markdown,required TResult Function()  djot,required TResult Function()  html,required TResult Function()  json,required TResult Function()  structured,required TResult Function( String field0)  custom,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function()  plain,required TResult Function()  markdown,required TResult Function()  djot,required TResult Function()  html,required TResult Function()  json,required TResult Function()  structured,required TResult Function()  docTags,required TResult Function( String field0)  custom,}) {final _that = this;
 switch (_that) {
 case OutputFormat_Plain():
 return plain();case OutputFormat_Markdown():
@@ -9978,7 +9982,8 @@ return markdown();case OutputFormat_Djot():
 return djot();case OutputFormat_Html():
 return html();case OutputFormat_Json():
 return json();case OutputFormat_Structured():
-return structured();case OutputFormat_Custom():
+return structured();case OutputFormat_DocTags():
+return docTags();case OutputFormat_Custom():
 return custom(_that.field0);}
 }
 /// A variant of `when` that fallback to returning `null`
@@ -9993,7 +9998,7 @@ return custom(_that.field0);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function()?  plain,TResult? Function()?  markdown,TResult? Function()?  djot,TResult? Function()?  html,TResult? Function()?  json,TResult? Function()?  structured,TResult? Function( String field0)?  custom,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function()?  plain,TResult? Function()?  markdown,TResult? Function()?  djot,TResult? Function()?  html,TResult? Function()?  json,TResult? Function()?  structured,TResult? Function()?  docTags,TResult? Function( String field0)?  custom,}) {final _that = this;
 switch (_that) {
 case OutputFormat_Plain() when plain != null:
 return plain();case OutputFormat_Markdown() when markdown != null:
@@ -10001,7 +10006,8 @@ return markdown();case OutputFormat_Djot() when djot != null:
 return djot();case OutputFormat_Html() when html != null:
 return html();case OutputFormat_Json() when json != null:
 return json();case OutputFormat_Structured() when structured != null:
-return structured();case OutputFormat_Custom() when custom != null:
+return structured();case OutputFormat_DocTags() when docTags != null:
+return docTags();case OutputFormat_Custom() when custom != null:
 return custom(_that.field0);case _:
   return null;
 
@@ -10194,6 +10200,38 @@ int get hashCode => runtimeType.hashCode;
 @override
 String toString() {
   return 'OutputFormat.structured()';
+}
+
+
+}
+
+
+
+
+/// @nodoc
+
+
+class OutputFormat_DocTags extends OutputFormat {
+  const OutputFormat_DocTags(): super._();
+
+
+
+
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is OutputFormat_DocTags);
+}
+
+
+@override
+int get hashCode => runtimeType.hashCode;
+
+@override
+String toString() {
+  return 'OutputFormat.docTags()';
 }
 
 

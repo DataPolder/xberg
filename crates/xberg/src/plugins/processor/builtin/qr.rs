@@ -159,7 +159,10 @@ fn append_payload_section(result: &mut ExtractedDocument, config: &ExtractionCon
         | OutputFormat::Djot
         | OutputFormat::Html
         | OutputFormat::Structured => true,
-        OutputFormat::Json | OutputFormat::Custom(_) => false,
+        // DocTags joins Json/Custom rather than the text formats above: its output is a tag
+        // stream with no free-text position, so appending an untagged payload section would
+        // emit content outside any element and stop the document round-tripping.
+        OutputFormat::Json | OutputFormat::DocTags | OutputFormat::Custom(_) => false,
     };
 
     if renders_as_text {

@@ -8281,10 +8281,7 @@ fn wire__crate__map_url_impl(
         },
     )
 }
-#[cfg(any(
-    any(feature = "late-interaction-presets", feature = "late-interaction"),
-    feature = "late-interaction-presets"
-))]
+#[cfg(any(any(feature = "late-interaction-presets", feature = "late-interaction"),feature = "late-interaction-presets"))]
 fn wire__crate__max_sim_rank_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -8314,10 +8311,7 @@ fn wire__crate__max_sim_rank_impl(
         },
     )
 }
-#[cfg(any(
-    any(feature = "late-interaction-presets", feature = "late-interaction"),
-    feature = "late-interaction-presets"
-))]
+#[cfg(any(any(feature = "late-interaction-presets", feature = "late-interaction"),feature = "late-interaction-presets"))]
 fn wire__crate__max_sim_score_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -10638,6 +10632,7 @@ const _: fn() = || {
         crate::OutputFormat::Html => {}
         crate::OutputFormat::Json => {}
         crate::OutputFormat::Structured => {}
+        crate::OutputFormat::DocTags => {}
         crate::OutputFormat::Custom { field0 } => {
             let _: String = field0;
         }
@@ -19097,6 +19092,9 @@ impl SseDecode for crate::OutputFormat {
                 return crate::OutputFormat::Structured;
             }
             6 => {
+                return crate::OutputFormat::DocTags;
+            }
+            7 => {
                 let mut var_field0 = <String>::sse_decode(deserializer);
                 return crate::OutputFormat::Custom { field0: var_field0 };
             }
@@ -21595,15 +21593,9 @@ fn pde_ffi_dispatcher_primary_impl(
         278 => wire__crate__list_validators_impl(port, ptr, rust_vec_len, data_len),
         #[cfg(feature = "url-ingestion")]
         279 => wire__crate__map_url_impl(port, ptr, rust_vec_len, data_len),
-        #[cfg(any(
-            any(feature = "late-interaction-presets", feature = "late-interaction"),
-            feature = "late-interaction-presets"
-        ))]
+        #[cfg(any(any(feature = "late-interaction-presets", feature = "late-interaction"),feature = "late-interaction-presets"))]
         280 => wire__crate__max_sim_rank_impl(port, ptr, rust_vec_len, data_len),
-        #[cfg(any(
-            any(feature = "late-interaction-presets", feature = "late-interaction"),
-            feature = "late-interaction-presets"
-        ))]
+        #[cfg(any(any(feature = "late-interaction-presets", feature = "late-interaction"),feature = "late-interaction-presets"))]
         281 => wire__crate__max_sim_score_impl(port, ptr, rust_vec_len, data_len),
         282 => wire__crate__register_document_extractor_impl(port, ptr, rust_vec_len, data_len),
         283 => wire__crate__register_embedding_backend_impl(port, ptr, rust_vec_len, data_len),
@@ -26239,7 +26231,8 @@ impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::OutputFormat> {
             crate::OutputFormat::Html => [3.into_dart()].into_dart(),
             crate::OutputFormat::Json => [4.into_dart()].into_dart(),
             crate::OutputFormat::Structured => [5.into_dart()].into_dart(),
-            crate::OutputFormat::Custom { field0 } => [6.into_dart(), field0.into_into_dart().into_dart()].into_dart(),
+            crate::OutputFormat::DocTags => [6.into_dart()].into_dart(),
+            crate::OutputFormat::Custom { field0 } => [7.into_dart(), field0.into_into_dart().into_dart()].into_dart(),
             _ => {
                 unimplemented!("");
             }
@@ -34216,8 +34209,11 @@ impl SseEncode for crate::OutputFormat {
             crate::OutputFormat::Structured => {
                 <i32>::sse_encode(5, serializer);
             }
-            crate::OutputFormat::Custom { field0 } => {
+            crate::OutputFormat::DocTags => {
                 <i32>::sse_encode(6, serializer);
+            }
+            crate::OutputFormat::Custom { field0 } => {
+                <i32>::sse_encode(7, serializer);
                 <String>::sse_encode(field0, serializer);
             }
             _ => {

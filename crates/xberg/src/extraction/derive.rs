@@ -599,6 +599,13 @@ pub fn derive_extraction_result(
             }
         }
         crate::core::config::OutputFormat::Structured => None,
+        crate::core::config::OutputFormat::DocTags => {
+            if doc.pre_rendered_content.is_some() && doc.metadata.output_format.as_deref() == Some("doctags") {
+                doc.pre_rendered_content.take()
+            } else {
+                Some(crate::rendering::render_doctags(&doc))
+            }
+        }
         crate::core::config::OutputFormat::Custom(ref name) => {
             let registry = crate::plugins::registry::get_renderer_registry();
             let registry = registry.read();
@@ -836,9 +843,9 @@ fn build_pages(doc: &InternalDocument) -> Option<Vec<PageContent>> {
 ///
 /// Called after pages are built but before `derive_document_structure_inner` moves
 /// element text out of the document. For Plain/Structured/Json/Custom formats this
-/// is a no-op. For Markdown/Djot/Html, each page's element subset is rendered with
-/// the same renderer used for the full document, so `pages[n].content` matches the
-/// format of `result.content` after `apply_output_format`.
+/// is a no-op. For Markdown/Djot/Html/DocTags, each page's element subset is
+/// rendered with the same renderer used for the full document, so `pages[n].content`
+/// matches the format of `result.content` after `apply_output_format`.
 ///
 /// Pages whose `page_number` has no matching page-tagged elements (e.g., natively
 /// extracted PDF pages where individual elements are not page-tracked) are returned
@@ -854,6 +861,7 @@ fn apply_page_content_format(
         OutputFormat::Markdown => crate::rendering::render_markdown,
         OutputFormat::Djot => crate::rendering::render_djot,
         OutputFormat::Html => crate::rendering::render_html,
+        OutputFormat::DocTags => crate::rendering::render_doctags,
         OutputFormat::Plain | OutputFormat::Structured | OutputFormat::Json | OutputFormat::Custom(_) => {
             return pages;
         }
@@ -1279,6 +1287,26 @@ mod tests {
         assert_eq!(result.content, "Hello world.");
         assert_eq!(result.mime_type, "text/markdown");
         assert!(result.document.is_none());
+    }
+
+    /// `OutputFormat::DocTags` must produce the same output as the always-registered
+    /// built-in "doctags" renderer (`plugins::registry::renderer::DocTagsRenderer`),
+    /// via its own first-class match arm rather than falling through to the
+    /// `Custom(_)` renderer-registry lookup path (and its warning-on-miss behavior).
+    #[test]
+    fn should_render_doctags_output_format_without_going_through_custom_fallback() {
+        let mut doc = make_doc("markdown");
+        doc.push_element(InternalElement::text(ElementKind::Paragraph, "Hello world.", 0));
+        let expected = crate::rendering::render_doctags(&doc);
+
+        let result = derive_extraction_result(doc, false, crate::core::config::OutputFormat::DocTags);
+
+        assert_eq!(result.formatted_content.as_deref(), Some(expected.as_str()));
+        assert!(
+            result.processing_warnings.is_empty(),
+            "DocTags is a first-class, always-registered format and must never warn: {:?}",
+            result.processing_warnings
+        );
     }
 
     /// #208: requesting a custom output format with no matching renderer must

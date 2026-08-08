@@ -12296,6 +12296,9 @@ sealed class OutputFormat with _$OutputFormat {
   /// Structured JSON format with full OCR element metadata.
   const factory OutputFormat.structured() = OutputFormat_Structured;
 
+  /// Docling DocTags format (tables rendered as OTSL).
+  const factory OutputFormat.docTags() = OutputFormat_DocTags;
+
   /// Custom renderer registered via the RendererRegistry.
   /// The string is the renderer name (e.g., "docx", "latex").
   const factory OutputFormat.custom({required String field0}) =
