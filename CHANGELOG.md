@@ -137,6 +137,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   merge, citation and vision-fallback decision into callable units. They are public API for embedders
   that build their own structured-extraction path; the built-in pipeline still calls the simpler
   text-only structured extraction and does not route through them.
+- Docling DocTags is supported in both directions: it can be emitted as an output format and read as
+  an input format, with tables carried as OTSL and geometry as `<loc_*>` tokens. Emission maps the
+  internal model onto the DocTags vocabulary (headings to `section_header_level_N`, header/footer/
+  footnote content layers to `page_header`/`page_footer`/`footnote`, captions nested inside
+  `<otsl>`/`<picture>`/`<code>`, list items wrapped in `<ordered_list>`/`<unordered_list>`). Location
+  tokens are emitted only when an element has a bounding box and its page recorded dimensions; the
+  vertical axis is flipped because `BoundingBox` is PDF space with a bottom-left origin while DocTags
+  counts from the top-left. Ingestion registers an extractor for `text/vnd.docling.doctags` and a
+  `.doctags` extension, expands the OTSL merge tokens `lcel`/`ucel`/`xcel` into the flat grid, and
+  tokenizes by recognised tag name rather than by scanning to the next `>` — DocTags has no escaping
+  and real Docling output carries literal `<` in prose, so a naive scan corrupts the document from
+  the first caption that discusses markup. Parsed pages are rebuilt as 500-unit squares because the
+  real page size is not recoverable from the stream, which makes re-emitting a parsed document
+  reproduce its original tokens exactly. Emitted OTSL cannot currently produce `lcel`/`ucel`/`xcel`/
+  `rhed` and merged cells come through duplicated, because `Table::cells` is a flat `Vec<Vec<String>>`
+  with no span data; ingestion parses the full grammar, so only the emit direction is lossy (#1383).
+- `ConversionOptions` is re-exported from the crate root under the `html` feature.
+  `ExtractionConfig::html_options` and `FileConfig::html_options` are public fields of this type, so
+  callers already had to name it; without the re-export they had to take a direct
+  `html-to-markdown-rs` dependency and keep its version in lockstep with ours.
+- The WebAssembly build now enables `pdf`, `html`, `heuristics`, `layout-types`, `transcription-types`
+  and `simd-utf8`, so PDF and HTML extraction, the heuristics surface and the layout and transcription
+  types are reachable from the browser bindings rather than being compiled out. These were previously
+  excluded because generating them tripped two binding-generator defects, both since fixed. Expect a
+  larger bundle.
 
 ### Changed
 
@@ -271,6 +296,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tesseract source caches now require a valid source-tree marker instead of trusting directory
   existence alone. Incomplete Leptonica or Tesseract trees are removed and downloaded again for
   both native and WebAssembly builds, with WebAssembly patches reapplied after recovery (#1401).
+- The crate compiles cleanly under feature sets that omit `api-types`, the WebAssembly build among
+  them. The server-boundary validators (listen host, port, CORS origin, upload size) and their
+  constants were unconditionally compiled but their only consumer, `ServerConfig::validate`, is gated
+  on `api-types`, so every one of them was dead code and any build with `-D warnings` failed. They
+  now carry the same gate as their consumer, and their tests moved alongside them.
 - Two-column PDF reading order is now detected per horizontal band instead of per page. Page
   furniture (running headers/footers, titles, rules) used to make the whole page look
   single-column to the repair heuristic, so genuinely two-column pages kept their columns
