@@ -19,9 +19,10 @@ See the [TreeSitterConfig reference](/reference/configuration/#treesitterconfig)
 Extracting a source code file produces:
 
 - **`content`** -- the source text, split into code segments at tree-sitter chunk boundaries and rendered in the configured output format. When chunking is enabled, each segment is preceded by a heading naming its enclosing function, class, or module. With chunking disabled (the default), the whole source is emitted as a single code block.
-- **`metadata.format`** -- tagged as `code` (`format_type: "code"`). This is a marker only; it carries no additional fields such as language, structure, or imports.
+- **`metadata.format`** -- tagged as `code` (`format_type: "code"`), carrying the structural `chunks` and, when data extraction is enabled, the hierarchical `data` tree.
+- **`code_intelligence`** -- tree-sitter's full analysis as an opaque JSON object: language, metrics, structure, imports, exports, comments, docstrings, symbols, diagnostics, chunks, and the data tree. It is populated for source files when the `tree-sitter` feature is enabled, and `null` otherwise.
 
-Tree-sitter's structured analysis (structure, imports, exports, comments, docstrings, symbols, diagnostics) is computed internally to drive chunking, but is **not currently exposed** in the extraction result. The `code_intelligence` field on the result is reserved for this data and is always `null` in the current release. Read the rendered `content` rather than expecting structured code-intelligence fields.
+`code_intelligence` is the serialized `tree_sitter_language_pack::ProcessResult`. It is deliberately untyped so every binding (Go, Java, C#, ...) can read it as a raw JSON object; deserialize it against TSLP's own schema if you need typed access.
 
 ## Getting Started
 
@@ -40,9 +41,14 @@ let result = &output.results[0];
 // The rendered source is in the content field.
 println!("{}", result.content);
 
-// metadata.format is tagged as Code -- a marker with no payload.
-if matches!(result.metadata.format, Some(xberg::types::FormatMetadata::Code)) {
-    println!("Detected a source code file");
+// metadata.format is tagged as Code and carries the structural chunks.
+if let Some(xberg::types::FormatMetadata::Code(code)) = &result.metadata.format {
+    println!("Detected a source code file with {} chunks", code.chunks.len());
+}
+
+// The full tree-sitter analysis is an opaque JSON value.
+if let Some(intelligence) = &result.code_intelligence {
+    println!("{intelligence}");
 }
 ```
 
@@ -50,6 +56,8 @@ if matches!(result.metadata.format, Some(xberg::types::FormatMetadata::Code)) {
 <TabItem label="Python">
 
 ```python title="basic.py"
+import json
+
 import xberg
 
 config = xberg.ExtractionConfig()
@@ -59,10 +67,14 @@ result = output.results[0]
 # The rendered source is in the content field.
 print(result.content)
 
-# metadata["format"] is tagged as code -- a marker with no extra fields.
+# metadata["format"] is tagged as code and carries the structural chunks.
 fmt = result.metadata.get("format")
 if fmt and fmt.get("format_type") == "code":
-    print("Detected a source code file")
+    print(f"Detected a source code file with {len(fmt['chunks'])} chunks")
+
+# The full tree-sitter analysis is a JSON string in the Python binding.
+if result.code_intelligence is not None:
+    print(json.loads(result.code_intelligence)["symbols"])
 ```
 
 </TabItem>
@@ -80,10 +92,15 @@ const result = output.results[0];
 // The rendered source is in the content field.
 console.log(result.content);
 
-// metadata.format is tagged "code" -- a marker with no extra fields.
+// metadata.format is tagged "code" and carries the structural chunks.
 const fmt = result.metadata?.format;
 if (fmt?.formatType === "code") {
-  console.log("Detected a source code file");
+  console.log(`Detected a source code file with ${fmt.chunks.length} chunks`);
+}
+
+// The full tree-sitter analysis is an unknown-typed JSON object.
+if (result.codeIntelligence) {
+  console.log(result.codeIntelligence);
 }
 ```
 
@@ -97,7 +114,8 @@ if err != nil {
 }
 
 fmt.Println(result.Content)
-// result.Metadata.Format is tagged "code" for source files.
+// result.Metadata.Format is tagged "code" for source files, and
+// result.CodeIntelligence carries the full tree-sitter analysis as raw JSON.
 ```
 
 </TabItem>
@@ -107,8 +125,8 @@ fmt.Println(result.Content)
 
 Use `TreeSitterConfig` to control tree-sitter processing. Set `enabled: false` to skip code intelligence entirely. `chunk_max_size` controls where the source is split into segments; when unset (the default), the whole file is emitted as a single block.
 
-:::caution[Analysis toggles are inert in the current release]
-Only `enabled` and `chunk_max_size` affect the emitted output. The `structure`, `imports`, `exports`, `comments`, `docstrings`, `symbols`, and `diagnostics` toggles configure tree-sitter's internal analysis, but that analysis is not surfaced in the result -- setting them has no observable effect on `content` or `metadata`.
+:::note[Which fields each toggle affects]
+`enabled` and `chunk_max_size` shape `content` and `metadata.format`. The `structure`, `imports`, `exports`, `comments`, `docstrings`, `symbols`, and `diagnostics` toggles are passed through to tree-sitter and decide which sections of `code_intelligence` are populated; they do not change `content`.
 :::
 
 <Tabs syncKey="lang">
@@ -194,7 +212,7 @@ result = output.results[0]
 print(result.content)
 ```
 
-Structured per-chunk data (byte spans, parent context, per-chunk language) is not exposed in the current release. For programmatic chunking with offsets and metadata -- for example, in a RAG pipeline -- use Xberg's [chunking pipeline](/guides/chunking/) instead.
+Structured per-chunk data is also available without parsing `content`: each entry of `metadata.format.chunks` carries the chunk `text`, its `context_path` (enclosing scopes), the tree-sitter `node_types`, and the `byte_start`/`byte_end` offsets into the source. For general-purpose text chunking across all formats -- for example, in a RAG pipeline -- use Xberg's [chunking pipeline](/guides/chunking/) instead.
 
 ## Language Detection
 
@@ -203,7 +221,7 @@ Xberg detects the programming language in two ways:
 1. **File extension** (fast path) -- when using `extract`, the extension is matched against 248 known language extensions
 2. **Shebang line** (fallback) -- when the extension is missing or ambiguous, the first line is checked for `#!/usr/bin/env python`, `#!/bin/bash`, and so on.
 
-If neither method identifies the language, extraction returns an `UnsupportedFormat` error. The detected language is used internally for parsing and is not exposed as a structured field on the result.
+If neither method identifies the language, extraction returns an `UnsupportedFormat` error. The detected language drives parsing and is reported in `code_intelligence`.
 
 ## Language Support
 

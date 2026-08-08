@@ -44,13 +44,13 @@ Models are downloaded from HuggingFace Hub on first use — `Tiny`, `Base`, and
 | `enabled`          | `bool`            | `true`   | The extractor activates only when the `transcription` block is present and `enabled` is true. |
 | `model`            | `WhisperModel`    | `Tiny`   | Size variant to use. |
 | `language`         | `Option<String>`  | `None`   | ISO-639-1 code (e.g. `"en"`, `"de"`). The current engine falls back to English when unset; set this explicitly for deterministic output. |
-| `timestamps`       | `bool`            | `false`  | Accepted for forward-compatibility; segment timestamps are not yet emitted. |
+| `timestamps`       | `bool`            | `false`  | When `true`, the decoder prompt omits the `notimestamps` token and each transcript segment carries start/end offsets. |
 | `max_bytes`        | `Option<u64>`     | `512 MiB` | Reject input larger than this many bytes before decoding. |
 | `max_duration_ms`  | `Option<u64>`     | `30 min` | Reject audio longer than this many milliseconds after decode. |
 | `timeout_ms`       | `Option<u64>`     | `10 min` | Reserved wall-clock timeout for the full inference call. The current extractor does not enforce it yet. |
 | `model_cache_dir`  | `Option<PathBuf>` | `None`   | Override the default cache location. |
 | `allow_network`    | `bool`            | `true`   | Set to `false` to disable automatic downloads; returns `ModelMissing` if the model is not already cached. |
-| `verify_hash`      | `bool`            | `true`   | Hash verification is reserved for a future work item; currently a no-op with a warning. |
+| `verify_hash`      | `bool`            | `false`  | Leave at `false`. Pinned checksum metadata is not available yet, so the model resolver rejects an explicit `true` with `HashVerificationUnavailable` and transcription fails before any download. |
 
 ## First-run download
 

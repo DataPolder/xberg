@@ -1,4 +1,14 @@
 ```java title="Java"
-// Note: Keyword extraction is not yet available in Java bindings
-// This feature requires the 'keywords' feature flag and is planned for a future release
+import io.xberg.ExtractionConfig;
+import io.xberg.KeywordAlgorithm;
+import io.xberg.KeywordConfig;
+
+ExtractionConfig config = ExtractionConfig.builder()
+    .withKeywords(KeywordConfig.builder()
+        .withAlgorithm(KeywordAlgorithm.Yake)
+        .withMaxKeywords(10L)
+        .withMinScore(0.3f)
+        .withLanguage("en")
+        .build())
+    .build();
 ```

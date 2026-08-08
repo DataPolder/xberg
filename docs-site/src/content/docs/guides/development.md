@@ -172,7 +172,7 @@ Each language runs its suite with `task <lang>:e2e`:
 | Kotlin / Android     | `e2e/kotlin_android/`| `task kotlin-android:e2e`|
 | WebAssembly          | `e2e/wasm/`          | `task wasm:e2e`          |
 
-Or run one suite by name with `task e2e:lang LANG=python`.
+Or run one suite by name with `task e2e:lang E2E_LANG=python`.
 
 ### Regenerate end-to-end Tests
 

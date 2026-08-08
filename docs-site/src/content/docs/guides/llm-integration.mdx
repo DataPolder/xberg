@@ -460,7 +460,7 @@ config = LlmConfig(
 | `max_tokens`        | `int \| None`               | `None`     | Maximum tokens to generate                                           |
 | `load_env`          | `bool \| None`              | `None`     | Whether liter-llm loads provider credentials from environment vars   |
 | `headers`           | `dict[str, str] \| None`    | `None`     | Extra HTTP headers sent with every request                           |
-| `providers`         | `list[LlmProviderConfig]`   | `None`     | Custom OpenAI-compatible providers — **accepted but inert**, see below |
+| `providers`         | `list[LlmProviderConfig]`   | `None`     | Custom OpenAI-compatible providers, routed by model prefix — see below |
 | `cache`             | `LlmCacheConfig \| None`    | `None`     | Response cache settings — requires liter-llm's `tower` feature        |
 | `budget`            | `LlmBudgetConfig \| None`   | `None`     | Spend limits and enforcement — requires liter-llm's `tower` feature   |
 | `rate_limit`        | `LlmRateLimitConfig \| None`| `None`     | Requests/tokens per minute — requires liter-llm's `tower` feature     |
@@ -502,11 +502,15 @@ tpm = 100000
 window_seconds = 60
 ```
 
-### `providers` Is Accepted But Not Wired
+### Custom Providers
 
-`LlmConfig.providers` mirrors liter-llm's `LlmConfig::providers` field and round-trips through TOML/JSON like every other field. It is **not currently consulted when Xberg builds a client** — liter-llm's own `into_client_builder` does not map `providers` into the client either. Custom/self-hosted OpenAI-compatible providers go through a separate, process-wide liter-llm provider registry with a different shape.
+`LlmConfig.providers` registers custom OpenAI-compatible endpoints and routes models to them by prefix. Every entry is registered with liter-llm when Xberg builds a client, so any model whose name starts with one of the declared `model_prefixes` is sent to that provider's `base_url`.
 
-```toml title="xberg.toml — round-trips, has no routing effect today"
+```toml title="xberg.toml"
+[structured_extraction.llm]
+model = "my-provider/llama-3.1-70b"
+api_key = "..."
+
 [[structured_extraction.llm.providers]]
 name = "my-provider"
 base_url = "https://my-llm.example.com/v1"
@@ -514,7 +518,11 @@ auth_header = "X-Api-Key"
 model_prefixes = ["my-provider/"]
 ```
 
-Setting this will not fail and will not route requests to `my-provider`. Use `base_url` on `LlmConfig` directly for a single custom/self-hosted endpoint (see [Custom Base URL](#local-llm-support) above), or register with liter-llm's provider registry outside of Xberg's config surface.
+`auth_header` is the header name carrying the key. Leave it unset (or set it to `Authorization`) for `Authorization: Bearer <key>`; any other name sends the raw key under that header, with no scheme prefix.
+
+Registration failures surface as a validation error rather than being ignored. The liter-llm registry is process-global and keyed by `name`, so the most recently built client wins for a given provider name — use distinct names across every `LlmConfig` in one process.
+
+For a single custom or self-hosted endpoint that needs no prefix routing, set `base_url` on `LlmConfig` directly instead (see [Custom Base URL](#local-llm-support) above).
 
 ### Credentials Are Redacted in Debug, Not in Serialized Output
 

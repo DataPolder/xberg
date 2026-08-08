@@ -1,236 +1,126 @@
-# PHP Plugin System - Deferred to Future Version
+# PHP Plugin System
 
-## Status: Not Yet Implemented
+The PHP extension exposes the full plugin registry. Plugins are plain PHP classes
+implementing the matching interface; you register them on the `Xberg` facade and
+the native extension calls back into PHP during extraction.
 
-The PHP plugin system for Xberg is **deferred to a future version**. This includes:
+## Supported Plugin Types
 
-- Custom OCR backend registration
-- Post-processor plugins
-- Validator plugins
-- Custom extractor plugins
+| Plugin type         | Register                        | Unregister                        | List                          | Clear                          |
+| ------------------- | ------------------------------- | --------------------------------- | ----------------------------- | ------------------------------ |
+| Document extractor  | `registerDocumentExtractor()`   | `unregisterDocumentExtractor()`   | `listDocumentExtractors()`    | `clearDocumentExtractors()`    |
+| OCR backend         | `registerOcrBackend()`          | `unregisterOcrBackend()`          | `listOcrBackends()`           | `clearOcrBackends()`           |
+| Post-processor      | `registerPostProcessor()`       | `unregisterPostProcessor()`       | `listPostProcessors()`        | `clearPostProcessors()`        |
+| Validator           | `registerValidator()`           | `unregisterValidator()`           | `listValidators()`            | `clearValidators()`            |
+| Embedding backend   | `registerEmbeddingBackend()`    | `unregisterEmbeddingBackend()`    | `listEmbeddingBackends()`     | `clearEmbeddingBackends()`     |
+| Reranker backend    | `registerRerankerBackend()`     | `unregisterRerankerBackend()`     | `listRerankerBackends()`      | `clearRerankerBackends()`      |
+| Tokenizer backend   | `registerTokenizerBackend()`    | `unregisterTokenizerBackend()`    | `listTokenizerBackends()`     | `clearTokenizerBackends()`     |
+| Renderer            | `registerRenderer()`            | `unregisterRenderer()`            | `listRenderers()`             | `clearRenderers()`             |
 
-## Why Deferred?
+## Quick Start
 
-The plugin system requires complex callback handling between Rust and PHP through ext-php-rs. Specifically:
+Register a post-processor that annotates every result with a word count:
 
-1. **Callback Challenges**: ext-php-rs callback support for complex interfaces is still evolving
-2. **Memory Safety**: Ensuring proper lifetime management for PHP closures called from Rust
-3. **Error Handling**: Propagating exceptions across the FFI boundary in plugin contexts
-4. **Performance**: Minimizing overhead of cross-language callbacks in hot paths
-
-## Affected Functions (~16 functions)
-
-The following functions exist in Python, Ruby, Node.js, and other bindings but are not yet available in PHP:
-
-### OCR Backend Registration
-
-- `xberg_register_ocr_backend()`
-- `xberg_unregister_ocr_backend()`
-- `xberg_list_ocr_backends()`
-
-### Post-Processor Plugins
-
-- `xberg_register_post_processor()`
-- `xberg_unregister_post_processor()`
-- `xberg_list_post_processors()`
-- `xberg_clear_post_processors()`
-
-### Validator Plugins
-
-- `xberg_register_validator()`
-- `xberg_unregister_validator()`
-- `xberg_list_validators()`
-- `xberg_clear_validators()`
-
-### Custom Extractor Plugins
-
-- `xberg_register_extractor()`
-- `xberg_unregister_extractor()`
-- `xberg_list_extractors()`
-- `xberg_clear_extractors()`
-
-### Plugin Testing
-
-- `xberg_test_plugin()`
-
-## Workarounds
-
-Until the plugin system is implemented, you can:
-
-### 1. Post-Process Results in PHP
-
-Instead of registering a post-processor plugin, process the extraction result directly:
-
-```php title="Post-Process Results"
+```php title="Register a Post-Processor"
 <?php
 
 declare(strict_types=1);
 
 use Xberg\XbergApi;
-use Xberg\Types\ExtractedDocument;
 
-function postProcessResult(ExtractedDocument $result): ExtractedDocument
+final class WordCountProcessor implements PostProcessor
 {
-    // Custom post-processing logic
-    $processedContent = strtoupper($result->content);
+    public function name(): string
+    {
+        return 'word-count';
+    }
 
-    // Return a new result with modified content
-    return new ExtractedDocument(
-        content: $processedContent,
-        mimeType: $result->mimeType,
-        metadata: $result->metadata,
-        tables: $result->tables,
-        images: $result->images,
-        chunks: $result->chunks,
+    public function version(): string
+    {
+        return '1.0.0';
+    }
+
+    public function initialize(): void
+    {
+    }
+
+    public function shutdown(): void
+    {
+    }
+
+    public function process(object &$result, object $config): void
+    {
+        $words = preg_split('/\s+/', trim($result->content), -1, PREG_SPLIT_NO_EMPTY);
+        $metadata = (array) ($result->metadata ?? []);
+        $metadata['word_count'] = count($words);
+        $result->metadata = $metadata;
+    }
+
+    public function processingStage(): string
+    {
+        return 'Early';
+    }
+
+    public function shouldProcess(object $result, object $config): bool
+    {
+        return $result->content !== '';
+    }
+
+    public function estimatedDurationMs(object $result): int
+    {
+        return 1;
+    }
+
+    public function priority(): int
+    {
+        return 50;
+    }
+}
+
+Xberg::registerPostProcessor(new WordCountProcessor());
+
+try {
+    $output = Xberg::extract(
+        \Xberg\ExtractInput::fromUri('document.pdf'),
+        \Xberg\ExtractionConfig::default(),
     );
-}
-
-$output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('document.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
-$processed = postProcessResult($result);
-```
-
-### 2. Use Built-in OCR Backends
-
-PHP bindings support all built-in OCR backends:
-
-```php title="Built-in OCR Backends"
-<?php
-
-declare(strict_types=1);
-
-use Xberg\ExtractionConfig;
-use Xberg\OcrConfig;
-use Xberg\XbergApi;
-
-$config = new ExtractionConfig(
-    ocr: new OcrConfig(
-        backend: 'tesseract',  // Built-in: tesseract, apple-vision (macOS)
-        language: 'eng',
-    ),
-);
-
-$output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('scanned.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
-```
-
-### 3. Validate Results in PHP
-
-Instead of validator plugins, validate extraction results directly:
-
-```php title="Validate Results"
-<?php
-
-declare(strict_types=1);
-
-use Xberg\Exceptions\ValidationException;
-use Xberg\Types\ExtractedDocument;
-
-function validateResult(ExtractedDocument $result): void
-{
-    if (strlen($result->content) < 100) {
-        throw new ValidationException('Content too short (minimum 100 characters)');
-    }
-
-    if ($result->metadata?->pageCount === 0) {
-        throw new ValidationException('Document has no pages');
-    }
-}
-
-$output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('document.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
-validateResult($result);
-```
-
-### 4. Wrap the Xberg Class
-
-For application-specific functionality, wrap the static API in a helper that
-delegates to `Xberg::extract()`:
-
-```php title="Wrap Xberg Class"
-<?php
-
-declare(strict_types=1);
-
-use Xberg\ExtractInput;
-use Xberg\ExtractionConfig;
-use Xberg\XbergApi;
-use Xberg\Types\ExtractedDocument;
-
-final class CustomXberg
-{
-    public static function extractAndValidate(
-        string $path,
-        ?ExtractionConfig $config = null
-    ): ExtractedDocument {
-        $output = Xberg::extract(ExtractInput::fromUri($path), $config);
-        $result = $output->results[0];
-
-        // Custom validation
-        if (strlen($result->content) < 100) {
-            throw new \RuntimeException('Content too short');
-        }
-
-        return $result;
-    }
-
-    public static function extractAndTransform(
-        string $path,
-        callable $transformer,
-        ?ExtractionConfig $config = null
-    ): ExtractedDocument {
-        $output = Xberg::extract(ExtractInput::fromUri($path), $config);
-        $result = $output->results[0];
-
-        // Custom transformation
-        $transformedContent = $transformer($result->content);
-
-        return new ExtractedDocument(
-            content: $transformedContent,
-            mimeType: $result->mimeType,
-            metadata: $result->metadata,
-            tables: $result->tables,
-            images: $result->images,
-            chunks: $result->chunks,
-        );
-    }
+    $metadata = (array) $output->results[0]->metadata;
+    echo 'word count: ', $metadata['word_count'] ?? 0, "\n";
+} catch (\Xberg\Exceptions\XbergException $e) {
+    fwrite(STDERR, 'extraction failed: ' . $e->getMessage() . "\n");
+} finally {
+    Xberg::unregisterPostProcessor('word-count');
 }
 ```
 
-## Timeline
+## Plugin Contract
 
-The plugin system is planned for a future PHP bindings release (tentatively v4.1.0 or v4.2.0), pending:
+Every plugin implements the four lifecycle methods — `name()`, `version()`,
+`initialize()`, `shutdown()` — plus the methods specific to its type:
 
-1. Ext-php-rs improvements for complex callbacks
-2. Comprehensive testing of callback performance and safety
-3. Documentation of plugin interfaces
+- **DocumentExtractor**: `extract()`, `supportedMimeTypes()`, `priority()`
+- **OcrBackend**: `processImage()`, `supportsLanguage()`, `backendType()`
+- **PostProcessor**: `process()`, `processingStage()`, `shouldProcess()`, `estimatedDurationMs()`, `priority()`
+- **Validator**: `validate()`, `priority()`
 
-## Current Feature Parity
+Priorities run 0-255 and default to 50; the highest-priority plugin matching a
+MIME type wins. `initialize()` must validate everything the plugin needs and
+throw on failure — registration fails fast rather than erroring mid-extraction.
 
-Despite the deferred plugin system, PHP bindings achieve **95% feature parity** with other language bindings:
+Never let an exception escape a plugin method during extraction: it crosses the
+FFI boundary and aborts the whole extraction. Catch and handle inside the plugin,
+or return a degraded result.
 
-- ✅ All extraction functions (file, bytes, batch)
-- ✅ All configuration options (OCR, PDF, chunking, embeddings)
-- ✅ All result types (tables, images, chunks, metadata)
-- ✅ All validation functions (14 validators)
-- ✅ Embedding presets (2 functions + class)
-- ✅ Error classification (3 functions + class)
-- ✅ Config helpers (JSON export, field access, merging)
-- ❌ Plugin system (16 functions) - **deferred**
+## More Examples
+
+- `extractor_registration.md` — custom document extractor
+- `ocr_backend.md` — custom OCR backend
+- `word_count_processor.md`, `pdf_only_processor.md` — post-processors
+- `min_length_validator.md`, `quality_score_validator.md` — validators
+- `list_plugins.md`, `unregister_plugins.md`, `clear_plugins.md` — registry management
+- `plugin_testing.md` — testing plugins with PHPUnit
 
 ## Questions?
 
-For questions about the plugin system or to request early access when available:
-
 - GitHub Issues: <https://github.com/xberg-io/xberg/issues>
 - Discussions: <https://github.com/xberg-io/xberg/discussions>
-
-## Contributing
-
-If you're interested in helping implement the plugin system for PHP:
-
-1. Review the plugin implementations in Python (`crates/xberg-py/src/plugins.rs`)
-2. Review ext-php-rs callback documentation
-3. Open a discussion on the Xberg GitHub repository
-
-We welcome contributions!
