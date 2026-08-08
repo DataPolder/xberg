@@ -89,7 +89,7 @@ xml = ["dep:quick-xml", "dep:roxmltree"]
 archives = ["dep:zip", "dep:tar", "dep:sevenz-rust2", "dep:flate2"]
 mdx = []
 
-liter-llm = ["dep:liter-llm", "dep:minijinja", "dep:ureq", "ocr-pipeline"]
+liter-llm = ["dep:liter-llm", "dep:minijinja", "dep:ureq", "dep:secrecy", "ocr-pipeline"]
 
 # ~keep Forward to liter-llm's `bedrock` feature (SigV4 request signing for
 # ~keep `bedrock/...` model routing — see BedrockProvider). Weak-optional (`?/`)
@@ -1047,6 +1047,10 @@ roxmltree = { version = "0.21.1", optional = true }
 rqrr = { version = "0.10", optional = true }
 sceptre = { workspace = true, optional = true }
 scrypt = { version = "0.12", optional = true, default-features = false, features = ["kdf"] }
+# Constructs the `SecretString` arguments liter-llm's managed credential providers (Azure AD,
+# Vertex OAuth2) take — see `llm::client::build_credential_provider` (GH#1381). Same version and
+# `serde` feature liter-llm itself declares, so Cargo unifies onto one resolved instance.
+secrecy = { version = "0.10", features = ["serde"], optional = true }
 serde = { workspace = true }
 # `preserve_order` keeps `Value::Object` backed by an IndexMap so JSON, YAML and TOML
 # extraction emit keys in document order rather than alphabetically (#165). It was already
@@ -1124,8 +1128,39 @@ zip = { version = ">=7.0.0", optional = true, default-features = false, features
 # corresponding xberg `LlmConfig` fields, while still round-tripping through
 # config files, reach nothing. `tower`/`tower-http`/`futures-util` are pure-Rust
 # and native-http-only (this target block excludes wasm32), so this is safe here.
+# `azure-auth`/`bedrock-auth`/`copilot-auth` (GH#1381) each add nothing beyond
+# `native-http` itself (confirmed against liter-llm 1.16.0's own Cargo.toml: both are
+# literally `= ["native-http"]`) — they exist purely to gate whether
+# `liter_llm::auth::{azure_ad,bedrock_sts,github_copilot}` compile in at all, so enabling them
+# here is free. `vertex-auth` additionally pulls the small, pure-Rust `jsonwebtoken` crate
+# (verified: its own deps are base64/getrandom/js-sys/pem/serde/serde_json/signature/
+# simple_asn1/zeroize — no TLS, no crypto-with-assembly) for `liter_llm::auth::vertex_oauth`.
+# `vertex-adc` needs no entry: it is already implied by `native-http`.
+#
+# None of those four features is what brings in a second HTTP/TLS stack, though — that cost
+# comes from `native-http` itself, already enabled above independent of GH#1381:
+# `native-http = [..., "dep:gcp_auth"]` in liter-llm's manifest, and `gcp_auth` (0.12.7, per
+# Cargo.lock) links `hyper`/`hyper-rustls`/`hyper-util` directly as its own HTTP client rather
+# than going through `reqwest`, and pulls them with `features = ["ring"]`. `ring` is Rust plus
+# hand-written assembly, not pure Rust, and its presence forces the single workspace `rustls`
+# instance to compile in both the `ring` and `aws-lc-rs` crypto backends side by side (Cargo.lock
+# shows one unified `rustls` node depending on both). This predates GH#1381; this diff only adds
+# `jsonwebtoken` on top of an already-paid `gcp_auth`/`ring` cost.
+#
+# Without the four `*-auth` features, `LlmConfig::credential_provider`
+# (see `core::config::llm::CredentialProviderConfig` and `llm::client::build_credential_provider`)
+# has no auth module to construct against and every non-Bedrock-static-credential variant is
+# unreachable, matching the same "config field reaches nothing" failure mode `tower` fixes above.
 [target.'cfg(all(not(target_os = "windows"), not(target_arch = "wasm32")))'.dependencies]
-liter-llm = { workspace = true, optional = true, features = ["native-http", "bedrock", "tower"] }
+liter-llm = { workspace = true, optional = true, features = [
+  "native-http",
+  "bedrock",
+  "tower",
+  "azure-auth",
+  "bedrock-auth",
+  "copilot-auth",
+  "vertex-auth",
+] }
 # Xberg resolves pretrained tokenizer files through its shared hf-hub 1 client;
 # keep tokenizers' separate `http` client disabled to avoid a second cache stack.
 tokenizers = { version = "0.23", default-features = false, features = ["fancy-regex"], optional = true }
@@ -1156,9 +1191,18 @@ ureq = { version = "3.3", default-features = false, features = [
 # trusts the Windows system certificate store via WinCrypt (#1146). hf-hub is declared once in
 # the target-independent `not(wasm32)` block below (1.0 uses reqwest/rustls → aws-lc-sys, which
 # builds on Windows MSVC — same stack liter-llm already relies on here).
-# `tower` addition: see the matching comment on the non-Windows liter-llm entry above.
+# `tower`/`azure-auth`/`bedrock-auth`/`copilot-auth`/`vertex-auth` addition: see the matching
+# comment on the non-Windows liter-llm entry above.
 [target.'cfg(all(target_os = "windows", not(target_arch = "wasm32")))'.dependencies]
-liter-llm = { workspace = true, optional = true, features = ["native-http", "bedrock", "tower"] }
+liter-llm = { workspace = true, optional = true, features = [
+  "native-http",
+  "bedrock",
+  "tower",
+  "azure-auth",
+  "bedrock-auth",
+  "copilot-auth",
+  "vertex-auth",
+] }
 # Keep tokenizers' separate `http` client disabled; Xberg uses the shared hf-hub 1 resolver.
 tokenizers = { version = "0.23", default-features = false, features = ["fancy-regex"], optional = true }
 # ureq on Windows: ring-backed rustls + platform-verifier (WinCrypt OS trust store, no openssl).

@@ -75,7 +75,7 @@ pub struct LlmConfig {
     /// feature is disabled. See [`crate::llm::client::parse_reasoning_effort`] for the
     /// conversion into `liter_llm::ReasoningEffort`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "alef-meta", alef(since = "1.2.0"))]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
     pub reasoning_effort: Option<String>,
 
     /// Provider-specific extra parameters merged into the request body (guardrails,
@@ -85,7 +85,7 @@ pub struct LlmConfig {
     /// Mirrors liter-llm's `ChatCompletionRequest::extra_body`. A request-time
     /// parameter like `temperature`/`max_tokens` above, not a client-level setting.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "alef-meta", alef(since = "1.2.0"))]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
     pub extra_body: Option<serde_json::Value>,
 
     /// Whether liter-llm should load provider credentials from environment variables.
@@ -183,6 +183,143 @@ pub struct LlmConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
     pub bedrock: Option<Box<BedrockConfig>>,
+
+    /// Managed OAuth2/STS credential provider for auth modes liter-llm cannot express via a
+    /// static `api_key` — Azure AD, Vertex AI OAuth2, Vertex AI Application Default
+    /// Credentials, and AWS STS Web Identity (EKS IRSA) for Bedrock.
+    ///
+    /// Mirrors liter-llm's `client::ClientConfigBuilder::credential_provider`, which takes an
+    /// `Arc<dyn liter_llm::auth::CredentialProvider>` trait object — that cannot appear in a
+    /// serde DTO. Every [`CredentialProviderConfig`] variant is plain data instead, so it
+    /// round-trips through TOML/JSON/YAML and every language binding like the rest of
+    /// `LlmConfig`.
+    ///
+    /// Inert on `wasm32`: `crate::llm` (the module that reads this field —
+    /// [`crate::llm::client::build_credential_provider`] and friends) is compiled out
+    /// entirely on that target, via the crate-root `#[cfg(all(feature = "liter-llm",
+    /// not(target_arch = "wasm32")))] pub mod llm;` gate in `lib.rs`. Every variant needs
+    /// liter-llm's `native-http`-backed auth modules, and wasm32 builds request only
+    /// `wasm-http` (see the `liter-llm` dependency comment in Cargo.toml), so there is no
+    /// code path left on that target to construct a provider from this field, or to reject
+    /// it. This type (`core::config::llm`) has no `liter-llm` dependency itself and compiles
+    /// on every target, so setting this field on a wasm32 build is accepted by serde and
+    /// silently ignored — a plain no-op, not a [`crate::XbergError::Validation`]. Reject a
+    /// wasm32 build that sets this field yourself if that silence is a problem for your use
+    /// case; xberg does not do it for you.
+    ///
+    /// GitHub Copilot's device-flow provider has no variant here: it takes no configuration at
+    /// all (`liter_llm::auth::github_copilot::GithubCopilotCredentialProvider::new` accepts only
+    /// an HTTP client) and drives an interactive terminal prompt, so it cannot be expressed as
+    /// data. A Rust embedder who needs it — or any other fully custom `CredentialProvider` — can
+    /// call `xberg::llm::client::create_client_with_credential_provider` directly with a
+    /// `liter-llm` dependency of their own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
+    pub credential_provider: Option<Box<CredentialProviderConfig>>,
+}
+
+/// Managed credential-provider configuration for OAuth2/STS-based authentication modes liter-llm
+/// cannot express via a static `api_key`. See [`LlmConfig::credential_provider`].
+///
+/// `Debug` is implemented by hand: [`CredentialProviderConfig::AzureAd`]'s `client_secret` is a
+/// credential and must never be printed, matching [`LlmConfig`]'s own redaction policy. The
+/// other variants carry no secret material — [`CredentialProviderConfig::VertexOauth2`] and
+/// [`CredentialProviderConfig::BedrockWebIdentity`] reference a *file path*, never the key or
+/// token itself.
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[cfg_attr(feature = "api", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
+pub enum CredentialProviderConfig {
+    /// Azure AD OAuth2 client-credentials flow (Azure OpenAI / Azure Cognitive Services).
+    AzureAd {
+        /// Azure AD tenant ID.
+        tenant_id: String,
+        /// Application (client) ID.
+        client_id: String,
+        /// Client secret value. Secret — never logged.
+        client_secret: String,
+        /// OAuth2 scope. Defaults to liter-llm's own
+        /// `https://cognitiveservices.azure.com/.default` when unset.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scope: Option<String>,
+    },
+    /// Google Vertex AI OAuth2 via a service-account JSON key file on disk.
+    ///
+    /// Points at a file path rather than embedding the key inline: the key file contains an
+    /// RSA private key — stronger secret material than an API key — and `LlmConfig` must never
+    /// carry that directly, matching the credential-handling policy the rest of this module
+    /// follows.
+    VertexOauth2 {
+        /// Path to a Google service-account JSON key file (the same file
+        /// `GOOGLE_APPLICATION_CREDENTIALS` would point to).
+        service_account_key_file: String,
+        /// OAuth2 scope. Defaults to liter-llm's own Vertex AI scope when unset.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scope: Option<String>,
+    },
+    /// Google Vertex AI Application Default Credentials, resolved from the GCE/GKE/Cloud Run
+    /// metadata server. Carries no secret material at all.
+    VertexAdc {
+        /// OAuth2 scope. Defaults to liter-llm's own Vertex AI scope when unset.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scope: Option<String>,
+    },
+    /// AWS STS `AssumeRoleWithWebIdentity` (EKS IRSA / OIDC federation) for Bedrock.
+    BedrockWebIdentity {
+        /// ARN of the IAM role to assume.
+        role_arn: String,
+        /// Path to a file containing the OIDC JWT (the same file
+        /// `AWS_WEB_IDENTITY_TOKEN_FILE` would point to).
+        token_file: String,
+        /// STS session name. Defaults to liter-llm's own default (`"liter-llm-session"`) when
+        /// unset.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_name: Option<String>,
+        /// AWS region. Defaults to liter-llm's own default (`"us-east-1"`) when unset.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        region: Option<String>,
+    },
+}
+
+impl std::fmt::Debug for CredentialProviderConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::AzureAd {
+                tenant_id,
+                client_id,
+                scope,
+                client_secret: _,
+            } => f
+                .debug_struct("AzureAd")
+                .field("tenant_id", tenant_id)
+                .field("client_id", client_id)
+                .field("client_secret", &REDACTED)
+                .field("scope", scope)
+                .finish(),
+            Self::VertexOauth2 {
+                service_account_key_file,
+                scope,
+            } => f
+                .debug_struct("VertexOauth2")
+                .field("service_account_key_file", service_account_key_file)
+                .field("scope", scope)
+                .finish(),
+            Self::VertexAdc { scope } => f.debug_struct("VertexAdc").field("scope", scope).finish(),
+            Self::BedrockWebIdentity {
+                role_arn,
+                token_file,
+                session_name,
+                region,
+            } => f
+                .debug_struct("BedrockWebIdentity")
+                .field("role_arn", role_arn)
+                .field("token_file", token_file)
+                .field("session_name", session_name)
+                .field("region", region)
+                .finish(),
+        }
+    }
 }
 
 /// A custom provider configuration entry, in addition to liter-llm's built-in providers.
@@ -353,6 +490,7 @@ impl std::fmt::Debug for LlmConfig {
             .field("cooldown_secs", &self.cooldown_secs)
             .field("health_check_secs", &self.health_check_secs)
             .field("bedrock", &self.bedrock)
+            .field("credential_provider", &self.credential_provider)
             .finish()
     }
 }
@@ -503,6 +641,7 @@ mod tests {
         assert!(cfg.cooldown_secs.is_none());
         assert!(cfg.health_check_secs.is_none());
         assert!(cfg.bedrock.is_none());
+        assert!(cfg.credential_provider.is_none());
     }
 
     /// Verify the struct-update pattern from the issue compiles and produces
@@ -533,6 +672,7 @@ mod tests {
         assert!(cfg.cooldown_secs.is_none());
         assert!(cfg.health_check_secs.is_none());
         assert!(cfg.bedrock.is_none());
+        assert!(cfg.credential_provider.is_none());
     }
 
     /// `load_env` and `headers` must round-trip through TOML so they are settable
@@ -605,6 +745,10 @@ load_env = true
             "health_check_secs should be omitted when None: {json}"
         );
         assert!(!json.contains("bedrock"), "bedrock should be omitted when None: {json}");
+        assert!(
+            !json.contains("credential_provider"),
+            "credential_provider should be omitted when None: {json}"
+        );
     }
 
     /// Regression test for https://github.com/xberg-io/xberg/issues/1381
@@ -891,5 +1035,190 @@ region = "us-east-1"
             assert_eq!(decoded, mode);
         }
         assert_eq!(MergeMode::default(), MergeMode::ObjectMerge);
+    }
+
+    /// Regression test for https://github.com/xberg-io/xberg/issues/1381
+    ///
+    /// An `AzureAd` credential provider must survive a TOML load and a JSON round-trip,
+    /// tagged with `type = "azure_ad"`.
+    #[test]
+    fn test_credential_provider_azure_ad_round_trips_through_toml_and_json() {
+        let toml_src = r#"
+model = "azure/gpt-4o"
+
+[credential_provider]
+type = "azure_ad"
+tenant_id = "11111111-1111-1111-1111-111111111111"
+client_id = "22222222-2222-2222-2222-222222222222"
+client_secret = "example-client-secret"
+scope = "https://cognitiveservices.azure.com/.default"
+"#;
+        let cfg: LlmConfig = toml::from_str(toml_src).expect("deserialize LlmConfig from TOML");
+        match cfg.credential_provider.as_deref() {
+            Some(CredentialProviderConfig::AzureAd {
+                tenant_id,
+                client_id,
+                client_secret,
+                scope,
+            }) => {
+                assert_eq!(tenant_id, "11111111-1111-1111-1111-111111111111");
+                assert_eq!(client_id, "22222222-2222-2222-2222-222222222222");
+                assert_eq!(client_secret, "example-client-secret");
+                assert_eq!(scope.as_deref(), Some("https://cognitiveservices.azure.com/.default"));
+            }
+            other => panic!("expected AzureAd variant, got {other:?}"),
+        }
+
+        let round_tripped: LlmConfig =
+            serde_json::from_str(&serde_json::to_string(&cfg).expect("serialize")).expect("deserialize");
+        assert_eq!(round_tripped, cfg);
+    }
+
+    /// A `VertexOauth2` credential provider must survive a TOML load and a JSON round-trip,
+    /// tagged with `type = "vertex_oauth2"`, and carries a key *file path* rather than key
+    /// material.
+    #[test]
+    fn test_credential_provider_vertex_oauth2_round_trips_through_toml_and_json() {
+        let toml_src = r#"
+model = "vertex_ai/gemini-1.5-pro"
+
+[credential_provider]
+type = "vertex_oauth2"
+service_account_key_file = "/etc/xberg/vertex-service-account.json"
+"#;
+        let cfg: LlmConfig = toml::from_str(toml_src).expect("deserialize LlmConfig from TOML");
+        match cfg.credential_provider.as_deref() {
+            Some(CredentialProviderConfig::VertexOauth2 {
+                service_account_key_file,
+                scope,
+            }) => {
+                assert_eq!(service_account_key_file, "/etc/xberg/vertex-service-account.json");
+                assert!(scope.is_none());
+            }
+            other => panic!("expected VertexOauth2 variant, got {other:?}"),
+        }
+
+        let round_tripped: LlmConfig =
+            serde_json::from_str(&serde_json::to_string(&cfg).expect("serialize")).expect("deserialize");
+        assert_eq!(round_tripped, cfg);
+    }
+
+    /// A `VertexAdc` credential provider must survive a TOML load and a JSON round-trip,
+    /// tagged with `type = "vertex_adc"`, and carries no secret fields at all.
+    #[test]
+    fn test_credential_provider_vertex_adc_round_trips_through_toml_and_json() {
+        let toml_src = r#"
+model = "vertex_ai/gemini-1.5-pro"
+
+[credential_provider]
+type = "vertex_adc"
+"#;
+        let cfg: LlmConfig = toml::from_str(toml_src).expect("deserialize LlmConfig from TOML");
+        assert!(matches!(
+            cfg.credential_provider.as_deref(),
+            Some(CredentialProviderConfig::VertexAdc { scope: None })
+        ));
+
+        let round_tripped: LlmConfig =
+            serde_json::from_str(&serde_json::to_string(&cfg).expect("serialize")).expect("deserialize");
+        assert_eq!(round_tripped, cfg);
+    }
+
+    /// A `BedrockWebIdentity` credential provider must survive a TOML load and a JSON
+    /// round-trip, tagged with `type = "bedrock_web_identity"`.
+    #[test]
+    fn test_credential_provider_bedrock_web_identity_round_trips_through_toml_and_json() {
+        let toml_src = r#"
+model = "bedrock/anthropic.claude-3-sonnet-20240229-v1:0"
+
+[credential_provider]
+type = "bedrock_web_identity"
+role_arn = "arn:aws:iam::123456789012:role/xberg-bedrock"
+token_file = "/var/run/secrets/eks.amazonaws.com/serviceaccount/token"
+session_name = "xberg-session"
+region = "eu-central-1"
+"#;
+        let cfg: LlmConfig = toml::from_str(toml_src).expect("deserialize LlmConfig from TOML");
+        match cfg.credential_provider.as_deref() {
+            Some(CredentialProviderConfig::BedrockWebIdentity {
+                role_arn,
+                token_file,
+                session_name,
+                region,
+            }) => {
+                assert_eq!(role_arn, "arn:aws:iam::123456789012:role/xberg-bedrock");
+                assert_eq!(token_file, "/var/run/secrets/eks.amazonaws.com/serviceaccount/token");
+                assert_eq!(session_name.as_deref(), Some("xberg-session"));
+                assert_eq!(region.as_deref(), Some("eu-central-1"));
+            }
+            other => panic!("expected BedrockWebIdentity variant, got {other:?}"),
+        }
+
+        let round_tripped: LlmConfig =
+            serde_json::from_str(&serde_json::to_string(&cfg).expect("serialize")).expect("deserialize");
+        assert_eq!(round_tripped, cfg);
+    }
+
+    /// `Debug` must redact `AzureAd`'s `client_secret` while still printing the
+    /// non-secret routing fields, matching `LlmConfig`'s own redaction policy.
+    #[test]
+    fn test_credential_provider_debug_redacts_azure_client_secret() {
+        let provider = CredentialProviderConfig::AzureAd {
+            tenant_id: "tenant-123".to_string(),
+            client_id: "client-456".to_string(),
+            client_secret: "super-secret-value".to_string(),
+            scope: Some("https://cognitiveservices.azure.com/.default".to_string()),
+        };
+        let rendered = format!("{provider:?}");
+        assert!(!rendered.contains("super-secret-value"), "leaked secret: {rendered}");
+        assert!(rendered.contains("tenant-123"), "{rendered}");
+        assert!(rendered.contains("client-456"), "{rendered}");
+        assert!(rendered.contains(REDACTED), "{rendered}");
+    }
+
+    /// `Debug` must print every field of the non-secret variants verbatim: `VertexOauth2`'s
+    /// key *file path*, `VertexAdc`'s scope, and `BedrockWebIdentity`'s role/token-path/
+    /// session/region are not credentials in themselves.
+    #[test]
+    fn test_credential_provider_debug_prints_non_secret_variants_verbatim() {
+        let vertex_oauth2 = CredentialProviderConfig::VertexOauth2 {
+            service_account_key_file: "/etc/xberg/vertex.json".to_string(),
+            scope: None,
+        };
+        assert_eq!(
+            format!("{vertex_oauth2:?}"),
+            r#"VertexOauth2 { service_account_key_file: "/etc/xberg/vertex.json", scope: None }"#
+        );
+
+        let vertex_adc = CredentialProviderConfig::VertexAdc { scope: None };
+        assert_eq!(format!("{vertex_adc:?}"), "VertexAdc { scope: None }");
+
+        let bedrock = CredentialProviderConfig::BedrockWebIdentity {
+            role_arn: "arn:aws:iam::123456789012:role/xberg-bedrock".to_string(),
+            token_file: "/var/run/token".to_string(),
+            session_name: None,
+            region: None,
+        };
+        let rendered = format!("{bedrock:?}");
+        assert!(rendered.starts_with("BedrockWebIdentity {"), "{rendered}");
+        assert!(
+            rendered.contains(r#"role_arn: "arn:aws:iam::123456789012:role/xberg-bedrock""#),
+            "{rendered}"
+        );
+        assert!(rendered.contains(r#"token_file: "/var/run/token""#), "{rendered}");
+        assert!(rendered.contains("session_name: None"), "{rendered}");
+        assert!(rendered.contains("region: None"), "{rendered}");
+    }
+
+    /// The `credential_provider` field must be omitted from serialized output when unset,
+    /// same as every other optional passthrough field.
+    #[test]
+    fn test_credential_provider_omitted_from_json_when_none() {
+        let cfg = LlmConfig {
+            model: "openai/gpt-4o".to_string(),
+            ..LlmConfig::default()
+        };
+        let json = serde_json::to_string(&cfg).expect("serialize");
+        assert_eq!(json, r#"{"model":"openai/gpt-4o"}"#);
     }
 }

@@ -1,5 +1,3 @@
-#![deny(clippy::print_stdout, clippy::print_stderr)]
-#![cfg_attr(test, allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro))]
 //! Xberg - High-Performance Document Intelligence Library
 //!
 //! Xberg is a Rust-first document extraction library with language-agnostic plugin support.
@@ -33,6 +31,8 @@
 //! - Configurable caching and quality processing
 //! - Cross-language plugin support (Python, Node.js planned)
 
+#![deny(clippy::print_stdout, clippy::print_stderr)]
+#![cfg_attr(test, allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro))]
 #![deny(unsafe_code)]
 
 #[cfg(all(
@@ -217,14 +217,14 @@ pub use core::split::{SplitConfig, SplitSegment, SplitStrategy, split_and_extrac
 
 pub use core::config::{
     AccelerationConfig, BedrockConfig, BreadcrumbTarget, CallMode, CaptioningConfig, ChunkClassificationConfig,
-    ChunkClassificationDefinition, ChunkSizing, ChunkerType, ChunkingConfig, ContentFilterConfig, CsvConfig,
-    EmailConfig, EmbeddingConfig, EmbeddingModelType, ExecutionProviderType, ExtractInput, ExtractInputKind,
-    ExtractionConfig, ExtractionErrorItem, ExtractionResult, ExtractionSummary, FileExtractionConfig,
-    ImageExtractionConfig, JupyterCellRendering, LanguageDetectionConfig, LlmConfig, MergeMode, NerBackendKind,
-    NerConfig, OcrConfig, OutputFormat, PageClassificationConfig, PageConfig, PostProcessorConfig, RedactionConfig,
-    RedactionPattern, RedactionTerm, RerankerConfig, RerankerHead, RerankerModelType, StructuredExtractionConfig,
-    SummarizationConfig, TableChunkingMode, TokenReductionOptions, TranslationConfig, UrlExtractionConfig,
-    UrlExtractionMode,
+    ChunkClassificationDefinition, ChunkSizing, ChunkerType, ChunkingConfig, ContentFilterConfig,
+    CredentialProviderConfig, CsvConfig, EmailConfig, EmbeddingConfig, EmbeddingModelType, ExecutionProviderType,
+    ExtractInput, ExtractInputKind, ExtractionConfig, ExtractionErrorItem, ExtractionResult, ExtractionSummary,
+    FileExtractionConfig, ImageExtractionConfig, JupyterCellRendering, LanguageDetectionConfig, LlmConfig, MergeMode,
+    NerBackendKind, NerConfig, OcrConfig, OutputFormat, PageClassificationConfig, PageConfig, PostProcessorConfig,
+    RedactionConfig, RedactionPattern, RedactionTerm, RerankerConfig, RerankerHead, RerankerModelType,
+    StructuredExtractionConfig, SummarizationConfig, TableChunkingMode, TokenReductionOptions, TranslationConfig,
+    UrlExtractionConfig, UrlExtractionMode,
 };
 pub use core::config::{
     LateInteractionConfig, LateInteractionModelType, SparseEmbeddingConfig, SparseEmbeddingModelType,

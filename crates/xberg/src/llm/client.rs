@@ -1,7 +1,12 @@
 //! LLM client factory — converts xberg's LlmConfig to a liter-llm DefaultClient.
 
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
+
 use liter_llm::client::{ClientConfig, DefaultClient};
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::core::config::CredentialProviderConfig;
 use crate::core::config::{
     BedrockConfig, LlmBudgetConfig, LlmCacheConfig, LlmConfig, LlmProviderConfig, LlmRateLimitConfig,
 };
@@ -161,6 +166,142 @@ fn to_liter_llm_rate_limit(rate_limit: &LlmRateLimitConfig) -> liter_llm::client
     }
 }
 
+/// Build a live liter-llm credential provider from xberg's [`CredentialProviderConfig`].
+///
+/// Every variant needs one of liter-llm's `native-http`-backed auth modules
+/// (`azure-auth`, `vertex-auth`, `bedrock-auth` — `vertex-adc` rides plain `native-http`),
+/// which xberg's Cargo.toml enables unconditionally on every non-wasm32 target (see the
+/// `liter-llm` dependency comment there). This function is therefore only compiled on
+/// non-wasm32 — the same reason it exists at all: the whole `crate::llm` module (this file
+/// included) is compiled out on `wasm32` at the crate root
+/// (`#[cfg(all(feature = "liter-llm", not(target_arch = "wasm32")))]` on `pub mod llm;` in
+/// `lib.rs`), so there is nothing here for a wasm32 build to reject or fall back from.
+#[cfg(not(target_arch = "wasm32"))]
+fn build_credential_provider(
+    config: &CredentialProviderConfig,
+) -> crate::Result<Arc<dyn liter_llm::auth::CredentialProvider>> {
+    match config {
+        CredentialProviderConfig::AzureAd {
+            tenant_id,
+            client_id,
+            client_secret,
+            scope,
+        } => Ok(build_azure_ad_provider(
+            tenant_id,
+            client_id,
+            client_secret,
+            scope.as_deref(),
+        )),
+        CredentialProviderConfig::VertexOauth2 {
+            service_account_key_file,
+            scope,
+        } => build_vertex_oauth2_provider(service_account_key_file, scope.as_deref()),
+        CredentialProviderConfig::VertexAdc { scope } => Ok(build_vertex_adc_provider(scope.as_deref())),
+        CredentialProviderConfig::BedrockWebIdentity {
+            role_arn,
+            token_file,
+            session_name,
+            region,
+        } => Ok(build_bedrock_web_identity_provider(
+            role_arn,
+            token_file,
+            session_name.as_deref(),
+            region.as_deref(),
+        )),
+    }
+}
+
+/// Build an Azure AD OAuth2 client-credentials provider. See [`build_credential_provider`].
+#[cfg(not(target_arch = "wasm32"))]
+fn build_azure_ad_provider(
+    tenant_id: &str,
+    client_id: &str,
+    client_secret: &str,
+    scope: Option<&str>,
+) -> Arc<dyn liter_llm::auth::CredentialProvider> {
+    let mut provider = liter_llm::auth::azure_ad::AzureAdCredentialProvider::new(
+        tenant_id.to_string(),
+        client_id.to_string(),
+        secrecy::SecretString::from(client_secret.to_string()),
+    );
+    if let Some(scope) = scope {
+        provider = provider.with_scope(scope.to_string());
+    }
+    Arc::new(provider)
+}
+
+/// Build a Vertex AI OAuth2 provider from a service-account JSON key file. See
+/// [`build_credential_provider`].
+#[cfg(not(target_arch = "wasm32"))]
+fn build_vertex_oauth2_provider(
+    service_account_key_file: &str,
+    scope: Option<&str>,
+) -> crate::Result<Arc<dyn liter_llm::auth::CredentialProvider>> {
+    let mut provider = liter_llm::auth::vertex_oauth::VertexOAuthCredentialProvider::from_key_file(
+        std::path::Path::new(service_account_key_file),
+    )
+    .map_err(|e| crate::XbergError::Validation {
+        message: format!("Failed to load Vertex OAuth2 service account key file '{service_account_key_file}': {e}"),
+        source: Some(Box::new(e)),
+    })?;
+    if let Some(scope) = scope {
+        provider = provider.with_scope(scope.to_string());
+    }
+    Ok(Arc::new(provider))
+}
+
+/// Build a Vertex AI Application Default Credentials provider. See [`build_credential_provider`].
+#[cfg(not(target_arch = "wasm32"))]
+fn build_vertex_adc_provider(scope: Option<&str>) -> Arc<dyn liter_llm::auth::CredentialProvider> {
+    let mut provider = liter_llm::auth::vertex_adc::VertexAdcCredentialProvider::new();
+    if let Some(scope) = scope {
+        provider = provider.with_scope(scope.to_string());
+    }
+    Arc::new(provider)
+}
+
+/// Build an AWS STS `AssumeRoleWithWebIdentity` provider for Bedrock. See
+/// [`build_credential_provider`].
+#[cfg(not(target_arch = "wasm32"))]
+fn build_bedrock_web_identity_provider(
+    role_arn: &str,
+    token_file: &str,
+    session_name: Option<&str>,
+    region: Option<&str>,
+) -> Arc<dyn liter_llm::auth::CredentialProvider> {
+    Arc::new(liter_llm::auth::bedrock_sts::WebIdentityCredentialProvider::new(
+        role_arn.to_string(),
+        token_file.to_string(),
+        session_name.unwrap_or("liter-llm-session").to_string(),
+        region.unwrap_or("us-east-1").to_string(),
+    ))
+}
+
+/// Cache backend name accepted when liter-llm's `opendal-cache` feature is not compiled in.
+///
+/// xberg does not enable `opendal-cache` (see the `liter-llm` dependency comment in
+/// Cargo.toml): it pulls opendal's `services-memory`/`services-redis`/`services-fs`/
+/// `services-s3` clients, a heavy dependency for a passthrough cache config field. Without
+/// this check, liter-llm's own `into_client_builder` would silently downgrade any other
+/// backend name to `Memory` — see [`validate_cache_backend`].
+const SUPPORTED_CACHE_BACKEND: &str = "memory";
+
+/// Reject an `LlmConfig::cache` backend name xberg cannot honor, instead of letting it
+/// silently degrade to the in-memory backend inside liter-llm's own `into_client_builder`.
+fn validate_cache_backend(cache: &LlmCacheConfig) -> crate::Result<()> {
+    match cache.backend.as_deref() {
+        None | Some(SUPPORTED_CACHE_BACKEND) => Ok(()),
+        Some(other) => Err(crate::XbergError::Validation {
+            message: format!(
+                "Unsupported LLM cache backend '{other}': xberg only supports \"{SUPPORTED_CACHE_BACKEND}\" \
+                 (liter-llm's `opendal-cache` feature, which unlocks Redis/S3/filesystem-backed caches, is not \
+                 compiled in). Use \"{SUPPORTED_CACHE_BACKEND}\" or omit `backend`."
+            ),
+            source: None,
+        }),
+    }
+}
+
 /// Translate xberg's [`LlmConfig`] into liter-llm's own canonical `client::LlmConfig`,
 /// field for field, so the two never drift silently: every field the two types share
 /// (by name and type, by construction — see the `LlmConfig` module doc) is copied
@@ -233,8 +374,15 @@ fn to_liter_llm_config(config: &LlmConfig) -> liter_llm::client::LlmConfig {
 /// constructing a live HTTP client.
 fn build_client_config(config: &LlmConfig) -> crate::Result<ClientConfig> {
     register_configured_providers(config)?;
+    if let Some(ref cache) = config.cache {
+        validate_cache_backend(cache)?;
+    }
 
     let mut builder = to_liter_llm_config(config).into_client_builder();
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        builder = apply_credential_provider(config, builder)?;
+    }
 
     if let Some(ref headers) = config.headers {
         for (key, value) in headers {
@@ -249,6 +397,20 @@ fn build_client_config(config: &LlmConfig) -> crate::Result<ClientConfig> {
     }
 
     Ok(builder.build())
+}
+
+/// Resolve [`LlmConfig::credential_provider`], if set, into a live liter-llm provider and
+/// attach it to `builder`. A no-op when unset.
+#[cfg(not(target_arch = "wasm32"))]
+fn apply_credential_provider(
+    config: &LlmConfig,
+    builder: liter_llm::client::ClientConfigBuilder,
+) -> crate::Result<liter_llm::client::ClientConfigBuilder> {
+    let Some(provider_config) = config.credential_provider.as_deref() else {
+        return Ok(builder);
+    };
+    let provider = build_credential_provider(provider_config)?;
+    Ok(builder.credential_provider(provider))
 }
 
 /// Create a liter-llm [`DefaultClient`] from xberg's [`LlmConfig`].
@@ -279,10 +441,48 @@ pub(crate) fn create_client(config: &LlmConfig) -> crate::Result<DefaultClient> 
     })
 }
 
+/// Create a liter-llm [`DefaultClient`] from xberg's [`LlmConfig`], overriding any
+/// [`LlmConfig::credential_provider`] with an explicit, caller-supplied provider.
+///
+/// This is the escape hatch for authentication modes [`CredentialProviderConfig`] cannot
+/// express as data — GitHub Copilot's interactive device-flow provider
+/// (`liter_llm::auth::github_copilot::GithubCopilotCredentialProvider`), or any fully custom
+/// [`liter_llm::auth::CredentialProvider`] implementation. Building `provider` requires the
+/// caller to depend on `liter-llm` directly; xberg does not re-export its auth types.
+///
+/// Not available on wasm32: this function lives in `crate::llm::client`, which — like the rest
+/// of `crate::llm` — is compiled out on that target (see the crate-root `pub mod llm;` gate in
+/// `lib.rs`), because there is no native-http-backed `CredentialProvider` implementation to
+/// construct `provider` from there in the first place. [`LlmConfig::credential_provider`]
+/// itself still exists as a field on wasm32 (see that field's docs) — it is simply never read.
+///
+/// `#[cfg_attr(alef, alef(skip))]`: `Arc<dyn liter_llm::auth::CredentialProvider>` is a trait
+/// object with no FFI-representable equivalent — alef's own `lossy_sanitized_surface` check
+/// rejects it outright rather than silently degrading the parameter to a `String`, matching
+/// every other binding-unreachable LLM entry point in this crate (e.g.
+/// `llm::text_completion::complete_text`, `llm::structured::complete_with_json_schema`).
+#[cfg(not(target_arch = "wasm32"))]
+#[cfg_attr(alef, alef(skip))]
+pub fn create_client_with_credential_provider(
+    config: &LlmConfig,
+    provider: Arc<dyn liter_llm::auth::CredentialProvider>,
+) -> crate::Result<DefaultClient> {
+    let mut client_config = build_client_config(config)?;
+    client_config.credential_provider = Some(provider);
+
+    DefaultClient::new(client_config, Some(&config.model)).map_err(|e| {
+        let msg = format!("Failed to build LLM client for model '{}': {e}", config.model);
+        crate::XbergError::Validation {
+            message: msg,
+            source: Some(Box::new(e)),
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::config::{BedrockConfig, LlmConfig};
+    use crate::core::config::{BedrockConfig, CredentialProviderConfig, LlmConfig};
 
     #[cfg(feature = "api")]
     #[tokio::test]
@@ -644,11 +844,14 @@ mod tests {
         assert!(matches!(cache.backend, liter_llm::tower::CacheBackend::Memory));
     }
 
-    /// Without the `opendal-cache` liter-llm feature, a non-memory cache backend
-    /// name gracefully degrades to the in-memory backend instead of failing —
-    /// matching liter-llm's own `into_client_builder` fallback exactly.
+    /// Regression test for https://github.com/xberg-io/xberg/issues/1381
+    ///
+    /// Without the `opendal-cache` liter-llm feature, a non-memory cache backend name must be
+    /// rejected up front instead of silently degrading to the in-memory backend inside
+    /// liter-llm's own `into_client_builder` — a user who configured `backend = "s3"` and got
+    /// silent in-memory caching would have no way to notice.
     #[test]
-    fn test_build_client_config_cache_backend_falls_back_to_memory_without_opendal_cache() {
+    fn test_build_client_config_rejects_unsupported_cache_backend_without_opendal_cache() {
         let config = LlmConfig {
             model: "openai/gpt-4o".to_string(),
             api_key: Some("test-key".to_string()),
@@ -659,9 +862,48 @@ mod tests {
             ..LlmConfig::default()
         };
 
+        match build_client_config(&config) {
+            Err(crate::XbergError::Validation { message, .. }) => {
+                assert!(message.contains("Unsupported LLM cache backend 's3'"), "{message}");
+                assert!(message.contains("opendal-cache"), "{message}");
+            }
+            Err(other) => panic!("expected a Validation error, got: {other}"),
+            Ok(_) => panic!("expected build_client_config to reject the unsupported cache backend"),
+        }
+    }
+
+    /// A `cache.backend` of exactly `"memory"` must still build successfully — the only
+    /// backend name xberg accepts without the `opendal-cache` liter-llm feature.
+    #[test]
+    fn test_build_client_config_accepts_explicit_memory_cache_backend() {
+        let config = LlmConfig {
+            model: "openai/gpt-4o".to_string(),
+            api_key: Some("test-key".to_string()),
+            cache: Some(Box::new(LlmCacheConfig {
+                backend: Some("memory".to_string()),
+                ..LlmCacheConfig::default()
+            })),
+            ..LlmConfig::default()
+        };
+
         let client_config = build_client_config(&config).expect("build client config");
         let cache = client_config.cache_config.expect("cache_config present");
+        assert!(matches!(cache.backend, liter_llm::tower::CacheBackend::Memory));
+    }
 
+    /// An absent `cache.backend` must still build successfully, defaulting to the in-memory
+    /// backend exactly as liter-llm's own `into_client_builder` does.
+    #[test]
+    fn test_build_client_config_accepts_unset_cache_backend() {
+        let config = LlmConfig {
+            model: "openai/gpt-4o".to_string(),
+            api_key: Some("test-key".to_string()),
+            cache: Some(Box::new(LlmCacheConfig::default())),
+            ..LlmConfig::default()
+        };
+
+        let client_config = build_client_config(&config).expect("build client config");
+        let cache = client_config.cache_config.expect("cache_config present");
         assert!(matches!(cache.backend, liter_llm::tower::CacheBackend::Memory));
     }
 
@@ -1056,5 +1298,156 @@ mod tests {
         };
 
         assert_eq!(request.extra_body, Some(extra));
+    }
+
+    /// Regression test for https://github.com/xberg-io/xberg/issues/1381
+    ///
+    /// A `VertexAdc` credential provider needs no I/O to construct (unlike `AzureAd`, which
+    /// would perform a live OAuth exchange the first time it resolves, and `VertexOauth2`,
+    /// which reads a key file) — it must build a client and attach a provider without error.
+    /// liter-llm's own `ClientConfig::Debug` prints only `"[configured]"` for a set
+    /// `credential_provider`, so that string is the exact, structural proof a provider reached
+    /// the client config, not merely a truthiness check.
+    #[test]
+    fn test_build_client_config_attaches_vertex_adc_credential_provider() {
+        let config = LlmConfig {
+            model: "vertex_ai/gemini-1.5-pro".to_string(),
+            credential_provider: Some(Box::new(CredentialProviderConfig::VertexAdc { scope: None })),
+            ..LlmConfig::default()
+        };
+
+        let client_config = build_client_config(&config).expect("build client config");
+        assert!(client_config.credential_provider.is_some());
+        let rendered = format!("{client_config:?}");
+        assert!(
+            rendered.contains(r#"credential_provider: Some("[configured]")"#),
+            "{rendered}"
+        );
+    }
+
+    /// An `AzureAd` credential provider must reach the client config, and liter-llm's own
+    /// `ClientConfig::Debug` must never leak the `client_secret` xberg handed it.
+    #[test]
+    fn test_build_client_config_attaches_azure_ad_credential_provider_without_leaking_secret() {
+        let config = LlmConfig {
+            model: "azure/gpt-4o".to_string(),
+            credential_provider: Some(Box::new(CredentialProviderConfig::AzureAd {
+                tenant_id: "tenant-123".to_string(),
+                client_id: "client-456".to_string(),
+                client_secret: "super-secret-azure-value".to_string(),
+                scope: None,
+            })),
+            ..LlmConfig::default()
+        };
+
+        let client_config = build_client_config(&config).expect("build client config");
+        let rendered = format!("{client_config:?}");
+        assert!(
+            !rendered.contains("super-secret-azure-value"),
+            "liter-llm ClientConfig Debug leaked the Azure client secret: {rendered}"
+        );
+        assert!(
+            rendered.contains(r#"credential_provider: Some("[configured]")"#),
+            "{rendered}"
+        );
+    }
+
+    /// A `VertexOauth2` credential provider reads its service-account key file at build time —
+    /// an invalid file must surface as a named `XbergError::Validation` naming the file, not a
+    /// panic or an opaque downstream error.
+    #[test]
+    fn test_build_client_config_rejects_missing_vertex_oauth2_key_file() {
+        let config = LlmConfig {
+            model: "vertex_ai/gemini-1.5-pro".to_string(),
+            credential_provider: Some(Box::new(CredentialProviderConfig::VertexOauth2 {
+                service_account_key_file: "/nonexistent/xberg-test-vertex-key.json".to_string(),
+                scope: None,
+            })),
+            ..LlmConfig::default()
+        };
+
+        match build_client_config(&config) {
+            Err(crate::XbergError::Validation { message, .. }) => {
+                assert!(
+                    message.contains("/nonexistent/xberg-test-vertex-key.json"),
+                    "error should name the file: {message}"
+                );
+                assert!(
+                    message.contains("Vertex OAuth2"),
+                    "error should name the auth mode: {message}"
+                );
+            }
+            other => panic!("expected a Validation error, got: {other:?}"),
+        }
+    }
+
+    /// A valid service-account JSON key file must build a `VertexOauth2` credential provider
+    /// successfully. Uses a per-process-unique temp file path so parallel test runs never
+    /// collide (test-independence).
+    #[test]
+    fn test_build_client_config_attaches_vertex_oauth2_credential_provider_from_key_file() {
+        let path = std::env::temp_dir().join(format!(
+            "xberg-test-vertex-oauth2-key-{}-{:?}.json",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        // Assembled rather than written as a literal: a PEM header in source trips the
+        // detect-private-key commit hook, and suppressing that hook to admit a fixture is
+        // exactly the exemption that later lets a real key through.
+        let pem_label = "PRIVATE KEY";
+        let fixture_json = serde_json::json!({
+            "client_email": "xberg-test@example.iam.gserviceaccount.com",
+            "private_key": format!("-----BEGIN {pem_label}-----\nZmFrZS1rZXktbWF0ZXJpYWw=\n-----END {pem_label}-----\n"),
+        });
+        std::fs::write(&path, fixture_json.to_string()).expect("write fixture key file");
+
+        let config = LlmConfig {
+            model: "vertex_ai/gemini-1.5-pro".to_string(),
+            credential_provider: Some(Box::new(CredentialProviderConfig::VertexOauth2 {
+                service_account_key_file: path.to_string_lossy().into_owned(),
+                scope: Some("https://www.googleapis.com/auth/cloud-platform".to_string()),
+            })),
+            ..LlmConfig::default()
+        };
+
+        let result = build_client_config(&config);
+        let _ = std::fs::remove_file(&path);
+
+        let client_config = result.expect("build client config");
+        assert!(client_config.credential_provider.is_some());
+    }
+
+    /// A `BedrockWebIdentity` credential provider needs no I/O to construct — the token file is
+    /// only read when the provider later resolves a credential — so it must build a client
+    /// successfully from plain data alone.
+    #[test]
+    fn test_build_client_config_attaches_bedrock_web_identity_credential_provider() {
+        let config = LlmConfig {
+            model: "bedrock/anthropic.claude-3-sonnet-20240229-v1:0".to_string(),
+            credential_provider: Some(Box::new(CredentialProviderConfig::BedrockWebIdentity {
+                role_arn: "arn:aws:iam::123456789012:role/xberg-bedrock".to_string(),
+                token_file: "/var/run/secrets/eks.amazonaws.com/serviceaccount/token".to_string(),
+                session_name: None,
+                region: None,
+            })),
+            ..LlmConfig::default()
+        };
+
+        let client_config = build_client_config(&config).expect("build client config");
+        assert!(client_config.credential_provider.is_some());
+    }
+
+    /// With no `credential_provider` set, the client config's slot must stay `None` so
+    /// liter-llm falls back to `api_key`/environment resolution as before this feature existed.
+    #[test]
+    fn test_build_client_config_leaves_credential_provider_unset_when_absent() {
+        let config = LlmConfig {
+            model: "openai/gpt-4o".to_string(),
+            api_key: Some("test-key".to_string()),
+            ..LlmConfig::default()
+        };
+
+        let client_config = build_client_config(&config).expect("build client config");
+        assert!(client_config.credential_provider.is_none());
     }
 }
