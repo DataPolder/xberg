@@ -47,7 +47,7 @@ classifiers = [
   "Topic :: Text Processing :: Indexing",
   "Typing :: Typed",
 ]
-dependencies = ["langchain-core>=1.0,<2.0", "xberg>=1.0.14,<2"]
+dependencies = ["langchain-core>=1.0,<2.0", "xberg>=1.1.0,<2"]
 
 [dependency-groups]
 dev = ["pytest>=9.0", "pytest-asyncio>=0.24", "pytest-cov>=6.0", "mypy>=1.19", "pre-commit>=4.0"]
