@@ -279,9 +279,9 @@ Configure via `--ocr-backend candle-deepseek-ocr` or `ocr.backend = "candle-deep
 
 Pure-Rust VLM OCR. PaddleOCR-VL 1.5 vision-language model with SigLIP+Ernie integration. Fast multilingual document OCR with strong CJK support. No ONNX Runtime dependency. Ships compiled in by default in the published packages (Python, Node, Go, Java, C#, Ruby, PHP, Elixir, Kotlin/JVM, Zig, CLI/Docker) on Linux, macOS, and Windows — no feature flag needed.
 
-**Rust crate feature flag (for custom builds):** `candle-paddleocr-vl-15`
+**Rust crate feature flag (for custom builds):** `candle-paddleocr-vl`
 
-**Implies:** `candle-ocr`, `xberg-candle-ocr/paddleocr-vl-15`
+**Implies:** `candle-ocr`, `xberg-candle-ocr/paddleocr-vl`
 
 **Deployment:**
 
@@ -295,13 +295,13 @@ Pure-Rust VLM OCR. PaddleOCR-VL 1.5 vision-language model with SigLIP+Ernie inte
 - Lightweight architecture optimized for speed and accuracy on scanned documents
 - CPU dtype: F32; CUDA dtype: F16
 
-Configure via `--ocr-backend candle-paddleocr-vl-15` or `ocr.backend = "candle-paddleocr-vl-15"` in config. Set device via `backend_options`: `{"device":"metal"}`, `{"device":"cuda"}`.
+Configure via `--ocr-backend candle-paddleocr-vl` or `ocr.backend = "candle-paddleocr-vl"` in config. Set device via `backend_options`: `{"device":"metal"}`, `{"device":"cuda"}`.
 
 **Attribution:** Model vendored from [jhqxxx/aha](https://github.com/jhqxxx/aha) (Apache-2.0). See [ATTRIBUTIONS.md](https://github.com/xberg-io/xberg/blob/main/ATTRIBUTIONS.md).
 
 ### Candle VLM-OCR Umbrella
 
-The `candle-vlm-ocr` feature aggregates all Candle VLM-OCR backends: `candle-deepseek-ocr`, `candle-paddleocr-vl-15`, `candle-glm-ocr`, and `candle-trocr`. Use this aggregate to enable all pure-Rust vision-language OCR options in a single feature flag.
+The `candle-vlm-ocr` feature aggregates all Candle VLM-OCR backends: `candle-deepseek-ocr`, `candle-paddleocr-vl`, `candle-glm-ocr`, and `candle-trocr`. Use this aggregate to enable all pure-Rust vision-language OCR options in a single feature flag.
 
 ---
 
@@ -506,6 +506,57 @@ Rust builds are modular through Cargo features. The default feature set is `toki
 | **Text analysis**     | `language-detection`, `chunking`, `quality`, `keywords`, `stopwords`, `diff`, `ner`, `redaction`, `summarization`, `translation`, `classification`, `captioning`, `qr-codes` |
 | **Servers**           | `api`, `mcp`, `mcp-http`, `otel`                                                                        |
 | **Bundles**           | `formats`, `analysis`, `services`, `full`, `server`, `cli`, `wasm-target`, `android-target`, `windows-target` |
+
+### Additional Rust Feature Flags
+
+The table above covers the main entry points. These are lower-level or opt-in flags not otherwise
+documented — each enables narrower functionality and carries a specific cost (extra native
+dependency, platform restriction, or CI-untested status per Cargo.toml's own comments).
+
+| Feature                                                       | Enables                                                                 | Cost / restriction |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------ | ------------------- |
+| `notebook`                                                    | Jupyter `.ipynb` extraction                                              | Pure Rust, no extra deps; already included by `office` |
+| `wordperfect`                                                 | `.wpd` extraction via vendored libwpd/librevenge                        | Native C++ dependency (vendors boost); needs vcpkg zlib on Windows; native-only |
+| `bedrock`                                                     | Forwards to liter-llm's AWS Bedrock SigV4 model routing                 | Requires `liter-llm`; adds aws-credential-types + pure-Rust aws-sigv4 (no aws-sdk) |
+| `candle-cuda` / `candle-metal` / `candle-accelerate` / `candle-mkl` | GPU/accelerator backend for candle VLM OCR (`candle-ocr` family)   | Must be paired with a `candle-*` OCR backend; CPU-only decode of the larger VLM models is impractically slow without one |
+| `paddle-ocr-ort`                                              | PaddleOCR via ONNX Runtime (native default engine)                      | Pulls in `ort` + `ort-bundled` prebuilt runtime download |
+| `paddle-ocr-tract`                                            | PaddleOCR via the pure-Rust `tract` engine, no ORT                      | For no-ORT targets (Android x86_64 emulator); never enable alongside `paddle-ocr-ort` in the same build |
+| `sceptre-ocr-ort` / `sceptre-ocr-tract`                       | Sceptre OCR's ORT and pure-Rust tract engine variants                   | `sceptre-ocr` aliases to `-ort`; the two are additive but only one is needed per target |
+| `sceptre-ocr-candle`                                          | Hand-written CRAFT/CRNN forward pass over candle tensors                | CPU-only by default (candle-core has default features off) |
+| `sceptre-ocr-candle-metal` / `sceptre-ocr-candle-cuda`        | Metal / CUDA acceleration for the sceptre candle backend                | **UNTESTED** -- Cargo.toml notes no CI leg builds or runs either combination |
+| `ort-bundled`                                                 | Downloads the pyke prebuilt ONNX Runtime at build time                  | Dev-default strategy; the prebuilt requires glibc >= 2.38 to run |
+| `ort-dynamic`                                                 | Loads ONNX Runtime dynamically at runtime via `ORT_DYLIB_PATH`          | Build-time only, no download; used where no static prebuilt exists (e.g. Intel macOS) |
+| `coreml`                                                      | Explicit opt-in for the CoreML execution provider                       | macOS-only; not included in `default`, `full`, or any binding preset |
+| `cuda`                                                        | Explicit opt-in for the CUDA execution provider                         | Requires a CUDA-enabled ONNX Runtime build (the plain prebuilt has no CUDA support); not in `default`/`full` |
+| `tensorrt`                                                    | Explicit opt-in for the TensorRT execution provider                     | Requires a TensorRT-enabled ONNX Runtime build; not in `default`/`full` |
+| `auto-rotate` / `auto-rotate-tract`                           | PP-LCNet document-orientation detection (ORT and pure-Rust tract variants) | `-tract` is the no-ORT sibling for Android x86_64/WASM; never enable both together |
+| `tract`                                                       | Pure-Rust ONNX inference engine underlying every `*-tract` feature       | Additive alongside ORT on native targets; the sole inference engine on WASM and Android x86_64 |
+| `chunking-tokenizers`                                         | Token-count-based chunk sizing using any HuggingFace tokenizer          | Adds `tokenizers` + `hf-hub`/`reqwest` model download |
+| `static-embeddings`                                           | Pure-Rust static (model2vec) dense embeddings, no ORT                   | The only dense embedder available on WASM/Android; native-only model download |
+| `sparse-embeddings`                                           | SPLADE sparse embeddings for hybrid dense+sparse retrieval              | ORT-dependent, WASM-incompatible |
+| `late-interaction`                                            | ColBERT multi-vector (MaxSim) embeddings                                | ORT-dependent, WASM-incompatible |
+| `enrichment`                                                  | Cloud-upstreamed generic overridable extraction defaults                | Pure Rust, no deps; no domain-specific logic yet |
+| `heuristics`                                                  | Hooks for heuristic-based extraction behavior                           | Pure Rust, no deps; currently a thin placeholder (text-layer-detection heuristics land under a separate future feature) |
+| `keywords-yake` / `keywords-rake`                             | Individual keyword-extraction algorithms (unsupervised YAKE / statistical RAKE) | `keywords` enables both together; use these to pick just one |
+| `markdown-footnotes`                                          | Footnote and citation extraction (`FootnoteConfig`, `Citation`, etc.)   | Pure Rust, no deps |
+| `ner-llm`                                                     | Zero-shot NER via any configured liter-llm provider                     | Requires `liter-llm`; no ORT needed |
+| `ner-onnx`                                                    | NER via the `xberg-gliner` ONNX backend                                 | ORT-dependent; downloads models from Hugging Face on first use |
+| `presets`                                                     | Built-in extraction preset format, registry, and resolver               | Pure Rust, no native deps |
+| `structured`                                                  | Enables `ExtractionConfig.structured_extraction` (LLM-driven typed JSON extraction against a caller-supplied schema) | Requires `liter-llm`; unrelated to `OutputFormat::Structured`, which is a metadata-only label that renders identically to Plain |
+| `redaction-rehydrate`                                         | Encrypted rehydration map capture for reversible PII redaction          | Requires `redaction`; adds `aes-gcm`, `scrypt`, `zeroize` |
+| `redaction-ml`                                                | Couples NER into redaction for PERSON/ORG/LOC pattern matching          | Requires `redaction` + `ner` |
+| `summarization-llm`                                           | Abstractive summarization via any liter-llm provider                    | Requires `summarization` + `liter-llm` (the base `summarization` feature is pure-Rust TextRank only) |
+| `url-ingestion` / `url-ingestion-browser`                     | Fetch and crawl remote URLs as extraction input via `crawlberg`         | `-browser` adds `crawlberg/browser` for in-browser fetch (WASM); native `url-ingestion` needs `crawlberg/native-runtime` |
+| `prometheus`                                                  | Opt-in Prometheus `/metrics` endpoint                                   | Requires both `api` and `otel` explicitly -- neither implies the other |
+| `mobile`                                                      | Deployment preset: `formats` + `analysis` + Tesseract `ocr` + `tree-sitter` + `api-types` | Excludes all ORT-dependent ML (paddle-ocr, layout-detection, embeddings, reranker, transcription, auto-rotate) |
+| `macos-intel-target`                                          | Full feature parity on Intel macOS (`full-no-heic` + `ort-dynamic`)     | ORT dropped static x86_64-apple-darwin prebuilts after v2.0.0-rc.11, so this target loads ONNX Runtime dynamically instead |
+
+Skipped as internal plumbing (pure marker/aggregate features with no independent behavior, or types-only
+subsets already covered by their parent feature above): `paddle-ocr-types`, `layout-types`,
+`auto-rotate-types`, `transcription-types`, `embedding-presets`, `reranker-presets`,
+`sparse-embedding-presets`, `late-interaction-presets`, `api-types`, `ner-llm-types`, `onnx-runtime`,
+`ocr-pipeline`, `image-encode`, `url-config-types`, `tower-service`, `no-ort-target`, `formats-no-heic`,
+`full-no-heic`, `simd-utf8`, `tokio-runtime`, `profiling`, `pool-metrics`.
 
 ### Package Installation
 
