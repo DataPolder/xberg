@@ -1,4 +1,5 @@
 using Xberg;
+using System;
 
 class MinLengthValidator : IValidator
 {
@@ -10,13 +11,19 @@ class MinLengthValidator : IValidator
     }
 
     public string Name => "min-length";
+    public string Version => "1.0.0";
     public int Priority => 10;
 
-    public void Validate(ExtractedDocument result)
+    public void Initialize() { }
+    public void Shutdown() { }
+
+    public bool ShouldValidate(ExtractedDocument result, ExtractionConfig config) => true;
+
+    public void Validate(ExtractedDocument result, ExtractionConfig config)
     {
         if (result.Content.Length < _minLength)
         {
-            throw new XbergValidationException(
+            throw new ValidationException(
                 $"Content too short: {result.Content.Length} < {_minLength}"
             );
         }
@@ -33,15 +40,21 @@ class QualityScoreValidator : IValidator
     }
 
     public string Name => "quality-score";
+    public string Version => "1.0.0";
     public int Priority => 5;
 
-    public void Validate(ExtractedDocument result)
+    public void Initialize() { }
+    public void Shutdown() { }
+
+    public bool ShouldValidate(ExtractedDocument result, ExtractionConfig config) => result.QualityScore.HasValue;
+
+    public void Validate(ExtractedDocument result, ExtractionConfig config)
     {
-        var score = result.QualityScore;
+        var score = result.QualityScore ?? 0.0;
 
         if (score < _minScore)
         {
-            throw new XbergValidationException(
+            throw new ValidationException(
                 $"Quality score too low: {score:F2} < {_minScore:F2}"
             );
         }
@@ -50,13 +63,13 @@ class QualityScoreValidator : IValidator
 
 class Program
 {
-    static void Main()
+    static async System.Threading.Tasks.Task Main()
     {
         var minLengthValidator = new MinLengthValidator(minLength: 50);
         var qualityValidator = new QualityScoreValidator(minScore: 0.7);
 
-        XbergLib.RegisterValidator(minLengthValidator);
-        XbergLib.RegisterValidator(qualityValidator);
+        ValidatorRegistry.RegisterValidator(minLengthValidator);
+        ValidatorRegistry.RegisterValidator(qualityValidator);
 
         try
         {
@@ -70,7 +83,7 @@ class Program
             Console.WriteLine("Validation passed");
             Console.WriteLine($"Content length: {result.Content.Length}");
         }
-        catch (XbergValidationException ex)
+        catch (ValidationException ex)
         {
             Console.WriteLine($"Validation failed: {ex.Message}");
         }

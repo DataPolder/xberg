@@ -1,12 +1,14 @@
 using Xberg;
+using System;
+using System.Collections.Generic;
 using System.Net.Http;
-using System.Text.Json;
+using System.Threading.Tasks;
 
 class CloudOcrBackend : IOcrBackend
 {
     private readonly string _apiKey;
-    private readonly HttpClient _httpClient;
     private readonly string _apiEndpoint;
+    private readonly HttpClient _httpClient;
 
     public CloudOcrBackend(string apiKey, string apiEndpoint = "https://api.example.com/ocr")
     {
@@ -16,16 +18,43 @@ class CloudOcrBackend : IOcrBackend
     }
 
     public string Name => "cloud-ocr-backend";
+    public string Version => "1.0.0";
+    public OcrBackendType BackendType => OcrBackendType.Custom;
+    public List<string> SupportedLanguages => new() { "eng" };
+    public bool SupportsTableDetection => false;
+    public bool SupportsDocumentProcessing => false;
+    public bool EmitsStructuredMarkdown => false;
 
-    public string Process(ReadOnlySpan<byte> imageBytes, OcrConfig? config)
+    public void Initialize() { }
+    public void Shutdown() => _httpClient.Dispose();
+
+    public bool SupportsLanguage(string lang) => SupportedLanguages.Contains(lang);
+
+    public ExtractedDocument ProcessImage(byte[] imageBytes, OcrConfig config)
+    {
+        var text = SendToCloudOcr(imageBytes);
+        return new ExtractedDocument
+        {
+            Content = text,
+            MimeType = "text/plain",
+            Metadata = new Metadata(),
+        };
+    }
+
+    public ExtractedDocument ProcessImageFile(string path, OcrConfig config) =>
+        ProcessImage(System.IO.File.ReadAllBytes(path), config);
+
+    public ExtractedDocument ProcessDocument(string path, OcrConfig config) =>
+        throw new OcrException("cloud-ocr-backend does not support whole-document processing");
+
+    private string SendToCloudOcr(byte[] imageBytes)
     {
         return Task.Run(async () =>
             {
                 try
                 {
-                    var bytes = imageBytes.ToArray();
                     using var content = new MultipartFormDataContent();
-                    content.Add(new ByteArrayContent(bytes), "image");
+                    content.Add(new ByteArrayContent(imageBytes), "image");
 
                     var request = new HttpRequestMessage(
                         HttpMethod.Post,
@@ -42,28 +71,22 @@ class CloudOcrBackend : IOcrBackend
                     var response = await _httpClient.SendAsync(request);
                     response.EnsureSuccessStatusCode();
 
-                    var jsonContent = await response.Content.ReadAsStringAsync();
-                    return jsonContent;
+                    return await response.Content.ReadAsStringAsync();
                 }
                 catch (HttpRequestException ex)
                 {
-                    throw new XbergOcrException($"Cloud OCR service error: {ex.Message}");
+                    throw new OcrException($"Cloud OCR service error: {ex.Message}");
                 }
         }).GetAwaiter().GetResult();
-    }
-
-    public void Dispose()
-    {
-        _httpClient?.Dispose();
     }
 }
 
 class Program
 {
-    static void Main()
+    static async Task Main()
     {
-        using var backend = new CloudOcrBackend(apiKey: "your-api-key-here");
-        XbergLib.RegisterOcrBackend(backend);
+        var backend = new CloudOcrBackend(apiKey: "your-api-key-here");
+        OcrBackendRegistry.RegisterOcrBackend(backend);
 
         try
         {
@@ -78,7 +101,7 @@ class Program
             var result = (await XbergConverter.ExtractAsync(ExtractInput.FromUri("document.pdf"), config)).Results[0];
             Console.WriteLine($"OCR text: {result.Content}");
         }
-        catch (XbergOcrException ex)
+        catch (OcrException ex)
         {
             Console.WriteLine($"OCR error: {ex.Message}");
         }

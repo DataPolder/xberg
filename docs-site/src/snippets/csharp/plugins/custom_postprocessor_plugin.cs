@@ -1,76 +1,82 @@
 using Xberg;
+using System;
+using System.Linq;
+using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 
 class WordCountPostProcessor : IPostProcessor
 {
     public string Name => "word-count";
+    public string Version => "1.0.0";
     public int Priority => 10;
+    public ProcessingStage ProcessingStage => ProcessingStage.Middle;
 
-    public ExtractedDocument Process(ExtractedDocument result)
+    public void Initialize() { }
+    public void Shutdown() { }
+
+    public bool ShouldProcess(ExtractedDocument result, ExtractionConfig config) =>
+        !string.IsNullOrEmpty(result.Content);
+
+    public ulong EstimatedDurationMs(ExtractedDocument result) => 1;
+
+    public void Process(ExtractedDocument result, ExtractionConfig config)
     {
-        if (string.IsNullOrEmpty(result.Content))
-        {
-            return result;
-        }
-
         var wordCount = result.Content.Split(
             new[] { ' ', '\n', '\r', '\t' },
             StringSplitOptions.RemoveEmptyEntries
         ).Length;
 
-        if (result.Metadata.Additional == null)
-        {
-            result.Metadata.Additional = new Dictionary<string, System.Text.Json.Nodes.JsonNode?>();
-        }
-        result.Metadata.Additional["word_count"] = System.Text.Json.Nodes.JsonValue.Create(wordCount);
-
-        return result;
+        result.Metadata.Additional["word_count"] = JsonSerializer.SerializeToElement(wordCount);
     }
 }
 
 class CleanupPostProcessor : IPostProcessor
 {
     public string Name => "text-cleanup";
+    public string Version => "1.0.0";
     public int Priority => 5;
+    public ProcessingStage ProcessingStage => ProcessingStage.Early;
 
-    public ExtractedDocument Process(ExtractedDocument result)
+    public void Initialize() { }
+    public void Shutdown() { }
+
+    public bool ShouldProcess(ExtractedDocument result, ExtractionConfig config) =>
+        !string.IsNullOrEmpty(result.Content);
+
+    public ulong EstimatedDurationMs(ExtractedDocument result) => 1;
+
+    // ExtractedDocument.Content is immutable (init-only), so the cleaned
+    // text is reported through Metadata.Additional rather than rewritten
+    // in place.
+    public void Process(ExtractedDocument result, ExtractionConfig config)
     {
-        if (string.IsNullOrEmpty(result.Content))
-        {
-            return result;
-        }
-
         var cleaned = Regex.Replace(result.Content, @"\s+", " ").Trim();
-
         cleaned = Regex.Replace(cleaned, @"[^\w\s\.\,\!\?\-]", "");
 
-        result.Content = cleaned;
-
-        return result;
+        result.Metadata.Additional["cleaned_content"] = JsonSerializer.SerializeToElement(cleaned);
     }
 }
 
 class LanguageDetectionPostProcessor : IPostProcessor
 {
     public string Name => "language-detection";
+    public string Version => "1.0.0";
     public int Priority => 1;
+    public ProcessingStage ProcessingStage => ProcessingStage.Early;
 
-    public ExtractedDocument Process(ExtractedDocument result)
+    public void Initialize() { }
+    public void Shutdown() { }
+
+    public bool ShouldProcess(ExtractedDocument result, ExtractionConfig config) =>
+        !string.IsNullOrEmpty(result.Content);
+
+    public ulong EstimatedDurationMs(ExtractedDocument result) => 1;
+
+    public void Process(ExtractedDocument result, ExtractionConfig config)
     {
-        if (string.IsNullOrEmpty(result.Content))
-        {
-            return result;
-        }
-
         var detectedLanguage = DetectLanguage(result.Content);
-
-        if (result.Metadata.Additional == null)
-        {
-            result.Metadata.Additional = new Dictionary<string, System.Text.Json.Nodes.JsonNode?>();
-        }
-        result.Metadata.Additional["detected_language"] = System.Text.Json.Nodes.JsonValue.Create(detectedLanguage);
-
-        return result;
+        result.Metadata.Additional["detected_language"] = JsonSerializer.SerializeToElement(detectedLanguage);
     }
 
     private string DetectLanguage(string text)
@@ -87,33 +93,30 @@ class LanguageDetectionPostProcessor : IPostProcessor
 
 class Program
 {
-    static void Main()
+    static async Task Main()
     {
         var wordCountProcessor = new WordCountPostProcessor();
         var cleanupProcessor = new CleanupPostProcessor();
         var languageProcessor = new LanguageDetectionPostProcessor();
 
-        XbergLib.RegisterPostProcessor(wordCountProcessor);
-        XbergLib.RegisterPostProcessor(cleanupProcessor);
-        XbergLib.RegisterPostProcessor(languageProcessor);
+        PostProcessorRegistry.RegisterPostProcessor(wordCountProcessor);
+        PostProcessorRegistry.RegisterPostProcessor(cleanupProcessor);
+        PostProcessorRegistry.RegisterPostProcessor(languageProcessor);
 
         try
         {
-            var config = new ExtractionConfig();
+            var config = ExtractionConfig.Default();
             var result = (await XbergConverter.ExtractAsync(ExtractInput.FromUri("document.pdf"), config)).Results[0];
 
             Console.WriteLine($"Original content length: {result.Content.Length}");
 
-            if (result.Metadata.Additional != null)
+            if (result.Metadata.Additional.TryGetValue("word_count", out var wc))
             {
-                if (result.Metadata.Additional.TryGetValue("word_count", out var wc))
-                {
-                    Console.WriteLine($"Word count: {wc}");
-                }
-                if (result.Metadata.Additional.TryGetValue("detected_language", out var lang))
-                {
-                    Console.WriteLine($"Detected language: {lang}");
-                }
+                Console.WriteLine($"Word count: {wc}");
+            }
+            if (result.Metadata.Additional.TryGetValue("detected_language", out var lang))
+            {
+                Console.WriteLine($"Detected language: {lang}");
             }
         }
         catch (XbergException ex)

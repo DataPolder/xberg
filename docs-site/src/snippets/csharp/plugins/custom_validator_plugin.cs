@@ -1,4 +1,6 @@
 using Xberg;
+using System;
+using System.Threading.Tasks;
 
 class MinLengthValidator : IValidator
 {
@@ -10,13 +12,19 @@ class MinLengthValidator : IValidator
     }
 
     public string Name => "min-length";
+    public string Version => "1.0.0";
     public int Priority => 10;
 
-    public void Validate(ExtractedDocument result)
+    public void Initialize() { }
+    public void Shutdown() { }
+
+    public bool ShouldValidate(ExtractedDocument result, ExtractionConfig config) => true;
+
+    public void Validate(ExtractedDocument result, ExtractionConfig config)
     {
         if (result.Content.Length < _minLength)
         {
-            throw new XbergValidationException(
+            throw new ValidationException(
                 $"Content too short: {result.Content.Length} < {_minLength}"
             );
         }
@@ -33,15 +41,21 @@ class QualityScoreValidator : IValidator
     }
 
     public string Name => "quality-score";
+    public string Version => "1.0.0";
     public int Priority => 5;
 
-    public void Validate(ExtractedDocument result)
+    public void Initialize() { }
+    public void Shutdown() { }
+
+    public bool ShouldValidate(ExtractedDocument result, ExtractionConfig config) => result.QualityScore.HasValue;
+
+    public void Validate(ExtractedDocument result, ExtractionConfig config)
     {
-        var score = result.QualityScore;
+        var score = result.QualityScore ?? 0.0;
 
         if (score < _minScore)
         {
-            throw new XbergValidationException(
+            throw new ValidationException(
                 $"Quality score too low: {score:F2} < {_minScore:F2}"
             );
         }
@@ -51,33 +65,39 @@ class QualityScoreValidator : IValidator
 class ContentValidValidator : IValidator
 {
     public string Name => "content-valid";
+    public string Version => "1.0.0";
     public int Priority => 20;
 
-    public void Validate(ExtractedDocument result)
+    public void Initialize() { }
+    public void Shutdown() { }
+
+    public bool ShouldValidate(ExtractedDocument result, ExtractionConfig config) => true;
+
+    public void Validate(ExtractedDocument result, ExtractionConfig config)
     {
         if (string.IsNullOrWhiteSpace(result.Content))
         {
-            throw new XbergValidationException("Extracted content is empty or whitespace");
+            throw new ValidationException("Extracted content is empty or whitespace");
         }
 
         if (result.Content.Length < 10)
         {
-            throw new XbergValidationException("Extracted content is too short (minimum 10 characters)");
+            throw new ValidationException("Extracted content is too short (minimum 10 characters)");
         }
     }
 }
 
 class Program
 {
-    static void Main()
+    static async Task Main()
     {
         var minLengthValidator = new MinLengthValidator(minLength: 50);
         var qualityValidator = new QualityScoreValidator(minScore: 0.7);
         var contentValidator = new ContentValidValidator();
 
-        XbergLib.RegisterValidator(minLengthValidator);
-        XbergLib.RegisterValidator(qualityValidator);
-        XbergLib.RegisterValidator(contentValidator);
+        ValidatorRegistry.RegisterValidator(minLengthValidator);
+        ValidatorRegistry.RegisterValidator(qualityValidator);
+        ValidatorRegistry.RegisterValidator(contentValidator);
 
         try
         {
@@ -91,7 +111,7 @@ class Program
             Console.WriteLine("All validations passed");
             Console.WriteLine($"Content length: {result.Content.Length}");
         }
-        catch (XbergValidationException ex)
+        catch (ValidationException ex)
         {
             Console.WriteLine($"Validation failed: {ex.Message}");
         }

@@ -1,10 +1,13 @@
 ```csharp title="C#"
 using Xberg;
+using System;
 
 public class PdfOnlyProcessor : IPostProcessor
 {
     public string Name => "pdf-only-processor";
     public string Version => "1.0.0";
+    public int Priority => 50;
+    public ProcessingStage ProcessingStage => ProcessingStage.Middle;
 
     public void Initialize()
     {
@@ -22,11 +25,6 @@ public class PdfOnlyProcessor : IPostProcessor
         }
     }
 
-    public ProcessingStage ProcessingStage()
-    {
-        return ProcessingStage.Middle;
-    }
-
     public bool ShouldProcess(ExtractedDocument result, ExtractionConfig config)
     {
         return result.MimeType == "application/pdf";
@@ -35,11 +33,6 @@ public class PdfOnlyProcessor : IPostProcessor
     public ulong EstimatedDurationMs(ExtractedDocument result)
     {
         return 10;
-    }
-
-    public int Priority()
-    {
-        return 50;
     }
 }
 

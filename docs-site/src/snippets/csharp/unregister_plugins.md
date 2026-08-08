@@ -1,5 +1,6 @@
 ```csharp title="C#"
 using Xberg;
+using System.Collections.Generic;
 
 var names = new List<string>
 {
@@ -9,8 +10,8 @@ var names = new List<string>
     "min_length_validator"
 };
 
-XbergLib.UnregisterDocumentExtractor(names[0]);
-XbergLib.UnregisterPostProcessor(names[1]);
-XbergLib.UnregisterOcrBackend(names[2]);
-XbergLib.UnregisterValidator(names[3]);
+DocumentExtractorRegistry.Unregister(names[0]);
+PostProcessorRegistry.Unregister(names[1]);
+OcrBackendRegistry.Unregister(names[2]);
+ValidatorRegistry.Unregister(names[3]);
 ```

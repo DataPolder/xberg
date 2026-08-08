@@ -1,5 +1,6 @@
 ```csharp title="C#"
 using Xberg;
+using System;
 
 var processor = new LoggingPostProcessor();
 PostProcessorRegistry.Register(processor);
@@ -8,6 +9,8 @@ public class LoggingPostProcessor : IPostProcessor
 {
     public string Name => "logging-processor";
     public string Version => "1.0.0";
+    public int Priority => 10;
+    public ProcessingStage ProcessingStage => ProcessingStage.Early;
 
     public void Initialize()
     {
@@ -29,11 +32,6 @@ public class LoggingPostProcessor : IPostProcessor
         }
     }
 
-    public ProcessingStage ProcessingStage()
-    {
-        return ProcessingStage.Early;
-    }
-
     public bool ShouldProcess(ExtractedDocument result, ExtractionConfig config)
     {
         return true;
@@ -42,11 +40,6 @@ public class LoggingPostProcessor : IPostProcessor
     public ulong EstimatedDurationMs(ExtractedDocument result)
     {
         return 1;
-    }
-
-    public int Priority()
-    {
-        return 10;
     }
 }
 ```

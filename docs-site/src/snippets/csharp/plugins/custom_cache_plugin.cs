@@ -1,22 +1,26 @@
 using Xberg;
+using System;
 using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading.Tasks;
 
-// NOTE: ICacheBackend interface is not available in C# bindings
+// NOTE: The C# binding has no ICacheBackend plugin interface. Built-in
+// caching is controlled via ExtractionConfig.UseCache/CacheNamespace/
+// CacheTtlSecs. This class is a plain application-level memoization wrapper.
 
 class CustomCacheWrapper
 {
-    private readonly Dictionary<string, (ExtractionResult result, DateTime timestamp)> _cache;
+    private readonly Dictionary<string, (ExtractedDocument result, DateTime timestamp)> _cache;
     private readonly TimeSpan _cacheExpiration;
 
     public CustomCacheWrapper(TimeSpan? cacheExpiration = null)
     {
-        _cache = new Dictionary<string, (ExtractionResult, DateTime)>();
+        _cache = new Dictionary<string, (ExtractedDocument, DateTime)>();
         _cacheExpiration = cacheExpiration ?? TimeSpan.FromHours(1);
     }
 
-    public ExtractionResult? Get(string key)
+    public ExtractedDocument? Get(string key)
     {
         if (_cache.TryGetValue(key, out var entry))
         {
@@ -33,7 +37,7 @@ class CustomCacheWrapper
         return null;
     }
 
-    public void Set(string key, ExtractionResult result)
+    public void Set(string key, ExtractedDocument result)
     {
         _cache[key] = (result, DateTime.UtcNow);
     }
@@ -56,9 +60,10 @@ class CustomCacheWrapper
         return Convert.ToHexString(hashBytes);
     }
 
-    public ExtractionResult GetOrExtract(string filePath, ExtractionConfig? config = null)
+    public async Task<ExtractedDocument> GetOrExtractAsync(string filePath, ExtractionConfig? config = null)
     {
-        var cacheKey = GenerateKey(filePath, config);
+        var effectiveConfig = config ?? ExtractionConfig.Default();
+        var cacheKey = GenerateKey(filePath, effectiveConfig);
 
         var cached = Get(cacheKey);
         if (cached != null)
@@ -67,17 +72,17 @@ class CustomCacheWrapper
             return cached;
         }
 
-        var result = (await XbergConverter.ExtractAsync(ExtractInput.FromUri(filePath), config)).Results[0];
-        Set(cacheKey, result);
+        var document = (await XbergConverter.ExtractAsync(ExtractInput.FromUri(filePath), effectiveConfig)).Results[0];
+        Set(cacheKey, document);
         Console.WriteLine("Extracted and cached");
 
-        return result;
+        return document;
     }
 }
 
 class Program
 {
-    static void Main()
+    static async Task Main()
     {
         var cache = new CustomCacheWrapper(cacheExpiration: TimeSpan.FromMinutes(30));
 
@@ -86,12 +91,10 @@ class Program
             var config = new ExtractionConfig { UseCache = true };
             var filePath = "document.pdf";
 
-            var result1 = cache.GetOrExtract(filePath, config);
-            var document1 = result1.Results[0];
+            var document1 = await cache.GetOrExtractAsync(filePath, config);
             Console.WriteLine($"First extraction: {document1.Content.Length} chars");
 
-            var result2 = cache.GetOrExtract(filePath, config);
-            var document2 = result2.Results[0];
+            var document2 = await cache.GetOrExtractAsync(filePath, config);
             Console.WriteLine($"Second extraction: {document2.Content.Length} chars");
 
             cache.Clear();

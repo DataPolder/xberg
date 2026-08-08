@@ -1,6 +1,8 @@
 using Xberg;
+using System;
+using System.Collections.Generic;
 using System.Net.Http;
-using System.Text.Json;
+using System.Threading.Tasks;
 
 class CloudOcrBackend : IOcrBackend
 {
@@ -14,54 +16,75 @@ class CloudOcrBackend : IOcrBackend
     }
 
     public string Name => "cloud-ocr";
+    public string Version => "1.0.0";
+    public OcrBackendType BackendType => OcrBackendType.Custom;
+    public List<string> SupportedLanguages => new() { "eng" };
+    public bool SupportsTableDetection => false;
+    public bool SupportsDocumentProcessing => false;
+    public bool EmitsStructuredMarkdown => false;
 
-    public string Process(ReadOnlySpan<byte> imageBytes, OcrConfig? config)
+    public void Initialize() { }
+    public void Shutdown() => _httpClient.Dispose();
+
+    public bool SupportsLanguage(string lang) => SupportedLanguages.Contains(lang);
+
+    public ExtractedDocument ProcessImage(byte[] imageBytes, OcrConfig config)
     {
-        return Task.Run(async () =>
-            {
-                try
-                {
-                    var bytes = imageBytes.ToArray();
-                    using var content = new MultipartFormDataContent();
-                    content.Add(new ByteArrayContent(bytes), "image");
-
-                    var request = new HttpRequestMessage(
-                        HttpMethod.Post,
-                        "https://api.example.com/ocr"
-                    )
-                    {
-                        Content = content,
-                        Headers =
-                        {
-                            { "Authorization", $"Bearer {_apiKey}" }
-                        }
-                    };
-
-                    var response = await _httpClient.SendAsync(request);
-                    response.EnsureSuccessStatusCode();
-
-                    var jsonContent = await response.Content.ReadAsStringAsync();
-                    return jsonContent;
-                }
-                catch (HttpRequestException ex)
-                {
-                    throw new XbergOcrException($"Cloud OCR service error: {ex.Message}");
-                }
-        }).GetAwaiter().GetResult();
+        var text = SendToCloudOcr(imageBytes);
+        return new ExtractedDocument
+        {
+            Content = text,
+            MimeType = "text/plain",
+            Metadata = new Metadata(),
+        };
     }
 
-    public void Dispose()
+    public ExtractedDocument ProcessImageFile(string path, OcrConfig config) =>
+        ProcessImage(System.IO.File.ReadAllBytes(path), config);
+
+    public ExtractedDocument ProcessDocument(string path, OcrConfig config) =>
+        throw new OcrException("cloud-ocr does not support whole-document processing");
+
+    private string SendToCloudOcr(byte[] imageBytes)
     {
-        _httpClient?.Dispose();
+        return Task.Run(async () =>
+        {
+            try
+            {
+                using var content = new MultipartFormDataContent();
+                content.Add(new ByteArrayContent(imageBytes), "image");
+
+                var request = new HttpRequestMessage(
+                    HttpMethod.Post,
+                    "https://api.example.com/ocr"
+                )
+                {
+                    Content = content,
+                    Headers =
+                    {
+                        { "Authorization", $"Bearer {_apiKey}" }
+                    }
+                };
+
+                var response = await _httpClient.SendAsync(request);
+                response.EnsureSuccessStatusCode();
+
+                return await response.Content.ReadAsStringAsync();
+            }
+            catch (HttpRequestException ex)
+            {
+                throw new OcrException($"Cloud OCR service error: {ex.Message}");
+            }
+        }).GetAwaiter().GetResult();
     }
 }
 
 class Program
 {
-    static void Main()
+    static async Task Main()
     {
-        using var backend = new CloudOcrBackend("your-api-key");
-        XbergLib.RegisterOcrBackend(backend);
+        var backend = new CloudOcrBackend("your-api-key");
+        OcrBackendRegistry.RegisterOcrBackend(backend);
 
         try
         {

@@ -1,5 +1,6 @@
 ```csharp title="C#"
 using Xberg;
+using System;
 using System.Collections.Concurrent;
 
 var processor = new StatefulPostProcessor();
@@ -12,6 +13,8 @@ public class StatefulPostProcessor : IPostProcessor
 
     public string Name => "stateful-processor";
     public string Version => "1.0.0";
+    public int Priority => 50;
+    public ProcessingStage ProcessingStage => ProcessingStage.Middle;
 
     public void Initialize()
     {
@@ -36,11 +39,6 @@ public class StatefulPostProcessor : IPostProcessor
         Console.WriteLine($"Processing #{_callCount}: {result.MimeType}");
     }
 
-    public ProcessingStage ProcessingStage()
-    {
-        return ProcessingStage.Middle;
-    }
-
     public bool ShouldProcess(ExtractedDocument result, ExtractionConfig config)
     {
         return true;
@@ -49,11 +47,6 @@ public class StatefulPostProcessor : IPostProcessor
     public ulong EstimatedDurationMs(ExtractedDocument result)
     {
         return 5;
-    }
-
-    public int Priority()
-    {
-        return 50;
     }
 }
 ```

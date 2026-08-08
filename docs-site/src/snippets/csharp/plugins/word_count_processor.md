@@ -1,5 +1,7 @@
 ```csharp title="C#"
 using Xberg;
+using System;
+using System.Text.Json;
 
 var processor = new WordCountProcessor();
 PostProcessorRegistry.Register(processor);
@@ -8,6 +10,8 @@ public class WordCountProcessor : IPostProcessor
 {
     public string Name => "word-count";
     public string Version => "1.0.0";
+    public int Priority => 50;
+    public ProcessingStage ProcessingStage => ProcessingStage.Early;
 
     public void Initialize()
     {
@@ -22,18 +26,9 @@ public class WordCountProcessor : IPostProcessor
     public void Process(ExtractedDocument result, ExtractionConfig config)
     {
         var wordCount = CountWords(result.Content);
-
-        if (result.Metadata == null)
-        {
-            result.Metadata = new Metadata();
-        }
+        result.Metadata.Additional["word_count"] = JsonSerializer.SerializeToElement(wordCount);
 
         Console.WriteLine($"Document contains {wordCount} words");
-    }
-
-    public ProcessingStage ProcessingStage()
-    {
-        return ProcessingStage.Early;
     }
 
     public bool ShouldProcess(ExtractedDocument result, ExtractionConfig config)
@@ -44,11 +39,6 @@ public class WordCountProcessor : IPostProcessor
     public ulong EstimatedDurationMs(ExtractedDocument result)
     {
         return 5;
-    }
-
-    public int Priority()
-    {
-        return 50;
     }
 
     private int CountWords(string content)

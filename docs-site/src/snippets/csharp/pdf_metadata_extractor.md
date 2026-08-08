@@ -1,25 +1,27 @@
 ```csharp title="C#"
 using Xberg;
+using System;
 
 var processor = new PdfMetadataExtractor();
-XbergLib.RegisterPostProcessor(processor);
+PostProcessorRegistry.RegisterPostProcessor(processor);
 
 public class PdfMetadataExtractor : IPostProcessor
 {
     private int _processedCount = 0;
 
-    public string Name() => "pdf_metadata_extractor";
-    public string Version() => "1.0.0";
-    public string Description() => "Extracts and enriches PDF metadata";
-    public string ProcessingStage() => "early";
+    public string Name => "pdf_metadata_extractor";
+    public string Version => "1.0.0";
+    public int Priority => 50;
+    public ProcessingStage ProcessingStage => ProcessingStage.Early;
 
-    public bool ShouldProcess(ExtractedDocument result)
+    public bool ShouldProcess(ExtractedDocument result, ExtractionConfig config)
         => result.MimeType == "application/pdf";
 
-    public ExtractedDocument Process(ExtractedDocument result)
+    public ulong EstimatedDurationMs(ExtractedDocument result) => 1;
+
+    public void Process(ExtractedDocument result, ExtractionConfig config)
     {
         _processedCount++;
-        return result;
     }
 
     public void Initialize()

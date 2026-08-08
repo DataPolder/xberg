@@ -1,13 +1,17 @@
 ```csharp title="C#"
 using Xberg;
+using System;
+using System.Collections.Generic;
 
 var extractor = new JsonDocumentExtractor();
-XbergLib.RegisterDocumentExtractor(extractor);
+DocumentExtractorRegistry.RegisterDocumentExtractor(extractor);
 
 public class JsonDocumentExtractor : IDocumentExtractor
 {
     public string Name => "json-extractor";
     public string Version => "1.0.0";
+    public int Priority => 50;
+    public List<string> SupportedMimeTypes => new() { "application/json", "text/json" };
 
     public void Initialize()
     {
@@ -19,33 +23,20 @@ public class JsonDocumentExtractor : IDocumentExtractor
         Console.WriteLine("JSON extractor shut down");
     }
 
-    public ExtractedDocument Extract(byte[] content, string mimeType, ExtractionConfig config)
-    {
-        var json = System.Text.Encoding.UTF8.GetString(content);
+    public bool CanHandle(string path, string mimeType) =>
+        mimeType == "application/json" || mimeType == "text/json";
 
-        var result = new ExtractedDocument
+    public ExtractedDocument Extract(ExtractInput input, ExtractionConfig config)
+    {
+        var bytes = input.Bytes ?? System.IO.File.ReadAllBytes(input.Uri!);
+        var json = System.Text.Encoding.UTF8.GetString(bytes);
+
+        return new ExtractedDocument
         {
             Content = json,
-            MimeType = mimeType,
-            DetectedLanguages = null
+            MimeType = input.MimeType ?? "application/json",
+            Metadata = new Metadata(),
         };
-        return result;
-    }
-
-    public ExtractedDocument Extract(string path, string mimeType, ExtractionConfig config)
-    {
-        var content = System.IO.File.ReadAllBytes(path);
-        return Extract(content, mimeType, config);
-    }
-
-    public string[] SupportedMimeTypes()
-    {
-        return new[] { "application/json", "text/json" };
-    }
-
-    public int Priority()
-    {
-        return 50;
     }
 }
 ```

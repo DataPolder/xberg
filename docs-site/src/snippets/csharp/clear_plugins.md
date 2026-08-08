@@ -1,10 +1,11 @@
 ```csharp title="C#"
 using Xberg;
+using System;
 
-XbergLib.ClearPostProcessors();
-XbergLib.ClearValidators();
-XbergLib.ClearOcrBackends();
-XbergLib.ClearDocumentExtractors();
+PostProcessorRegistry.Clear();
+ValidatorRegistry.Clear();
+OcrBackendRegistry.Clear();
+DocumentExtractorRegistry.Clear();
 
 Console.WriteLine("All plugins cleared");
 ```

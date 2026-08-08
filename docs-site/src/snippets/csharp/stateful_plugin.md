@@ -1,27 +1,34 @@
 ```csharp title="C#"
-using System.Collections.Generic;
-using System.Threading;
+using Xberg;
+using System;
+using System.Collections.Concurrent;
+using System.Text.Json;
 
-public class StatefulPlugin
+public class StatefulPostProcessor : IPostProcessor
 {
     private readonly object _lock = new();
     private int _callCount = 0;
-    private readonly Dictionary<string, object> _cache = new();
+    private readonly ConcurrentDictionary<string, string> _cache = new();
 
-    public string Name() => "stateful-plugin";
-    public string Version() => "1.0.0";
+    public string Name => "stateful-plugin";
+    public string Version => "1.0.0";
+    public int Priority => 50;
+    public ProcessingStage ProcessingStage => ProcessingStage.Middle;
 
-    public Dictionary<string, object> Process(Dictionary<string, object> result)
+    public void Initialize() { }
+    public void Shutdown() { }
+
+    public bool ShouldProcess(ExtractedDocument result, ExtractionConfig config) => true;
+    public ulong EstimatedDurationMs(ExtractedDocument result) => 5;
+
+    public void Process(ExtractedDocument result, ExtractionConfig config)
     {
         lock (_lock)
         {
             _callCount++;
-            _cache["last_mime"] = result["mime_type"];
+            _cache["last_mime"] = result.MimeType;
         }
-        return result;
+        result.Metadata.Additional["call_count"] = JsonSerializer.SerializeToElement(_callCount);
     }
-
-    public void Initialize() { }
-    public void Shutdown() { }
 }
 ```

@@ -1,4 +1,5 @@
 ```csharp title="C#"
+using Xberg;
 using Xunit;
 
 public class CustomExtractorTests
@@ -8,12 +9,13 @@ public class CustomExtractorTests
     {
         var extractor = new CustomJsonExtractor();
         var jsonData = System.Text.Encoding.UTF8.GetBytes(@"{""message"": ""Hello, world!""}");
-        var config = new Dictionary<string, object>();
+        var input = ExtractInput.FromBytes(jsonData, "application/json", null);
+        var config = ExtractionConfig.Default();
 
-        var result = extractor.Extract(jsonData, "application/json", config);
+        var result = extractor.Extract(input, config);
 
-        Assert.Contains("Hello, world!", (string)result["content"]);
-        Assert.Equal("application/json", (string)result["mime_type"]);
+        Assert.Contains("Hello, world!", result.Content);
+        Assert.Equal("application/json", result.MimeType);
     }
 }
 ```

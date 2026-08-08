@@ -1,6 +1,8 @@
 ```csharp title="C#"
 using Xberg;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 
 public class CloudOcrBackend : IOcrBackend
 {
@@ -8,6 +10,11 @@ public class CloudOcrBackend : IOcrBackend
 
     public string Name => "cloud-ocr";
     public string Version => "1.0.0";
+    public OcrBackendType BackendType => OcrBackendType.Custom;
+    public List<string> SupportedLanguages => new() { "eng", "deu", "fra" };
+    public bool SupportsTableDetection => false;
+    public bool SupportsDocumentProcessing => false;
+    public bool EmitsStructuredMarkdown => false;
 
     public CloudOcrBackend(string apiKey)
     {
@@ -26,7 +33,7 @@ public class CloudOcrBackend : IOcrBackend
     {
         // Call cloud OCR API with imageBytes and config.Language
         // Return ExtractedDocument with extracted text
-        throw new NotImplementedException();
+        throw new System.NotImplementedException();
     }
 
     public ExtractedDocument ProcessImageFile(string path, OcrConfig config)
@@ -37,32 +44,12 @@ public class CloudOcrBackend : IOcrBackend
 
     public bool SupportsLanguage(string language)
     {
-        return SupportedLanguages().Contains(language);
-    }
-
-    public OcrBackendType BackendType()
-    {
-        return OcrBackendType.Cloud;
-    }
-
-    public List<string> SupportedLanguages()
-    {
-        return new List<string> { "eng", "deu", "fra" };
-    }
-
-    public bool SupportsTableDetection()
-    {
-        return false;
-    }
-
-    public bool SupportsDocumentProcessing()
-    {
-        return false;
+        return SupportedLanguages.Contains(language);
     }
 
     public ExtractedDocument ProcessDocument(string path, OcrConfig config)
     {
-        throw new NotSupportedException("Document processing not supported by CloudOcrBackend");
+        throw new System.NotSupportedException("Document processing not supported by CloudOcrBackend");
     }
 }
 
@@ -72,7 +59,7 @@ class Program
     {
         // Register the backend
         var backend = new CloudOcrBackend(apiKey: "your-api-key");
-        OcrBackendBridge.Register(backend);
+        OcrBackendRegistry.RegisterOcrBackend(backend);
     }
 }
 ```

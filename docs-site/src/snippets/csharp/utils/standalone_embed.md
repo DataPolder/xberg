@@ -1,17 +1,26 @@
 ```csharp title="C#"
 using Xberg;
+using System;
+using System.Linq;
 
-var client = new XbergLib();
+// NOTE: The C# binding has no standalone "embed arbitrary text" client —
+// there is no public EmbedSync/EmbedAsync entry point. Embeddings are only
+// produced as part of extraction, attached per chunk, via
+// ExtractionConfig.Chunking.Embedding.
+var config = new ExtractionConfig
+{
+    Chunking = new ChunkingConfig
+    {
+        Embedding = new EmbeddingConfig
+        {
+            Model = new EmbeddingModelType.Preset("balanced"),
+            Normalize = true
+        }
+    }
+};
 
-var config = new EmbeddingConfig { Model = new EmbeddingModelType.Preset("balanced"), Normalize = true };
-var texts = new[] { "Hello, world!", "Xberg is fast" };
-
-// Synchronous
-var embeddings = client.EmbedSync(texts, config).ToList();
-Console.WriteLine(embeddings.Count);       // 2
-Console.WriteLine(embeddings[0].Length);   // 768
-
-// Asynchronous
-var asyncEmbeddings = await client.EmbedAsync(texts, config);
-Console.WriteLine(asyncEmbeddings.First().Length); // 768
+var result = (await XbergConverter.ExtractAsync(ExtractInput.FromUri("document.pdf"), config)).Results[0];
+var chunksWithEmbeddings = result.Chunks?.Where(c => c.Embedding != null).ToList() ?? new();
+Console.WriteLine(chunksWithEmbeddings.Count);
+Console.WriteLine(chunksWithEmbeddings.FirstOrDefault()?.Embedding?.Count);
 ```

@@ -10,7 +10,7 @@ public class CustomValidatorTests
         var validator = new TestValidator();
         ValidatorRegistry.Register(validator);
 
-        var validators = XbergLib.ListValidators();
+        var validators = XbergConverter.ListValidators();
         Assert.Contains("test-validator", validators);
     }
 
@@ -20,10 +20,11 @@ public class CustomValidatorTests
         var result = new ExtractedDocument
         {
             Content = "Test content with some length",
-            MimeType = "text/plain"
+            MimeType = "text/plain",
+            Metadata = new Metadata(),
         };
 
-        var config = new ExtractionConfig();
+        var config = ExtractionConfig.Default();
         var validator = new TestValidator();
 
         validator.Initialize();
@@ -37,6 +38,7 @@ public class TestValidator : IValidator
 {
     public string Name => "test-validator";
     public string Version => "1.0.0";
+    public int Priority => 50;
 
     public void Initialize() { }
     public void Shutdown() { }
@@ -45,7 +47,7 @@ public class TestValidator : IValidator
     {
         if (string.IsNullOrEmpty(result.Content))
         {
-            throw new XbergException("Content cannot be empty", 1000);
+            throw new ValidationException("Content cannot be empty");
         }
     }
 
@@ -53,7 +55,5 @@ public class TestValidator : IValidator
     {
         return !string.IsNullOrEmpty(result.Content);
     }
-
-    public int Priority() => 50;
 }
 ```

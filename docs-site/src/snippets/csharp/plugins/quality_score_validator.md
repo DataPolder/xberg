@@ -1,5 +1,6 @@
 ```csharp title="C#"
 using Xberg;
+using System;
 
 public class QualityScoreValidator : IValidator
 {
@@ -7,6 +8,7 @@ public class QualityScoreValidator : IValidator
 
     public string Name => "quality-score-validator";
     public string Version => "1.0.0";
+    public int Priority => 50;
 
     public void Initialize()
     {
@@ -24,9 +26,8 @@ public class QualityScoreValidator : IValidator
 
         if (qualityScore < MinimumQuality)
         {
-            throw new XbergException(
-                $"Quality score {qualityScore:F2} below minimum {MinimumQuality}",
-                1003
+            throw new ValidationException(
+                $"Quality score {qualityScore:F2} below minimum {MinimumQuality}"
             );
         }
     }
@@ -36,15 +37,10 @@ public class QualityScoreValidator : IValidator
         return !string.IsNullOrEmpty(result.Content);
     }
 
-    public int Priority()
-    {
-        return 50;
-    }
-
     private float CalculateQualityScore(ExtractedDocument result)
     {
         var contentLength = result.Content.Length;
-        var hasMetadata = result.Metadata != null;
+        var hasMetadata = result.Metadata is not null;
 
         var score = (contentLength > 100 ? 0.8f : 0.5f) + (hasMetadata ? 0.2f : 0.0f);
         return Math.Min(score, 1.0f);

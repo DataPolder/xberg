@@ -1,21 +1,31 @@
 ```csharp title="C#"
 using Xberg;
+using System;
+using System.Collections.Generic;
 
 var extractor = new CustomExtractor();
-XbergLib.RegisterDocumentExtractor(extractor);
+DocumentExtractorRegistry.RegisterDocumentExtractor(extractor);
 Console.WriteLine("Extractor registered");
 
 public class CustomExtractor : IDocumentExtractor
 {
-    public string Name() => "custom";
-    public string Version() => "1.0.0";
+    public string Name => "custom";
+    public string Version => "1.0.0";
+    public int Priority => 50;
+    public List<string> SupportedMimeTypes => new() { "application/x-custom" };
 
-    public Dictionary<string, object> Extract(byte[] data, string mimeType, Dictionary<string, object> config)
+    public void Initialize() { }
+    public void Shutdown() { }
+
+    public bool CanHandle(string path, string mimeType) => mimeType == "application/x-custom";
+
+    public ExtractedDocument Extract(ExtractInput input, ExtractionConfig config)
     {
-        return new Dictionary<string, object>
+        return new ExtractedDocument
         {
-            { "content", "Extracted content" },
-            { "mime_type", mimeType }
+            Content = "Extracted content",
+            MimeType = "application/x-custom",
+            Metadata = new Metadata(),
         };
     }
 }

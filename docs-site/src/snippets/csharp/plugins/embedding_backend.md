@@ -20,10 +20,7 @@ public class CustomEmbeddingBackend : IEmbeddingBackend
         Console.WriteLine("Embedding backend shut down");
     }
 
-    public ulong Dimensions()
-    {
-        return 384;
-    }
+    public ulong Dimensions => 384;
 
     public List<List<float>> Embed(List<string> texts)
     {

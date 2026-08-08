@@ -1,10 +1,11 @@
 using System;
-using System.Collections.Generic;
 using System.Diagnostics;
-using System.Net.Http;
-using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 
+// NOTE: The C# binding has no in-process MCP server SDK (no
+// XbergMcpServer/RegisterTool API). The MCP server is the `xberg mcp` CLI
+// subcommand, run as a subprocess and spoken to over its stdio transport.
 class McpServer
 {
     public static async Task Main(string[] args)
@@ -19,30 +20,9 @@ class McpServer
             RedirectStandardError = true,
         };
 
-        var process = Process.Start(processInfo);
+        using var process = Process.Start(processInfo)
+            ?? throw new InvalidOperationException("Failed to start xberg mcp process");
 
         await Task.Delay(Timeout.Infinite);
-    }
-}
-
-class McpServerProgram
-{
-    public static async Task Main()
-    {
-        var server = new XbergMcpServer();
-
-        server.RegisterTool("extract", new Dictionary<string, object>
-            {
-                { "description", "Extract text from a document file" },
-                { "parameters", new { path = "string" } }
-        });
-
-        server.RegisterTool("extract", new Dictionary<string, object>
-            {
-                { "description", "Extract text from document bytes" },
-                { "parameters", new { data = "string", mimeType = "string" } }
-        });
-
-        await server.StartAsync();
     }
 }

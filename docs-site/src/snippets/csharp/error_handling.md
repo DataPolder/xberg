@@ -6,11 +6,11 @@ try
     var result = (await XbergConverter.ExtractAsync(ExtractInput.FromUri("missing.pdf"), ExtractionConfig.Default())).Results[0];
     Console.WriteLine(result.Content);
 }
-catch (XbergValidationException ex)
+catch (ValidationException ex)
 {
     Console.Error.WriteLine($"Validation error: {ex.Message}");
 }
-catch (XbergIOException ex)
+catch (IoException ex)
 {
     Console.Error.WriteLine($"IO error: {ex.Message}");
     throw;

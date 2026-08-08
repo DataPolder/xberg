@@ -1,5 +1,7 @@
 ```csharp title="C#"
 using Xberg;
+using System;
+using System.Linq;
 
 var validator = new ContentTypeValidator("application/pdf", "text/plain");
 ValidatorRegistry.Register(validator);
@@ -15,6 +17,7 @@ public class ContentTypeValidator : IValidator
 
     public string Name => "content-type-validator";
     public string Version => "1.0.0";
+    public int Priority => 50;
 
     public void Initialize()
     {
@@ -30,9 +33,8 @@ public class ContentTypeValidator : IValidator
     {
         if (!_allowedMimeTypes.Contains(result.MimeType))
         {
-            throw new XbergException(
-                $"MIME type {result.MimeType} not allowed. Allowed types: {string.Join(", ", _allowedMimeTypes)}",
-                1002
+            throw new ValidationException(
+                $"MIME type {result.MimeType} not allowed. Allowed types: {string.Join(", ", _allowedMimeTypes)}"
             );
         }
     }
@@ -40,11 +42,6 @@ public class ContentTypeValidator : IValidator
     public bool ShouldValidate(ExtractedDocument result, ExtractionConfig config)
     {
         return true;
-    }
-
-    public int Priority()
-    {
-        return 50;
     }
 }
 ```

@@ -1,11 +1,16 @@
 using Xberg;
+using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 
+// The C# binding has no ICache plugin interface — caching is a native
+// feature controlled via ExtractionConfig.UseCache/CacheNamespace/CacheTtlSecs.
+// This is a plain application-level memoization wrapper, not a registered plugin.
 class CustomCacheBackend
 {
-    private Dictionary<string, ExtractionResult> _cache = new();
+    private readonly Dictionary<string, ExtractedDocument> _cache = new();
 
-    public async Task<ExtractionResult> GetOrExtractAsync(
+    public async Task<ExtractedDocument> GetOrExtractAsync(
         string filePath,
         ExtractionConfig config)
     {
@@ -17,12 +22,12 @@ class CustomCacheBackend
             return cachedResult;
         }
 
-        var result = (await XbergConverter.ExtractAsync(ExtractInput.FromUri(filePath), config)).Results[0];
+        var document = (await XbergConverter.ExtractAsync(ExtractInput.FromUri(filePath), config)).Results[0];
 
-        _cache[cacheKey] = result;
+        _cache[cacheKey] = document;
         Console.WriteLine("Result cached");
 
-        return result;
+        return document;
     }
 
     private string GenerateCacheKey(string filePath, ExtractionConfig config)
@@ -47,12 +52,10 @@ class Program
 
         try
         {
-            var result1 = await cacheBackend.GetOrExtractAsync("document.pdf", config);
-            var document1 = result1.Results[0];
+            var document1 = await cacheBackend.GetOrExtractAsync("document.pdf", config);
             Console.WriteLine($"Result 1: {document1.Content.Length} chars");
 
-            var result2 = await cacheBackend.GetOrExtractAsync("document.pdf", config);
-            var document2 = result2.Results[0];
+            var document2 = await cacheBackend.GetOrExtractAsync("document.pdf", config);
             Console.WriteLine($"Result 2: {document2.Content.Length} chars");
 
             cacheBackend.ClearCache();

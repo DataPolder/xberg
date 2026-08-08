@@ -1,5 +1,6 @@
 ```csharp title="C#"
 using Xberg;
+using System;
 
 var validator = new MinimumLengthValidator();
 ValidatorRegistry.Register(validator);
@@ -10,6 +11,7 @@ public class MinimumLengthValidator : IValidator
 
     public string Name => "min-length-validator";
     public string Version => "1.0.0";
+    public int Priority => 50;
 
     public void Initialize()
     {
@@ -25,9 +27,8 @@ public class MinimumLengthValidator : IValidator
     {
         if (result.Content.Length < MinimumLength)
         {
-            throw new XbergException(
-                $"Content length {result.Content.Length} is below minimum {MinimumLength}",
-                1001
+            throw new ValidationException(
+                $"Content length {result.Content.Length} is below minimum {MinimumLength}"
             );
         }
     }
@@ -35,11 +36,6 @@ public class MinimumLengthValidator : IValidator
     public bool ShouldValidate(ExtractedDocument result, ExtractionConfig config)
     {
         return !string.IsNullOrEmpty(result.Content);
-    }
-
-    public int Priority()
-    {
-        return 50;
     }
 }
 ```

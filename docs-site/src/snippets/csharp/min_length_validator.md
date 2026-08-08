@@ -2,7 +2,7 @@
 using Xberg;
 
 var validator = new MinLengthValidator(minLength: 100);
-XbergLib.RegisterValidator(validator);
+ValidatorRegistry.RegisterValidator(validator);
 
 public class MinLengthValidator : IValidator
 {
@@ -13,18 +13,18 @@ public class MinLengthValidator : IValidator
         _minLength = minLength;
     }
 
-    public string Name() => "min_length_validator";
-    public string Version() => "1.0.0";
-    public int Priority() => 100;
+    public string Name => "min_length_validator";
+    public string Version => "1.0.0";
+    public int Priority => 100;
 
-    public void Validate(Dictionary<string, object> result)
+    public void Validate(ExtractedDocument result, ExtractionConfig config)
     {
-        var contentLength = result["content"].ToString()?.Length ?? 0;
+        var contentLength = result.Content.Length;
         if (contentLength < _minLength)
-            throw new ValidationError($"Content too short: {contentLength}");
+            throw new ValidationException($"Content too short: {contentLength}");
     }
 
-    public bool ShouldValidate(Dictionary<string, object> result) => true;
+    public bool ShouldValidate(ExtractedDocument result, ExtractionConfig config) => true;
     public void Initialize() { }
     public void Shutdown() { }
 }

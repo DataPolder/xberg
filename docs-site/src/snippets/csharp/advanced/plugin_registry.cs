@@ -1,5 +1,6 @@
 using Xberg;
-using System.Collections.Generic;
+using System;
+using System.Text.Json;
 
 class Program
 {
@@ -7,28 +8,28 @@ class Program
     {
         try
         {
-            var extractors = XbergLib.ListDocumentExtractors();
+            var extractors = XbergConverter.ListDocumentExtractors();
             Console.WriteLine("Registered Document Extractors:");
             foreach (var extractor in extractors)
             {
                 Console.WriteLine($"  - {extractor}");
             }
 
-            var ocrBackends = XbergLib.ListOcrBackends();
+            var ocrBackends = XbergConverter.ListOcrBackends();
             Console.WriteLine("\nRegistered OCR Backends:");
             foreach (var backend in ocrBackends)
             {
                 Console.WriteLine($"  - {backend}");
             }
 
-            var processors = XbergLib.ListPostProcessors();
+            var processors = XbergConverter.ListPostProcessors();
             Console.WriteLine("\nRegistered Post-Processors:");
             foreach (var processor in processors)
             {
                 Console.WriteLine($"  - {processor}");
             }
 
-            var validators = XbergLib.ListValidators();
+            var validators = XbergConverter.ListValidators();
             Console.WriteLine("\nRegistered Validators:");
             foreach (var validator in validators)
             {
@@ -36,13 +37,13 @@ class Program
             }
 
             var customProcessor = new CustomPostProcessor();
-            XbergLib.RegisterPostProcessor(customProcessor);
+            PostProcessorRegistry.RegisterPostProcessor(customProcessor);
             Console.WriteLine($"\nRegistered custom post-processor: {customProcessor.Name}");
 
-            XbergLib.UnregisterPostProcessor(customProcessor.Name);
+            PostProcessorRegistry.Unregister(customProcessor.Name);
             Console.WriteLine($"Unregistered post-processor: {customProcessor.Name}");
 
-            XbergLib.ClearValidators();
+            ValidatorRegistry.Clear();
             Console.WriteLine("All validators cleared");
         }
         catch (XbergException ex)
@@ -55,11 +56,21 @@ class Program
 class CustomPostProcessor : IPostProcessor
 {
     public string Name => "custom-processor";
+    public string Version => "1.0.0";
     public int Priority => 50;
+    public ProcessingStage ProcessingStage => ProcessingStage.Late;
 
-    public ExtractedDocument Process(ExtractedDocument result)
+    public void Initialize() { }
+    public void Shutdown() { }
+
+    public bool ShouldProcess(ExtractedDocument result, ExtractionConfig config) => true;
+    public ulong EstimatedDurationMs(ExtractedDocument result) => 1;
+
+    // ExtractedDocument.Content is immutable; post-processors report derived
+    // data through Metadata.Additional instead of rewriting the content.
+    public void Process(ExtractedDocument result, ExtractionConfig config)
     {
-        result.Content = result.Content.ToUpper();
-        return result;
+        result.Metadata.Additional["content_uppercase"] =
+            JsonSerializer.SerializeToElement(result.Content.ToUpper());
     }
 }

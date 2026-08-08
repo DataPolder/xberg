@@ -1,5 +1,7 @@
 ```csharp title="C#"
 using Xberg;
+using System;
+using System.Text.Json;
 
 var enricher = new PdfMetadataEnricher();
 PostProcessorRegistry.Register(enricher);
@@ -10,6 +12,8 @@ public class PdfMetadataEnricher : IPostProcessor
 
     public string Name => "pdf-metadata-enricher";
     public string Version => "1.0.0";
+    public int Priority => 50;
+    public ProcessingStage ProcessingStage => ProcessingStage.Early;
 
     public void Initialize()
     {
@@ -22,22 +26,19 @@ public class PdfMetadataEnricher : IPostProcessor
         Console.WriteLine($"PDF metadata enricher processed {_processedCount} documents");
     }
 
+    // ExtractedDocument.Metadata and Metadata.Authors are init-only, so
+    // enrichment is reported through Metadata.Additional instead of
+    // rewriting the document/metadata in place.
     public void Process(ExtractedDocument result, ExtractionConfig config)
     {
         if (result.MimeType == "application/pdf")
         {
             _processedCount++;
-            if (result.Metadata == null)
+            if (result.Metadata.Authors is null or { Count: 0 })
             {
-                result.Metadata = new Metadata();
+                result.Metadata.Additional["author_fallback"] = JsonSerializer.SerializeToElement("Unknown");
             }
-            result.Metadata.Author = result.Metadata.Author ?? "Unknown";
         }
-    }
-
-    public ProcessingStage ProcessingStage()
-    {
-        return ProcessingStage.Early;
     }
 
     public bool ShouldProcess(ExtractedDocument result, ExtractionConfig config)
@@ -46,11 +47,6 @@ public class PdfMetadataEnricher : IPostProcessor
     }
 
     public ulong EstimatedDurationMs(ExtractedDocument result)
-    {
-        return 50;
-    }
-
-    public int Priority()
     {
         return 50;
     }

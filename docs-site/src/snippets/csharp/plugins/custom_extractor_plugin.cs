@@ -1,23 +1,35 @@
 using Xberg;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
 
-// NOTE: IDocumentExtractor interface is not available in C# bindings
-
-class CustomJsonProcessor
+class JsonDocumentExtractor : IDocumentExtractor
 {
-    public static ExtractedDocument ProcessJson(byte[] content, string mimeType)
+    public string Name => "json-extractor";
+    public string Version => "1.0.0";
+    public int Priority => 60;
+    public List<string> SupportedMimeTypes => new() { "application/json" };
+
+    public void Initialize() { }
+    public void Shutdown() { }
+
+    public bool CanHandle(string path, string mimeType) =>
+        mimeType == "application/json" || path.EndsWith(".json", StringComparison.OrdinalIgnoreCase);
+
+    public ExtractedDocument Extract(ExtractInput input, ExtractionConfig config)
     {
+        var bytes = input.Bytes ?? throw new ParsingException("JSON extractor requires bytes input");
         try
         {
-            var jsonContent = System.Text.Encoding.UTF8.GetString(content);
+            var jsonContent = System.Text.Encoding.UTF8.GetString(bytes);
             var document = JsonDocument.Parse(jsonContent);
-
             var text = ExtractText(document.RootElement);
 
             return new ExtractedDocument
             {
                 Content = text,
-                MimeType = mimeType,
+                MimeType = "application/json",
                 Metadata = new Metadata(),
                 Tables = new List<Table>()
             };
@@ -51,12 +63,16 @@ class Program
     {
         try
         {
+            var extractor = new JsonDocumentExtractor();
+            DocumentExtractorRegistry.RegisterDocumentExtractor(extractor);
+
             var jsonData = new { message = "Hello, world!", timestamp = DateTime.UtcNow };
             var jsonBytes = System.Text.Encoding.UTF8.GetBytes(
                 JsonSerializer.Serialize(jsonData)
             );
 
-            var result = CustomJsonProcessor.ProcessJson(jsonBytes, "application/json");
+            var input = ExtractInput.FromBytes(jsonBytes, "application/json", null);
+            var result = extractor.Extract(input, ExtractionConfig.Default());
 
             Console.WriteLine($"Extracted: {result.Content}");
             Console.WriteLine($"MIME type: {result.MimeType}");
