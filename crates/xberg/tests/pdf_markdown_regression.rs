@@ -8,12 +8,14 @@
 //! - **PDF (native)**: Direct text extraction from searchable PDFs
 //! - **OCR**: Image rendering → Tesseract OCR → plain text
 //!
-//! Usage:
-//!   # All quality gates (Markdown, Djot, Plain):
-//!   cargo test -p xberg --features "pdf" --test pdf_markdown_regression -- --nocapture
+//! All quality gates run by default:
+//!   cargo test -p xberg --features "pdf,ocr" --test pdf_markdown_regression -- --nocapture
 //!
-//!   # Include OCR path tests (slow, needs tesseract):
-//!   cargo test -p xberg --features "pdf,ocr" --test pdf_markdown_regression -- --ignored --nocapture
+//! The OCR gate needs Tesseract plus the `eng` traineddata on `TESSDATA_PREFIX`;
+//! `scripts/ci/rust/run-unit-tests.sh` installs both before invoking cargo.
+//!
+//! All gates need `test_documents/`, which is bucket-fetched and absent from a bare
+//! checkout — run `python3 test_documents/scripts/fetch_corpus.py`.
 
 #![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(feature = "pdf")]
@@ -617,6 +619,9 @@ fn extract_ocr(pdf_path: &std::path::Path) -> Option<xberg::types::ExtractedDocu
             ..Default::default()
         }),
         force_ocr: true,
+        // The OCR cache is keyed on image bytes + OCR config, not on extractor code, so a
+        // cached hit would let this gate pass against a stale result. ~keep
+        use_cache: false,
         ..Default::default()
     };
 
@@ -639,12 +644,19 @@ const OCR_GROUND_TRUTH: &[(&str, f64)] = &[
     ("test", 0.20),
 ];
 
+/// Per-document OCR F1 quality gate.
+///
+/// Requires Tesseract with the `eng` traineddata reachable via `TESSDATA_PREFIX`;
+/// `scripts/ci/rust/run-unit-tests.sh` provisions it before running this leg.
 #[cfg(feature = "ocr")]
 #[test]
-#[ignore]
 fn test_ocr_quality_gate() {
     if !test_documents_available() {
-        println!("Skipping: test_documents not available");
+        eprintln!(
+            "SKIPPING test_ocr_quality_gate: test corpus not present at {} — \
+             run `python3 test_documents/scripts/fetch_corpus.py`",
+            get_test_documents_dir().display()
+        );
         return;
     }
 
@@ -664,10 +676,17 @@ fn test_ocr_quality_gate() {
     );
     println!("{}", "-".repeat(100));
 
+    let mut unresolved: Vec<String> = Vec::new();
+
     for &(gt_name, min_f1) in OCR_GROUND_TRUTH {
         let gt = match load_ground_truth(gt_name) {
             Some(gt) => gt,
             None => {
+                eprintln!(
+                    "missing fixture {} — run `python3 test_documents/scripts/fetch_corpus.py`",
+                    get_test_file_path(&format!("ground_truth/pdf/{gt_name}.txt")).display()
+                );
+                unresolved.push(format!("{gt_name} (ground truth)"));
                 skipped += 1;
                 continue;
             }
@@ -676,6 +695,12 @@ fn test_ocr_quality_gate() {
         let pdf_path = match resolve_pdf_path(gt_name) {
             Some(p) => p,
             None => {
+                eprintln!(
+                    "missing fixture {gt_name}.pdf under {} — \
+                     run `python3 test_documents/scripts/fetch_corpus.py`",
+                    get_test_documents_dir().display()
+                );
+                unresolved.push(format!("{gt_name} (pdf)"));
                 skipped += 1;
                 continue;
             }
@@ -736,18 +761,38 @@ fn test_ocr_quality_gate() {
         }
     }
 
-    assert!(
-        failures.is_empty(),
-        "{} document(s) fell below their OCR F1 threshold",
-        failures.len()
+    assert_eq!(
+        failures,
+        Vec::<String>::new(),
+        "{failed} document(s) failed the OCR gate (threshold miss or extraction error)"
+    );
+    // A fetched corpus resolves every entry. Asserting this stops the gate from
+    // reporting green after silently skipping its way to zero documents.
+    assert_eq!(
+        tested,
+        OCR_GROUND_TRUTH.len(),
+        "expected all {} OCR ground-truth documents to be evaluated, only {tested} were \
+         ({skipped} skipped); unresolved: {unresolved:?}",
+        OCR_GROUND_TRUTH.len()
+    );
+    assert_eq!(
+        passed, tested,
+        "every evaluated document must have passed its threshold"
     );
 }
 
+/// Diagnostic dump of per-document scores, headings and previews. Asserts nothing —
+/// it is a debugging aid, not coverage. Kept `#[ignore]`d so it never masquerades as
+/// a passing test; the real gates are `test_pdf_quality_gate` and friends above.
 #[test]
-#[ignore]
+#[ignore = "diagnostic dump with no assertions; run with --ignored when investigating scores"]
 fn test_pdf_detailed_snapshot() {
     if !test_documents_available() {
-        println!("Skipping: test_documents not available");
+        eprintln!(
+            "SKIPPING test_pdf_detailed_snapshot: test corpus not present at {} — \
+             run `python3 test_documents/scripts/fetch_corpus.py`",
+            get_test_documents_dir().display()
+        );
         return;
     }
 
@@ -844,7 +889,11 @@ mod scoring_tests {
     }
 
     #[test]
-    fn test_resolve_pdf_path_basic() {
-        let _ = resolve_pdf_path("nonexistent_document_12345");
+    fn should_return_none_when_pdf_name_matches_no_candidate_path() {
+        assert_eq!(
+            resolve_pdf_path("nonexistent_document_12345"),
+            None,
+            "a name matching none of the candidate roots must resolve to None"
+        );
     }
 }
