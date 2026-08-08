@@ -100,7 +100,7 @@ RUST_LOG=debug task python:e2e
 
 ### Testing the live browser demo
 
-The demo at `docs/demo.html` loads `@xberg-io/xberg-wasm` from a CDN. To test local changes against it, use:
+The demo at `docs-site/public/demo.html` loads `@xberg-io/xberg-wasm` from a CDN. To test local changes against it, use:
 
 ```bash title="Terminal"
 task demo:dev
@@ -113,7 +113,7 @@ This builds the Wasm binary and TypeScript dist, patches the demo with local URL
 | Docs   | `http://localhost:8001` | Serves the patched `demo-dev.html` |
 | Assets | `http://localhost:9000` | Serves the local Wasm package      |
 
-Open **`http://localhost:8001/demo-dev.html`** — no manual edits needed. The patched file (`docs/demo-dev.html`) is gitignored and regenerated on every run. The two different ports reproduce the cross-origin setup the CDN creates in production.
+Open **`http://localhost:8001/demo-dev.html`** — no manual edits needed. The patched file (`docs-site/public/demo-dev.html`) is gitignored and regenerated on every run. The two different ports reproduce the cross-origin setup the CDN creates in production.
 
 To skip the slow Rust build when you've only changed TypeScript:
 
@@ -134,15 +134,13 @@ To change a binding, edit the Rust source, README templates, fixtures, or `alef.
 then regenerate:
 
 ```bash title="Terminal"
-task alef:generate        # Regenerate all Alef-managed output (alef all --clean, no build)
-task alef:format          # Apply Alef post-generation formatting
+task alef:generate        # Regenerate all Alef-managed output (alef all --clean, formatting via poly, no build)
 task alef:build           # Compile the bindings (same as build:bindings)
 task alef:sync            # Sync the version from Cargo.toml to every manifest
 task alef:verify          # Check that generated output is up to date
 ```
 
-`task alef:generate` regenerates without compiling and without Alef post-generation
-formatting; run `task alef:format` explicitly when that formatting is needed. Commit the
+`task alef:generate` regenerates and formats (via `poly`) without compiling. Commit the
 generator inputs and regenerated output together in one change.
 
 ---
@@ -250,20 +248,21 @@ The repository uses pre-commit hooks that enforce conventional commit messages, 
 
 ## Working with Documentation
 
+Docs are an Astro Starlight site under `docs-site/`.
+
 ### Building Locally
 
 ```bash title="Terminal"
-uv sync --group doc
-zensical build --clean
-zensical serve
+task docs:build         # pnpm install + astro build
+task docs:serve         # pnpm install + astro dev (live reload)
 ```
 
 ### How Snippets Work
 
-Code examples in the docs aren't inline — they're pulled from `docs/snippets/` via the `--8<--` include directive. This keeps examples testable and reusable across pages.
+Code examples in the docs aren't inline — they're pulled from `docs-site/src/snippets/` and imported into each `.mdx` page as Astro components (`import { Content as Snip_... } from "../../../snippets/.../file.md"`, rendered inside `<TabItem>`). This keeps examples testable and reusable across pages.
 
 ```text
-docs/snippets/
+docs-site/src/snippets/
 ├── python/           # Python examples
 │   ├── api/          #   extract, extract_batch, etc.
 │   ├── config/       #   ExtractionConfig, OcrConfig, etc.
@@ -273,19 +272,13 @@ docs/snippets/
 │   └── utils/        #   Embeddings, chunking, errors
 ├── rust/             # Rust examples (same layout)
 ├── typescript/       # TypeScript examples
-├── go/, java/, csharp/, ruby/, r/
+├── go/, java/, csharp/, ruby/
 ├── docker/           # Docker commands
 ├── api_server/       # Server startup examples
 └── cli/              # CLI usage
 ```
 
-When you change a user-facing API, update the matching snippet. When you add a new feature, create a snippet and include it from the relevant doc page.
-
-### Theme tokens (light mode)
-
-Inline `code` and command-style monospace in light mode use the text token **`#26203A`**, defined in `docs/css/extra.css` as `--kb-text` (referenced as `var(--kb-text)`; brand backgrounds use the same value via `--kb-brand-ink`).
-
----
+When you change a user-facing API, update the matching snippet. When you add a new feature, create a snippet and import it from the relevant doc page. Use `task docs:snippets:gaps` to find unreferenced snippets or missing language variants, and `task docs:snippets:validate` to syntax-check them.
 
 ## Debugging
 

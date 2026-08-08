@@ -305,7 +305,7 @@ if (file) {
       mimeType: file.type || 'application/octet-stream',
       filename: file.name,
     },
-    { ocr: { backend: 'tesseract-wasm', language: 'eng+deu' } },
+    { ocr: { backend: 'tesseract-wasm', language: ['eng', 'deu'] } },
   );
   const result = output.results[0];
 }
@@ -523,7 +523,7 @@ config = ExtractionConfig(
     force_ocr=True,
     ocr=OcrConfig(
         backend="candle-glm-ocr",
-        language="en",
+        language=["en"],
         backend_options={"layout_mode": "paired"},
     ),
 )
@@ -536,7 +536,7 @@ config_whole = ExtractionConfig(
     force_ocr=True,
     ocr=OcrConfig(
         backend="candle-glm-ocr",
-        language="en",
+        language=["en"],
         backend_options={"layout_mode": "whole_page"},
     ),
 )
@@ -560,7 +560,7 @@ const output = await extract(
     forceOcr: true,
     ocr: {
       backend: 'candle-glm-ocr',
-      language: 'en',
+      language: ['en'],
       backendOptions: { layout_mode: 'paired' },
     },
   },
@@ -575,7 +575,7 @@ const wholePageOutput = await extract(
     forceOcr: true,
     ocr: {
       backend: 'candle-glm-ocr',
-      language: 'en',
+      language: ['en'],
       backendOptions: { layout_mode: 'whole_page' },
     },
   },
@@ -595,7 +595,7 @@ let config = ExtractionConfig {
     force_ocr: true,
     ocr: Some(OcrConfig {
         backend: "candle-glm-ocr".into(),
-        language: "en".into(),
+        language: vec!["en".to_string()],
         backend_options: Some(json!({"layout_mode": "paired"})),
         ..Default::default()
     }),
@@ -610,7 +610,7 @@ let config_whole = ExtractionConfig {
     force_ocr: true,
     ocr: Some(OcrConfig {
         backend: "candle-glm-ocr".into(),
-        language: "en".into(),
+        language: vec!["en".to_string()],
         backend_options: Some(json!({"layout_mode": "whole_page"})),
         ..Default::default()
     }),
@@ -668,7 +668,7 @@ config = ExtractionConfig(
     force_ocr=True,
     ocr=OcrConfig(
         backend="candle-deepseek-ocr",
-        language="en",
+        language=["en"],
         backend_options={"device": "auto", "model_path": "~/.cache/huggingface/"},
     ),
 )
@@ -689,7 +689,7 @@ const output = await extract(
     forceOcr: true,
     ocr: {
       backend: 'candle-deepseek-ocr',
-      language: 'en',
+      language: ['en'],
       backendOptions: { device: 'auto', model_path: '~/.cache/huggingface/' },
     },
   },
@@ -709,7 +709,7 @@ let config = ExtractionConfig {
     force_ocr: true,
     ocr: Some(OcrConfig {
         backend: "candle-deepseek-ocr".into(),
-        language: "en".into(),
+        language: vec!["en".to_string()],
         backend_options: Some(json!({"device": "auto", "model_path": "~/.cache/huggingface/"})),
         ..Default::default()
     }),
@@ -771,7 +771,7 @@ config = ExtractionConfig(
     force_ocr=True,
     ocr=OcrConfig(
         backend="candle-paddleocr-vl",
-        language="en",
+        language=["en"],
         backend_options={"device": "auto", "model_path": "~/.cache/huggingface/"},
     ),
 )
@@ -792,7 +792,7 @@ const output = await extract(
     forceOcr: true,
     ocr: {
       backend: 'candle-paddleocr-vl',
-      language: 'en',
+      language: ['en'],
       backendOptions: { device: 'auto', model_path: '~/.cache/huggingface/' },
     },
   },
@@ -812,7 +812,7 @@ let config = ExtractionConfig {
     force_ocr: true,
     ocr: Some(OcrConfig {
         backend: "candle-paddleocr-vl".into(),
-        language: "en".into(),
+        language: vec!["en".to_string()],
         backend_options: Some(json!({"device": "auto", "model_path": "~/.cache/huggingface/"})),
         ..Default::default()
     }),

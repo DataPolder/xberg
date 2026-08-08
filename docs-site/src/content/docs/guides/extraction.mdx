@@ -440,6 +440,90 @@ The extraction is aborted for that input; it does not silently truncate or
 return partial content for a security violation the way a format-parsing
 warning would.
 
+## PDF Reading Order Repair
+
+Native PDF text extraction reads glyphs in the order they were written into
+the content stream, not the order a human reads the page. For multi-column
+layouts (academic papers, magazines, dense reports) that order can jump
+between columns mid-sentence. Xberg can repair this by projecting text spans
+onto layout-detected regions, grouping them into columns, and re-emitting
+them top-to-bottom within each column, left-to-right across columns.
+
+This repair is **off by default**. Enable it with
+`ExtractionConfig.pdf_options.reading_order = true`
+(`PdfConfig::reading_order` in Rust, default `false`).
+
+<Tabs syncKey="lang">
+<TabItem label="Python">
+
+```python title="pdf_reading_order.py"
+from xberg import ExtractInput, ExtractionConfig, PdfOptions, extract
+
+config = ExtractionConfig(
+    pdf_options=PdfOptions(reading_order=True),
+)
+
+output = await extract(
+    ExtractInput(kind="uri", uri="two_column_paper.pdf"),
+    config=config,
+)
+```
+
+</TabItem>
+<TabItem label="TypeScript">
+
+```typescript title="pdf-reading-order.ts"
+import { ExtractInputKind, extract } from "@xberg-io/xberg";
+
+const output = await extract(
+  { kind: ExtractInputKind.Uri, uri: "two_column_paper.pdf" },
+  {
+    pdfOptions: {
+      readingOrder: true,
+    },
+  },
+);
+```
+
+</TabItem>
+<TabItem label="Rust">
+
+```rust title="pdf_reading_order.rs"
+use xberg::{extract, ExtractInput, ExtractionConfig, PdfConfig};
+
+let config = ExtractionConfig {
+    pdf_options: Some(PdfConfig {
+        reading_order: true,
+        ..Default::default()
+    }),
+    ..Default::default()
+};
+
+let output = extract(ExtractInput::from_uri("two_column_paper.pdf"), &config).await?;
+```
+
+</TabItem>
+</Tabs>
+
+**Requirements:** this option only takes effect when the `layout-detection`
+feature is compiled in and layout hints were produced for the page (the page
+must have a layout model pass run over it). Without layout hints, the flag is
+a no-op and extraction falls back silently to native text order.
+
+**What it fixes:** the flowing body text of multi-column pages — the case
+where native extraction interleaves column A and column B mid-paragraph.
+
+**What it does not fix:** reading order only reorders text spans, not table
+cells. A page containing a rotated or scrambled table is unaffected by this
+option — that class of problem lives in the table extraction path, not the
+span-reordering pass, and setting `reading_order` will not repair it.
+
+**Cost:** reordering only runs when layout hints are already available, so it
+adds span-projection and column-detection work on top of an existing
+layout-detection pass rather than triggering a new one on its own. There is
+no published benchmark number for the added latency; measure it against your
+own corpus before enabling it in a latency-sensitive pipeline.
+
 ## Content Filtering
 
 Xberg strips running headers, footers, watermarks, and cross-page repeating text

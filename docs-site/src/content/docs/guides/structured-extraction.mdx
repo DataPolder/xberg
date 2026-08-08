@@ -78,6 +78,7 @@ async fn main() -> xberg::Result<()> {
 
 ```python
 import asyncio
+import json
 from xberg import (
     ExtractInput,
     ExtractionConfig,
@@ -91,25 +92,29 @@ async def main() -> None:
     config = ExtractionConfig(
         structured_extraction=StructuredExtractionConfig(
             schema_name="paper_metadata",
-            schema={
-                "type": "object",
-                "properties": {
-                    "title": {"type": "string"},
-                    "authors": {
-                        "type": "array",
-                        "items": {"type": "string"},
+            # The Python binding types `schema` as `str` (see _xberg.pyi), so the
+            # schema is passed as JSON text rather than a dict.
+            schema=json.dumps(
+                {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string"},
+                        "authors": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        "date": {"type": "string"},
                     },
-                    "date": {"type": "string"},
-                },
-                "required": ["title", "authors"],
-                "additionalProperties": False,
-            },
+                    "required": ["title", "authors"],
+                    "additionalProperties": False,
+                }
+            ),
             strict=True,
             llm=LlmConfig(model="openai/gpt-4o-mini"),
         ),
     )
 
-    output = await extract(ExtractInput.from_uri("paper.pdf"), config)
+    output = await extract(ExtractInput(uri="paper.pdf"), config)
     if output.results and output.results[0].structured_output is not None:
         print(output.results[0].structured_output)
 

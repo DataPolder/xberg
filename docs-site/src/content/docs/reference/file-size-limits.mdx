@@ -111,110 +111,27 @@ services:
         cpu: "2000m"
 ```
 
-### 4. Programmatic Configuration
+### 4. Programmatic Configuration (Rust only)
 
-<Tabs syncKey="lang">
-<TabItem label="C#">
-
-```csharp
-using Xberg;
-
-// Create limits: 50 MB for both request body and individual files
-var limits = ApiSizeLimits.FromMB(50, 50);
-
-// Or create with custom byte values
-var customLimits = new ApiSizeLimits
-{
-    MaxRequestBodyBytes = 100 * 1024 * 1024,  // 100 MB
-    MaxMultipartFieldBytes = 100 * 1024 * 1024  // 100 MB
-};
-```
-
-</TabItem>
-<TabItem label="Go">
-
-```go
-import "xberg"
-
-// Create limits: 200 MB for both request body and individual files
-limits := xberg.NewApiSizeLimits(
-    200 * 1024 * 1024,  // max_request_body_bytes
-    200 * 1024 * 1024,  // max_multipart_field_bytes
-)
-
-// Or use convenience method with MB values
-limits := xberg.ApiSizeLimitsFromMB(200, 200)
-```
-
-</TabItem>
-<TabItem label="Java">
-
-```java
-import com.xberg.api.ApiSizeLimits;
-
-// Create limits: 200 MB for both request body and individual files
-ApiSizeLimits limits = new ApiSizeLimits(
-    200 * 1024 * 1024,  // maxRequestBodyBytes
-    200 * 1024 * 1024   // maxMultipartFieldBytes
-);
-
-// Or use convenience method with MB values
-ApiSizeLimits limits = ApiSizeLimits.fromMB(200, 200);
-```
-
-</TabItem>
-<TabItem label="Python">
-
-```python
-from xberg.api import ApiSizeLimits, create_router_with_limits
-from xberg import ExtractionConfig
-
-# Create limits: 200 MB for both request body and individual files
-limits = ApiSizeLimits.from_mb(200, 200)
-
-# Or create with custom byte values
-limits = ApiSizeLimits(
-    max_request_body_bytes=200 * 1024 * 1024,
-    max_multipart_field_bytes=200 * 1024 * 1024
-)
-
-# Create router with custom limits
-config = ExtractionConfig()
-router = create_router_with_limits(config, limits)
-```
-
-</TabItem>
-<TabItem label="Ruby">
-
-```ruby
-require 'xberg'
-
-# Create limits: 200 MB for both request body and individual files
-limits = Xberg::Api::ApiSizeLimits.from_mb(200, 200)
-
-# Or create with custom byte values
-limits = Xberg::Api::ApiSizeLimits.new(
-  max_request_body_bytes: 200 * 1024 * 1024,
-  max_multipart_field_bytes: 200 * 1024 * 1024
-)
-```
-
-</TabItem>
-<TabItem label="Rust">
+`ApiSizeLimits` and `create_router_with_limits` are part of the core `xberg` Rust
+crate's `api` module, used when embedding the Xberg Axum router directly. They are
+not exposed by any language binding (Python, TypeScript, Go, Java, C#, Ruby,
+etc.) — those consumers configure limits through the `XBERG_MAX_REQUEST_BODY_BYTES`
+/ `XBERG_MAX_MULTIPART_FIELD_BYTES` environment variables or a config file when
+running the `xberg serve` binary, as shown above.
 
 ```rust
 use xberg::{ExtractionConfig, api::{create_router_with_limits, ApiSizeLimits}};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Create limits: 200 MB for both request body and individual files
-    let limits = ApiSizeLimits::from_mb(200, 200);
-
-    // Or create with custom byte values
-    let limits = ApiSizeLimits::new(
-        200 * 1024 * 1024,  // max_request_body_bytes
-        200 * 1024 * 1024,  // max_multipart_field_bytes
-    );
+    // Create limits: 200 MB for both request body and individual files.
+    // `ApiSizeLimits` only exposes public fields; build it directly rather
+    // than via a constructor method.
+    let limits = ApiSizeLimits {
+        max_request_body_bytes: 200 * 1024 * 1024,
+        max_multipart_field_bytes: 200 * 1024 * 1024,
+    };
 
     let config = ExtractionConfig::default();
     let router = create_router_with_limits(config, limits);
@@ -222,28 +139,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
-
-</TabItem>
-<TabItem label="TypeScript">
-
-```typescript
-import { ApiSizeLimits, createRouterWithLimits } from 'xberg';
-
-// Create limits: 200 MB for both request body and individual files
-const limits = ApiSizeLimits.fromMb(200, 200);
-
-// Or create with custom byte values
-const limits = new ApiSizeLimits({
-    maxRequestBodyBytes: 200 * 1024 * 1024,
-    maxMultipartFieldBytes: 200 * 1024 * 1024
-});
-
-// Create router with custom limits
-const router = createRouterWithLimits(config, limits);
-```
-
-</TabItem>
-</Tabs>
 
 ## Configuration Scenarios
 

@@ -152,6 +152,15 @@ When multiple extractors support the same MIME type, the highest priority wins:
 
 ## Post-Processors
 
+:::caution[Python PostProcessor cannot mutate the result]
+The Python `process()` callback receives a clone of the `ExtractedDocument` and its return
+value is discarded by the Rust bridge — any changes it makes are not written back into the
+extraction result. This applies to the Python binding only; native Rust `PostProcessor`
+plugins receive `&mut ExtractedDocument` and mutate it directly. Until this is fixed, use a
+Python `PostProcessor` for side effects (logging, metrics, external calls) rather than content
+transformation, or implement the processor in Rust.
+:::
+
 Processors execute in three stages:
 
 - **Early** — Foundational: language detection, quality scoring, text normalization
@@ -250,7 +259,7 @@ register_ocr_backend(backend)
 
 from xberg import extract, ExtractionConfig, OcrConfig
 
-config = ExtractionConfig(ocr=OcrConfig(backend="cloud-ocr", language="eng"))
+config = ExtractionConfig(ocr=OcrConfig(backend="cloud-ocr", language=["eng"]))
 result = extract("scanned.pdf", config=config)
 
 unregister_ocr_backend("cloud-ocr")

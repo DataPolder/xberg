@@ -28,7 +28,7 @@ Score extracted text on a 0.0–1.0 scale, where 1.0 is highest quality. Scoring
 | Document Structure  | 20%        | Bonus   | Sentence/paragraph length, punctuation distribution    |
 | Metadata Quality    | 10%        | Bonus   | Title, author, subject, description, keywords          |
 
-Script and navigation penalties apply only to text longer than 1000 characters; shorter text is scored on OCR artifacts and structure alone.
+OCR, script, and navigation penalties apply at every text length, including short fragments — there is no length threshold below which they are skipped.
 
 ## Configuration
 

@@ -131,7 +131,7 @@ use xberg::presets::{Registry, resolve};
 use std::collections::BTreeMap;
 
 let registry = Registry::global();
-let preset = registry.get("my_preset")?;
+let preset = registry.get("my_preset").expect("preset exists");
 
 let mut context = BTreeMap::new();
 context.insert("company_name", "ACME Corp");

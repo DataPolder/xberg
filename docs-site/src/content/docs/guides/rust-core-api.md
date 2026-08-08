@@ -291,19 +291,19 @@ Requires `captioning` + `tokio-runtime` features. Calls a vision-language model.
 pub async fn caption_image(
     image_bytes: &[u8],
     llm_config: &LlmConfig,
-    custom_prompt: Option<String>,
+    custom_prompt: Option<&str>,
 ) -> Result<String>;
 
 pub async fn caption_image_file(
-    path: &str,
+    path: impl AsRef<Path>,
     llm_config: &LlmConfig,
-    custom_prompt: Option<String>,
+    custom_prompt: Option<&str>,
 ) -> Result<String>;
 
 pub async fn caption_images(
     images: &[&[u8]],
     llm_config: &LlmConfig,
-    custom_prompt: Option<String>,
+    custom_prompt: Option<&str>,
 ) -> Result<Vec<String>>;
 ```
 
@@ -403,7 +403,7 @@ pub fn compare(
 ) -> ExtractionDiff;
 ```
 
-`DiffOptions` controls context line count, metadata inclusion, embedded-child comparison, and per-field truncation. `ExtractionDiff` contains:
+`DiffOptions` has three fields: `include_metadata`, `include_embedded`, and `max_content_chars` (truncates `content` before diffing; `None` means no truncation). `ExtractionDiff` contains:
 
 | Field | Type | Description |
 |---|---|---|
@@ -439,8 +439,8 @@ async fn diff_two_docs() -> xberg::Result<()> {
 ```rust
 pub struct SecurityLimits {
     pub max_archive_size: usize,
-    pub max_compression_ratio: f64,
-    pub max_file_count: usize,
+    pub max_compression_ratio: usize,
+    pub max_files_in_archive: usize,
     pub max_nesting_depth: usize,
     // ...
 }

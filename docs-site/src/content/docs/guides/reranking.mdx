@@ -154,9 +154,9 @@ for (var r : results) {
 | Preset | When to use |
 |--------|-------------|
 | `fast` | Latency-critical retrieval, English-only. ~37M parameters, 8192-token context. |
-| `balanced` | Production English/Chinese RAG. ~278M parameters, 512-token context, the recommended default. |
+| `balanced` | Production English RAG. ~150M parameters (ModernBERT-based), ~8000-token context, the recommended default. |
 | `quality` | Complex queries where accuracy matters more than latency. 568M parameters, 100+ languages, 8192-token context. |
-| `multilingual` | International documents, balanced latency/quality. ~278M parameters, 1024-token context, 100+ languages. |
+| `multilingual` | International documents needing top accuracy. Same underlying 568M-parameter model as `quality`, 100+ languages, 8192-token context. |
 
 All four download lazily from HuggingFace on first use and cache under `~/.cache/xberg/rerankers/`.
 

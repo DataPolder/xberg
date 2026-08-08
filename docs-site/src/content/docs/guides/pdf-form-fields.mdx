@@ -20,13 +20,13 @@ Extracted fields appear in `result.form_fields` as a list of `PdfFormField` stru
 | `name` | string | Leaf field name in the hierarchy (e.g., `"line_total"`). |
 | `full_name` | string | Dotted path from root (e.g., `"invoice.line_items[0].line_total"`). |
 | `field_type` | enum | One of: `Text`, `Checkbox`, `Radio`, `Choice`, `Signature`, `Button`, `Unknown`. |
-| `value` | string | Current field value (if filled). |
-| `default_value` | string | Default value from the form template. |
+| `value` | `Option<string>` | Current field value (if filled). |
+| `default_value` | `Option<string>` | Default value from the form template. |
 | `flags` | u32 | Bitmask: read-only, required, multiline, password, and so on. |
 | `page` | `Option<u32>` | 1-indexed page number the field appears on. Currently always `None` — page assignment is not yet wired up. |
-| `bbox` | `BoundingBox` | Widget location on the page (x, y, width, height). |
-| `max_length` | u32 | Maximum input length (text fields only). |
-| `tooltip` | string | Hover text or field description. |
+| `bbox` | `Option<BoundingBox>` | Widget location on the page (x, y, width, height), if known. |
+| `max_length` | `Option<u32>` | Maximum input length (text fields only), if specified. |
+| `tooltip` | `Option<string>` | Hover text or field description, if present. |
 
 ## Configuration
 

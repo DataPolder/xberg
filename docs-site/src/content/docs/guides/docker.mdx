@@ -123,13 +123,14 @@ See [API Server Guide - MCP Section](/guides/api-server/#mcp-server) for integra
 
 ## Environment Variables
 
-| Variable                       | Default                       | Description                                                                                      |
-| ------------------------------ | ----------------------------- | ------------------------------------------------------------------------------------------------ |
-| `XBERG_MAX_UPLOAD_SIZE_MB` | `100`                         | Max upload size in MB                                                                            |
-| `XBERG_CORS_ORIGINS`       | `*`                           | Comma-separated allowed origins                                                                  |
-| `RUST_LOG`                     | `info`                        | Log level: `error`, `warn`, `info`, `debug`, `trace`                                             |
-| `XBERG_CACHE_DIR`          | `/app/.xberg`             | Cache directory (set explicitly in Docker; outside containers defaults to platform global cache) |
-| `HF_HOME`                      | `/app/.xberg/huggingface` | HuggingFace model cache                                                                          |
+| Variable                           | Default       | Description                                                                                      |
+| ---------------------------------- | ------------- | ------------------------------------------------------------------------------------------------ |
+| `XBERG_MAX_REQUEST_BODY_BYTES`     | `104857600`   | Max request body size in bytes                                                                   |
+| `XBERG_MAX_MULTIPART_FIELD_BYTES`  | `104857600`   | Max multipart field (upload) size in bytes                                                       |
+| `XBERG_CORS_ORIGINS`               | `*`           | Comma-separated allowed origins                                                                  |
+| `RUST_LOG`                         | `info`        | Log level: `error`, `warn`, `info`, `debug`, `trace`                                             |
+| `XBERG_CACHE_DIR`                  | `/app/.xberg` | Cache directory (set explicitly in Docker; outside containers defaults to platform global cache) |
+| `HF_HOME`                          | `/app/.xberg/huggingface` | HuggingFace model cache                                                              |
 
 Host and port are set via CLI args: `serve --host 0.0.0.0 --port 8000`.
 
@@ -167,7 +168,7 @@ services:
       - "8000:8000"
     environment:
       - XBERG_CORS_ORIGINS=https://myapp.com
-      - XBERG_MAX_UPLOAD_SIZE_MB=500
+      - XBERG_MAX_REQUEST_BODY_BYTES=524288000
       - RUST_LOG=info
     volumes:
       - ./config:/config
@@ -289,7 +290,7 @@ Images run as UID 1000. Fix with: `chown -R 1000:1000 /path/to/mounted/directory
 :::
 
 :::note[Large file processing fails]
-Increase memory limit (`--memory=4g`) and upload size (`-e XBERG_MAX_UPLOAD_SIZE_MB=1000`).
+Increase memory limit (`--memory=4g`) and upload size (`-e XBERG_MAX_MULTIPART_FIELD_BYTES=1048576000`).
 :::
 
 ## Next Steps
