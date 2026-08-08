@@ -5,8 +5,20 @@
 	"call": "extract",
 	"assertion_recipes": ["chunks", "streaming"],
 	"input": {
-		"kind": "uri",
-		"uri": "markdown/extraction_test.md"
+		"mock_responses": [
+			{
+				"path": "/markdown/extraction_test.md",
+				"status_code": 200,
+				"headers": {
+					"content-type": "text/markdown"
+				},
+				"body_file": "../test_documents/markdown/extraction_test.md"
+			}
+		],
+		"extract_input": {
+			"kind": "uri",
+			"uri": "$mock_url/markdown/extraction_test.md"
+		}
 	},
 	"assertions": [
 		{
@@ -34,10 +46,7 @@
 	],
 	"skip": {
 		"languages": [
-			"python",
-			"node",
 			"ruby",
-			"elixir",
 			"php",
 			"zig",
 			"dart",
@@ -45,7 +54,7 @@
 			"swift",
 			"homebrew"
 		],
-		"reason": "python/node/ruby/elixir/php/zig run their e2e suite from e2e/<lang>/ without a chdir to test_documents/, so the relative uri cannot resolve; ruby, php and zig additionally have no generator support for the chunks_have_heading_context / first_chunk_starts_with_heading synthetic fields, and dart, kotlin_android and swift have no synthetic chunk assertions at all. homebrew is a CLI test_app with no result object to assert on."
+		"reason": "ruby and zig explicitly emit a skip comment for both chunks_have_heading_context and first_chunk_starts_with_heading (no binding field / not derivable from JSON alone); php/assertions.rs has no match arm for either field so they would fall through to an invalid generic field lookup. dart, kotlin_android and swift have no synthetic chunk assertions at all. homebrew is a CLI test_app with no result object to assert on."
 	},
 	"config": {
 		"chunking": {
