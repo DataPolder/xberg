@@ -616,7 +616,7 @@ no-ort-target = [
   "svg",
   "transcription-types",
 ]
-# wasm-target: no-ort-target plus WASM-specific overrides (excel-wasm, tree-sitter-wasm, ocr-wasm),
+# wasm-target: no-ort-target plus WASM-specific overrides (excel-wasm, ocr-wasm),
 # plus the pure-Rust `layout-tract` (RT-DETR + table classifier) and `auto-rotate-tract`
 # (PP-LCNet document orientation) capabilities (issue #1275, Workstream A). Both run through
 # the tract engine, so no `dep:ort` is pulled in. Unlike the native/Android variants of these
@@ -630,17 +630,20 @@ no-ort-target = [
 # "wasm32")`-gated so they simply do not compile on this target; only the engine-neutral,
 # bytes-based constructors do. Table STRUCTURE recognition (TATR, SLANeXT) and PP-DocLayout-V3
 # stay ORT-only and are therefore unavailable here too (see the `layout-tract` feature doc above).
-# NOTE: tree-sitter-wasm compiles 100+ embedded C parsers (via tree-sitter-language-pack)
-# for wasm32-unknown-unknown. Clang uses ~13-14 GB peak RSS during compilation, causing OOM
-# on standard GitHub Actions runners (~16 GB). Publish job caps parallelism to 2 (-j 2) to
-# reduce memory spikes. Long-term fix: add tree-sitter-wasm-lite feature to tree-sitter-language-pack
-# with curated parser set (markdown, javascript, python, rust, json, yaml, html, css, sql, c, etc.)
-# and update this aggregate to use it instead of the full tree-sitter feature.
 # NOTE: tree-sitter is intentionally EXCLUDED from wasm-target. The statically
 # linked tree-sitter grammar pack (371 languages) pushed the browser wasm binary
 # past ~100 MB, over jsDelivr's 50 MB per-file limit, which broke the live demo
 # (the CDN 403s the oversized .wasm). Code intelligence is therefore unavailable
 # in the WASM build; native targets keep `tree-sitter`. See docs (WASM limitations).
+# NOTE: the `tree-sitter-wasm` feature defined above (`tree-sitter-wasm = ["tree-sitter"]`)
+# is currently ORPHANED — it is not enabled by `wasm-target` or by anything else in this
+# manifest, and as defined it is a plain alias for the full 371-language `tree-sitter`
+# feature (no curated/lite parser subset), so enabling it today would hit the exact
+# jsDelivr size limit and Clang OOM problems described above. It appears to be a stub
+# left over from an abandoned plan to ship a curated "lite" parser set (markdown,
+# javascript, python, rust, json, yaml, html, css, sql, c, etc.) sized for wasm32.
+# Needs a decision: either implement that curated subset and wire this feature into
+# `wasm-target`, or remove the orphaned feature entirely.
 wasm-target = ["no-ort-target", "excel-wasm", "ocr-wasm", "layout-tract", "auto-rotate-tract", "ner-candle-wasm"]
 # android-target: no-ort-target plus native-Linux variants that work on Android ABI
 # (excel with tokio, native tree-sitter, Tesseract OCR, and API/MCP transport).
