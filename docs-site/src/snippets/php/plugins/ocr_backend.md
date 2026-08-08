@@ -2,6 +2,10 @@
 <?php declare(strict_types=1);
 
 use Xberg\XbergApi;
+use Xberg\Xberg;
+use Xberg\OcrBackend;
+use Xberg\OcrConfig;
+use Xberg\ExtractedDocument;
 
 class CustomOcrBackend implements OcrBackend {
     private array $supportedLangs = ["eng", "deu", "fra"];
@@ -22,45 +26,39 @@ class CustomOcrBackend implements OcrBackend {
         // Cleanup OCR resources
     }
 
-    public function processImage(string $imageBytes, object $config): object {
-        // Process image bytes and return ExtractedDocument
+    public function process_image(mixed $image_bytes, OcrConfig $config): ExtractedDocument {
+        // Process image bytes and return an ExtractedDocument.
         // This would call your OCR engine (Tesseract, PaddleOCR, VLM OCR, etc.)
-        return (object)[
-            'content' => 'Extracted text from image',
-            'mime_type' => 'image/png',
-            'metadata' => ['ocr_engine' => 'custom-ocr'],
-            'tables' => [],
-            'detected_languages' => ['eng'],
-        ];
+        return new ExtractedDocument('Extracted text from image', 'image/png', detectedLanguages: ['eng']);
     }
 
-    public function processImageFile(string $path, object $config): object {
-        // Read file and delegate to processImage
+    public function process_image_file(string $path, OcrConfig $config): ExtractedDocument {
+        // Read file and delegate to process_image
         $imageBytes = file_get_contents($path);
-        return $this->processImage($imageBytes, $config);
+        return $this->process_image($imageBytes, $config);
     }
 
-    public function supportsLanguage(string $lang): bool {
+    public function supports_language(string $lang): bool {
         return in_array($lang, $this->supportedLangs);
     }
 
-    public function backendType(): string {
+    public function backend_type(): mixed {
         return "OCREngine";
     }
 
-    public function supportedLanguages(): array {
+    public function supported_languages(): mixed {
         return $this->supportedLangs;
     }
 
-    public function supportsTableDetection(): bool {
+    public function supports_table_detection(): bool {
         return true;
     }
 
-    public function supportsDocumentProcessing(): bool {
+    public function supports_document_processing(): bool {
         return false;
     }
 
-    public function processDocument(string $path, object $config): object {
+    public function process_document(string $path, OcrConfig $config): ExtractedDocument {
         throw new Exception("Document processing not supported");
     }
 }

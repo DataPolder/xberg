@@ -17,6 +17,6 @@ if (result.Pages != null)
         Console.WriteLine($"Page {page.PageNumber}:");
         Console.WriteLine($"  Content: {page.Content.Length} chars");
         Console.WriteLine($"  Tables: {page.Tables.Count}");
-        Console.WriteLine($"  Images: {page.Images.Count}");
+        Console.WriteLine($"  Images: {page.ImageIndices.Count}");
     }
 }

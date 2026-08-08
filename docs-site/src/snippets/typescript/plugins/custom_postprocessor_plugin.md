@@ -2,7 +2,8 @@
 import {
   registerPostProcessor,
   unregisterPostProcessor,
-  type PostProcessorProtocol,
+  ProcessingStage,
+  type PostProcessor,
   type ExtractedDocument,
 } from "@xberg-io/xberg";
 
@@ -13,37 +14,43 @@ import {
  * const processor = new MetadataEnrichmentProcessor();
  * registerPostProcessor(processor);
  */
-class MetadataEnrichmentProcessor implements PostProcessorProtocol {
+class MetadataEnrichmentProcessor implements PostProcessor {
   private processedCount: number = 0;
 
   name(): string {
     return "metadata-enrichment-processor";
   }
 
-  processingStage(): "early" | "middle" | "late" {
-    return "middle";
+  processingStage(): ProcessingStage {
+    return ProcessingStage.Middle;
   }
 
   /**
-   * Enrich result with additional metadata
+   * Enrich result with additional metadata (mutates the result in place)
    */
-  process(result: ExtractedDocument): ExtractedDocument {
+  async process(result?: ExtractedDocument | null): Promise<void> {
+    if (!result) {
+      return;
+    }
     this.processedCount++;
+    const content = result.content ?? "";
 
-    return {
-      ...result,
+    Object.assign(result, {
       metadata: {
         ...result.metadata,
-        processedAt: new Date().toISOString(),
-        processingIndex: this.processedCount,
-        contentStats: {
-          characterCount: result.content.length,
-          wordCount: result.content.split(/\s+/).length,
-          lineCount: result.content.split("\n").length,
+        additional: {
+          ...result.metadata?.additional,
+          processedAt: new Date().toISOString(),
+          processingIndex: this.processedCount,
+          contentStats: {
+            characterCount: content.length,
+            wordCount: content.split(/\s+/).length,
+            lineCount: content.split("\n").length,
+          },
+          extractionQuality: this.calculateQuality(content),
         },
-        extractionQuality: this.calculateQuality(result.content),
       },
-    };
+    });
   }
 
   /**
@@ -87,23 +94,23 @@ class MetadataEnrichmentProcessor implements PostProcessorProtocol {
  * const processor = new FormatPostProcessor();
  * registerPostProcessor(processor);
  */
-class FormatPostProcessor implements PostProcessorProtocol {
+class FormatPostProcessor implements PostProcessor {
   name(): string {
     return "format-postprocessor";
   }
 
-  processingStage(): "early" | "middle" | "late" {
-    return "late";
+  processingStage(): ProcessingStage {
+    return ProcessingStage.Late;
   }
 
   /**
-   * Format content for consistency
+   * Format content for consistency (mutates the result in place)
    */
-  process(result: ExtractedDocument): ExtractedDocument {
-    return {
-      ...result,
-      content: this.formatContent(result.content),
-    };
+  async process(result?: ExtractedDocument | null): Promise<void> {
+    if (!result) {
+      return;
+    }
+    Object.assign(result, { content: this.formatContent(result.content ?? "") });
   }
 
   /**

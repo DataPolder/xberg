@@ -5,7 +5,7 @@ var config = new ExtractionConfig
     Ocr = new OcrConfig
     {
         Backend = "auto",
-        Language = "en"
+        Language = ["en"]
     }
 };
 

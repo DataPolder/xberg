@@ -3,13 +3,14 @@
 declare(strict_types=1);
 
 use Xberg\XbergApi;
+use Xberg\Xberg;
 use Xberg\ExtractionConfig;
 use Xberg\ChunkingConfig;
 
 $config = ExtractionConfig::default();
 $config->setChunking(new ChunkingConfig());
 $resultOutput = Xberg::extract(\Xberg\ExtractInput::fromUri('document.pdf'), $config);
-$result = $resultOutput->results[0];
+$result = $resultOutput->getResults()[0];
 
 echo "Total content length: " . strlen($result->content) . "\n";
 

@@ -2,6 +2,10 @@
 <?php declare(strict_types=1);
 
 use Xberg\XbergApi;
+use Xberg\Xberg;
+use Xberg\Validator;
+use Xberg\ExtractedDocument;
+use Xberg\ExtractionConfig;
 
 class QualityScoreValidator implements Validator {
     private float $minQualityScore = 0.7;
@@ -22,7 +26,7 @@ class QualityScoreValidator implements Validator {
         // Cleanup resources
     }
 
-    public function validate(object $result, object $config): void {
+    public function validate(ExtractedDocument $result, ExtractionConfig $config): mixed {
         $qualityScore = $this->calculateQualityScore($result);
 
         if ($qualityScore < $this->minQualityScore) {
@@ -34,13 +38,15 @@ class QualityScoreValidator implements Validator {
                 )
             );
         }
+
+        return null;
     }
 
     public function priority(): int {
         return 90;
     }
 
-    private function calculateQualityScore(object $result): float {
+    private function calculateQualityScore(ExtractedDocument $result): float {
         $score = 1.0;
 
         // Penalize if content is too short
@@ -49,12 +55,12 @@ class QualityScoreValidator implements Validator {
         }
 
         // Penalize if many detection warnings
-        if (isset($result->processing_warnings) && count($result->processing_warnings) > 5) {
+        if (count($result->getProcessingWarnings()) > 5) {
             $score *= 0.9;
         }
 
         // Reward if language was detected
-        if (isset($result->detected_languages) && !empty($result->detected_languages)) {
+        if (!empty($result->detectedLanguages)) {
             $score *= 1.05;
         }
 

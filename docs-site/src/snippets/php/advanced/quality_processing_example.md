@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Xberg\XbergApi;
+use Xberg\Xberg;
 use Xberg\ExtractionConfig;
 
 $config = new ExtractionConfig(
@@ -11,7 +12,7 @@ $config = new ExtractionConfig(
 
 $resultOutput = Xberg::extract(\Xberg\ExtractInput::fromUri('scanned_document.pdf'), $config);
 
-$result = $resultOutput->results[0];
+$result = $resultOutput->getResults()[0];
 
 if ($result->getQualityScore() !== null) {
     $score = $result->getQualityScore();

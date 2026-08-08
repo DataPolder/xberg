@@ -9,15 +9,15 @@ class Program
             var result = (await XbergConverter.ExtractAsync(ExtractInput.FromUri("document.pdf"), ExtractionConfig.Default())).Results[0];
             Console.WriteLine($"Extracted {result.Content.Length} characters");
         }
-        catch (XbergParsingException ex)
+        catch (ParsingException ex)
         {
             Console.WriteLine($"Failed to parse document: {ex.Message}");
         }
-        catch (XbergOcrException ex)
+        catch (OcrException ex)
         {
             Console.WriteLine($"OCR processing failed: {ex.Message}");
         }
-        catch (XbergMissingDependencyException ex)
+        catch (MissingDependencyException ex)
         {
             Console.WriteLine($"Missing dependency: {ex.Message}");
         }
@@ -31,9 +31,9 @@ class Program
             var config = new ExtractionConfig();
             var pdfBytes = new byte[] { 0x25, 0x50, 0x44, 0x46 };
 
-            var result = (await XbergConverter.ExtractAsync(ExtractInput.FromUri(
-                pdfBytes), "application/pdf",
-            config
+            var result = (await XbergConverter.ExtractAsync(
+                ExtractInput.FromBytes(pdfBytes, "application/pdf", "document.pdf"),
+                config
             )).Results[0];
 
             var preview = result.Content.Length > 100
@@ -42,11 +42,11 @@ class Program
 
             Console.WriteLine($"Extracted: {preview}");
         }
-        catch (XbergValidationException ex)
+        catch (ValidationException ex)
         {
             Console.WriteLine($"Invalid configuration: {ex.Message}");
         }
-        catch (XbergOcrException ex)
+        catch (OcrException ex)
         {
             Console.WriteLine($"OCR failed: {ex.Message}");
         }
@@ -59,7 +59,7 @@ class Program
         {
             var result = (await XbergConverter.ExtractAsync(ExtractInput.FromUri("nonexistent.pdf"), ExtractionConfig.Default())).Results[0];
         }
-        catch (XbergIOException)
+        catch (IoException)
         {
             Console.WriteLine("File not found");
         }

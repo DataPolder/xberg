@@ -2,12 +2,13 @@
 <?php
 use Xberg\ExtractionConfig;
 use Xberg\XbergApi;
+use Xberg\Xberg;
 
 $config = new ExtractionConfig(includeDocumentStructure: true);
 
 $resultOutput = Xberg::extract(\Xberg\ExtractInput::fromUri('document.pdf'), $config);
 
-$result = $resultOutput->results[0];
+$result = $resultOutput->getResults()[0];
 
 if ($result->document !== null) {
     foreach ($result->document->nodes as $node) {

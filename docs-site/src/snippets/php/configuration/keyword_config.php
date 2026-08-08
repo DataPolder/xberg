@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/vendor/autoload.php';
 
+use Xberg\Xberg;
 use Xberg\ExtractInput;
 use Xberg\ExtractionConfig;
 
@@ -17,7 +18,7 @@ function keywordConfig(array $keywords): ExtractionConfig
 function extractFirst(string $uri, ExtractionConfig $config): object
 {
     $output = Xberg::extract(ExtractInput::fromUri($uri), $config);
-    return $output->results[0];
+    return $output->getResults()[0];
 }
 
 $config = keywordConfig([

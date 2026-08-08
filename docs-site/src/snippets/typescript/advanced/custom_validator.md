@@ -3,9 +3,9 @@ import {
   registerValidator,
   unregisterValidator,
   extract,
-  type ValidatorProtocol,
+  ExtractInputKind,
+  type Validator,
   type ExtractedDocument,
-  ValidationError,
 } from "@xberg-io/xberg";
 
 /**
@@ -15,7 +15,7 @@ import {
  * const validator = new QualityValidator();
  * registerValidator(validator);
  */
-class QualityValidator implements ValidatorProtocol {
+class QualityValidator implements Validator {
   name(): string {
     return "quality-validator";
   }
@@ -27,7 +27,10 @@ class QualityValidator implements ValidatorProtocol {
   /**
    * Validate extraction result meets quality standards
    */
-  validate(result: ExtractedDocument): void {
+  async validate(result?: ExtractedDocument | null): Promise<void> {
+    if (!result) {
+      return;
+    }
     this.checkMinimumLength(result);
     this.checkEmptyContent(result);
     this.checkMetadata(result);
@@ -38,10 +41,9 @@ class QualityValidator implements ValidatorProtocol {
    */
   private checkMinimumLength(result: ExtractedDocument): void {
     const minLength = 50;
-    if (result.content.length < minLength) {
-      throw new ValidationError(
-        `Content too short: ${result.content.length} bytes (minimum ${minLength})`,
-      );
+    const content = result.content ?? "";
+    if (content.length < minLength) {
+      throw new Error(`Content too short: ${content.length} bytes (minimum ${minLength})`);
     }
   }
 
@@ -49,9 +51,9 @@ class QualityValidator implements ValidatorProtocol {
    * Ensure content is not empty
    */
   private checkEmptyContent(result: ExtractedDocument): void {
-    const trimmed = result.content.trim();
+    const trimmed = (result.content ?? "").trim();
     if (trimmed.length === 0) {
-      throw new ValidationError("Extracted content is empty");
+      throw new Error("Extracted content is empty");
     }
   }
 
@@ -60,7 +62,7 @@ class QualityValidator implements ValidatorProtocol {
    */
   private checkMetadata(result: ExtractedDocument): void {
     if (!result.metadata || Object.keys(result.metadata).length === 0) {
-      throw new ValidationError("Missing extraction metadata");
+      throw new Error("Missing extraction metadata");
     }
   }
 }
@@ -72,16 +74,13 @@ registerValidator(validator);
 // Usage with error handling (must use async extraction for custom validators)
 try {
   const output = await extract({
-    kind: "uri",
+    kind: ExtractInputKind.Uri,
     uri: "document.pdf",
   });
-  console.log(`Validated content length: ${output.results[0].content.length} characters`);
+  const first = output.results?.[0];
+  console.log(`Validated content length: ${first?.content?.length ?? 0} characters`);
 } catch (error) {
-  if (error instanceof ValidationError) {
-    console.error(`Validation failed: ${error.message}`);
-  } else {
-    throw error;
-  }
+  console.error(`Validation failed: ${error instanceof Error ? error.message : String(error)}`);
 }
 
 // Later, unregister if needed

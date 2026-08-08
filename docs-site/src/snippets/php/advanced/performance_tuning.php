@@ -11,6 +11,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/vendor/autoload.php';
 
+use Xberg\Xberg;
 use Xberg\ExtractionConfig;
 
 function extractBatchFiles(array $files): array
@@ -20,7 +21,7 @@ function extractBatchFiles(array $files): array
         $files
     );
 
-    return Xberg::extractBatch($inputs, \Xberg\ExtractionConfig::default())->results;
+    return Xberg::extractBatch($inputs, \Xberg\ExtractionConfig::default())->getResults();
 }
 
 function benchmark(callable $fn, string $label): void
@@ -97,7 +98,7 @@ function processLargeDocumentEfficiently(string $filePath): void
     );
 
     $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($filePath), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
     echo "Processing large document page by page:\n";
 
@@ -195,7 +196,7 @@ $monitor = new ResourceMonitor();
 $monitor->checkpoint("Xberg initialized");
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('document.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 $monitor->checkpoint("Document extracted");
 
 $words = str_word_count($result->content);
@@ -239,7 +240,7 @@ class CachedXberg
         }
 
         $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($filePath), $config ?? \Xberg\ExtractionConfig::default());
-        $result = $output->results[0];
+        $result = $output->getResults()[0];
 
         if (count($this->cache) >= $this->maxCacheSize) {
             array_shift($this->cache); 

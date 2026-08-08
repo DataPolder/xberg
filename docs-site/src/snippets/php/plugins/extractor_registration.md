@@ -2,6 +2,11 @@
 <?php declare(strict_types=1);
 
 use Xberg\XbergApi;
+use Xberg\Xberg;
+use Xberg\DocumentExtractor;
+use Xberg\ExtractInput;
+use Xberg\ExtractionConfig;
+use Xberg\ExtractedDocument;
 
 class CustomJsonExtractor implements DocumentExtractor {
     public function name(): string {
@@ -20,22 +25,15 @@ class CustomJsonExtractor implements DocumentExtractor {
         // Cleanup resources
     }
 
-    public function extract(string $content, string $mimeType, object $config): object {
+    public function extract(ExtractInput $input, ExtractionConfig $config): ExtractedDocument {
+        $content = $input->getBytes() ?? file_get_contents((string) $input->getUri());
         $json = json_decode($content, true);
         $text = $this->extractTextFromJson($json);
 
-        return (object)[
-            'content' => $text,
-            'mime_type' => 'application/json',
-            'metadata' => [],
-            'tables' => [],
-            'detected_languages' => null,
-            'chunks' => null,
-            'images' => null,
-        ];
+        return new ExtractedDocument($text, 'application/json');
     }
 
-    public function supportedMimeTypes(): array {
+    public function supported_mime_types(): mixed {
         return ["application/json", "text/json"];
     }
 
@@ -59,8 +57,6 @@ class CustomJsonExtractor implements DocumentExtractor {
 }
 
 // Register the custom extractor
-// Note: Document extractor registration would use a similar pattern
-// when the binding API is available
 $extractor = new CustomJsonExtractor();
 Xberg::registerDocumentExtractor($extractor);
 ```

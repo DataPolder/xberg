@@ -22,7 +22,7 @@ class Program
         {
             var result = (await XbergConverter.ExtractAsync(ExtractInput.FromUri(
                 "document.pdf"), config
-            )).Results[0].ConfigureAwait(false);
+            )).Results[0];
 
             if (result.Chunks != null)
             {

@@ -25,7 +25,7 @@ echo "========================================\n\n";
 
 if (extension_loaded('xberg')) {
     echo "✓ Xberg extension is loaded\n";
-    echo "  Version: " . Xberg::version() . "\n\n";
+    echo "  Version: " . phpversion('xberg') . "\n\n";
 
     $info = [];
     ob_start();

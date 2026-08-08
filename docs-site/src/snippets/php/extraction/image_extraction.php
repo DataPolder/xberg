@@ -25,7 +25,7 @@ $config = new ExtractionConfig(
 );
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('presentation.pptx'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 echo "Image Extraction Results:\n";
 echo str_repeat('=', 60) . "\n";
@@ -62,7 +62,7 @@ $ocrConfig = new ExtractionConfig(
 );
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('scanned_images.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 echo "Images with OCR:\n";
 echo str_repeat('=', 60) . "\n";
@@ -89,7 +89,7 @@ $largeImageConfig = new ExtractionConfig(
 );
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('photo_album.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 echo "Large images (>500x500):\n";
 foreach ($result->images ?? [] as $image) {
@@ -99,7 +99,7 @@ foreach ($result->images ?? [] as $image) {
 }
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('document.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 $imageTypes = [];
 foreach ($result->images ?? [] as $image) {

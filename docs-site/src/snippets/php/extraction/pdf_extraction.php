@@ -14,7 +14,7 @@ use Xberg\ExtractionConfig;
 use Xberg\PdfConfig;
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('document.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 echo "PDF Extraction Results:\n";
 echo str_repeat('=', 60) . "\n";
@@ -32,7 +32,7 @@ $config = new ExtractionConfig(
 );
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('report.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 echo "Extracted Tables:\n";
 echo str_repeat('=', 60) . "\n";
@@ -76,13 +76,13 @@ $formattedConfig = new ExtractionConfig(
 );
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('formatted.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 file_put_contents('output.md', $result->content);
 echo "Saved formatted output to: output.md\n";
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('document.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 $content = $result->content;
 
 $sections = [];

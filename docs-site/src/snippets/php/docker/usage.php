@@ -130,7 +130,7 @@ try {
 
     sleep(2);
 
-    $content = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('document.pdf'), $config ?? \Xberg\ExtractionConfig::default())->results[0]->content;
+    $content = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('document.pdf'), $config ?? \Xberg\ExtractionConfig::default())->getResults()[0]->content;
     echo "Extracted content:\n{$content}\n";
 } finally {
     $dockerClient->stopContainer();

@@ -102,7 +102,7 @@ class DiskCache
 }
 
 $cache = new DiskCache();
-$config = new ExtractionConfig();
+$config = \Xberg\ExtractionConfig::default();
 
 $file = 'document.pdf';
 
@@ -113,7 +113,7 @@ $extractedResult = $cache->get($file, $config);
 
 if ($extractedResult === null) {
     $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($file), $config);
-    $extractedResult = $output->results[0];
+    $extractedResult = $output->getResults()[0];
     $cache->set($file, $config, $extractedResult);
     echo "  Status: Extracted and cached\n";
 } else {
@@ -131,7 +131,7 @@ $extractedResult = $cache->get($file, $config);
 
 if ($extractedResult === null) {
     $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($file), $config);
-    $extractedResult = $output->results[0];
+    $extractedResult = $output->getResults()[0];
     $cache->set($file, $config, $extractedResult);
     echo "  Status: Extracted and cached\n";
 } else {
@@ -159,13 +159,13 @@ class CachedXberg
         string $filePath,
         ?ExtractionConfig $config = null
     ): ExtractionResult {
-        $config = $config ?? new ExtractionConfig();
+        $config = $config ?? \Xberg\ExtractionConfig::default();
 
         $result = $this->cache->get($filePath, $config);
 
         if ($result === null) {
             $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($filePath), $config);
-            $result = $output->results[0];
+            $result = $output->getResults()[0];
             $this->cache->set($filePath, $config, $result);
         }
 
@@ -196,7 +196,7 @@ foreach ($files as $file) {
 
     $start = microtime(true);
     $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($file), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
     $elapsed = microtime(true) - $start;
 
     echo "$file: " . number_format($elapsed, 4) . "s\n";

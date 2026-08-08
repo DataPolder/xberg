@@ -23,7 +23,7 @@ $config = new ExtractionConfig(
 );
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('multilingual_document.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 echo "Multilingual Language Detection:\n";
 echo str_repeat('=', 60) . "\n";
@@ -165,7 +165,7 @@ foreach ($testDocuments as $document) {
     }
 
     $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($document), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
     $languages = $result->detectedLanguages ?? [];
     $type = categorizeMultilingualDocument($languages);
 
@@ -197,7 +197,7 @@ function analyzeLanguagePairs(array $documents, Xberg $xberg): array
         }
 
         $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($document), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
         $languages = $result->detectedLanguages ?? [];
 
         if (count($languages) >= 2) {

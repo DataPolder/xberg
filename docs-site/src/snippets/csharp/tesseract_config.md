@@ -10,7 +10,7 @@ var config = new ExtractionConfig
         {
             Psm = 6,
             Oem = 1,
-            MinConfidence = 0.8m,
+            MinConfidence = 0.8,
             EnableTableDetection = true
         }
     }

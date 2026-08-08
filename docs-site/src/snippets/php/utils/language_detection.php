@@ -23,7 +23,7 @@ $config = new ExtractionConfig(
 );
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('document.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 echo "Language Detection Results:\n";
 echo str_repeat('=', 60) . "\n";
@@ -79,7 +79,7 @@ foreach ($thresholds as $threshold) {
     );
 
     $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('document.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
     $languages = $result->detectedLanguages ?? [];
 
@@ -152,7 +152,7 @@ foreach ($documents as $document) {
     }
 
     $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($document), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
     $languages = $result->detectedLanguages ?? [];
 
     echo basename($document) . ": ";

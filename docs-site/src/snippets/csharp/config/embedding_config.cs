@@ -1,4 +1,4 @@
-using Xberg.Config;
+using Xberg;
 
 public class EmbeddingConfigExample
 {
@@ -8,10 +8,7 @@ public class EmbeddingConfigExample
         // Fast, balanced, or quality preset configurations optimized for common use cases.
         var embeddingConfig = new EmbeddingConfig
         {
-            Model = new EmbeddingModelType.Preset
-            {
-                Name = "balanced"
-            },
+            Model = new EmbeddingModelType.Preset("balanced"),
             BatchSize = 32,
             Normalize = true,
             ShowDownloadProgress = true,
@@ -29,11 +26,7 @@ public class EmbeddingConfigExample
         // Direct access to specific ONNX embedding models from HuggingFace with custom dimensions.
         embeddingConfig = new EmbeddingConfig
         {
-            Model = new EmbeddingModelType.Custom
-            {
-                ModelId = "BAAI/bge-small-en-v1.5",
-                Dimensions = 384
-            },
+            Model = new EmbeddingModelType.Custom("BAAI/bge-small-en-v1.5", 384),
             BatchSize = 32,
             Normalize = true,
             ShowDownloadProgress = true,
@@ -51,11 +44,7 @@ public class EmbeddingConfigExample
         // For advanced users wanting different ONNX embedding models.
         embeddingConfig = new EmbeddingConfig
         {
-            Model = new EmbeddingModelType.Custom
-            {
-                ModelId = "sentence-transformers/all-mpnet-base-v2",
-                Dimensions = 768
-            },
+            Model = new EmbeddingModelType.Custom("sentence-transformers/all-mpnet-base-v2", 768),
             BatchSize = 16,  // Larger model requires smaller batch size
             Normalize = true,
             ShowDownloadProgress = true,
@@ -67,15 +56,12 @@ public class EmbeddingConfigExample
         // Add embeddings to your chunking configuration:
         var chunkingConfig = new ChunkingConfig
         {
-            MaxChars = 1024,
-            MaxOverlap = 100,
+            MaxCharacters = 1024,
+            Overlap = 100,
             Preset = "balanced",
             Embedding = new EmbeddingConfig
             {
-                Model = new EmbeddingModelType.Preset
-                {
-                    Name = "balanced"
-                },
+                Model = new EmbeddingModelType.Preset("balanced"),
                 BatchSize = 32,
                 Normalize = true
             }

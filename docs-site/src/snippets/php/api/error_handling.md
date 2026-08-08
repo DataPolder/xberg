@@ -3,13 +3,14 @@
 declare(strict_types=1);
 
 use Xberg\XbergApi;
+use Xberg\Xberg;
 use Xberg\ExtractionConfig;
 use Xberg\XbergException;
 
 $config = ExtractionConfig::default();
 try {
     $resultOutput = Xberg::extract(\Xberg\ExtractInput::fromUri('document.pdf'), $config);
-    $result = $resultOutput->results[0];
+    $result = $resultOutput->getResults()[0];
     echo $result->content;
 } catch (XbergException $e) {
     // The extension throws XbergException with the error message

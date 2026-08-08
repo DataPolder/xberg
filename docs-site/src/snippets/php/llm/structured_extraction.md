@@ -42,11 +42,11 @@ $structured = StructuredExtractionConfig::from_json(json_encode([
     ],
 ], JSON_THROW_ON_ERROR));
 
-$config = new ExtractionConfig();
+$config = \Xberg\ExtractionConfig::default();
 $config->structured_extraction = $structured;
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('paper.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 if ($result->structured_output !== null) {
     echo $result->structured_output, "\n";

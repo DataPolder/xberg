@@ -17,7 +17,7 @@ use Xberg\TesseractConfig;
 
 $config = new ExtractionConfig(extractTables: true);
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('financial_report.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 echo "Table Extraction:\n";
 echo str_repeat('=', 60) . "\n";
@@ -73,7 +73,7 @@ $ocrConfig = new ExtractionConfig(
 );
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('scanned_table.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 echo "OCR Table Extraction:\n";
 echo str_repeat('=', 60) . "\n";
@@ -146,7 +146,7 @@ function tableToAssociativeArray(\Xberg\Types\Table $table): array
 }
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('quarterly_report.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 foreach ($result->tables as $index => $table) {
     $data = tableToAssociativeArray($table);

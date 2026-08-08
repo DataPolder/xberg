@@ -2,6 +2,7 @@
 <?php declare(strict_types=1);
 
 use Xberg\XbergApi;
+use Xberg\Xberg;
 use Xberg\ExtractionConfig;
 use Xberg\PageConfig;
 
@@ -14,7 +15,7 @@ $config->pages = new PageConfig(
 
 $resultOutput = Xberg::extract(\Xberg\ExtractInput::fromUri("document.pdf"), $config);
 
-$result = $resultOutput->results[0];
+$result = $resultOutput->getResults()[0];
 
 // Content with inline page markers
 echo "Full content with markers:\n";

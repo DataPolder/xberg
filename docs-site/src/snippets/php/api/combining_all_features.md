@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Xberg\XbergApi;
+use Xberg\Xberg;
 use Xberg\ExtractionConfig;
 use Xberg\OcrConfig;
 use Xberg\ChunkingConfig;
@@ -62,7 +63,7 @@ $config->setImages($imageConfig);
 
 $resultOutput = Xberg::extract(\Xberg\ExtractInput::fromUri('report.pdf'), $config);
 
-$result = $resultOutput->results[0];
+$result = $resultOutput->getResults()[0];
 
 echo "Content (" . strlen($result->content) . " chars):\n";
 echo substr($result->content, 0, 200) . "\n\n";

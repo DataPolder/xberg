@@ -8,7 +8,7 @@ var config = new ExtractionConfig
     Ocr = new OcrConfig
     {
         Backend = "tesseract",
-        Language = "eng+fra",
+        Language = ["eng", "fra"],
         TesseractConfig = new TesseractConfig
         {
             Psm = 3,
@@ -37,12 +37,12 @@ var config = new ExtractionConfig
     },
     Chunking = new ChunkingConfig
     {
-        MaxChars = 1000,
-        MaxOverlap = 200
+        MaxCharacters = 1000,
+        Overlap = 200
     },
     TokenReduction = new TokenReductionConfig
     {
-        Mode = "moderate",
+        Level = ReductionLevel.Moderate,
         PreserveImportantWords = true
     },
     LanguageDetection = new LanguageDetectionConfig

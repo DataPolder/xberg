@@ -11,6 +11,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/vendor/autoload.php';
 
+use Xberg\Xberg;
 use Xberg\ExtractionConfig;
 use Xberg\OcrConfig;
 
@@ -21,7 +22,7 @@ function extractBatchFiles(array $files): array
         $files
     );
 
-    return Xberg::extractBatch($inputs, \Xberg\ExtractionConfig::default())->results;
+    return Xberg::extractBatch($inputs, \Xberg\ExtractionConfig::default())->getResults();
 }
 
 class Benchmark

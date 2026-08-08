@@ -27,7 +27,7 @@ $config1 = new ExtractionConfig(
 );
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('document.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 if ($result->chunks !== null) {
     foreach ($result->chunks as $i => $chunk) {
@@ -148,7 +148,7 @@ $config5 = new ExtractionConfig(
     )
 );
 
-$result5 = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('document.pdf'), $config5)->results[0];
+$result5 = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('document.pdf'), $config5)->getResults()[0];
 
 if ($result5->chunks !== null) {
     echo "Processing " . count($result5->chunks) . " chunks with embeddings...\n\n";

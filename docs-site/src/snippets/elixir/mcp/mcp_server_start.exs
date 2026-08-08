@@ -140,7 +140,7 @@ defmodule XbergMCPServer.Handler do
     %Xberg.ExtractionConfig{
     ocr: opts["ocr"],
     chunking: opts["chunking"],
-    quality_processing: opts["quality_processing"],
+    enable_quality_processing: Map.get(opts, "quality_processing", true),
     language_detection: opts["language_detection"],
     images: opts["images"],
     use_cache: Map.get(opts, "use_cache", true)

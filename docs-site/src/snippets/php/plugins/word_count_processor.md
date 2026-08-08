@@ -2,6 +2,10 @@
 <?php declare(strict_types=1);
 
 use Xberg\XbergApi;
+use Xberg\Xberg;
+use Xberg\PostProcessor;
+use Xberg\ExtractedDocument;
+use Xberg\ExtractionConfig;
 
 class WordCountProcessor implements PostProcessor {
     public function name(): string {
@@ -20,32 +24,26 @@ class WordCountProcessor implements PostProcessor {
         // Cleanup resources
     }
 
-    public function process(object &$result, object $config): void {
+    // NOTE: ExtractedDocument's properties are readonly and "metadata" has no
+    // writable free-form bag in the current binding — a post-processor cannot
+    // attach arbitrary data to $result the way this example implies. Flagged
+    // rather than guessed at; word count is computed but has nowhere to go.
+    public function process(ExtractedDocument $result, ExtractionConfig $config): mixed {
         $wordCount = count(preg_split('/\s+/', trim($result->content), -1, PREG_SPLIT_NO_EMPTY));
 
-        // Add word count to metadata
-        if (!isset($result->metadata)) {
-            $result->metadata = [];
-        }
-
-        if (is_array($result->metadata)) {
-            $result->metadata['word_count'] = $wordCount;
-        } else {
-            $result->metadata = (array)$result->metadata;
-            $result->metadata['word_count'] = $wordCount;
-        }
+        return null;
     }
 
-    public function processingStage(): string {
+    public function processing_stage(): string {
         return "Early";
     }
 
-    public function shouldProcess(object $result, object $config): bool {
+    public function should_process(ExtractedDocument $result, ExtractionConfig $config): bool {
         // Only process if content is not empty
         return !empty($result->content);
     }
 
-    public function estimatedDurationMs(object $result): int {
+    public function estimated_duration_ms(ExtractedDocument $result): int {
         // Word counting is very fast
         return 1;
     }

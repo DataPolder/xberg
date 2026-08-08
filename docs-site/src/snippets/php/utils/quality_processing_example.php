@@ -18,7 +18,7 @@ $config = new ExtractionConfig(
 );
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('scanned_document.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 echo "Quality Processing Results:\n";
 echo str_repeat('=', 60) . "\n";
@@ -113,7 +113,7 @@ foreach ($documents as $document) {
     }
 
     $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($document), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
     $score = $result->qualityScore ?? 0.0;
 
     $qualityResults[$document] = [

@@ -23,7 +23,7 @@ $config = new ExtractionConfig(
 );
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('report.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 echo "Content with page markers:\n";
 echo str_repeat('=', 60) . "\n";
@@ -37,7 +37,7 @@ $pageConfig = new ExtractionConfig(
 );
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('multi_page.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 foreach ($result->pages ?? [] as $page) {
     echo "Page {$page->pageNumber}:\n";
@@ -56,7 +56,7 @@ $customConfig = new ExtractionConfig(
 );
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('document.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 $pages = preg_split('/={10} PAGE \d+ ={10}/', $result->content);
 echo "Split into " . count($pages) . " sections\n";
@@ -66,7 +66,7 @@ $allPagesConfig = new ExtractionConfig(
 );
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('large_doc.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 $selectedPages = array_filter(
     $result->pages ?? [],

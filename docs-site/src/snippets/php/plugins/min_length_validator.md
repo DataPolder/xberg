@@ -2,6 +2,10 @@
 <?php declare(strict_types=1);
 
 use Xberg\XbergApi;
+use Xberg\Xberg;
+use Xberg\Validator;
+use Xberg\ExtractedDocument;
+use Xberg\ExtractionConfig;
 
 class MinLengthValidator implements Validator {
     private int $minLength;
@@ -26,7 +30,7 @@ class MinLengthValidator implements Validator {
         // Cleanup
     }
 
-    public function validate(object $result, object $config): void {
+    public function validate(ExtractedDocument $result, ExtractionConfig $config): mixed {
         $contentLength = strlen($result->content);
 
         if ($contentLength < $this->minLength) {
@@ -38,6 +42,8 @@ class MinLengthValidator implements Validator {
                 )
             );
         }
+
+        return null;
     }
 
     public function priority(): int {

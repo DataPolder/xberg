@@ -2,9 +2,8 @@
 import {
   registerValidator,
   unregisterValidator,
-  type ValidatorProtocol,
+  type Validator,
   type ExtractedDocument,
-  ValidationError,
 } from "@xberg-io/xberg";
 
 /**
@@ -14,7 +13,7 @@ import {
  * const validator = new StatefulValidator();
  * registerValidator(validator);
  */
-class StatefulValidator implements ValidatorProtocol {
+class StatefulValidator implements Validator {
   private callCount: number = 0;
   private failureCount: number = 0;
   private cache: Map<string, boolean> = new Map();
@@ -30,7 +29,10 @@ class StatefulValidator implements ValidatorProtocol {
   /**
    * Validate with state tracking
    */
-  validate(result: ExtractedDocument): void {
+  async validate(result?: ExtractedDocument | null): Promise<void> {
+    if (!result) {
+      return;
+    }
     this.callCount++;
 
     // Check cache first
@@ -53,18 +55,18 @@ class StatefulValidator implements ValidatorProtocol {
    */
   private performValidation(result: ExtractedDocument): void {
     // Check content length
-    if (result.content.length < 10) {
-      throw new ValidationError("Content too short (minimum 10 characters)");
+    if ((result.content ?? "").length < 10) {
+      throw new Error("Content too short (minimum 10 characters)");
     }
 
     // Check for mime type
     if (!result.mimeType) {
-      throw new ValidationError("Missing MIME type");
+      throw new Error("Missing MIME type");
     }
 
     // Check metadata
     if (!result.metadata || Object.keys(result.metadata).length === 0) {
-      throw new ValidationError("Missing metadata");
+      throw new Error("Missing metadata");
     }
   }
 
@@ -72,7 +74,7 @@ class StatefulValidator implements ValidatorProtocol {
    * Create cache key from result
    */
   private getCacheKey(result: ExtractedDocument): string {
-    return `${result.mimeType}-${result.content.length}`;
+    return `${result.mimeType}-${(result.content ?? "").length}`;
   }
 
   /**
@@ -100,7 +102,7 @@ class StatefulValidator implements ValidatorProtocol {
  * const validator = new ContentTypeValidator();
  * registerValidator(validator);
  */
-class ContentTypeValidator implements ValidatorProtocol {
+class ContentTypeValidator implements Validator {
   name(): string {
     return "content-type-validator";
   }
@@ -112,8 +114,11 @@ class ContentTypeValidator implements ValidatorProtocol {
   /**
    * Validate content matches MIME type
    */
-  validate(result: ExtractedDocument): void {
-    this.validateContentType(result.mimeType, result.content);
+  async validate(result?: ExtractedDocument | null): Promise<void> {
+    if (!result) {
+      return;
+    }
+    this.validateContentType(result.mimeType ?? "", result.content ?? "");
   }
 
   /**
@@ -126,19 +131,19 @@ class ContentTypeValidator implements ValidatorProtocol {
       try {
         JSON.parse(trimmed);
       } catch {
-        throw new ValidationError("Content is not valid JSON");
+        throw new Error("Content is not valid JSON");
       }
     }
 
     if (mimeType.includes("xml")) {
       if (!trimmed.startsWith("<")) {
-        throw new ValidationError("Content does not appear to be XML");
+        throw new Error("Content does not appear to be XML");
       }
     }
 
     if (mimeType.includes("html")) {
       if (!trimmed.includes("<") || !trimmed.includes(">")) {
-        throw new ValidationError("Content does not appear to be HTML");
+        throw new Error("Content does not appear to be HTML");
       }
     }
   }
@@ -153,7 +158,7 @@ registerValidator(contentTypeValidator);
 
 // Usage with statistics
 // try {
-//   const output = await extract({ kind: "uri", uri: "document.pdf" });
+//   const output = await extract({ kind: ExtractInputKind.Uri, uri: "document.pdf" });
 // } catch (error) {
 //   console.error("Validation failed:", error);
 // }

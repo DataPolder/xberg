@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Xberg\XbergApi;
+use Xberg\Xberg;
 use Xberg\ExtractionConfig;
 use Xberg\TokenReductionOptions;
 
@@ -15,7 +16,7 @@ $config = new ExtractionConfig(
 
 $resultOutput = Xberg::extract(\Xberg\ExtractInput::fromUri('verbose_document.pdf'), $config);
 
-$result = $resultOutput->results[0];
+$result = $resultOutput->getResults()[0];
 
 if ($result->getTokenCount() !== null) {
     echo "Original token count: " . $result->getTokenCount() . "\n";

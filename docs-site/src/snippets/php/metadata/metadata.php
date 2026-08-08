@@ -13,7 +13,7 @@ require_once __DIR__ . '/vendor/autoload.php';
 
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('document.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 if ($result->metadata?->pdf !== null) {
     $pdfMeta = $result->metadata->pdf;
@@ -22,7 +22,7 @@ if ($result->metadata?->pdf !== null) {
     echo "Title: " . ($pdfMeta['title'] ?? 'N/A') . "\n";
 }
 
-$htmlResult = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('page.html'), $config ?? \Xberg\ExtractionConfig::default())->results[0];
+$htmlResult = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('page.html'), $config ?? \Xberg\ExtractionConfig::default())->getResults()[0];
 
 if (isset($htmlResult->metadata->html)) {
     $htmlMeta = $htmlResult->metadata->html;

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Xberg\XbergApi;
+use Xberg\Xberg;
 use Xberg\ExtractInput;
 use Xberg\ExtractionConfig;
 
@@ -17,7 +18,7 @@ $config = ExtractionConfig::from_json(json_encode([
 
 $resultOutput = Xberg::extract(ExtractInput::fromUri('document.pdf'), $config);
 
-$result = $resultOutput->results[0];
+$result = $resultOutput->getResults()[0];
 
 if ($result->extractedKeywords) {
     foreach ($result->extractedKeywords as $keyword) {

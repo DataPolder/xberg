@@ -41,4 +41,4 @@ foreach (var lang in multiResult.DetectedLanguages)
 Console.WriteLine($"\nLanguage Detection Summary:");
 Console.WriteLine($"  - Content: {multiResult.Content.Substring(0, 100)}...");
 Console.WriteLine($"  - Languages: {string.Join(", ", multiResult.DetectedLanguages)}");
-Console.WriteLine($"  - Quality Score: {multiResult.Metadata.QualityScore}");
+Console.WriteLine($"  - Quality Score: {multiResult.QualityScore}");

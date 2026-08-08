@@ -10,10 +10,11 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/vendor/autoload.php';
 
+use Xberg\Xberg;
 use Xberg\ExtractionConfig;
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('document.docx'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 echo "Word Document Extraction:\n";
 echo str_repeat('=', 60) . "\n";
@@ -35,7 +36,7 @@ $config = new ExtractionConfig(
 );
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('report.docx'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 foreach ($result->tables as $index => $table) {
     echo "Table " . ($index + 1) . ":\n";
@@ -62,7 +63,7 @@ foreach ($conversions as $name => $format) {
     );
 
     $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('document.docx'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
     $outputFile = "output_$name.txt";
     file_put_contents($outputFile, $result->content);
@@ -78,7 +79,7 @@ if (!empty($docxFiles)) {
         $docxFiles
     );
     $output = Xberg::extractBatch($inputs, \Xberg\ExtractionConfig::default());
-    $results = $output->results;
+    $results = $output->getResults();
 
     foreach ($results as $index => $result) {
         $filename = basename($docxFiles[$index]);
@@ -90,7 +91,7 @@ if (!empty($docxFiles)) {
 }
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('reviewed_document.docx'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 if (!empty($result->metadata->createdBy)) {
     echo "\nDocument Information:\n";
@@ -102,7 +103,7 @@ if (!empty($result->metadata->producer)) {
 }
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('document.docx'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 $content = $result->content;
 
 $stats = [

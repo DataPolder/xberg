@@ -1,7 +1,7 @@
 ```typescript title="TypeScript"
-import { registerValidator, ValidationError, type ExtractedDocument } from "@xberg-io/xberg";
+import { registerValidator, type Validator, type ExtractedDocument } from "@xberg-io/xberg";
 
-class QualityScoreValidator {
+class QualityScoreValidator implements Validator {
   private readonly minScore: number;
 
   constructor(minScore: number = 0.5) {
@@ -16,11 +16,14 @@ class QualityScoreValidator {
     return 50;
   }
 
-  validate(result: ExtractedDocument): void {
-    const score = Number(result.metadata?.qualityScore ?? 0);
+  async validate(result?: ExtractedDocument | null): Promise<void> {
+    if (!result) {
+      return;
+    }
+    const score = Number(result.metadata?.additional?.quality_score ?? 0);
 
     if (score < this.minScore) {
-      throw new ValidationError(
+      throw new Error(
         `Quality score too low: ${score.toFixed(2)} < ${this.minScore.toFixed(2)}`,
       );
     }

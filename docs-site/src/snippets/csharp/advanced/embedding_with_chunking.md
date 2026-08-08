@@ -8,11 +8,11 @@ var config = new ExtractionConfig
 {
     Chunking = new ChunkingConfig
     {
-        MaxChars = 512,
-        MaxOverlap = 50,
+        MaxCharacters = 512,
+        Overlap = 50,
         Embedding = new EmbeddingConfig
         {
-            Model = EmbeddingModelType.Preset("balanced"),
+            Model = new EmbeddingModelType.Preset("balanced"),
             Normalize = true,
             BatchSize = 32,
             ShowDownloadProgress = false
@@ -20,7 +20,7 @@ var config = new ExtractionConfig
     }
 };
 
-var result = await Xberg.ExtractAsync("document.pdf", config);
+var result = (await XbergConverter.ExtractAsync(ExtractInput.FromUri("document.pdf"), config)).Results[0];
 
 var chunks = result.Chunks ?? new List<Chunk>();
 foreach (var (index, chunk) in chunks.WithIndex())
@@ -30,7 +30,7 @@ foreach (var (index, chunk) in chunks.WithIndex())
 
     if (chunk.Embedding != null)
     {
-        Console.WriteLine($"  Embedding dimensions: {chunk.Embedding.Length}");
+        Console.WriteLine($"  Embedding dimensions: {chunk.Embedding.Count}");
     }
 }
 

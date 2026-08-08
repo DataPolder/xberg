@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/vendor/autoload.php';
 
+use Xberg\Xberg;
 use Xberg\ExtractInput;
 use Xberg\ExtractionConfig;
 
@@ -22,7 +23,7 @@ $output = Xberg::extractBatch($inputs, $config);
 
 echo "Processed {$output->summary->results} documents\n";
 
-foreach ($output->results as $result) {
+foreach ($output->getResults() as $result) {
     echo "Content: " . strlen($result->content) . " chars\n";
     echo "Tables: " . count($result->tables) . "\n";
     echo "MIME: {$result->mimeType}\n\n";

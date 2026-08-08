@@ -7,11 +7,11 @@ var config = new ExtractionConfig
 
 var result = (await XbergConverter.ExtractAsync(ExtractInput.FromUri("document.html"), config)).Results[0];
 
-if (result.Metadata?.Format.Text?.Links != null)
+if (result.Metadata?.Format?.AsHtml?.Links != null)
 {
-    foreach (var link in result.Metadata.Format.Text.Links)
+    foreach (var link in result.Metadata.Format.AsHtml.Links)
     {
-        var text = link[0];
-        var url = link[1];
+        var text = link.Text;
+        var url = link.Href;
     }
 }

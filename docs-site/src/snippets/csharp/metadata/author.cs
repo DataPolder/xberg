@@ -10,8 +10,8 @@ var config = new ExtractionConfig
 
 var result = (await XbergConverter.ExtractAsync(ExtractInput.FromUri("document.pdf"), config)).Results[0];
 
-if (result.Metadata?.Format.Pdf != null)
+if (result.Metadata != null)
 {
-    var author = result.Metadata.Format.Pdf.Author;
-    Console.WriteLine($"Author: {author}");
+    var authors = result.Metadata.Authors;
+    Console.WriteLine($"Author: {string.Join(", ", authors)}");
 }

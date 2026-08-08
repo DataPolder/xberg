@@ -11,9 +11,9 @@ import {
   clearPostProcessors,
   clearValidators,
   clearOcrBackends,
-  type PostProcessorProtocol,
-  type ValidatorProtocol,
-  type OcrBackendProtocol,
+  type PostProcessor,
+  type Validator,
+  type OcrBackend,
 } from "@xberg-io/xberg";
 
 /**
@@ -25,9 +25,9 @@ import {
  * registry.listAll();
  */
 class PluginRegistry {
-  private postProcessors: PostProcessorProtocol[] = [];
-  private validators: ValidatorProtocol[] = [];
-  private ocrBackends: OcrBackendProtocol[] = [];
+  private postProcessors: PostProcessor[] = [];
+  private validators: Validator[] = [];
+  private ocrBackends: OcrBackend[] = [];
 
   /**
    * Register all available plugins
@@ -94,15 +94,15 @@ class PluginRegistry {
   /**
    * Add plugin to registry
    */
-  addPostProcessor(processor: PostProcessorProtocol): void {
+  addPostProcessor(processor: PostProcessor): void {
     this.postProcessors.push(processor);
   }
 
-  addValidator(validator: ValidatorProtocol): void {
+  addValidator(validator: Validator): void {
     this.validators.push(validator);
   }
 
-  addOcrBackend(backend: OcrBackendProtocol): void {
+  addOcrBackend(backend: OcrBackend): void {
     this.ocrBackends.push(backend);
   }
 }

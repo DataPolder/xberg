@@ -1,30 +1,43 @@
 ```typescript title="TypeScript"
-import { registerOcrBackend, type OcrBackendProtocol } from "@xberg-io/xberg";
+import {
+  registerOcrBackend,
+  OcrBackendType,
+  type OcrBackend,
+  type OcrConfig,
+  type ExtractedDocument,
+} from "@xberg-io/xberg";
 
 /**
  * Mock OCR backend for testing
  * Simulates OCR results without calling external service
  * @example
  * const backend = new MockOcrBackend();
- * await backend.initialize();
  * registerOcrBackend(backend);
  */
-class MockOcrBackend implements OcrBackendProtocol {
+class MockOcrBackend implements OcrBackend {
   private callCount: number = 0;
 
   name(): string {
     return "mock-ocr-backend";
   }
 
+  backendType(): OcrBackendType {
+    return OcrBackendType.Custom;
+  }
+
+  supportsLanguage(lang: string): boolean {
+    return ["en", "de", "fr", "es"].includes(lang);
+  }
+
   supportedLanguages(): string[] {
     return ["en", "de", "fr", "es"];
   }
 
-  async initialize(): Promise<void> {
+  initialize(): void {
     console.log("Mock OCR backend initialized");
   }
 
-  async shutdown(): Promise<void> {
+  shutdown(): void {
     console.log("Mock OCR backend shutdown");
   }
 
@@ -32,29 +45,22 @@ class MockOcrBackend implements OcrBackendProtocol {
    * Return mock OCR results based on image size
    */
   async processImage(
-    imageData: Uint8Array | string,
-    language: string,
-  ): Promise<{
-    content: string;
-    mime_type: string;
-    metadata: Record<string, unknown>;
-    tables: unknown[];
-  }> {
+    imageBytes: Uint8Array,
+    config?: OcrConfig | null,
+  ): Promise<ExtractedDocument> {
     this.callCount++;
 
-    const buffer =
-      typeof imageData === "string" ? Buffer.from(imageData, "base64") : Buffer.from(imageData);
+    const language = (config?.language ?? ["en"]).join("+");
 
     // Simulate OCR processing time
     await new Promise((resolve) => setTimeout(resolve, 100));
 
-    const mockText = `This is mock OCR result for ${language} detected in ${buffer.length} bytes of image data.`;
+    const mockText = `This is mock OCR result for ${language} detected in ${imageBytes.length} bytes of image data.`;
 
     return {
       content: mockText,
-      mime_type: "text/plain",
-      metadata: { confidence: 0.95, language },
-      tables: [],
+      mimeType: "text/plain",
+      metadata: { additional: { confidence: 0.95, language } },
     };
   }
 
@@ -68,10 +74,10 @@ class MockOcrBackend implements OcrBackendProtocol {
 
 // Register mock OCR backend for testing
 const mockBackend = new MockOcrBackend();
-await mockBackend.initialize();
+mockBackend.initialize();
 registerOcrBackend(mockBackend);
 
 // Usage in tests
-// const output = await extract({ kind: "uri", uri: "image.png" });
+// const output = await extract({ kind: ExtractInputKind.Uri, uri: "image.png" });
 // console.log(mockBackend.getStats()); // { callCount: 1 }
 ```

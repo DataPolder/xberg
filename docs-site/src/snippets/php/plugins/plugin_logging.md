@@ -2,6 +2,10 @@
 <?php declare(strict_types=1);
 
 use Xberg\XbergApi;
+use Xberg\Xberg;
+use Xberg\PostProcessor;
+use Xberg\ExtractedDocument;
+use Xberg\ExtractionConfig;
 
 class LoggingPostProcessor implements PostProcessor {
     public function name(): string {
@@ -20,22 +24,24 @@ class LoggingPostProcessor implements PostProcessor {
         error_log("LoggingPostProcessor shutting down");
     }
 
-    public function process(object &$result, object $config): void {
-        error_log("Processing: " . $result->mime_type);
+    public function process(ExtractedDocument $result, ExtractionConfig $config): mixed {
+        error_log("Processing: " . $result->mimeType);
         error_log("Content length: " . strlen($result->content));
-        error_log("Metadata: " . json_encode($result->metadata));
+        error_log("Metadata: " . json_encode($result->getMetadata()));
+
+        return null;
     }
 
-    public function processingStage(): string {
+    public function processing_stage(): string {
         return "Early";
     }
 
-    public function shouldProcess(object $result, object $config): bool {
+    public function should_process(ExtractedDocument $result, ExtractionConfig $config): bool {
         // Only log non-empty results
         return !empty($result->content);
     }
 
-    public function estimatedDurationMs(object $result): int {
+    public function estimated_duration_ms(ExtractedDocument $result): int {
         // Logging takes minimal time
         return 1;
     }

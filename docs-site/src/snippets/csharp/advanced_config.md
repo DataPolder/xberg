@@ -3,9 +3,9 @@ using Xberg;
 
 var config = new ExtractionConfig
 {
-    Ocr = new OcrConfig { Backend = "tesseract", Language = "eng+deu" },
-    Chunking = new ChunkingConfig { MaxChars = 1000, MaxOverlap = 100 },
-    TokenReduction = new TokenReductionConfig { Enabled = true },
+    Ocr = new OcrConfig { Backend = "tesseract", Language = ["eng", "deu"] },
+    Chunking = new ChunkingConfig { MaxCharacters = 1000, Overlap = 100 },
+    TokenReduction = new TokenReductionConfig { Level = ReductionLevel.Moderate },
     LanguageDetection = new LanguageDetectionConfig
     {
         Enabled = true,

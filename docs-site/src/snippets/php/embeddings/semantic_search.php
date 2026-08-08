@@ -36,7 +36,7 @@ foreach ($files as $file) {
     echo "Indexing: " . basename($file) . "\n";
 
     $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($file), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
     foreach ($result->chunks ?? [] as $chunk) {
         if ($chunk->embedding) {
@@ -90,7 +90,7 @@ function getQueryEmbedding(Xberg $xberg, string $query): ?array
 
     try {
         $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($tempFile), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
         $chunk = ($result->chunks ?? [])[0] ?? null;
         return $chunk?->embedding;
     } finally {

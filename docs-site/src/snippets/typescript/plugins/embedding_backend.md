@@ -1,5 +1,5 @@
 ```typescript title="TypeScript"
-import { registerEmbeddingBackend, embedTexts } from "@xberg-io/xberg";
+import { registerEmbeddingBackend, extract, ExtractInputKind } from "@xberg-io/xberg";
 
 // Wrap an already-loaded embedder so xberg can call back into it during
 // chunking and standalone embed requests.
@@ -34,9 +34,19 @@ class MyEmbedder {
 // Register once at startup.
 registerEmbeddingBackend(new MyEmbedder());
 
-const vectors = await embedTexts(["Hello, world!", "Second text"], {
-  model: { type: "plugin", name: "my-embedder" },
-  // Optional: bound the wait on a hung backend (default 60s; null disables).
-  maxEmbedDurationSecs: 30,
-});
+// The registered backend is invoked during chunk embedding when the chunking
+// config selects the "plugin" embedding model type by registered name.
+const output = await extract(
+  { kind: ExtractInputKind.Uri, uri: "document.pdf" },
+  {
+    chunking: {
+      embedding: {
+        model: { type: "plugin", name: "my-embedder" },
+        // Optional: bound the wait on a hung backend (default 60s; null disables).
+        maxEmbedDurationSecs: 30,
+      },
+    },
+  },
+);
+const vectors = output.results?.[0]?.chunks?.map((chunk) => chunk.embedding) ?? [];
 ```

@@ -23,26 +23,26 @@ public class VectorDatabaseIntegration
         {
             Chunking = new ChunkingConfig
             {
-                MaxChars = 512,
-                MaxOverlap = 50,
+                MaxCharacters = 512,
+                Overlap = 50,
                 Embedding = new EmbeddingConfig
                 {
-                    Model = EmbeddingModelType.Preset("balanced"),
+                    Model = new EmbeddingModelType.Preset("balanced"),
                     Normalize = true,
                     BatchSize = 32
                 }
             }
         };
 
-        var result = await Xberg.ExtractAsync(documentPath, config);
-        var chunks = result.Chunks ?? new List<Chunk>();
+        var result = await XbergConverter.ExtractAsync(ExtractInput.FromUri(documentPath), config);
+        var chunks = result.Results[0].Chunks ?? new List<Chunk>();
 
         var vectorRecords = chunks
             .Select((chunk, index) => new VectorRecord
             {
                 Id = $"{documentId}_chunk_{index}",
                 Content = chunk.Content,
-                Embedding = chunk.Embedding,
+                Embedding = chunk.Embedding?.ToArray() ?? Array.Empty<float>(),
                 Metadata = new Dictionary<string, string>
                 {
                     { "document_id", documentId },

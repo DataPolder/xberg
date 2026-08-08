@@ -21,7 +21,7 @@ $config = new ExtractionConfig(
 );
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('scanned_document.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 echo "OCR Extraction Results:\n";
 echo str_repeat('=', 60) . "\n";
@@ -35,7 +35,7 @@ $multilingualConfig = new ExtractionConfig(
 );
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('multilingual_scan.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 echo "Multilingual OCR:\n";
 echo str_repeat('=', 60) . "\n";
@@ -55,7 +55,7 @@ foreach ($imageFormats as $format) {
     if (file_exists($file)) {
         echo "Processing $file...\n";
         $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($file), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
         echo "Extracted " . strlen($result->content) . " characters\n";
         echo "Preview: " . substr($result->content, 0, 100) . "...\n\n";
     }
@@ -84,7 +84,7 @@ foreach ($languages as $lang => $description) {
         );
 
         $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($file), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
         echo "$description ($lang):\n";
         echo "  Characters extracted: " . mb_strlen($result->content) . "\n\n";
@@ -97,14 +97,14 @@ $config = new ExtractionConfig(
 );
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('invoice_scan.pdf'), $config);
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 echo "Invoice OCR:\n";
 echo str_repeat('=', 60) . "\n";
 echo $result->content . "\n";
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('scanned.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 $contentLength = strlen($result->content);
 $pageCount = $result->metadata?->pdf?->page_count ?? 1;

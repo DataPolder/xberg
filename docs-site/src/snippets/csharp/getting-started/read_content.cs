@@ -8,5 +8,4 @@ var output = await XbergConverter.ExtractAsync(
 var result = output.Results[0];
 
 Console.WriteLine(result.Content);
-Console.WriteLine($"Success: {result.Success}");
 Console.WriteLine($"Content Length: {result.Content.Length}");

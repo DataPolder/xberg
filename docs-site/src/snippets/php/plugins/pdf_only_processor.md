@@ -2,6 +2,10 @@
 <?php declare(strict_types=1);
 
 use Xberg\XbergApi;
+use Xberg\Xberg;
+use Xberg\PostProcessor;
+use Xberg\ExtractedDocument;
+use Xberg\ExtractionConfig;
 
 class PdfOnlyProcessor implements PostProcessor {
     public function name(): string {
@@ -20,35 +24,24 @@ class PdfOnlyProcessor implements PostProcessor {
         // Cleanup resources
     }
 
-    public function process(object &$result, object $config): void {
-        // Only execute for PDFs
-        if ($result->mime_type !== 'application/pdf') {
-            return;
-        }
-
-        // Process PDF-specific logic
-        // For example: extract page information, count pages, extract images, etc.
-
-        if (!isset($result->metadata)) {
-            $result->metadata = [];
-        }
-
-        if (is_array($result->metadata)) {
-            $result->metadata['pdf_processed'] = true;
-            $result->metadata['processor_version'] = '1.0.0';
-        }
+    // NOTE: ExtractedDocument's properties are readonly and "metadata" has no
+    // writable free-form bag in the current binding — a post-processor cannot
+    // attach arbitrary data to $result the way this example implies. Flagged
+    // rather than guessed at.
+    public function process(ExtractedDocument $result, ExtractionConfig $config): mixed {
+        return null;
     }
 
-    public function processingStage(): string {
+    public function processing_stage(): string {
         return "Middle";
     }
 
-    public function shouldProcess(object $result, object $config): bool {
+    public function should_process(ExtractedDocument $result, ExtractionConfig $config): bool {
         // Only process PDFs with content
-        return $result->mime_type === 'application/pdf' && !empty($result->content);
+        return $result->mimeType === 'application/pdf' && !empty($result->content);
     }
 
-    public function estimatedDurationMs(object $result): int {
+    public function estimated_duration_ms(ExtractedDocument $result): int {
         // PDF processing varies by size
         return 50;
     }

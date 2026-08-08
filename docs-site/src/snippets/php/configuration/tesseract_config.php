@@ -97,7 +97,7 @@ $config3 = new ExtractionConfig(
 );
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('scanned_invoice.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 echo "Table detection enabled\n";
 echo "Best for: Forms, invoices, spreadsheets, reports\n";

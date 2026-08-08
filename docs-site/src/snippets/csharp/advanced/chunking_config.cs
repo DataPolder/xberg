@@ -8,11 +8,11 @@ class Program
         {
             Chunking = new ChunkingConfig
             {
-                MaxChars = 1000,
-                MaxOverlap = 200,
+                MaxCharacters = 1000,
+                Overlap = 200,
                 Embedding = new EmbeddingConfig
                 {
-                    Model = EmbeddingModelType.Preset("all-minilm-l6-v2"),
+                    Model = new EmbeddingModelType.Preset("all-minilm-l6-v2"),
                     Normalize = true,
                     BatchSize = 32
                 }
@@ -23,7 +23,7 @@ class Program
         {
             var result = (await XbergConverter.ExtractAsync(ExtractInput.FromUri(
                 "document.pdf"), config
-            )).Results[0].ConfigureAwait(false);
+            )).Results[0];
 
             Console.WriteLine($"Chunks: {result.Chunks.Count}");
             foreach (var chunk in result.Chunks)
@@ -31,7 +31,7 @@ class Program
                 Console.WriteLine($"Content length: {chunk.Content.Length}");
                 if (chunk.Embedding != null)
                 {
-                    Console.WriteLine($"Embedding dimensions: {chunk.Embedding.Length}");
+                    Console.WriteLine($"Embedding dimensions: {chunk.Embedding.Count}");
                 }
             }
         }
@@ -47,8 +47,8 @@ class Program
         {
             Chunking = new ChunkingConfig
             {
-                MaxChars = 500,
-                MaxOverlap = 50,
+                MaxCharacters = 500,
+                Overlap = 50,
                 PrependHeadingContext = true
             }
         };
@@ -57,7 +57,7 @@ class Program
         {
             var result = (await XbergConverter.ExtractAsync(ExtractInput.FromUri(
                 "document.md"), config
-            )).Results[0].ConfigureAwait(false);
+            )).Results[0];
 
             foreach (var chunk in result.Chunks)
             {

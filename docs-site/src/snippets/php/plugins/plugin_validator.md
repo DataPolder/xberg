@@ -2,6 +2,10 @@
 <?php declare(strict_types=1);
 
 use Xberg\XbergApi;
+use Xberg\Xberg;
+use Xberg\Validator;
+use Xberg\ExtractedDocument;
+use Xberg\ExtractionConfig;
 
 class ContentQualityValidator implements Validator {
     private int $minLength = 10;
@@ -23,7 +27,7 @@ class ContentQualityValidator implements Validator {
         // Cleanup resources
     }
 
-    public function validate(object $result, object $config): void {
+    public function validate(ExtractedDocument $result, ExtractionConfig $config): mixed {
         $contentLength = strlen($result->content);
 
         if ($contentLength < $this->minLength) {
@@ -37,6 +41,8 @@ class ContentQualityValidator implements Validator {
                 "Content too long: $contentLength > {$this->maxLength} characters"
             );
         }
+
+        return null;
     }
 
     public function priority(): int {

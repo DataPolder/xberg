@@ -2,6 +2,11 @@
 <?php declare(strict_types=1);
 
 use Xberg\XbergApi;
+use Xberg\Xberg;
+use Xberg\DocumentExtractor;
+use Xberg\ExtractInput;
+use Xberg\ExtractionConfig;
+use Xberg\ExtractedDocument;
 
 class CustomXmlExtractor implements DocumentExtractor {
     public function name(): string {
@@ -20,29 +25,19 @@ class CustomXmlExtractor implements DocumentExtractor {
         // Cleanup resources
     }
 
-    public function extract(string $content, string $mimeType, object $config): object {
+    public function extract(ExtractInput $input, ExtractionConfig $config): ExtractedDocument {
+        $content = $input->getBytes() ?? file_get_contents((string) $input->getUri());
         try {
             $xml = simplexml_load_string($content);
             $text = $this->extractTextFromXml($xml);
 
-            return (object)[
-                'content' => $text,
-                'mime_type' => 'application/xml',
-                'metadata' => [
-                    'root_element' => $xml->getName(),
-                    'extraction_method' => 'custom-xml-extractor'
-                ],
-                'tables' => [],
-                'detected_languages' => null,
-                'chunks' => null,
-                'images' => null,
-            ];
+            return new ExtractedDocument($text, 'application/xml');
         } catch (Exception $e) {
             throw new Exception("XML parsing failed: " . $e->getMessage());
         }
     }
 
-    public function supportedMimeTypes(): array {
+    public function supported_mime_types(): mixed {
         return [
             "application/xml",
             "text/xml",

@@ -19,13 +19,12 @@ class CustomJsonProcessor
                 Content = text,
                 MimeType = mimeType,
                 Metadata = new Metadata(),
-                Tables = new List<Table>(),
-                Success = true
+                Tables = new List<Table>()
             };
         }
         catch (JsonException ex)
         {
-            throw new XbergParsingException($"Failed to parse JSON: {ex.Message}");
+            throw new ParsingException($"Failed to parse JSON: {ex.Message}");
         }
     }
 

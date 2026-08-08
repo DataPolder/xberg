@@ -20,7 +20,7 @@ use Xberg\Exceptions\ValidationException;
 
 try {
     $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('document.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
     echo "Extracted " . strlen($result->content) . " characters\n";
 } catch (ParsingException $e) {
     echo "Failed to parse document: " . $e->getMessage() . "\n";
@@ -36,7 +36,7 @@ $result = $output->results[0];
 }
 
 try {
-    $config = new ExtractionConfig();
+    $config = \Xberg\ExtractionConfig::default();
     $pdfBytes = file_get_contents('sample.pdf');
 
     if ($pdfBytes === false) {
@@ -44,7 +44,7 @@ try {
     }
 
     $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromBytes($pdfBytes, 'application/pdf'), $config);
-    $result = $output->results[0];
+    $result = $output->getResults()[0];
     echo "Extracted from bytes: " . substr($result->content, 0, 100) . "...\n";
 } catch (ValidationException $e) {
     echo "Invalid configuration or input: " . $e->getMessage() . "\n";
@@ -64,7 +64,7 @@ $failedExtractions = [];
 foreach ($files as $file) {
     try {
         $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($file), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
         $successfulExtractions[$file] = $result;
         echo "Success: $file\n";
     } catch (XbergException $e) {

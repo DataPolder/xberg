@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Xberg\XbergApi;
+use Xberg\Xberg;
 use Xberg\ExtractionConfig;
 use Xberg\ChunkingConfig;
 use Xberg\PageConfig;
@@ -19,7 +20,7 @@ $config = new ExtractionConfig(
 
 $resultOutput = Xberg::extract(\Xberg\ExtractInput::fromUri('document.pdf'), $config);
 
-$result = $resultOutput->results[0];
+$result = $resultOutput->getResults()[0];
 
 if ($result->chunks) {
     foreach ($result->chunks as $chunk) {

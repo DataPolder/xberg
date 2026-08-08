@@ -22,7 +22,7 @@ $config = new ExtractionConfig(
 );
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('document.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 echo "Token Reduction Results:\n";
 echo str_repeat('=', 60) . "\n";
@@ -61,7 +61,7 @@ foreach ($modes as $mode => $description) {
     );
 
     $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('sample.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
     $contentLength = strlen($result->content);
     $tokenCount = $result->metadata['token_count'] ?? $contentLength;
@@ -103,7 +103,7 @@ $advancedConfig = new ExtractionConfig(
 );
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('verbose_document.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 echo "Advanced Token Reduction:\n";
 echo str_repeat('=', 60) . "\n";

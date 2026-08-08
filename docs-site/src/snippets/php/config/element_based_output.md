@@ -2,6 +2,7 @@
 <?php
 use Xberg\ExtractionConfig;
 use Xberg\XbergApi;
+use Xberg\Xberg;
 
 // Configure element-based output
 $config = ExtractionConfig::default();
@@ -9,7 +10,7 @@ $config->setOutputFormat('element_based');
 
 // Extract document
 $resultOutput = Xberg::extract(\Xberg\ExtractInput::fromUri('document.pdf'), $config);
-$result = $resultOutput->results[0];
+$result = $resultOutput->getResults()[0];
 
 // Access elements
 foreach ($result->getElements() as $element) {

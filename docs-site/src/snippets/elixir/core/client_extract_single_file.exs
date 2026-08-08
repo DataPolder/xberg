@@ -34,11 +34,11 @@ defmodule DocumentClient do
     case Xberg.extract(input: %Xberg.ExtractInput{kind: :uri, uri: path, mime_type: mime_type}, config: config) do
       {:ok, output} ->
       result = List.first(output.results)
-      IO.debug("Successfully extracted file: #{path}")
+      IO.puts("Successfully extracted file: #{path}")
       {:ok, result}
 
       {:error, reason} ->
-      IO.debug("Failed to extract file: #{path} - #{reason}")
+      IO.puts("Failed to extract file: #{path} - #{reason}")
       {:error, reason}
     end
   end

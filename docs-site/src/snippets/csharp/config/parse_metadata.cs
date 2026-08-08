@@ -10,9 +10,9 @@ var config = new ExtractionConfig
 
 var result = (await XbergConverter.ExtractAsync(ExtractInput.FromUri("document.pdf"), config)).Results[0];
 
-if (result.Metadata?.Format.Pdf != null)
+if (result.Metadata?.Format?.AsPdf != null)
 {
-    var title = result.Metadata.Format.Pdf.Title;
-    var author = result.Metadata.Format.Pdf.Author;
-    var pageCount = result.Metadata.Format.Pdf.PageCount;
+    var title = result.Metadata.Title;
+    var author = result.Metadata.Authors;
+    var pageCount = result.Metadata.Format.AsPdf.PageCount;
 }

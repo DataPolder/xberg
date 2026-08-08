@@ -21,7 +21,7 @@ $config = new ExtractionConfig(
 );
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('multilingual.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 echo "Detected languages:\n";
 foreach ($result->detectedLanguages ?? [] as $lang) {
@@ -38,7 +38,7 @@ $advancedConfig = new ExtractionConfig(
 );
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('document.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 if (!empty($result->detectedLanguages)) {
     echo "High-confidence languages detected:\n";
@@ -54,7 +54,7 @@ $detectConfig = new ExtractionConfig(
 );
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('scanned.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 if (!empty($result->detectedLanguages)) {
     $primaryLanguage = $result->detectedLanguages[0];
@@ -69,7 +69,7 @@ if (!empty($result->detectedLanguages)) {
     );
 
     $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('scanned.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
     echo "OCR extraction complete\n";
 }
 
@@ -80,7 +80,7 @@ foreach ($files as $file) {
     if (!file_exists($file)) continue;
 
     $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($file), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
     $lang = $result->detectedLanguages[0] ?? 'unknown';
 
     if (!isset($languageMap[$lang])) {

@@ -2,6 +2,7 @@
 <?php declare(strict_types=1);
 
 use Xberg\XbergApi;
+use Xberg\Xberg;
 
 // Unregister all OCR backends by clearing the registry
 Xberg::clearOcrBackends();

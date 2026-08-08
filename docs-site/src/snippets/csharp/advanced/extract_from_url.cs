@@ -12,8 +12,9 @@ class Program
             var url = "https://example.com/document.pdf";
             var documentBytes = await httpClient.GetByteArrayAsync(url);
 
-            var result = (await XbergConverter.ExtractAsync(ExtractInput.FromUri(
-                documentBytes), "application/pdf"
+            var result = (await XbergConverter.ExtractAsync(
+                ExtractInput.FromBytes(documentBytes, "application/pdf", "document.pdf"),
+                ExtractionConfig.Default()
             )).Results[0];
 
             Console.WriteLine($"Extracted from URL: {result.Content.Length} chars");
@@ -23,9 +24,9 @@ class Program
                 EnableQualityProcessing = true
             };
 
-            var result2 = (await XbergConverter.ExtractAsync(ExtractInput.FromUri(
-                documentBytes), "application/pdf",
-            config
+            var result2 = (await XbergConverter.ExtractAsync(
+                ExtractInput.FromBytes(documentBytes, "application/pdf", "document.pdf"),
+                config
             )).Results[0];
 
             Console.WriteLine($"Quality score: {result2.QualityScore}");
@@ -42,8 +43,9 @@ class Program
                     try
                     {
                         var bytes = await httpClient.GetByteArrayAsync(u);
-                        return (await XbergConverter.ExtractAsync(ExtractInput.FromUri(
-                            bytes), "application/pdf"
+                        return (await XbergConverter.ExtractAsync(
+                            ExtractInput.FromBytes(bytes, "application/pdf", u),
+                            ExtractionConfig.Default()
                         )).Results[0];
                     }
                     catch (HttpRequestException ex)

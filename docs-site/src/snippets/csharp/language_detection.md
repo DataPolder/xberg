@@ -6,7 +6,7 @@ var config = new ExtractionConfig
     LanguageDetection = new LanguageDetectionConfig
     {
         Enabled = true,
-        MinConfidence = 0.9m,
+        MinConfidence = 0.9,
         DetectMultiple = true
     }
 };

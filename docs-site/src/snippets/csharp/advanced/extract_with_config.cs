@@ -15,7 +15,7 @@ class Program
                 Ocr = new OcrConfig
                 {
                     Backend = "tesseract",
-                    Language = "eng+fra",
+                    Language = ["eng", "fra"],
                     TesseractConfig = new TesseractConfig
                     {
                         Psm = 3,
@@ -47,14 +47,14 @@ class Program
 
                 Chunking = new ChunkingConfig
                 {
-                    MaxChars = 1000,
-                    MaxOverlap = 200,
+                    MaxCharacters = 1000,
+                    Overlap = 200,
                     Preset = "default"
                 },
 
                 TokenReduction = new TokenReductionConfig
                 {
-                    Mode = "moderate",
+                    Level = ReductionLevel.Moderate,
                     PreserveImportantWords = true
                 },
 
@@ -77,7 +77,6 @@ class Program
 
             Console.WriteLine($"Content length: {result.Content.Length}");
             Console.WriteLine($"MIME type: {result.MimeType}");
-            Console.WriteLine($"Format type: {result.Metadata.FormatType}");
 
             if (result.Tables.Any())
             {

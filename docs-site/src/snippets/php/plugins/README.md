@@ -27,6 +27,10 @@ Register a post-processor that annotates every result with a word count:
 declare(strict_types=1);
 
 use Xberg\XbergApi;
+use Xberg\Xberg;
+use Xberg\PostProcessor;
+use Xberg\ExtractedDocument;
+use Xberg\ExtractionConfig;
 
 final class WordCountProcessor implements PostProcessor
 {
@@ -48,25 +52,26 @@ final class WordCountProcessor implements PostProcessor
     {
     }
 
-    public function process(object &$result, object $config): void
+    // NOTE: ExtractedDocument's properties are readonly and "metadata" has no
+    // writable free-form bag in the current binding — a post-processor cannot
+    // attach arbitrary data (like a word count) back onto $result. Flagged
+    // rather than guessed at.
+    public function process(ExtractedDocument $result, ExtractionConfig $config): mixed
     {
-        $words = preg_split('/\s+/', trim($result->content), -1, PREG_SPLIT_NO_EMPTY);
-        $metadata = (array) ($result->metadata ?? []);
-        $metadata['word_count'] = count($words);
-        $result->metadata = $metadata;
+        return null;
     }
 
-    public function processingStage(): string
+    public function processing_stage(): string
     {
         return 'Early';
     }
 
-    public function shouldProcess(object $result, object $config): bool
+    public function should_process(ExtractedDocument $result, ExtractionConfig $config): bool
     {
         return $result->content !== '';
     }
 
-    public function estimatedDurationMs(object $result): int
+    public function estimated_duration_ms(ExtractedDocument $result): int
     {
         return 1;
     }
@@ -84,9 +89,8 @@ try {
         \Xberg\ExtractInput::fromUri('document.pdf'),
         \Xberg\ExtractionConfig::default(),
     );
-    $metadata = (array) $output->results[0]->metadata;
-    echo 'word count: ', $metadata['word_count'] ?? 0, "\n";
-} catch (\Xberg\Exceptions\XbergException $e) {
+    echo 'extracted ', strlen($output->getResults()[0]->content), " characters\n";
+} catch (\Xberg\XbergException $e) {
     fwrite(STDERR, 'extraction failed: ' . $e->getMessage() . "\n");
 } finally {
     Xberg::unregisterPostProcessor('word-count');
@@ -95,13 +99,19 @@ try {
 
 ## Plugin Contract
 
-Every plugin implements the four lifecycle methods — `name()`, `version()`,
-`initialize()`, `shutdown()` — plus the methods specific to its type:
+Every plugin may implement four lifecycle/metadata methods — `name()`, `version()`,
+`initialize()`, `shutdown()` (plus `description()`/`author()`) — the bridge calls
+them if defined, but the interfaces below don't require them. Interface method
+names are `snake_case`, matching the underlying Rust trait, not PHP's usual
+camelCase convention:
 
-- **DocumentExtractor**: `extract()`, `supportedMimeTypes()`, `priority()`
-- **OcrBackend**: `processImage()`, `supportsLanguage()`, `backendType()`
-- **PostProcessor**: `process()`, `processingStage()`, `shouldProcess()`, `estimatedDurationMs()`, `priority()`
-- **Validator**: `validate()`, `priority()`
+- **DocumentExtractor**: `extract()`, `supported_mime_types()`, plus optional `priority()`, `can_handle()`
+- **OcrBackend**: `process_image()`, `supports_language()`, `backend_type()`, plus optional `process_image_file()`, `supported_languages()`, `supports_table_detection()`, `supports_document_processing()`, `emits_structured_markdown()`, `process_document()`
+- **PostProcessor**: `process()`, `processing_stage()`, plus optional `should_process()`, `estimated_duration_ms()`, `priority()`
+- **Validator**: `validate()`, plus optional `should_validate()`, `priority()`
+- **EmbeddingBackend**: `dimensions()`, `embed()`
+- **RerankerBackend**: `rerank()`
+- **TokenizerBackend**: `count_tokens()`
 
 Priorities run 0-255 and default to 50; the highest-priority plugin matching a
 MIME type wins. `initialize()` must validate everything the plugin needs and

@@ -18,9 +18,9 @@ $mimeType = 'application/pdf';
 
 $output = \Xberg\XbergApi::extract(
     \Xberg\ExtractInput::fromBytes($fileData, $mimeType),
-    new ExtractionConfig()
+    \Xberg\ExtractionConfig::default()
 );
-$result = $output->results[0];
+$result = $output->getResults()[0];
 echo "Extracted from bytes:\n";
 echo substr($result->content, 0, 200) . "...\n\n";
 
@@ -34,9 +34,9 @@ if (file_exists($uploadedFile['tmp_name'])) {
     $data = file_get_contents($uploadedFile['tmp_name']);
     $output = \Xberg\XbergApi::extract(
         \Xberg\ExtractInput::fromBytes($data, $uploadedFile['type']),
-        new ExtractionConfig()
+        \Xberg\ExtractionConfig::default()
     );
-    $result = $output->results[0];
+    $result = $output->getResults()[0];
 
     echo "Uploaded file processed:\n";
     echo "Size: " . strlen($data) . " bytes\n";

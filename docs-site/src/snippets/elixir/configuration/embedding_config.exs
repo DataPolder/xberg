@@ -1,15 +1,14 @@
-alias Xberg.ExtractionConfig
+alias Xberg.{ExtractionConfig, ChunkingConfig, EmbeddingConfig}
 
 # Configure embeddings for vector search
+# Embeddings are configured on the chunking config, not on ExtractionConfig directly.
 config = %ExtractionConfig{
-chunking: %{
-"enabled" => true,
-"max_characters" => 512,
-"overlap" => 50
-},
-embeddings: %{
-"enabled" => true,
-"model" => "sentence-transformers/all-MiniLM-L6-v2"
+chunking: %ChunkingConfig{
+max_characters: 512,
+overlap: 50,
+embedding: %EmbeddingConfig{
+model: "sentence-transformers/all-MiniLM-L6-v2"
+}
 }
 }
 

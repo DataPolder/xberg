@@ -11,13 +11,15 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/vendor/autoload.php';
 
-use Xberg\PostProcessor\PostProcessorInterface;
-use Xberg\Types\ExtractedDocument;
+use Xberg\Xberg;
+use Xberg\PostProcessor;
+use Xberg\ExtractedDocument;
+use Xberg\ExtractionConfig;
 
 /**
  * Post-processor for extracting and enriching PDF metadata
  */
-readonly class PdfMetadataExtractor implements PostProcessorInterface
+class PdfMetadataExtractor implements PostProcessor
 {
     private int $processedCount;
 
@@ -53,7 +55,7 @@ readonly class PdfMetadataExtractor implements PostProcessorInterface
     /**
      * Get the processing stage (early, normal, or late)
      */
-    public function processingStage(): string
+    public function processing_stage(): string
     {
         return 'early';
     }
@@ -61,25 +63,25 @@ readonly class PdfMetadataExtractor implements PostProcessorInterface
     /**
      * Determine if this processor should handle the result
      */
-    public function shouldProcess(ExtractedDocument $result): bool
+    public function should_process(ExtractedDocument $result, ExtractionConfig $config): bool
     {
         return $result->mimeType === 'application/pdf';
     }
 
     /**
-     * Process the extraction result
+     * Process the extraction result.
+     *
+     * NOTE: ExtractedDocument has no writable "metadata.custom" bag in the current
+     * binding (Metadata exposes only its fixed, typed fields via getters — there is
+     * no free-form map to attach arbitrary processor output to). This snippet cannot
+     * be made to actually enrich metadata until that capability exists; flagged for a
+     * product decision rather than guessed at here.
      */
-    public function process(ExtractedDocument $result): ExtractedDocument
+    public function process(ExtractedDocument $result, ExtractionConfig $config): mixed
     {
         $this->processedCount++;
 
-        if (!isset($result->metadata->custom)) {
-            $result->metadata->custom = [];
-        }
-        $result->metadata->custom['pdf_processed'] = true;
-        $result->metadata->custom['processor_version'] = $this->version();
-
-        return $result;
+        return null;
     }
 
     /**

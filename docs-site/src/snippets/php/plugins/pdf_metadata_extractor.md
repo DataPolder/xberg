@@ -2,6 +2,10 @@
 <?php declare(strict_types=1);
 
 use Xberg\XbergApi;
+use Xberg\Xberg;
+use Xberg\PostProcessor;
+use Xberg\ExtractedDocument;
+use Xberg\ExtractionConfig;
 
 class PdfMetadataExtractor implements PostProcessor {
     public function name(): string {
@@ -20,34 +24,23 @@ class PdfMetadataExtractor implements PostProcessor {
         // Cleanup resources
     }
 
-    public function process(object &$result, object $config): void {
-        // Only process PDFs
-        if ($result->mime_type !== 'application/pdf') {
-            return;
-        }
-
-        // Extract and attach metadata
-        if (!isset($result->metadata)) {
-            $result->metadata = [];
-        }
-
-        if (is_array($result->metadata)) {
-            $result->metadata = array_merge($result->metadata, [
-                'pdf_processor' => 'pdf-metadata-extractor',
-                'extracted_at' => date('Y-m-d H:i:s'),
-            ]);
-        }
+    // NOTE: ExtractedDocument's properties are readonly and "metadata" has no
+    // writable free-form bag in the current binding — a post-processor cannot
+    // attach arbitrary data to $result the way this example implies. Flagged
+    // rather than guessed at.
+    public function process(ExtractedDocument $result, ExtractionConfig $config): mixed {
+        return null;
     }
 
-    public function processingStage(): string {
+    public function processing_stage(): string {
         return "Middle";
     }
 
-    public function shouldProcess(object $result, object $config): bool {
-        return $result->mime_type === 'application/pdf';
+    public function should_process(ExtractedDocument $result, ExtractionConfig $config): bool {
+        return $result->mimeType === 'application/pdf';
     }
 
-    public function estimatedDurationMs(object $result): int {
+    public function estimated_duration_ms(ExtractedDocument $result): int {
         return 10;
     }
 

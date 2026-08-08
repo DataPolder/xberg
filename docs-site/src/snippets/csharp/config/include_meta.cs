@@ -6,7 +6,7 @@ var config = new ExtractionConfig
     Ocr = new OcrConfig
     {
         Backend = "tesseract",
-        Language = "eng"
+        Language = ["eng"]
     }
 };
 
@@ -15,5 +15,5 @@ var result = (await XbergConverter.ExtractAsync(ExtractInput.FromUri("document.p
 if (result.Metadata != null)
 {
     var language = result.Metadata.Language;
-    var format = result.Metadata.FormatType;
+    var format = result.Metadata.Format;
 }

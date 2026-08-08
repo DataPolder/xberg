@@ -84,7 +84,7 @@ try {
 
     $start = microtime(true);
     $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($inputFile), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
     $elapsed = microtime(true) - $start;
 
     fwrite(STDERR, "Extraction completed in " . number_format($elapsed, 3) . "s\n");

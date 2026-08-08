@@ -2,6 +2,7 @@
 <?php declare(strict_types=1);
 
 use Xberg\XbergApi;
+use Xberg\Xberg;
 
 // List all registered OCR backends
 $ocr_backends = Xberg::listOcrBackends();

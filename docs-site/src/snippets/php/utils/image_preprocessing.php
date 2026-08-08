@@ -31,7 +31,7 @@ $config = new ExtractionConfig(
 );
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('scanned.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 echo "OCR with Image Preprocessing:\n";
 echo str_repeat('=', 60) . "\n";
@@ -59,7 +59,7 @@ $advancedConfig = new ExtractionConfig(
 );
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('poor_quality_scan.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 echo "Advanced Preprocessing Results:\n";
 echo str_repeat('=', 60) . "\n";
@@ -128,7 +128,7 @@ foreach ($preprocessingProfiles as $profileName => $preprocessing) {
 
     $startTime = microtime(true);
     $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('sample_scan.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
     $elapsedTime = microtime(true) - $startTime;
 
     echo ucfirst($profileName) . " profile:\n";

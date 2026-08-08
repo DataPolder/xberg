@@ -1,12 +1,12 @@
 # Extract scanned documents with OCR
 # Configure Tesseract for OCR processing
 
-ocr_config = %Xberg.Config.OCR{
+ocr_config = %Xberg.OcrConfig{
 backend: "tesseract",
-language: "eng"
+language: ["eng"]
 }
 
-config = %Xberg.Config.Extraction{
+config = %Xberg.ExtractionConfig{
 ocr: ocr_config
 }
 

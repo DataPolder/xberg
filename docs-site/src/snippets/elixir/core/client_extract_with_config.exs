@@ -164,22 +164,16 @@ defmodule ConfiguredDocumentClient do
   @doc """
   Validate file before extraction.
 
-  Checks file existence and MIME type compatibility.
+  Checks file existence. MIME type detection and validation happen
+  internally when `Xberg.extract/1` runs, so there is no separate
+  pre-flight MIME check exposed by the binding.
   """
   @spec validate_file(String.t()) :: :ok | {:error, String.t()}
   def validate_file(path) do
-    cond do
-      not File.exists?(path) ->
+    if File.exists?(path) do
+      :ok
+    else
       {:error, "File not found: #{path}"}
-
-      true ->
-      case Xberg.detect_mime_type_from_path(path) do
-        {:ok, _mime_type} ->
-        :ok
-
-        {:error, reason} ->
-        {:error, "Cannot determine MIME type: #{reason}"}
-      end
     end
   end
 

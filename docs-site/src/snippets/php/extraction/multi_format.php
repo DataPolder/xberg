@@ -36,7 +36,7 @@ foreach ($formats as $type => $file) {
     echo "Processing $type ($file):\n";
 
     $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($file), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
     echo "  Content length: " . strlen($result->content) . " chars\n";
     echo "  Tables: " . count($result->tables) . "\n";
@@ -56,7 +56,7 @@ foreach ($mixedFiles as $file) {
     }
 
     $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($file), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
     $byFormat[$extension][] = [
         'file' => basename($file),
         'size' => strlen($result->content),
@@ -109,7 +109,7 @@ foreach ($mixedFiles as $file) {
 
     $config = $formatConfigs[$ext];
     $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($file), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
     echo "Processed " . basename($file) . " with $ext config\n";
 }
@@ -123,7 +123,7 @@ function convertToMarkdown(string $inputFile): string
     );
 
     $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($inputFile), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
     $markdown = "# " . ($result->metadata?->title ?? basename($inputFile)) . "\n\n";
 
@@ -159,7 +159,7 @@ foreach (['document.pdf', 'document.docx'] as $file) {
 function extractFromArchive(string $archiveFile): array
 {
     $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($archiveFile), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
     return [
         'archive' => basename($archiveFile),
@@ -196,7 +196,7 @@ class UniversalExtractor
     {
         $config = new ExtractionConfig(extractTables: true, extractImages: true);
         $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($file), $config);
-        $result = $output->results[0];
+        $result = $output->getResults()[0];
 
         return [
             'type' => 'PDF',
@@ -209,8 +209,8 @@ class UniversalExtractor
 
     private function handleDOCX(string $file, string $ext): array
     {
-        $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($file), new ExtractionConfig());
-        $result = $output->results[0];
+        $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($file), \Xberg\ExtractionConfig::default());
+        $result = $output->getResults()[0];
 
         return [
             'type' => 'Word Document',
@@ -224,7 +224,7 @@ class UniversalExtractor
     {
         $config = new ExtractionConfig(extractTables: true);
         $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($file), $config);
-        $result = $output->results[0];
+        $result = $output->getResults()[0];
 
         return [
             'type' => 'Excel Spreadsheet',
@@ -239,7 +239,7 @@ class UniversalExtractor
             ocr: new \Xberg\OcrConfig(backend: 'tesseract', language: 'eng')
         );
         $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($file), $config);
-        $result = $output->results[0];
+        $result = $output->getResults()[0];
 
         return [
             'type' => 'Image (OCR)',
@@ -250,8 +250,8 @@ class UniversalExtractor
 
     private function handleGeneric(string $file, string $ext): array
     {
-        $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($file), new ExtractionConfig());
-        $result = $output->results[0];
+        $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($file), \Xberg\ExtractionConfig::default());
+        $result = $output->getResults()[0];
 
         return [
             'type' => 'Generic',

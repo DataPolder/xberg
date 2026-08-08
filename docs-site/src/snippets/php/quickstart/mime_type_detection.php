@@ -22,8 +22,8 @@ if (file_exists($unknownFile)) {
     echo "Processing unknown file: $unknownFile\n";
     echo "ExtractInput will auto-detect the format...\n";
 
-    $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($unknownFile), new ExtractionConfig());
-    $result = $output->results[0];
+    $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($unknownFile), \Xberg\ExtractionConfig::default());
+    $result = $output->getResults()[0];
     echo "Successfully extracted " . strlen($result->content) . " characters\n";
 }
 
@@ -35,8 +35,8 @@ if (file_exists($fileToCheck)) {
 
     if (in_array($extension, $allowedExtensions, true)) {
         echo "File extension .$extension is allowed, processing...\n";
-        $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($fileToCheck), new ExtractionConfig());
-        $result = $output->results[0];
+        $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($fileToCheck), \Xberg\ExtractionConfig::default());
+        $result = $output->getResults()[0];
         echo "Extraction successful: " . strlen($result->content) . " characters extracted\n";
     } else {
         echo "File extension .$extension is not allowed\n";

@@ -10,11 +10,11 @@ class RagPipelineExample
         {
             Chunking = new ChunkingConfig
             {
-                MaxChars = 500,
-                MaxOverlap = 50,
+                MaxCharacters = 500,
+                Overlap = 50,
                 Embedding = new EmbeddingConfig
                 {
-                    Model = EmbeddingModelType.Preset("all-mpnet-base-v2"),
+                    Model = new EmbeddingModelType.Preset("all-mpnet-base-v2"),
                     Normalize = true,
                     BatchSize = 16
                 }
@@ -25,7 +25,7 @@ class RagPipelineExample
         {
             var result = (await XbergConverter.ExtractAsync(ExtractInput.FromUri(
                 "research_paper.pdf"), config
-            )).Results[0].ConfigureAwait(false);
+            )).Results[0];
 
             var vectorStore = await BuildVectorStoreAsync(result.Chunks)
             .ConfigureAwait(false);

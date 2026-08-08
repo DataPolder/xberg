@@ -2,7 +2,7 @@ using Xberg;
 
 var config = new ExtractionConfig
 {
-    Chunking = new ChunkingConfig { ChunkSize = 500, Overlap = 50 },
+    Chunking = new ChunkingConfig { MaxCharacters = 500, Overlap = 50 },
     Pages = new PageConfig { ExtractPages = true }
 };
 
@@ -18,7 +18,7 @@ if (result.Chunks != null)
             ? $"Page {chunk.Metadata.FirstPage}"
             : $"Pages {chunk.Metadata.FirstPage}-{chunk.Metadata.LastPage}";
 
-            Console.WriteLine($"Chunk: {chunk.Text[..50]}... ({pageRange})");
+            Console.WriteLine($"Chunk: {chunk.Content[..50]}... ({pageRange})");
         }
     }
 }

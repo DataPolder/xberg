@@ -27,7 +27,7 @@ $config = new ExtractionConfig(
 );
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('document.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 echo "Embedding Generation Results:\n";
 echo str_repeat('=', 60) . "\n";
@@ -66,7 +66,7 @@ foreach ($models as $model) {
 
     $start = microtime(true);
     $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('test_doc.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
     $elapsed = microtime(true) - $start;
 
     $chunk = ($result->chunks ?? [])[0] ?? null;
@@ -98,7 +98,7 @@ $config = new ExtractionConfig(
 );
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('document.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 echo "Chunk Similarity Analysis:\n";
 echo str_repeat('=', 60) . "\n";
@@ -174,7 +174,7 @@ foreach ($files as $file) {
     if (!file_exists($file)) continue;
 
     $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($file), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
     foreach ($result->chunks ?? [] as $chunk) {
         if ($chunk->embedding) {
@@ -193,7 +193,7 @@ $config = new ExtractionConfig(
 );
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('export_doc.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 $exportData = [];
 foreach ($result->chunks ?? [] as $chunk) {

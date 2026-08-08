@@ -2,6 +2,7 @@
 <?php declare(strict_types=1);
 
 use Xberg\XbergApi;
+use Xberg\Xberg;
 use Xberg\ExtractionConfig;
 use Xberg\ChunkingConfig;
 use Xberg\EmbeddingConfig;
@@ -25,7 +26,7 @@ $config->embeddings = $embeddingConfig;
 
 $resultOutput = Xberg::extract(\Xberg\ExtractInput::fromUri("document.pdf"), $config);
 
-$result = $resultOutput->results[0];
+$result = $resultOutput->getResults()[0];
 
 // Store chunks and embeddings for vector database
 if ($result->chunks !== null) {

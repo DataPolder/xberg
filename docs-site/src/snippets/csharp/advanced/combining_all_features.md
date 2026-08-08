@@ -18,24 +18,23 @@ async Task RunRagPipeline()
 
         TokenReduction = new TokenReductionConfig
         {
-            Mode = "moderate",
+            Level = ReductionLevel.Moderate,
             PreserveImportantWords = true,
         },
 
         Chunking = new ChunkingConfig
         {
-            MaxChars = 512,
-            MaxOverlap = 50,
-            Embedding = new Dictionary<string, object?>
+            MaxCharacters = 512,
+            Overlap = 50,
+            Embedding = new EmbeddingConfig
             {
-                { "preset", "balanced" },
+                Model = new EmbeddingModelType.Preset("balanced"),
             },
-            Enabled = true,
         },
 
         Keywords = new KeywordConfig
         {
-            Algorithm = "yake",
+            Algorithm = KeywordAlgorithm.Yake,
             MaxKeywords = 10,
         },
     };
@@ -54,9 +53,9 @@ async Task RunRagPipeline()
         Console.WriteLine($"Total chunks: {result.Chunks.Count}");
         var firstChunk = result.Chunks[0];
         Console.WriteLine($"First chunk tokens: {firstChunk.Metadata.TokenCount}");
-        if (firstChunk.Embedding?.Length > 0)
+        if (firstChunk.Embedding?.Count > 0)
         {
-            Console.WriteLine($"Embedding dimensions: {firstChunk.Embedding.Length}");
+            Console.WriteLine($"Embedding dimensions: {firstChunk.Embedding.Count}");
         }
     }
 

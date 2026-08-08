@@ -41,12 +41,12 @@ defmodule BatchDocumentClient do
     case Xberg.extract_batch(inputs: inputs, config: config) do
       {:ok, output} ->
       results = output.results
-      IO.debug("Successfully extracted #{length(results)} files")
+      IO.puts("Successfully extracted #{length(results)} files")
       {:ok, results}
 
       {:error, reason} ->
       if log_errors do
-        IO.debug("Batch extraction error: #{reason}")
+        IO.puts("Batch extraction error: #{reason}")
       end
       {:error, reason}
     end
@@ -101,7 +101,7 @@ defmodule BatchDocumentClient do
           {:ok, transform_fn.(result)}
         rescue
           error ->
-          IO.debug("Transform error: #{inspect(error)}")
+          IO.puts("Transform error: #{inspect(error)}")
           {:error, error}
         end
       end)

@@ -10,20 +10,20 @@ var config = new ExtractionConfig
 
 var result = (await XbergConverter.ExtractAsync(ExtractInput.FromUri("document.pdf"), config)).Results[0];
 
-if (result.Metadata?.Format.Pdf != null)
+if (result.Metadata?.Format?.AsPdf != null)
 {
-    var pdfMeta = result.Metadata.Format.Pdf;
+    var pdfMeta = result.Metadata.Format.AsPdf;
     Console.WriteLine($"Pages: {pdfMeta.PageCount}");
-    Console.WriteLine($"Author: {pdfMeta.Author}");
-    Console.WriteLine($"Title: {pdfMeta.Title}");
-    Console.WriteLine($"Subject: {pdfMeta.Subject}");
-    Console.WriteLine($"Created: {pdfMeta.CreatedDate:O}");
+    Console.WriteLine($"Author: {string.Join(", ", result.Metadata.Authors)}");
+    Console.WriteLine($"Title: {result.Metadata.Title}");
+    Console.WriteLine($"Subject: {result.Metadata.Subject}");
+    Console.WriteLine($"Created: {result.Metadata.CreatedAt}");
 }
 
 var htmlResult = (await XbergConverter.ExtractAsync(ExtractInput.FromUri("page.html"), config)).Results[0];
-if (htmlResult.Metadata?.Format.Html != null)
+if (htmlResult.Metadata?.Format?.AsHtml != null)
 {
-    var htmlMeta = htmlResult.Metadata.Format.Html;
+    var htmlMeta = htmlResult.Metadata.Format.AsHtml;
     Console.WriteLine($"Title: {htmlMeta.Title}");
     Console.WriteLine($"Description: {htmlMeta.Description}");
     if (htmlMeta.OpenGraph != null && htmlMeta.OpenGraph.ContainsKey("image"))

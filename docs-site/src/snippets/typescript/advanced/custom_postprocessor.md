@@ -2,7 +2,8 @@
 import {
   registerPostProcessor,
   unregisterPostProcessor,
-  type PostProcessorProtocol,
+  ProcessingStage,
+  type PostProcessor,
   type ExtractedDocument,
 } from "@xberg-io/xberg";
 
@@ -13,23 +14,23 @@ import {
  * const processor = new CleaningPostProcessor();
  * registerPostProcessor(processor);
  */
-class CleaningPostProcessor implements PostProcessorProtocol {
+class CleaningPostProcessor implements PostProcessor {
   name(): string {
     return "cleaning-postprocessor";
   }
 
-  processingStage(): "early" | "middle" | "late" {
-    return "middle";
+  processingStage(): ProcessingStage {
+    return ProcessingStage.Middle;
   }
 
   /**
-   * Process extraction result for cleanup
+   * Process extraction result for cleanup (mutates the result in place)
    */
-  process(result: ExtractedDocument): ExtractedDocument {
-    return {
-      ...result,
-      content: this.cleanContent(result.content),
-    };
+  async process(result?: ExtractedDocument | null): Promise<void> {
+    if (!result) {
+      return;
+    }
+    Object.assign(result, { content: this.cleanContent(result.content ?? "") });
   }
 
   /**

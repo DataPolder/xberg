@@ -3,17 +3,24 @@ import {
   extract,
   registerValidator,
   unregisterValidator,
-  ValidationError,
+  ExtractInputKind,
+  type Validator,
   type ExtractedDocument,
 } from "@xberg-io/xberg";
 
-class MinLengthValidator {
-  name = "min_length_validator";
-  priority = 10;
+class MinLengthValidator implements Validator {
+  name(): string {
+    return "min_length_validator";
+  }
 
-  validate(result: ExtractedDocument): void {
-    if (result.content.length < 50) {
-      throw new ValidationError(`Content too short: ${result.content.length}`);
+  priority(): number {
+    return 10;
+  }
+
+  async validate(result?: ExtractedDocument | null): Promise<void> {
+    const content = result?.content ?? "";
+    if (content.length < 50) {
+      throw new Error(`Content too short: ${content.length}`);
     }
   }
 }
@@ -21,10 +28,11 @@ class MinLengthValidator {
 registerValidator(new MinLengthValidator());
 
 const output = await extract({
-  kind: "uri",
+  kind: ExtractInputKind.Uri,
   uri: "document.pdf",
 });
-console.log(`Validated content length: ${output.results[0].content.length}`);
+const first = output.results?.[0];
+console.log(`Validated content length: ${first?.content?.length ?? 0}`);
 
 unregisterValidator("min_length_validator");
 ```

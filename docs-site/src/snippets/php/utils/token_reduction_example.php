@@ -22,7 +22,7 @@ $config = new ExtractionConfig(
 );
 
 $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri('verbose_document.pdf'), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
 echo "Token Reduction Example:\n";
 echo str_repeat('=', 60) . "\n";
@@ -80,7 +80,7 @@ foreach ($documents as $document) {
     }
 
     $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($document), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
     $originalTokens = $result->metadata['original_token_count'] ?? 0;
     $reducedTokens = $result->metadata['token_count'] ?? 0;
@@ -121,7 +121,7 @@ function fitWithinTokenLimit(
         );
 
         $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($filePath), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
 
         $tokens = $result->metadata['token_count'] ?? strlen($result->content);
 
@@ -143,7 +143,7 @@ $result = $output->results[0];
     );
 
     $output = \Xberg\XbergApi::extract(\Xberg\ExtractInput::fromUri($filePath), $config ?? \Xberg\ExtractionConfig::default());
-$result = $output->results[0];
+$result = $output->getResults()[0];
     $tokens = $result->metadata['token_count'] ?? strlen($result->content);
 
     return [

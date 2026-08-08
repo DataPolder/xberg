@@ -2,11 +2,12 @@
 <?php declare(strict_types=1);
 
 use Xberg\XbergApi;
+use Xberg\Xberg;
 use Xberg\ExtractionConfig;
 
 $resultOutput = Xberg::extract(\Xberg\ExtractInput::fromUri("document.pdf"), \Xberg\ExtractionConfig::default());
 
-$result = $resultOutput->results[0];
+$result = $resultOutput->getResults()[0];
 
 foreach ($result->tables as $table) {
     echo "Table on page " . $table->page_number . " with " . count($table->cells) . " rows\n";

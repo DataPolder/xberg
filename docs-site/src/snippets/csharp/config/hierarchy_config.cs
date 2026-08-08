@@ -1,4 +1,3 @@
-using Xberg.Config;
 using Xberg;
 
 public class HierarchyConfigExample

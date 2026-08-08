@@ -8,17 +8,17 @@ var config = new ExtractionConfig
     Ocr = new OcrConfig
     {
         Backend = "tesseract",
-        Language = "eng+fra",
+        Language = ["eng", "fra"],
         TesseractConfig = new TesseractConfig { Psm = 3 }
     },
     PdfOptions = new PdfConfig { ExtractImages = true },
     Chunking = new ChunkingConfig
     {
-        MaxChars = 1000,
-        MaxOverlap = 200,
+        MaxCharacters = 1000,
+        Overlap = 200,
         Embedding = new EmbeddingConfig
         {
-            Model = EmbeddingModelType.Preset("all-MiniLM-L6-v2")
+            Model = new EmbeddingModelType.Preset("all-MiniLM-L6-v2")
         }
     }
 };

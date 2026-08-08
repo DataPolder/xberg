@@ -2,6 +2,10 @@
 <?php declare(strict_types=1);
 
 use Xberg\XbergApi;
+use Xberg\Xberg;
+use Xberg\PostProcessor;
+use Xberg\ExtractedDocument;
+use Xberg\ExtractionConfig;
 
 class StatefulPlugin implements PostProcessor {
     private int $callCount = 0;
@@ -25,34 +29,31 @@ class StatefulPlugin implements PostProcessor {
         error_log("StatefulPlugin called {$this->callCount} times total");
     }
 
-    public function process(object &$result, object $config): void {
+    // NOTE: ExtractedDocument's properties are readonly and "metadata" has no
+    // writable free-form bag in the current binding — only this plugin's own
+    // instance state (cache/callCount below) can actually be tracked; the
+    // metadata annotation shown in earlier revisions of this snippet is not
+    // supported and has been removed rather than guessed at.
+    public function process(ExtractedDocument $result, ExtractionConfig $config): mixed {
         $this->callCount++;
 
         // Cache the last MIME type
-        $this->cache['last_mime'] = $result->mime_type;
+        $this->cache['last_mime'] = $result->mimeType;
         $this->cache['last_timestamp'] = time();
 
-        // Add cache info to metadata
-        if (!isset($result->metadata)) {
-            $result->metadata = [];
-        }
-
-        if (is_array($result->metadata)) {
-            $result->metadata['plugin_call_count'] = $this->callCount;
-            $result->metadata['cached_mime'] = $this->cache['last_mime'] ?? 'none';
-        }
+        return null;
     }
 
-    public function processingStage(): string {
+    public function processing_stage(): string {
         return "Middle";
     }
 
-    public function shouldProcess(object $result, object $config): bool {
+    public function should_process(ExtractedDocument $result, ExtractionConfig $config): bool {
         // Always process to track state
         return true;
     }
 
-    public function estimatedDurationMs(object $result): int {
+    public function estimated_duration_ms(ExtractedDocument $result): int {
         // State tracking is minimal overhead
         return 2;
     }

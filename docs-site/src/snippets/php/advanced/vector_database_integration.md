@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Xberg\XbergApi;
+use Xberg\Xberg;
 use Xberg\ExtractionConfig;
 use Xberg\ChunkingConfig;
 use Xberg\EmbeddingConfig;
@@ -33,7 +34,7 @@ function extractAndVectorize(
 
     $resultOutput = Xberg::extract(\Xberg\ExtractInput::fromUri($documentPath), $config);
 
-    $result = $resultOutput->results[0];
+    $result = $resultOutput->getResults()[0];
 
     $records = [];
     if ($result->chunks) {

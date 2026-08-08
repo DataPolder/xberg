@@ -9,7 +9,7 @@ class Program
             LanguageDetection = new LanguageDetectionConfig
             {
                 Enabled = true,
-                MinConfidence = 0.8m,
+                MinConfidence = 0.8,
                 DetectMultiple = false
             }
         };

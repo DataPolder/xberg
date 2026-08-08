@@ -6,9 +6,11 @@ var config = new ExtractionConfig
     EnableQualityProcessing = true
 };
 
-var result = (await XbergConverter.ExtractAsync(ExtractInput.FromUri(
-    new BytesWithMime(fileBytes), "application/pdf")).Results[0],
-config
-);
+var fileBytes = await File.ReadAllBytesAsync("document.pdf");
+
+var result = (await XbergConverter.ExtractAsync(
+    ExtractInput.FromBytes(fileBytes, "application/pdf", "document.pdf"),
+    config
+)).Results[0];
 
 var mimeType = result.MimeType;

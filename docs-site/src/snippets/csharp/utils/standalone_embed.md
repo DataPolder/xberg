@@ -3,7 +3,7 @@ using Xberg;
 
 var client = new XbergLib();
 
-var config = new EmbeddingConfig { Model = EmbeddingModelType.Preset("balanced"), Normalize = true };
+var config = new EmbeddingConfig { Model = new EmbeddingModelType.Preset("balanced"), Normalize = true };
 var texts = new[] { "Hello, world!", "Xberg is fast" };
 
 // Synchronous
