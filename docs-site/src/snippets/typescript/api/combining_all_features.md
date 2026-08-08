@@ -3,28 +3,28 @@ import { extract } from "@xberg-io/xberg";
 
 const config = {
   // OCR: Tesseract on all pages with English text
-  force_ocr: false,
+  forceOcr: false,
   ocr: {
     backend: "tesseract",
-    language: "eng",
+    language: ["eng"],
   },
   // Chunking: semantic markdown chunks of ~800 chars, 100-char overlap
   chunking: {
-    max_characters: 800,
+    maxCharacters: 800,
     overlap: 100,
-    chunker_type: "markdown",
-    prepend_heading_context: true,
+    chunkerType: "markdown",
+    prependHeadingContext: true,
   },
   // Output: include document structure and tables
-  output_format: "markdown",
-  include_document_structure: true,
+  outputFormat: "markdown",
+  includeDocumentStructure: true,
   // Images: extract embedded images
   images: {
-    extract_images: true,
+    extractImages: true,
   },
   // Cache extracted results on disk
-  use_cache: true,
-  enable_quality_processing: true,
+  useCache: true,
+  enableQualityProcessing: true,
 };
 
 const output = await extract({ kind: "uri", uri: "report.pdf" }, config);

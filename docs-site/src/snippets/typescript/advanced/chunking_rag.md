@@ -3,8 +3,8 @@ import { extract } from "@xberg-io/xberg";
 
 const config = {
   chunking: {
-    maxChars: 500,
-    maxOverlap: 50,
+    maxCharacters: 500,
+    overlap: 50,
     embedding: {
       model: { type: "preset", name: "balanced" },
       normalize: true,
@@ -12,9 +12,9 @@ const config = {
   },
 };
 
-const result = await extract({ kind: "uri", uri: "research_paper.pdf" }, config);
+const output = await extract({ kind: "uri", uri: "research_paper.pdf" }, config);
 
-for (const chunk of result.chunks ?? []) {
+for (const chunk of output.results[0].chunks ?? []) {
   console.log(`Chunk ${chunk.metadata.chunkIndex + 1}/${chunk.metadata.totalChunks}`);
   console.log(`Position: ${chunk.metadata.byteStart}-${chunk.metadata.byteEnd}`);
   console.log(`Content: ${chunk.content.slice(0, 100)}...`);

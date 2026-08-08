@@ -3,15 +3,16 @@ import { extract } from "@xberg-io/xberg";
 
 const config = {
   chunking: {
-    maxChars: 512,
-    maxOverlap: 50,
+    maxCharacters: 512,
+    overlap: 50,
     embedding: {
-      preset: "balanced",
+      model: { type: "preset", name: "balanced" },
     },
   },
 };
 
-const result = await extract({ kind: "uri", uri: "document.pdf" }, config);
+const output = await extract({ kind: "uri", uri: "document.pdf" }, config);
+const result = output.results[0];
 
 if (result.chunks) {
   for (const chunk of result.chunks) {

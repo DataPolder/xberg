@@ -1,32 +1,42 @@
 ```typescript title="TypeScript"
-import { registerPostProcessor, type ExtractedDocument } from "@xberg-io/xberg";
+import {
+  registerPostProcessor,
+  ProcessingStage,
+  type PostProcessor,
+  type ExtractedDocument,
+} from "@xberg-io/xberg";
 
-class PdfMetadataExtractor {
+class PdfMetadataExtractor implements PostProcessor {
   private processedCount: number = 0;
 
   name(): string {
     return "pdf-metadata-extractor";
   }
 
-  processingStage(): "early" | "middle" | "late" {
-    return "early";
+  processingStage(): ProcessingStage {
+    return ProcessingStage.Early;
   }
 
-  shouldProcess(result: ExtractedDocument): boolean {
-    return result.mimeType === "application/pdf";
+  shouldProcess(result?: ExtractedDocument | null): boolean {
+    return result?.mimeType === "application/pdf";
   }
 
-  process(result: ExtractedDocument): ExtractedDocument {
+  async process(result?: ExtractedDocument | null): Promise<void> {
+    if (!result) {
+      return;
+    }
     this.processedCount += 1;
 
-    return {
-      ...result,
+    Object.assign(result, {
       metadata: {
         ...result.metadata,
-        pdfProcessingIndex: this.processedCount,
-        pdfMetadataEnriched: true,
+        additional: {
+          ...result.metadata?.additional,
+          pdfProcessingIndex: this.processedCount,
+          pdfMetadataEnriched: true,
+        },
       },
-    };
+    });
   }
 
   getStats(): { processedCount: number } {

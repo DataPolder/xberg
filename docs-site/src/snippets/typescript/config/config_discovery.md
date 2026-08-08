@@ -1,18 +1,23 @@
 # Configuration Discovery Example
 
-Use `ExtractionConfig.discover()` to automatically find and load configuration files from the current directory or parent directories:
+The Node binding has no built-in config-file discovery helper — automatic
+`xberg.toml`/`xberg.yaml`/`xberg.json` lookup is a CLI/server-side feature.
+From Node, read and parse the file yourself and pass the result as `config`:
 
 ```typescript title="config_discovery.ts"
-import { ExtractInputKind, ExtractionConfig, extract } from "@xberg-io/xberg";
+import { existsSync, readFileSync } from "node:fs";
+import { extract, type ExtractionConfig } from "@xberg-io/xberg";
 
-const config = ExtractionConfig.discover();
 const input = {
-  kind: "uri",
+  kind: "uri" as const,
   uri: "document.pdf",
 };
 
-if (config) {
+const configPath = "xberg.json";
+
+if (existsSync(configPath)) {
   console.log("Found configuration file");
+  const config = JSON.parse(readFileSync(configPath, "utf8")) as ExtractionConfig;
   const output = await extract(input, config);
   console.log(output.results[0].content);
 } else {
@@ -21,5 +26,3 @@ if (config) {
   console.log(output.results[0].content);
 }
 ```
-
-The discovery method looks for `xberg.toml`, `xberg.yaml`, or `xberg.json` files starting in the current directory and searching parent directories up to the filesystem root.

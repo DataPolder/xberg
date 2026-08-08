@@ -11,7 +11,7 @@ console.log(`Content: ${doc.content}`);
 console.log(`Success: ${output.errors?.length === 0}`);
 console.log(`Content Length: ${doc.content.length}`);
 
-if (doc.metadata?.page_count) {
-  console.log(`Pages: ${doc.metadata.page_count}`);
+if (doc.counts?.pages) {
+  console.log(`Pages: ${doc.counts.pages}`);
 }
 ```

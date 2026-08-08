@@ -1,30 +1,49 @@
 ```typescript title="TypeScript"
-import { registerPostProcessor, registerValidator, type ExtractedDocument } from "@xberg-io/xberg";
+import {
+  registerPostProcessor,
+  registerValidator,
+  type PostProcessor,
+  type Validator,
+  type ExtractedDocument,
+} from "@xberg-io/xberg";
 
-class LoggingPostProcessor {
-  name = "logging-processor";
-  priority = 5;
+class LoggingPostProcessor implements PostProcessor {
+  name(): string {
+    return "logging-processor";
+  }
 
-  process(result: ExtractedDocument): ExtractedDocument {
+  priority(): number {
+    return 5;
+  }
+
+  async process(result?: ExtractedDocument | null): Promise<void> {
+    if (!result) {
+      return;
+    }
+    const content = result.content ?? "";
     console.info(`[PostProcessor] Processing ${result.mimeType}`);
-    console.info(`[PostProcessor] Content length: ${result.content.length}`);
+    console.info(`[PostProcessor] Content length: ${content.length}`);
 
-    if (result.content.length === 0) {
+    if (content.length === 0) {
       console.warn("[PostProcessor] Warning: Empty content extracted");
     }
-
-    return result;
   }
 }
 
-class LoggingValidator {
-  name = "logging-validator";
-  priority = 100;
+class LoggingValidator implements Validator {
+  name(): string {
+    return "logging-validator";
+  }
 
-  validate(result: ExtractedDocument): void {
-    console.info(`[Validator] Validating extraction result (${result.content.length} bytes)`);
+  priority(): number {
+    return 100;
+  }
 
-    if (result.content.length < 50) {
+  async validate(result?: ExtractedDocument | null): Promise<void> {
+    const content = result?.content ?? "";
+    console.info(`[Validator] Validating extraction result (${content.length} bytes)`);
+
+    if (content.length < 50) {
       console.error("[Validator] Error: Content below minimum threshold");
       throw new Error("Content too short");
     }

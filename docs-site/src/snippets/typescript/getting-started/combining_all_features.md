@@ -8,14 +8,14 @@ const config = {
     detectMultiple: true,
   },
   tokenReduction: {
-    mode: "moderate",
+    level: "Moderate",
     preserveImportantWords: true,
   },
   chunking: {
-    maxChars: 512,
-    maxOverlap: 50,
+    maxCharacters: 512,
+    overlap: 50,
     embedding: {
-      preset: "balanced",
+      model: { type: "preset", name: "balanced" },
     },
   },
   keywords: {
@@ -24,7 +24,8 @@ const config = {
   },
 };
 
-const result = await extract({ kind: "uri", uri: "document.pdf" }, config);
+const output = await extract({ kind: "uri", uri: "document.pdf" }, config);
+const result = output.results[0];
 
 console.log(`Content length: ${result.content.length}`);
 if (result.detectedLanguages) {

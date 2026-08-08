@@ -13,7 +13,8 @@ const config = {
   },
 };
 
-const result = await extract({ kind: "uri", uri: "document.pdf" }, config);
+const output = await extract({ kind: "uri", uri: "document.pdf" }, config);
+const result = output.results[0];
 if (result.pages) {
   result.pages.forEach((page) => {
     console.log(`Page ${page.pageNumber}:`);

@@ -13,6 +13,7 @@ const config = {
       required: ["title", "authors", "date"],
       additionalProperties: false,
     },
+    schemaName: "paper_metadata",
     llm: {
       model: "openai/gpt-4o-mini",
     },
@@ -20,6 +21,6 @@ const config = {
   },
 };
 
-const result = extract({ kind: "uri", uri: "paper.pdf" }, config);
-console.log(result.structuredOutput);
+const output = await extract({ kind: "uri", uri: "paper.pdf" }, config);
+console.log(output.results[0].structuredOutput);
 ```

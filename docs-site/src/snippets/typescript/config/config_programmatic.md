@@ -5,18 +5,18 @@ const config: ExtractionConfig = {
   useCache: true,
   ocr: {
     backend: "tesseract",
-    language: "eng+deu",
+    language: ["eng", "deu"],
     tesseractConfig: {
       psm: 6,
     },
   },
   chunking: {
-    maxChars: 1000,
-    maxOverlap: 200,
+    maxCharacters: 1000,
+    overlap: 200,
   },
   enableQualityProcessing: true,
 };
 
-const result = extract({ kind: "uri", uri: "document.pdf" }, config);
-console.log(`Content length: ${result.content.length}`);
+const output = await extract({ kind: "uri", uri: "document.pdf" }, config);
+console.log(`Content length: ${output.results[0].content.length}`);
 ```

@@ -1,4 +1,4 @@
-import { type ExtractionConfig, extract, type RakeParams, type YakeParams } from "@xberg-io/xberg";
+import { type ExtractionConfig, extract } from "@xberg-io/xberg";
 
 // Example 1: Basic YAKE configuration
 // Uses YAKE algorithm with default parameters and English stopword filtering
@@ -30,7 +30,7 @@ async function _advancedYake(): Promise<void> {
       language: "en",
       yakeParams: {
         windowSize: 1,
-      } as YakeParams,
+      },
       rakeParams: null,
     },
   };
@@ -53,7 +53,7 @@ async function _rakeConfig(): Promise<void> {
       rakeParams: {
         minWordLength: 1,
         maxWordsPerPhrase: 3,
-      } as RakeParams,
+      },
     },
   };
 

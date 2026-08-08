@@ -12,6 +12,6 @@ const config = {
   },
 };
 
-const result = extract({ kind: "uri", uri: "scanned.pdf" }, config);
-console.log(`content length: ${result.content.length}`);
+const output = await extract({ kind: "uri", uri: "scanned.pdf" }, config);
+console.log(`content length: ${output.results[0].content.length}`);
 ```

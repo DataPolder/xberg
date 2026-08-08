@@ -10,6 +10,6 @@ const config = {
   },
 };
 
-const result = extract({ kind: "uri", uri: "scanned.pdf" }, config);
-console.log(result.content);
+const output = await extract({ kind: "uri", uri: "scanned.pdf" }, config);
+console.log(output.results[0].content);
 ```

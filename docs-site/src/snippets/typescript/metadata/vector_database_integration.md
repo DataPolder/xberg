@@ -14,8 +14,8 @@ async function extractAndVectorize(
 ): Promise<VectorRecord[]> {
   const config = {
     chunking: {
-      max_chars: 512,
-      max_overlap: 50,
+      maxCharacters: 512,
+      overlap: 50,
       embedding: {
         model: { type: "preset", name: "balanced" },
         normalize: true,
@@ -24,7 +24,8 @@ async function extractAndVectorize(
     },
   };
 
-  const result = await extract({ kind: "uri", uri: documentPath }, config);
+  const output = await extract({ kind: "uri", uri: documentPath }, config);
+  const result = output.results[0];
 
   const records: VectorRecord[] = [];
   if (result.chunks) {

@@ -4,14 +4,14 @@ import { extract } from "@xberg-io/xberg";
 const config = {
   ocr: {
     backend: "tesseract",
-    language: "eng+deu",
+    language: ["eng", "deu"],
   },
   chunking: {
-    maxChars: 1000,
-    maxOverlap: 100,
+    maxCharacters: 1000,
+    overlap: 100,
   },
   tokenReduction: {
-    mode: "aggressive",
+    level: "Aggressive",
   },
   languageDetection: {
     enabled: true,
@@ -21,7 +21,8 @@ const config = {
   enableQualityProcessing: true,
 };
 
-const result = extract({ kind: "uri", uri: "document.pdf" }, config);
+const output = await extract({ kind: "uri", uri: "document.pdf" }, config);
+const result = output.results[0];
 
 if (result.chunks) {
   for (const chunk of result.chunks) {

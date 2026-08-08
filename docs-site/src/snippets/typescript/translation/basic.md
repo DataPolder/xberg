@@ -7,6 +7,7 @@ const output = await extract({
 }, {
     translation: {
         targetLang: "de",
+        preserveMarkup: false,
         llm: { model: "openai/gpt-4o-mini" },
     },
 });

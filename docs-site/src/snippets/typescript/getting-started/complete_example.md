@@ -7,7 +7,7 @@ const config = {
   forceOcr: false,
   ocr: {
     backend: "tesseract",
-    language: "eng+fra",
+    language: ["eng", "fra"],
     tesseractConfig: {
       psm: 3,
       enableTableDetection: true,
@@ -23,14 +23,14 @@ const config = {
     maxImageDimension: 2048,
   },
   chunking: {
-    maxChars: 1000,
-    maxOverlap: 200,
+    maxCharacters: 1000,
+    overlap: 200,
     embedding: {
-      preset: "balanced",
+      model: { type: "preset", name: "balanced" },
     },
   },
   tokenReduction: {
-    mode: "moderate",
+    level: "Moderate",
     preserveImportantWords: true,
   },
   languageDetection: {
@@ -43,6 +43,6 @@ const config = {
   },
 };
 
-const result = await extract({ kind: "uri", uri: "document.pdf" }, config);
-console.log(`Extracted content length: ${result.content.length}`);
+const output = await extract({ kind: "uri", uri: "document.pdf" }, config);
+console.log(`Extracted content length: ${output.results[0].content.length}`);
 ```

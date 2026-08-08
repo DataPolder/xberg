@@ -1,22 +1,27 @@
 ```typescript title="TypeScript"
-import { registerPostProcessor, type ExtractedDocument } from "@xberg-io/xberg";
+import {
+  registerPostProcessor,
+  ProcessingStage,
+  type PostProcessor,
+  type ExtractedDocument,
+} from "@xberg-io/xberg";
 
-class PdfOnlyProcessor {
+class PdfOnlyProcessor implements PostProcessor {
   name(): string {
     return "pdf-only-processor";
   }
 
-  processingStage(): "early" | "middle" | "late" {
-    return "middle";
+  processingStage(): ProcessingStage {
+    return ProcessingStage.Middle;
   }
 
   // Gate the processor so it only runs for PDF documents.
-  shouldProcess(result: ExtractedDocument): boolean {
-    return result.mimeType === "application/pdf";
+  shouldProcess(result?: ExtractedDocument | null): boolean {
+    return result?.mimeType === "application/pdf";
   }
 
-  process(result: ExtractedDocument): ExtractedDocument {
-    return result;
+  async process(): Promise<void> {
+    // No-op: this processor only exists to demonstrate `shouldProcess` gating.
   }
 }
 

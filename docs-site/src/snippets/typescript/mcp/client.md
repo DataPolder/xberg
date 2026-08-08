@@ -88,27 +88,16 @@ class XbergMcpClient {
   /**
    * Extract file from path
    */
-  async extract(path: string, async: boolean = false): Promise<Record<string, unknown>> {
-    return this.callTool("extract", {
-      path,
-      async,
-    }) as Promise<Record<string, unknown>>;
+  async extractFile(path: string, async: boolean = false): Promise<unknown> {
+    return this.callTool("extract", { path, async });
   }
 
   /**
    * Extract from bytes
    */
-  async extract(
-    data: Uint8Array,
-    mimeType: string,
-    async: boolean = false,
-  ): Promise<Record<string, unknown>> {
+  async extractBytes(data: Uint8Array, mimeType: string, async: boolean = false): Promise<unknown> {
     const base64 = Buffer.from(data).toString("base64");
-    return this.callTool("extract", {
-      data: base64,
-      mimeType,
-      async,
-    }) as Promise<Record<string, unknown>>;
+    return this.callTool("extract", { data: base64, mimeType, async });
   }
 
   /**
@@ -156,7 +145,7 @@ async function main(): Promise<void> {
     );
 
     // Extract file
-    const result = await client.extract("document.pdf", true);
+    const result = await client.extractFile("document.pdf", true);
     console.log("Extraction result:", result);
   } catch (error) {
     console.error("Error:", error);
@@ -166,7 +155,7 @@ async function main(): Promise<void> {
 }
 
 // Run if executed directly
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   main();
 }
 

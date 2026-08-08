@@ -7,11 +7,11 @@ const output = await extract({
 });
 const result = output.results[0];
 
-if (result.metadata?.page_structure?.boundaries) {
+if (result.metadata?.pages?.boundaries) {
   const encoder = new TextEncoder();
   const contentBytes = encoder.encode(result.content);
 
-  for (const boundary of result.metadata.page_structure.boundaries.slice(0, 3)) {
+  for (const boundary of result.metadata.pages.boundaries.slice(0, 3)) {
     const pageBytes = contentBytes.slice(boundary.byteStart, boundary.byteEnd);
     const pageText = new TextDecoder().decode(pageBytes);
 

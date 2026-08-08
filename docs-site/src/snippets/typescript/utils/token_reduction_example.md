@@ -3,12 +3,13 @@ import { extract } from "@xberg-io/xberg";
 
 const config = {
   tokenReduction: {
-    mode: "moderate",
+    level: "Moderate",
     preserveImportantWords: true,
   },
 };
 
-const result = await extract({ kind: "uri", uri: "verbose_document.pdf" }, config);
+const output = await extract({ kind: "uri", uri: "verbose_document.pdf" }, config);
+const result = output.results[0];
 console.log(`Content length: ${result.content.length}`);
 console.log(`Metadata: ${JSON.stringify(result.metadata)}`);
 ```

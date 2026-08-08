@@ -1,20 +1,26 @@
 ```typescript title="TypeScript"
-import { registerOcrBackend, extract } from "@xberg-io/xberg";
+import {
+  registerOcrBackend,
+  extract,
+  OcrBackendType,
+  type OcrBackend,
+  type OcrConfig,
+} from "@xberg-io/xberg";
 
 const supportedLangs = ["eng", "deu", "fra"];
 
-const cloudBackend = {
+const cloudBackend: OcrBackend = {
   name: () => "cloud-ocr",
   version: () => "1.0.0",
   initialize: () => {},
   shutdown: () => {},
-  process_image: async (imageBytes: Uint8Array, config: { language?: string }) => {
+  processImage: async (imageBytes: Uint8Array, config?: OcrConfig | null) => {
     // Call your cloud OCR API with imageBytes and config.language.
-    return { content: "Extracted text", mime_type: "text/plain" };
+    return { content: "Extracted text", mimeType: "text/plain" };
   },
-  supports_language: (lang: string) => supportedLangs.includes(lang),
-  backend_type: () => "Custom",
-  supported_languages: () => supportedLangs,
+  supportsLanguage: (lang: string) => supportedLangs.includes(lang),
+  backendType: () => OcrBackendType.Custom,
+  supportedLanguages: () => supportedLangs,
 };
 
 registerOcrBackend(cloudBackend);
@@ -25,7 +31,7 @@ const output = await extract({
 }, {
   ocr: {
     backend: "cloud-ocr",
-    language: "eng",
+    language: ["eng"],
   },
 });
 console.log(output.results[0].content);

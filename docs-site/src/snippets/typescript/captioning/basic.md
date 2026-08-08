@@ -7,6 +7,7 @@ const output = await extract({
 }, {
     captioning: {
         llm: { model: "openai/gpt-4o-mini" },
+        minImageArea: 1000,
     },
 });
 

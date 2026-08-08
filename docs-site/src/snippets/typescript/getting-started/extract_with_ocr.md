@@ -5,11 +5,12 @@ const config = {
   forceOcr: true,
   ocr: {
     backend: "tesseract",
-    language: "eng",
+    language: ["eng"],
   },
 };
 
-const result = extract({ kind: "uri", uri: "scanned.pdf" }, config);
+const output = await extract({ kind: "uri", uri: "scanned.pdf" }, config);
+const result = output.results[0];
 
 console.log(result.content);
 console.log(`Detected Languages: ${result.detectedLanguages?.join(", ") ?? "none"}`);

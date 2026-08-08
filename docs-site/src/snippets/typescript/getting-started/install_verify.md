@@ -1,8 +1,5 @@
 ```typescript title="TypeScript"
 import { extract, ExtractInputKind } from "@xberg-io/xberg";
-import { version } from "@xberg-io/xberg/package.json" with { type: "json" };
-
-console.log(`Xberg version: ${version}`);
 
 const output = await extract({
   kind: ExtractInputKind.Uri,

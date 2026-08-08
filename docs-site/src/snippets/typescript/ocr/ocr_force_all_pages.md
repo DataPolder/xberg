@@ -8,6 +8,6 @@ const config = {
   forceOcr: true,
 };
 
-const result = extract({ kind: "uri", uri: "document.pdf" }, config);
-console.log(result.content);
+const output = await extract({ kind: "uri", uri: "document.pdf" }, config);
+console.log(output.results[0].content);
 ```

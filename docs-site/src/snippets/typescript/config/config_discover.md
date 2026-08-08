@@ -1,11 +1,13 @@
 ```typescript title="TypeScript"
-import { extract, ExtractionConfig } from "@xberg-io/xberg";
+import { extract, type ExtractionConfig } from "@xberg-io/xberg";
 
-const config = ExtractionConfig.discover();
-if (config) {
-  const result = await extract({ kind: "uri", uri: "document.pdf" }, config);
-  console.log(result.content);
-} else {
-  console.log("No configuration file found");
-}
+// Note: the Node binding has no config-file discovery helper. Build the
+// config object directly (or load `xberg.toml`/`xberg.yaml`/`xberg.json`
+// yourself and parse it) and pass it to `extract`.
+const config: ExtractionConfig = {
+  useCache: true,
+};
+
+const output = await extract({ kind: "uri", uri: "document.pdf" }, config);
+console.log(output.results[0].content);
 ```

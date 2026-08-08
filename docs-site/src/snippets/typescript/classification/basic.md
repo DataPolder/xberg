@@ -7,6 +7,7 @@ const output = await extract({
 }, {
     pageClassification: {
         labels: ["invoice", "contract", "id_document", "receipt"],
+        multiLabel: false,
         llm: { model: "openai/gpt-4o-mini" },
     },
 });

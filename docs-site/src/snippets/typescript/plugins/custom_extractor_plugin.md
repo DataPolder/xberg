@@ -1,23 +1,31 @@
 ```typescript title="TypeScript"
 import {
   listDocumentExtractors,
+  registerDocumentExtractor,
   unregisterDocumentExtractor,
   clearDocumentExtractors,
+  type DocumentExtractor,
+  type ExtractedDocument,
 } from "@xberg-io/xberg";
 
-/**
- * Note: Custom document extractors are not supported in TypeScript v4.0.
- * Document extraction logic lives in the Rust core.
- *
- * You can list, unregister, or clear built-in extractors.
- */
+// Custom document extractors are supported: implement `DocumentExtractor`
+// and register it. See `plugin_extractor.md` for a complete example.
+const customExtractor: DocumentExtractor = {
+  name: () => "custom-text-extractor",
+  supportedMimeTypes: () => ["text/x-custom"],
+  priority: () => 60,
+  async extract(): Promise<ExtractedDocument> {
+    return { content: "custom extraction result", mimeType: "text/x-custom" };
+  },
+};
+registerDocumentExtractor(customExtractor);
 
 // List all registered document extractors
 const extractors = listDocumentExtractors();
 console.log("Available extractors:", extractors);
 
 // Unregister a specific extractor (use with caution)
-unregisterDocumentExtractor("SomeExtractor");
+unregisterDocumentExtractor("custom-text-extractor");
 
 // Clear all extractors (use with extreme caution)
 // clearDocumentExtractors();

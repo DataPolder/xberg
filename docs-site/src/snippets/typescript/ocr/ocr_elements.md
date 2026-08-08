@@ -4,11 +4,12 @@ import { extract } from "@xberg-io/xberg";
 const config = {
   ocr: {
     backend: "paddle-ocr",
-    language: "en",
+    language: ["en"],
   },
 };
 
-const result = extract({ kind: "uri", uri: "scanned.pdf" }, config);
+const output = await extract({ kind: "uri", uri: "scanned.pdf" }, config);
+const result = output.results[0];
 
 if (result.ocrElements) {
   for (const element of result.ocrElements) {
@@ -16,7 +17,7 @@ if (result.ocrElements) {
     console.log(`Confidence: ${element.confidence.recognition.toFixed(2)}`);
     console.log(`Geometry:`, element.geometry);
     if (element.rotation) {
-      console.log(`Rotation: ${element.rotation.angle}°`);
+      console.log(`Rotation: ${element.rotation.angleDegrees}°`);
     }
     console.log();
   }

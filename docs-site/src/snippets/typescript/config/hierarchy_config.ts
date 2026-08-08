@@ -18,7 +18,7 @@ const extractionConfigBasic: ExtractionConfig = {
   pdfOptions: pdfConfigBasic,
 };
 
-const _result = extract({ kind: "uri", uri: "document.pdf" }, extractionConfigBasic);
+const _result = await extract({ kind: "uri", uri: "document.pdf" }, extractionConfigBasic);
 
 // Example 2: Custom kClusters for minimal structure
 // Use 3 clusters for simpler hierarchy with minimal structure.
@@ -38,7 +38,7 @@ const extractionConfigMinimal: ExtractionConfig = {
   pdfOptions: pdfConfigMinimal,
 };
 
-const _resultMinimal = extract({ kind: "uri", uri: "document.pdf" }, extractionConfigMinimal);
+const _resultMinimal = await extract({ kind: "uri", uri: "document.pdf" }, extractionConfigMinimal);
 
 // Example 3: With OCR coverage threshold
 // Trigger OCR if less than 50% of text has font data.
@@ -58,7 +58,7 @@ const extractionConfigOcr: ExtractionConfig = {
   pdfOptions: pdfConfigOcr,
 };
 
-const _resultOcr = extract({ kind: "uri", uri: "document.pdf" }, extractionConfigOcr);
+const _resultOcr = await extract({ kind: "uri", uri: "document.pdf" }, extractionConfigOcr);
 
 // Field descriptions:
 //

@@ -56,8 +56,8 @@ const _embeddingConfig3: EmbeddingConfig = {
 // Integration with ChunkingConfig
 // Add embeddings to your chunking configuration:
 const chunkingWithEmbeddings: ChunkingConfig = {
-  maxChars: 1024,
-  maxOverlap: 100,
+  maxCharacters: 1024,
+  overlap: 100,
   preset: "balanced",
   embedding: {
     model: {

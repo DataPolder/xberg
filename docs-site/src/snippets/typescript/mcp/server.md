@@ -1,12 +1,5 @@
 ```typescript title="TypeScript"
-import {
-  extract,
-  extract,
-  extract,
-  extract,
-  type ExtractionResult,
-  type ExtractionConfig,
-} from "@xberg-io/xberg";
+import { extract, type ExtractionConfig } from "@xberg-io/xberg";
 import * as readline from "node:readline";
 
 /**
@@ -114,7 +107,7 @@ class XbergMcpServer {
         },
       },
       {
-        name: "extract",
+        name: "extract_bytes",
         description: "Extract content from raw bytes",
         inputSchema: {
           type: "object",
@@ -149,7 +142,7 @@ class XbergMcpServer {
       }
     }
 
-    if (name === "extract") {
+    if (name === "extract_bytes") {
       const data = Buffer.from(args.data as string, "base64");
       const mimeType = args.mimeType as string;
       const useAsync = (args.async as boolean) ?? true;
