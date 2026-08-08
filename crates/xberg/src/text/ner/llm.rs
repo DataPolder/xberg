@@ -204,16 +204,12 @@ async fn complete_with_json_schema(
         "required": ["entities"]
     });
 
-    let request = liter_llm::ChatCompletionRequest {
+    let mut request = liter_llm::ChatCompletionRequest {
         model: config.model.clone(),
         messages: vec![liter_llm::Message::User(liter_llm::UserMessage {
             content: liter_llm::UserContent::Text(prompt),
             name: None,
         })],
-        temperature: config.temperature,
-        max_tokens: config.max_tokens,
-        reasoning_effort: crate::llm::client::parse_reasoning_effort(config)?,
-        extra_body: config.extra_body.clone(),
         response_format: Some(liter_llm::ResponseFormat::JsonSchema {
             json_schema: liter_llm::JsonSchemaFormat {
                 name: "entity_list".to_string(),
@@ -224,6 +220,7 @@ async fn complete_with_json_schema(
         }),
         ..Default::default()
     };
+    crate::llm::client::apply_request_time_params(&mut request, config)?;
 
     let response = client
         .chat(request)

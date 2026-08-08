@@ -147,23 +147,61 @@ pub(crate) fn parse_reasoning_effort(config: &LlmConfig) -> crate::Result<Option
 /// onto [`liter_llm::StopSequence::Multiple`], which is wire-compatible with every
 /// provider that also accepts a single-element array for `stop`.
 ///
-/// Called from every site that builds a [`liter_llm::ChatCompletionRequest`] from an
-/// [`LlmConfig`], alongside the `temperature`/`max_tokens` lines and
-/// [`parse_reasoning_effort`]: `llm::text_completion`, `llm::structured` (both request
-/// builders), `llm::vlm_ocr` and `text::ner::llm`. A new request builder must wire this,
-/// `config.top_p`, `config.seed`, `config.presence_penalty`, and
-/// `config.frequency_penalty` too, or those five config fields silently do nothing on
-/// that path.
-///
-/// `#[allow(dead_code)]`: none of the four call sites above are wired to this function
-/// yet — that wiring lives outside `core::config::llm` and `llm::client` and is tracked
-/// as follow-up work. Remove this allow once a caller lands.
-#[allow(dead_code)]
+/// Called only from [`apply_request_time_params`], which is the single place every
+/// request builder goes through.
 pub(crate) fn to_stop_sequence(config: &LlmConfig) -> Option<liter_llm::StopSequence> {
     config
         .stop
         .as_ref()
         .map(|sequences| liter_llm::StopSequence::Multiple(sequences.clone()))
+}
+
+/// Apply every request-time parameter carried on an [`LlmConfig`] onto a liter-llm
+/// [`liter_llm::ChatCompletionRequest`] in one place, so a new (or migrated) request
+/// builder cannot silently drop one of them the way `top_p`, `stop`, `seed`,
+/// `presence_penalty`, and `frequency_penalty` previously were — every existing call site
+/// wired `temperature`, `max_tokens`, `reasoning_effort` (via [`parse_reasoning_effort`]),
+/// and `extra_body` individually, but none of them set those other five
+/// [`LlmConfig`] fields, so they were accepted by every config file and language binding
+/// and then silently never reached a provider.
+///
+/// Deliberately leaves `request.model` and `request.messages` untouched — those come from
+/// the call site's own prompt/schema/messages, not from `config`.
+///
+/// Every request builder in the crate calls this: `llm::text_completion::complete_text`,
+/// `llm::structured` (both builders), `llm::vlm_ocr` and `text::ner::llm`. Keep it that
+/// way — a builder that sets these fields by hand is how the five above went missing.
+///
+/// # Errors
+///
+/// Propagates [`parse_reasoning_effort`]'s error for an unrecognized
+/// [`LlmConfig::reasoning_effort`] string.
+///
+/// `#[cfg_attr(alef, alef(skip))]`: `&mut liter_llm::ChatCompletionRequest` is a foreign,
+/// non-`repr(C)` type with no FFI-representable equivalent — alef's own
+/// `lossy_sanitized_surface` check rejects it outright, matching every other
+/// binding-unreachable LLM entry point in this crate (e.g.
+/// `create_client_with_credential_provider` above, `llm::text_completion::complete_text`,
+/// `llm::structured::complete_with_json_schema`).
+#[cfg_attr(alef, alef(skip))]
+pub(crate) fn apply_request_time_params(
+    request: &mut liter_llm::ChatCompletionRequest,
+    config: &LlmConfig,
+) -> crate::Result<()> {
+    // Parse before mutating anything: a rejected `reasoning_effort` must leave the
+    // request untouched rather than half-applied.
+    let reasoning_effort = parse_reasoning_effort(config)?;
+
+    request.temperature = config.temperature;
+    request.max_tokens = config.max_tokens;
+    request.top_p = config.top_p;
+    request.stop = to_stop_sequence(config);
+    request.seed = config.seed;
+    request.presence_penalty = config.presence_penalty;
+    request.frequency_penalty = config.frequency_penalty;
+    request.reasoning_effort = reasoning_effort;
+    request.extra_body = config.extra_body.clone();
+    Ok(())
 }
 
 /// Translate xberg's [`LlmCacheConfig`] into liter-llm's own `client::LlmCacheConfig`.
@@ -1310,30 +1348,6 @@ mod tests {
         }
     }
 
-    /// Regression test for https://github.com/xberg-io/xberg/issues/1381
-    ///
-    /// Demonstrates (and pins the exact value semantics of) the wiring a future change
-    /// must add at every `ChatCompletionRequest`-building call site:
-    /// `request.extra_body = config.extra_body.clone();`, exactly parallel to the
-    /// existing `request.temperature = config.temperature;` /
-    /// `request.max_tokens = config.max_tokens;` lines.
-    #[test]
-    fn test_extra_body_clones_into_a_liter_llm_chat_completion_request() {
-        let extra = serde_json::json!({"safety_settings": {"harassment": "block_none"}});
-        let config = LlmConfig {
-            model: "openai/gpt-4o".to_string(),
-            extra_body: Some(extra.clone()),
-            ..LlmConfig::default()
-        };
-
-        let request = liter_llm::ChatCompletionRequest {
-            extra_body: config.extra_body.clone(),
-            ..Default::default()
-        };
-
-        assert_eq!(request.extra_body, Some(extra));
-    }
-
     /// `to_stop_sequence` must map an absent `stop` to `None`.
     #[test]
     fn test_to_stop_sequence_returns_none_when_unset() {
@@ -1375,45 +1389,6 @@ mod tests {
             }
             other => panic!("expected StopSequence::Multiple, got {other:?}"),
         }
-    }
-
-    /// Regression test pinning the exact wiring a request builder must add for the four
-    /// new fields that need no conversion (`top_p`, `seed`, `presence_penalty`,
-    /// `frequency_penalty` are already the same `Option<f64>`/`Option<i64>` shape on both
-    /// `LlmConfig` and `ChatCompletionRequest`), exactly parallel to the existing
-    /// `request.temperature = config.temperature;` / `request.max_tokens = config.max_tokens;`
-    /// lines, plus `to_stop_sequence` for `stop`.
-    #[test]
-    fn test_new_sampling_fields_clone_directly_into_a_liter_llm_chat_completion_request() {
-        let config = LlmConfig {
-            model: "openai/gpt-4o".to_string(),
-            top_p: Some(0.9),
-            stop: Some(vec!["\n\n".to_string()]),
-            seed: Some(42),
-            presence_penalty: Some(0.5),
-            frequency_penalty: Some(-0.5),
-            ..LlmConfig::default()
-        };
-
-        let request = liter_llm::ChatCompletionRequest {
-            top_p: config.top_p,
-            stop: to_stop_sequence(&config),
-            seed: config.seed,
-            presence_penalty: config.presence_penalty,
-            frequency_penalty: config.frequency_penalty,
-            ..Default::default()
-        };
-
-        assert_eq!(request.top_p, Some(0.9));
-        match request.stop {
-            Some(liter_llm::StopSequence::Multiple(sequences)) => {
-                assert_eq!(sequences, vec!["\n\n".to_string()]);
-            }
-            other => panic!("expected StopSequence::Multiple, got {other:?}"),
-        }
-        assert_eq!(request.seed, Some(42));
-        assert_eq!(request.presence_penalty, Some(0.5));
-        assert_eq!(request.frequency_penalty, Some(-0.5));
     }
 
     /// `build_client_config` must reject an out-of-range `top_p` before doing any other
@@ -1635,5 +1610,162 @@ mod tests {
 
         let client_config = build_client_config(&config).expect("build client config");
         assert!(client_config.credential_provider.is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // `apply_request_time_params` — `LlmConfig` carries nine request-time
+    // parameters. Before this helper existed each request builder set four of
+    // them by hand, so `top_p`, `stop`, `seed`, `presence_penalty` and
+    // `frequency_penalty` were accepted by every config file and language
+    // binding and then silently never reached a provider.
+    // -----------------------------------------------------------------------
+
+    fn base_request() -> liter_llm::ChatCompletionRequest {
+        liter_llm::ChatCompletionRequest {
+            model: "openai/gpt-4o".to_string(),
+            messages: vec![liter_llm::Message::User(liter_llm::UserMessage {
+                content: liter_llm::UserContent::Text("hello".to_string()),
+                name: None,
+            })],
+            ..Default::default()
+        }
+    }
+
+    /// `LlmConfig::stop` — always a plain list, even for a single sequence — must map onto
+    /// exactly `StopSequence::Multiple` with the same strings, in the same order.
+    #[test]
+    fn should_forward_stop_sequences_to_the_request() {
+        let config = LlmConfig {
+            model: "openai/gpt-4o".to_string(),
+            stop: Some(vec!["\n\n".to_string(), "[END]".to_string()]),
+            ..LlmConfig::default()
+        };
+        let mut request = base_request();
+
+        apply_request_time_params(&mut request, &config).expect("apply_request_time_params should succeed");
+
+        assert_eq!(
+            request.stop,
+            Some(liter_llm::StopSequence::Multiple(vec![
+                "\n\n".to_string(),
+                "[END]".to_string()
+            ]))
+        );
+    }
+
+    /// An unset `LlmConfig::stop` must leave `request.stop` as `None`, not an empty list.
+    #[test]
+    fn should_leave_stop_none_when_config_stop_is_unset() {
+        let config = LlmConfig {
+            model: "openai/gpt-4o".to_string(),
+            ..LlmConfig::default()
+        };
+        let mut request = base_request();
+
+        apply_request_time_params(&mut request, &config).expect("apply_request_time_params should succeed");
+
+        assert_eq!(request.stop, None);
+    }
+
+    /// `top_p`, `seed`, `presence_penalty`, and `frequency_penalty` must all reach the
+    /// request with their exact configured values — these four were silently dropped by
+    /// every call site before `apply_request_time_params` existed.
+    #[test]
+    fn should_forward_top_p_seed_and_penalties_to_the_request() {
+        let config = LlmConfig {
+            model: "openai/gpt-4o".to_string(),
+            top_p: Some(0.9),
+            seed: Some(42),
+            presence_penalty: Some(0.5),
+            frequency_penalty: Some(-0.5),
+            ..LlmConfig::default()
+        };
+        let mut request = base_request();
+
+        apply_request_time_params(&mut request, &config).expect("apply_request_time_params should succeed");
+
+        assert_eq!(request.top_p, Some(0.9));
+        assert_eq!(request.seed, Some(42));
+        assert_eq!(request.presence_penalty, Some(0.5));
+        assert_eq!(request.frequency_penalty, Some(-0.5));
+    }
+
+    /// `temperature`, `max_tokens`, `reasoning_effort`, and `extra_body` — the four fields
+    /// every call site already wired by hand — must still reach the request exactly the
+    /// same way now that they are routed through `apply_request_time_params`.
+    #[test]
+    fn should_forward_temperature_max_tokens_reasoning_effort_and_extra_body_to_the_request() {
+        let config = LlmConfig {
+            model: "openai/gpt-4o".to_string(),
+            temperature: Some(0.7),
+            max_tokens: Some(1024),
+            reasoning_effort: Some("high".to_string()),
+            extra_body: Some(serde_json::json!({"safety_settings": {"harassment": "block_none"}})),
+            ..LlmConfig::default()
+        };
+        let mut request = base_request();
+
+        apply_request_time_params(&mut request, &config).expect("apply_request_time_params should succeed");
+
+        assert_eq!(request.temperature, Some(0.7));
+        assert_eq!(request.max_tokens, Some(1024));
+        assert!(matches!(
+            request.reasoning_effort,
+            Some(liter_llm::ReasoningEffort::High)
+        ));
+        assert_eq!(
+            request.extra_body,
+            Some(serde_json::json!({"safety_settings": {"harassment": "block_none"}}))
+        );
+    }
+
+    /// An unrecognized `reasoning_effort` string must surface as a named
+    /// `XbergError::Validation` and must leave the request completely untouched — the
+    /// parse happens before any field is written, so a rejected config cannot half-apply.
+    #[test]
+    fn should_return_validation_error_for_invalid_reasoning_effort() {
+        let config = LlmConfig {
+            model: "openai/gpt-4o".to_string(),
+            reasoning_effort: Some("maximum".to_string()),
+            stop: Some(vec!["\n\n".to_string()]),
+            temperature: Some(0.7),
+            ..LlmConfig::default()
+        };
+        let mut request = base_request();
+
+        match apply_request_time_params(&mut request, &config) {
+            Err(crate::XbergError::Validation { message, .. }) => {
+                assert!(message.contains("reasoning_effort"), "{message}");
+                assert!(message.contains("maximum"), "{message}");
+            }
+            other => panic!("expected a Validation error, got {other:?}"),
+        }
+
+        assert_eq!(request.stop, None, "a rejected config must not half-apply");
+        assert_eq!(request.temperature, None, "a rejected config must not half-apply");
+    }
+
+    /// `apply_request_time_params` must never touch `request.model` or `request.messages` —
+    /// those are call-site specific (the prompt/schema differs per feature), not carried on
+    /// `LlmConfig`.
+    #[test]
+    fn should_not_touch_model_or_messages_fields() {
+        let config = LlmConfig {
+            model: "anthropic/claude-sonnet-4-20250514".to_string(),
+            temperature: Some(0.3),
+            ..LlmConfig::default()
+        };
+        let mut request = base_request();
+        let original_model = request.model.clone();
+        let original_messages_len = request.messages.len();
+
+        apply_request_time_params(&mut request, &config).expect("apply_request_time_params should succeed");
+
+        assert_eq!(request.model, original_model, "model must stay call-site controlled");
+        assert_eq!(
+            request.messages.len(),
+            original_messages_len,
+            "messages must stay call-site controlled"
+        );
     }
 }

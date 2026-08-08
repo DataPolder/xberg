@@ -50,10 +50,7 @@ pub async fn complete_with_json_schema(
         content: liter_llm::UserContent::Text(prompt.to_string()),
         name: None,
     })];
-    request.temperature = llm_config.temperature;
-    request.max_tokens = llm_config.max_tokens;
-    request.reasoning_effort = super::client::parse_reasoning_effort(llm_config)?;
-    request.extra_body = llm_config.extra_body.clone();
+    super::client::apply_request_time_params(&mut request, llm_config)?;
     request.response_format = Some(liter_llm::ResponseFormat::JsonSchema {
         json_schema: liter_llm::JsonSchemaFormat {
             name: schema_name.to_string(),
@@ -190,10 +187,7 @@ pub(crate) async fn extract_structured(
         content: liter_llm::UserContent::Text(prompt),
         name: None,
     })];
-    request.temperature = config.llm.temperature;
-    request.max_tokens = config.llm.max_tokens;
-    request.reasoning_effort = super::client::parse_reasoning_effort(&config.llm)?;
-    request.extra_body = config.llm.extra_body.clone();
+    super::client::apply_request_time_params(&mut request, &config.llm)?;
     request.response_format = Some(liter_llm::ResponseFormat::JsonSchema {
         json_schema: liter_llm::JsonSchemaFormat {
             name: config.schema_name.clone(),
