@@ -1,8 +1,9 @@
 //! Sceptre OCR backend.
 //!
 //! Sceptre runs CRAFT text detection followed by CRNN recognition through ONNX
-//! Runtime or the pure-Rust tract engine. Readers are initialized lazily and
-//! cached by their effective model and inference configuration.
+//! Runtime, the pure-Rust tract engine, or hand-written networks over candle
+//! (CPU, Metal, or CUDA). Readers are initialized lazily and cached by their
+//! effective model and inference configuration.
 
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
@@ -669,14 +670,15 @@ fn validate_inference_backend(backend: Backend) -> Result<()> {
     match backend {
         Backend::Ort if cfg!(feature = "sceptre-ocr-ort") => Ok(()),
         Backend::Tract if cfg!(feature = "sceptre-ocr-tract") => Ok(()),
+        Backend::Candle if cfg!(feature = "sceptre-ocr-candle") => Ok(()),
         Backend::Ort => Err(ocr_error(
             "Sceptre ORT inference is unavailable in this build; enable `sceptre-ocr-ort`",
         )),
         Backend::Tract => Err(ocr_error(
             "Sceptre tract inference is unavailable in this build; enable `sceptre-ocr-tract`",
         )),
-        _ => Err(ocr_error(
-            "The selected Sceptre inference backend is not supported by Xberg",
+        Backend::Candle => Err(ocr_error(
+            "Sceptre candle inference is unavailable in this build; enable `sceptre-ocr-candle`",
         )),
     }
 }
@@ -901,6 +903,32 @@ mod tests {
         };
         let error = SceptreOcrBackend::effective_config(&config).expect_err("tract must require its feature");
         assert!(error.to_string().contains("sceptre-ocr-tract"));
+    }
+
+    // Candle is never the compile-time default (unlike tract in a tract-only build):
+    // selecting it always requires an explicit `backend_options.model.backend = "candle"`,
+    // so there is no "candle_only_build_should_select_candle_by_default" counterpart here.
+    #[cfg(not(feature = "sceptre-ocr-candle"))]
+    #[test]
+    fn build_without_candle_should_reject_explicit_candle() {
+        let config = OcrConfig {
+            backend_options: Some(serde_json::json!({ "model": { "backend": "candle" } })),
+            ..Default::default()
+        };
+        let error = SceptreOcrBackend::effective_config(&config).expect_err("candle must require its feature");
+        assert!(error.to_string().contains("sceptre-ocr-candle"));
+    }
+
+    #[cfg(feature = "sceptre-ocr-candle")]
+    #[test]
+    fn should_accept_explicit_candle_backend_when_compiled_in() {
+        let config = OcrConfig {
+            backend_options: Some(serde_json::json!({ "model": { "backend": "candle" } })),
+            ..Default::default()
+        };
+        let (effective, _) =
+            SceptreOcrBackend::effective_config(&config).expect("candle backend must be accepted explicitly");
+        assert_eq!(effective.model.backend, Backend::Candle);
     }
 
     #[test]

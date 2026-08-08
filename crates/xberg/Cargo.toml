@@ -242,6 +242,28 @@ paddle-ocr-tract = [
 sceptre-ocr = ["sceptre-ocr-ort"]
 sceptre-ocr-ort = ["dep:sceptre", "sceptre/ort-bundled", "sceptre/download", "ocr-pipeline", "tokio-runtime"]
 sceptre-ocr-tract = ["dep:sceptre", "sceptre/tract", "ocr-pipeline", "tokio-runtime"]
+# sceptre-ocr-candle: hand-written CRAFT/CRNN networks over candle's native tensors
+# (sceptre 0.6.0, see crates.io/sceptre `src/inference/candle/`). Unlike `ort`/`tract`
+# this backend does not interpret an ONNX graph — it reads the same ONNX files for
+# their trained weights only (via sceptre's vendored `prost` decoder) and runs a
+# hand-written forward pass — so no separate model artifact or download path is
+# needed here; `sceptre/download` (HF hub resolution) already covers it.
+# CPU-only by default, matching every other candle dependency in this Cargo.toml
+# (candle-core is `default-features = false`); GPU is opt-in via the two variants
+# below. Additive with `sceptre-ocr-ort` / `sceptre-ocr-tract` — sceptre's own
+# `inference::load_backend` seam compiles all three side by side with no conflict.
+# Deliberately NOT named `candle-metal`/`candle-cuda`: those top-level feature names
+# already belong to the unrelated `xberg-candle-ocr` VLM backend (see `candle-vlm-ocr`
+# above); the `sceptre-ocr-` prefix keeps the two candle integrations distinct.
+sceptre-ocr-candle = ["dep:sceptre", "sceptre/candle", "ocr-pipeline", "tokio-runtime"]
+# Opt-in Apple Metal acceleration for the sceptre candle backend (sceptre's own
+# `candle-metal` feature, forwarded to `candle-core?/metal` / `candle-nn?/metal`).
+# UNTESTED: no CI leg builds or runs this combination yet.
+sceptre-ocr-candle-metal = ["sceptre-ocr-candle", "sceptre/candle-metal"]
+# Opt-in NVIDIA CUDA acceleration for the sceptre candle backend (sceptre's own
+# `candle-cuda` feature, forwarded to `candle-core?/cuda` / `candle-nn?/cuda`).
+# UNTESTED: no CI leg builds or runs this combination yet.
+sceptre-ocr-candle-cuda = ["sceptre-ocr-candle", "sceptre/candle-cuda"]
 # Opt-in browser engine used by the separate worker-backed WASM build. It
 # intentionally omits the async OCR registry and default `wasm-target`. ~keep
 sceptre-wasm = ["dep:sceptre", "sceptre/tract"]
