@@ -138,6 +138,34 @@ pub(crate) fn parse_reasoning_effort(config: &LlmConfig) -> crate::Result<Option
     }
 }
 
+/// Convert xberg's list-shaped [`LlmConfig::stop`] into liter-llm's untagged
+/// [`liter_llm::StopSequence`] request-time enum.
+///
+/// liter-llm represents `stop` as either a single string or a list of strings
+/// (`types::common::StopSequence`, `#[serde(untagged)]`); xberg's `LlmConfig::stop` is
+/// always a plain list — even a single stop sequence is `["..."]` — so this always maps
+/// onto [`liter_llm::StopSequence::Multiple`], which is wire-compatible with every
+/// provider that also accepts a single-element array for `stop`.
+///
+/// Called from every site that builds a [`liter_llm::ChatCompletionRequest`] from an
+/// [`LlmConfig`], alongside the `temperature`/`max_tokens` lines and
+/// [`parse_reasoning_effort`]: `llm::text_completion`, `llm::structured` (both request
+/// builders), `llm::vlm_ocr` and `text::ner::llm`. A new request builder must wire this,
+/// `config.top_p`, `config.seed`, `config.presence_penalty`, and
+/// `config.frequency_penalty` too, or those five config fields silently do nothing on
+/// that path.
+///
+/// `#[allow(dead_code)]`: none of the four call sites above are wired to this function
+/// yet — that wiring lives outside `core::config::llm` and `llm::client` and is tracked
+/// as follow-up work. Remove this allow once a caller lands.
+#[allow(dead_code)]
+pub(crate) fn to_stop_sequence(config: &LlmConfig) -> Option<liter_llm::StopSequence> {
+    config
+        .stop
+        .as_ref()
+        .map(|sequences| liter_llm::StopSequence::Multiple(sequences.clone()))
+}
+
 /// Translate xberg's [`LlmCacheConfig`] into liter-llm's own `client::LlmCacheConfig`.
 fn to_liter_llm_cache(cache: &LlmCacheConfig) -> liter_llm::client::LlmCacheConfig {
     liter_llm::client::LlmCacheConfig {
@@ -372,7 +400,13 @@ fn to_liter_llm_config(config: &LlmConfig) -> liter_llm::client::LlmConfig {
 ///
 /// Split out of [`create_client`] so the mapping is observable in tests without
 /// constructing a live HTTP client.
+///
+/// [`LlmConfig::validate`] runs first, rejecting an out-of-range `top_p`,
+/// `presence_penalty`, or `frequency_penalty` before any provider registration or
+/// header validation below — the same "fail before doing anything else" position as
+/// the existing `validate_cache_backend` check.
 fn build_client_config(config: &LlmConfig) -> crate::Result<ClientConfig> {
+    config.validate()?;
     register_configured_providers(config)?;
     if let Some(ref cache) = config.cache {
         validate_cache_backend(cache)?;
@@ -1298,6 +1332,158 @@ mod tests {
         };
 
         assert_eq!(request.extra_body, Some(extra));
+    }
+
+    /// `to_stop_sequence` must map an absent `stop` to `None`.
+    #[test]
+    fn test_to_stop_sequence_returns_none_when_unset() {
+        let config = LlmConfig::default();
+        assert!(to_stop_sequence(&config).is_none());
+    }
+
+    /// `to_stop_sequence` must map a single-element list onto liter-llm's
+    /// `StopSequence::Multiple` — never `StopSequence::Single` — so xberg's `LlmConfig::stop`
+    /// has one FFI-friendly shape regardless of how many sequences are configured.
+    #[test]
+    fn test_to_stop_sequence_maps_single_entry_to_multiple_variant() {
+        let config = LlmConfig {
+            model: "openai/gpt-4o".to_string(),
+            stop: Some(vec!["\n\n".to_string()]),
+            ..LlmConfig::default()
+        };
+
+        match to_stop_sequence(&config) {
+            Some(liter_llm::StopSequence::Multiple(sequences)) => {
+                assert_eq!(sequences, vec!["\n\n".to_string()]);
+            }
+            other => panic!("expected StopSequence::Multiple, got {other:?}"),
+        }
+    }
+
+    /// `to_stop_sequence` must map every configured stop sequence, in order.
+    #[test]
+    fn test_to_stop_sequence_maps_multiple_entries_in_order() {
+        let config = LlmConfig {
+            model: "openai/gpt-4o".to_string(),
+            stop: Some(vec!["\n\n".to_string(), "[END]".to_string()]),
+            ..LlmConfig::default()
+        };
+
+        match to_stop_sequence(&config) {
+            Some(liter_llm::StopSequence::Multiple(sequences)) => {
+                assert_eq!(sequences, vec!["\n\n".to_string(), "[END]".to_string()]);
+            }
+            other => panic!("expected StopSequence::Multiple, got {other:?}"),
+        }
+    }
+
+    /// Regression test pinning the exact wiring a request builder must add for the four
+    /// new fields that need no conversion (`top_p`, `seed`, `presence_penalty`,
+    /// `frequency_penalty` are already the same `Option<f64>`/`Option<i64>` shape on both
+    /// `LlmConfig` and `ChatCompletionRequest`), exactly parallel to the existing
+    /// `request.temperature = config.temperature;` / `request.max_tokens = config.max_tokens;`
+    /// lines, plus `to_stop_sequence` for `stop`.
+    #[test]
+    fn test_new_sampling_fields_clone_directly_into_a_liter_llm_chat_completion_request() {
+        let config = LlmConfig {
+            model: "openai/gpt-4o".to_string(),
+            top_p: Some(0.9),
+            stop: Some(vec!["\n\n".to_string()]),
+            seed: Some(42),
+            presence_penalty: Some(0.5),
+            frequency_penalty: Some(-0.5),
+            ..LlmConfig::default()
+        };
+
+        let request = liter_llm::ChatCompletionRequest {
+            top_p: config.top_p,
+            stop: to_stop_sequence(&config),
+            seed: config.seed,
+            presence_penalty: config.presence_penalty,
+            frequency_penalty: config.frequency_penalty,
+            ..Default::default()
+        };
+
+        assert_eq!(request.top_p, Some(0.9));
+        match request.stop {
+            Some(liter_llm::StopSequence::Multiple(sequences)) => {
+                assert_eq!(sequences, vec!["\n\n".to_string()]);
+            }
+            other => panic!("expected StopSequence::Multiple, got {other:?}"),
+        }
+        assert_eq!(request.seed, Some(42));
+        assert_eq!(request.presence_penalty, Some(0.5));
+        assert_eq!(request.frequency_penalty, Some(-0.5));
+    }
+
+    /// `build_client_config` must reject an out-of-range `top_p` before doing any other
+    /// work (provider registration, header validation), via `LlmConfig::validate`.
+    #[test]
+    fn test_build_client_config_rejects_invalid_top_p() {
+        let config = LlmConfig {
+            model: "openai/gpt-4o".to_string(),
+            top_p: Some(1.5),
+            ..LlmConfig::default()
+        };
+
+        match build_client_config(&config) {
+            Err(crate::XbergError::Validation { message, .. }) => {
+                assert!(message.contains("top_p"), "{message}");
+            }
+            other => panic!("expected a Validation error, got {other:?}"),
+        }
+    }
+
+    /// `build_client_config` must reject an out-of-range `presence_penalty`.
+    #[test]
+    fn test_build_client_config_rejects_invalid_presence_penalty() {
+        let config = LlmConfig {
+            model: "openai/gpt-4o".to_string(),
+            presence_penalty: Some(-3.0),
+            ..LlmConfig::default()
+        };
+
+        match build_client_config(&config) {
+            Err(crate::XbergError::Validation { message, .. }) => {
+                assert!(message.contains("presence_penalty"), "{message}");
+            }
+            other => panic!("expected a Validation error, got {other:?}"),
+        }
+    }
+
+    /// `build_client_config` must reject an out-of-range `frequency_penalty`.
+    #[test]
+    fn test_build_client_config_rejects_invalid_frequency_penalty() {
+        let config = LlmConfig {
+            model: "openai/gpt-4o".to_string(),
+            frequency_penalty: Some(3.0),
+            ..LlmConfig::default()
+        };
+
+        match build_client_config(&config) {
+            Err(crate::XbergError::Validation { message, .. }) => {
+                assert!(message.contains("frequency_penalty"), "{message}");
+            }
+            other => panic!("expected a Validation error, got {other:?}"),
+        }
+    }
+
+    /// Valid `top_p`, `stop`, `seed`, `presence_penalty`, and `frequency_penalty` values
+    /// must not prevent `build_client_config` from succeeding.
+    #[test]
+    fn test_build_client_config_accepts_valid_sampling_fields() {
+        let config = LlmConfig {
+            model: "openai/gpt-4o".to_string(),
+            api_key: Some("test-key".to_string()),
+            top_p: Some(0.9),
+            stop: Some(vec!["\n\n".to_string()]),
+            seed: Some(42),
+            presence_penalty: Some(0.5),
+            frequency_penalty: Some(-0.5),
+            ..LlmConfig::default()
+        };
+
+        assert!(build_client_config(&config).is_ok());
     }
 
     /// Regression test for https://github.com/xberg-io/xberg/issues/1381

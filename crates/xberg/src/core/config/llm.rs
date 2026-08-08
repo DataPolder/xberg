@@ -11,6 +11,21 @@ use serde::{Deserialize, Serialize};
 /// in this module. Mirrors liter-llm's own `ClientConfig` debug policy.
 const REDACTED: &str = "[redacted]";
 
+/// Minimum accepted value for [`LlmConfig::top_p`], liter-llm's nucleus-sampling
+/// probability.
+const TOP_P_MIN: f64 = 0.0;
+
+/// Maximum accepted value for [`LlmConfig::top_p`].
+const TOP_P_MAX: f64 = 1.0;
+
+/// Minimum accepted value for [`LlmConfig::presence_penalty`] and
+/// [`LlmConfig::frequency_penalty`], matching liter-llm's/OpenAI's documented range.
+const PENALTY_MIN: f64 = -2.0;
+
+/// Maximum accepted value for [`LlmConfig::presence_penalty`] and
+/// [`LlmConfig::frequency_penalty`].
+const PENALTY_MAX: f64 = 2.0;
+
 /// Configuration for an LLM provider/model via liter-llm.
 ///
 /// Each feature (VLM OCR, VLM embeddings, structured extraction) carries
@@ -61,6 +76,61 @@ pub struct LlmConfig {
     /// Maximum tokens to generate.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u64>,
+
+    /// Nucleus sampling parameter for generation tasks, applied to individual
+    /// requests built from this config. Restricts sampling to the smallest set of
+    /// tokens whose cumulative probability mass is at least this value; lower is
+    /// more focused. Validated to `[0.0, 1.0]` by [`LlmConfig::validate`].
+    ///
+    /// Mirrors liter-llm's `ChatCompletionRequest::top_p`. A request-time
+    /// parameter like `temperature`/`max_tokens` above, not a client-level
+    /// setting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.2.0"))]
+    pub top_p: Option<f64>,
+
+    /// Stop sequence(s) that halt token generation, applied to individual requests
+    /// built from this config.
+    ///
+    /// Mirrors liter-llm's `ChatCompletionRequest::stop`
+    /// (`types::common::StopSequence`), which liter-llm represents as either a
+    /// single string or a list of strings via an untagged enum. Always expressed
+    /// here as a list — even one stop sequence is `["..."]` — so the field has a
+    /// single, FFI-friendly shape across every language binding instead of a
+    /// single-or-list union type. Converted to liter-llm's
+    /// `StopSequence::Multiple` at each request-building call site; see
+    /// [`crate::llm::client::to_stop_sequence`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.2.0"))]
+    pub stop: Option<Vec<String>>,
+
+    /// Random seed for reproducible outputs, applied to individual requests built
+    /// from this config. Provider support varies — some silently ignore it.
+    ///
+    /// Mirrors liter-llm's `ChatCompletionRequest::seed`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.2.0"))]
+    pub seed: Option<i64>,
+
+    /// Presence penalty for generation tasks, applied to individual requests
+    /// built from this config. Positive values discourage the model from
+    /// repeating topics already present in the conversation. Validated to
+    /// `[-2.0, 2.0]` by [`LlmConfig::validate`].
+    ///
+    /// Mirrors liter-llm's `ChatCompletionRequest::presence_penalty`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.2.0"))]
+    pub presence_penalty: Option<f64>,
+
+    /// Frequency penalty for generation tasks, applied to individual requests
+    /// built from this config. Positive values discourage the model from
+    /// repeating the same tokens verbatim. Validated to `[-2.0, 2.0]` by
+    /// [`LlmConfig::validate`].
+    ///
+    /// Mirrors liter-llm's `ChatCompletionRequest::frequency_penalty`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.2.0"))]
+    pub frequency_penalty: Option<f64>,
 
     /// Reasoning effort level for extended-thinking models, applied to individual
     /// requests built from this config.
@@ -216,6 +286,42 @@ pub struct LlmConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
     pub credential_provider: Option<Box<CredentialProviderConfig>>,
+}
+
+impl LlmConfig {
+    /// Validate the request-time sampling parameters that have a documented range:
+    /// `top_p` (`[0.0, 1.0]`), `presence_penalty`, and `frequency_penalty` (both
+    /// `[-2.0, 2.0]`, matching liter-llm's/OpenAI's semantics). An unset field is
+    /// always valid — silence in config should never be rejected.
+    ///
+    /// Called from [`crate::llm::client::build_client_config`] before a liter-llm
+    /// client is built from this config, alongside the existing
+    /// `validate_cache_backend` check in that function.
+    pub fn validate(&self) -> crate::Result<()> {
+        if let Some(top_p) = self.top_p {
+            validate_sampling_range("top_p", top_p, TOP_P_MIN, TOP_P_MAX)?;
+        }
+        if let Some(presence_penalty) = self.presence_penalty {
+            validate_sampling_range("presence_penalty", presence_penalty, PENALTY_MIN, PENALTY_MAX)?;
+        }
+        if let Some(frequency_penalty) = self.frequency_penalty {
+            validate_sampling_range("frequency_penalty", frequency_penalty, PENALTY_MIN, PENALTY_MAX)?;
+        }
+        Ok(())
+    }
+}
+
+/// Reject a request-time sampling parameter outside its documented `[min, max]` range,
+/// naming the field, the offending value, and the accepted range in the error message.
+fn validate_sampling_range(field_name: &str, value: f64, min: f64, max: f64) -> crate::Result<()> {
+    if (min..=max).contains(&value) {
+        Ok(())
+    } else {
+        Err(crate::XbergError::Validation {
+            message: format!("Invalid LLM {field_name} {value}: expected a value between {min} and {max}"),
+            source: None,
+        })
+    }
 }
 
 /// Managed credential-provider configuration for OAuth2/STS-based authentication modes liter-llm
@@ -477,6 +583,11 @@ impl std::fmt::Debug for LlmConfig {
             .field("max_retries", &self.max_retries)
             .field("temperature", &self.temperature)
             .field("max_tokens", &self.max_tokens)
+            .field("top_p", &self.top_p)
+            .field("stop", &self.stop)
+            .field("seed", &self.seed)
+            .field("presence_penalty", &self.presence_penalty)
+            .field("frequency_penalty", &self.frequency_penalty)
             .field("reasoning_effort", &self.reasoning_effort)
             .field("extra_body", &self.extra_body)
             .field("load_env", &self.load_env)
@@ -628,6 +739,11 @@ mod tests {
         assert!(cfg.max_retries.is_none());
         assert!(cfg.temperature.is_none());
         assert!(cfg.max_tokens.is_none());
+        assert!(cfg.top_p.is_none());
+        assert!(cfg.stop.is_none());
+        assert!(cfg.seed.is_none());
+        assert!(cfg.presence_penalty.is_none());
+        assert!(cfg.frequency_penalty.is_none());
         assert!(cfg.reasoning_effort.is_none());
         assert!(cfg.extra_body.is_none());
         assert!(cfg.load_env.is_none());
@@ -659,6 +775,11 @@ mod tests {
         assert!(cfg.max_retries.is_none());
         assert!(cfg.temperature.is_none());
         assert!(cfg.max_tokens.is_none());
+        assert!(cfg.top_p.is_none());
+        assert!(cfg.stop.is_none());
+        assert!(cfg.seed.is_none());
+        assert!(cfg.presence_penalty.is_none());
+        assert!(cfg.frequency_penalty.is_none());
         assert!(cfg.reasoning_effort.is_none());
         assert!(cfg.extra_body.is_none());
         assert!(cfg.load_env.is_none());
@@ -708,6 +829,17 @@ load_env = true
             ..Default::default()
         };
         let json = serde_json::to_string(&cfg).expect("serialize");
+        assert!(!json.contains("top_p"), "top_p should be omitted when None: {json}");
+        assert!(!json.contains("\"stop\""), "stop should be omitted when None: {json}");
+        assert!(!json.contains("\"seed\""), "seed should be omitted when None: {json}");
+        assert!(
+            !json.contains("presence_penalty"),
+            "presence_penalty should be omitted when None: {json}"
+        );
+        assert!(
+            !json.contains("frequency_penalty"),
+            "frequency_penalty should be omitted when None: {json}"
+        );
         assert!(
             !json.contains("reasoning_effort"),
             "reasoning_effort should be omitted when None: {json}"
@@ -852,6 +984,172 @@ safety_settings = { harassment = "block_none" }
         let round_tripped: LlmConfig =
             serde_json::from_str(&serde_json::to_string(&cfg).expect("serialize")).expect("deserialize");
         assert_eq!(round_tripped, cfg);
+    }
+
+    /// `top_p`, `stop`, `seed`, `presence_penalty`, and `frequency_penalty` must survive a
+    /// TOML load and a JSON round-trip so they are settable from a config file and from
+    /// every language binding, matching liter-llm's `ChatCompletionRequest` request-time
+    /// fields.
+    #[test]
+    fn test_llm_config_sampling_fields_round_trip_through_toml_and_json() {
+        let toml_src = r#"
+model = "openai/gpt-4o"
+top_p = 0.9
+stop = ["\n\n", "[END]"]
+seed = 42
+presence_penalty = 0.5
+frequency_penalty = -0.5
+"#;
+        let cfg: LlmConfig = toml::from_str(toml_src).expect("deserialize LlmConfig from TOML");
+
+        assert_eq!(cfg.top_p, Some(0.9));
+        assert_eq!(cfg.stop, Some(vec!["\n\n".to_string(), "[END]".to_string()]));
+        assert_eq!(cfg.seed, Some(42));
+        assert_eq!(cfg.presence_penalty, Some(0.5));
+        assert_eq!(cfg.frequency_penalty, Some(-0.5));
+
+        let round_tripped: LlmConfig =
+            serde_json::from_str(&serde_json::to_string(&cfg).expect("serialize")).expect("deserialize");
+        assert_eq!(round_tripped, cfg);
+    }
+
+    /// Empty passthrough fields stay absent from serialized output, exactly like the
+    /// other optional request-time parameters.
+    #[test]
+    fn test_llm_config_omits_empty_sampling_fields() {
+        let cfg = LlmConfig {
+            model: "openai/gpt-4o".to_string(),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&cfg).expect("serialize");
+        assert_eq!(json, r#"{"model":"openai/gpt-4o"}"#);
+    }
+
+    /// `Debug` prints the five new sampling fields verbatim — none of them are credentials.
+    #[test]
+    fn test_llm_config_debug_prints_sampling_fields_verbatim() {
+        let cfg = LlmConfig {
+            model: "openai/gpt-4o".to_string(),
+            top_p: Some(0.9),
+            stop: Some(vec!["\n\n".to_string()]),
+            seed: Some(42),
+            presence_penalty: Some(0.5),
+            frequency_penalty: Some(-0.5),
+            ..Default::default()
+        };
+        let rendered = format!("{cfg:?}");
+        assert!(rendered.contains("top_p: Some(0.9)"), "{rendered}");
+        assert!(rendered.contains(r#"stop: Some(["\n\n"])"#), "{rendered}");
+        assert!(rendered.contains("seed: Some(42)"), "{rendered}");
+        assert!(rendered.contains("presence_penalty: Some(0.5)"), "{rendered}");
+        assert!(rendered.contains("frequency_penalty: Some(-0.5)"), "{rendered}");
+    }
+
+    /// `top_p` at the exact boundaries `0.0` and `1.0` must be accepted.
+    #[test]
+    fn test_llm_config_validate_accepts_top_p_at_boundaries() {
+        for value in [0.0, 1.0, 0.5] {
+            let cfg = LlmConfig {
+                model: "openai/gpt-4o".to_string(),
+                top_p: Some(value),
+                ..Default::default()
+            };
+            assert!(cfg.validate().is_ok(), "top_p {value} should be accepted");
+        }
+    }
+
+    /// `top_p` outside `[0.0, 1.0]` must be a named `XbergError::Validation` naming the
+    /// offending value and the accepted range.
+    #[test]
+    fn test_llm_config_validate_rejects_top_p_out_of_range() {
+        for value in [-0.1, 1.1] {
+            let cfg = LlmConfig {
+                model: "openai/gpt-4o".to_string(),
+                top_p: Some(value),
+                ..Default::default()
+            };
+            match cfg.validate() {
+                Err(crate::XbergError::Validation { message, .. }) => {
+                    assert!(message.contains("top_p"), "{message}");
+                    assert!(message.contains(&value.to_string()), "{message}");
+                }
+                other => panic!("expected a Validation error for top_p {value}, got {other:?}"),
+            }
+        }
+    }
+
+    /// `presence_penalty` and `frequency_penalty` at the exact boundaries `-2.0` and `2.0`
+    /// must be accepted.
+    #[test]
+    fn test_llm_config_validate_accepts_penalties_at_boundaries() {
+        for value in [-2.0, 2.0, 0.0] {
+            let cfg = LlmConfig {
+                model: "openai/gpt-4o".to_string(),
+                presence_penalty: Some(value),
+                frequency_penalty: Some(value),
+                ..Default::default()
+            };
+            assert!(cfg.validate().is_ok(), "penalty {value} should be accepted");
+        }
+    }
+
+    /// `presence_penalty` outside `[-2.0, 2.0]` must be a named `XbergError::Validation`.
+    #[test]
+    fn test_llm_config_validate_rejects_presence_penalty_out_of_range() {
+        let cfg = LlmConfig {
+            model: "openai/gpt-4o".to_string(),
+            presence_penalty: Some(2.1),
+            ..Default::default()
+        };
+        match cfg.validate() {
+            Err(crate::XbergError::Validation { message, .. }) => {
+                assert!(message.contains("presence_penalty"), "{message}");
+                assert!(message.contains("2.1"), "{message}");
+            }
+            other => panic!("expected a Validation error, got {other:?}"),
+        }
+    }
+
+    /// `frequency_penalty` outside `[-2.0, 2.0]` must be a named `XbergError::Validation`.
+    #[test]
+    fn test_llm_config_validate_rejects_frequency_penalty_out_of_range() {
+        let cfg = LlmConfig {
+            model: "openai/gpt-4o".to_string(),
+            frequency_penalty: Some(-2.1),
+            ..Default::default()
+        };
+        match cfg.validate() {
+            Err(crate::XbergError::Validation { message, .. }) => {
+                assert!(message.contains("frequency_penalty"), "{message}");
+                assert!(message.contains("-2.1"), "{message}");
+            }
+            other => panic!("expected a Validation error, got {other:?}"),
+        }
+    }
+
+    /// A config with none of the five new sampling fields set must validate successfully —
+    /// silence in config is always valid.
+    #[test]
+    fn test_llm_config_validate_accepts_all_unset_sampling_fields() {
+        let cfg = LlmConfig {
+            model: "openai/gpt-4o".to_string(),
+            ..Default::default()
+        };
+        assert!(cfg.validate().is_ok());
+    }
+
+    /// `seed` has no documented range (liter-llm forwards it to the provider as-is), so any
+    /// `i64` — including negative values — must be accepted by `validate`.
+    #[test]
+    fn test_llm_config_validate_accepts_any_seed_value() {
+        for value in [i64::MIN, -1, 0, 1, i64::MAX] {
+            let cfg = LlmConfig {
+                model: "openai/gpt-4o".to_string(),
+                seed: Some(value),
+                ..Default::default()
+            };
+            assert!(cfg.validate().is_ok(), "seed {value} should be accepted");
+        }
     }
 
     /// `Debug` prints `reasoning_effort` and `extra_body` verbatim — neither is a
