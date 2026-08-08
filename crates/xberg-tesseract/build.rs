@@ -5,7 +5,12 @@
 #![allow(clippy::uninlined_format_args)]
 
 #[cfg(any(feature = "build-tesseract", feature = "build-tesseract-wasm"))]
+#[path = "build_support/source_cache.rs"]
+mod source_cache;
+
+#[cfg(any(feature = "build-tesseract", feature = "build-tesseract-wasm"))]
 mod build_tesseract {
+    use crate::source_cache::{PreparedSourceTree, prepare_source_tree, source_tree_is_complete};
     use cmake::Config;
     use std::env;
     use std::fs;
@@ -26,6 +31,28 @@ mod build_tesseract {
             "https://codeload.github.com/tesseract-ocr/tesseract/zip/refs/tags/{}",
             TESSERACT_VERSION
         )
+    }
+
+    fn get_or_download_source(third_party_dir: &Path, url: &str, name: &str) -> PreparedSourceTree {
+        let source_dir = third_party_dir.join(name);
+        if source_dir.exists() && !source_tree_is_complete(&source_dir) {
+            println!(
+                "cargo:warning=Cached {} source at {} is incomplete (missing CMakeLists.txt); redownloading",
+                name,
+                source_dir.display()
+            );
+        }
+
+        let prepared = prepare_source_tree(third_party_dir, name, |download_dir| {
+            download_and_extract(download_dir, url, name);
+        })
+        .unwrap_or_else(|error| panic!("Failed to prepare {name} source: {error}"));
+
+        if !prepared.downloaded {
+            eprintln!("Using existing {name} source");
+        }
+
+        prepared
     }
 
     fn workspace_cache_dir_from_out_dir() -> Option<PathBuf> {
@@ -419,21 +446,8 @@ mod build_tesseract {
         let project_dir = custom_out_dir.clone();
         let third_party_dir = project_dir.join("third_party");
 
-        let leptonica_dir = if third_party_dir.join("leptonica").exists() {
-            eprintln!("Using existing leptonica source");
-            third_party_dir.join("leptonica")
-        } else {
-            fs::create_dir_all(&third_party_dir).expect("Failed to create third_party directory");
-            download_and_extract(&third_party_dir, &leptonica_url(), "leptonica")
-        };
-
-        let tesseract_dir = if third_party_dir.join("tesseract").exists() {
-            eprintln!("Using existing tesseract source");
-            third_party_dir.join("tesseract")
-        } else {
-            fs::create_dir_all(&third_party_dir).expect("Failed to create third_party directory");
-            download_and_extract(&third_party_dir, &tesseract_url(), "tesseract")
-        };
+        let leptonica_dir = get_or_download_source(&third_party_dir, &leptonica_url(), "leptonica").path;
+        let tesseract_dir = get_or_download_source(&third_party_dir, &tesseract_url(), "tesseract").path;
 
         let (cmake_cxx_flags, cmake_c_flags, additional_defines) = get_os_specific_config();
 
@@ -1492,24 +1506,14 @@ Installation instructions:
             }
         };
 
-        let leptonica_dir = if third_party_dir.join("leptonica").exists() {
-            eprintln!("Using existing leptonica source");
-            third_party_dir.join("leptonica")
-        } else {
-            fs::create_dir_all(&third_party_dir).expect("Failed to create third_party directory");
-            download_and_extract(&third_party_dir, &leptonica_url(), "leptonica")
-        };
+        let leptonica_dir = get_or_download_source(&third_party_dir, &leptonica_url(), "leptonica").path;
 
-        let tesseract_dir = if third_party_dir.join("tesseract").exists() {
-            eprintln!("Using existing tesseract source");
-            third_party_dir.join("tesseract")
-        } else {
-            fs::create_dir_all(&third_party_dir).expect("Failed to create third_party directory");
-            let dir = download_and_extract(&third_party_dir, &tesseract_url(), "tesseract");
-            apply_tesseract_wasm_patch(&dir);
-            apply_wasm_noop_mutex_patch(&dir);
-            dir
-        };
+        let tesseract_source = get_or_download_source(&third_party_dir, &tesseract_url(), "tesseract");
+        if tesseract_source.downloaded {
+            apply_tesseract_wasm_patch(&tesseract_source.path);
+            apply_wasm_noop_mutex_patch(&tesseract_source.path);
+        }
+        let tesseract_dir = tesseract_source.path;
 
         let leptonica_install_dir = custom_out_dir.join("leptonica");
         let leptonica_cache_dir = cache_dir.join("leptonica");
