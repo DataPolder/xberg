@@ -7,7 +7,6 @@
 use crate::{Result, XbergError};
 
 /// Valid binarization methods for image preprocessing.
-#[cfg(test)]
 const VALID_BINARIZATION_METHODS: &[&str] = &["otsu", "adaptive", "sauvola"];
 
 /// Valid token reduction levels.
@@ -195,11 +194,9 @@ const VALID_LANGUAGE_CODES: &[&str] = &[
 ];
 
 /// Valid tesseract PSM (Page Segmentation Mode) values.
-#[cfg(test)]
 const VALID_TESSERACT_PSM: &[i32] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
 
 /// Valid tesseract OEM (OCR Engine Mode) values.
-#[cfg(test)]
 const VALID_TESSERACT_OEM: &[i32] = &[0, 1, 2, 3];
 
 /// Valid output formats for document extraction.
@@ -220,8 +217,7 @@ const VALID_OUTPUT_FORMATS: &[&str] = &["plain", "text", "markdown", "md", "djot
 ///
 /// # Examples
 ///
-/// Not run as a doctest: exported `#[cfg(test)] pub(crate)` only (see the note in
-/// [`crate::core::config_validation`]), so it is unreachable from a downstream crate.
+/// Not run as a doctest: `pub(crate)`, so it is unreachable from a downstream crate.
 ///
 /// ```ignore
 /// use xberg::core::config_validation::validate_binarization_method;
@@ -230,7 +226,6 @@ const VALID_OUTPUT_FORMATS: &[&str] = &["plain", "text", "markdown", "md", "djot
 /// assert!(validate_binarization_method("adaptive").is_ok());
 /// assert!(validate_binarization_method("invalid").is_err());
 /// ```
-#[cfg(test)]
 pub(crate) fn validate_binarization_method(method: &str) -> Result<()> {
     let method = method.to_lowercase();
     if VALID_BINARIZATION_METHODS.contains(&method.as_str()) {
@@ -377,8 +372,7 @@ pub(crate) fn validate_language_code(code: &str) -> Result<()> {
 ///
 /// # Examples
 ///
-/// Not run as a doctest: exported `#[cfg(test)] pub(crate)` only (see the note in
-/// [`crate::core::config_validation`]), so it is unreachable from a downstream crate.
+/// Not run as a doctest: `pub(crate)`, so it is unreachable from a downstream crate.
 ///
 /// ```ignore
 /// use xberg::core::config_validation::validate_tesseract_psm;
@@ -387,7 +381,6 @@ pub(crate) fn validate_language_code(code: &str) -> Result<()> {
 /// assert!(validate_tesseract_psm(6).is_ok());  // Single block of text
 /// assert!(validate_tesseract_psm(14).is_err()); // Out of range
 /// ```
-#[cfg(test)]
 pub(crate) fn validate_tesseract_psm(psm: i32) -> Result<()> {
     if VALID_TESSERACT_PSM.contains(&psm) {
         Ok(())
@@ -415,8 +408,7 @@ pub(crate) fn validate_tesseract_psm(psm: i32) -> Result<()> {
 ///
 /// # Examples
 ///
-/// Not run as a doctest: exported `#[cfg(test)] pub(crate)` only (see the note in
-/// [`crate::core::config_validation`]), so it is unreachable from a downstream crate.
+/// Not run as a doctest: `pub(crate)`, so it is unreachable from a downstream crate.
 ///
 /// ```ignore
 /// use xberg::core::config_validation::validate_tesseract_oem;
@@ -425,7 +417,6 @@ pub(crate) fn validate_tesseract_psm(psm: i32) -> Result<()> {
 /// assert!(validate_tesseract_oem(2).is_ok());  // Legacy + LSTM
 /// assert!(validate_tesseract_oem(4).is_err()); // Out of range
 /// ```
-#[cfg(test)]
 pub(crate) fn validate_tesseract_oem(oem: i32) -> Result<()> {
     if VALID_TESSERACT_OEM.contains(&oem) {
         Ok(())
@@ -459,8 +450,7 @@ pub(crate) fn validate_tesseract_oem(oem: i32) -> Result<()> {
 ///
 /// # Examples
 ///
-/// Not run as a doctest: exported `#[cfg(test)] pub(crate)` only (see the note in
-/// [`crate::core::config_validation`]), so it is unreachable from a downstream crate.
+/// Not run as a doctest: `pub(crate)`, so it is unreachable from a downstream crate.
 ///
 /// ```ignore
 /// use xberg::core::config_validation::validate_output_format;

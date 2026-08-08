@@ -705,6 +705,7 @@ impl OcrConfig {
         if let VlmFallbackPolicy::OnLowQuality { quality_threshold } = &self.vlm_fallback {
             crate::core::config_validation::validate_confidence(*quality_threshold)?;
         }
+        validate_tesseract_tuning(self.tesseract_config.as_ref())?;
         if let Some(ref pipeline) = self.pipeline {
             for stage in &pipeline.stages {
                 validate_ocr_backend(&stage.backend)?;
@@ -712,6 +713,7 @@ impl OcrConfig {
                 if let Some(ref languages) = stage.language {
                     validate_languages(languages)?;
                 }
+                validate_tesseract_tuning(stage.tesseract_config.as_ref())?;
             }
         } else if self.vlm_fallback != VlmFallbackPolicy::Disabled && self.vlm_config.is_none() {
             return Err(XbergError::validation(
@@ -937,6 +939,23 @@ fn validate_languages(languages: &[String]) -> Result<(), XbergError> {
     Ok(())
 }
 
+/// Validate the Tesseract tuning knobs that are plain integers and strings rather than enums.
+///
+/// `psm`, `oem` and `binarization_method` are the only OCR fields whose type does not already
+/// constrain them at deserialization time, so an out-of-range mode reaches the backend and fails
+/// there — far from the config that caused it. Validating here keeps the error next to the input.
+fn validate_tesseract_tuning(tesseract_config: Option<&crate::types::TesseractConfig>) -> Result<(), XbergError> {
+    let Some(tesseract_config) = tesseract_config else {
+        return Ok(());
+    };
+    crate::core::config_validation::validate_tesseract_psm(tesseract_config.psm)?;
+    crate::core::config_validation::validate_tesseract_oem(tesseract_config.oem)?;
+    if let Some(ref preprocessing) = tesseract_config.preprocessing {
+        crate::core::config_validation::validate_binarization_method(&preprocessing.binarization_method)?;
+    }
+    Ok(())
+}
+
 fn default_ocr_enabled() -> bool {
     true
 }
@@ -959,6 +978,80 @@ fn default_eng() -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn tesseract_config_with(psm: i32, oem: i32) -> crate::types::TesseractConfig {
+        crate::types::TesseractConfig {
+            psm,
+            oem,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn should_accept_ocr_config_when_tesseract_psm_and_oem_are_in_range() {
+        let config = OcrConfig {
+            tesseract_config: Some(tesseract_config_with(6, 1)),
+            ..Default::default()
+        };
+
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn should_reject_ocr_config_when_tesseract_psm_is_above_range() {
+        let config = OcrConfig {
+            tesseract_config: Some(tesseract_config_with(14, 1)),
+            ..Default::default()
+        };
+
+        let message = config
+            .validate()
+            .expect_err("psm 14 is out of the 0-13 range")
+            .to_string();
+        assert!(
+            message.contains("PSM"),
+            "error should name the PSM field; got: {message}"
+        );
+    }
+
+    #[test]
+    fn should_reject_ocr_config_when_tesseract_oem_is_above_range() {
+        let config = OcrConfig {
+            tesseract_config: Some(tesseract_config_with(6, 4)),
+            ..Default::default()
+        };
+
+        let message = config
+            .validate()
+            .expect_err("oem 4 is out of the 0-3 range")
+            .to_string();
+        assert!(
+            message.contains("OEM"),
+            "error should name the OEM field; got: {message}"
+        );
+    }
+
+    #[test]
+    fn should_reject_ocr_config_when_binarization_method_is_unknown() {
+        let mut tesseract_config = tesseract_config_with(6, 1);
+        tesseract_config.preprocessing = Some(crate::types::ImagePreprocessingConfig {
+            binarization_method: "not-a-method".to_string(),
+            ..Default::default()
+        });
+        let config = OcrConfig {
+            tesseract_config: Some(tesseract_config),
+            ..Default::default()
+        };
+
+        let message = config
+            .validate()
+            .expect_err("an unknown binarization method must be rejected")
+            .to_string();
+        assert!(
+            message.contains("binarization"),
+            "error should name the binarization method; got: {message}"
+        );
+    }
 
     #[test]
     fn test_ocr_config_default() {

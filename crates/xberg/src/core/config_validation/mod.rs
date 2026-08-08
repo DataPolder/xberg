@@ -28,31 +28,20 @@
 mod dependencies;
 mod sections;
 
+pub(crate) use dependencies::{validate_cors_origin, validate_host, validate_port, validate_upload_size};
 pub(crate) use sections::{
     validate_chunking_params, validate_confidence, validate_csv_delimiter, validate_dpi, validate_language_code,
     validate_ocr_backend, validate_token_reduction_level, validate_vlm_backend_config,
 };
 
-// The remaining validators are exported under `#[cfg(test)]` only: every `ExtractionConfig`
-// field they would apply to lives outside `crates/xberg/src/core/config*/**`, so wiring them
-// into production requires editing those out-of-tree files (see issue #270 follow-up):
-//
-// - `validate_binarization_method`, `validate_tesseract_psm`, `validate_tesseract_oem`: their
-//   target fields (`ImagePreprocessingConfig::binarization_method`, `TesseractConfig::{psm,oem}`)
-//   live in `crate::types::formats`.
-// - `validate_output_format`: both `ExtractionConfig::output_format` and
-//   `OcrConfig::output_format` are already the strongly-typed `OutputFormat` enum, which
-//   rejects invalid values at deserialization time — there is no raw-string field left to
-//   validate with this function.
-// - `validate_cors_origin`, `validate_host`, `validate_port`, `validate_upload_size`: their
-//   target fields live on `ServerConfig` in `crate::core::server_config`, a separate module
-//   tree from `crate::core::config`.
+pub(crate) use sections::{validate_binarization_method, validate_tesseract_oem, validate_tesseract_psm};
+
+// `validate_output_format` stays `#[cfg(test)]`-only, and correctly so: both
+// `ExtractionConfig::output_format` and `OcrConfig::output_format` are the strongly-typed
+// `OutputFormat` enum, which rejects invalid values at deserialization time. There is no
+// raw-string field left for this function to validate.
 #[cfg(test)]
-pub(crate) use dependencies::{validate_cors_origin, validate_host, validate_port, validate_upload_size};
-#[cfg(test)]
-pub(crate) use sections::{
-    validate_binarization_method, validate_output_format, validate_tesseract_oem, validate_tesseract_psm,
-};
+pub(crate) use sections::validate_output_format;
 
 #[cfg(test)]
 mod tests {
@@ -315,117 +304,171 @@ mod tests {
         assert!(err.contains("en"));
     }
 
-    #[test]
-    fn test_validate_port_valid() {
-        assert!(validate_port(1).is_ok());
-        assert!(validate_port(80).is_ok());
-        assert!(validate_port(443).is_ok());
-        assert!(validate_port(8000).is_ok());
-        assert!(validate_port(65535).is_ok());
+    /// Render a validation outcome as an exactly comparable string: the empty string for
+    /// an accepted value, or the full `Display` text of the rejection.
+    fn outcome(result: crate::Result<()>) -> String {
+        match result {
+            Ok(()) => String::new(),
+            Err(error) => error.to_string(),
+        }
+    }
+
+    const PORT_ZERO_REJECTION: &str = "Validation error: Port must be 1-65535, got 0. \
+         Set 'server.port' (or XBERG_PORT) to a free port such as 8000.";
+
+    const EMPTY_HOST_REJECTION: &str = "Validation error: Invalid host '': \
+         must be a valid IP address or hostname. Set 'server.host' (or XBERG_HOST) to e.g. \
+         '127.0.0.1', '0.0.0.0' or 'localhost'.";
+
+    const UPLOAD_SIZE_ZERO_REJECTION: &str = "Validation error: Upload size must be greater than 0, got 0. \
+         Set 'server.max_request_body_bytes' / 'server.max_multipart_field_bytes' \
+         to a positive byte count such as 104857600 (100 MB).";
+
+    fn cors_rejection(origin: &str) -> String {
+        format!(
+            "Validation error: Invalid CORS origin '{origin}': must be a valid HTTP/HTTPS URL or '*'. \
+             Set 'server.cors_origins' (or XBERG_CORS_ORIGINS) to e.g. 'https://example.com'."
+        )
     }
 
     #[test]
-    fn test_validate_port_invalid() {
-        let result = validate_port(0);
-        assert!(result.is_err());
-        let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("Port must be 1-65535"));
-        assert!(msg.contains("0"));
+    fn should_accept_port_when_inside_valid_range() {
+        for port in [1_u32, 80, 443, 8000, 65535] {
+            assert_eq!(outcome(validate_port(port)), "", "port {port} should be accepted");
+        }
     }
 
     #[test]
-    fn test_validate_host_ipv4() {
-        assert!(validate_host("127.0.0.1").is_ok());
-        assert!(validate_host("0.0.0.0").is_ok());
-        assert!(validate_host("192.168.1.1").is_ok());
-        assert!(validate_host("10.0.0.1").is_ok());
-        assert!(validate_host("255.255.255.255").is_ok());
+    fn should_reject_port_when_zero() {
+        assert_eq!(outcome(validate_port(0)), PORT_ZERO_REJECTION);
     }
 
     #[test]
-    fn test_validate_host_ipv6() {
-        assert!(validate_host("::1").is_ok());
-        assert!(validate_host("::").is_ok());
-        assert!(validate_host("2001:db8::1").is_ok());
-        assert!(validate_host("fe80::1").is_ok());
+    fn should_reject_port_when_above_sixteen_bit_range() {
+        assert_eq!(
+            outcome(validate_port(65_536)),
+            "Validation error: Port must be 1-65535, got 65536. \
+             Set 'server.port' (or XBERG_PORT) to a free port such as 8000."
+        );
     }
 
     #[test]
-    fn test_validate_host_hostname() {
-        assert!(validate_host("localhost").is_ok());
-        assert!(validate_host("example.com").is_ok());
-        assert!(validate_host("sub.example.com").is_ok());
-        assert!(validate_host("api-server").is_ok());
-        assert!(validate_host("app123").is_ok());
+    fn should_accept_host_when_ipv4_address() {
+        for host in ["127.0.0.1", "0.0.0.0", "192.168.1.1", "10.0.0.1", "255.255.255.255"] {
+            assert_eq!(outcome(validate_host(host)), "", "host {host} should be accepted");
+        }
     }
 
     #[test]
-    fn test_validate_host_invalid() {
-        let result = validate_host("");
-        assert!(result.is_err());
-        let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("Invalid host"));
-
-        let result = validate_host("not a valid host");
-        assert!(result.is_err());
-
-        let result = validate_host("256.256.256.256");
-        assert!(result.is_err());
+    fn should_accept_host_when_ipv6_address() {
+        for host in ["::1", "::", "2001:db8::1", "fe80::1"] {
+            assert_eq!(outcome(validate_host(host)), "", "host {host} should be accepted");
+        }
     }
 
     #[test]
-    fn test_validate_cors_origin_https() {
-        assert!(validate_cors_origin("https://example.com").is_ok());
-        assert!(validate_cors_origin("https://localhost:3000").is_ok());
-        assert!(validate_cors_origin("https://sub.example.com").is_ok());
-        assert!(validate_cors_origin("https://192.168.1.1").is_ok());
-        assert!(validate_cors_origin("https://example.com/path").is_ok());
+    fn should_accept_host_when_dns_hostname() {
+        for host in ["localhost", "example.com", "sub.example.com", "api-server", "app123"] {
+            assert_eq!(outcome(validate_host(host)), "", "host {host} should be accepted");
+        }
     }
 
     #[test]
-    fn test_validate_cors_origin_http() {
-        assert!(validate_cors_origin("http://example.com").is_ok());
-        assert!(validate_cors_origin("http://localhost:3000").is_ok());
-        assert!(validate_cors_origin("http://127.0.0.1:8000").is_ok());
+    fn should_reject_host_when_empty() {
+        assert_eq!(outcome(validate_host("")), EMPTY_HOST_REJECTION);
     }
 
     #[test]
-    fn test_validate_cors_origin_wildcard() {
-        assert!(validate_cors_origin("*").is_ok());
+    fn should_reject_host_when_it_contains_whitespace() {
+        assert_eq!(
+            outcome(validate_host("not a valid host")),
+            "Validation error: Invalid host 'not a valid host': must be a valid IP address or hostname. \
+             Set 'server.host' (or XBERG_HOST) to e.g. '127.0.0.1', '0.0.0.0' or 'localhost'."
+        );
     }
 
     #[test]
-    fn test_validate_cors_origin_invalid() {
-        let result = validate_cors_origin("not-a-url");
-        assert!(result.is_err());
-        let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("Invalid CORS origin"));
-
-        let result = validate_cors_origin("ftp://example.com");
-        assert!(result.is_err());
-
-        let result = validate_cors_origin("example.com");
-        assert!(result.is_err());
-
-        let result = validate_cors_origin("http://");
-        assert!(result.is_err());
+    fn should_reject_host_when_ipv4_octets_are_out_of_range() {
+        assert_eq!(
+            outcome(validate_host("256.256.256.256")),
+            "Validation error: Invalid host '256.256.256.256': must be a valid IP address or hostname. \
+             Set 'server.host' (or XBERG_HOST) to e.g. '127.0.0.1', '0.0.0.0' or 'localhost'."
+        );
     }
 
     #[test]
-    fn test_validate_upload_size_valid() {
-        assert!(validate_upload_size(1).is_ok());
-        assert!(validate_upload_size(1024).is_ok());
-        assert!(validate_upload_size(1_000_000).is_ok());
-        assert!(validate_upload_size(1_000_000_000).is_ok());
-        assert!(validate_upload_size(usize::MAX).is_ok());
+    fn should_reject_host_when_a_label_is_empty() {
+        assert_eq!(
+            outcome(validate_host("example..com")),
+            "Validation error: Invalid host 'example..com': must be a valid IP address or hostname. \
+             Set 'server.host' (or XBERG_HOST) to e.g. '127.0.0.1', '0.0.0.0' or 'localhost'."
+        );
     }
 
     #[test]
-    fn test_validate_upload_size_invalid() {
-        let result = validate_upload_size(0);
-        assert!(result.is_err());
-        let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("Upload size must be greater than 0"));
-        assert!(msg.contains("0"));
+    fn should_accept_cors_origin_when_https_url() {
+        for origin in [
+            "https://example.com",
+            "https://localhost:3000",
+            "https://sub.example.com",
+            "https://192.168.1.1",
+            "https://example.com/path",
+        ] {
+            assert_eq!(outcome(validate_cors_origin(origin)), "", "origin {origin} should pass");
+        }
+    }
+
+    #[test]
+    fn should_accept_cors_origin_when_http_url() {
+        for origin in ["http://example.com", "http://localhost:3000", "http://127.0.0.1:8000"] {
+            assert_eq!(outcome(validate_cors_origin(origin)), "", "origin {origin} should pass");
+        }
+    }
+
+    #[test]
+    fn should_accept_cors_origin_when_wildcard() {
+        assert_eq!(outcome(validate_cors_origin("*")), "");
+    }
+
+    #[test]
+    fn should_reject_cors_origin_when_scheme_is_missing() {
+        assert_eq!(outcome(validate_cors_origin("not-a-url")), cors_rejection("not-a-url"));
+        assert_eq!(
+            outcome(validate_cors_origin("example.com")),
+            cors_rejection("example.com")
+        );
+    }
+
+    #[test]
+    fn should_reject_cors_origin_when_scheme_is_not_http() {
+        assert_eq!(
+            outcome(validate_cors_origin("ftp://example.com")),
+            cors_rejection("ftp://example.com")
+        );
+    }
+
+    #[test]
+    fn should_reject_cors_origin_when_authority_is_empty() {
+        assert_eq!(outcome(validate_cors_origin("http://")), cors_rejection("http://"));
+        assert_eq!(
+            outcome(validate_cors_origin("https:///path")),
+            cors_rejection("https:///path")
+        );
+    }
+
+    #[test]
+    fn should_accept_upload_size_when_positive() {
+        for size in [1_usize, 1024, 1_000_000, 1_000_000_000, usize::MAX] {
+            assert_eq!(
+                outcome(validate_upload_size(size)),
+                "",
+                "size {size} should be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn should_reject_upload_size_when_zero() {
+        assert_eq!(outcome(validate_upload_size(0)), UPLOAD_SIZE_ZERO_REJECTION);
     }
 }
