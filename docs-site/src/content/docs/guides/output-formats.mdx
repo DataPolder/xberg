@@ -108,10 +108,10 @@ table_anchors = true
 | ----------------- | ----------------------------------------------------------------------- |
 | `Plain` (default) | Raw extracted text with minimal formatting                              |
 | `Markdown`        | Markdown-formatted content                                              |
-| `Djot`            | Djot markup (requires the `djot` feature)                              |
+| `Djot`            | Djot markup                                                            |
 | `Html`            | HTML-formatted content                                                  |
 | `Json`            | JSON tree with heading-driven sections                                  |
-| `Structured`      | JSON with full OCR element metadata (bounding boxes, confidence scores) |
+| `Structured`      | Currently identical to `Plain` text (no OCR element data, bounding boxes, or confidence scores); only the `metadata.output_format` label differs. HTML sources are routed through Markdown conversion first, so they come out as Markdown-flavored text |
 | `DocTags`         | Docling DocTags tag-stream format (tables as OTSL). See [DocTags Output](/guides/doctags-output/) |
 | `Custom(name)`    | Output from a renderer registered in the `RendererRegistry` (e.g. `docx`, `latex`) |
 
