@@ -128,6 +128,22 @@ fn test_docling_content_quality() {
 /// repository due to size). To reproduce locally, generate a Ghostscript vector
 /// decomposition PDF and place it at:
 ///   test_documents/pdf/ghostscript_inline_images_repro.pdf
+///
+/// The budget below guards against the O(N²) blowup coming back — which cost
+/// *minutes* — and is not a throughput target.
+///
+/// It was originally 10s, which no machine has ever met in a debug build: measured
+/// 2026-08-09 at 27.0s locally (isolated, `cargo test` debug profile) against 13.2s
+/// on macos-latest and 14.5s on ubuntu-24.04-arm. That bound went unnoticed because
+/// the skip branch above was always taken — `test_documents` is bucket-fetched, and
+/// CI only began materialising this fixture once the corpus fetcher landed. The
+/// first CI run that actually had the file was the first one to measure anything.
+/// So this is a budget that was never exercised, not a performance regression.
+/// Upper bound for the Ghostscript inline-image repro. See the note on
+/// [`test_ghostscript_inline_images_completes_in_reasonable_time`] — this guards against a
+/// complexity regression, so it sits well above the slowest healthy CI measurement.
+const MAX_GHOSTSCRIPT_INLINE_IMAGE_EXTRACTION: std::time::Duration = std::time::Duration::from_secs(45);
+
 #[test]
 fn test_ghostscript_inline_images_completes_in_reasonable_time() {
     let path = test_documents_dir().join("pdf/ghostscript_inline_images_repro.pdf");
@@ -149,8 +165,10 @@ fn test_ghostscript_inline_images_completes_in_reasonable_time() {
     let elapsed = start.elapsed();
 
     assert!(
-        elapsed.as_secs() < 10,
-        "Ghostscript inline-image PDF must extract in under 10 seconds, took {elapsed:?}"
+        elapsed < MAX_GHOSTSCRIPT_INLINE_IMAGE_EXTRACTION,
+        "Ghostscript inline-image PDF took {elapsed:?}, over the \
+         {MAX_GHOSTSCRIPT_INLINE_IMAGE_EXTRACTION:?} blowup guard -- suspect the O(N²) inline-image \
+         scan of issue #752 has returned"
     );
 
     let _ = result;
