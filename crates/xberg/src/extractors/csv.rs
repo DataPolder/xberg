@@ -168,7 +168,9 @@ impl InternalDocumentExtractor for CsvExtractor {
             ));
         }
 
-        builder.push_table(table, None, None);
+        let content_text = render_plain_text(&table.cells);
+        let table_element = builder.push_table(table, None, None);
+        builder.set_text(table_element, &content_text);
 
         let mut doc = builder.build();
         doc.mime_type = mime_type.to_string();
@@ -488,6 +490,24 @@ fn infer_column_types(rows: &[Vec<String>], has_header: bool) -> Vec<String> {
             }
         })
         .collect()
+}
+
+/// Render rows as canonical space-separated plain text for `result.content`.
+///
+/// Matches `rendering::common::render_table_plain` except that rows where every
+/// cell is empty after trimming are omitted entirely, rather than surviving as a
+/// blank-looking line of bare separators. The Markdown table and `result.tables`
+/// keep such rows, since they still convey real structure there.
+fn render_plain_text(cells: &[Vec<String>]) -> String {
+    let mut out = String::new();
+    for row in cells {
+        if row.iter().all(|cell| cell.trim().is_empty()) {
+            continue;
+        }
+        out.push_str(&row.join(" "));
+        out.push('\n');
+    }
+    out
 }
 
 /// Build a Markdown table from parsed rows.
