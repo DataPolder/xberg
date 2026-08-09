@@ -4,6 +4,8 @@ import importlib.util
 import unittest
 from pathlib import Path
 
+import pytest
+
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 VALIDATOR_PATH = Path(__file__).with_name("validate-workflow-matrix.py")
 SPEC = importlib.util.spec_from_file_location("validate_workflow_matrix", VALIDATOR_PATH)
@@ -39,7 +41,7 @@ class TestWorkflowMatrixValidation(unittest.TestCase):
             1,
         )
 
-        with self.assertRaisesRegex(ValueError, "must not use continue-on-error"):
+        with pytest.raises(ValueError, match="must not use continue-on-error"):
             VALIDATOR.workflow_cells(mutated)
 
     def test_artifacts_must_be_validated_before_consolidation(self) -> None:
@@ -61,7 +63,7 @@ class TestWorkflowMatrixValidation(unittest.TestCase):
             )
         )
 
-        with self.assertRaisesRegex(ValueError, "validation gates must precede publication"):
+        with pytest.raises(ValueError, match="validation gates must precede publication"):
             VALIDATOR.workflow_cells(mutated)
 
 
