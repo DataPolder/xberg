@@ -579,6 +579,12 @@ max_multipart_field_bytes: 200000000
     assert_eq!(json_config.max_multipart_field_bytes, 200_000_000);
 }
 
+/// Port 0 asks the OS for an arbitrary ephemeral port, which defeats the point of a
+/// configured listen address (see `MIN_PORT` in `core::config_validation::dependencies`).
+/// `validate_port` deliberately rejects it, so `XBERG_PORT=0` must fail the same way a
+/// config-file `port = 0` does (`should_reject_config_when_port_is_zero` in
+/// `core::server_config::validation`). This test intentionally asserts rejection, not
+/// acceptance.
 #[test]
 #[serial_test::serial]
 fn test_port_validation_bounds() {
@@ -586,8 +592,12 @@ fn test_port_validation_bounds() {
 
     set_env("XBERG_PORT", "0");
     let mut config = ServerConfig::default();
-    config.apply_env_overrides().expect("Operation failed");
-    assert_eq!(config.port, 0);
+    let result = config.apply_env_overrides();
+    assert_eq!(
+        result.unwrap_err().to_string(),
+        "Validation error: Port must be 1-65535, got 0. \
+         Set 'server.port' (or XBERG_PORT) to a free port such as 8000."
+    );
 
     set_env("XBERG_PORT", "65535");
     let mut config = ServerConfig::default();
