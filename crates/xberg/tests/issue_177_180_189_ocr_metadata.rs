@@ -101,11 +101,25 @@ fn word_language_is_forwarded_per_ocr_element() {
             "word {:?} should carry its Tesseract block type (#175)",
             element.text
         );
+        // Paragraph metadata is all-or-nothing: `conversion.rs` writes is_crown,
+        // is_list_item and justification from the same `Option<&ParaInfo>`, which is
+        // resolved by matching the word centroid against the RIL_PARA bboxes collected
+        // in `extract_all_paragraphs`. When this fails it is one of exactly two things,
+        // and `ParagraphExtractionOutcome`'s counters (logged at WARN by
+        // ocr/processor/execution.rs) say which:
+        //   skipped_no_para_info > 0 -> TessPageIteratorParagraphInfo returned 0
+        //   skipped_no_bbox      > 0 -> metadata came back but the paragraph had no bbox
+        //   both zero                -> paragraphs were collected but no bbox contains
+        //                               this word's centroid (a matching bug, not FFI)
+        // Observed failing on x86_64-linux CI while arm64-linux and macOS pass.
         assert_eq!(
             element.backend_metadata.get("is_crown"),
             Some(&serde_json::json!(false)),
-            "word {:?} should carry paragraph crown metadata (#191)",
-            element.text
+            "word {:?} lost its paragraph metadata (#191); run with RUST_LOG=warn and read the \
+             skipped_no_para_info / skipped_no_bbox counters to tell FFI refusal from bbox \
+             mismatch. Full metadata: {:?}",
+            element.text,
+            element.backend_metadata
         );
     }
 

@@ -806,13 +806,25 @@ fn extract_elements_via_iterator(
         }
     };
 
-    let paragraphs = match page_iter.extract_all_paragraphs() {
+    let paragraph_extraction = match page_iter.extract_all_paragraphs() {
         Ok(p) => p,
         Err(e) => {
             tracing::warn!(error = %e, "Failed to extract Tesseract page paragraphs; falling back to TSV-based OCR element extraction");
             return Ok(empty());
         }
     };
+
+    if paragraph_extraction.skipped_no_para_info > 0 || paragraph_extraction.skipped_no_bbox > 0 {
+        tracing::warn!(
+            skipped_no_para_info = paragraph_extraction.skipped_no_para_info,
+            skipped_no_bbox = paragraph_extraction.skipped_no_bbox,
+            extracted_paragraphs = paragraph_extraction.paragraphs.len(),
+            "Tesseract declined to describe some paragraphs; their words lose the is_crown, \
+             is_list_item and justification metadata"
+        );
+    }
+
+    let paragraphs = paragraph_extraction.paragraphs;
 
     let result_iter = match api.get_iterator() {
         Ok(iter) => iter,

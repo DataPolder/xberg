@@ -174,7 +174,7 @@ mod wasm_compat {
     }
 }
 mod page_iterator;
-pub use page_iterator::{BlockInfo, PageIterator, ParaInfo};
+pub use page_iterator::{BlockInfo, PageIterator, ParaInfo, ParagraphExtractionOutcome};
 mod result_iterator;
 pub use result_iterator::{FontAttributes, ResultIterator, WordData};
 mod choice_iterator;

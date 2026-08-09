@@ -31,6 +31,24 @@ pub struct ParaInfo {
     pub bottom: i32,
 }
 
+/// Outcome of a full-page paragraph extraction pass over the `PageIterator`.
+///
+/// The skip counts distinguish "the page has no paragraphs" from "paragraphs
+/// exist but Tesseract declined to describe them" — both previously collapsed
+/// into an empty `Vec<ParaInfo>` with no signal, which silently stripped
+/// `is_crown`/`is_list_item`/`justification` from every OCR element on builds
+/// where `TessPageIteratorParagraphInfo` returns 0.
+#[derive(Debug, Clone, Default)]
+pub struct ParagraphExtractionOutcome {
+    /// Successfully described paragraphs, in iterator order.
+    pub paragraphs: Vec<ParaInfo>,
+    /// Count of paragraphs for which `TessPageIteratorParagraphInfo` returned 0.
+    pub skipped_no_para_info: usize,
+    /// Count of paragraphs that reported metadata but no bounding box, and so
+    /// could not be matched to a word.
+    pub skipped_no_bbox: usize,
+}
+
 pub struct PageIterator {
     pub handle: Arc<Mutex<*mut c_void>>,
 }
@@ -248,12 +266,15 @@ impl PageIterator {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(Vec<ParaInfo>)` with one entry per paragraph, or an error if the
-    /// mutex cannot be acquired.
-    pub fn extract_all_paragraphs(&self) -> Result<Vec<ParaInfo>> {
+    /// Returns `Ok(ParagraphExtractionOutcome)`, or an error if the mutex cannot be
+    /// acquired. Paragraphs whose FFI calls fail are dropped and counted rather than
+    /// silently discarded — see [`ParagraphExtractionOutcome`].
+    pub fn extract_all_paragraphs(&self) -> Result<ParagraphExtractionOutcome> {
         let handle = self.handle.lock().map_err(|_| TesseractError::MutexLockError)?;
         let level = TessPageIteratorLevel::RIL_PARA as c_int;
         let mut paragraphs = Vec::new();
+        let mut skipped_no_para_info = 0usize;
+        let mut skipped_no_bbox = 0usize;
 
         unsafe { TessPageIteratorBegin(*handle) };
 
@@ -295,6 +316,10 @@ impl PageIterator {
                     right,
                     bottom,
                 });
+            } else if para_ok == 0 {
+                skipped_no_para_info += 1;
+            } else {
+                skipped_no_bbox += 1;
             }
 
             let has_next = unsafe { TessPageIteratorNext(*handle, level) };
@@ -303,7 +328,11 @@ impl PageIterator {
             }
         }
 
-        Ok(paragraphs)
+        Ok(ParagraphExtractionOutcome {
+            paragraphs,
+            skipped_no_para_info,
+            skipped_no_bbox,
+        })
     }
 
     /// Gets the paragraph information of the current iterator.
