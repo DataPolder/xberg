@@ -17,18 +17,37 @@
 use xberg::core::config::ExtractionConfig;
 
 mod helpers;
-use helpers::extract_bytes_document;
+use helpers::{extract_bytes_document, get_test_file_path};
 
-const RST_FIXTURE: &str = include_str!("../../../test_documents/rst/rst-reader.rst");
+const RST_FIXTURE_PATH: &str = "rst/rst-reader.rst";
 
-fn rst_fixture_bytes() -> Vec<u8> {
-    RST_FIXTURE.as_bytes().to_vec()
+/// Read the RST fixture at runtime, skipping the calling test with a greppable
+/// message when the corpus is absent.
+///
+/// `test_documents/` is bucket-fetched (see `test_documents/scripts/fetch_corpus.py`)
+/// and is not present in a bare checkout, so baking this in with `include_str!` made
+/// the whole test binary fail to *compile* there -- which is what broke the `validate
+/// (poly)` job, since its workspace clippy has to build every target.
+fn rst_fixture_bytes() -> Option<Vec<u8>> {
+    let path = get_test_file_path(RST_FIXTURE_PATH);
+    match std::fs::read(&path) {
+        Ok(bytes) => Some(bytes),
+        Err(e) => {
+            eprintln!(
+                "SKIP: fixture {} not available ({e}); run `python3 test_documents/scripts/fetch_corpus.py` to fetch it",
+                path.display()
+            );
+            None
+        }
+    }
 }
 
 /// Test extraction of document title from RST file structure
 #[tokio::test]
 async fn test_rst_title_extraction() {
-    let content = rst_fixture_bytes();
+    let Some(content) = rst_fixture_bytes() else {
+        return;
+    };
     let result = extract_bytes_document(&content, "text/x-rst", &ExtractionConfig::default())
         .await
         .expect("Should extract RST successfully");
@@ -49,7 +68,9 @@ async fn test_rst_title_extraction() {
 /// Test field list metadata extraction (:Authors:, :Date:, :Revision:)
 #[tokio::test]
 async fn test_rst_field_list_metadata_extraction() {
-    let content = rst_fixture_bytes();
+    let Some(content) = rst_fixture_bytes() else {
+        return;
+    };
     let result = extract_bytes_document(&content, "text/x-rst", &ExtractionConfig::default())
         .await
         .expect("Should extract RST successfully");
@@ -72,7 +93,9 @@ async fn test_rst_field_list_metadata_extraction() {
 /// Test extraction of multiple heading levels
 #[tokio::test]
 async fn test_rst_section_hierarchy() {
-    let content = rst_fixture_bytes();
+    let Some(content) = rst_fixture_bytes() else {
+        return;
+    };
     let result = extract_bytes_document(&content, "text/x-rst", &ExtractionConfig::default())
         .await
         .expect("Should extract RST successfully");
@@ -106,7 +129,9 @@ async fn test_rst_section_hierarchy() {
 /// Test that emphasis in headings is preserved
 #[tokio::test]
 async fn test_rst_heading_with_inline_markup() {
-    let content = rst_fixture_bytes();
+    let Some(content) = rst_fixture_bytes() else {
+        return;
+    };
     let result = extract_bytes_document(&content, "text/x-rst", &ExtractionConfig::default())
         .await
         .expect("Should extract RST successfully");
@@ -122,7 +147,9 @@ async fn test_rst_heading_with_inline_markup() {
 /// Test code block extraction with language specification
 #[tokio::test]
 async fn test_rst_code_block_extraction() {
-    let content = rst_fixture_bytes();
+    let Some(content) = rst_fixture_bytes() else {
+        return;
+    };
     let result = extract_bytes_document(&content, "text/x-rst", &ExtractionConfig::default())
         .await
         .expect("Should extract RST successfully");
@@ -143,7 +170,9 @@ async fn test_rst_code_block_extraction() {
 /// Test Haskell code blocks with highlight directive
 #[tokio::test]
 async fn test_rst_highlight_directive_code_blocks() {
-    let content = rst_fixture_bytes();
+    let Some(content) = rst_fixture_bytes() else {
+        return;
+    };
     let result = extract_bytes_document(&content, "text/x-rst", &ExtractionConfig::default())
         .await
         .expect("Should extract RST successfully");
@@ -164,7 +193,9 @@ async fn test_rst_highlight_directive_code_blocks() {
 /// Test JavaScript code blocks
 #[tokio::test]
 async fn test_rst_javascript_code_blocks() {
-    let content = rst_fixture_bytes();
+    let Some(content) = rst_fixture_bytes() else {
+        return;
+    };
     let result = extract_bytes_document(&content, "text/x-rst", &ExtractionConfig::default())
         .await
         .expect("Should extract RST successfully");
@@ -180,7 +211,9 @@ async fn test_rst_javascript_code_blocks() {
 /// Test unordered list extraction
 #[tokio::test]
 async fn test_rst_unordered_lists() {
-    let content = rst_fixture_bytes();
+    let Some(content) = rst_fixture_bytes() else {
+        return;
+    };
     let result = extract_bytes_document(&content, "text/x-rst", &ExtractionConfig::default())
         .await
         .expect("Should extract RST successfully");
@@ -207,7 +240,9 @@ async fn test_rst_unordered_lists() {
 /// Test ordered list extraction
 #[tokio::test]
 async fn test_rst_ordered_lists() {
-    let content = rst_fixture_bytes();
+    let Some(content) = rst_fixture_bytes() else {
+        return;
+    };
     let result = extract_bytes_document(&content, "text/x-rst", &ExtractionConfig::default())
         .await
         .expect("Should extract RST successfully");
@@ -228,7 +263,9 @@ async fn test_rst_ordered_lists() {
 /// Test nested lists extraction
 #[tokio::test]
 async fn test_rst_nested_lists() {
-    let content = rst_fixture_bytes();
+    let Some(content) = rst_fixture_bytes() else {
+        return;
+    };
     let result = extract_bytes_document(&content, "text/x-rst", &ExtractionConfig::default())
         .await
         .expect("Should extract RST successfully");
@@ -247,7 +284,9 @@ async fn test_rst_nested_lists() {
 /// Test simple table extraction
 #[tokio::test]
 async fn test_rst_simple_table_extraction() {
-    let content = rst_fixture_bytes();
+    let Some(content) = rst_fixture_bytes() else {
+        return;
+    };
     let result = extract_bytes_document(&content, "text/x-rst", &ExtractionConfig::default())
         .await
         .expect("Should extract RST successfully");
@@ -265,7 +304,9 @@ async fn test_rst_simple_table_extraction() {
 /// Test grid table extraction
 #[tokio::test]
 async fn test_rst_grid_table_extraction() {
-    let content = rst_fixture_bytes();
+    let Some(content) = rst_fixture_bytes() else {
+        return;
+    };
     let result = extract_bytes_document(&content, "text/x-rst", &ExtractionConfig::default())
         .await
         .expect("Should extract RST successfully");
@@ -283,7 +324,9 @@ async fn test_rst_grid_table_extraction() {
 /// Test table with complex structure (multiple rows/columns spanning)
 #[tokio::test]
 async fn test_rst_complex_table_with_spanning() {
-    let content = rst_fixture_bytes();
+    let Some(content) = rst_fixture_bytes() else {
+        return;
+    };
     let result = extract_bytes_document(&content, "text/x-rst", &ExtractionConfig::default())
         .await
         .expect("Should extract RST successfully");
@@ -302,7 +345,9 @@ async fn test_rst_complex_table_with_spanning() {
 /// Test emphasis and strong markup
 #[tokio::test]
 async fn test_rst_emphasis_and_strong() {
-    let content = rst_fixture_bytes();
+    let Some(content) = rst_fixture_bytes() else {
+        return;
+    };
     let result = extract_bytes_document(&content, "text/x-rst", &ExtractionConfig::default())
         .await
         .expect("Should extract RST successfully");
@@ -318,7 +363,9 @@ async fn test_rst_emphasis_and_strong() {
 /// Test inline code extraction
 #[tokio::test]
 async fn test_rst_inline_code() {
-    let content = rst_fixture_bytes();
+    let Some(content) = rst_fixture_bytes() else {
+        return;
+    };
     let result = extract_bytes_document(&content, "text/x-rst", &ExtractionConfig::default())
         .await
         .expect("Should extract RST successfully");
@@ -334,7 +381,9 @@ async fn test_rst_inline_code() {
 /// Test subscript and superscript
 #[tokio::test]
 async fn test_rst_subscript_superscript() {
-    let content = rst_fixture_bytes();
+    let Some(content) = rst_fixture_bytes() else {
+        return;
+    };
     let result = extract_bytes_document(&content, "text/x-rst", &ExtractionConfig::default())
         .await
         .expect("Should extract RST successfully");
@@ -350,7 +399,9 @@ async fn test_rst_subscript_superscript() {
 /// Test explicit links extraction
 #[tokio::test]
 async fn test_rst_explicit_links() {
-    let content = rst_fixture_bytes();
+    let Some(content) = rst_fixture_bytes() else {
+        return;
+    };
     let result = extract_bytes_document(&content, "text/x-rst", &ExtractionConfig::default())
         .await
         .expect("Should extract RST successfully");
@@ -371,7 +422,9 @@ async fn test_rst_explicit_links() {
 /// Test reference links
 #[tokio::test]
 async fn test_rst_reference_links() {
-    let content = rst_fixture_bytes();
+    let Some(content) = rst_fixture_bytes() else {
+        return;
+    };
     let result = extract_bytes_document(&content, "text/x-rst", &ExtractionConfig::default())
         .await
         .expect("Should extract RST successfully");
@@ -387,7 +440,9 @@ async fn test_rst_reference_links() {
 /// Test autolinks (bare URLs and email addresses)
 #[tokio::test]
 async fn test_rst_autolinks() {
-    let content = rst_fixture_bytes();
+    let Some(content) = rst_fixture_bytes() else {
+        return;
+    };
     let result = extract_bytes_document(&content, "text/x-rst", &ExtractionConfig::default())
         .await
         .expect("Should extract RST successfully");
@@ -408,7 +463,9 @@ async fn test_rst_autolinks() {
 /// Test image directive extraction
 #[tokio::test]
 async fn test_rst_image_directive() {
-    let content = rst_fixture_bytes();
+    let Some(content) = rst_fixture_bytes() else {
+        return;
+    };
     let result = extract_bytes_document(&content, "text/x-rst", &ExtractionConfig::default())
         .await
         .expect("Should extract RST successfully");
@@ -429,7 +486,9 @@ async fn test_rst_image_directive() {
 /// Test raw HTML block extraction
 #[tokio::test]
 async fn test_rst_raw_html_blocks() {
-    let content = rst_fixture_bytes();
+    let Some(content) = rst_fixture_bytes() else {
+        return;
+    };
     let result = extract_bytes_document(&content, "text/x-rst", &ExtractionConfig::default())
         .await
         .expect("Should extract RST successfully");
@@ -445,7 +504,9 @@ async fn test_rst_raw_html_blocks() {
 /// Test LaTeX block extraction
 #[tokio::test]
 async fn test_rst_latex_blocks() {
-    let content = rst_fixture_bytes();
+    let Some(content) = rst_fixture_bytes() else {
+        return;
+    };
     let result = extract_bytes_document(&content, "text/x-rst", &ExtractionConfig::default())
         .await
         .expect("Should extract RST successfully");
@@ -464,7 +525,9 @@ async fn test_rst_latex_blocks() {
 /// Test math directive extraction
 #[tokio::test]
 async fn test_rst_math_directive() {
-    let content = rst_fixture_bytes();
+    let Some(content) = rst_fixture_bytes() else {
+        return;
+    };
     let result = extract_bytes_document(&content, "text/x-rst", &ExtractionConfig::default())
         .await
         .expect("Should extract RST successfully");
@@ -483,7 +546,9 @@ async fn test_rst_math_directive() {
 /// Test comment blocks are excluded from output
 #[tokio::test]
 async fn test_rst_comment_blocks_excluded() {
-    let content = rst_fixture_bytes();
+    let Some(content) = rst_fixture_bytes() else {
+        return;
+    };
     let result = extract_bytes_document(&content, "text/x-rst", &ExtractionConfig::default())
         .await
         .expect("Should extract RST successfully");
@@ -504,7 +569,9 @@ async fn test_rst_comment_blocks_excluded() {
 /// Test line blocks extraction
 #[tokio::test]
 async fn test_rst_line_blocks() {
-    let content = rst_fixture_bytes();
+    let Some(content) = rst_fixture_bytes() else {
+        return;
+    };
     let result = extract_bytes_document(&content, "text/x-rst", &ExtractionConfig::default())
         .await
         .expect("Should extract RST successfully");
@@ -522,7 +589,9 @@ async fn test_rst_line_blocks() {
 /// Test unicode character preservation
 #[tokio::test]
 async fn test_rst_unicode_characters() {
-    let content = rst_fixture_bytes();
+    let Some(content) = rst_fixture_bytes() else {
+        return;
+    };
     let result = extract_bytes_document(&content, "text/x-rst", &ExtractionConfig::default())
         .await
         .expect("Should extract RST successfully");
@@ -541,7 +610,9 @@ async fn test_rst_unicode_characters() {
 /// Test escaped characters
 #[tokio::test]
 async fn test_rst_escaped_characters() {
-    let content = rst_fixture_bytes();
+    let Some(content) = rst_fixture_bytes() else {
+        return;
+    };
     let result = extract_bytes_document(&content, "text/x-rst", &ExtractionConfig::default())
         .await
         .expect("Should extract RST successfully");
@@ -561,7 +632,9 @@ async fn test_rst_escaped_characters() {
 /// Test footnote extraction
 #[tokio::test]
 async fn test_rst_footnotes() {
-    let content = rst_fixture_bytes();
+    let Some(content) = rst_fixture_bytes() else {
+        return;
+    };
     let result = extract_bytes_document(&content, "text/x-rst", &ExtractionConfig::default())
         .await
         .expect("Should extract RST successfully");
@@ -577,7 +650,9 @@ async fn test_rst_footnotes() {
 /// Test block quote extraction
 #[tokio::test]
 async fn test_rst_block_quotes() {
-    let content = rst_fixture_bytes();
+    let Some(content) = rst_fixture_bytes() else {
+        return;
+    };
     let result = extract_bytes_document(&content, "text/x-rst", &ExtractionConfig::default())
         .await
         .expect("Should extract RST successfully");
@@ -593,7 +668,9 @@ async fn test_rst_block_quotes() {
 /// Test overall content extraction volume
 #[tokio::test]
 async fn test_rst_content_extraction_volume() {
-    let content = rst_fixture_bytes();
+    let Some(content) = rst_fixture_bytes() else {
+        return;
+    };
     let result = extract_bytes_document(&content, "text/x-rst", &ExtractionConfig::default())
         .await
         .expect("Should extract RST successfully");
@@ -616,7 +693,9 @@ async fn test_rst_content_extraction_volume() {
 /// Test extracted content contains all major sections
 #[tokio::test]
 async fn test_rst_all_major_sections_present() {
-    let content = rst_fixture_bytes();
+    let Some(content) = rst_fixture_bytes() else {
+        return;
+    };
     let result = extract_bytes_document(&content, "text/x-rst", &ExtractionConfig::default())
         .await
         .expect("Should extract RST successfully");
@@ -663,7 +742,9 @@ async fn test_rst_all_major_sections_present() {
 /// Test MIME type detection
 #[tokio::test]
 async fn test_rst_mime_type_detection() {
-    let content = rst_fixture_bytes();
+    let Some(content) = rst_fixture_bytes() else {
+        return;
+    };
 
     let result = extract_bytes_document(&content, "text/x-rst", &ExtractionConfig::default())
         .await
@@ -677,7 +758,9 @@ async fn test_rst_mime_type_detection() {
 /// Test that no extraction errors occur on valid RST file
 #[tokio::test]
 async fn test_rst_extraction_no_errors() {
-    let content = rst_fixture_bytes();
+    let Some(content) = rst_fixture_bytes() else {
+        return;
+    };
 
     let result = extract_bytes_document(&content, "text/x-rst", &ExtractionConfig::default()).await;
 
