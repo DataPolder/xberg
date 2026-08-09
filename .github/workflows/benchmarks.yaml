@@ -44,7 +44,7 @@ defaults:
 jobs:
   setup:
     name: Build harness + native libs
-    runs-on: runner-medium-arm64
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 360
     permissions:
       contents: read
@@ -176,11 +176,11 @@ jobs:
   bench-rust:
     name: bench-rust (${{ matrix.pipeline }}, ${{ matrix.output_format }}, ${{ matrix.mode }}, ${{ matrix.cohort }})
     needs: setup
-    runs-on: >-
-      ${{ (matrix.pipeline == 'layout'
-        || contains(matrix.pipeline, 'paddle')
-        || contains(matrix.pipeline, 'sceptre'))
-        && 'runner-large-arm64' || 'runner-medium-arm64' }}
+    # Previously split heavy pipelines (layout/paddle/sceptre) onto runner-large-arm64 and
+    # the rest onto runner-medium-arm64. Both self-hosted arm64 pools were retired, so every
+    # leg now runs on the same hosted arm64 machine — figures need re-baselining before they
+    # are compared against numbers published from the old runners.
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 360
     permissions:
       contents: read
@@ -359,7 +359,7 @@ jobs:
   sceptre-tract-diagnostic:
     name: sceptre-tract diagnostic (${{ matrix.mode }})
     needs: setup
-    runs-on: runner-large-arm64
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 360
     permissions:
       contents: read
@@ -427,7 +427,7 @@ jobs:
     name: docling (${{ matrix.output_format }}, ${{ matrix.mode }}, ${{ matrix.cohort }})
     needs: [setup, bench-rust]
     if: ${{ needs.setup.result == 'success' && !cancelled() }}
-    runs-on: runner-medium-arm64
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 360
     permissions:
       contents: read
@@ -544,7 +544,7 @@ jobs:
     name: markitdown (${{ matrix.output_format }}, ${{ matrix.mode }}, ${{ matrix.cohort }})
     needs: [setup, bench-rust]
     if: ${{ needs.setup.result == 'success' && !cancelled() }}
-    runs-on: runner-medium-arm64
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 360
     permissions:
       contents: read
@@ -627,7 +627,7 @@ jobs:
     name: unstructured (${{ matrix.output_format }}, ${{ matrix.mode }}, ${{ matrix.cohort }})
     needs: [setup, bench-rust]
     if: ${{ needs.setup.result == 'success' && !cancelled() }}
-    runs-on: runner-medium-arm64
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 360
     permissions:
       contents: read
@@ -721,7 +721,7 @@ jobs:
     name: tika (${{ matrix.output_format }}, ${{ matrix.mode }}, ${{ matrix.cohort }})
     needs: [setup, bench-rust]
     if: ${{ needs.setup.result == 'success' && !cancelled() }}
-    runs-on: runner-medium-arm64
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 360
     permissions:
       contents: read
@@ -817,7 +817,7 @@ jobs:
     name: pymupdf4llm (${{ matrix.output_format }}, ${{ matrix.mode }}, ${{ matrix.cohort }})
     needs: [setup, bench-rust]
     if: ${{ needs.setup.result == 'success' && !cancelled() }}
-    runs-on: runner-medium-arm64
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 360
     permissions:
       contents: read
@@ -911,7 +911,7 @@ jobs:
     # Checks out the same ref setup resolves (its later source-sha pin is only
     # needed by jobs that must match the benchmarked binary's exact revision).
     if: ${{ !cancelled() }}
-    runs-on: runner-medium-arm64
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 120
     permissions:
       contents: read
@@ -1030,7 +1030,7 @@ jobs:
     name: mineru (${{ matrix.output_format }}, ${{ matrix.mode }}, ${{ matrix.cohort }})
     needs: [setup, bench-rust, prefetch-mineru-models]
     if: ${{ needs.setup.result == 'success' && needs.prefetch-mineru-models.result == 'success' && !cancelled() }}
-    runs-on: runner-medium-arm64
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 360
     permissions:
       contents: read
@@ -1163,7 +1163,7 @@ jobs:
     name: liteparse (${{ matrix.output_format }}, ${{ matrix.mode }}, ${{ matrix.cohort }})
     needs: [setup, bench-rust]
     if: ${{ needs.setup.result == 'success' && !cancelled() }}
-    runs-on: runner-medium-arm64
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 360
     permissions:
       contents: read
