@@ -351,7 +351,7 @@ pub fn detect_mime_type_from_bytes(content: &[u8]) -> Result<String>;
 // Reverse lookup: MIME type → registered file extensions
 pub fn get_extensions_for_mime(mime_type: &str) -> Result<Vec<String>>;
 
-// Returns all 101 supported formats (115 file extensions) with name, MIME type, and extension list
+// Returns all 100 supported formats (120 file extensions) with name, MIME type, and extension list
 pub fn list_supported_formats() -> Vec<SupportedFormat>;
 ```
 

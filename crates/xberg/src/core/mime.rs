@@ -1840,6 +1840,47 @@ mod tests {
         assert!(!formats.is_empty(), "Supported formats list should not be empty");
     }
 
+    /// The headline "N formats · M file extensions" is hand-typed in the README
+    /// templates and the docs site, and nothing derived it from [`FORMATS`] — so it
+    /// drifted to "101 formats · 115 file extensions" against a table holding 100
+    /// entries and 120 extensions, and propagated into every generated README.
+    ///
+    /// Mirrors `core::formats::tests::test_known_formats_count`. If this fails because
+    /// a format was legitimately added or removed, update the numbers here **and** in
+    /// the copy listed below, which is where the published figures come from:
+    ///
+    /// - `templates/readme/root.md`, `cli.md`, `rust.md`,
+    ///   `templates/readme/partials/features.md.jinja`, `templates/docs/llms-body.md.jinja`
+    /// - `docs-site/src/content/docs/`: `index.mdx`, `features.mdx`, `ecosystem.md`,
+    ///   `cli/usage.mdx`, `guides/extraction.mdx`, `guides/rust-core-api.md`,
+    ///   `integrations/langchain.mdx`, `integrations/txtai.md`
+    ///
+    /// The generated READMEs (root `README.md`, `packages/*/README.md`, the crate
+    /// READMEs) pick the change up on the next alef regen -- do not hand-edit those.
+    #[test]
+    fn format_and_extension_counts_match_the_published_headline() {
+        const PUBLISHED_FORMATS: usize = 100;
+        const PUBLISHED_EXTENSIONS: usize = 120;
+
+        let extensions: HashSet<&str> = FORMATS
+            .iter()
+            .flat_map(|entry| entry.extensions.iter().copied())
+            .collect();
+
+        assert_eq!(
+            FORMATS.len(),
+            PUBLISHED_FORMATS,
+            "FORMATS has {} entries but the docs advertise {PUBLISHED_FORMATS} formats",
+            FORMATS.len()
+        );
+        assert_eq!(
+            extensions.len(),
+            PUBLISHED_EXTENSIONS,
+            "FORMATS covers {} unique extensions but the docs advertise {PUBLISHED_EXTENSIONS}",
+            extensions.len()
+        );
+    }
+
     #[test]
     fn test_list_supported_formats_sorted() {
         let formats = list_supported_formats();
