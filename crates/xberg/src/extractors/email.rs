@@ -820,7 +820,9 @@ Attachment body\r\n\
     #[cfg(feature = "tokio-runtime")]
     #[tokio::test]
     async fn test_async_msg_preserves_sync_output_prefix_when_extracting_attachments() {
-        let data = include_bytes!("../../../../test_documents/email/attachment.msg");
+        let Some(data) = crate::utils::read_test_fixture("email/attachment.msg") else {
+            return;
+        };
         let config = ExtractionConfig {
             max_archive_depth: 1,
             ..Default::default()
@@ -828,10 +830,10 @@ Attachment body\r\n\
         let extractor = EmailExtractor::new();
 
         let sync_doc = extractor
-            .extract_sync(data, "application/vnd.ms-outlook", &config)
+            .extract_sync(&data, "application/vnd.ms-outlook", &config)
             .unwrap();
         let async_doc = extractor
-            .extract_content(data, "application/vnd.ms-outlook", &config)
+            .extract_content(&data, "application/vnd.ms-outlook", &config)
             .await
             .unwrap();
 

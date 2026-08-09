@@ -13,6 +13,40 @@ pub mod quality;
 /// String utilities: mojibake repair, encoding detection, safe truncation.
 pub mod string_utils;
 
+/// Read a `test_documents/` fixture at runtime for a `#[cfg(test)]` test.
+///
+/// `test_documents/` is a bucket-fetched corpus (see
+/// `test_documents/scripts/fetch_corpus.py`) that is not committed, so tests must
+/// not bake fixture bytes in at compile time via `include_bytes!` — that turns a
+/// missing fixture into a build failure for the whole crate, which is what broke
+/// the workspace-wide clippy run in CI.
+///
+/// `relative` is a path under `test_documents/`, e.g. `"images/test.heic"`.
+/// Returns `None` — after printing a greppable skip message naming the missing
+/// path — when the fixture has not been fetched. Callers must skip cleanly; a
+/// `None` is "not run", never "passed".
+///
+/// Lives here rather than beside any one caller because `utils` is compiled
+/// unconditionally: `extraction::image` is gated on the OCR features and
+/// `extraction::email` on `email`, so a helper in either is invisible to the
+/// other under a narrow feature set.
+#[cfg(test)]
+pub(crate) fn read_test_fixture(relative: &str) -> Option<Vec<u8>> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../test_documents")
+        .join(relative);
+    match std::fs::read(&path) {
+        Ok(bytes) => Some(bytes),
+        Err(e) => {
+            eprintln!(
+                "SKIP: fixture {} not available ({e}); run `python3 test_documents/scripts/fetch_corpus.py` to fetch it",
+                path.display()
+            );
+            None
+        }
+    }
+}
+
 /// Strip a leading Unicode byte-order mark (U+FEFF) if present.
 ///
 /// `encoding_rs` removes a BOM when it drives the encoding choice, but detected

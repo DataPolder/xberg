@@ -123,8 +123,10 @@ mod tests {
         use image::ImageReader;
         use std::io::Cursor;
 
-        const HEIC: &[u8] = include_bytes!("../../../../test_documents/images/test.heic");
-        let png = decode_heic_to_png(HEIC).expect("decode_heic_to_png");
+        let Some(heic) = crate::utils::read_test_fixture("images/test.heic") else {
+            return;
+        };
+        let png = decode_heic_to_png(&heic).expect("decode_heic_to_png");
         assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n", "output is not a PNG");
 
         let reader = ImageReader::new(Cursor::new(&png))

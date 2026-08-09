@@ -2195,16 +2195,20 @@ mod tests {
 
     #[test]
     fn test_parse_msg_default_unchanged_with_real_fixture() {
-        let data = include_bytes!("../../../../test_documents/vendored/unstructured/msg/fake-email.msg");
-        let result = parse_msg_content(data, None).unwrap();
+        let Some(data) = crate::utils::read_test_fixture("vendored/unstructured/msg/fake-email.msg") else {
+            return;
+        };
+        let result = parse_msg_content(&data, None).unwrap();
         assert!(!result.content.is_empty());
     }
 
     #[test]
     fn test_parse_msg_reads_binary_html_body_with_attachment() {
-        let data = include_bytes!("../../../../test_documents/email/msg_with_attachments_alt.msg");
+        let Some(data) = crate::utils::read_test_fixture("email/msg_with_attachments_alt.msg") else {
+            return;
+        };
 
-        let result = parse_msg_content(data, None).unwrap();
+        let result = parse_msg_content(&data, None).unwrap();
 
         assert_eq!(result.subject.as_deref(), Some("This is the subject"));
         assert_eq!(result.from_email.as_deref(), Some("peterpan@neverland.com"));
@@ -2217,9 +2221,11 @@ mod tests {
 
     #[test]
     fn test_parse_msg_invalid_codepage_falls_back_silently() {
-        let data = include_bytes!("../../../../test_documents/vendored/unstructured/msg/fake-email.msg");
-        let result_invalid = parse_msg_content(data, Some(99999)).unwrap();
-        let result_default = parse_msg_content(data, None).unwrap();
+        let Some(data) = crate::utils::read_test_fixture("vendored/unstructured/msg/fake-email.msg") else {
+            return;
+        };
+        let result_invalid = parse_msg_content(&data, Some(99999)).unwrap();
+        let result_default = parse_msg_content(&data, None).unwrap();
         assert_eq!(result_invalid.subject, result_default.subject);
         assert_eq!(result_invalid.content, result_default.content);
     }

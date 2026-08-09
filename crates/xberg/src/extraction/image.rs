@@ -747,11 +747,15 @@ mod tests {
     #[cfg(feature = "heic")]
     #[test]
     fn test_extract_image_metadata_handles_heic() {
-        const HEIC: &[u8] = include_bytes!("../../../../test_documents/images/test.heic");
-        const HEIF: &[u8] = include_bytes!("../../../../test_documents/images/test.heif");
-        const AVIF: &[u8] = include_bytes!("../../../../test_documents/images/test.avif");
-        for (label, bytes) in [("heic", HEIC), ("heif", HEIF), ("avif", AVIF)] {
-            let meta = extract_image_metadata(bytes).unwrap_or_else(|e| panic!("{label}: {e}"));
+        for (label, relative) in [
+            ("heic", "images/test.heic"),
+            ("heif", "images/test.heif"),
+            ("avif", "images/test.avif"),
+        ] {
+            let Some(bytes) = crate::utils::read_test_fixture(relative) else {
+                continue;
+            };
+            let meta = extract_image_metadata(&bytes).unwrap_or_else(|e| panic!("{label}: {e}"));
             assert!(meta.width > 0, "{label}: width should be > 0");
             assert!(meta.height > 0, "{label}: height should be > 0");
             assert_eq!(meta.format, "HEIF", "{label}: unexpected format tag");
@@ -836,8 +840,10 @@ mod tests {
 
     #[test]
     fn test_extract_jp2_rust_logo_metadata() {
-        let bytes = include_bytes!("../../../../test_documents/images/rust-logo-512x512-blk.jp2");
-        let result = extract_image_metadata(bytes);
+        let Some(bytes) = crate::utils::read_test_fixture("images/rust-logo-512x512-blk.jp2") else {
+            return;
+        };
+        let result = extract_image_metadata(&bytes);
         assert!(result.is_ok(), "Failed to extract JP2 metadata: {:?}", result.err());
         let metadata = result.unwrap();
         assert_eq!(metadata.width, 512);
@@ -847,8 +853,10 @@ mod tests {
 
     #[test]
     fn test_extract_jp2_hadley_crater_metadata() {
-        let bytes = include_bytes!("../../../../test_documents/images/Hadley_Crater.jp2");
-        let result = extract_image_metadata(bytes);
+        let Some(bytes) = crate::utils::read_test_fixture("images/Hadley_Crater.jp2") else {
+            return;
+        };
+        let result = extract_image_metadata(&bytes);
         assert!(result.is_ok(), "Failed to extract JP2 metadata: {:?}", result.err());
         let metadata = result.unwrap();
         assert!(metadata.width > 0);
@@ -880,8 +888,10 @@ mod jp2_decode_tests {
 
     #[test]
     fn test_decode_jp2_to_rgb() {
-        let bytes = include_bytes!("../../../../test_documents/images/rust-logo-512x512-blk.jp2");
-        let rgb = decode_jp2_to_rgb(bytes).expect("Should decode JP2 to RGB");
+        let Some(bytes) = crate::utils::read_test_fixture("images/rust-logo-512x512-blk.jp2") else {
+            return;
+        };
+        let rgb = decode_jp2_to_rgb(&bytes).expect("Should decode JP2 to RGB");
         assert_eq!(rgb.width(), 512);
         assert_eq!(rgb.height(), 512);
     }
