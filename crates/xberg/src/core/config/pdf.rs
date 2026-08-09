@@ -81,8 +81,17 @@ pub struct PdfConfig {
     ///
     /// When `true`, projects text spans onto layout-detected regions, performs
     /// column detection, and emits spans in natural reading order (important
-    /// for multi-column academic PDFs). Requires the `layout-detection`
-    /// feature; has no effect without it. Defaults to `false`.
+    /// for multi-column academic PDFs). It also repairs 90/180/270-degree
+    /// rotated text runs — sideways tables and captions — that otherwise read
+    /// word-reversed and glued (GH#1358); see
+    /// `crate::extractors::pdf::reading_order` for the rotation-handling
+    /// details and its limits. Requires the `layout-detection` feature and a
+    /// page for which layout detection actually produces hints: a page with
+    /// no detected regions falls back to the original, unrepaired extraction
+    /// order even with this enabled. Independent of
+    /// [`LayoutStrategy`](crate::core::config::LayoutStrategy), which only
+    /// controls whether layout detection runs at all — enabling `Always` or
+    /// `Auto` alone does not turn reordering on. Defaults to `false`.
     #[serde(default)]
     pub reading_order: bool,
 }

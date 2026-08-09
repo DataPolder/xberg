@@ -5,7 +5,21 @@
 //! (top-to-bottom within a column, left-to-right across columns).
 //!
 //! This is critical for multi-column academic PDFs where native PDF text
-//! extraction reads in column order rather than visual reading order.
+//! extraction reads in column order rather than visual reading order. It also
+//! reassembles 90/180/270-degree rotated text-matrix runs (sideways tables,
+//! rotated captions) along their own advance axis instead of page x/y — see
+//! [`assemble_reading_order_text`] — which is the GH#1358 case (rotated spec
+//! tables reading word-reversed and glued).
+//!
+//! Both repairs depend on layout hints being available for the page
+//! ([`reorder_spans_by_layout`]'s per-region path). When no hints are
+//! produced for a page, `extract_all_from_oxide_document` short-circuits to
+//! identity span order before this module's own geometric fallback
+//! ([`reorder_spans_geometric`]) ever runs, so that page's rotated runs are
+//! *not* repaired even with `reading_order` enabled. `reorder_spans_geometric`
+//! is also deliberately rotation-blind by design (see its doc comment) even
+//! when it does run. GH#1358 is only fully closed for pages where layout
+//! detection actually produces hints.
 
 #[cfg(feature = "layout-detection")]
 use crate::pdf::structure::types::{LayoutHint, LayoutHintClass, LayoutRegionPath, LayoutRegionTag};
