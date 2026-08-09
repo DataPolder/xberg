@@ -134,7 +134,7 @@ For advanced configuration options including language detection, table extractio
 ## Documentation
 
 - **[Official Documentation](https://docs.xberg.io/)**
-- **[API Reference](https://docs.xberg.io/reference/api-python/)**
+- **[API Reference](https://docs.xberg.io/reference/api-{% if language == "ffi" %}c{% elif language == "kotlin_android" %}kotlin-android{% else %}{{ language }}{% endif %}/)**
 - **[Examples & Guides](https://docs.xberg.io/)**
 
 ## Contributing

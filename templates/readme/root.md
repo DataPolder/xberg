@@ -533,7 +533,7 @@ Full guides, API references for every binding, format reference, and configurati
 - [Getting Started](https://docs.xberg.io/getting-started/installation/)
 - [Quick Start](https://docs.xberg.io/getting-started/quickstart/)
 - [Guides](https://docs.xberg.io/guides/extraction/)
-- [API Reference](https://docs.xberg.io/reference/api-python/)
+- [API Reference (Rust core)](https://docs.xberg.io/reference/api-rust/) — every binding has its own page under `/reference/`
 - [Format Reference](https://docs.xberg.io/reference/formats/)
 - [Live Demo](https://docs.xberg.io/demo.html) (browser, WASM)
 
