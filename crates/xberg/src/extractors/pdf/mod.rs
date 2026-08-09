@@ -226,6 +226,70 @@ fn attach_unrepresented_tables(doc: &mut InternalDocument, tables: Vec<crate::ty
     }
 }
 
+/// Share of a table's cell tokens that must already be in the element stream
+/// before the table counts as represented.
+const MIN_TABLE_TOKEN_REPRESENTATION: f64 = 0.90;
+/// Cell-token count below which the containment check abstains: on a handful of
+/// tokens an incidental overlap with unrelated prose is likely, and injecting a
+/// duplicate is cheaper than dropping a real table.
+const MIN_TABLE_TOKENS_FOR_CONTAINMENT: usize = 8;
+
+/// Tokens the element stream already renders, as a consumable multiset.
+fn element_token_multiset(doc: &InternalDocument) -> ahash::AHashMap<String, usize> {
+    let mut represented = ahash::AHashMap::<String, usize>::new();
+    for token in doc
+        .elements
+        .iter()
+        .flat_map(|element| normalized_pdf_tokens(&element.text))
+    {
+        *represented.entry(token).or_default() += 1;
+    }
+    represented
+}
+
+/// Whether `table`'s cell text is already carried by the element stream.
+///
+/// Compares on `normalized_pdf_tokens`, so whitespace, line wrapping and edge
+/// punctuation do not matter — a table reconstructed from prose lines that are
+/// still in the stream verbatim reads as represented. Accounting is multiset
+/// based like [`structured_native_token_coverage`]: each text occurrence backs at
+/// most one cell occurrence, and the occurrences are consumed only when the table
+/// is judged represented, so one table cannot mask the next.
+///
+/// Both bailouts err toward returning `false` (inject), because a duplicated
+/// table costs precision while a dropped one costs content.
+fn table_is_represented(table: &crate::types::Table, represented: &mut ahash::AHashMap<String, usize>) -> bool {
+    let mut table_tokens = ahash::AHashMap::<String, usize>::new();
+    let mut table_token_count = 0usize;
+    for token in table
+        .cells
+        .iter()
+        .flatten()
+        .flat_map(|cell| normalized_pdf_tokens(cell))
+    {
+        *table_tokens.entry(token).or_default() += 1;
+        table_token_count += 1;
+    }
+    if table_token_count < MIN_TABLE_TOKENS_FOR_CONTAINMENT {
+        return false;
+    }
+
+    let matched: usize = table_tokens
+        .iter()
+        .map(|(token, count)| (*count).min(represented.get(token).copied().unwrap_or_default()))
+        .sum();
+    if (matched as f64 / table_token_count as f64) < MIN_TABLE_TOKEN_REPRESENTATION {
+        return false;
+    }
+
+    for (token, count) in table_tokens {
+        if let Some(remaining) = represented.get_mut(&token) {
+            *remaining = remaining.saturating_sub(count);
+        }
+    }
+    true
+}
+
 fn inject_unrepresented_table_elements(doc: &mut InternalDocument, allow_injection: bool) {
     if !allow_injection
         || doc
@@ -236,7 +300,16 @@ fn inject_unrepresented_table_elements(doc: &mut InternalDocument, allow_injecti
         return;
     }
 
-    for table_index in 0..doc.tables.len() as u32 {
+    // The `Table`-element guard above only ever fires on the structured path;
+    // `flat_pdf_document` builds nothing but `Paragraph`s, so on the flat path
+    // every detected table was injected on top of native text that already
+    // contained the words it was reconstructed from — the same content rendered
+    // twice (pdfa_031). Inject only the tables whose cells are genuinely absent.
+    let mut represented = element_token_multiset(doc);
+    let unrepresented = (0..doc.tables.len() as u32)
+        .filter(|table_index| !table_is_represented(&doc.tables[*table_index as usize], &mut represented))
+        .collect::<Vec<_>>();
+    for table_index in unrepresented {
         doc.push_element(InternalElement::text(ElementKind::Table { table_index }, "", 0));
     }
 }
@@ -2038,6 +2111,105 @@ mod tests {
                 .count(),
             1,
             "structured and OCR paths must still be able to render attached table assets"
+        );
+    }
+
+    /// pdfa_031: the structure-coverage safeguard falls back to `flat_pdf_document`,
+    /// which carries no `Table` element, so a table reconstructed from prose that is
+    /// still in the flat text used to be rendered a second time.
+    #[test]
+    fn structured_output_skips_tables_already_present_in_the_element_stream() {
+        let mut doc = InternalDocument::new("pdf");
+        doc.push_element(InternalElement::text(
+            ElementKind::Paragraph,
+            "Persons committed to the custody of a sheriff shall be confined\nin the facilities designated by law.",
+            0,
+        ));
+        let table = crate::types::Table {
+            cells: vec![
+                vec![
+                    "Persons committed to the custody".to_string(),
+                    "of a sheriff".to_string(),
+                ],
+                vec![
+                    "shall be confined in the facilities".to_string(),
+                    "designated by law".to_string(),
+                ],
+            ],
+            markdown: "| Persons committed to the custody | of a sheriff |".to_string(),
+            page_number: 1,
+            bounding_box: None,
+            ..Default::default()
+        };
+
+        attach_unrepresented_tables(&mut doc, vec![table]);
+        inject_unrepresented_table_elements(&mut doc, true);
+
+        assert_eq!(doc.tables.len(), 1, "table assets must remain available to callers");
+        assert!(
+            !doc.elements
+                .iter()
+                .any(|element| matches!(element.kind, ElementKind::Table { .. })),
+            "a table whose cells are already rendered must not be injected a second time"
+        );
+    }
+
+    #[test]
+    fn structured_output_still_injects_tables_missing_from_the_element_stream() {
+        let mut doc = InternalDocument::new("pdf");
+        doc.push_element(InternalElement::text(
+            ElementKind::Paragraph,
+            "Narrative prose that shares none of the tabulated content.",
+            0,
+        ));
+        let table = crate::types::Table {
+            cells: vec![
+                vec!["Region".to_string(), "Revenue".to_string(), "Growth".to_string()],
+                vec!["North".to_string(), "1200".to_string(), "4 percent".to_string()],
+                vec!["South".to_string(), "980".to_string(), "7 percent".to_string()],
+            ],
+            markdown: "| Region | Revenue | Growth |".to_string(),
+            page_number: 1,
+            bounding_box: None,
+            ..Default::default()
+        };
+
+        attach_unrepresented_tables(&mut doc, vec![table]);
+        inject_unrepresented_table_elements(&mut doc, true);
+
+        assert_eq!(
+            doc.elements
+                .iter()
+                .filter(|element| matches!(element.kind, ElementKind::Table { .. }))
+                .count(),
+            1,
+            "dropped table content must still be recovered by injection"
+        );
+    }
+
+    /// The containment check abstains below `MIN_TABLE_TOKENS_FOR_CONTAINMENT`, so a
+    /// short table cannot be suppressed by an incidental token overlap.
+    #[test]
+    fn short_tables_are_injected_even_when_their_tokens_appear_in_the_text() {
+        let mut doc = InternalDocument::new("pdf");
+        doc.push_element(InternalElement::text(ElementKind::Paragraph, "total 42 balance", 0));
+        let table = crate::types::Table {
+            cells: vec![vec!["Total".to_string(), "42".to_string()]],
+            markdown: "| Total | 42 |".to_string(),
+            page_number: 1,
+            bounding_box: None,
+            ..Default::default()
+        };
+
+        attach_unrepresented_tables(&mut doc, vec![table]);
+        inject_unrepresented_table_elements(&mut doc, true);
+
+        assert_eq!(
+            doc.elements
+                .iter()
+                .filter(|element| matches!(element.kind, ElementKind::Table { .. }))
+                .count(),
+            1
         );
     }
 

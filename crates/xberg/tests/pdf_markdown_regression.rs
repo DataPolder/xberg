@@ -363,7 +363,6 @@ const PDFIUM_KNOWN_REGRESSIONS: &[&str] = &[
     // nougat_026 is the same file as pdfa_001 (identical md5); its duplicate table row was
     // removed, so the pdfa_001 entry covers both. ~keep
     "pdfa_001", // calibrated 0.993 → today 0.905 (Δ -0.088,  -9%); floor 0.92
-    "pdfa_031", // calibrated 0.903 → today 0.733 (Δ -0.170, -19%); floor 0.83
 ];
 
 /// Extract a PDF with the given output format.
