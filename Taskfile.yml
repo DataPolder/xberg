@@ -263,6 +263,11 @@ tasks:
     cmds:
       - python3 scripts/ci/check-ffi-format-features.py alef.toml
 
+  docs:verify:changelog:
+    desc: "Check the docs-site changelog carries every release section from CHANGELOG.md"
+    cmds:
+      - python3 scripts/ci/check-changelog-sync.py
+
   e2e:generate:
     desc: "Generate E2E tests for all languages from fixtures"
     cmds:

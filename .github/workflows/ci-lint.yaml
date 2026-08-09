@@ -126,6 +126,13 @@ jobs:
       # AND the generated manifest both carry the formats. ~keep
       - name: Verify the native FFI build still selects every document format
         run: task alef:verify:ffi-formats
+      # docs-site/src/content/docs/changelog.md is a hand-maintained copy of
+      # CHANGELOG.md -- nothing generates it and nothing synced it, so it silently
+      # fell a full release behind (repo at 1.1.0, published docs still at 1.0.14).
+      # Asserts every release section is present AND byte-identical, so neither a
+      # missed release nor a one-sided edit can drift again. ~keep
+      - name: Verify the docs-site changelog is in sync
+        run: task docs:verify:changelog
 
   alef-bindings-freshness:
     name: Alef-generated bindings freshness
