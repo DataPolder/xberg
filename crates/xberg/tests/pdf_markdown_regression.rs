@@ -349,20 +349,48 @@ const PDFIUM_KNOWN_REGRESSIONS: &[&str] = &[
     // entries to the gate once the offending post-processor is identified. ~keep
     "nics-background-checks-2015-11-rotated", // md / djot 0.724 < 0.92
     "issue-1181",                             // plain 0.500 ≤ 0.50 floor (tip-over)
-    // ── 4. BROKEN: post-calibration extraction regressions the safeguard did not reach ──
-    // Six documents were listed here on 2026-08-07. The native-coverage safeguard recovered
-    // four of them; these two it did not. The thresholds are correct and are deliberately left
-    // untouched — do not lower a floor to make one of these pass, that hides the defect.
-    // Delete the entry only when today's score is back above the floor.
+    // ── 4. NOT AN EXTRACTION DEFECT: this ground truth encodes policies xberg does not
+    //       implement. Diagnosed 2026-08-09; the previous comment here was wrong. ──
     //
-    // The safeguard moved pdfa_001 not at all (0.905 both before and after) and pdfa_031 by
-    // +0.010, so neither is a partial fix awaiting one more nudge. The two fail differently and
-    // need separate diagnoses: pdfa_001 loses content (97.6% precision against 84.4% recall),
-    // while pdfa_031 emits surplus text (58.9% precision against 97.1% recall).
+    // pdfa_001 scores P 0.927 / R 0.784 / F1 0.849 against a 0.92 floor. 345 of 1597 ground-truth
+    // words are missing, and two causes account for 244 of them. NEITHER is a bug in extraction.
+    //
+    // (a) 131 ballot glyphs — 75 × U+2610 ☐ and 56 × U+2611 ☑ — that NO text extractor produces.
+    //     Measured on this exact file: pdfplumber `extract_text()` yields ☐ 0, ☑ 0, and 57
+    //     standalone "X"; xberg yields the same. The PDF has no AcroForm, no /Widget, no /FT, no
+    //     ZapfDingbats and no /Differences — just two Type1 Helvetica fonts in WinAnsiEncoding.
+    //     Checked boxes are the literal operator `(X) Tj`; unchecked boxes have NO text at all,
+    //     only stroke-only vector rectangles. So for 75 of them there is no character to extract:
+    //     emitting a glyph would mean detecting an empty stroked rect beside a label and
+    //     synthesizing one, which is a layout feature, not an extraction fix. The other 56 are a
+    //     token *substitution* (we emit "X", the GT wants ☑) and are penalised twice — the glyph
+    //     counts as missing, the "X" counts as spurious.
+    //
+    // (b) ~113 words of repeated page footer, stripped by design. "Report Status: / Data Last
+    //     Update: 09/17/2012 / Submission Date: 01/08/2013 / Print Date: 1/9/2013 6:25 AM" is on
+    //     every page; the GT keeps all 13 copies, we keep 3. Instrumented and confirmed: the
+    //     footer arrives as SEVEN separate paragraphs of 8–14 alphanumeric characters each, all
+    //     far below `retain_page_furniture_safely`'s MIN_SUBSTANTIVE_CHARS = 80, so each is
+    //     dropped wherever that function's 30 %-of-page rescue valve does not fire. Across the 13
+    //     pages the valve fires on exactly 2 (51.4 % and 51.0 %, the sparse pages) and not on the
+    //     other 11 (7.4 %–26.8 %); page 1 never marks the footer as furniture at all. 2 + 1 = the
+    //     3 survivors. Dropping short repeated furniture is the intended behaviour of that code.
+    //
+    // Why the entry stays rather than getting "fixed": measured, fixing the footer ALONE reaches
+    // only F1 0.892 — still under the floor. The only route to 0.92 runs through mapping "X" → ☑
+    // (0.928), and that is ground-truth chasing: xberg has no checkbox detection, so it cannot
+    // know an "X" sits in a box rather than being ordinary content. Do not do it to turn a number
+    // green, and do NOT lower the floor — the floor is correct, the fixture just measures a
+    // different rendering policy. Retire this entry only if xberg gains real checkbox detection,
+    // or if the corpus grows a ground truth produced by a plain text extractor.
+    //
+    // Left open, and genuinely ours: the same repeat-detector also swallowed the standalone table
+    // value "22" (alnum = 2) as furniture. One word here, but it shows a short numeric cell that
+    // happens to recur across pages can be classified as page furniture — worth its own fix.
     //
     // nougat_026 is the same file as pdfa_001 (identical md5); its duplicate table row was
     // removed, so the pdfa_001 entry covers both. ~keep
-    "pdfa_001", // calibrated 0.993 → today 0.905 (Δ -0.088,  -9%); floor 0.92
+    "pdfa_001", // GT policy mismatch (synthesized ☐/☑ + by-design furniture stripping), not a regression
 ];
 
 /// Extract a PDF with the given output format.
