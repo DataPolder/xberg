@@ -1118,6 +1118,22 @@ fn rectangle_overlap_area(left: (f32, f32, f32, f32), right: (f32, f32, f32, f32
 /// as a paragraph break. Normal line pitch leaves well under one line height of
 /// whitespace; a blank line leaves more than one.
 const PARAGRAPH_GAP_HEIGHT_FACTOR: f32 = 1.5;
+
+/// Multiple of the page's own body leading a baseline-to-baseline advance must
+/// reach to count as a paragraph break.
+///
+/// [`PARAGRAPH_GAP_HEIGHT_FACTOR`] measures the *whitespace band* between two
+/// lines against the glyph height, which makes it blind to the most common
+/// paragraph separator there is. With glyph height `h` and leading `L`, single
+/// spacing leaves a band of `L - h` and a blank line leaves `2L - h`; for the
+/// usual `L` of 1.1–1.3 `h` that blank line is only 1.2–1.6 `h`, so a 1.5 `h`
+/// band threshold demands more vertical space than a blank line actually
+/// provides. Comparing the advance to the leading instead is scale-free: a
+/// blank line doubles the advance, so anything at or past 1.5× the body leading
+/// is a break while ordinary wrapped lines (1.0×) are not, whatever the leading
+/// happens to be. The two rules are OR-ed, so no break the band rule already
+/// finds is lost.
+const PARAGRAPH_BREAK_LEADING_MULTIPLE: f32 = 1.5;
 const INLINE_STYLE_BASELINE_TOLERANCE: f32 = 0.5;
 const INLINE_STYLE_MAX_FORWARD_GAP_FONT_FACTOR: f32 = 1.0;
 const INLINE_STYLE_MAX_OVERLAP_FONT_FACTOR: f32 = 0.15;
@@ -1126,11 +1142,13 @@ const INLINE_STYLE_MAX_OVERLAP_FONT_FACTOR: f32 = 0.15;
 ///
 /// Segments are clustered into visual lines after sorting by y — stream order
 /// is not positional (multi-column PDFs interleave columns, which a pairwise
-/// scan misreads as phantom gaps). A break is recorded only where the band
-/// between two consecutive lines is taller than
-/// [`PARAGRAPH_GAP_HEIGHT_FACTOR`] × the median line height: pure blank-line
-/// spacing. Bands between two monospace lines are skipped, because code
-/// listings legitimately contain blank lines inside one logical block.
+/// scan misreads as phantom gaps). A break is recorded where the band between
+/// two consecutive lines is taller than [`PARAGRAPH_GAP_HEIGHT_FACTOR`] × the
+/// median line height, or where their baseline advance reaches
+/// [`PARAGRAPH_BREAK_LEADING_MULTIPLE`] × the page's own body leading — the
+/// signal a blank line actually produces. Bands between two monospace lines are
+/// skipped, because code listings legitimately contain blank lines inside one
+/// logical block.
 ///
 /// Without this, the heuristic path only breaks paragraphs on font/bold/list
 /// changes, fusing visually separated blocks (standalone headings, display
@@ -1156,6 +1174,15 @@ fn compute_paragraph_gap_ys(segments: &[SegmentData]) -> Vec<f32> {
     gaps
 }
 
+/// One visual line of a page, as clustered by [`compute_paragraph_gap_ys_in_shared_frame`].
+struct LineBand {
+    top: f32,
+    bottom: f32,
+    height: f32,
+    monospace: bool,
+    anchor_y: f32,
+}
+
 fn compute_paragraph_gap_ys_in_shared_frame(segments: &[SegmentData]) -> Vec<f32> {
     if segments.len() < 2 {
         return Vec::new();
@@ -1168,13 +1195,6 @@ fn compute_paragraph_gap_ys_in_shared_frame(segments: &[SegmentData]) -> Vec<f32
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    struct LineBand {
-        top: f32,
-        bottom: f32,
-        height: f32,
-        monospace: bool,
-        anchor_y: f32,
-    }
     let mut lines: Vec<LineBand> = Vec::new();
     for &i in &order {
         let seg = &segments[i];
@@ -1207,16 +1227,44 @@ fn compute_paragraph_gap_ys_in_shared_frame(segments: &[SegmentData]) -> Vec<f32
 
     let mut heights: Vec<f32> = lines.iter().map(|l| l.height).collect();
     heights.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let gap_threshold = heights[heights.len() / 2] * PARAGRAPH_GAP_HEIGHT_FACTOR;
+    let median_height = heights[heights.len() / 2];
+    let gap_threshold = median_height * PARAGRAPH_GAP_HEIGHT_FACTOR;
+    let advance_threshold = body_leading(&lines, median_height) * PARAGRAPH_BREAK_LEADING_MULTIPLE;
 
     let mut gap_ys = Vec::new();
     for pair in lines.windows(2) {
         let gap = pair[0].bottom - pair[1].top;
-        if gap > gap_threshold && !(pair[0].monospace && pair[1].monospace) {
+        let advance = pair[0].anchor_y - pair[1].anchor_y;
+        if (gap > gap_threshold || advance > advance_threshold) && !(pair[0].monospace && pair[1].monospace) {
             gap_ys.push((pair[0].bottom + pair[1].top) / 2.0);
         }
     }
     gap_ys
+}
+
+/// Estimate the body leading of a page from its own line pitch: the tightest
+/// baseline-to-baseline advance between consecutive lines, floored at the
+/// median line height.
+///
+/// The tightest advance is used rather than the median or the mode because a
+/// short block-structured page — a memo of five one-line blocks, say — has more
+/// break-sized advances than body-sized ones, so any central statistic reports
+/// the break spacing as normal and no break can ever be detected. The floor is
+/// what makes the minimum safe: an advance below one line height is not a
+/// wrapped line at all (stacked accents, a subscript resolved onto its own
+/// band) and must not be allowed to shrink the estimate and split every
+/// ordinary line on the page.
+fn body_leading(lines: &[LineBand], median_height: f32) -> f32 {
+    let tightest = lines
+        .windows(2)
+        .map(|pair| pair[0].anchor_y - pair[1].anchor_y)
+        .filter(|advance| advance.is_finite() && *advance > 0.0)
+        .fold(f32::INFINITY, f32::min);
+    if tightest.is_finite() {
+        tightest.max(median_height)
+    } else {
+        median_height
+    }
 }
 
 fn paragraph_gap_axis(segment: &SegmentData) -> f32 {
