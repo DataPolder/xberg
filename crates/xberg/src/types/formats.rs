@@ -357,9 +357,13 @@ impl Default for ImagePreprocessingConfig {
 #[cfg_attr(feature = "api", derive(utoipa::ToSchema))]
 #[serde(default)]
 pub struct TesseractConfig {
-    /// Language code(s) for OCR recognition.
-    /// Accepts either a single language code ("eng") or a list (["eng", "deu"]).
-    /// For Tesseract backend, languages are joined with "+".
+    /// Language code(s) for OCR recognition. For Tesseract, languages are joined with "+".
+    ///
+    /// A list is the canonical form and the only form accepted by the binding
+    /// object APIs (Python, Node, PHP, WASM, etc.): `["eng", "deu"]`. When
+    /// deserializing from a config file, JSON body, or the REST/MCP API, a
+    /// single string is also accepted, either as one code ("eng") or
+    /// "+"-joined ("eng+deu").
     #[serde(deserialize_with = "deserialize_languages")]
     pub language: Vec<String>,
 

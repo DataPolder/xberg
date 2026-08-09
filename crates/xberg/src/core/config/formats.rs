@@ -47,7 +47,7 @@ pub enum OutputFormat {
 impl OutputFormat {
     /// Get the renderer name for this format.
     /// Returns `None` for formats that don't use the renderer registry
-    /// (Plain, Structured, Toon — these are handled differently).
+    /// (Plain, Json, Structured — these are handled differently).
     pub(crate) fn renderer_name(&self) -> Option<&str> {
         match self {
             OutputFormat::Plain | OutputFormat::Json | OutputFormat::Structured => None,

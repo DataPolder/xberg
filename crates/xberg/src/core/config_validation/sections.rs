@@ -200,8 +200,9 @@ const VALID_TESSERACT_PSM: &[i32] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 
 const VALID_TESSERACT_OEM: &[i32] = &[0, 1, 2, 3];
 
 /// Valid output formats for document extraction.
-/// Supports plain text, markdown, djot, HTML, and structured (JSON) output formats.
-/// Also accepts aliases: "text" for "plain", "md" for "markdown", "json" for "structured".
+/// Supports plain text, markdown, djot, HTML, JSON, and structured output formats.
+/// "json" and "structured" are distinct formats, not aliases of each other.
+/// Also accepts aliases: "text" for "plain", "md" for "markdown", "structured-ocr" for "structured".
 #[cfg(test)]
 const VALID_OUTPUT_FORMATS: &[&str] = &["plain", "text", "markdown", "md", "djot", "html", "structured", "json"];
 
