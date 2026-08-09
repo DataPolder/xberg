@@ -31,6 +31,12 @@ pub mod string_utils;
 /// `extraction::email` on `email`, so a helper in either is invisible to the
 /// other under a narrow feature set.
 #[cfg(test)]
+// Every caller sits behind a feature gate (`ocr`/`ocr-wasm`/`ocr-pipeline` for the image and
+// heif tests, `email` for the message ones), so a build that enables none of them compiles this
+// with no users at all and `-D warnings` rejects it -- which is what broke the
+// `--no-default-features --features layout-tract` clippy leg. Enumerating the gates here instead
+// would have to be kept in step with every future caller; allowing the unused case would not.
+#[allow(dead_code)]
 pub(crate) fn read_test_fixture(relative: &str) -> Option<Vec<u8>> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../test_documents")
