@@ -38,6 +38,17 @@ on:
 
 env:
   GLIBC_FLOOR: "2.28"
+  # jsDelivr (which serves the published @xberg-io/xberg-wasm package to the
+  # live browser demo) hard-caps a single file at 50 MB and rejects the whole
+  # package past 150 MB total -- either cap breached serves a 403 to every
+  # consumer, which has already happened once (commit 8ad6b2f4ccf dropped
+  # tree-sitter from wasm-target purely to get back under the per-file cap).
+  # Both budgets below sit at 80% of the real jsDelivr limit: candle (added to
+  # wasm-target after that incident) means the bundle is trending upward and
+  # untracked, so the margin exists to fail CI while there is still headroom
+  # to investigate, instead of finding out from a broken demo. ~keep
+  WASM_MAX_FILE_BYTES: "41943040" # 40 MiB; jsDelivr per-file hard cap is 50 MB
+  WASM_MAX_PACKAGE_BYTES: "125829120" # 120 MiB; jsDelivr per-package hard cap is 150 MB
 
 permissions:
   contents: read
@@ -880,6 +891,55 @@ jobs:
           # suffix, so we invoke the patch here (publish.yaml is not generated)
           # rather than relying on a package.json script surviving regen. ~keep
           build-command: "pnpm run build:all && node scripts/fix-wasi-imports.mjs"
+
+      - name: Enforce WASM CDN size budget (jsDelivr limits)
+        working-directory: crates/xberg-wasm
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Early warning, deliberately NOT the blocking gate: this job carries a
+          # job-level `continue-on-error: true`, so a failure here does not
+          # reliably stop publish-wasm from running. The authoritative check is
+          # the npm-tarball measurement inside publish-wasm, which runs before
+          # the publish step in a job that is not continue-on-error. This step
+          # exists to surface the number early, against the build output rather
+          # than the packed tarball, so growth toward the jsDelivr caps is
+          # visible on every run instead of being discovered from a broken
+          # demo. Sizes print whether or not the budget is breached. ~keep
+          FAIL=0
+          {
+            echo "### WASM CDN size budget (crates/xberg-wasm)"
+            echo
+            echo "| artifact | size (bytes) | limit (bytes) | status |"
+            echo "|---|---|---|---|"
+          } >>"$GITHUB_STEP_SUMMARY"
+
+          while IFS= read -r -d '' file; do
+            size=$(stat -c%s "$file")
+            rel="crates/xberg-wasm/${file#./}"
+            status="ok"
+            if (( size > WASM_MAX_FILE_BYTES )); then
+              status="FAIL"
+              FAIL=1
+              echo "::error::${rel} is ${size} bytes, exceeding the per-file budget of ${WASM_MAX_FILE_BYTES} bytes (jsDelivr's hard per-file cap is 50 MB). Trim this artifact (or feature-gate the dependency that grew it) before it can publish."
+            fi
+            echo "size: ${rel} = ${size} bytes (limit ${WASM_MAX_FILE_BYTES})"
+            echo "| ${rel} | ${size} | ${WASM_MAX_FILE_BYTES} | ${status} |" >>"$GITHUB_STEP_SUMMARY"
+          done < <(find pkg -name '*.wasm' -print0)
+
+          total=$(du -sb pkg | cut -f1)
+          status="ok"
+          if (( total > WASM_MAX_PACKAGE_BYTES )); then
+            status="FAIL"
+            FAIL=1
+            echo "::error::crates/xberg-wasm/pkg is ${total} bytes, exceeding the package budget of ${WASM_MAX_PACKAGE_BYTES} bytes (jsDelivr's hard per-package cap is 150 MB). Trim the published bundle before it can publish."
+          fi
+          echo "size: crates/xberg-wasm/pkg (total) = ${total} bytes (limit ${WASM_MAX_PACKAGE_BYTES})"
+          echo "| crates/xberg-wasm/pkg (total) | ${total} | ${WASM_MAX_PACKAGE_BYTES} | ${status} |" >>"$GITHUB_STEP_SUMMARY"
+
+          if [[ "$FAIL" -ne 0 ]]; then
+            exit 1
+          fi
 
       - name: Smoke test — Node can load the wasm web bundle
         working-directory: crates/xberg-wasm
@@ -2906,7 +2966,7 @@ jobs:
           node-version: "24"
           registry-url: "https://registry.npmjs.org/"
 
-      - name: Assert npm tarball contains the wasm web bundle
+      - name: Assert npm tarball contains the wasm web bundle and fits the CDN size budget
         working-directory: crates/xberg-wasm
         shell: bash
         run: |
@@ -2923,7 +2983,6 @@ jobs:
           # that makes the pipeline report non-zero and `if !` misreads it as a
           # false "missing" (the bundle is actually present). ~keep
           listing=$(tar -tzf "$TARBALL")
-          rm -f "$TARBALL"
           MISSING=0
           for f in "package/pkg/web/xberg_wasm.js" "package/pkg/web/xberg_wasm_bg.wasm"; do
             if ! grep -qxF "$f" <<<"$listing"; then
@@ -2932,10 +2991,36 @@ jobs:
             fi
           done
           if [[ "$MISSING" -ne 0 ]]; then
+            rm -f "$TARBALL"
             echo "FATAL: wasm npm package is missing required web bundle files; aborting publish." >&2
             exit 1
           fi
           echo "OK: npm tarball contains the wasm web bundle (xberg_wasm.js + xberg_wasm_bg.wasm)"
+
+          # Authoritative package-size gate: wasm-bindings already checked the
+          # unpacked pkg/ directory, but this is the actual gzip tarball
+          # npm/jsDelivr will serve, measured immediately before publish-npm
+          # runs so a regression introduced between jobs (or a stale
+          # wasm-bundle artifact) still can't reach the registry. Always
+          # printed, pass or fail, per #435. ~keep
+          tarball_size=$(stat -c%s "$TARBALL")
+          rm -f "$TARBALL"
+          status="ok"
+          if (( tarball_size > WASM_MAX_PACKAGE_BYTES )); then
+            status="FAIL"
+          fi
+          echo "size: npm tarball ($TARBALL) = ${tarball_size} bytes (limit ${WASM_MAX_PACKAGE_BYTES})"
+          {
+            echo "### WASM npm tarball size budget"
+            echo
+            echo "| artifact | size (bytes) | limit (bytes) | status |"
+            echo "|---|---|---|---|"
+            echo "| npm tarball | ${tarball_size} | ${WASM_MAX_PACKAGE_BYTES} | ${status} |"
+          } >>"$GITHUB_STEP_SUMMARY"
+          if [[ "$status" == "FAIL" ]]; then
+            echo "::error::npm tarball is ${tarball_size} bytes, exceeding the package budget of ${WASM_MAX_PACKAGE_BYTES} bytes (jsDelivr's hard per-package cap is 150 MB). Aborting before publish-npm runs."
+            exit 1
+          fi
 
       - uses: xberg-io/actions/publish-npm@v1
         with:
