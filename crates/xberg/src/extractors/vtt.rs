@@ -103,6 +103,14 @@ fn parse_track(source: &str) -> ParsedTrack {
     };
 
     let mut cues = Vec::new();
+    // A block with no timing line is not a cue, but whether its text is content depends on the
+    // rest of the file, which is not known until every block has been read. If the track has
+    // real cues, an untimed block is noise beside them and gets dropped. If the track has *no*
+    // cues at all — a plain-text file mislabelled `.vtt`, or a track truncated before its
+    // timings — that text is the entire document, so dropping it would extract nothing.
+    // Blocks and their warning slots are therefore held back and resolved after the loop, which
+    // keeps the warnings interleaved in source order either way.
+    let mut untimed: Vec<(usize, String)> = Vec::new();
     for block in split_blocks(&lines[body_start..]) {
         match classify_block(&block) {
             BlockKind::Metadata => {}
@@ -110,22 +118,26 @@ fn parse_track(source: &str) -> ParsedTrack {
                 Ok(cue) => cues.push(cue),
                 Err(message) => warnings.push(warning(message)),
             },
-            // A block with no timing line is not a cue, but its text is still the document's
-            // content — dropping it loses everything in a file that is mislabelled `.vtt` or
-            // truncated before its timings. Keep the text as an untimed cue and warn.
             BlockKind::Unknown => {
-                warnings.push(warning("block without a timing line kept as untimed text"));
                 let text = block.join("\n").trim().to_string();
                 if !text.is_empty() {
-                    cues.push(Cue {
-                        identifier: None,
-                        start_millis: None,
-                        end_millis: None,
-                        speaker: None,
-                        text,
-                    });
+                    warnings.push(warning("block without a timing line skipped"));
+                    untimed.push((warnings.len() - 1, text));
                 }
             }
+        }
+    }
+
+    if cues.is_empty() {
+        for (slot, text) in untimed {
+            warnings[slot] = warning("block without a timing line kept as untimed text");
+            cues.push(Cue {
+                identifier: None,
+                start_millis: None,
+                end_millis: None,
+                speaker: None,
+                text,
+            });
         }
     }
 
@@ -503,6 +515,21 @@ mod tests {
             "an untimed block must not fabricate an end"
         );
         assert_eq!(parsed.warnings.len(), 2, "each dropped-then-recovered block warns");
+    }
+
+    /// The mirror case: once the track has a real cue, an untimed block is noise beside it
+    /// rather than the document's content, so it is dropped and reported as skipped. Without
+    /// this split, junk blocks in an otherwise valid track surface as if they were subtitles.
+    #[test]
+    fn should_skip_untimed_blocks_when_the_track_has_real_cues() {
+        let parsed = parse_track("WEBVTT\n\nstray line\n\n00:00:02.000 --> 00:00:03.000\nReal cue\n");
+
+        assert_eq!(parsed.cues.len(), 1);
+        assert_eq!(parsed.cues[0].text, "Real cue");
+        assert_eq!(
+            parsed.warnings.iter().map(|w| w.message.as_ref()).collect::<Vec<_>>(),
+            vec!["block without a timing line skipped"]
+        );
     }
 
     /// The recovered text must not be mistaken for a real cue: `cue_attributes` emits no
