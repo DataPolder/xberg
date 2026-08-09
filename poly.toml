@@ -222,6 +222,13 @@ enabled = true
 root = "packages/elixir"
 
 [per-file-ignores]
+# CI helper tests run under stdlib `python3 -m unittest` (see .task/workflows/benchmark.yml),
+# in jobs that install Task and nothing else -- no uv, no virtualenv, no pytest. PT027 wants
+# `pytest.raises` over `assertRaises`, and taking that advice here makes the file import pytest
+# and the job dies on ModuleNotFoundError. Scoped to these three files so PT027 still gates
+# everywhere the repo genuinely uses pytest. ~keep
+"scripts/ci/benchmarks/test_*.py" = ["PT027"]
+"tools/benchmark-harness/tests/test_*.py" = ["PT027"]
 "**/api.py" = ["F401", "I001", "TC006", "UP035"]
 "**/*.pyi" = ["A002", "F401", "I001", "PYI033", "TC006", "UP035"]
 "**/options.py" = ["F401", "I001", "RUF100", "S105"]
@@ -581,6 +588,11 @@ fmt = { exclude = [
   ".ai-rulez-generated.json",
 ] }
 file_safety = { exclude = [
+  # Generated Rust/FFI sources lead with inner attributes (`#![deny(...)]`,
+  # `#![allow(...)]`), which poly's file_safety check reads as a shebang. There
+  # is no per-check disable, so excluding the paths is the only remedy. alef's
+  # scaffolding step drops these on every regen -- restore them if a regen diff
+  # shows them missing, or `poly lint .` goes red across ~133 files. ~keep
   "crates/xberg-ffi/include/**",
   "crates/xberg-ffi/src/lib.rs",
   "crates/xberg-node/src/lib.rs",
