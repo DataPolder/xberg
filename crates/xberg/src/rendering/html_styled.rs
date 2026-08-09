@@ -426,7 +426,26 @@ fn render_elements(doc: &InternalDocument, p: &str, buf: &mut String) {
             }
 
             ElementKind::RawBlock => {
-                buf.push_str(&elem.text);
+                // Only a block that declares itself HTML may be written through
+                // verbatim. Most producers of a raw block do not: `odp.rs` pushes
+                // speaker notes and master-page text as `odp-speaker-notes` /
+                // `odp-master-page`, `orgmode.rs` pushes Org source, `html/structure.rs`
+                // pushes `script`/`style` bodies, and `djot_format` pushes whatever
+                // format the source declared, including `unknown`. Emitting those
+                // unescaped puts arbitrary author-typed text — a `<` in a speaker
+                // note, or LibreOffice's literal `<number>` field placeholder — into
+                // the output as if it were markup, which both corrupts the document
+                // structure and is an injection vector (#69).
+                let is_html = elem
+                    .attributes
+                    .as_ref()
+                    .and_then(|a| a.get("format"))
+                    .is_some_and(|format| format == "html");
+                if is_html {
+                    buf.push_str(&elem.text);
+                } else {
+                    write!(buf, r#"<pre class="{p}pre {p}raw">{}</pre>"#, esc(&elem.text)).unwrap();
+                }
             }
             ElementKind::MetadataBlock => {
                 write!(buf, r#"<dl class="{p}metadata">{}</dl>"#, esc(&elem.text)).unwrap();

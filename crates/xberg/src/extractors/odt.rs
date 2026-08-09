@@ -1110,6 +1110,20 @@ fn collect_inline_run(
                 // (dedicated marker + definition pass); comments are handled
                 // as their own elements (#100). Neither belongs inline here.
             }
+            name if is_odf_dropped_field(name) => {
+                // Field placeholder (page-number/page-count/date/time/
+                // file-name/author-name, ...): ODF writers cache the field's
+                // last-computed *display* value as the element's text content
+                // so a reader without a live layout engine still sees
+                // something, but that cached value is meaningless outside
+                // the authoring application — page numbers depend on
+                // pagination this extractor never performs, and a cached
+                // date/time/filename/author is stale or context-dependent.
+                // Emitting it verbatim also risks leaking the literal
+                // editor-placeholder text (e.g. LibreOffice's `<number>`) as
+                // if it were real document content (#69). Drop the field
+                // rather than resolve it.
+            }
             "a" => {
                 let start = text.len() as u32;
                 collect_inline_run(child, style_map, text, annotations, uris);
@@ -1151,6 +1165,24 @@ fn collect_inline_run(
             }
         }
     }
+}
+
+/// ODF pagination field elements whose cached display text must not be emitted
+/// as literal document content (#69).
+///
+/// `text:page-number` and `text:page-count` depend on a pagination pass this
+/// extractor never performs, so there is no value it could resolve them to.
+/// What they *do* carry is whatever the authoring application last cached as
+/// the field's display text — and for a slide master, LibreOffice Impress
+/// caches its own editor placeholder, the literal string `<number>`. Emitting
+/// that verbatim puts a stray pseudo-tag into the extracted content.
+///
+/// Deliberately limited to the pagination fields. The sibling fields
+/// (`text:date`, `text:time`, `text:file-name`, `text:author-name`) cache a
+/// real last-computed value rather than a placeholder, and that value is text
+/// the document visibly displays, so dropping them would lose content.
+fn is_odf_dropped_field(tag_name: &str) -> bool {
+    matches!(tag_name, "page-number" | "page-count")
 }
 
 /// Extract table cells as `Vec<Vec<String>>` from an ODT table element.
@@ -1262,6 +1294,12 @@ pub(crate) fn extract_node_text(node: roxmltree::Node) -> Option<String> {
                 text_parts.push("\n".to_string());
             }
             "annotation" | "annotation-end" => {}
+            name if is_odf_dropped_field(name) => {
+                // See `is_odf_dropped_field`: a field's cached display text
+                // (e.g. a slide master's page-number placeholder) is not
+                // real document content and must not be emitted verbatim
+                // (#69).
+            }
             "note" => {
                 if let Some(note_text) = extract_note_inline(child) {
                     push_block_text(&mut text_parts, note_text);
