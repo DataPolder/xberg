@@ -18,10 +18,19 @@
 //! Windows XLSX bug") — this test locks in the analogous fix for the desktop/server target
 //! and prevents a future edit of the hand-maintained feature list from silently dropping
 //! `"excel"` again.
+//!
+//! The manifest is parsed with the real `toml` crate (already a non-optional dependency of
+//! this crate, see `crates/xberg/Cargo.toml`) rather than hand-rolled string slicing: an
+//! earlier version of this test assumed the `default = [...]` feature array was always
+//! formatted one entry per line, and silently produced a single bogus entry (the whole
+//! array, as one string with embedded quotes) once `alef`'s regen reformatted it onto a
+//! single line — turning the safeguard into a false positive that no longer proved anything.
 #![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test binaries print by design
 
 use std::fs;
 use std::path::Path;
+
+use toml::Table;
 
 /// Locates the `crates/xberg-ffi/Cargo.toml` manifest relative to this crate.
 fn ffi_manifest_source() -> String {
@@ -35,26 +44,42 @@ fn ffi_manifest_source() -> String {
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", ffi_manifest.display()))
 }
 
-/// Extracts the single-line `features = [...]` array that follows `needle` in `source`,
-/// returning the comma-separated feature name list.
-fn features_array_after(source: &str, needle: &str) -> Vec<String> {
-    let needle_index = source
-        .find(needle)
-        .unwrap_or_else(|| panic!("expected to find target block `{needle}` in xberg-ffi/Cargo.toml"));
-    let after_needle = &source[needle_index..];
-    let features_start = after_needle
-        .find("features = [")
-        .expect("expected a `features = [...]` dependency declaration after the target block");
-    let array_start = features_start + "features = [".len();
-    let array_end = after_needle[array_start..]
-        .find(']')
-        .expect("expected a closing `]` for the features array");
-    after_needle[array_start..array_start + array_end]
-        .split(',')
-        .map(|entry| entry.trim().trim_matches('"').to_owned())
-        .filter(|entry| !entry.is_empty())
+/// Parses `source` as a TOML document, panicking with the parse error on malformed input.
+fn parse_manifest(source: &str) -> Table {
+    source
+        .parse::<Table>()
+        .unwrap_or_else(|error| panic!("failed to parse xberg-ffi/Cargo.toml as TOML: {error}"))
+}
+
+/// Reads the string array at `path` (a sequence of table keys) from `manifest`, panicking
+/// with a precise description of what was expected if any segment is missing or not the
+/// expected shape.
+fn string_array_at(manifest: &Table, path: &[&str]) -> Vec<String> {
+    let mut current = manifest
+        .get(path[0])
+        .unwrap_or_else(|| panic!("expected top-level key `{}` in xberg-ffi/Cargo.toml", path[0]));
+    for (depth, key) in path.iter().enumerate().skip(1) {
+        current = current.get(key).unwrap_or_else(|| {
+            let traversed = path[..depth].join(".");
+            panic!("expected key `{key}` under `{traversed}` in xberg-ffi/Cargo.toml")
+        });
+    }
+    current
+        .as_array()
+        .unwrap_or_else(|| panic!("expected `{}` to be a TOML array, got {current:?}", path.join(".")))
+        .iter()
+        .map(|entry| {
+            entry
+                .as_str()
+                .unwrap_or_else(|| panic!("expected `{}` entries to be strings, got {entry:?}", path.join(".")))
+                .to_owned()
+        })
         .collect()
 }
+
+/// The exact `cfg(...)` target key (without surrounding brackets/quotes) used for the
+/// default native build target: linux-x64, linux-aarch64, and macos-arm64.
+const DEFAULT_NATIVE_TARGET_CFG: &str = r#"cfg(not(any(target_os = "android", target_os = "ios", target_os = "windows", all(target_os = "macos", target_arch = "x86_64"))))"#;
 
 /// The default target — used for linux-x64/linux-arm64/macos-arm64 native builds (Go, C,
 /// Java, and C# runtime packs) — must carry `"excel"`, or xlsx/xlsm/xlsb/xltx/ods extraction
@@ -63,8 +88,12 @@ fn features_array_after(source: &str, needle: &str) -> Vec<String> {
 #[test]
 fn ffi_default_target_dependency_must_enable_excel_feature() {
     let source = ffi_manifest_source();
-    let target_cfg = r#"[target.'cfg(not(any(target_os = "android", target_os = "ios", target_os = "windows", all(target_os = "macos", target_arch = "x86_64"))))'.dependencies]"#;
-    let features = features_array_after(&source, target_cfg);
+    let manifest = parse_manifest(&source);
+
+    let features = string_array_at(
+        &manifest,
+        &["target", DEFAULT_NATIVE_TARGET_CFG, "dependencies", "xberg", "features"],
+    );
 
     assert!(
         features.iter().any(|feature| feature == "excel"),
@@ -80,32 +109,18 @@ fn ffi_default_target_dependency_must_enable_excel_feature() {
 #[test]
 fn ffi_crate_declares_and_defaults_to_excel_feature() {
     let source = ffi_manifest_source();
+    let manifest = parse_manifest(&source);
 
-    assert!(
-        source.contains(r#"excel = ["xberg/excel"]"#),
-        "xberg-ffi must declare `excel = [\"xberg/excel\"]` in its [features] table"
+    let excel_feature = string_array_at(&manifest, &["features", "excel"]);
+    assert_eq!(
+        excel_feature,
+        vec!["xberg/excel".to_owned()],
+        "xberg-ffi must declare `excel = [\"xberg/excel\"]` in its [features] table; got {excel_feature:?}"
     );
 
-    let default_features = features_array_multiline(&source, "default = [");
+    let default_features = string_array_at(&manifest, &["features", "default"]);
     assert!(
         default_features.iter().any(|feature| feature == "excel"),
         "xberg-ffi's default feature set must include \"excel\"; got {default_features:?}"
     );
-}
-
-/// Extracts a multi-line, one-feature-per-line `key = [...]` array (as used by the
-/// `default` feature list, which is formatted one entry per line rather than inline).
-fn features_array_multiline(source: &str, needle: &str) -> Vec<String> {
-    let needle_index = source
-        .find(needle)
-        .unwrap_or_else(|| panic!("expected to find `{needle}` in xberg-ffi/Cargo.toml"));
-    let array_start = needle_index + needle.len();
-    let array_end = source[array_start..]
-        .find(']')
-        .expect("expected a closing `]` for the default features array");
-    source[array_start..array_start + array_end]
-        .lines()
-        .map(|line| line.trim().trim_end_matches(',').trim_matches('"').to_owned())
-        .filter(|entry| !entry.is_empty())
-        .collect()
 }
