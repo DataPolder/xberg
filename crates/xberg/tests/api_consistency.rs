@@ -253,6 +253,7 @@ fn test_extraction_config_no_unknown_fields_in_default() {
         "cache_namespace",
         "cache_ttl_secs",
         "concurrency",
+        "csv",
         "email",
         "layout",
         "max_archive_depth",
