@@ -20,6 +20,7 @@
 !crates/xberg-libheif/
 !crates/xberg-libwpd/
 !crates/xberg-py/
+!packages/python/
 !crates/xberg-node/
 !crates/xberg-wasm/
 !packages/elixir/native/xberg_nif/

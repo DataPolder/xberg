@@ -561,7 +561,12 @@ jobs:
   python-sdist:
     name: Build Python sdist
     needs: [prepare, check-pypi, publish-crates]
-    if: ${{ !cancelled() && needs.publish-crates.result != 'failure' && needs.prepare.outputs.release_python == 'true' && (needs.check-pypi.outputs.exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
+    # Skipped on dry runs. The sdist is built out of the workspace with internal `path = "..."` keys
+    # stripped, so `cargo generate-lockfile` must resolve `xberg = "^<version>"` from crates.io. A dry
+    # run's `publish-crates` succeeds without actually publishing, so that version is never on the
+    # registry and resolution fails by construction — the job can only ever be red here, whatever the
+    # code does. (`is_tag` is NOT the right predicate: dry runs synthesize a tag and set it true.)
+    if: ${{ !cancelled() && needs.prepare.outputs.dry_run != 'true' && needs.publish-crates.result != 'failure' && needs.prepare.outputs.release_python == 'true' && (needs.check-pypi.outputs.exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -1053,7 +1058,10 @@ jobs:
   php-extension:
     name: Build PHP extension (php${{ matrix.php }} ${{ matrix.platform.label }})
     needs: [prepare, check-packagist, publish-crates]
-    if: ${{ !cancelled() && needs.publish-crates.result != 'failure' && needs.prepare.outputs.release_php == 'true' && (needs.check-packagist.outputs.exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
+    # Skipped on dry runs for the same reason as `python-sdist`: the extension is packaged out of the
+    # workspace with internal `path = "..."` keys stripped, so it resolves `xberg = "^<version>"` from
+    # crates.io, which only exists after a real (non-dry-run) `publish-crates`.
+    if: ${{ !cancelled() && needs.prepare.outputs.dry_run != 'true' && needs.publish-crates.result != 'failure' && needs.prepare.outputs.release_php == 'true' && (needs.check-packagist.outputs.exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
     runs-on: ${{ matrix.platform.os }}
     timeout-minutes: 90
     strategy:
@@ -3923,10 +3931,14 @@ jobs:
   publish-integrations-npm:
     name: Publish ${{ matrix.package }} to npm
     needs: [prepare, publish-node, publish-crates]
+    # Also skipped on dry runs: each integration package pins `@xberg-io/xberg` to the exact release
+    # version, and a dry-run `publish-node` never puts that version on npm, so `npm install` dies with
+    # ETARGET "No matching version found for @xberg-io/xberg@<version>" before anything is published.
     if: >-
       ${{ !cancelled() && needs.publish-node.result != 'failure'
       && needs.publish-crates.result != 'failure'
       && needs.prepare.outputs.release_node == 'true'
+      && needs.prepare.outputs.dry_run != 'true'
       && needs.prepare.outputs.is_tag == 'true' }}
     runs-on: ubuntu-latest
     permissions:
