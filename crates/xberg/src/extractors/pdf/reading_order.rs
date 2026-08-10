@@ -5,36 +5,46 @@
 //! (top-to-bottom within a column, left-to-right across columns).
 //!
 //! This is critical for multi-column academic PDFs where native PDF text
-//! extraction reads in column order rather than visual reading order.
+//! extraction reads in column order rather than visual reading order. It also
+//! reassembles 90/180/270-degree rotated text-matrix runs (sideways tables,
+//! rotated captions) along their own advance axis instead of page x/y — see
+//! [`assemble_reading_order_text`] — which is the GH#1358 case (rotated spec
+//! tables reading word-reversed and glued).
 //!
-//! Everything here depends on layout hints, which is why the whole module is
-//! gated behind `layout-detection`: [`reorder_spans_by_layout`]'s per-region
-//! path is driven entirely by the hints it is handed, and when a page
-//! produces no hints `extract_all_from_oxide_document` short-circuits to
-//! identity span order before the geometric fallback
-//! ([`reorder_spans_geometric`] — itself deliberately rotation-blind, see its
-//! doc comment) ever runs.
-//!
-//! The other half of the GH#1358 repair — reassembling 90/180/270-degree
-//! rotated text-matrix runs (sideways tables, rotated captions) along their
-//! own advance axis instead of page x/y — needs no hints at all, because
-//! rotation comes straight off the PDF text matrix. It therefore lives in the
-//! ungated sibling [`super::rotation`], and this module imports
-//! [`TextSpan`] and [`assemble_reading_order_text`] from there rather than
-//! defining them. What remains here is the part that genuinely requires
-//! detection: column and cross-region reading order, including on rotated
-//! pages.
+//! Both repairs depend on layout hints being available for the page
+//! ([`reorder_spans_by_layout`]'s per-region path). When no hints are
+//! produced for a page, `extract_all_from_oxide_document` short-circuits to
+//! identity span order before this module's own geometric fallback
+//! ([`reorder_spans_geometric`]) ever runs, so that page's rotated runs are
+//! *not* repaired even with `reading_order` enabled. `reorder_spans_geometric`
+//! is also deliberately rotation-blind by design (see its doc comment) even
+//! when it does run. GH#1358 is only fully closed for pages where layout
+//! detection actually produces hints.
 
 #[cfg(feature = "layout-detection")]
 use crate::pdf::structure::types::{LayoutHint, LayoutHintClass, LayoutRegionPath, LayoutRegionTag};
 
-use super::rotation::{ATOMIC_FRAGMENT_GAP_RATIO, upright_reading_origin};
-// Re-exported so existing `reading_order::` call sites keep resolving after
-// the rotation core moved out; both now live in `super::rotation`.
-pub(crate) use super::rotation::{TextSpan, assemble_reading_order_text};
-
 /// Region x-centers closer than this (in PDF points) are merged into one column.
 const COLUMN_MERGE_THRESHOLD_PTS: f32 = 20.0;
+
+/// A text span with bounding box information.
+///
+/// `x`/`y`/`width`/`height` are always the page-space bbox pdf_oxide reports:
+/// for a rotated run the origin is in page coordinates but `width`/`height`
+/// are flattened onto the run's own (rotated) axis — see
+/// [`upright_reading_origin`] for why ordering must account for this.
+#[derive(Debug, Clone)]
+pub struct TextSpan {
+    pub text: String,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    /// Text-matrix rotation in degrees, as reported by pdf_oxide
+    /// (`TextSpan::rotation_degrees`). Zero for the overwhelming majority of
+    /// (unrotated) spans.
+    pub rotation_degrees: f32,
+}
 
 /// A region projection: layout region with indices of spans it contains.
 #[derive(Debug, Clone)]
@@ -354,6 +364,8 @@ const MIN_SINGLE_COLUMN_COMMON_WIDTH_RATIO: f32 = 0.5;
 /// wrapper. This preserves Title/ListItem/Text classification while a partial
 /// child (for example, a narrow caption overlapping a form) cannot steal text.
 const MIN_SEMANTIC_CHILD_SEGMENT_COVERAGE: f32 = 0.8;
+/// Maximum same-baseline gap that still represents a kerning-run split.
+const ATOMIC_FRAGMENT_GAP_RATIO: f32 = 0.15;
 /// Require several page-wide body lines before treating a Picture owner as a
 /// layout false positive rather than embedded text in a real figure.
 const MIN_FALSE_PICTURE_PROSE_LINES: usize = 3;
@@ -1251,6 +1263,22 @@ pub(crate) fn reorder_segments_by_layout(
         .collect()
 }
 
+/// Rotate a span's page-space origin into its own upright reading frame.
+///
+/// Mirrors [`crate::pdf::oxide::span_geometry::upright_origin`] (which
+/// operates on `pdf_oxide::layout::TextSpan`) for the simpler geometry this
+/// module works with. Returns `(advance, cross)`: `advance` is the position
+/// along the span's own reading direction and `cross` is the position along
+/// the axis lines stack on. For unrotated spans (`rotation_degrees == 0`,
+/// the overwhelming majority) this is the identity `(x, y)`.
+fn upright_reading_origin(span: &TextSpan) -> (f32, f32) {
+    if span.rotation_degrees == 0.0 {
+        return (span.x, span.y);
+    }
+    let (sin, cos) = (-span.rotation_degrees).to_radians().sin_cos();
+    (span.x * cos - span.y * sin, span.x * sin + span.y * cos)
+}
+
 /// `(advance_start, cross_top)` for ordering spans within a reading-order
 /// group: descending `cross_top` walks rows in the span's own reading
 /// direction (top-to-bottom for unrotated text; the equivalent "downward"
@@ -1425,6 +1453,127 @@ pub(crate) fn reorder_spans_by_layout(spans: &[TextSpan], hints: &[LayoutHint]) 
         .into_iter()
         .flat_map(|index| groups[index].clone())
         .collect()
+}
+
+/// Cross-axis spans within this fraction of the taller span's `height` are
+/// treated as the same rotated-frame "line" rather than a new row. Mirrors
+/// [`FALSE_PICTURE_BASELINE_TOLERANCE_RATIO`]'s baseline-clustering role, but
+/// expressed on the rotated upright frame [`upright_reading_origin`] produces.
+const ROTATED_LINE_CROSS_TOLERANCE_RATIO: f32 = 0.5;
+
+/// Assemble spans — already row-ordered by [`reorder_spans_by_layout`] (or any
+/// other producer of a span-index order) — into page text.
+///
+/// Plain concatenation of `spans[i].text` in index order is correct only when
+/// every span shares the page's own upright axis: pdf_oxide bakes word gaps
+/// into a rotated run's *own* baseline, not into page-x, so naive
+/// concatenation of a 90/180/270-degree-rotated run's fragments both glues
+/// adjacent words together (no separator survives reordering) and can read
+/// the fragments out of order (a rotated run's local word order is only
+/// well-defined along its own advance axis, [`upright_reading_origin`], not
+/// along whatever order pdf_oxide happened to emit fragments in).
+///
+/// This groups `order` into maximal same-rotation runs first — a mixed page
+/// (rotated body text beside an upright footer, for example) must not have
+/// one frame forced across the boundary — then, for a rotated run, further
+/// splits it into "lines" using cross-axis proximity (spans within
+/// [`ROTATED_LINE_CROSS_TOLERANCE_RATIO`] of the run's own font extent count
+/// as the same line), sorts each line strictly by advance-axis position, and
+/// inserts a space wherever the advance-axis gap between consecutive spans
+/// exceeds the same kerning cutoff [`ATOMIC_FRAGMENT_GAP_RATIO`] uses
+/// elsewhere in this module.
+///
+/// Unrotated spans take the old code path verbatim (back-to-back
+/// concatenation, no reordering, no inserted separators), so this function is
+/// a byte-identical no-op whenever every span in `order` has
+/// `rotation_degrees == 0.0` — the overwhelming majority of pages.
+pub(crate) fn assemble_reading_order_text(spans: &[TextSpan], order: &[usize]) -> String {
+    let mut text = String::new();
+    let mut run_start = 0;
+    while run_start < order.len() {
+        let rotation = span_rotation(spans, order[run_start]);
+        let mut run_end = run_start + 1;
+        while run_end < order.len() && span_rotation(spans, order[run_end]) == rotation {
+            run_end += 1;
+        }
+        append_run(&mut text, spans, &order[run_start..run_end], rotation);
+        run_start = run_end;
+    }
+    text
+}
+
+fn span_rotation(spans: &[TextSpan], index: usize) -> f32 {
+    spans.get(index).map_or(0.0, |span| span.rotation_degrees)
+}
+
+/// Append one maximal same-rotation run to `text`. `rotation == 0.0` is the
+/// exact legacy path; any other rotation goes through line-clustering,
+/// advance-axis sorting, and gap-based space insertion.
+fn append_run(text: &mut String, spans: &[TextSpan], indices: &[usize], rotation: f32) {
+    if rotation == 0.0 {
+        for &index in indices {
+            if let Some(span) = spans.get(index) {
+                text.push_str(&span.text);
+            }
+        }
+        return;
+    }
+
+    let mut line_start = 0;
+    let mut first_line = true;
+    while line_start < indices.len() {
+        let Some(anchor) = spans.get(indices[line_start]) else {
+            line_start += 1;
+            continue;
+        };
+        let (_, anchor_cross) = upright_reading_origin(anchor);
+        let mut line_end = line_start + 1;
+        while line_end < indices.len() {
+            let Some(candidate) = spans.get(indices[line_end]) else {
+                break;
+            };
+            let (_, candidate_cross) = upright_reading_origin(candidate);
+            let tolerance = anchor.height.max(candidate.height).max(f32::EPSILON) * ROTATED_LINE_CROSS_TOLERANCE_RATIO;
+            if (candidate_cross - anchor_cross).abs() > tolerance {
+                break;
+            }
+            line_end += 1;
+        }
+
+        if !first_line && !text.is_empty() && !text.ends_with(char::is_whitespace) {
+            text.push(' ');
+        }
+        first_line = false;
+        append_rotated_line(text, spans, &indices[line_start..line_end]);
+        line_start = line_end;
+    }
+}
+
+/// Sort one rotated-frame line by advance-axis position and join it,
+/// inserting a space wherever the advance-axis gap between consecutive spans
+/// looks like a real word boundary rather than kerning.
+fn append_rotated_line(text: &mut String, spans: &[TextSpan], indices: &[usize]) {
+    let mut ordered: Vec<usize> = indices.to_vec();
+    ordered.sort_by(|&a, &b| {
+        let advance_a = spans.get(a).map_or(0.0, |span| upright_reading_origin(span).0);
+        let advance_b = spans.get(b).map_or(0.0, |span| upright_reading_origin(span).0);
+        advance_a.total_cmp(&advance_b)
+    });
+
+    let mut previous_advance_end: Option<f32> = None;
+    for index in ordered {
+        let Some(span) = spans.get(index) else { continue };
+        let (advance_start, _) = upright_reading_origin(span);
+        if let Some(previous_end) = previous_advance_end {
+            let gap = advance_start - previous_end;
+            let kerning_limit = span.height.max(f32::EPSILON) * ATOMIC_FRAGMENT_GAP_RATIO;
+            if gap > kerning_limit && !text.is_empty() && !text.ends_with(char::is_whitespace) {
+                text.push(' ');
+            }
+        }
+        text.push_str(&span.text);
+        previous_advance_end = Some(advance_start + span.width);
+    }
 }
 
 #[cfg(test)]
@@ -3353,6 +3502,151 @@ mod tests {
                 vec![0, 1, 2, 3],
                 "unrotated geometric fallback must still order left column top-to-bottom \
                  then right column top-to-bottom, exactly as before rotation awareness was added"
+            );
+        }
+    }
+
+    // Regression tests for issue #292/#293 (GH#1358): `reorder_spans_by_layout`
+    // already emits the correct span-index order (see
+    // `issue_292_rotated_reading_order` above), but the caller
+    // (`apply_reading_order_reordering` in extraction.rs) used to concatenate
+    // `spans[index].text` back-to-back with no separator at all. For a
+    // 90-degree-rotated run pdf_oxide bakes word gaps into the run's own
+    // (rotated) baseline, not into page-x, so naive concatenation glued
+    // adjacent words together. `assemble_reading_order_text` fixes this by
+    // grouping same-rotation runs, sorting each rotated line by its own
+    // advance axis, and inserting a space wherever the advance-axis gap looks
+    // like a real word boundary rather than kerning.
+    mod issue_292_span_assembly {
+        use super::*;
+
+        fn rotated_word(text: &str, y: f32, width: f32) -> TextSpan {
+            TextSpan {
+                text: text.to_string(),
+                x: 100.0,
+                y,
+                width,
+                height: 10.0,
+                rotation_degrees: 90.0,
+            }
+        }
+
+        /// Six words of a rotated run, built so the correct reading order
+        /// ("Engine oil need only meet the") reads along ascending
+        /// advance-axis (page-y for a 90-degree run), with real 3pt word gaps
+        /// between them (well above the kerning cutoff for a 10pt run). Fed
+        /// to `assemble_reading_order_text` in the exact reverse order to
+        /// reproduce the observed defect (#292: "the meet only need oil
+        /// Engine").
+        fn scrambled_rotated_sentence() -> Vec<TextSpan> {
+            vec![
+                rotated_word("Engine", 0.0, 36.0),
+                rotated_word("oil", 39.0, 18.0),
+                rotated_word("need", 60.0, 24.0),
+                rotated_word("only", 87.0, 24.0),
+                rotated_word("meet", 114.0, 24.0),
+                rotated_word("the", 141.0, 18.0),
+            ]
+        }
+
+        #[test]
+        fn should_reassemble_rotated_run_in_advance_order_with_word_gaps() {
+            let spans = scrambled_rotated_sentence();
+            // Fed in reverse: exactly the garbled order observed on the real
+            // fixture, where the run's fragments arrive back-to-front.
+            let order = vec![5, 4, 3, 2, 1, 0];
+
+            let text = assemble_reading_order_text(&spans, &order);
+
+            assert_eq!(
+                text, "Engine oil need only meet the",
+                "rotated-run assembly must read along the advance axis and space real word gaps"
+            );
+        }
+
+        #[test]
+        fn should_not_insert_space_for_kerning_tight_rotated_fragments() {
+            // "Eng" and "ine" are two fragments of one word pdf_oxide split,
+            // 0.5pt apart on a 10pt run — well under the kerning cutoff
+            // (10.0 * ATOMIC_FRAGMENT_GAP_RATIO = 1.5), so no space belongs
+            // between them.
+            let spans = vec![rotated_word("Eng", 0.0, 18.0), rotated_word("ine", 18.5, 18.0)];
+            let order = vec![0, 1];
+
+            let text = assemble_reading_order_text(&spans, &order);
+
+            assert_eq!(
+                text, "Engine",
+                "kerning-tight rotated fragments must glue, not space, together"
+            );
+        }
+
+        #[test]
+        fn should_not_force_one_frame_across_a_rotation_boundary() {
+            // An upright footer line sandwiched between two rotated-body
+            // fragments: the rotation boundary must isolate the footer from
+            // the rotated run's advance-axis sort, and the footer itself must
+            // take the exact legacy pass-through (no reordering, no inserted
+            // separators) regardless of position.
+            let spans = vec![
+                rotated_word("oil", 39.0, 18.0),   // 0: rotated body, second word
+                rotated_word("Engine", 0.0, 36.0), // 1: rotated body, first word
+                TextSpan {
+                    text: "Page 264".to_string(),
+                    x: 500.0,
+                    y: 10.0,
+                    width: 40.0,
+                    height: 8.0,
+                    rotation_degrees: 0.0,
+                },
+            ];
+            // Rotated run first (fed reversed, like the fixture), then the
+            // upright footer as its own trailing run.
+            let order = vec![0, 1, 2];
+
+            let text = assemble_reading_order_text(&spans, &order);
+
+            assert_eq!(
+                text, "Engine oilPage 264",
+                "the rotated run resolves to advance order internally; the upright run after it \
+                 is untouched pass-through text with no separator forced across the boundary"
+            );
+        }
+
+        /// Over-fire guard: an entirely unrotated span list must come out
+        /// byte-identical to plain `order`-indexed concatenation, with no
+        /// sorting or gap-based spacing applied — even when the given order
+        /// does not match left-to-right page position, proving the rotated
+        /// path never fires for `rotation_degrees == 0.0`.
+        #[test]
+        fn should_leave_unrotated_spans_byte_identical_to_plain_concatenation() {
+            let spans = vec![
+                TextSpan {
+                    text: "second".to_string(),
+                    x: 300.0,
+                    y: 0.0,
+                    width: 40.0,
+                    height: 10.0,
+                    rotation_degrees: 0.0,
+                },
+                TextSpan {
+                    text: "first".to_string(),
+                    x: 0.0,
+                    y: 0.0,
+                    width: 40.0,
+                    height: 10.0,
+                    rotation_degrees: 0.0,
+                },
+            ];
+            // Deliberately positionally "wrong" order (right-hand span first)
+            // — the unrotated path must reproduce it verbatim, not repair it.
+            let order = vec![0, 1];
+
+            let text = assemble_reading_order_text(&spans, &order);
+
+            assert_eq!(
+                text, "secondfirst",
+                "unrotated spans must pass through in the given order with no separators, unchanged"
             );
         }
     }
