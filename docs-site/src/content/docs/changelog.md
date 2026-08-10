@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- Diagram recovery: vector SVG and vector PDF sources that draw a node/edge diagram (Graphviz,
+  Mermaid, PlantUML, and LibreOffice Draw are corpus-verified producers) are recovered
+  deterministically from their geometry — no detection model involved — and can be rendered as
+  Graphviz DOT via `output_format="dot"`. Recovery rejects drawings with no connector (charts,
+  logos, illustrations) and closed regions ruled like a table, so it does not misfire on ordinary
+  page content. `output_format="dot"` replaces `content` with the DOT text and yields the empty
+  string when no diagram is found on the page (#579).
+
 ## [1.1.0] - 2026-08-07
 
 ### Added

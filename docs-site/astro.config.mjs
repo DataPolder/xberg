@@ -124,6 +124,10 @@ export default defineConfig({
                     {label : "OCR", slug : "guides/ocr"},
                     {label : "HTML Output", slug : "guides/html-output"},
                     {label : "DocTags Output", slug : "guides/doctags-output"},
+                    {
+                      label : "Diagram DOT Output",
+                      slug : "guides/diagram-dot-output",
+                    },
                   ],
                 },
                 {
