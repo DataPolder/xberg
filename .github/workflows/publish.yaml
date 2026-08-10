@@ -1862,7 +1862,15 @@ jobs:
           done
           [ "$shipped" = 1 ] || echo "::notice::no artifact produced (dry-run stub); skipping ship+verify"
 
+      # `build-elixir-natives` returns before creating the tarball on a dry run
+      # (scripts/build.py writes its outputs and skips the cargo build), so the
+      # glob below matches nothing and `if-no-files-found: error` fails the job
+      # -- on exactly the case the ship+verify step above deliberately tolerates
+      # as a "dry-run stub". Sibling actions emit a stub and so do not hit this.
+      # Gate on dry_run, NOT on is_tag: publish.yaml synthesizes a dry-run tag,
+      # so `is_tag` is true on a dry run and would not skip anything. ~keep
       - uses: actions/upload-artifact@v7
+        if: ${{ needs.prepare.outputs.dry_run != 'true' }}
         with:
           name: elixir-${{ matrix.label }}-nif-${{ matrix.nif }}
           path: dist/elixir-natives/*.tar.gz
@@ -2500,7 +2508,12 @@ jobs:
   upload-elixir-release:
     name: Upload Elixir NIF archives to GitHub Release
     needs: [prepare, elixir-natives, elixir-natives-musl]
-    if: ${{ needs.prepare.outputs.is_tag == 'true' && (needs.elixir-natives.result == 'success' || needs.elixir-natives-musl.result == 'success') }}
+    # `is_tag` alone does NOT exclude a dry run -- prepare synthesizes
+    # `v<version>-dryrun-<sha>`, so `is_tag` is true there too. Without the
+    # dry_run test this job would start uploading release assets as soon as the
+    # native builds stopped failing, and its download-artifact would find
+    # nothing because the dry-run upload above is skipped. ~keep
+    if: ${{ needs.prepare.outputs.dry_run != 'true' && needs.prepare.outputs.is_tag == 'true' && (needs.elixir-natives.result == 'success' || needs.elixir-natives-musl.result == 'success') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/create-github-app-token@v2
