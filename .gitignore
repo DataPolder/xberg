@@ -338,6 +338,10 @@ build-output-musl-node/
 
 poly.local.toml
 
+# Alef snippet validator scratch workspaces and caches ~keep
+**/.alef-snippet-*/
+**/.alef-cache/
+
 # BEGIN ai-rulez (DO NOT EDIT - managed by ai-rulez)
 .ai-rulez/.generated-manifest.json
 # END ai-rulez
