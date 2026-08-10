@@ -1,6 +1,35 @@
 {
 	"id": "config_chunking_prepend_heading_context",
 	"description": "Tests markdown chunker records heading hierarchy on chunk metadata",
+	"docs": {
+		"topic": "contract",
+		"title": "Tests markdown chunker records heading hierarchy on chunk metadata",
+		"description": "Tests markdown chunker records heading hierarchy on chunk metadata",
+		"presentation": {
+			"input": {
+				"extract_input": { "kind": "uri", "uri": "document.md" },
+				"config": {
+					"chunking": {
+						"chunker_type": "markdown",
+						"max_characters": 500,
+						"overlap": 50,
+						"prepend_heading_context": true
+					}
+				}
+			},
+			"operations": [
+				{
+					"op": "iterate",
+					"path": "results[0].chunks",
+					"item": "chunk",
+					"fields": ["content"],
+					"display": true,
+					"optional": true
+				}
+			]
+		},
+		"side_effects": "server"
+	},
 	"tags": ["contract", "config", "chunking", "heading-context"],
 	"call": "extract",
 	"assertion_recipes": ["chunks", "streaming"],

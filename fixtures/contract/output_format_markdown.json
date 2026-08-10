@@ -1,6 +1,12 @@
 {
 	"id": "output_format_markdown",
 	"description": "Tests Markdown output format",
+	"docs": {
+		"topic": "contract",
+		"title": "Tests Markdown output format",
+		"description": "Tests Markdown output format",
+		"side_effects": "server"
+	},
 	"tags": ["contract", "output_format"],
 	"call": "extract",
 	"input": {

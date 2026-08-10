@@ -14,15 +14,22 @@ use pdf_oxide::document::ReadingOrder;
 use std::borrow::Cow;
 
 /// Result type for PDF text extraction with optional page tracking.
-type PdfTextExtractionResult = (String, Option<Vec<PageBoundary>>, Option<Vec<PageContent>>);
+///
+/// The trailing `Vec<u32>` lists the 1-based page numbers that carry at least
+/// one rotated text span — see [`spans_contain_rotation`]. It is a by-product of
+/// the page pass that already runs, so callers needing rotation repair (GH#1358)
+/// do not have to re-extract every page just to discover there is nothing to do.
+type PdfTextExtractionResult = (String, Option<Vec<PageBoundary>>, Option<Vec<PageContent>>, Vec<u32>);
 
 /// Result type for unified PDF text and metadata extraction.
 ///
-/// Contains text, optional page boundaries, optional per-page content, and metadata.
+/// Contains text, optional page boundaries, optional per-page content, the
+/// 1-based numbers of pages carrying rotated spans, and metadata.
 pub type OxideUnifiedExtractionResult = (
     String,
     Option<Vec<PageBoundary>>,
     Option<Vec<PageContent>>,
+    Vec<u32>,
     PdfExtractionMetadata,
 );
 
@@ -35,7 +42,8 @@ pub(crate) fn extract_text_and_metadata(
     extraction_config: Option<&ExtractionConfig>,
 ) -> Result<OxideUnifiedExtractionResult> {
     let page_config = extraction_config.and_then(|c| c.pages.as_ref());
-    let (text, boundaries, page_contents) = extract_text_from_oxide_document(doc, page_config, extraction_config)?;
+    let (text, boundaries, page_contents, rotated_pages) =
+        extract_text_from_oxide_document(doc, page_config, extraction_config)?;
 
     let scanned_min_confidence = extraction_config
         .map(|c| c.ocr_strategy.effective_min_confidence())
@@ -52,7 +60,7 @@ pub(crate) fn extract_text_and_metadata(
         &ocr_quality_thresholds,
     )?;
 
-    Ok((text, boundaries, page_contents, metadata))
+    Ok((text, boundaries, page_contents, rotated_pages, metadata))
 }
 
 /// Extract text spans with bounding boxes from a single page.
@@ -61,11 +69,10 @@ pub(crate) fn extract_text_and_metadata(
 /// in PDF coordinate space (points, y=0 at bottom of page).
 ///
 /// This is used by reading-order reconstruction to project spans onto layout regions.
-#[cfg(feature = "layout-detection")]
 pub(crate) fn extract_spans_from_page(
     doc: &mut pdf_oxide::PdfDocument,
     page_index: usize,
-) -> Result<(Vec<crate::extractors::pdf::reading_order::TextSpan>, bool)> {
+) -> Result<(Vec<crate::extractors::pdf::rotation::TextSpan>, bool)> {
     use pdf_oxide::document::ReadingOrder;
 
     let mut page_text_data = super::guard_oxide_panic(
@@ -80,7 +87,7 @@ pub(crate) fn extract_spans_from_page(
     let spans = page_text_data
         .spans
         .iter()
-        .map(|span| crate::extractors::pdf::reading_order::TextSpan {
+        .map(|span| crate::extractors::pdf::rotation::TextSpan {
             text: span.text.clone(),
             x: span.bbox.x,
             y: span.bbox.y,
@@ -141,11 +148,15 @@ fn extract_text_fast_path(doc: &mut OxideDocument) -> Result<PdfTextExtractionRe
     let excluded_layers = pdf_oxide::optional_content::compute_default_off_ocgs(&doc.doc);
 
     let mut content = String::new();
+    let mut rotated_pages = Vec::new();
     let mut total_sample_size = 0usize;
     let mut sample_count = 0;
 
     for page_idx in 0..page_count {
-        let page_text = extract_page_text_column_aware(&mut doc.doc, page_idx, &excluded_layers)?;
+        let (page_text, has_rotated_spans) = extract_page_text_column_aware(&mut doc.doc, page_idx, &excluded_layers)?;
+        if has_rotated_spans {
+            rotated_pages.push(page_idx as u32 + 1);
+        }
 
         let page_size = page_text.len();
 
@@ -168,7 +179,7 @@ fn extract_text_fast_path(doc: &mut OxideDocument) -> Result<PdfTextExtractionRe
         }
     }
 
-    Ok((content, None, None))
+    Ok((content, None, None, rotated_pages))
 }
 
 /// Extract text with page boundary and content tracking.
@@ -187,6 +198,7 @@ fn extract_text_with_tracking(doc: &mut OxideDocument, config: &PageConfig) -> R
 
     let mut content = String::new();
     let mut boundaries = Vec::with_capacity(page_count);
+    let mut rotated_pages = Vec::new();
     let mut page_contents = if config.extract_pages {
         Some(Vec::with_capacity(page_count))
     } else {
@@ -199,7 +211,10 @@ fn extract_text_with_tracking(doc: &mut OxideDocument, config: &PageConfig) -> R
     for page_idx in 0..page_count {
         let page_number = page_idx + 1;
 
-        let page_text = extract_page_text_column_aware(&mut doc.doc, page_idx, &excluded_layers)?;
+        let (page_text, has_rotated_spans) = extract_page_text_column_aware(&mut doc.doc, page_idx, &excluded_layers)?;
+        if has_rotated_spans {
+            rotated_pages.push(page_number as u32);
+        }
 
         let page_size = page_text.len();
 
@@ -251,7 +266,7 @@ fn extract_text_with_tracking(doc: &mut OxideDocument, config: &PageConfig) -> R
         }
     }
 
-    Ok((content, Some(boundaries), page_contents))
+    Ok((content, Some(boundaries), page_contents, rotated_pages))
 }
 
 /// Collect Widget annotation field values for the given page, sorted top-to-bottom.
@@ -1177,15 +1192,32 @@ fn page_text_with_options_excluding_layers(
     })
 }
 
+/// Whether any span carries a rotated text matrix.
+///
+/// A deliberately cheap, over-approximating prefilter: it answers "is it worth
+/// looking at this page again", nothing more. Exact rotation classification
+/// (and the repair itself) lives in `extractors::pdf::rotation`, so this uses a
+/// bare non-zero test rather than duplicating that module's tolerances — a page
+/// flagged here but rejected there simply costs one span re-extraction, whereas
+/// a page missed here would silently keep the GH#1358 scrambling.
+fn spans_contain_rotation(spans: &[pdf_oxide::layout::TextSpan]) -> bool {
+    spans.iter().any(|span| span.rotation_degrees != 0.0)
+}
+
 /// Extract text from one page with column-aware ordering and guarded repairs.
 ///
 /// Applies sparse-column and glyph-fragmentation repairs before assembling the
 /// page text.
+///
+/// The returned flag reports whether the page carries any rotated span. It is
+/// read off the `PageText` this function already builds, so rotation detection
+/// costs one comparison per span instead of a second extraction pass over every
+/// page of every PDF (GH#1358). The text itself is unaffected.
 fn extract_page_text_column_aware(
     doc: &mut pdf_oxide::PdfDocument,
     page_index: usize,
     excluded_layers: &std::collections::HashSet<String>,
-) -> Result<String> {
+) -> Result<(String, bool)> {
     let widgets = collect_widget_field_values(doc, page_index);
 
     let mut page_text_data = super::guard_oxide_panic(
@@ -1206,6 +1238,8 @@ fn extract_page_text_column_aware(
     reorder_sparse_two_column_page(&mut page_text_data.spans, page_text_data.page_width);
     reorder_dense_two_column_page(&mut page_text_data.spans, page_text_data.page_width);
 
+    let has_rotated_spans = spans_contain_rotation(&page_text_data.spans);
+
     if is_fragmented_span_list(&page_text_data.spans) {
         tracing::debug!(
             span_count = page_text_data.spans.len(),
@@ -1213,14 +1247,14 @@ fn extract_page_text_column_aware(
         );
         let mut text = rebuild_text_from_fragmented_spans(&page_text_data.spans);
         append_missing_widget_values(&mut text, &widgets);
-        return Ok(text);
+        return Ok((text, has_rotated_spans));
     }
 
     let mut text = assemble_page_text(&page_text_data.spans);
 
     append_missing_widget_values(&mut text, &widgets);
 
-    Ok(text)
+    Ok((text, has_rotated_spans))
 }
 
 /// Apply common text cleanup: fix control chars and optionally convert HTML.
@@ -1436,6 +1470,52 @@ mod tests {
         let mut span = span_with_width(text, x, y, width, height, height);
         span.rotation_degrees = rotation_degrees;
         span
+    }
+
+    /// GH#1358 — the rotation prefilter must fire on a page carrying a rotated
+    /// run, so `extraction.rs` knows to re-extract that page's spans.
+    #[test]
+    fn should_detect_rotation_when_any_span_is_rotated() {
+        let spans = vec![
+            span("upright", 100.0, 700.0, 10.0, 10.0),
+            rotated_span("sideways", 400.0, 100.0, 45.0, 10.0, 90.0),
+        ];
+
+        assert!(super::spans_contain_rotation(&spans));
+    }
+
+    /// The overwhelming majority of pages: no rotated span, so no second
+    /// extraction pass is triggered and the text is left exactly as extracted.
+    #[test]
+    fn should_not_detect_rotation_when_every_span_is_upright() {
+        let spans = vec![
+            span("first", 100.0, 700.0, 10.0, 10.0),
+            span("second", 200.0, 700.0, 10.0, 10.0),
+        ];
+
+        assert!(!super::spans_contain_rotation(&spans));
+        assert!(!super::spans_contain_rotation(&[]), "an empty page is not rotated");
+    }
+
+    /// 180 and 270 degree matrices count too — the prefilter must not special-case 90.
+    #[test]
+    fn should_detect_rotation_for_upside_down_and_counterclockwise_spans() {
+        assert!(super::spans_contain_rotation(&[rotated_span(
+            "upside down",
+            100.0,
+            100.0,
+            40.0,
+            10.0,
+            180.0
+        )]));
+        assert!(super::spans_contain_rotation(&[rotated_span(
+            "counterclockwise",
+            100.0,
+            100.0,
+            40.0,
+            10.0,
+            270.0
+        )]));
     }
 
     /// #1358 / #294 — a detached fragment of a rotated word must rejoin its

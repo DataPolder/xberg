@@ -14,6 +14,10 @@ mod pages;
 pub(crate) mod reading_order;
 #[cfg(all(feature = "liter-llm", feature = "layout-detection"))]
 mod region_vlm;
+/// Rotated text-matrix run assembly. Deliberately ungated: the GH#1358 repair
+/// reads span rotation straight off the PDF text matrix and must be reachable
+/// without `layout-detection`, unlike the hint-driven `reading_order` above.
+pub(crate) mod rotation;
 
 use crate::Result;
 use crate::core::config::ExtractionConfig;

@@ -10375,6 +10375,51 @@ class LlmConfig {
   /// Maximum tokens to generate.
   final PlatformInt64? maxTokens;
 
+  /// Nucleus sampling parameter for generation tasks, applied to individual
+  /// requests built from this config. Restricts sampling to the smallest set of
+  /// tokens whose cumulative probability mass is at least this value; lower is
+  /// more focused. Validated to `[0.0, 1.0]` by [`LlmConfig::validate`].
+  ///
+  /// Mirrors liter-llm's `ChatCompletionRequest::top_p`. A request-time
+  /// parameter like `temperature`/`max_tokens` above, not a client-level
+  /// setting.
+  final double? topP;
+
+  /// Stop sequence(s) that halt token generation, applied to individual requests
+  /// built from this config.
+  ///
+  /// Mirrors liter-llm's `ChatCompletionRequest::stop`
+  /// (`types::common::StopSequence`), which liter-llm represents as either a
+  /// single string or a list of strings via an untagged enum. Always expressed
+  /// here as a list — even one stop sequence is `["..."]` — so the field has a
+  /// single, FFI-friendly shape across every language binding instead of a
+  /// single-or-list union type. Converted to liter-llm's
+  /// `StopSequence::Multiple` at each request-building call site; see
+  /// `to_stop_sequence`.
+  final List<String>? stop;
+
+  /// Random seed for reproducible outputs, applied to individual requests built
+  /// from this config. Provider support varies — some silently ignore it.
+  ///
+  /// Mirrors liter-llm's `ChatCompletionRequest::seed`.
+  final PlatformInt64? seed;
+
+  /// Presence penalty for generation tasks, applied to individual requests
+  /// built from this config. Positive values discourage the model from
+  /// repeating topics already present in the conversation. Validated to
+  /// `[-2.0, 2.0]` by [`LlmConfig::validate`].
+  ///
+  /// Mirrors liter-llm's `ChatCompletionRequest::presence_penalty`.
+  final double? presencePenalty;
+
+  /// Frequency penalty for generation tasks, applied to individual requests
+  /// built from this config. Positive values discourage the model from
+  /// repeating the same tokens verbatim. Validated to `[-2.0, 2.0]` by
+  /// [`LlmConfig::validate`].
+  ///
+  /// Mirrors liter-llm's `ChatCompletionRequest::frequency_penalty`.
+  final double? frequencyPenalty;
+
   /// Reasoning effort level for extended-thinking models, applied to individual
   /// requests built from this config.
   ///
@@ -10512,6 +10557,11 @@ class LlmConfig {
     this.maxRetries,
     this.temperature,
     this.maxTokens,
+    this.topP,
+    this.stop,
+    this.seed,
+    this.presencePenalty,
+    this.frequencyPenalty,
     this.reasoningEffort,
     this.extraBody,
     this.loadEnv,
@@ -10537,6 +10587,11 @@ class LlmConfig {
   maxRetries.hashCode ^
   temperature.hashCode ^
   maxTokens.hashCode ^
+  topP.hashCode ^
+  stop.hashCode ^
+  seed.hashCode ^
+  presencePenalty.hashCode ^
+  frequencyPenalty.hashCode ^
   reasoningEffort.hashCode ^
   extraBody.hashCode ^
   loadEnv.hashCode ^
@@ -10564,6 +10619,11 @@ class LlmConfig {
   maxRetries == other.maxRetries &&
   temperature == other.temperature &&
   maxTokens == other.maxTokens &&
+  topP == other.topP &&
+  stop == other.stop &&
+  seed == other.seed &&
+  presencePenalty == other.presencePenalty &&
+  frequencyPenalty == other.frequencyPenalty &&
   reasoningEffort == other.reasoningEffort &&
   extraBody == other.extraBody &&
   loadEnv == other.loadEnv &&
@@ -11450,9 +11510,14 @@ class OcrConfig {
   /// Browser WebAssembly uses the separate byte-fed Sceptre worker API.
   final String backend;
 
-  /// Language code(s) for OCR recognition.
-  /// Accepts either a single language code ("eng") or a list (["eng", "deu"]).
-  /// Defaults to ["eng"]. For Tesseract, languages are joined with "+".
+  /// Language code(s) for OCR recognition. Defaults to `["eng"]`. For Tesseract,
+  /// languages are joined with "+".
+  ///
+  /// A list is the canonical form and the only form accepted by the binding
+  /// object APIs (Python, Node, PHP, WASM, etc.): `["eng", "deu"]`. When
+  /// deserializing from a config file, JSON body, or the REST/MCP API, a
+  /// single string is also accepted, either as one code ("eng") or
+  /// "+"-joined ("eng+deu").
   final List<String> language;
 
   /// Tesseract-specific configuration (optional)
@@ -11917,7 +11982,11 @@ class OcrPipelineStage {
   final PlatformInt64 priority;
 
   /// Language override for this stage (None = use parent OcrConfig.language).
-  /// Accepts either a single language code ("eng") or a list (["eng", "deu"]).
+  ///
+  /// A list is the canonical form and the only form accepted by the binding
+  /// object APIs: `["eng", "deu"]`. When deserializing from a config file,
+  /// JSON body, or the REST/MCP API, a single string is also accepted,
+  /// either as one code ("eng") or "+"-joined ("eng+deu").
   final List<String>? language;
 
   /// Tesseract-specific config override for this stage.
@@ -12293,7 +12362,9 @@ sealed class OutputFormat with _$OutputFormat {
   /// JSON tree format with heading-driven sections.
   const factory OutputFormat.json() = OutputFormat_Json;
 
-  /// Structured JSON format with full OCR element metadata.
+  /// Metadata-only label; content is identical to [`OutputFormat::Plain`].
+  /// No dedicated renderer exists yet, so this attaches no OCR element
+  /// metadata. See the enum-level docs above.
   const factory OutputFormat.structured() = OutputFormat_Structured;
 
   /// Docling DocTags format (tables rendered as OTSL).
@@ -13272,8 +13343,17 @@ class PdfConfig {
   ///
   /// When `true`, projects text spans onto layout-detected regions, performs
   /// column detection, and emits spans in natural reading order (important
-  /// for multi-column academic PDFs). Requires the `layout-detection`
-  /// feature; has no effect without it. Defaults to `false`.
+  /// for multi-column academic PDFs). It also repairs 90/180/270-degree
+  /// rotated text runs — sideways tables and captions — that otherwise read
+  /// word-reversed and glued (GH#1358); see
+  /// `crate::extractors::pdf::reading_order` for the rotation-handling
+  /// details and its limits. Requires the `layout-detection` feature and a
+  /// page for which layout detection actually produces hints: a page with
+  /// no detected regions falls back to the original, unrepaired extraction
+  /// order even with this enabled. Independent of
+  /// [`LayoutStrategy`](crate::core::config::LayoutStrategy), which only
+  /// controls whether layout detection runs at all — enabling `Always` or
+  /// `Auto` alone does not turn reordering on. Defaults to `false`.
   final bool readingOrder;
 
   const PdfConfig({
@@ -16054,9 +16134,13 @@ enum TableOverlapPreference {
 /// Most users can use the defaults, but these settings allow optimization
 /// for specific document types (invoices, handwriting, etc.).
 class TesseractConfig {
-  /// Language code(s) for OCR recognition.
-  /// Accepts either a single language code ("eng") or a list (["eng", "deu"]).
-  /// For Tesseract backend, languages are joined with "+".
+  /// Language code(s) for OCR recognition. For Tesseract, languages are joined with "+".
+  ///
+  /// A list is the canonical form and the only form accepted by the binding
+  /// object APIs (Python, Node, PHP, WASM, etc.): `["eng", "deu"]`. When
+  /// deserializing from a config file, JSON body, or the REST/MCP API, a
+  /// single string is also accepted, either as one code ("eng") or
+  /// "+"-joined ("eng+deu").
   final List<String> language;
 
   /// Page Segmentation Mode (0-13).

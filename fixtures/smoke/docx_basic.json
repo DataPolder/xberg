@@ -2,6 +2,12 @@
 	"id": "smoke_docx_basic",
 	"category": "smoke",
 	"description": "Smoke test: DOCX with formatted text",
+	"docs": {
+		"topic": "smoke",
+		"title": "Smoke test: DOCX with formatted text",
+		"description": "Smoke test: DOCX with formatted text",
+		"side_effects": "server"
+	},
 	"tags": ["smoke", "office", "docx"],
 	"input": {
 		"mock_responses": [

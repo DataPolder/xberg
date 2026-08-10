@@ -90,7 +90,9 @@ def check(repo_path: Path, docs_path: Path) -> int:
     repo_order = [v for v in repo_versions if v in shared]
     docs_order = [v for v in docs_versions if v in shared]
     if repo_order != docs_order:
-        _fail(f"{docs_path}: shared releases are in a different order than {repo_path}\n       {docs_order}\n       {repo_order}")
+        _fail(
+            f"{docs_path}: shared releases are in a different order than {repo_path}\n       {docs_order}\n       {repo_order}"
+        )
         return 1
 
     repo_sections = _sections(repo_lines)
@@ -104,10 +106,7 @@ def check(repo_path: Path, docs_path: Path) -> int:
                 for r, d in zip(repo_sections[version], docs_sections[version], strict=False)
                 if r != d
             ][:MAX_DIFF_LINES]
-            _fail(
-                f"{docs_path}: the [{version}] section differs from {repo_path}\n"
-                + "\n".join(differing)
-            )
+            _fail(f"{docs_path}: the [{version}] section differs from {repo_path}\n" + "\n".join(differing))
             return 1
 
     print(f"OK: {docs_path} carries all {len(repo_versions)} release sections from {repo_path}, byte-identical")

@@ -2,6 +2,12 @@
 	"id": "smoke_txt_basic",
 	"category": "smoke",
 	"description": "Smoke test: Plain text file",
+	"docs": {
+		"topic": "smoke",
+		"title": "Smoke test: Plain text file",
+		"description": "Smoke test: Plain text file",
+		"side_effects": "server"
+	},
 	"tags": ["smoke", "text", "plaintext"],
 	"input": {
 		"mock_responses": [

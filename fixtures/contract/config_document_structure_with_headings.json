@@ -1,6 +1,12 @@
 {
 	"id": "config_document_structure_with_headings",
 	"description": "Tests document structure with DOCX heading-driven nesting",
+	"docs": {
+		"topic": "contract",
+		"title": "Tests document structure with DOCX heading-driven nesting",
+		"description": "Tests document structure with DOCX heading-driven nesting",
+		"side_effects": "server"
+	},
 	"tags": ["contract", "document_structure"],
 	"call": "extract",
 	"input": {

@@ -2,6 +2,12 @@
 	"id": "smoke_html_basic",
 	"category": "smoke",
 	"description": "Smoke test: HTML table extraction",
+	"docs": {
+		"topic": "smoke",
+		"title": "Smoke test: HTML table extraction",
+		"description": "Smoke test: HTML table extraction",
+		"side_effects": "server"
+	},
 	"tags": ["smoke", "html"],
 	"input": {
 		"mock_responses": [

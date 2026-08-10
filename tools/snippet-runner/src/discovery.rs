@@ -43,7 +43,6 @@ pub fn discover_snippets(dirs: &[PathBuf], language_filter: Option<&[Language]>)
     snippets.sort_by(|a, b| a.path.cmp(&b.path).then(a.block_index.cmp(&b.block_index)));
     Ok(snippets)
 }
-
 fn extract_snippets_from_file(path: &Path, base_dir: &Path) -> Result<Vec<Snippet>> {
     let blocks = parser::parse_code_blocks(path)?;
     let mut snippets = Vec::new();

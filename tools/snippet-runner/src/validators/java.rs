@@ -139,7 +139,6 @@ impl JavaValidator {
         }
     }
 }
-
 impl SnippetValidator for JavaValidator {
     fn language(&self) -> Language {
         Language::Java

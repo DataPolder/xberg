@@ -192,5 +192,8 @@ fn every_fixture_config_key_survives_a_round_trip() {
         "no fixture carried a non-empty config that this build could parse — the assertion above \
          proved nothing. Re-run with more features enabled."
     );
-    eprintln!("checked {checked} fixture config(s) across {} fixture file(s)", paths.len());
+    eprintln!(
+        "checked {checked} fixture config(s) across {} fixture file(s)",
+        paths.len()
+    );
 }

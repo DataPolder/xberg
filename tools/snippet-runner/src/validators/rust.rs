@@ -108,7 +108,6 @@ impl RustValidator {
         }
     }
 }
-
 impl SnippetValidator for RustValidator {
     fn language(&self) -> Language {
         Language::Rust

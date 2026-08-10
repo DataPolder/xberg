@@ -131,7 +131,6 @@ impl PythonValidator {
         output.join("\n")
     }
 }
-
 impl SnippetValidator for PythonValidator {
     fn language(&self) -> Language {
         Language::Python

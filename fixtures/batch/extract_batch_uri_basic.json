@@ -2,6 +2,12 @@
 	"id": "extract_batch_uri_basic",
 	"category": "batch",
 	"description": "extract_batch over URI inputs",
+	"docs": {
+		"topic": "batch",
+		"title": "extract_batch over URI inputs",
+		"description": "extract_batch over URI inputs",
+		"side_effects": "safe"
+	},
 	"tags": ["batch", "uri", "multiple_inputs"],
 	"call": "extract_batch",
 	"input": {

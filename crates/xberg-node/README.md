@@ -247,16 +247,19 @@ extractViaClient();
 #### Configuration Discovery
 
 ```typescript title="config_discovery.ts"
-import { ExtractInputKind, ExtractionConfig, extract } from "@xberg-io/xberg";
+import { existsSync, readFileSync } from "node:fs";
+import { extract, type ExtractionConfig } from "@xberg-io/xberg";
 
-const config = ExtractionConfig.discover();
 const input = {
-  kind: "uri",
+  kind: "uri" as const,
   uri: "document.pdf",
 };
 
-if (config) {
+const configPath = "xberg.json";
+
+if (existsSync(configPath)) {
   console.log("Found configuration file");
+  const config = JSON.parse(readFileSync(configPath, "utf8")) as ExtractionConfig;
   const output = await extract(input, config);
   console.log(output.results[0].content);
 } else {
@@ -387,7 +390,7 @@ Powered by [tree-sitter-language-pack](https://github.com/xberg-io/tree-sitter-l
 - **Language Detection** - Detect and support multiple languages in documents
 - **Code Intelligence** - Extract structure, imports, exports, symbols, and docstrings from [371 programming languages](https://docs.tree-sitter-language-pack.xberg.io) via tree-sitter
 - **Configuration** - Fine-grained control over extraction behavior
-- **Six Output Formats** - Plain text, Markdown, Djot, HTML, JSON tree structure, or Structured JSON with OCR metadata
+- **Six Output Formats** - Plain text, Markdown, Djot, HTML, JSON tree structure, or Structured (same text as Plain with a `structured` metadata label)
 
 ## OCR Support
 

@@ -2,6 +2,20 @@
 	"id": "ocr_image_png",
 	"category": "smoke",
 	"description": "OCR: PNG image extraction with OCR enabled. In WASM this exercises the Uint8Array bridge parameter and Promise await in the generated OcrBackend bridge.",
+	"docs": {
+		"topic": "smoke",
+		"title": "OCR: PNG image extraction with OCR enabled. In WASM this exercises the Uint8Array bridge parameter and Promise await in the generated OcrBackend bridge.",
+		"description": "OCR: PNG image extraction with OCR enabled. In WASM this exercises the Uint8Array bridge parameter and Promise await in the generated OcrBackend bridge.",
+		"presentation": {
+			"files": [
+				{
+					"field": "/bytes",
+					"path": "test_documents/images/test_hello_world.png"
+				}
+			]
+		},
+		"side_effects": "safe"
+	},
 	"tags": ["smoke", "ocr", "image", "png"],
 	"call": "extract",
 	"input": {

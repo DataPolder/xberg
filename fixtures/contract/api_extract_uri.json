@@ -1,6 +1,12 @@
 {
 	"id": "api_extract_uri",
 	"description": "Tests URI extraction API",
+	"docs": {
+		"topic": "contract",
+		"title": "Tests URI extraction API",
+		"description": "Tests URI extraction API",
+		"side_effects": "server"
+	},
 	"tags": ["contract", "api"],
 	"input": {
 		"mock_responses": [

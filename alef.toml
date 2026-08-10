@@ -1,5 +1,5 @@
 [workspace]
-alef_version = "0.58.0"
+alef_version = "0.59.0"
 # -D warnings (emitted into every generated Rust binding as #![allow(...)]).
 extra_clippy_allows = ["redundant_field_names"]
 languages = [
@@ -71,7 +71,76 @@ template_dir = "templates/docs/skills"
 outputs = [".codex/skills", ".agents/skills", ".github/skills", ".claude/skills"]
 
 [workspace.docs.snippets]
-dirs = ["docs-site/src/snippets"]
+dirs = ["docs-site/src/snippets", "docs-site/src/snippets-generated"]
+validation_level = "compile"
+timeout_secs = 120
+strict = true
+report_output = ".alef/snippet-validation-report.json"
+
+[workspace.docs.snippets.sessions.rust]
+cwd = "."
+manifest = "crates/xberg/Cargo.toml"
+
+[workspace.docs.snippets.sessions.python]
+cwd = "packages/python"
+manifest = "packages/python/pyproject.toml"
+
+[workspace.docs.snippets.sessions.node]
+cwd = "crates/xberg-node"
+manifest = "crates/xberg-node/package.json"
+
+[workspace.docs.snippets.sessions.wasm]
+cwd = "crates/xberg-wasm"
+manifest = "crates/xberg-wasm/package.json"
+
+[workspace.docs.snippets.sessions.go]
+cwd = "packages/go"
+manifest = "packages/go/go.mod"
+
+[workspace.docs.snippets.sessions.ruby]
+cwd = "packages/ruby"
+manifest = "packages/ruby/xberg.gemspec"
+
+[workspace.docs.snippets.sessions.php]
+cwd = "packages/php"
+manifest = "crates/xberg-php/src/composer.json"
+
+[workspace.docs.snippets.sessions.elixir]
+cwd = "packages/elixir"
+manifest = "packages/elixir/mix.exs"
+
+[workspace.docs.snippets.sessions.java]
+cwd = "packages/java"
+manifest = "packages/java/pom.xml"
+
+[workspace.docs.snippets.sessions.csharp]
+cwd = "packages/csharp/Xberg"
+manifest = "packages/csharp/Xberg/Xberg.csproj"
+
+[workspace.docs.snippets.sessions.dart]
+cwd = "packages/dart"
+manifest = "packages/dart/pubspec.yaml"
+
+[workspace.docs.snippets.sessions.kotlin]
+cwd = "packages/kotlin-android"
+manifest = "packages/kotlin-android/build.gradle.kts"
+
+[workspace.docs.snippets.sessions.kotlin_android]
+cwd = "packages/kotlin-android"
+manifest = "packages/kotlin-android/build.gradle.kts"
+
+[workspace.docs.snippets.sessions.swift]
+cwd = "packages/swift"
+manifest = "packages/swift/Package.swift"
+
+[workspace.docs.snippets.sessions.zig]
+cwd = "packages/zig"
+manifest = "packages/zig/build.zig"
+env = { ZIG_GLOBAL_CACHE_DIR = ".alef-cache/zig-global" }
+
+[workspace.docs.snippets.sessions.c]
+cwd = "crates/xberg-ffi/include"
+manifest = "crates/xberg-ffi/Cargo.toml"
 
 
 [workspace.sync]
@@ -2017,6 +2086,26 @@ languages = [
   "zig",
   "homebrew",
 ]
+
+[crates.e2e.snippets]
+output = "docs-site/src/snippets-generated"
+languages = [
+  "python",
+  "rust",
+  "node",
+  "go",
+  "ruby",
+  "elixir",
+  "wasm",
+  "java",
+  "csharp",
+  "php",
+  "dart",
+  "kotlin_android",
+  "swift",
+  "zig",
+  "c",
+]
 fields_optional = [
   "results[0].metadata.format",
   "results[0].metadata.format.excel",
@@ -2198,6 +2287,10 @@ json_object_types = { chunking = "ChunkingConfig", ocr = "OcrConfig", images = "
 
 [crates.e2e.calls.extract.overrides.python]
 options_type = "ExtractionConfig"
+
+[crates.e2e.calls.extract.overrides.node]
+options_type = "ExtractionConfig"
+enum_fields = { chunker_type = "ChunkerType" }
 
 [crates.e2e.calls.list_supported_formats]
 result_is_simple = true
@@ -3800,7 +3893,7 @@ path = "../../packages/swift"
 path = "../../packages/zig"
 
 [crates.e2e.registry.packages.zig]
-hash = "xberg-v1.0.14-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+hash = "xberg-v1.1.0-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 
 [crates.e2e.packages.wasm]
 name = "@xberg-io/xberg-wasm"

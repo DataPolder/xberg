@@ -1568,8 +1568,11 @@ typedef struct XBERGOrientationResult XBERGOrientationResult;
  * Controls the format of the `content` field in `ExtractedDocument`.
  * When set to `Markdown`, `Djot`, or `Html`, the output uses that format.
  * `Plain` returns the raw extracted text.
- * `Structured` returns JSON with full OCR element data including bounding
- * boxes and confidence scores.
+ * `Structured` is currently a metadata-only label: `derive_extraction_result`
+ * returns `None` for it (see `extraction/derive.rs`), so no renderer runs and
+ * the content is left exactly as `Plain` would leave it. Only
+ * `metadata.output_format` differs. It does NOT attach OCR element data,
+ * bounding boxes or confidence scores.
  */
 typedef struct XBERGOutputFormat XBERGOutputFormat;
 /**
@@ -5781,6 +5784,41 @@ double xberg_llm_config_temperature(const XBERGLlmConfig *ptr);
 uint64_t xberg_llm_config_max_tokens(const XBERGLlmConfig *ptr);
 
 /**
+ * Get the `top_p` field from a `LlmConfig`.
+ * # Safety
+ * Pointer must be a valid handle returned by this library.
+ */
+double xberg_llm_config_top_p(const XBERGLlmConfig *ptr);
+
+/**
+ * Get the `stop` field from a `LlmConfig`.
+ * # Safety
+ * Pointer must be a valid handle returned by this library.
+ */
+char *xberg_llm_config_stop(const XBERGLlmConfig *ptr);
+
+/**
+ * Get the `seed` field from a `LlmConfig`.
+ * # Safety
+ * Pointer must be a valid handle returned by this library.
+ */
+int64_t xberg_llm_config_seed(const XBERGLlmConfig *ptr);
+
+/**
+ * Get the `presence_penalty` field from a `LlmConfig`.
+ * # Safety
+ * Pointer must be a valid handle returned by this library.
+ */
+double xberg_llm_config_presence_penalty(const XBERGLlmConfig *ptr);
+
+/**
+ * Get the `frequency_penalty` field from a `LlmConfig`.
+ * # Safety
+ * Pointer must be a valid handle returned by this library.
+ */
+double xberg_llm_config_frequency_penalty(const XBERGLlmConfig *ptr);
+
+/**
  * Get the `reasoning_effort` field from a `LlmConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
@@ -5878,6 +5916,20 @@ XBERGBedrockConfig *xberg_llm_config_bedrock(const XBERGLlmConfig *ptr);
  */
 XBERGCredentialProviderConfig *
 xberg_llm_config_credential_provider(const XBERGLlmConfig *ptr);
+
+/**
+ * Validate the request-time sampling parameters that have a documented range:
+ * `top_p` (`[0.0, 1.0]`), `presence_penalty`, and `frequency_penalty` (both
+ * `[-2.0, 2.0]`, matching liter-llm's/OpenAI's semantics). An unset field is
+ * always valid â silence in config should never be rejected.
+ *
+ * Called from `build_client_config` before a liter-llm
+ * client is built from this config, alongside the existing
+ * `validate_cache_backend` check in that function.
+ * \note SAFETY: Caller must ensure all pointer arguments are valid or null.
+ * Returned pointers must be freed with the appropriate free function.
+ */
+int32_t xberg_llm_config_validate(const XBERGLlmConfig *this_);
 
 /**
  * Create a `LlmProviderConfig` from a JSON string. Returns null on failure.

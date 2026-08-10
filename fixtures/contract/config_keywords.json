@@ -1,6 +1,12 @@
 {
 	"id": "config_keywords",
 	"description": "Tests keyword extraction via YAKE algorithm",
+	"docs": {
+		"topic": "contract",
+		"title": "Tests keyword extraction via YAKE algorithm",
+		"description": "Tests keyword extraction via YAKE algorithm",
+		"side_effects": "server"
+	},
 	"tags": ["contract", "config", "keywords"],
 	"call": "extract",
 	"assertion_recipes": ["keywords"],

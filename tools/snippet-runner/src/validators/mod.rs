@@ -34,7 +34,6 @@ pub trait SnippetValidator: Send + Sync {
         false
     }
 }
-
 /// Registry of validators keyed by language.
 pub struct ValidatorRegistry {
     validators: HashMap<Language, Box<dyn SnippetValidator>>,

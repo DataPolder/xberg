@@ -978,3 +978,43 @@ mod scoring_tests {
         );
     }
 }
+
+/// TEMPORARY DIAGNOSTIC — remove before commit.
+#[test]
+#[ignore]
+fn diag_pdfa_001_missing_words() {
+    let pdf_path = get_test_file_path("pdf/pdfa_001.pdf");
+    let gt_path = get_test_file_path("ground_truth/pdf/pdfa_001.md");
+    let gt = std::fs::read_to_string(&gt_path).expect("gt");
+    let result = extract_with_format(&pdf_path, OutputFormat::Markdown).expect("extract");
+
+    let (p, r, f1) = word_f1(&result.content, &gt);
+    println!("P {:.3} R {:.3} F1 {:.3}", p, r, f1);
+
+    let ext = tokenize(&result.content);
+    let gtt = tokenize(&gt);
+    let mut ext_counts: std::collections::HashMap<&str, i32> = std::collections::HashMap::new();
+    for t in &ext {
+        *ext_counts.entry(t.as_str()).or_default() += 1;
+    }
+    let mut missing: Vec<&str> = Vec::new();
+    for t in &gtt {
+        let e = ext_counts.entry(t.as_str()).or_default();
+        if *e > 0 {
+            *e -= 1;
+        } else {
+            missing.push(t.as_str());
+        }
+    }
+    println!("MISSING {} of {} GT words:", missing.len(), gtt.len());
+    println!("{}", missing.join(" "));
+
+    println!(
+        "\n===== EXTRACTED (first 3000 chars) =====\n{}",
+        &result.content[..std::cmp::min(3000, result.content.len())]
+    );
+    println!(
+        "\n===== GT (first 3000 chars) =====\n{}",
+        &gt[..std::cmp::min(3000, gt.len())]
+    );
+}

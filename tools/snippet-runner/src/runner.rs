@@ -10,7 +10,6 @@ pub struct RunnerConfig {
     pub timeout_secs: u64,
     pub fail_fast: bool,
 }
-
 impl Default for RunnerConfig {
     fn default() -> Self {
         Self {

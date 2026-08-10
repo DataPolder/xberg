@@ -16650,8 +16650,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   LlmConfig dco_decode_llm_config(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 21)
-    throw Exception('unexpected arr length: expect 21 but see ${arr.length}');
+    if (arr.length != 26)
+    throw Exception('unexpected arr length: expect 26 but see ${arr.length}');
     return LlmConfig(
       model: dco_decode_String(arr[0]),
       apiKey: dco_decode_opt_String(arr[1]),
@@ -16660,21 +16660,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       maxRetries: dco_decode_opt_box_autoadd_i_64(arr[4]),
       temperature: dco_decode_opt_box_autoadd_f_64(arr[5]),
       maxTokens: dco_decode_opt_box_autoadd_i_64(arr[6]),
-      reasoningEffort: dco_decode_opt_String(arr[7]),
-      extraBody: dco_decode_opt_String(arr[8]),
-      loadEnv: dco_decode_opt_box_autoadd_bool(arr[9]),
-      headers: dco_decode_opt_Map_String_String_None(arr[10]),
-      providers: dco_decode_opt_list_llm_provider_config(arr[11]),
-      cache: dco_decode_opt_box_autoadd_llm_cache_config(arr[12]),
-      budget: dco_decode_opt_box_autoadd_llm_budget_config(arr[13]),
-      rateLimit: dco_decode_opt_box_autoadd_llm_rate_limit_config(arr[14]),
-      costTracking: dco_decode_opt_box_autoadd_bool(arr[15]),
-      tracing: dco_decode_opt_box_autoadd_bool(arr[16]),
-      cooldownSecs: dco_decode_opt_box_autoadd_i_64(arr[17]),
-      healthCheckSecs: dco_decode_opt_box_autoadd_i_64(arr[18]),
-      bedrock: dco_decode_opt_box_autoadd_bedrock_config(arr[19]),
+      topP: dco_decode_opt_box_autoadd_f_64(arr[7]),
+      stop: dco_decode_opt_list_String(arr[8]),
+      seed: dco_decode_opt_box_autoadd_i_64(arr[9]),
+      presencePenalty: dco_decode_opt_box_autoadd_f_64(arr[10]),
+      frequencyPenalty: dco_decode_opt_box_autoadd_f_64(arr[11]),
+      reasoningEffort: dco_decode_opt_String(arr[12]),
+      extraBody: dco_decode_opt_String(arr[13]),
+      loadEnv: dco_decode_opt_box_autoadd_bool(arr[14]),
+      headers: dco_decode_opt_Map_String_String_None(arr[15]),
+      providers: dco_decode_opt_list_llm_provider_config(arr[16]),
+      cache: dco_decode_opt_box_autoadd_llm_cache_config(arr[17]),
+      budget: dco_decode_opt_box_autoadd_llm_budget_config(arr[18]),
+      rateLimit: dco_decode_opt_box_autoadd_llm_rate_limit_config(arr[19]),
+      costTracking: dco_decode_opt_box_autoadd_bool(arr[20]),
+      tracing: dco_decode_opt_box_autoadd_bool(arr[21]),
+      cooldownSecs: dco_decode_opt_box_autoadd_i_64(arr[22]),
+      healthCheckSecs: dco_decode_opt_box_autoadd_i_64(arr[23]),
+      bedrock: dco_decode_opt_box_autoadd_bedrock_config(arr[24]),
       credentialProvider: dco_decode_opt_box_autoadd_credential_provider_config(
-        arr[20],
+        arr[25],
       ),
     );
   }
@@ -25581,6 +25586,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_maxRetries = sse_decode_opt_box_autoadd_i_64(deserializer);
     var var_temperature = sse_decode_opt_box_autoadd_f_64(deserializer);
     var var_maxTokens = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_topP = sse_decode_opt_box_autoadd_f_64(deserializer);
+    var var_stop = sse_decode_opt_list_String(deserializer);
+    var var_seed = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_presencePenalty = sse_decode_opt_box_autoadd_f_64(deserializer);
+    var var_frequencyPenalty = sse_decode_opt_box_autoadd_f_64(deserializer);
     var var_reasoningEffort = sse_decode_opt_String(deserializer);
     var var_extraBody = sse_decode_opt_String(deserializer);
     var var_loadEnv = sse_decode_opt_box_autoadd_bool(deserializer);
@@ -25606,6 +25616,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       maxRetries: var_maxRetries,
       temperature: var_temperature,
       maxTokens: var_maxTokens,
+      topP: var_topP,
+      stop: var_stop,
+      seed: var_seed,
+      presencePenalty: var_presencePenalty,
+      frequencyPenalty: var_frequencyPenalty,
       reasoningEffort: var_reasoningEffort,
       extraBody: var_extraBody,
       loadEnv: var_loadEnv,
@@ -35106,6 +35121,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_box_autoadd_i_64(self.maxRetries, serializer);
     sse_encode_opt_box_autoadd_f_64(self.temperature, serializer);
     sse_encode_opt_box_autoadd_i_64(self.maxTokens, serializer);
+    sse_encode_opt_box_autoadd_f_64(self.topP, serializer);
+    sse_encode_opt_list_String(self.stop, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.seed, serializer);
+    sse_encode_opt_box_autoadd_f_64(self.presencePenalty, serializer);
+    sse_encode_opt_box_autoadd_f_64(self.frequencyPenalty, serializer);
     sse_encode_opt_String(self.reasoningEffort, serializer);
     sse_encode_opt_String(self.extraBody, serializer);
     sse_encode_opt_box_autoadd_bool(self.loadEnv, serializer);

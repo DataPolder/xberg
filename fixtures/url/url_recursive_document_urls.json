@@ -2,6 +2,12 @@
 	"id": "url_recursive_document_urls",
 	"category": "url",
 	"description": "extract: recursive URL extraction follows document links discovered in results",
+	"docs": {
+		"topic": "url",
+		"title": "extract: recursive URL extraction follows document links discovered in results",
+		"description": "extract: recursive URL extraction follows document links discovered in results",
+		"side_effects": "server"
+	},
 	"tags": ["url", "recursive"],
 	"call": "extract",
 	"args": [

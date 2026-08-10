@@ -58,7 +58,6 @@ impl SnippetValidator for RubyValidator {
         ValidationLevel::Run
     }
 }
-
 /// Detect YARD-style method signatures like:
 /// `Xberg.extract_file_sync(path, config: nil) -> Xberg::Result`
 fn is_api_signature(code: &str) -> bool {

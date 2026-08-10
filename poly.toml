@@ -225,7 +225,7 @@ root = "packages/elixir"
 # CI helper tests run under stdlib `python3 -m unittest` (see .task/workflows/benchmark.yml),
 # in jobs that install Task and nothing else -- no uv, no virtualenv, no pytest. PT027 wants
 # `pytest.raises` over `assertRaises`, and taking that advice here makes the file import pytest
-# and the job dies on ModuleNotFoundError. Scoped to these three files so PT027 still gates
+# and the job dies on ModuleNotFoundError. Scoped to these two globs so PT027 still gates
 # everywhere the repo genuinely uses pytest. ~keep
 "scripts/ci/benchmarks/test_*.py" = ["PT027"]
 "tools/benchmark-harness/tests/test_*.py" = ["PT027"]
@@ -703,3 +703,9 @@ run = "mix deps.get && mix credo --strict"
 root = "packages/elixir"
 workspace = true
 files = "packages/elixir/**/*.{ex,exs}"
+
+[hooks.pre-commit.commands.alef-snippets]
+run = "alef snippets check --strict --cache off"
+root = "."
+workspace = true
+files = "{alef.toml,fixtures/**/*.json,docs-site/src/snippets/**,docs-site/src/snippets-generated/**}"

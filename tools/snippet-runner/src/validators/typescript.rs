@@ -52,7 +52,6 @@ impl TypeScriptValidator {
         false
     }
 }
-
 impl SnippetValidator for TypeScriptValidator {
     fn language(&self) -> Language {
         Language::TypeScript

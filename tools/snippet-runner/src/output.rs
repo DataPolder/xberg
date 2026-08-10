@@ -73,7 +73,6 @@ pub fn print_summary(summary: &RunSummary, show_code: bool) {
     );
     println!();
 }
-
 /// Write results as JSON to a file.
 pub fn write_json(results: &[ValidationResult], path: &Path) -> Result<()> {
     let json = serde_json::to_string_pretty(results)?;

@@ -2,6 +2,12 @@
 	"id": "code_shebang_detection",
 	"category": "code",
 	"description": "Test language detection from shebang line via bytes input",
+	"docs": {
+		"topic": "code",
+		"title": "Test language detection from shebang line via bytes input",
+		"description": "Test language detection from shebang line via bytes input",
+		"side_effects": "server"
+	},
 	"tags": ["code", "shebang", "tree-sitter"],
 	"call": "extract",
 	"input": {

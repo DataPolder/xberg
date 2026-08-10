@@ -1,6 +1,12 @@
 {
 	"id": "api_extract_batch_uri_with_config",
 	"description": "Tests batch URI extraction with per-input config (extract_batch)",
+	"docs": {
+		"topic": "contract",
+		"title": "Tests batch URI extraction with per-input config (extract_batch)",
+		"description": "Tests batch URI extraction with per-input config (extract_batch)",
+		"side_effects": "server"
+	},
 	"tags": ["contract", "api", "batch", "input_config"],
 	"call": "extract_batch",
 	"input": {

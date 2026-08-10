@@ -10258,6 +10258,11 @@ const _: fn() = || {
         let _: Option<i64> = LlmConfig.max_retries;
         let _: Option<f64> = LlmConfig.temperature;
         let _: Option<i64> = LlmConfig.max_tokens;
+        let _: Option<f64> = LlmConfig.top_p;
+        let _: Option<Vec<String>> = LlmConfig.stop;
+        let _: Option<i64> = LlmConfig.seed;
+        let _: Option<f64> = LlmConfig.presence_penalty;
+        let _: Option<f64> = LlmConfig.frequency_penalty;
         let _: Option<String> = LlmConfig.reasoning_effort;
         let _: Option<String> = LlmConfig.extra_body;
         let _: Option<bool> = LlmConfig.load_env;
@@ -16948,6 +16953,11 @@ impl SseDecode for crate::LlmConfig {
         let mut var_maxRetries = <Option<i64>>::sse_decode(deserializer);
         let mut var_temperature = <Option<f64>>::sse_decode(deserializer);
         let mut var_maxTokens = <Option<i64>>::sse_decode(deserializer);
+        let mut var_topP = <Option<f64>>::sse_decode(deserializer);
+        let mut var_stop = <Option<Vec<String>>>::sse_decode(deserializer);
+        let mut var_seed = <Option<i64>>::sse_decode(deserializer);
+        let mut var_presencePenalty = <Option<f64>>::sse_decode(deserializer);
+        let mut var_frequencyPenalty = <Option<f64>>::sse_decode(deserializer);
         let mut var_reasoningEffort = <Option<String>>::sse_decode(deserializer);
         let mut var_extraBody = <Option<String>>::sse_decode(deserializer);
         let mut var_loadEnv = <Option<bool>>::sse_decode(deserializer);
@@ -16970,6 +16980,11 @@ impl SseDecode for crate::LlmConfig {
             max_retries: var_maxRetries,
             temperature: var_temperature,
             max_tokens: var_maxTokens,
+            top_p: var_topP,
+            stop: var_stop,
+            seed: var_seed,
+            presence_penalty: var_presencePenalty,
+            frequency_penalty: var_frequencyPenalty,
             reasoning_effort: var_reasoningEffort,
             extra_body: var_extraBody,
             load_env: var_loadEnv,
@@ -25432,6 +25447,11 @@ impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::LlmConfig> {
             self.0.max_retries.into_into_dart().into_dart(),
             self.0.temperature.into_into_dart().into_dart(),
             self.0.max_tokens.into_into_dart().into_dart(),
+            self.0.top_p.into_into_dart().into_dart(),
+            self.0.stop.into_into_dart().into_dart(),
+            self.0.seed.into_into_dart().into_dart(),
+            self.0.presence_penalty.into_into_dart().into_dart(),
+            self.0.frequency_penalty.into_into_dart().into_dart(),
             self.0.reasoning_effort.into_into_dart().into_dart(),
             self.0.extra_body.into_into_dart().into_dart(),
             self.0.load_env.into_into_dart().into_dart(),
@@ -32404,6 +32424,11 @@ impl SseEncode for crate::LlmConfig {
         <Option<i64>>::sse_encode(self.max_retries, serializer);
         <Option<f64>>::sse_encode(self.temperature, serializer);
         <Option<i64>>::sse_encode(self.max_tokens, serializer);
+        <Option<f64>>::sse_encode(self.top_p, serializer);
+        <Option<Vec<String>>>::sse_encode(self.stop, serializer);
+        <Option<i64>>::sse_encode(self.seed, serializer);
+        <Option<f64>>::sse_encode(self.presence_penalty, serializer);
+        <Option<f64>>::sse_encode(self.frequency_penalty, serializer);
         <Option<String>>::sse_encode(self.reasoning_effort, serializer);
         <Option<String>>::sse_encode(self.extra_body, serializer);
         <Option<bool>>::sse_encode(self.load_env, serializer);

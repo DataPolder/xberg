@@ -10,7 +10,6 @@ pub struct CodeBlock {
     pub start_line: usize,
     pub preceding_comment: Option<String>,
 }
-
 /// Extract fenced code blocks from markdown content.
 ///
 /// Recognizes blocks like:

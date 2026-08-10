@@ -2,6 +2,12 @@
 	"id": "summarization_extractive_smoke",
 	"category": "summarization",
 	"description": "TextRank extractive summary over a multi-paragraph plain text document. Pure-Rust, deterministic, no external services required.",
+	"docs": {
+		"topic": "summarization",
+		"title": "TextRank extractive summary over a multi-paragraph plain text document. Pure-Rust, deterministic, no external services required.",
+		"description": "TextRank extractive summary over a multi-paragraph plain text document. Pure-Rust, deterministic, no external services required.",
+		"side_effects": "server"
+	},
 	"tags": ["summarization", "extractive", "textrank"],
 	"call": "extract",
 	"input": {

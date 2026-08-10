@@ -1,6 +1,12 @@
 {
 	"id": "config_tree_sitter",
 	"description": "Tests tree-sitter configuration round-trip",
+	"docs": {
+		"topic": "contract",
+		"title": "Tests tree-sitter configuration round-trip",
+		"description": "Tests tree-sitter configuration round-trip",
+		"side_effects": "server"
+	},
 	"tags": ["contract", "config", "tree-sitter"],
 	"call": "extract",
 	"input": {

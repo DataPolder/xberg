@@ -2,6 +2,12 @@
 	"id": "extract_batch_uri_all_missing",
 	"category": "batch",
 	"description": "extract_batch with missing URI inputs",
+	"docs": {
+		"topic": "batch",
+		"title": "extract_batch with missing URI inputs",
+		"description": "extract_batch with missing URI inputs",
+		"side_effects": "safe"
+	},
 	"tags": ["batch", "uri", "error"],
 	"call": "extract_batch",
 	"input": {

@@ -87,7 +87,6 @@ impl GoValidator {
         }
     }
 }
-
 impl SnippetValidator for GoValidator {
     fn language(&self) -> Language {
         Language::Go
