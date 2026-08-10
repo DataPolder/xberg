@@ -95,7 +95,17 @@ pub(crate) async fn extract(
     // exceeds the recursion limit proving `Send` for the combined future, and any
     // caller doing `tokio::spawn(xberg::extract(..))` — the canonical usage — fails
     // to compile with E0275. ~keep
+    //
+    // No `+ Send` on wasm32: extractor futures are `!Send` there (`async_trait(?Send)`,
+    // see `plugins/extractor/trait.rs`), and the JS-backed futures pulled in through
+    // crawlberg/reqwest's wasm backend (`JsFuture`, wasm-bindgen closures) are never
+    // `Send` either. wasm32 has no OS threads and no `tokio::spawn`, so nothing needs
+    // the bound there — mirrors the `extract_batch` split below. ~keep
+    #[cfg(not(target_arch = "wasm32"))]
     let uncached: std::pin::Pin<Box<dyn std::future::Future<Output = Result<ExtractionResult>> + Send>> =
+        Box::pin(extract_uncached(input, config));
+    #[cfg(target_arch = "wasm32")]
+    let uncached: std::pin::Pin<Box<dyn std::future::Future<Output = Result<ExtractionResult>>>> =
         Box::pin(extract_uncached(input, config));
     let result = uncached.await;
 
