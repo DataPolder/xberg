@@ -1587,7 +1587,13 @@ fn finalize_paragraph(
         });
     }
 
-    let page_number_like = word_count <= 10 && is_page_number_pattern(trimmed);
+    // Shape-only page-number test (GH#1411). It is used here purely to *suppress*
+    // heading promotion, which is non-destructive. The decision to mark such a
+    // paragraph as deletable furniture is made document-wide in
+    // `mark_validated_page_numbers`, which additionally requires margin position
+    // and cross-page sequence agreement.
+    let page_number_like =
+        word_count <= MAX_PAGE_NUMBER_WORD_COUNT && super::page_number::classify_page_number_text(trimmed).is_some();
 
     let mut heading_level = super::classify::find_heading_level(first.font_size, heading_map, gap_info);
     if heading_level.is_some()
@@ -1659,12 +1665,6 @@ fn finalize_paragraph(
     let is_code_block =
         heading_level.is_none() && !is_list_item && lines.iter().all(|l| l.is_monospace) && lines.len() >= 2;
 
-    let is_page_furniture = heading_level.is_none()
-        && !is_list_item
-        && !is_code_block
-        && word_count <= 10
-        && is_page_number_pattern(trimmed);
-
     tracing::debug!(
         font_size = first.font_size,
         is_bold,
@@ -1672,7 +1672,7 @@ fn finalize_paragraph(
         heading_level = ?heading_level,
         is_list_item,
         is_code_block,
-        is_page_furniture,
+        page_number_like,
         text_preview = %&trimmed.chars().take(60).collect::<String>(),
         "classified paragraph"
     );
@@ -1693,7 +1693,9 @@ fn finalize_paragraph(
         is_list_item,
         is_code_block,
         is_formula: false,
-        is_page_furniture,
+        // Page-number furniture is decided document-wide, not here — see
+        // `mark_validated_page_numbers` (GH#1411).
+        is_page_furniture: false,
         layout_class: None,
         layout_region_path: None,
         caption_for: None,
@@ -1816,39 +1818,6 @@ fn is_structural_heading_word(text: &str) -> bool {
             | "Results"
             | "Methodology"
     )
-}
-
-/// Check if text matches common page number patterns.
-///
-/// Detects standalone page numbers, "Page X", "Page X of Y", Roman numerals,
-/// and similar patterns that appear as page furniture.
-fn is_page_number_pattern(text: &str) -> bool {
-    let t = text.trim();
-    if t.is_empty() {
-        return false;
-    }
-    if t.chars().all(|c| c.is_ascii_digit()) && t.len() <= 4 {
-        return true;
-    }
-    let lower = t.to_lowercase();
-    if lower.starts_with("page ") {
-        return true;
-    }
-    if (t.starts_with("- ") || t.starts_with("– ")) && (t.ends_with(" -") || t.ends_with(" –")) {
-        let inner = t
-            .trim_start_matches("- ")
-            .trim_start_matches("– ")
-            .trim_end_matches(" -")
-            .trim_end_matches(" –")
-            .trim();
-        if inner.chars().all(|c| c.is_ascii_digit()) && inner.len() <= 4 {
-            return true;
-        }
-    }
-    if t.len() <= 5 && t.chars().all(|c| matches!(c, 'i' | 'v' | 'x' | 'I' | 'V' | 'X')) {
-        return true;
-    }
-    false
 }
 
 /// Build a structured `InternalDocument` from pre-extracted per-page segments.
@@ -2474,6 +2443,10 @@ pub(crate) fn extract_document_structure_from_segments(
     }
     mark_arxiv_noise(&mut all_page_paragraphs);
     recover_headings_from_outline(&mut all_page_paragraphs, outline_entries);
+    // Runs after heading recovery (so recovered headings are excluded) and
+    // immediately before the deletion pass it feeds. It needs every page in
+    // hand, which is why it cannot live in `process_single_page`.
+    mark_validated_page_numbers(&mut all_page_paragraphs, &page_heights);
     for page in &mut all_page_paragraphs {
         retain_page_furniture_safely(page);
     }
@@ -3967,6 +3940,191 @@ fn is_compact_footnote_marker(text: &str) -> bool {
             || marker
                 .chars()
                 .all(|character| matches!(character, '*' | '†' | '‡' | '§')))
+}
+
+/// Maximum word count for a paragraph to be considered a page-number candidate.
+///
+/// The longest conventional form ("Chapter 2 — Page 14 of 30") is eight tokens;
+/// ten leaves headroom without admitting prose.
+const MAX_PAGE_NUMBER_WORD_COUNT: usize = 10;
+
+/// Page width assumed when a document yields no usable paragraph geometry.
+///
+/// US Letter portrait, matching the 792pt height fallback used for `page_heights`.
+const FALLBACK_PAGE_WIDTH_PTS: f32 = 612.0;
+
+/// Page height assumed when `page_heights` carries no entry for a page index.
+const FALLBACK_PAGE_HEIGHT_PTS: f32 = 792.0;
+
+/// Mark confirmed running page numbers as furniture (GH#1411).
+///
+/// This replaces a context-free string test that matched any short numeric or
+/// Roman-looking token anywhere on the page, including table cells, list
+/// markers, footnote references and stray capitals. Because furniture under 80
+/// alphanumeric characters is physically deleted by `retain_page_furniture_safely`,
+/// that test caused silent content loss.
+///
+/// Three independent signals must agree before anything is marked:
+///
+/// 1. **Shape** — `classify_page_number_text` recognizes the token. Shape alone
+///    is never sufficient; it only makes a paragraph a candidate.
+/// 2. **Position** — the paragraph's vertical centre falls in the top or bottom
+///    margin band. Body-band candidates are observed (they are counter-evidence
+///    for the sequence) but are never deletable.
+/// 3. **Cross-page sequence** — `PageNumberSequence` has seen every page before
+///    any deletion decision is taken, so a single isolated match can never be
+///    removed. Deletion requires `confidence_at` to reach `DELETION_THRESHOLD`.
+///
+/// Where confidence falls short the text is kept. Retaining an occasional page
+/// number is far cheaper than silently dropping a table cell.
+///
+/// # Relationship to the layout model
+///
+/// Layout hints **inform, never override**, and this heuristic **stands down**
+/// wherever the layout model has an opinion:
+///
+/// - `layout_class == None` — the layout model did not run, or produced no
+///   class for this paragraph. Geometry plus cross-page sequence decide here.
+/// - `layout_class == Some(PageHeader | PageFooter)` — the layout path already
+///   owns this paragraph. It is marked furniture by `apply_layout_overrides` and
+///   then selectively un-marked by `un_mark_layout_furniture_per_config`
+///   according to `include_headers` / `include_footers`. Re-marking it here
+///   would silently override that user configuration.
+/// - `layout_class == Some(_other_)` — a positive body-content classification
+///   from the model, which counts as evidence against deletion.
+///
+/// The single consequence of this rule is `layout_class_permits_page_number_deletion`.
+fn mark_validated_page_numbers(all_pages: &mut [Vec<PdfParagraph>], page_heights: &[f32]) {
+    use super::page_number::{PageNumberSequence, margin_band};
+
+    let page_width = document_content_width(all_pages);
+    let mut sequence = PageNumberSequence::new();
+    // (page index, paragraph index, y ratio, x ratio) for every observed candidate.
+    let mut observations: Vec<(usize, usize, f32, f32)> = Vec::new();
+
+    // Pass 1: observe every candidate on every page. No deletion decision is
+    // taken here — the sequence is not usable until it has seen all pages.
+    for (page_index, page) in all_pages.iter().enumerate() {
+        let page_height = page_heights
+            .get(page_index)
+            .copied()
+            .unwrap_or(FALLBACK_PAGE_HEIGHT_PTS);
+        for (paragraph_index, paragraph) in page.iter().enumerate() {
+            let Some((y_ratio, x_ratio, candidate)) = page_number_observation(paragraph, page_height, page_width)
+            else {
+                continue;
+            };
+            sequence.observe(page_index, margin_band(y_ratio), x_ratio, &candidate);
+            observations.push((page_index, paragraph_index, y_ratio, x_ratio));
+        }
+    }
+
+    // Pass 2: confirm. Every page has now been observed.
+    let mut confirmed = 0_usize;
+    for (page_index, paragraph_index, y_ratio, x_ratio) in observations {
+        let band = margin_band(y_ratio);
+        if matches!(band, super::page_number::MarginBand::Body) {
+            continue;
+        }
+        if sequence.confidence_at(page_index, band, x_ratio) < PageNumberSequence::DELETION_THRESHOLD {
+            continue;
+        }
+        if let Some(paragraph) = all_pages
+            .get_mut(page_index)
+            .and_then(|page| page.get_mut(paragraph_index))
+        {
+            paragraph.is_page_furniture = true;
+            confirmed += 1;
+        }
+    }
+
+    tracing::debug!(
+        pages = all_pages.len(),
+        confirmed,
+        "page-number furniture confirmed by position and cross-page sequence"
+    );
+}
+
+/// Whether the layout model's opinion permits the page-number heuristic to act.
+///
+/// See the "Relationship to the layout model" section on
+/// `mark_validated_page_numbers`: any layout class at all — header, footer, or
+/// body content — takes precedence, so this heuristic only acts where the model
+/// is silent.
+fn layout_class_permits_page_number_deletion(paragraph: &PdfParagraph) -> bool {
+    paragraph.layout_class.is_none()
+}
+
+/// Build a page-number observation for one paragraph.
+///
+/// Returns `(y_ratio, x_ratio, candidate)`, where `y_ratio` is 0.0 at the top of
+/// the page and 1.0 at the bottom. `None` when the paragraph is not a candidate
+/// or carries no usable geometry — either way it is never deletable.
+fn page_number_observation(
+    paragraph: &PdfParagraph,
+    page_height: f32,
+    page_width: f32,
+) -> Option<(f32, f32, super::page_number::PageNumberCandidate)> {
+    if paragraph.heading_level.is_some()
+        || paragraph.is_list_item
+        || paragraph.is_code_block
+        || paragraph.is_page_furniture
+        || paragraph.word_count > MAX_PAGE_NUMBER_WORD_COUNT
+    {
+        return None;
+    }
+    if !layout_class_permits_page_number_deletion(paragraph) {
+        return None;
+    }
+    let text = paragraph_text_raw(paragraph);
+    let candidate = super::page_number::classify_page_number_text(text.trim())?;
+    let (y_ratio, x_ratio) = paragraph_position_ratios(paragraph, page_height, page_width)?;
+    Some((y_ratio, x_ratio, candidate))
+}
+
+/// Normalized position of a paragraph's centre within its page.
+///
+/// Returns `(y_ratio, x_ratio)` with `y_ratio` 0.0 at the top of the page and
+/// 1.0 at the bottom — PDF space measures y upward from the page bottom, so the
+/// vertical axis is inverted here to match the band API.
+fn paragraph_position_ratios(paragraph: &PdfParagraph, page_height: f32, page_width: f32) -> Option<(f32, f32)> {
+    if !page_height.is_finite() || page_height <= 0.0 || !page_width.is_finite() || page_width <= 0.0 {
+        return None;
+    }
+    let (left, bottom, right, top) = finite_paragraph_bbox(paragraph)?;
+    let centre_y = (bottom + top) * 0.5;
+    let centre_x = (left + right) * 0.5;
+    let y_ratio = (1.0 - centre_y / page_height).clamp(0.0, 1.0);
+    let x_ratio = (centre_x / page_width).clamp(0.0, 1.0);
+    Some((y_ratio, x_ratio))
+}
+
+/// `paragraph_geometry_bbox` restricted to fully finite boxes.
+///
+/// A paragraph assembled from degenerate font metrics can carry NaN or infinite
+/// bounds; normalizing those would produce a meaningless position ratio, so such
+/// paragraphs are treated as having no geometry and are therefore never deletable.
+fn finite_paragraph_bbox(paragraph: &PdfParagraph) -> Option<(f32, f32, f32, f32)> {
+    let bbox = paragraph_geometry_bbox(paragraph)?;
+    let (left, bottom, right, top) = bbox;
+    (left.is_finite() && bottom.is_finite() && right.is_finite() && top.is_finite()).then_some(bbox)
+}
+
+/// Widest right edge across the whole document, used to normalize horizontal
+/// position.
+///
+/// A document-wide value rather than a per-page one: `PageNumberSequence`
+/// compares horizontal positions *across* pages, so the normalizer must be the
+/// same on every page or a stable footer slot would read as drifting.
+fn document_content_width(all_pages: &[Vec<PdfParagraph>]) -> f32 {
+    let widest = all_pages
+        .iter()
+        .flatten()
+        .filter_map(finite_paragraph_bbox)
+        .map(|(_, _, right, _)| right)
+        .filter(|right| *right > 0.0)
+        .fold(0.0_f32, f32::max);
+    if widest > 0.0 { widest } else { FALLBACK_PAGE_WIDTH_PTS }
 }
 
 /// Filter page furniture paragraphs with a safety valve.
@@ -7971,13 +8129,103 @@ where new shares are issued;";
     }
 
     #[test]
-    fn test_finalize_paragraph_page_number_is_furniture_not_heading() {
+    fn test_finalize_paragraph_page_number_is_not_heading_and_not_yet_furniture() {
+        // GH#1411: classification suppresses heading promotion for page-number
+        // shapes but must not mark them deletable — that decision needs page
+        // geometry and cross-page agreement, and is made document-wide.
         let heading_map = vec![(12.0, Some(2)), (9.0, None)];
         let gap_info = crate::pdf::structure::classify::precompute_gap_info(&heading_map);
         let seg = seg_at("1", 300.0, 50.0, 12.0, false);
         let para = finalize_paragraph(&[&seg], &heading_map, &gap_info).expect("paragraph");
         assert_eq!(para.heading_level, None, "page number must not become a heading");
-        assert!(para.is_page_furniture, "page number must be marked furniture");
+        assert!(
+            !para.is_page_furniture,
+            "classification must not mark page furniture without positional evidence"
+        );
+    }
+
+    /// Paragraph carrying real geometry, for the page-number validation tests.
+    /// `y` is a PDF-space bottom coordinate on a 792pt page.
+    fn positioned_para(text: &str, x: f32, y: f32) -> PdfParagraph {
+        let segment = seg_at(text, x, y, 12.0, false);
+        let mut paragraph = para(vec![line(vec![segment])]);
+        paragraph.text = text.to_string();
+        paragraph.word_count = text.split_whitespace().count();
+        paragraph.block_bbox = Some((x, y, x + 200.0, y + 12.0));
+        paragraph
+    }
+
+    /// 792pt-tall pages, matching `positioned_para`'s coordinate assumptions.
+    fn letter_page_heights(page_count: usize) -> Vec<f32> {
+        vec![792.0; page_count]
+    }
+
+    #[test]
+    fn should_not_delete_page_number_shape_in_the_page_body() {
+        // A table cell reading "1" in the middle of the page: correct shape,
+        // wrong position. This is the 3020-hit regression from GH#1411.
+        let mut pages: Vec<Vec<PdfParagraph>> = (0..8)
+            .map(|_| vec![positioned_para("1", 90.0, 400.0), positioned_para("body", 90.0, 380.0)])
+            .collect();
+        let page_heights = letter_page_heights(pages.len());
+        mark_validated_page_numbers(&mut pages, &page_heights);
+        assert!(
+            pages.iter().all(|page| !page[0].is_page_furniture),
+            "body-band page-number shapes must never be marked furniture"
+        );
+    }
+
+    #[test]
+    fn should_not_delete_an_isolated_page_number_match() {
+        // One footer-positioned "7" on a single page of an eight-page document
+        // is not a running page number, whatever its shape.
+        let mut pages: Vec<Vec<PdfParagraph>> = (0..8)
+            .map(|_| vec![positioned_para("Some ordinary body sentence.", 90.0, 400.0)])
+            .collect();
+        pages[3].push(positioned_para("7", 300.0, 40.0));
+        let page_heights = letter_page_heights(pages.len());
+        mark_validated_page_numbers(&mut pages, &page_heights);
+        assert!(
+            !pages[3][1].is_page_furniture,
+            "a single isolated match must never be deleted"
+        );
+    }
+
+    #[test]
+    fn should_delete_a_consistent_running_footer_page_number() {
+        let mut pages: Vec<Vec<PdfParagraph>> = (0..8)
+            .map(|page_index| {
+                vec![
+                    positioned_para("Some ordinary body sentence.", 90.0, 400.0),
+                    positioned_para(&(page_index + 1).to_string(), 300.0, 40.0),
+                ]
+            })
+            .collect();
+        let page_heights = letter_page_heights(pages.len());
+        mark_validated_page_numbers(&mut pages, &page_heights);
+        assert!(
+            pages.iter().all(|page| page[1].is_page_furniture),
+            "an incrementing footer number in a fixed slot on every page is furniture"
+        );
+    }
+
+    #[test]
+    fn should_leave_layout_classified_paragraphs_to_the_layout_path() {
+        // R6: any layout class at all takes precedence over this heuristic, so
+        // `include_footers` cannot be silently overridden here.
+        let mut pages: Vec<Vec<PdfParagraph>> = (0..8)
+            .map(|page_index| {
+                let mut footer = positioned_para(&(page_index + 1).to_string(), 300.0, 40.0);
+                footer.layout_class = Some(LayoutHintClass::PageFooter);
+                vec![positioned_para("Some ordinary body sentence.", 90.0, 400.0), footer]
+            })
+            .collect();
+        let page_heights = letter_page_heights(pages.len());
+        mark_validated_page_numbers(&mut pages, &page_heights);
+        assert!(
+            pages.iter().all(|page| !page[1].is_page_furniture),
+            "layout-classified paragraphs must be left to the layout path"
+        );
     }
 
     #[test]
