@@ -17,6 +17,21 @@
 //!
 //! Callers must gate deletion on [`PageNumberSequence::DELETION_THRESHOLD`]. Keeping a
 //! stray page number costs one short line; deleting a table cell corrupts a document.
+//!
+//! ## Why the OCR path is not aligned with this (GH#1411 requirement 7)
+//!
+//! It has nothing to align. Page furniture is a native-PDF concept in this codebase:
+//! `is_page_furniture` exists only on [`PdfParagraph`](super::types::PdfParagraph) and is
+//! read only under `pdf/structure/`, and no OCR code path marks or deletes it. The
+//! `page_number` fields under `crate::ocr` are page *indices* on OCR elements and tables,
+//! not a furniture heuristic — nothing in the OCR pipeline drops a paragraph for looking
+//! like a page number.
+//!
+//! So OCR output retains page numbers unconditionally, which is the conservative side of
+//! the policy this module implements and cannot produce the data loss GH#1411 reported.
+//! Should furniture removal ever be added to the OCR path, it must reuse
+//! [`classify_page_number_text`] and [`PageNumberSequence`] rather than reintroduce a
+//! shape-only predicate — that predicate is exactly what this module replaced.
 
 use std::collections::BTreeMap;
 

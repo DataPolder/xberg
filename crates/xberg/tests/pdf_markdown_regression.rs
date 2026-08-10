@@ -384,9 +384,12 @@ const PDFIUM_KNOWN_REGRESSIONS: &[&str] = &[
     // different rendering policy. Retire this entry only if xberg gains real checkbox detection,
     // or if the corpus grows a ground truth produced by a plain text extractor.
     //
-    // Left open, and genuinely ours: the same repeat-detector also swallowed the standalone table
-    // value "22" (alnum = 2) as furniture. One word here, but it shows a short numeric cell that
-    // happens to recur across pages can be classified as page furniture — worth its own fix.
+    // Closed (GH#1411): the standalone table value "22" (alnum = 2) was being swallowed as
+    // furniture. It now survives — see tests/issue_1411_page_number_deletion.rs, which asserts the
+    // "inpatient 22" pair at the extraction level. The note that used to sit here blamed "the same
+    // repeat-detector" as the footer case; that was wrong. mark_cross_page_repeating_short_text
+    // skips any paragraph with block_bbox.is_some(), and finalize_paragraph gives a loose table
+    // cell a real bbox, so the cell never reached that detector at all. ~keep
     //
     // nougat_026 is the same file as pdfa_001 (identical md5); its duplicate table row was
     // removed, so the pdfa_001 entry covers both. ~keep
