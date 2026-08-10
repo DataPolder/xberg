@@ -47,6 +47,17 @@ impl TextPass {
             .unwrap_or_else(Transform::identity);
         let combined = self.transform().pre_concat(local);
 
+        // Defence in depth alongside `super::exceeds_max_nesting`, which
+        // already rejects any source deep enough to reach here: past the
+        // bound, stop matching tag names against a subtree no real diagram
+        // has, the same way a non-rendering subtree is skipped below. ~keep
+        if self.depth.len() >= super::MAX_NESTING_DEPTH {
+            if self.skipping.is_none() {
+                self.skipping = Some(self.depth.len());
+            }
+            return combined;
+        }
+
         if self.skipping.is_none() && NON_RENDERING.contains(&name) {
             self.skipping = Some(self.depth.len());
             return combined;
@@ -174,7 +185,7 @@ impl TextPass {
                     self.push_text(&raw);
                 }
                 // A malformed tail costs the labels after it and nothing else;
-                // the shapes come from a parse `usvg` already accepted.
+                // the shapes come from a parse `usvg` already accepted. ~keep
                 Ok(Event::Eof) | Err(_) => break,
                 _ => {}
             }

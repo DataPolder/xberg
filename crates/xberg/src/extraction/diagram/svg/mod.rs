@@ -22,9 +22,30 @@ use text::TextPass;
 /// with many `<use>` references can cost far more than its byte count suggests.
 const MAX_INPUT_BYTES: usize = 10 * 1024 * 1024;
 
+/// Maximum accepted element nesting depth (`<g>` inside `<g>` inside ...).
+///
+/// `usvg` 0.48.1's own tree conversion is mutually recursive with no depth
+/// limit of its own: `convert_children` calls `convert_element`, which for a
+/// `<g>` calls `convert_group` with a closure that calls `convert_element_impl`,
+/// which for `EId::G` calls `convert_children` again (verified in
+/// `usvg-0.48.1/src/parser/converter.rs`, lines 607-703; every one of those
+/// functions carries `#[inline(never)]`, so each level is a real stack frame,
+/// not one flattened by inlining). Roughly 10 MB of nested `<g>` elements is
+/// about 1.4 million levels, which overflows the stack and kills the process
+/// with SIGSEGV rather than returning an `Err` — that recursion runs before
+/// any of our code, so it cannot be caught by a counter inside our own
+/// traversal; see `exceeds_max_nesting` below, which rejects the input first.
+///
+/// Real diagrams (Graphviz `dot -Tsvg`, Mermaid, hand-authored flowcharts)
+/// nest well under 20 levels. 64 leaves generous headroom above that while
+/// keeping the worst case small enough, in both our own recursive traversals
+/// (`collect_geometry`, the text pass's element stack) and in whatever
+/// remains of usvg's, that depth can never be the limiting factor again.
+const MAX_NESTING_DEPTH: usize = 64;
+
 /// Recover a graph from SVG bytes, or `None` when the source is not a diagram.
 pub(crate) fn recover(data: &[u8]) -> Option<DiagramGraph> {
-    if data.is_empty() || data.len() > MAX_INPUT_BYTES {
+    if data.is_empty() || data.len() > MAX_INPUT_BYTES || exceeds_max_nesting(data) {
         return None;
     }
 
@@ -41,12 +62,103 @@ pub(crate) fn recover(data: &[u8]) -> Option<DiagramGraph> {
 
     let mut outlines = Vec::new();
     let mut connectors = Vec::new();
-    collect_geometry(tree.root(), &mut outlines, &mut connectors);
+    // `collect_geometry` reports truncation (rather than returning whatever
+    // it managed to collect) so that a tree deeper than the raw byte scan
+    // predicted - possible via `<use>`/`<symbol>` expansion - never turns
+    // into a partial graph presented as a complete one.
+    if collect_geometry(tree.root(), &mut outlines, &mut connectors) {
+        return None;
+    }
 
     let source = String::from_utf8_lossy(data);
     let text = TextPass::default().run(&source, canvas);
 
     super::assemble(text.title, canvas, outlines, connectors, text.labels)
+}
+
+/// Reject `data` before it reaches `usvg::Tree::from_data` if its element
+/// nesting would exceed [`MAX_NESTING_DEPTH`]. `usvg`'s own conversion is
+/// unboundedly recursive (see the comment on `MAX_NESTING_DEPTH`), so this
+/// has to run first: once `usvg` starts converting, a deeply nested document
+/// may already have overflowed the stack.
+///
+/// Single pass over the raw bytes, no allocation. Tag boundaries are found by
+/// tracking quoted attribute values (so a literal `>` inside `d="..."` does
+/// not end a tag early); comments, CDATA sections and declarations are
+/// skipped whole rather than descended into, since none of them nest
+/// elements. This is not a general XML/SVG parser and does not try to be
+/// one: it only has to bound the depth `usvg` will see, and returns as soon
+/// as the bound is crossed.
+fn exceeds_max_nesting(data: &[u8]) -> bool {
+    let mut depth: usize = 0;
+    let mut index = 0;
+
+    while let Some(open) = find(data, index, b"<") {
+        if data[open..].starts_with(b"<!--") {
+            index = find(data, open + 4, b"-->").map_or(data.len(), |end| end + 3);
+            continue;
+        }
+        if data[open..].starts_with(b"<![CDATA[") {
+            index = find(data, open + 9, b"]]>").map_or(data.len(), |end| end + 3);
+            continue;
+        }
+        if matches!(data.get(open + 1), Some(b'!') | Some(b'?')) {
+            // Doctype/declaration/processing-instruction: skip to the next
+            // `>`. Neither opens nor closes an element.
+            index = find(data, open + 1, b">").map_or(data.len(), |end| end + 1);
+            continue;
+        }
+
+        let closing = data.get(open + 1) == Some(&b'/');
+        let Some(tag_end) = unquoted_tag_end(data, open + 1) else {
+            break;
+        };
+        let self_closing = tag_end > 0 && data.get(tag_end - 1) == Some(&b'/');
+
+        if closing {
+            depth = depth.saturating_sub(1);
+        } else if !self_closing {
+            depth += 1;
+            if depth > MAX_NESTING_DEPTH {
+                return true;
+            }
+        }
+        index = tag_end + 1;
+    }
+
+    false
+}
+
+/// Index of the `>` that ends the tag whose name starts at `start`, treating
+/// a `>` inside a single- or double-quoted attribute value as ordinary text
+/// rather than the tag terminator.
+fn unquoted_tag_end(data: &[u8], start: usize) -> Option<usize> {
+    let mut quote: Option<u8> = None;
+    let mut index = start;
+    while index < data.len() {
+        let byte = data[index];
+        match quote {
+            Some(q) if byte == q => quote = None,
+            Some(_) => {}
+            None if byte == b'"' || byte == b'\'' => quote = Some(byte),
+            None if byte == b'>' => return Some(index),
+            None => {}
+        }
+        index += 1;
+    }
+    None
+}
+
+/// First occurrence of `needle` in `data` at or after `from`, or `None` when
+/// it does not appear (including when `from` is already past the end).
+fn find(data: &[u8], from: usize, needle: &[u8]) -> Option<usize> {
+    if from > data.len() {
+        return None;
+    }
+    data[from..]
+        .windows(needle.len())
+        .position(|w| w == needle)
+        .map(|p| p + from)
 }
 
 #[cfg(test)]
@@ -290,5 +402,130 @@ mod tests {
             return;
         };
         assert!(recover(&data).is_none());
+    }
+
+    /// `<g>` opened `depth` times around `leaf`, closed the same number of
+    /// times.
+    fn nested(depth: usize, leaf: &str) -> String {
+        let mut source = String::from(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400">"##,
+        );
+        for _ in 0..depth {
+            source.push_str("<g>");
+        }
+        source.push_str(leaf);
+        for _ in 0..depth {
+            source.push_str("</g>");
+        }
+        source.push_str("</svg>");
+        source
+    }
+
+    /// Real attack magnitude (the defect report's "~10 MB is ~1.4 million
+    /// levels"), run directly against `exceeds_max_nesting` and `recover`
+    /// rather than through the byte-length cap, to prove the depth scan
+    /// itself is iterative and returns promptly instead of recursing.
+    #[test]
+    fn should_reject_svg_nested_far_past_the_bound_without_recursing() {
+        // Two orders of magnitude past the bound: enough to prove the scan
+        // does not slow down or recurse as depth grows, without building
+        // anywhere near the ~1.4 million levels the defect report's 10 MB
+        // estimate implies.
+        const ATTACK_SCALE_DEPTH: usize = 100_000;
+        let source = nested(ATTACK_SCALE_DEPTH, "");
+
+        assert!(exceeds_max_nesting(source.as_bytes()));
+        assert!(recover(source.as_bytes()).is_none());
+    }
+
+    #[test]
+    fn should_reject_nesting_exactly_one_past_the_bound() {
+        assert!(!exceeds_max_nesting(nested(MAX_NESTING_DEPTH, "").as_bytes()));
+        assert!(exceeds_max_nesting(nested(MAX_NESTING_DEPTH + 1, "").as_bytes()));
+    }
+
+    #[test]
+    fn should_not_count_a_self_closing_group_toward_depth() {
+        let mut source = String::from(r##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">"##);
+        for _ in 0..(MAX_NESTING_DEPTH + 10) {
+            source.push_str(r#"<g/>"#);
+        }
+        source.push_str("</svg>");
+
+        assert!(!exceeds_max_nesting(source.as_bytes()));
+    }
+
+    #[test]
+    fn should_not_miscount_a_greater_than_sign_inside_a_quoted_attribute() {
+        // A literal `>` inside an attribute value must not end the tag early
+        // and desynchronise the scan from the real element boundaries.
+        let mut source = String::from(r##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">"##);
+        for _ in 0..(MAX_NESTING_DEPTH + 10) {
+            source.push_str(r#"<g data-note="a > b">"#);
+        }
+        for _ in 0..(MAX_NESTING_DEPTH + 10) {
+            source.push_str("</g>");
+        }
+        source.push_str("</svg>");
+
+        assert!(exceeds_max_nesting(source.as_bytes()));
+    }
+
+    #[test]
+    fn should_ignore_nesting_markup_inside_a_comment() {
+        let mut comment = String::from("<!--");
+        for _ in 0..(MAX_NESTING_DEPTH * 4) {
+            comment.push_str("<g>");
+        }
+        comment.push_str("-->");
+        let source = format!(r##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">{comment}</svg>"##);
+
+        assert!(!exceeds_max_nesting(source.as_bytes()));
+    }
+
+    /// A shape at every level of a chain nested past the bound: if the depth
+    /// guard did not trip, this is shaped exactly like a two-node diagram.
+    #[test]
+    fn should_return_no_diagram_for_a_shape_flood_nested_past_the_bound() {
+        let mut leaf = String::new();
+        for i in 0..(MAX_NESTING_DEPTH + 20) {
+            leaf.push_str(&format!(r#"<rect x="{i}" y="{i}" width="10" height="10"/>"#));
+        }
+        leaf.push_str(r##"<line x1="0" y1="0" x2="50" y2="50" stroke="#333"/>"##);
+
+        assert!(recover(nested(MAX_NESTING_DEPTH + 20, &leaf).as_bytes()).is_none());
+    }
+
+    /// A label at every level of a chain nested past the bound: proves the
+    /// text pass's own depth guard does not leak labels from a subtree the
+    /// byte-level scan already rejected.
+    #[test]
+    fn should_return_no_diagram_for_a_label_flood_nested_past_the_bound() {
+        let mut leaf = String::from(r#"<rect x="10" y="10" width="10" height="10"/>"#);
+        for i in 0..(MAX_NESTING_DEPTH + 20) {
+            leaf.push_str(&format!(r#"<text x="{i}" y="{i}">label {i}</text>"#));
+        }
+        leaf.push_str(r#"<rect x="200" y="200" width="10" height="10"/>"#);
+        leaf.push_str(r##"<line x1="10" y1="10" x2="200" y2="200" stroke="#333"/>"##);
+
+        assert!(recover(nested(MAX_NESTING_DEPTH + 20, &leaf).as_bytes()).is_none());
+    }
+
+    /// The bound must not be so tight that an everyday translated wrapper
+    /// (see `a_translated_group_still_matches_labels_to_shapes` above) stops
+    /// recovering.
+    #[test]
+    fn should_still_recover_a_diagram_nested_well_within_the_bound() {
+        let leaf = concat!(
+            r##"<rect x="10" y="10" width="80" height="40" fill="#2c3e50"/>"##,
+            r#"<text x="50" y="35" text-anchor="middle">Start</text>"#,
+            r##"<rect x="10" y="150" width="80" height="40" fill="#27ae60"/>"##,
+            r#"<text x="50" y="175" text-anchor="middle">End</text>"#,
+            r##"<line x1="50" y1="50" x2="50" y2="150" stroke="#333"/>"##,
+        );
+
+        let graph = recovered(&nested(4, leaf));
+        assert_eq!(graph.nodes.len(), 2);
+        assert_eq!(graph.edges.len(), 1);
     }
 }

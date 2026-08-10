@@ -15,10 +15,39 @@ use super::super::{Connector, Outline, Rect};
 /// Closedness is the discriminator, not fill. SVG's initial `fill` is black, so
 /// `usvg` hands a bare `<line>` a fill just as it does a `<rect>`, and treating
 /// filled paths as nodes classifies every connector as one.
-pub(super) fn collect_geometry(group: &usvg::Group, outlines: &mut Vec<Outline>, connectors: &mut Vec<Connector>) {
+///
+/// Returns `true` when nesting exceeded [`super::MAX_NESTING_DEPTH`] before
+/// the whole tree was walked. `usvg`'s own conversion already ran by the time
+/// this sees anything, so this counter cannot prevent the stack overflow that
+/// guard exists for (`super::exceeds_max_nesting` runs first, before `usvg`
+/// is invoked at all, and is what actually does that job); it exists because
+/// `<use>`/`<symbol>` resolution can make the *converted* tree deeper than the
+/// raw source's literal nesting, and a caller must not treat a truncated walk
+/// as a complete graph.
+pub(super) fn collect_geometry(
+    group: &usvg::Group,
+    outlines: &mut Vec<Outline>,
+    connectors: &mut Vec<Connector>,
+) -> bool {
+    collect_geometry_at(group, outlines, connectors, 0)
+}
+
+fn collect_geometry_at(
+    group: &usvg::Group,
+    outlines: &mut Vec<Outline>,
+    connectors: &mut Vec<Connector>,
+    depth: usize,
+) -> bool {
+    if depth > super::MAX_NESTING_DEPTH {
+        return true;
+    }
+
+    let mut truncated = false;
     for child in group.children() {
         match child {
-            usvg::Node::Group(inner) => collect_geometry(inner, outlines, connectors),
+            usvg::Node::Group(inner) => {
+                truncated |= collect_geometry_at(inner, outlines, connectors, depth + 1);
+            }
             usvg::Node::Path(path) => {
                 if !path.is_visible() {
                     continue;
@@ -41,7 +70,7 @@ pub(super) fn collect_geometry(group: &usvg::Group, outlines: &mut Vec<Outline>,
                 if closed {
                     // Tight bounds, not the control-point bounds `bounds()`
                     // returns: a rounded rectangle's corner controls sit outside
-                    // the shape and would inflate every box.
+                    // the shape and would inflate every box. ~keep
                     let Some(bounds) = absolute.compute_tight_bounds() else {
                         continue;
                     };
@@ -73,6 +102,7 @@ pub(super) fn collect_geometry(group: &usvg::Group, outlines: &mut Vec<Outline>,
             _ => {}
         }
     }
+    truncated
 }
 
 /// Flat `#rrggbb` for a solid paint. Gradients and patterns have no single

@@ -14,6 +14,18 @@ use async_trait::async_trait;
 /// `ProcessingWarning::source` used for every degradation reported by this extractor.
 const XML_WARNING_SOURCE: &str = "xml";
 
+/// Whether the caller actually asked for the recovered diagram, i.e. the
+/// request's output format resolves to the `dot` renderer.
+///
+/// `OutputFormat::Custom` is how any renderer, built-in or registered, is
+/// selected (see `plugins::registry::RendererRegistry`), so matching the
+/// renderer name here is the same test `derive_extraction_result` uses to
+/// decide which renderer runs — not a looser proxy for it.
+#[cfg(feature = "svg")]
+fn wants_dot_output(config: &ExtractionConfig) -> bool {
+    matches!(&config.output_format, crate::core::config::OutputFormat::Custom(name) if name == "dot")
+}
+
 /// Decode raw XML bytes to a UTF-8 string, honoring the `<?xml encoding=...?>`
 /// declaration when present and falling back to charset detection otherwise.
 /// Strips a leading BOM.
@@ -269,9 +281,13 @@ impl SyncExtractor for XmlExtractor {
         // An SVG diagram carries its own node/edge structure, so it can be read
         // rather than inferred. Recovery reports `None` for drawings that are
         // not diagrams, which is most SVGs, and leaves the rest of extraction
-        // untouched either way.
+        // untouched either way. Skipped outright unless the caller actually
+        // asked for DOT output: the text pass alone can walk an unbounded
+        // number of `<text>` elements, and every renderer but `dot` discards
+        // the result anyway.
         #[cfg(feature = "svg")]
         if mime_type == "image/svg+xml"
+            && wants_dot_output(config)
             && let Some(graph) = crate::extraction::diagram::svg::recover(content)
         {
             doc.diagrams.push(graph);

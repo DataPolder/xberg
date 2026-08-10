@@ -106,6 +106,11 @@ const MAX_OUTLINES: usize = 2_000;
 /// Upper bound on connectors considered, for the same reason.
 const MAX_CONNECTORS: usize = 5_000;
 
+/// Upper bound on labels considered. Owner resolution is `labels x outlines`,
+/// and a source can hand this a text run for every glyph on the page rather
+/// than one per caption; a diagram does not caption more shapes than this.
+const MAX_LABELS: usize = 20_000;
+
 /// A shape covering at least this fraction of the canvas is a background
 /// panel, not a node. Charts and dashboards routinely draw one.
 const BACKGROUND_AREA_RATIO: f32 = 0.9;
@@ -225,13 +230,15 @@ pub(crate) fn assemble(
     // outlines around one node, and reporting the ring and the disc separately
     // both invents a node and gives the connectors two things to land on.
     collapse_concentric(&mut kept);
-    drop_containers(&mut kept);
 
     if kept.is_empty() {
         return None;
     }
 
-    let mut labels = labels;
+    // Capped for the same reason as outlines and connectors: a source can hand
+    // this a text run per glyph rather than per caption, and owner resolution
+    // below is `labels x outlines`.
+    let mut labels: Vec<Label> = labels.into_iter().take(MAX_LABELS).collect();
     labels.sort_by(|a, b| a.y.total_cmp(&b.y).then(a.x.total_cmp(&b.x)));
 
     // Text belongs to the innermost shape that contains its anchor: a label
@@ -279,6 +286,13 @@ pub(crate) fn assemble(
             owned[*index].push(label);
         }
     }
+
+    // Containers can only be told apart from real nodes once labels and
+    // arrowheads are both known: a container is an enclosure nobody labelled,
+    // and its enclosed members exclude arrowheads, which sit inside a node's
+    // own border without making it one.
+    let is_container = find_containers(&kept, &arrowheads, &owned);
+
     let grids: Vec<bool> = kept
         .iter()
         .zip(&owned)
@@ -323,7 +337,7 @@ pub(crate) fn assemble(
         .filter(|i| {
             let anonymous_decoration = owned[*i].is_empty()
                 && (overlapping[*i] || decoration_cutoff.is_some_and(|cutoff| kept[*i].bbox.area() < cutoff));
-            !arrowheads[*i] && !grids[*i] && !anonymous_decoration
+            !arrowheads[*i] && !grids[*i] && !is_container[*i] && !anonymous_decoration
         })
         .collect();
     if node_indices.is_empty() {
@@ -380,7 +394,7 @@ pub(crate) fn assemble(
         // A connector returning to the shape it left is a self-loop, but only
         // if it actually went somewhere: a real one arcs clear of the node so
         // it can be seen, while a stroke lying entirely within a shape is
-        // interior detail, a divider or a glyph, and joins nothing.
+        // interior detail, a divider or a glyph, and joins nothing. ~keep
         if from == to
             && node_outlines[from]
                 .bbox
@@ -467,33 +481,43 @@ fn cluster_count(values: impl Iterator<Item = f32>, tolerance: f32) -> usize {
     clusters
 }
 
-/// Drop outlines that group other shapes rather than being shapes themselves.
+/// Mark the outlines that group other shapes rather than being shapes
+/// themselves.
 ///
 /// A Graphviz cluster, a BPMN pool and a PlantUML swimlane are all a box drawn
-/// around their members with a caption on the rim. Left in, each one both
+/// around their members with no label of their own attached to the box: a
+/// caption on the rim, if there is one, sits closer to the members than to
+/// anything else and is theirs, not the container's. Left in, a container both
 /// invents a node and steals the edges: a connector running between two boxes
 /// inside a cluster reaches the cluster's border first, so it lands there
 /// instead of on the box it was drawn to.
 ///
-/// Enclosure is the whole test. Nesting is allowed to any depth, since each
-/// container is judged against what it directly contains.
-fn drop_containers(outlines: &mut Vec<Outline>) {
-    let members: Vec<usize> = outlines
+/// Two things keep a real node safe from this test. A UML class box or a
+/// BPMN task carries its own label alongside the compartments or markers it
+/// draws inside itself, so an outline that owns a label is never a container
+/// whatever it encloses. And a node's own incoming arrowheads are drawn just
+/// inside its border and satisfy enclosure exactly as a real member would, so
+/// they are excluded from the count: two arrowheads landing inside an
+/// unlabelled node are not two members grouped by it.
+///
+/// Enclosure is otherwise the whole test. Nesting is allowed to any depth,
+/// since each container is judged against what it directly contains.
+fn find_containers(outlines: &[Outline], arrowheads: &[bool], owned: &[Vec<&Label>]) -> Vec<bool> {
+    outlines
         .iter()
-        .map(|outer| {
-            outlines
+        .enumerate()
+        .map(|(i, outer)| {
+            if !owned[i].is_empty() {
+                return false;
+            }
+            let members = outlines
                 .iter()
-                .filter(|inner| !std::ptr::eq(*inner, outer) && outer.bbox.encloses(&inner.bbox))
-                .count()
+                .enumerate()
+                .filter(|(j, inner)| *j != i && !arrowheads[*j] && outer.bbox.encloses(&inner.bbox))
+                .count();
+            members >= CONTAINER_MIN_MEMBERS
         })
-        .collect();
-
-    let mut index = 0;
-    outlines.retain(|_| {
-        let container = members[index] >= CONTAINER_MIN_MEMBERS;
-        index += 1;
-        !container
-    });
+        .collect()
 }
 
 fn collapse_concentric(outlines: &mut Vec<Outline>) {
@@ -557,6 +581,14 @@ fn find_arrowheads(
         return marked;
     };
 
+    // Precomputed once so the label test below is a lookup, not a scan of
+    // every label for every outline: `label_owners.contains(&Some(index))`
+    // repeated inside this loop is `outlines x labels`. ~keep
+    let mut labelled = vec![false; outlines.len()];
+    for owner in label_owners.iter().flatten() {
+        labelled[*owner] = true;
+    }
+
     for (index, outline) in outlines.iter().enumerate() {
         if outline.bbox.area() > largest * ARROWHEAD_AREA_RATIO {
             continue;
@@ -564,7 +596,7 @@ fn find_arrowheads(
         if outline.bbox.width() > max_side || outline.bbox.height() > max_side {
             continue;
         }
-        if label_owners.contains(&Some(index)) {
+        if labelled[index] {
             continue;
         }
         let touches = connectors.iter().any(|c| {
@@ -1051,6 +1083,74 @@ mod tests {
         // happen if it were merged into the shape it encloses.
         assert_eq!(graph.nodes.len(), 2);
         assert_eq!(graph.edges.len(), 1);
+    }
+
+    // The three tests below call `find_containers` directly rather than through
+    // `assemble`. Going through `assemble` confounds the container test with the
+    // unrelated overlap-decoration test: any shape one outline fully encloses
+    // also satisfies `overlap_area == area`, the same signal that condemns pie
+    // wedges, so an *unlabelled* node built with `assemble` would be dropped by
+    // that test regardless of whether the container fix is even in place. Only
+    // a direct call isolates the mechanism this defect is about. ~keep
+
+    /// Two of a node's own incoming arrowheads, drawn just inside its border,
+    /// satisfy `Rect::encloses` exactly as two real members would. They must
+    /// not count: excluding them leaves zero members, short of the container
+    /// threshold.
+    #[test]
+    fn a_container_test_excludes_arrowheads_from_its_member_count() {
+        let outlines = vec![
+            outline(0.0, 0.0, 100.0, 100.0),
+            outline(5.0, 5.0, 15.0, 15.0),
+            outline(80.0, 80.0, 90.0, 90.0),
+        ];
+        let arrowheads = vec![false, true, true];
+        let owned: Vec<Vec<&Label>> = vec![Vec::new(), Vec::new(), Vec::new()];
+
+        assert_eq!(
+            find_containers(&outlines, &arrowheads, &owned),
+            vec![false, false, false],
+            "two arrowheads inside a node's border are not two members grouped by it"
+        );
+    }
+
+    /// A UML class box or a BPMN task carries its own label alongside the
+    /// compartments or markers it draws inside itself. It must never be
+    /// condemned as a container, whatever it encloses.
+    #[test]
+    fn a_container_test_never_condemns_a_labelled_enclosure() {
+        let outlines = vec![
+            outline(0.0, 0.0, 100.0, 100.0),
+            outline(10.0, 10.0, 40.0, 40.0),
+            outline(60.0, 60.0, 90.0, 90.0),
+        ];
+        let arrowheads = vec![false, false, false];
+        let caption = label(50.0, 50.0, "ClassName");
+        let owned: Vec<Vec<&Label>> = vec![vec![&caption], Vec::new(), Vec::new()];
+
+        assert_eq!(
+            find_containers(&outlines, &arrowheads, &owned),
+            vec![false, false, false],
+            "a labelled enclosure is never a container, whatever it encloses"
+        );
+    }
+
+    /// The baseline the two tests above are contrasted with: an unlabelled
+    /// enclosure of two ordinary (non-arrowhead) shapes is still a container.
+    #[test]
+    fn a_container_test_still_condemns_an_unlabelled_enclosure_of_two_real_shapes() {
+        let outlines = vec![
+            outline(0.0, 0.0, 100.0, 100.0),
+            outline(10.0, 10.0, 40.0, 40.0),
+            outline(60.0, 60.0, 90.0, 90.0),
+        ];
+        let arrowheads = vec![false, false, false];
+        let owned: Vec<Vec<&Label>> = vec![Vec::new(), Vec::new(), Vec::new()];
+
+        assert_eq!(
+            find_containers(&outlines, &arrowheads, &owned),
+            vec![true, false, false]
+        );
     }
 
     #[test]

@@ -304,7 +304,7 @@ fn inject_unrepresented_table_elements(doc: &mut InternalDocument, allow_injecti
     // `flat_pdf_document` builds nothing but `Paragraph`s, so on the flat path
     // every detected table was injected on top of native text that already
     // contained the words it was reconstructed from — the same content rendered
-    // twice (pdfa_031). Inject only the tables whose cells are genuinely absent.
+    // twice (pdfa_031). Inject only the tables whose cells are genuinely absent. ~keep
     let mut represented = element_token_multiset(doc);
     let unrepresented = (0..doc.tables.len() as u32)
         .filter(|table_index| !table_is_represented(&doc.tables[*table_index as usize], &mut represented))
@@ -709,6 +709,18 @@ async fn run_ocr_with_layout(
     ))
 }
 
+/// Whether the caller actually asked for the recovered diagram, i.e. the
+/// request's output format resolves to the `dot` renderer.
+///
+/// `OutputFormat::Custom` is how any renderer, built-in or registered, is
+/// selected (see `plugins::registry::RendererRegistry`), so matching the
+/// renderer name here is the same test `derive_extraction_result` uses to
+/// decide which renderer runs — not a looser proxy for it.
+#[cfg(feature = "pdf")]
+fn wants_dot_output(config: &ExtractionConfig) -> bool {
+    matches!(&config.output_format, crate::core::config::OutputFormat::Custom(name) if name == "dot")
+}
+
 /// PDF document extractor using pdf_oxide.
 #[cfg_attr(alef, alef(skip))]
 pub struct PdfExtractor;
@@ -847,8 +859,16 @@ impl PdfExtractor {
 
         // Recovered before the document is handed on, which is the last point
         // it is still borrowable. Pages that draw nothing graph-shaped cost one
-        // path parse and stop there.
-        let diagrams = crate::extraction::diagram::pdf::recover(&mut oxide_document);
+        // path parse and stop there, and a page that does still pays for a
+        // second full text pass on top of the one this extractor already runs.
+        // Skipped outright unless the caller actually asked for DOT output —
+        // every other renderer discards the result, so an ordinary ruled
+        // report must not pay for it.
+        let diagrams = if wants_dot_output(config) {
+            crate::extraction::diagram::pdf::recover(&mut oxide_document)
+        } else {
+            Vec::new()
+        };
 
         #[allow(unused_variables, unused_mut)]
         let (
@@ -1416,7 +1436,7 @@ impl PdfExtractor {
         // from inside that closure and threads them back through its return
         // value instead (#353); they are merged below via
         // `markdown_layout_glyph_drop_warnings` (markdown path) and were
-        // already folded into `ocr_fallback_warnings` above (OCR path).
+        // already folded into `ocr_fallback_warnings` above (OCR path). ~keep
         for pdf_render_warning in crate::pdf::render::take_pdf_oxide_render_warnings() {
             crate::core::diagnostics::push_warning_deduped(&mut doc.processing_warnings, pdf_render_warning);
         }
@@ -1480,7 +1500,7 @@ impl PdfExtractor {
         // Issue #66: `/PageLabels` — one display label per page, index-aligned
         // with `pdf_metadata.page_structure`/`PageBoundary::page_number`.
         // `PdfMetadata` is an alef-listed type (no new public fields), so this
-        // rides in `additional` instead.
+        // rides in `additional` instead. ~keep
         if let Some(labels) = pdf_page_labels {
             doc.metadata
                 .additional
@@ -4390,5 +4410,91 @@ mod tests {
             crate::extraction::derive::derive_extraction_result(doc, false, crate::core::config::OutputFormat::Plain);
 
         assert!(result.form_fields.is_empty());
+    }
+
+    /// Two stroked boxes joined by a line that ends in a filled arrowhead, with a
+    /// label centred in each box. Mirrors the fixture in
+    /// `tests/diagram_dot_pdf.rs`, kept local so this unit test can inspect
+    /// `InternalDocument::diagrams` directly rather than through the renderer.
+    #[cfg(feature = "pdf")]
+    fn two_boxes_and_an_arrow_pdf() -> Vec<u8> {
+        use lopdf::{Document, Object, Stream, dictionary};
+
+        let content = b"1 w 0 0 0 RG
+10 150 80 30 re S
+10 20 80 30 re S
+50 150 m 50 56 l S
+46 56 m 54 56 l 50 50 l h f
+BT /F1 12 Tf 30 160 Td (Alpha) Tj ET
+BT /F1 12 Tf 30 30 Td (Beta) Tj ET
+"
+        .to_vec();
+
+        let mut document = Document::with_version("1.5");
+        let pages_id = document.new_object_id();
+        let font_id = document.add_object(dictionary! {
+            "Type" => "Font",
+            "Subtype" => "Type1",
+            "BaseFont" => "Helvetica",
+        });
+        let content_id = document.add_object(Stream::new(dictionary! {}, content));
+        let page_id = document.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "Contents" => content_id,
+            "Resources" => dictionary! { "Font" => dictionary! { "F1" => font_id } },
+            "MediaBox" => vec![0.into(), 0.into(), 200.into(), 200.into()],
+        });
+        document.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![page_id.into()],
+                "Count" => 1,
+            }),
+        );
+        let catalog_id = document.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
+        document.trailer.set("Root", catalog_id);
+
+        let mut bytes = Vec::new();
+        document.save_to(&mut bytes).expect("fixture PDF must save");
+        bytes
+    }
+
+    /// #579 defect: recovery ran on every PDF regardless of the requested
+    /// output format, so an ordinary document paid for a second full text
+    /// pass on any page that happened to look graph-shaped. `diagrams` is
+    /// internal, so this has to be a unit test here rather than in the
+    /// integration suite, which can only see the rendered `content` string —
+    /// and `content` looks identical whether recovery ran and was discarded
+    /// or never ran at all, so it cannot tell the two apart.
+    #[cfg(feature = "pdf")]
+    #[tokio::test]
+    async fn recovery_is_skipped_unless_dot_output_is_requested() {
+        let bytes = two_boxes_and_an_arrow_pdf();
+        let extractor = PdfExtractor::new();
+
+        let plain_doc = extractor
+            .extract_content(&bytes, "application/pdf", &ExtractionConfig::default())
+            .await
+            .expect("plain extraction must succeed");
+        assert_eq!(
+            plain_doc.diagrams.len(),
+            0,
+            "diagram recovery must not run for non-dot output"
+        );
+
+        let dot_config = ExtractionConfig {
+            output_format: crate::core::config::OutputFormat::Custom("dot".to_string()),
+            ..Default::default()
+        };
+        let dot_doc = extractor
+            .extract_content(&bytes, "application/pdf", &dot_config)
+            .await
+            .expect("dot extraction must succeed");
+        assert_eq!(dot_doc.diagrams.len(), 1, "diagram recovery must run for dot output");
     }
 }
