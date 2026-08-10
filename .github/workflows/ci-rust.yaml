@@ -159,6 +159,23 @@ jobs:
           fi
           echo "xberg doctest features: ${features}"
           cargo test --locked -p xberg --features "${features}" --doc
+
+          # The sibling library crates, for the same reason. `-p xberg` alone left the
+          # other first-party crates with no doctest coverage at all, and xberg-tesseract
+          # had accumulated a failing example nobody could see: its module-level usage
+          # sample was a bare ```rust fence, so it *executed*, called into Tesseract and
+          # died with InitError on any machine without eng.traineddata installed.
+          # Most carry no examples yet; gating them now is what stops the next one from
+          # rotting the same way. xberg-cli is a binary with no lib target, and
+          # crates/ttf-parser-compat is a vendored ttf-parser fork whose doctests are
+          # upstream's, so neither belongs here. ~keep
+          cargo test --locked -p xberg-tesseract --doc
+          cargo test --locked -p xberg-gliner --doc
+          cargo test --locked -p xberg-candle-ocr --doc
+          cargo test --locked -p xberg-libheif --doc
+          cargo test --locked -p xberg-libwpd --doc
+          # Refuses to build without an inference backend selected.
+          cargo test --locked -p xberg-paddle-ocr --features ort --doc
         shell: bash
         env:
           LD_LIBRARY_PATH: ${{ env.LD_LIBRARY_PATH || '' }}

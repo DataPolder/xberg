@@ -9,7 +9,11 @@
 //!
 //! Here's a basic example of how to use `xberg-tesseract`:
 //!
-//! ```rust
+//! `no_run` like every other example in this crate: it calls into Tesseract, which needs
+//! `eng.traineddata` present under `TESSDATA_PREFIX`. Executing it fails with `InitError`
+//! on any machine without the language pack installed, which is most CI runners.
+//!
+//! ```rust,no_run
 //! use std::path::PathBuf;
 //! use std::error::Error;
 //! use xberg_tesseract::TesseractAPI;
