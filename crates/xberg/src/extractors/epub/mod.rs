@@ -348,7 +348,7 @@ impl EpubExtractor {
                 // blockquote, so `push_quote_end()` can be emitted once that child has been
                 // processed. This is a one-level approximation (direct children only, not the
                 // full subtree) — correct for the common case of a blockquote with no nested
-                // blockquote inside it, which covers the overwhelming majority of EPUB content.
+                // blockquote inside it, which covers the overwhelming majority of EPUB content. ~keep
                 let mut quote_close_after: Option<u32> = None;
                 for (node_index, node) in chapter_structure.nodes.iter().enumerate() {
                     use crate::types::document_structure::NodeContent;
@@ -491,7 +491,7 @@ impl EpubExtractor {
                         // Issue #127: these kinds used to fall into the catch-all below and
                         // be dropped entirely, even though the upstream HTML structure
                         // walker (`extraction::html::structure`) does produce them (e.g.
-                        // `DefinitionItem` for `<dl>/<dt>/<dd>`).
+                        // `DefinitionItem` for `<dl>/<dt>/<dd>`). ~keep
                         NodeContent::DefinitionList | NodeContent::List { .. } => {}
                         NodeContent::DefinitionItem { term, definition } => {
                             builder.push_definition_term(term, None);
@@ -554,7 +554,7 @@ impl EpubExtractor {
             // Tagging that text "doctags" would make `derive_extraction_result`'s DocTags arm
             // take it verbatim instead of rendering the (correctly structured) element tree
             // via `render_doctags`. Falling through to "plain" here is intentional: it makes
-            // the tag mismatch so the DocTags arm always renders from `doc.elements` instead.
+            // the tag mismatch so the DocTags arm always renders from `doc.elements` instead. ~keep
             let format_name = match config.output_format {
                 OutputFormat::Markdown => "markdown",
                 OutputFormat::Djot => "djot",

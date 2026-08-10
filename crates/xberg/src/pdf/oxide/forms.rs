@@ -45,7 +45,7 @@ pub(crate) fn extract_form_fields(doc: &mut OxideDocument) -> (Vec<PdfFormField>
         Err(e) => {
             // `extract_fields` returns `Ok(vec![])` when the document simply has no
             // `/AcroForm` entry, so any `Err` here is a genuine parse/extraction
-            // failure, not the (very common) absence of a form.
+            // failure, not the (very common) absence of a form. ~keep
             tracing::debug!("AcroForm extraction failed: {e}");
             warnings.push(ProcessingWarning {
                 source: std::borrow::Cow::Borrowed("pdf_forms"),

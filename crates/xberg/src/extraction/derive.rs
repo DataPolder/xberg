@@ -74,7 +74,7 @@ pub(crate) fn resolve_relationships(doc: &mut InternalDocument) {
         // break as a set, and a per-key warning would flood `processing_warnings` on a
         // large document. Previously this was `log::debug!` only, so a citation or
         // cross-reference that failed to resolve vanished from `DocumentStructure` with
-        // no diagnostic at all (#74).
+        // no diagnostic at all (#74). ~keep
         crate::core::diagnostics::push_warning(
             &mut doc.processing_warnings,
             "relationships",
@@ -616,7 +616,7 @@ pub fn derive_extraction_result(
                     // #208: `tracing::warn!` is invisible to API/binding consumers — the
                     // only channel they can observe is `processing_warnings`. Without
                     // this, a typo'd or unregistered custom format silently produced
-                    // plain text with no way for the caller to detect the fallback.
+                    // plain text with no way for the caller to detect the fallback. ~keep
                     crate::core::diagnostics::push_warning(
                         &mut doc.processing_warnings,
                         "output-format",
@@ -646,13 +646,13 @@ pub fn derive_extraction_result(
     // #76: `push_uri` caps collection at `InternalDocument::MAX_URIS` and silently
     // discarded the rest, so a document with more links than the cap was
     // indistinguishable from one that genuinely has exactly `MAX_URIS`. Name the
-    // loss; only when it actually happened, so a normal document stays warning-free.
+    // loss; only when it actually happened, so a normal document stays warning-free. ~keep
     if doc.uris_dropped > 0 {
         let dropped = doc.uris_dropped;
         // Report the cap itself, not `doc.uris.len()`: the derivation runs a second
         // time after the captioning prepass, by which point the list has been
         // de-duplicated and shortened. A length-derived count would produce a second,
-        // differently-worded warning that `push_warning`'s dedup could not collapse.
+        // differently-worded warning that `push_warning`'s dedup could not collapse. ~keep
         let kept = InternalDocument::MAX_URIS;
         let found = kept + dropped;
         crate::core::diagnostics::push_warning(
@@ -684,7 +684,7 @@ pub fn derive_extraction_result(
     // `ExtractedDocument.metadata.additional` map. Fall back to serializing just
     // `CodeMetadata` for documents that reach this point without going through
     // `CodeExtractor` (e.g. synthetic `InternalDocument`s built by tests or other
-    // callers that set `FormatMetadata::Code` directly).
+    // callers that set `FormatMetadata::Code` directly). ~keep
     #[cfg(feature = "tree-sitter")]
     let is_code_metadata = matches!(
         doc.metadata.format.as_ref(),
@@ -795,7 +795,7 @@ fn build_pages(doc: &InternalDocument) -> Option<Vec<PageContent>> {
             for elem in &elems {
                 // `render_plain` drops everything outside the body layer, so page content
                 // must drop it too — otherwise running headers and footers appear in
-                // `pages[n].content` but not in `result.content` for `OutputFormat::Plain`.
+                // `pages[n].content` but not in `result.content` for `OutputFormat::Plain`. ~keep
                 if !crate::rendering::common::is_body_element(elem) {
                     continue;
                 }

@@ -177,7 +177,7 @@ async fn run_captioning_prepass(
     // degraded `CodeMetadata`-only `code_intelligence` payload. Put the full
     // payload the first derivation already computed back under the scratch key so
     // the second derivation round-trips the same `.remove()` and reconstructs the
-    // identical, non-degraded result.
+    // identical, non-degraded result. ~keep
     #[cfg(feature = "tree-sitter")]
     if let Some(code_intelligence) = caption_result.code_intelligence.take() {
         doc.metadata.additional.insert(

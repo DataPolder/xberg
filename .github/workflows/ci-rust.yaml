@@ -257,7 +257,7 @@ jobs:
   # `cargo test --no-run` (not `cargo check`, which never invokes link.exe, and not plain
   # `cargo build`, which only produces an rlib) builds the crate's test harness binary --
   # a real MSVC link of every native object, including the two above -- without spending
-  # time actually running the (fixture-heavy) test suite.
+  # time actually running the (fixture-heavy) test suite. ~keep
   windows-static-embeddings-link:
     name: Rust (windows-latest, static-embeddings link)
     if: github.repository == 'xberg-io/xberg' && github.actor != 'dependabot[bot]'
@@ -271,7 +271,7 @@ jobs:
       # `--lib` (not `--all-targets`) keeps the fixture surface to extraction::image's
       # ocr-gated `#[cfg(test)]` modules, whose include_bytes! fixtures must exist at
       # compile time even though the tests never run -- so `images/**` is sufficient.
-      # `static-embeddings`'s test fixtures are synthetic in-memory safetensors bytes.
+      # `static-embeddings`'s test fixtures are synthetic in-memory safetensors bytes. ~keep
       - name: Fetch test_documents fixtures
         uses: xberg-io/actions/fetch-test-documents@v1
         with:

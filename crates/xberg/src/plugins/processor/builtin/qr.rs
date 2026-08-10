@@ -120,7 +120,7 @@ impl PostProcessor for QrCodeProcessor {
         // Decoded payloads previously only landed on `ExtractedImage::qr_codes`, which nothing
         // in `rendering/` reads — the text never reached `content` (xberg-io/xberg#156). They
         // are appended as their own section so the text participates in every downstream stage
-        // that reads document text, chunking and embeddings included (#302).
+        // that reads document text, chunking and embeddings included (#302). ~keep
         append_payload_section(result, config, &payloads);
         collect_payload_uris(result, &payloads);
 

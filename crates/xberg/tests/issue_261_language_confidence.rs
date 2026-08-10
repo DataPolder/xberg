@@ -59,7 +59,7 @@ async fn mixed_language_document_reports_exact_proportions_and_ordering() {
     );
 
     // `ExtractedDocument` has private fields, so a struct literal with
-    // `..Default::default()` is E0451 outside the crate (see #313).
+    // `..Default::default()` is E0451 outside the crate (see #313). ~keep
     let mut result = ExtractedDocument::default();
     result.content = text;
     result.mime_type = Cow::Borrowed("text/plain");
@@ -119,7 +119,7 @@ async fn mixed_language_document_reports_exact_proportions_and_ordering() {
 
     // Confidence must be in range and self-consistent with `reliable`, which is
     // documented (see `language_detection::AGGREGATE_RELIABLE_THRESHOLD`) as the
-    // chunk-averaged confidence exceeding 0.9.
+    // chunk-averaged confidence exceeding 0.9. ~keep
     for detail in &details {
         assert!(
             (0.0..=1.0).contains(&detail.confidence),

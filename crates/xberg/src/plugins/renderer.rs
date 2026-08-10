@@ -68,7 +68,7 @@ where
         // produces a document with zero elements, and rendering that emits an empty
         // document shell instead of the document's content. Render from the preserved
         // `internal_document` when the caller supplied one; otherwise fall back to the
-        // `Renderer` default of returning the already-rendered text verbatim.
+        // `Renderer` default of returning the already-rendered text verbatim. ~keep
         match result.internal_document.as_ref() {
             Some(doc) => InternalRenderer::render(self, doc),
             None => Ok(result.content.clone()),

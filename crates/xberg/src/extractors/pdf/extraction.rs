@@ -239,7 +239,7 @@ pub(crate) fn extract_all_from_oxide_document(
         // `HierarchyConfig::include_bbox` (default `true`): when explicitly disabled,
         // bounding-box info is stripped from every structural element below so
         // `assign_hierarchy_to_pages` (extractors/pdf/pages.rs) — which maps
-        // `element.bbox` straight onto each `HierarchicalBlock.bbox` — omits it too.
+        // `element.bbox` straight onto each `HierarchicalBlock.bbox` — omits it too. ~keep
         let include_bbox = config
             .pdf_options
             .as_ref()

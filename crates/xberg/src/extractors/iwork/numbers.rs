@@ -1004,7 +1004,7 @@ fn parse_old_cell(
     // A legacy formula/comment key is a flag bit only (#110): xberg has no schema
     // for the pre-BNC formula token stream or comment thread payload behind that
     // key, so the presence is surfaced via warning instead of guessing at text
-    // the parser cannot actually decode.
+    // the parser cannot actually decode. ~keep
     push_legacy_formula_comment_warning(warnings, table_name, &fields);
 
     // Source: https://oss.sheetjs.com/notes/iwa/ documents pre-BNC fields 3/4 and masks. ~keep

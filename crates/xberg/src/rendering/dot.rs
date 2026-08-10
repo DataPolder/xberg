@@ -300,7 +300,7 @@ mod tests {
         use std::str::FromStr;
 
         // `FromStr` is the API-handler path; serde is the path the language
-        // bindings take (e.g. Python's `OutputFormat("dot")`).
+        // bindings take (e.g. Python's `OutputFormat("dot")`). ~keep
         let format = OutputFormat::from_str("dot").unwrap();
         assert_eq!(format, OutputFormat::Custom("dot".to_string()));
         assert_eq!(

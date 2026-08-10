@@ -375,7 +375,7 @@ mod tests {
         }
         let mut dbf_bytes = cursor.into_inner();
         dbf_bytes[0] = 0x83; // dBase III WITH memo
-        dbf_bytes[32 + 11] = b'M'; // field type: Character -> Memo
+        dbf_bytes[32 + 11] = b'M'; // field type: Character -> Memo ~keep
 
         // .dbt sidecar: a 6-byte header (next free block = 2, block size = 64)
         // padded to fill block 0, then block 1 holds the memo text terminated

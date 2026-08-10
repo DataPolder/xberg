@@ -131,7 +131,7 @@ mod tests {
         //     were found every body-text record still failed to match (#236).
         //
         // Neither produced a warning. The expected strings below are cross-checked against
-        // the file's own `PrvText` preview stream.
+        // the file's own `PrvText` preview stream. ~keep
         let path =
             std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../test_documents/hwp/styled_document.hwp");
         if !path.exists() {

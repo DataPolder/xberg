@@ -884,7 +884,7 @@ impl InternalDocumentExtractor for AsciiDocExtractor {
         // See the identical rationale on `extractors::text::PlainTextExtractor::extract_content`
         // (#171, #395): `replaced_characters` is recorded by the decoder itself, at the point
         // data is actually lost, so it stays accurate under `quality`'s mojibake cleanup where
-        // scanning the decoded text for U+FFFD afterwards would not.
+        // scanning the decoded text for U+FFFD afterwards would not. ~keep
         let outcome = crate::utils::decode_with_provenance(content, None);
         let decoded_lossily = outcome.replaced_characters;
         let source = normalize_line_endings(crate::utils::strip_bom(&outcome.text));

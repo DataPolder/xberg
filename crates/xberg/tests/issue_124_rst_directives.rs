@@ -53,7 +53,7 @@ Outro paragraph.
     );
 
     // The figure's image reference (alt-text placeholder, mirroring plain `.. image::`
-    // handling) must also be preserved rather than being dropped along with the caption.
+    // handling) must also be preserved rather than being dropped along with the caption. ~keep
     assert!(
         result.content.contains("[image: A bar chart]"),
         "expected figure image placeholder using :alt: text, got: {:?}",

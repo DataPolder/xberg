@@ -1851,7 +1851,7 @@ impl<R: Read + Seek> DocxParser<R> {
                         b"w:pict" => {
                             // `parse_vml_pict` now threads `budget` through and balances
                             // its own `</w:pict>` end tag against the `enter()` above
-                            // internally, so no manual `budget.leave()` is needed here.
+                            // internally, so no manual `budget.leave()` is needed here. ~keep
                             let parsed = super::drawing::parse_vml_pict(reader, budget)?;
                             if mc_fallback_depth == 0
                                 && let Some(drawing) = parsed
@@ -1889,7 +1889,7 @@ impl<R: Read + Seek> DocxParser<R> {
                             if let Some(ctx) = table_stack.last_mut() {
                                 // `parse_table_properties` now threads `budget` through and
                                 // balances its own `</w:tblPr>` end tag against the `enter()`
-                                // above internally, so no manual `budget.leave()` is needed here.
+                                // above internally, so no manual `budget.leave()` is needed here. ~keep
                                 ctx.table.properties = Some(super::table::parse_table_properties(reader, budget)?);
                             }
                         }
@@ -1945,7 +1945,7 @@ impl<R: Read + Seek> DocxParser<R> {
                         b"w:drawing" => {
                             // `parse_drawing` now threads `budget` through and balances its
                             // own `</w:drawing>` end tag against the `enter()` above
-                            // internally, so no manual `budget.leave()` is needed here.
+                            // internally, so no manual `budget.leave()` is needed here. ~keep
                             let drawing = super::drawing::parse_drawing(reader, budget)?;
                             let idx = out.drawings.len();
                             out.drawings.push(drawing);
@@ -1961,7 +1961,7 @@ impl<R: Read + Seek> DocxParser<R> {
                             // `parse_section_properties_streaming` now threads `budget`
                             // through and balances its own `</w:sectPr>` end tag against the
                             // `enter()` above internally, so no manual `budget.leave()` is
-                            // needed here.
+                            // needed here. ~keep
                             let sect_props = super::section::parse_section_properties_streaming(reader, budget)?;
                             out.sections.push(sect_props);
                         }

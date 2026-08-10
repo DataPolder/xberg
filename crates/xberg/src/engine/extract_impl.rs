@@ -184,7 +184,7 @@ pub(crate) async fn extract_batch(
     let batch_span = crate::telemetry::spans::batch_span(inputs.len());
     // `Instant::now()` panics on wasm32 (no usable timer there, see the wasm32 note on
     // `extract_file_uncached`'s timeout handling), so the batch counter/histogram pair is
-    // skipped on that target rather than risking a panic for a metrics-only side effect.
+    // skipped on that target rather than risking a panic for a metrics-only side effect. ~keep
     #[cfg(all(feature = "otel", not(target_arch = "wasm32")))]
     let batch_started = std::time::Instant::now();
 
@@ -202,7 +202,7 @@ pub(crate) async fn extract_batch(
     let batch: std::pin::Pin<Box<dyn std::future::Future<Output = Result<ExtractionResult>> + Send>> =
         Box::pin(extract_batch_concurrent(inner, inputs, config));
 
-    // No `+ Send` on wasm32: extractor futures are `!Send` there (async_trait(?Send)).
+    // No `+ Send` on wasm32: extractor futures are `!Send` there (async_trait(?Send)). ~keep
     #[cfg(any(not(feature = "tokio-runtime"), target_arch = "wasm32"))]
     let batch: std::pin::Pin<Box<dyn std::future::Future<Output = Result<ExtractionResult>>>> = {
         let _ = inner;
@@ -346,7 +346,7 @@ async fn extract_batch_concurrent(
                 // alef-generated binding crates, which cannot carry `#![recursion_limit]`.
                 // A bare `Box::pin` does not help: it yields `Pin<Box<ConcreteFuture>>`,
                 // so the concrete type stays in the proof. Coercing to `dyn Future` cuts
-                // the chain here.
+                // the chain here. ~keep
                 let extraction: std::pin::Pin<Box<dyn Future<Output = Result<ExtractionResult>> + Send + '_>> =
                     Box::pin(extract_one_resolved(input, &resolved_config, index));
                 extraction.await

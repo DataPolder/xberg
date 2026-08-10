@@ -208,7 +208,7 @@ fn resolve_thread_budget_with_guard(
     }
     match quota_cores {
         // `clamp` rather than `min().max()`: both bounds are known non-zero here
-        // (`cgroup_cpu_quota_cores` floors its result at 1), so it cannot panic.
+        // (`cgroup_cpu_quota_cores` floors its result at 1), so it cannot panic. ~keep
         Some(quota_cores) => host_cpus.clamp(1, quota_cores.max(1)),
         None => {
             if host_cpus > DEFAULT_THREAD_CAP {
@@ -487,7 +487,7 @@ mod tests {
     // `#[serial]`: DEFAULT_CAP_WARNED is a process-global static with no
     // injectable variant, so concurrent tests resetting/reading it would race
     // each other — same reasoning as the other process-global-static tests in
-    // this crate (see core::pipeline::mod::tests for the established pattern).
+    // this crate (see core::pipeline::mod::tests for the established pattern). ~keep
 
     #[test]
     #[serial_test::serial]

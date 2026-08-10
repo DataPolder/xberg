@@ -65,7 +65,7 @@ fn test_pdfa_001_retains_standalone_table_cell_22() {
     // contains five standalone `22` tokens, so a document-wide count of >= 1 would still pass with
     // the Psychiatric-Inpatient cell deleted and some unrelated `22` surviving — a test that passes
     // when the bug is present. The pair `Inpatient 22` is what the issue actually names, and it
-    // appears at ground-truth lines 75 and 95.
+    // appears at ground-truth lines 75 and 95. ~keep
     let inpatient_22_pairs = tokens
         .windows(2)
         // `tokenize` lowercases, so match lowercase here.

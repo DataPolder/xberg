@@ -197,7 +197,7 @@ pub(crate) fn parse_drawing(reader: &mut Reader<&[u8]>, budget: &mut SecurityBud
                         // Consumes through its own `</w:txbxContent>` end tag, so it
                         // must not also increment `depth` (#81). `collect_txbx_content_text`
                         // now threads `budget` through and balances the `enter()` above
-                        // internally, so no manual `budget.leave()` is needed here.
+                        // internally, so no manual `budget.leave()` is needed here. ~keep
                         let text = collect_txbx_content_text(reader, budget)?;
                         if !text.is_empty() {
                             drawing.text_box_content = Some(text);
@@ -439,7 +439,7 @@ fn parse_vml_textbox(reader: &mut Reader<&[u8]>, budget: &mut SecurityBudget) ->
                 if e.local_name().as_ref() == b"txbxContent" {
                     // `collect_txbx_content_text` consumes its own end tag and
                     // balances the `enter()` above internally, so no manual
-                    // `budget.leave()` is needed here.
+                    // `budget.leave()` is needed here. ~keep
                     let collected = collect_txbx_content_text(reader, budget)?;
                     if !collected.is_empty() {
                         text = Some(collected);
@@ -494,7 +494,7 @@ pub(crate) fn parse_vml_pict(
                 if e.local_name().as_ref() == b"textbox" {
                     // `parse_vml_textbox` consumes its own end tag and balances
                     // the `enter()` above internally, so no manual
-                    // `budget.leave()` is needed here.
+                    // `budget.leave()` is needed here. ~keep
                     text_box_content = parse_vml_textbox(reader, budget)?;
                 } else {
                     depth += 1;

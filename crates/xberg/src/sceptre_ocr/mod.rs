@@ -1053,7 +1053,7 @@ mod tests {
     fn should_publish_confidence_statistics_in_metadata() {
         let output = BlockingOutput {
             result: OcrResult {
-                // percentages: 90, 80, 40, 100 -> mean 77, sorted [40,80,90,100]
+                // percentages: 90, 80, 40, 100 -> mean 77, sorted [40,80,90,100] ~keep
                 lines: vec![line("a", 0.9), line("b", 0.8), line("c", 0.4), line("d", 1.0)],
             },
             width: 100,

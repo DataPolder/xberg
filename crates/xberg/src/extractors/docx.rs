@@ -240,7 +240,7 @@ fn build_internal_document(
                     // elsewhere), sourced from `word/comments.xml` instead of
                     // `word/footnotes.xml`, but it is routed through the dedicated
                     // `CommentRef`/`NodeContent::Comment` machinery so a consumer can
-                    // tell a reviewer comment apart from an authored footnote.
+                    // tell a reviewer comment apart from an authored footnote. ~keep
                     let mut search_start = 0;
                     while let Some(start) = text[search_start..].find("[cmt:") {
                         let abs_start = search_start + start;
@@ -667,7 +667,7 @@ fn parse_docx_core(
     // the flat text) vs. `to_plain_text()`. That placeholder is what the image-to-page
     // association below (`text.find(&placeholder)`) relies on; without it every image
     // silently defaults to page 1. DocTags needs the same per-image page fidelity as
-    // Markdown, so it takes the same branch here.
+    // Markdown, so it takes the same branch here. ~keep
     let (text, page_boundaries) = doc.extract_text_with_boundaries(
         matches!(
             output_format,

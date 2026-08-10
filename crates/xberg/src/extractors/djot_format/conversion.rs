@@ -76,7 +76,7 @@ pub fn extraction_result_to_djot(result: &crate::types::ExtractedDocument) -> cr
         // copies each element's text verbatim (crate::rendering::plain) and the
         // `pre_rendered_content` path bypasses rendering entirely, so a CRLF-authored
         // source (e.g. a Windows-authored code file) reaches here with `\r\n` intact.
-        // Splitting raw emits the whole document as one djot paragraph (#316).
+        // Splitting raw emits the whole document as one djot paragraph (#316). ~keep
         let content = crate::extraction::transform::normalize_line_endings(&result.content);
         let paragraphs: Vec<&str> = content.split("\n\n").collect();
 

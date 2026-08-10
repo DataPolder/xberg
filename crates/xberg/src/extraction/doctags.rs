@@ -165,7 +165,7 @@ fn take_location(tokens: &[Token<'_>]) -> (Option<BoundingBox>, usize) {
         // silently become a plausible-looking box, so reject rather than
         // clamp; this reuses the `values.len() != 4` absent-location path
         // below and mirrors the renderer's `is_finite` guard in
-        // `rendering::doctags::loc_tokens`.
+        // `rendering::doctags::loc_tokens`. ~keep
         if !value.is_finite() || !(0.0..=LOC_GRID).contains(&value) {
             break;
         }

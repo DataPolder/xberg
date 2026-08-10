@@ -122,7 +122,7 @@ mod tests {
         let span = rotated_span(100.0, 700.0, 40.0, 10.0, 90.0);
 
         let (advance, cross) = upright_origin(&span);
-        // -90 degrees: (x, y) -> (y, -x).
+        // -90 degrees: (x, y) -> (y, -x). ~keep
         assert!((advance - 700.0).abs() < 1e-3, "advance axis was {advance}");
         assert!((cross - -100.0).abs() < 1e-3, "cross axis was {cross}");
         let (start, end) = upright_advance_extent(&span);

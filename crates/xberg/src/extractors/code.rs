@@ -294,7 +294,7 @@ impl InternalDocumentExtractor for CodeExtractor {
         // `Cow::Owned` here means `from_utf8_lossy` had to allocate a replacement copy,
         // which it only does when it found at least one undecodable byte sequence to
         // substitute U+FFFD for; valid UTF-8 input is returned unchanged as
-        // `Cow::Borrowed` (#171).
+        // `Cow::Borrowed` (#171). ~keep
         let decoded_lossily = matches!(source, Cow::Owned(_));
 
         let language = tslp::detect_language_from_content(&source)

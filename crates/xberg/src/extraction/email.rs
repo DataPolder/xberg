@@ -981,7 +981,7 @@ fn extract_msg_from_cfb_at<F: std::io::Read + std::io::Seek>(
             } else {
                 // `budget.enter()` still incremented the counter even though it
                 // rejected this level; balance it immediately so sibling
-                // attachments at the same depth aren't spuriously capped too.
+                // attachments at the same depth aren't spuriously capped too. ~keep
                 budget.leave();
                 warnings.push(ProcessingWarning {
                     source: Cow::Borrowed("msg_embedded_message_extraction"),

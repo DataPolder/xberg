@@ -1633,7 +1633,7 @@ mod tests {
         // return value (rather than ignoring it) is required, not cosmetic —
         // a test binary where some other component already owns the `log`
         // backend would otherwise pass this test for the wrong reason: no
-        // warnings would ever be captured at all, layout render or not.
+        // warnings would ever be captured at all, layout render or not. ~keep
         assert!(
             crate::pdf::render::install_pdf_render_diagnostics(),
             "no other component should own the log backend in this test binary"

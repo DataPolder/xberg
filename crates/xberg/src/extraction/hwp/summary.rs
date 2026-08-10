@@ -251,7 +251,7 @@ mod tests {
     #[test]
     fn should_convert_filetime_to_rfc3339_using_verified_real_values() {
         // Ground truth cross-checked against Python: datetime(1601,1,1) +
-        // timedelta(microseconds=filetime // 10).
+        // timedelta(microseconds=filetime // 10). ~keep
         assert_eq!(
             filetime_to_rfc3339(133_642_875_584_630_000),
             Some("2024-07-01T06:05:58Z".to_string())

@@ -248,7 +248,7 @@ pub(crate) fn extract_metadata_from_yaml(yaml: &YamlValue) -> Metadata {
     // typed home for all three. Decision: if both `author` and `authors` are present,
     // `authors` wins for `Metadata::authors` (it is the more specific, list-oriented key),
     // while `Metadata::created_by` is still populated from a scalar `author` regardless,
-    // preserving the pre-existing single-author behavior.
+    // preserving the pre-existing single-author behavior. ~keep
     if let Some(author_value) = yaml.get("author") {
         if let Some(author) = author_value.as_str()
             && metadata.created_by.is_none()
@@ -665,7 +665,7 @@ tags: "tag1, tag2"
         let metadata = extract_metadata_from_yaml(&yaml);
 
         // Precedence decision (xberg-io/xberg#154): plural `authors` wins for the
-        // `Metadata::authors` list, while `created_by` still reflects the scalar `author`.
+        // `Metadata::authors` list, while `created_by` still reflects the scalar `author`. ~keep
         assert_eq!(
             metadata.authors,
             Some(vec!["Jane Doe".to_string(), "John Roe".to_string()])
@@ -709,7 +709,7 @@ tags: "tag1, tag2"
     #[test]
     fn test_extract_frontmatter_drops_warning_for_backward_compatibility() {
         // The 2-tuple `extract_frontmatter` is the existing public(crate) entry point used by
-        // the markdown/mdx/djot extractors; it must keep behaving exactly as before.
+        // the markdown/mdx/djot extractors; it must keep behaving exactly as before. ~keep
         let content = "---\ntitle: [unterminated\n---\n\nBody";
         let (yaml, remaining) = extract_frontmatter(content);
 

@@ -161,6 +161,6 @@ async fn embedded_image_ocr_result_keeps_every_backend_field() {
     assert_eq!(usage[0].total_tokens, Some(42));
 
     // Recursion guard documented on `extraction::image_ocr`: OCR output must never
-    // carry nested images.
+    // carry nested images. ~keep
     assert!(ocr.images.is_none(), "OCR result must not carry nested images");
 }

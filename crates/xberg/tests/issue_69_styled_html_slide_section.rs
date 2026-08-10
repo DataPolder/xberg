@@ -12,7 +12,7 @@
 
 // `HtmlOutputConfig`, `HtmlTheme` and `ExtractionConfig::html_output` are all gated on the
 // `html` feature, so without this guard the whole test target fails to compile under the
-// default feature set and takes `cargo clippy --all-targets` down with it.
+// default feature set and takes `cargo clippy --all-targets` down with it. ~keep
 #![cfg(feature = "html")]
 
 mod helpers;

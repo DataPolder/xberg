@@ -198,7 +198,7 @@ fn collect_children(
                     _ => {
                         // `skip_to_end` reads through its own matching end tag directly,
                         // so the `Event::End` arm below never sees it. Refund the enter
-                        // above or every unrecognized OMML tag leaks one depth level.
+                        // above or every unrecognized OMML tag leaks one depth level. ~keep
                         skip_to_end(reader, &tag);
                         budget.leave();
                     }

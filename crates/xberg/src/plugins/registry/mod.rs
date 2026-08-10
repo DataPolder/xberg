@@ -246,7 +246,7 @@ pub(crate) mod test_support {
     // `crate::plugins::clear_document_extractors`) was removed: it had no remaining callers
     // after the document-extractor tests were rewritten to use local
     // `DocumentExtractorRegistry` instances instead of mutating the global registry (see
-    // `core::extractor::file::issue_217_fallback_tests` and `plugins::extractor::tests`).
+    // `core::extractor::file::issue_217_fallback_tests` and `plugins::extractor::tests`). ~keep
     registry_guard!(
         PostProcessorRegistryGuard,
         POST_PROCESSOR_REGISTRY_LOCK,

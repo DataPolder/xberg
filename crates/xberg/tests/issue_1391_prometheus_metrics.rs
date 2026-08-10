@@ -111,7 +111,7 @@ fn sum_exact_counter(metrics_body: &str, metric_name: &str) -> f64 {
 #[serial]
 async fn metrics_endpoint_reports_extraction_total_after_a_real_extraction() {
     // Must run before this binary's first extraction, or `get_metrics()`'s `OnceLock`
-    // latches onto the OTel no-op meter and this test can never pass — see the module doc.
+    // latches onto the OTel no-op meter and this test can never pass — see the module doc. ~keep
     let _registry = xberg::telemetry::init_prometheus();
 
     let router = create_router_with_limits(xberg::ExtractionConfig::default(), ApiSizeLimits::default());

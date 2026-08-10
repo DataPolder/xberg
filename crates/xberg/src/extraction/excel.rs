@@ -1214,7 +1214,7 @@ fn extract_xlsx_office_metadata_from_archive<R: std::io::Read + std::io::Seek>(
         }
         // #230: surface the raw DocSecurity integer plus its decoded ECMA-376 flags.
         // `XlsxAppProperties` never reaches `FormatMetadata::Excel`, so without this the
-        // workbook's protection state was discarded entirely.
+        // workbook's protection state was discarded entirely. ~keep
         if let Some(raw) = app.doc_security {
             metadata.insert(DOC_SECURITY_KEY.to_string(), raw.to_string());
             for (key, value) in decode_doc_security_flags(raw) {

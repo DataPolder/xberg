@@ -1689,7 +1689,7 @@ pub(crate) mod tests {
     //
     // Shared helper used by 5 of the 6 tests below (`build_single_slide_pptx`);
     // #238 builds its own bytes since it needs corrupt, not merely custom,
-    // `docProps/core.xml`/comment parts.
+    // `docProps/core.xml`/comment parts. ~keep
 
     /// Build a minimal single-slide PPTX with caller-supplied slide XML,
     /// optional slide relationships XML, and optional extra ZIP parts (used

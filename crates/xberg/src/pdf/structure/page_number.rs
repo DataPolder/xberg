@@ -832,7 +832,7 @@ mod tests {
     #[test]
     fn should_still_confirm_a_run_that_keeps_one_convention() {
         // Same positions and same ascending values as the mixed-convention run above;
-        // only the convention agreement differs, which isolates the new rule.
+        // only the convention agreement differs, which isolates the new rule. ~keep
         let mut sequence = PageNumberSequence::new();
         observe_texts(
             &mut sequence,

@@ -132,7 +132,7 @@ struct Snapshot {
 fn snapshot(env: &TestMeterEnv) -> Snapshot {
     // `reset()` only clears the exporter's own already-exported buffer; it does not
     // reset the SDK's cumulative aggregation, so `force_flush` below still reports the
-    // running totals-to-date (the temporality is `Cumulative`, the SDK default).
+    // running totals-to-date (the temporality is `Cumulative`, the SDK default). ~keep
     env.exporter.reset();
     env.provider
         .force_flush()

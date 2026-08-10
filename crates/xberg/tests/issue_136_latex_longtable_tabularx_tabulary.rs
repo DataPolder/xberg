@@ -26,7 +26,7 @@ async fn extract_markdown(latex: &str) -> String {
     // `result.content` is always the plain-text rendering regardless of
     // `output_format` (see `derive_extraction_result`); the GFM markdown
     // pipe-table text requested via `OutputFormat::Markdown` lives in
-    // `formatted_content`.
+    // `formatted_content`. ~keep
     result
         .formatted_content
         .expect("markdown output_format should populate formatted_content")

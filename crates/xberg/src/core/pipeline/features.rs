@@ -529,7 +529,7 @@ pub(super) fn execute_chunking(
 
         // chunker_type='semantic' silently degrades to a structural-boundary heuristic
         // when no embedding model is configured (or the crate lacks the `embeddings`
-        // feature); `tracing::warn!` alone is invisible to API/binding consumers (#258).
+        // feature); `tracing::warn!` alone is invisible to API/binding consumers (#258). ~keep
         if chunking_config.chunker_type == crate::chunking::ChunkerType::Semantic
             && crate::chunking::semantic::semantic_uses_structural_fallback(chunking_config)
         {

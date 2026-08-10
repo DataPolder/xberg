@@ -41,7 +41,7 @@ pub(crate) use sections::{validate_binarization_method, validate_tesseract_oem, 
 // `validate_output_format` stays `#[cfg(test)]`-only, and correctly so: both
 // `ExtractionConfig::output_format` and `OcrConfig::output_format` are the strongly-typed
 // `OutputFormat` enum, which rejects invalid values at deserialization time. There is no
-// raw-string field left for this function to validate.
+// raw-string field left for this function to validate. ~keep
 #[cfg(test)]
 pub(crate) use sections::validate_output_format;
 

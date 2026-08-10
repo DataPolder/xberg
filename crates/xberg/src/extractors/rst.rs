@@ -1025,7 +1025,7 @@ impl RstExtractor {
             // document and never resolves the reference, so unlike a generic
             // unhandled directive (whose *own* body is still captured by the
             // fallback below) the referenced file's content is always missing
-            // from the extracted text (#171).
+            // from the extracted text (#171). ~keep
             if trimmed.starts_with(".. include::") {
                 let target = trimmed.strip_prefix(".. include::").unwrap_or("").trim();
                 b.add_warning(crate::core::diagnostics::warning(
@@ -1058,7 +1058,7 @@ impl RstExtractor {
                 // Distinguish an actual (but otherwise unhandled) directive, `.. name:: args`,
                 // from a plain RST comment, `.. some comment text`. Directive names are a single
                 // word (no whitespace) immediately followed by `::`; comments are not, and their
-                // body must stay dropped rather than surfacing as document text.
+                // body must stay dropped rather than surfacing as document text. ~keep
                 let after_dots = trimmed.strip_prefix(".. ").unwrap_or("");
                 let is_directive = trimmed != ".."
                     && after_dots

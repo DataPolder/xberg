@@ -124,7 +124,7 @@ fn build_hwpx_internal_document(doc: unhwp::model::Document, mime_type: &str) ->
 
     for section in &doc.sections {
         // Section headers/footers (`unhwp::model::Section::header`/`footer`) previously
-        // went unread entirely — only `section.content` was visited (#96).
+        // went unread entirely — only `section.content` was visited (#96). ~keep
         if let Some(header_paragraphs) = &section.header {
             push_header_footer_paragraphs(
                 &mut builder,
@@ -148,7 +148,7 @@ fn build_hwpx_internal_document(doc: unhwp::model::Document, mime_type: &str) ->
                     // `Paragraph::has_text_content()` does not count `InlineContent::Equation`
                     // (see `unhwp::model::paragraph`), so an equation-only paragraph (no
                     // surrounding prose) would otherwise be dropped here before its LaTeX
-                    // ever reached `build_paragraph_content` (#98).
+                    // ever reached `build_paragraph_content` (#98). ~keep
                     let has_equation = p
                         .content
                         .iter()
@@ -292,7 +292,7 @@ fn build_paragraph_content(
                 // (not MathML/OMML — HWP equations use a distinct script format) to
                 // LaTeX. The parser leaves `Equation.latex` unset (only `unhwp`'s own
                 // Markdown renderer calls `to_latex`), so it is invoked directly here
-                // instead of duplicating a second HWP-script-to-LaTeX converter (#98).
+                // instead of duplicating a second HWP-script-to-LaTeX converter (#98). ~keep
                 let latex = eq
                     .latex
                     .clone()
@@ -363,7 +363,7 @@ fn cell_plain_text(
         // on a second pass over `p.content` that only the top-level section/paragraph
         // loop performs (to reach `doc.resources` for the binary payload). Table cells
         // never get that second pass, so an image inside a cell is dropped outright --
-        // not even as a placeholder -- unlike a resolvable top-level image (#171).
+        // not even as a placeholder -- unlike a resolvable top-level image (#171). ~keep
         if p.content
             .iter()
             .any(|c| matches!(c, unhwp::model::InlineContent::Image(_)))

@@ -166,7 +166,7 @@ pub(crate) fn chunk_text_with_heading_source(
             // `prepend_heading_context` and `breadcrumb_target` are deprecated and now
             // inert: neither field has any effect on `content` any more. They are kept on
             // `ChunkingConfig` only so existing callers keep compiling; see
-            // [`render_heading_breadcrumb`] for the explicit replacement.
+            // [`render_heading_breadcrumb`] for the explicit replacement. ~keep
         }
     }
 

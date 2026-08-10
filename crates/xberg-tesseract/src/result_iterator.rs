@@ -445,7 +445,7 @@ fn extract_word_data_unlocked(raw: *mut c_void) -> Result<WordData> {
     // matching `ResultIterator::word_recognition_language`. A null pointer
     // means Tesseract could not attribute this word to a specific language
     // (e.g. non-LSTM engines, or a word outside the recognized text);
-    // that's a normal, non-fatal case, so it maps to `None`, not an error.
+    // that's a normal, non-fatal case, so it maps to `None`, not an error. ~keep
     let language = {
         let lang_ptr = unsafe { TessResultIteratorWordRecognitionLanguage(raw) };
         if lang_ptr.is_null() {

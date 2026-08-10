@@ -135,7 +135,7 @@ mod tests {
             "learning".to_string(),
             0.5,
             // Both variants are feature-gated, so naming one breaks any build without it;
-            // these tests are about position offsets, not which algorithm produced them.
+            // these tests are about position offsets, not which algorithm produced them. ~keep
             KeywordAlgorithm::default(),
             "machine learning is great",
         );
@@ -148,7 +148,7 @@ mod tests {
             "learn*".to_string(),
             0.5,
             // Both variants are feature-gated, so naming one breaks any build without it;
-            // these tests are about position offsets, not which algorithm produced them.
+            // these tests are about position offsets, not which algorithm produced them. ~keep
             KeywordAlgorithm::default(),
             "machine learning is great",
         );

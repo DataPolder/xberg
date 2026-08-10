@@ -138,7 +138,7 @@ async fn extract_populates_summary_for_a_remote_uri() {
 
     // wiremock binds loopback, which crawlberg's default SSRF policy rejects
     // (`deny_private`). Relaxing it is what makes the test reach the extractor at all;
-    // it is not part of what is under test.
+    // it is not part of what is under test. ~keep
     let mut config = extractive_config();
     config.url.crawl.ssrf.deny_private = false;
 

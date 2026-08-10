@@ -88,7 +88,7 @@ use utoipa::OpenApi;
             crate::types::djot::DjotContent,
             // Nested schemas reachable from the types above. utoipa emits a `$ref`
             // for each of these but only defines a component for types listed here,
-            // so omitting one produces a dangling pointer (#251).
+            // so omitting one produces a dangling pointer (#251). ~keep
             crate::types::extraction::ArchiveEntry,
             crate::types::extraction::DocumentCounts,
             crate::types::extraction::LanguageConfidence,
@@ -112,7 +112,7 @@ use utoipa::OpenApi;
             crate::types::uri::ExtractedUri,
             // Transitive closure of the above. `NodeIndex` is deliberately absent:
             // it carries `schema(value_type = u32)`, so utoipa inlines it as a
-            // primitive rather than emitting a `$ref`.
+            // primitive rather than emitting a `$ref`. ~keep
             crate::types::djot::BlockType,
             crate::types::djot::InlineElement,
             crate::types::djot::InlineType,
@@ -152,7 +152,7 @@ pub struct ApiDoc;
 //
 // Every type below IS reachable from `ExtractedDocument` when its feature is on,
 // so leaving it unregistered emits a `$ref` with no matching component — a
-// dangling pointer that makes the published spec unusable for codegen (#251).
+// dangling pointer that makes the published spec unusable for codegen (#251). ~keep
 
 #[cfg(all(feature = "api", feature = "tree-sitter"))]
 #[derive(OpenApi)]

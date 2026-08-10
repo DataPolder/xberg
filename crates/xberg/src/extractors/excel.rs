@@ -427,7 +427,7 @@ impl SyncExtractor for ExcelExtractor {
         // The sync path (WASM) cannot recurse into embedded objects the way
         // `extract_content`/`extract_path` do via `ooxml_embedded`, which requires
         // async pipeline extraction. Name them in a warning instead so a workbook
-        // with embedded files doesn't look fully extracted (xberg-io/xberg#78).
+        // with embedded files doesn't look fully extracted (xberg-io/xberg#78). ~keep
         #[cfg(feature = "office")]
         if config.max_archive_depth > 0
             && let Some(warning) = scan_for_embedded_objects(content, mime_type)

@@ -143,7 +143,7 @@ fn build_metadata(summary: Option<&SummaryInfo>) -> Option<Metadata> {
         authors: summary.author.as_ref().map(|author| vec![author.clone()]),
         // HWP stores keywords as a single free-form string rather than a delimited
         // list, unlike most other formats' `Metadata::keywords: Vec<String>` — kept as
-        // one entry rather than guessing a delimiter and splitting it incorrectly.
+        // one entry rather than guessing a delimiter and splitting it incorrectly. ~keep
         keywords: summary.keywords.as_ref().map(|keywords| vec![keywords.clone()]),
         created_at: summary.created.clone(),
         modified_at: summary.modified.clone(),

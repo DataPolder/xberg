@@ -80,7 +80,7 @@ pub(crate) fn extract_pict_image(chars: &mut std::iter::Peekable<std::str::Chars
                             // maximal ill-formed subsequence, so a multi-byte truncated sequence
                             // also collapses to a single U+FFFD and is under-counted here. Only
                             // parsing `\bin` against the original bytes can be exact, and this
-                            // parser is char-based throughout.
+                            // parser is char-based throughout. ~keep
                             let mut consumed_bytes = 0usize;
                             while consumed_bytes < count {
                                 match chars.next() {

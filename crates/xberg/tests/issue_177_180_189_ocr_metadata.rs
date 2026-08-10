@@ -125,7 +125,7 @@ fn word_language_is_forwarded_per_ocr_element() {
         //
         // Absence of paragraph metadata is therefore treated as a legitimate, architecture-dependent
         // outcome here rather than asserted away: keys must be present or absent together, and when
-        // present, the expected value is still pinned.
+        // present, the expected value is still pinned. ~keep
         let has_is_crown = element.backend_metadata.contains_key("is_crown");
         let has_is_list_item = element.backend_metadata.contains_key("is_list_item");
         let has_justification = element.backend_metadata.contains_key("justification");

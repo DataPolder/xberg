@@ -719,7 +719,7 @@ async fn test_typst_heading_content_association() {
 
     // `=== Level 3 heading` and `==== Level 4 heading` each own exactly one
     // paragraph, so their association is unambiguous and pins the ordering: a
-    // scrambled walk would hand these paragraphs to a different heading.
+    // scrambled walk would hand these paragraphs to a different heading. ~keep
     let block_for = |wanted: &str| {
         blocks
             .iter()

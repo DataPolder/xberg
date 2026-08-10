@@ -1440,7 +1440,7 @@ impl ImageExtractor {
         // OCR backends only see `OcrConfig`, which has no route back to
         // `ExtractionConfig::images`, so DPI/dimension normalization from
         // `ImageExtractionConfig` has to happen here, once, before any backend
-        // ever sees the bytes (issue #209).
+        // ever sees the bytes (issue #209). ~keep
         #[cfg(feature = "ocr")]
         let normalized_ocr_bytes = config
             .images
@@ -1806,7 +1806,7 @@ impl InternalDocumentExtractor for ImageExtractor {
         tracing::debug!(format = "image", size_bytes = content.len(), "extraction starting");
         let extraction_metadata = extract_image_metadata(content)?;
         // Computed against the original bytes (before any HEIC->PNG rebinding
-        // below) so it reflects the same input `extract_image_metadata` saw.
+        // below) so it reflects the same input `extract_image_metadata` saw. ~keep
         let exif_warning = crate::extraction::exif::extract_exif_warning(content);
 
         #[cfg(feature = "heic")]

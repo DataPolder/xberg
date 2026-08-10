@@ -166,7 +166,7 @@ pub(crate) fn create_router_with_limits_and_server_config(
     // their own extraction pipeline outside this router must call
     // `xberg::telemetry::init_prometheus()` themselves, before their first extraction —
     // see that function's doc comment. This call is idempotent, so calling it again here
-    // after an embedder's own explicit call is harmless.
+    // after an embedder's own explicit call is harmless. ~keep
     #[cfg(feature = "prometheus")]
     let prometheus_registry = crate::telemetry::init_prometheus();
 

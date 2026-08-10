@@ -395,7 +395,7 @@ pub(crate) fn parse_yaml(data: &[u8]) -> Result<StructuredDataResult> {
     // document. Kubernetes manifests, Docker Compose bundles, and Ansible playbooks all use
     // multi-document YAML, so iterate the document stream via `Deserializer` instead
     // (xberg-io/xberg#167). A single-document input still deserializes to that document's
-    // own value, unchanged from prior behavior; multiple documents are wrapped in an array.
+    // own value, unchanged from prior behavior; multiple documents are wrapped in an array. ~keep
     let documents: Vec<serde_json::Value> = serde_yaml_ng::Deserializer::from_str(yaml_str)
         .map(serde_json::Value::deserialize)
         .collect::<std::result::Result<Vec<_>, _>>()
@@ -497,7 +497,7 @@ pub(crate) fn parse_toml(data: &[u8]) -> Result<StructuredDataResult> {
     // Convert to a canonical `serde_json::Value` so the extractor can render document
     // structure (headings/lists) the same way as JSON/YAML/JSONL (xberg-io/xberg#155).
     // `toml::Value` round-trips through `serde_json::Value` for every value this parser
-    // produces; `None` here just means the extractor falls back to a raw code block.
+    // produces; `None` here just means the extractor falls back to a raw code block. ~keep
     let json_value = serde_json::to_value(&value).ok();
 
     Ok(StructuredDataResult {

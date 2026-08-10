@@ -152,7 +152,7 @@ fn extract_common_metadata(doc: &mut OxideDocument) -> Result<CommonPdfMetadata>
     let title = title.or_else(|| xmp.as_ref().and_then(|x| non_empty(x.dc_title.clone())));
     // Adobe's XMP mapping convention: Info /Subject <-> dc:description (a
     // single descriptive string), distinct from dc:subject (a keyword bag,
-    // mapped to Keywords below).
+    // mapped to Keywords below). ~keep
     let subject = subject.or_else(|| xmp.as_ref().and_then(|x| non_empty(x.dc_description.clone())));
     let created_by = created_by.or_else(|| xmp.as_ref().and_then(|x| non_empty(x.xmp_creator_tool.clone())));
     let authors = authors.or_else(|| xmp.as_ref().map(|x| x.dc_creator.clone()).filter(|c| !c.is_empty()));

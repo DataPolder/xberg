@@ -88,7 +88,7 @@ fn recover_page(doc: &mut OxideDocument, page_index: usize) -> Option<DiagramGra
 
     // Read directly rather than through `oxide::text`, whose helper is gated on
     // layout detection and reorders sparse columns in place. Labels want the
-    // spans where they were drawn, not in reading order.
+    // spans where they were drawn, not in reading order. ~keep
     let page_text = crate::pdf::oxide::guard_oxide_panic(
         || {
             doc.doc

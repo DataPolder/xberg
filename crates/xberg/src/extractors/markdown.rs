@@ -887,7 +887,7 @@ impl InternalDocumentExtractor for MarkdownExtractor {
             // static format table (core/mime.rs), so `validate_mime_type` accepts it —
             // but the registry looks extractors up by exact string with no alias
             // resolution, so an unclaimed alias reaches extraction and fails as
-            // UnsupportedFormat despite being advertised as supported (#229).
+            // UnsupportedFormat despite being advertised as supported (#229). ~keep
             "application/x-quarto",
             "text/x-r-markdown",
         ]

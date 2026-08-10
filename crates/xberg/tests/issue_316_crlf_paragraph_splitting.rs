@@ -139,7 +139,7 @@ mod djot_conversion {
     use xberg::types::ExtractedDocument;
 
     // `ExtractedDocument` has private fields, so a struct literal with `..Default::default()`
-    // is rejected from an integration test (E0451). Build the default and assign instead.
+    // is rejected from an integration test (E0451). Build the default and assign instead. ~keep
     fn document_with_content(content: &str) -> ExtractedDocument {
         let mut document = ExtractedDocument::default();
         document.content = content.to_string();

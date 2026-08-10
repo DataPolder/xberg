@@ -380,7 +380,7 @@ fn decode_piece_chars(
     let is_compressed = (fc_raw & 0x4000_0000) != 0;
     let fc = (fc_raw & 0x3FFF_FFFF) as usize;
     // Compressed (CP1252) pieces address `word_doc` at half the raw FC value;
-    // uncompressed (UTF-16LE) pieces address it directly.
+    // uncompressed (UTF-16LE) pieces address it directly. ~keep
     let byte_offset = if is_compressed { fc / 2 } else { fc };
 
     if is_compressed {
@@ -958,7 +958,7 @@ mod tests {
     // ccpFtn/ccpAtn or a deliberately-overrunning piece, so these build a
     // minimal OLE compound file directly, matching the exact FIB layout this
     // module reads (fib_base_size=32, csw=14, cslw=22; see
-    // `extract_text_word97`).
+    // `extract_text_word97`). ~keep
 
     const TEST_CSW: usize = 14;
     const TEST_CSLW: usize = 22;
@@ -995,7 +995,7 @@ mod tests {
     fn build_fib(len: usize, ccp_text: u32, ccp_ftn: u32, ccp_atn: u32, ccp_txbx: u32) -> Vec<u8> {
         let mut buf = vec![0u8; len];
         write_u16(&mut buf, 0, 0xA5EC); // wIdent
-        write_u16(&mut buf, 2, 101); // nFib >= 101 selects the Word97+ path
+        write_u16(&mut buf, 2, 101); // nFib >= 101 selects the Word97+ path ~keep
         write_u16(&mut buf, 0x0A, 0x0200); // fWhichTblStm: use 1Table
         write_u16(&mut buf, TEST_FIB_BASE, TEST_CSW as u16);
         let cslw_offset = TEST_FIB_BASE + 2 + TEST_CSW * 2;

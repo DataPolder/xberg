@@ -798,7 +798,7 @@ impl ExtractionConfig {
             // Only meaningful when the raw fields are the ones that will be used. A `preset`
             // replaces both `max_characters` and `overlap` in `ChunkingConfig::resolve_preset`,
             // and both fields carry serde defaults, so validating them alongside a preset would
-            // reject a config on values the preset discards before anything reads them.
+            // reject a config on values the preset discards before anything reads them. ~keep
             if chunking.preset.is_none() {
                 validate_chunking_params(chunking.max_characters, chunking.overlap)?;
             }

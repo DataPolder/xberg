@@ -47,7 +47,7 @@ fn build_internal_document(
     // every structured format, not just JSON objects: YAML, TOML, and JSONL already parse
     // into the same `serde_json::Value` shape, and a top-level array (JSONL's natural shape,
     // and valid JSON on its own) gets per-item structure instead of an opaque code block
-    // (xberg-io/xberg#155).
+    // (xberg-io/xberg#155). ~keep
     if matches!(source_format, "json" | "jsonl" | "yaml" | "toml")
         && let Some(value) = result.value.as_ref()
     {

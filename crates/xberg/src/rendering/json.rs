@@ -488,7 +488,7 @@ fn build_json_document(doc: &InternalDocument) -> JsonDocument {
     // dropped entirely (xberg-io/xberg#288). Collect the ones the main loop skipped
     // and append them once, in document order, at the very end, mirroring how the
     // Markdown renderer (`comrak_bridge::render_markdown`) emits collected footnote
-    // definitions after the rest of the tree instead of inline.
+    // definitions after the rest of the tree instead of inline. ~keep
     for elem in &doc.elements {
         if elem.kind == ElementKind::FootnoteDefinition && !is_body_element(elem) {
             root_body.push(JsonNode::FootnoteDefinition {
@@ -500,7 +500,7 @@ fn build_json_document(doc: &InternalDocument) -> JsonDocument {
 
     // Comment definitions (#300) live on `ContentLayer::Footnote` too, so they hit
     // the same `is_body_element` filter as footnote definitions above — collect
-    // them the same way instead of silently dropping the comment body.
+    // them the same way instead of silently dropping the comment body. ~keep
     for elem in &doc.elements {
         if elem.kind == ElementKind::CommentDefinition && !is_body_element(elem) {
             root_body.push(JsonNode::CommentDefinition {

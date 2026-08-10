@@ -394,7 +394,7 @@ mod tests {
         // enough unique long words to keep the primary filtering path active
         // (never falling back to "keep everything >= 3 chars"), plus a short,
         // thrice-repeated all-caps acronym that only the important-word guard
-        // saves (#269).
+        // saves (#269). ~keep
         let input = "documentation implementation specification organization architecture \
              infrastructure optimization configuration authentication authorization synchronization \
              virtualization containerization orchestration serialization CEO CEO CEO";

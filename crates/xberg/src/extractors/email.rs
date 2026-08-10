@@ -424,7 +424,7 @@ impl InternalDocumentExtractor for EmailExtractor {
             // `build_extracted_document`, which is what performs the inlining;
             // appending afterwards would leave the embedded body reachable only
             // through `doc.children` and absent from the parent's rendered
-            // content (#307, #153).
+            // content (#307, #153). ~keep
             if !parsed.nested_embedded_messages.is_empty() {
                 let (embedded_children, embedded_warnings) =
                     extract_nested_embedded_message_children(&parsed.nested_embedded_messages, config).await;

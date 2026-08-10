@@ -962,7 +962,7 @@ pub fn detect_mime_type_from_bytes(content: &[u8]) -> Result<String> {
         // where `trimmed.starts_with('<')` matched every tag first and made them dead code
         // (#235). HTML still routed correctly for whole documents only because `infer::get`
         // recognises those earlier in this function; a bare fragment reached here and was
-        // typed `application/xml`, then handed to the XML extractor.
+        // typed `application/xml`, then handed to the XML extractor. ~keep
         if !trimmed.starts_with("<?xml") && looks_like_html(trimmed) {
             return Ok(HTML_MIME_TYPE.to_string());
         }

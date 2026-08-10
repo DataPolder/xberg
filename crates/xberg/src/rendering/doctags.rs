@@ -140,7 +140,7 @@ pub(crate) fn render_doctags(doc: &InternalDocument) -> String {
                 // attributes back out. There is no separate body to distinguish from the
                 // label, and DocTags itself has no admonition/callout tag (the vendored
                 // Docling corpus has none), so this renders as an ordinary text element,
-                // exactly once.
+                // exactly once. ~keep
                 let label = get_admonition_title(elem).unwrap_or_else(|| get_admonition_kind(elem));
                 push_text_element(&mut out, elem.layer, loc, &normalize_inline_text(label));
             }
@@ -1424,7 +1424,7 @@ mod tests {
 
         assert_eq!(render_with(OutputFormat::DocTags).as_deref(), Some(EXPECTED));
         // Backward compatibility: an explicitly constructed `Custom("doctags")` still
-        // routes through the renderer registry and produces identical output.
+        // routes through the renderer registry and produces identical output. ~keep
         assert_eq!(
             render_with(OutputFormat::Custom("doctags".to_string())).as_deref(),
             Some(EXPECTED)

@@ -237,7 +237,7 @@ impl DocumentExtractorRegistry {
                     // priority_map no longer holds its slot — leaving that pair in place would let
                     // `remove(&displaced_name)` believe it cleaned up a slot it never touched, while
                     // the *other* MIME types `displaced_name` is still registered for stay orphaned
-                    // (#216). Prune the stale pair so `remove` only tracks slots it actually owns.
+                    // (#216). Prune the stale pair so `remove` only tracks slots it actually owns. ~keep
                     if let Some(entries) = self.name_index.get_mut(&displaced_name) {
                         entries.retain(|(m, p)| !(m == mime_type && *p == priority));
                         if entries.is_empty() {

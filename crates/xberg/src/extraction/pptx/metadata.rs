@@ -121,7 +121,7 @@ pub(super) fn extract_metadata<R: Read + Seek>(
                 }
                 // #230: surface the raw DocSecurity integer plus its decoded ECMA-376
                 // flags. `PptxAppProperties` never reaches `FormatMetadata::Pptx`, so
-                // without this the presentation's protection state was discarded entirely.
+                // without this the presentation's protection state was discarded entirely. ~keep
                 if let Some(raw) = app.doc_security {
                     metadata_map.insert(DOC_SECURITY_KEY.to_string(), raw.to_string());
                     for (key, value) in decode_doc_security_flags(raw) {

@@ -64,7 +64,7 @@ async fn code_intelligence_surfaces_the_full_tree_sitter_process_result() {
     );
     // `node_count`/`max_depth` reflect the tree-sitter-python grammar's internal parse
     // tree shape, not something mechanically derivable from the source text by hand;
-    // only assert they were actually computed (never zero for a non-empty parse).
+    // only assert they were actually computed (never zero for a non-empty parse). ~keep
     assert!(metrics["node_count"].as_u64().expect("node_count must be a number") > 0);
     assert!(metrics["max_depth"].as_u64().expect("max_depth must be a number") > 0);
 

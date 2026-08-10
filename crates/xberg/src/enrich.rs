@@ -262,7 +262,7 @@ pub async fn enrich(mut extraction: ExtractedDocument, config: &EnrichmentConfig
     // extraction-time work and there is nothing for `enrich` to run, so the request is
     // reported the way the pipeline reports every other requested-but-unavailable stage —
     // a non-fatal `ProcessingWarning`, partial results preserved (see the captioning and
-    // structured-extraction warnings in `core::pipeline`).
+    // structured-extraction warnings in `core::pipeline`). ~keep
     #[cfg(feature = "transcription-types")]
     if let Some(ref transcription) = config.transcription {
         extraction.processing_warnings.push(crate::types::ProcessingWarning {
@@ -303,7 +303,7 @@ pub async fn enrich(mut extraction: ExtractedDocument, config: &EnrichmentConfig
             crate::text::ner::detect_entities(&extraction.content, cfg.backend.as_ref(), &cfg.categories).await?;
         // `ExtractedDocument::entities` is the field the API schema, the bindings, and every
         // serializing consumer read. Without this write-back the detected entities existed
-        // only in `EnrichedResult` and were invisible downstream (#263).
+        // only in `EnrichedResult` and were invisible downstream (#263). ~keep
         extraction.entities = Some(detected.clone());
         Some(detected)
     } else {

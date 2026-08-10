@@ -115,7 +115,7 @@ fn push_messages_as_elements(doc: &mut InternalDocument, messages: &[crate::type
         // and for PST that content is `PR_BODY` (0x1000) straight out of the message
         // store — Outlook writes CRLF there (see `resolve_pst_body` in
         // `extraction/pst.rs`, which passes the plain-text property through untouched).
-        // Normalize before splitting or the whole message body becomes one paragraph (#316).
+        // Normalize before splitting or the whole message body becomes one paragraph (#316). ~keep
         let msg_text = normalize_line_endings(&crate::extraction::email::build_email_text_output(msg)).into_owned();
         if !msg_text.is_empty() {
             for paragraph in msg_text.split("\n\n") {

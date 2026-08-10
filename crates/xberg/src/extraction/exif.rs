@@ -39,7 +39,7 @@ pub(crate) fn extract_exif_data(bytes: &[u8]) -> HashMap<String, String> {
 
     // IFD0 tag codes not present in nom-exif 3.6.2's curated `ExifTag` enum.
     // Looked up via `Exif::get_by_code` at the main IFD, same as the enum-based
-    // tags below but bypassing the enum since these codes have no variant.
+    // tags below but bypassing the enum since these codes have no variant. ~keep
     const ARTIST_TAG_CODE: u16 = 0x013B;
     // Windows Explorer's "XP" tag family: BYTE arrays holding null-terminated
     // UTF-16LE text. Not part of the base TIFF/EXIF spec, but commonly written

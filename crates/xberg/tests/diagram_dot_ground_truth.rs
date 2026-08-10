@@ -60,7 +60,7 @@ fn parse_dot(source: &str) -> Shape {
         } else if let Some((id, attrs)) = line.split_once('[') {
             let id = unquote(id.trim());
             // Our renderer emits generated ids and carries the text in `label`;
-            // ground truth uses the label as the id. Either way the label wins.
+            // ground truth uses the label as the id. Either way the label wins. ~keep
             let label = attribute(attrs, "label").unwrap_or_else(|| id.clone());
             labels.push((id, label));
         }
@@ -281,7 +281,7 @@ fn recovers_the_diagram_corpus() {
 
         // A fixture that states its own graph is scored twice: as emitted, and
         // with the producer's metadata stripped. Reading the metadata is
-        // correct behaviour, but only the stripped copy measures geometry.
+        // correct behaviour, but only the stripped copy measures geometry. ~keep
         let variants = [Some(fixture.path.clone()), fixture.geometry_variant.clone()];
         for variant in variants.into_iter().flatten() {
             let Some(dot) = extract_dot(&variant) else {

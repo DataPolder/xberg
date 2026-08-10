@@ -1335,7 +1335,7 @@ pub(super) fn perform_ocr(
     // orientation classifier used here has no script-detection capability,
     // unlike Tesseract's own `DetectOrientationScript()`/OSD (which this crate
     // does not call). Emitting a placeholder script name would misrepresent
-    // real detection as having happened (#184).
+    // real detection as having happened (#184). ~keep
     if let Some((orient_deg, orient_conf)) = detected_orientation {
         metadata.insert(
             crate::ocr_metadata_keys::OCR_ORIENTATION_DEGREES_METADATA_KEY.to_string(),

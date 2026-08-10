@@ -35,7 +35,7 @@ pub fn apply_output_format(result: ExtractedDocument, output_format: OutputForma
     // leaving `formatted_content` unset. That is the only way a `Custom` format can
     // reach this function with no pre-rendered content — every successful custom
     // render always produces `Some(_)`. Detect that fallback here so metadata does
-    // not claim a format that was never actually produced.
+    // not claim a format that was never actually produced. ~keep
     let custom_fallback_to_plain =
         matches!(output_format, OutputFormat::Custom(_)) && result.formatted_content.is_none();
 
@@ -50,7 +50,7 @@ pub fn apply_output_format(result: ExtractedDocument, output_format: OutputForma
         // `extraction::derive::derive_extraction_result`), so this arm only swaps
         // the metadata label. The `content` field stays whatever plain text the
         // extractor and post-processors produced — identical to `Plain` — until a
-        // real structured (OCR element / bounding-box) renderer is implemented.
+        // real structured (OCR element / bounding-box) renderer is implemented. ~keep
         OutputFormat::Structured => "structured",
         OutputFormat::DocTags => "doctags",
         OutputFormat::Custom(ref name) => {

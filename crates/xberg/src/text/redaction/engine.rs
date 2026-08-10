@@ -663,7 +663,7 @@ impl RedactionPass<'_> {
             FormatMetadata::Pdf(_) => {}
             // Slide titles are the direct analogue of `ExcelMetadata::sheet_names`
             // handled above — a deck routinely names people in them
-            // ("Performance review — J. Smith").
+            // ("Performance review — J. Smith"). ~keep
             FormatMetadata::Pptx(pptx) => {
                 for name in pptx.slide_names.iter_mut() {
                     self.redact_in_place(name);

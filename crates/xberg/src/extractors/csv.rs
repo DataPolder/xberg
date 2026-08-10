@@ -153,7 +153,7 @@ impl InternalDocumentExtractor for CsvExtractor {
         // replacement character stripped by its internal mojibake cleanup, so no
         // marker of the loss survives to check for here either. Neither build can be
         // told apart from a clean decode without changing that shared helper (out of
-        // this extractor's scope), so no lossy-decode warning is emitted for CSV.
+        // this extractor's scope), so no lossy-decode warning is emitted for CSV. ~keep
 
         if table
             .cells
@@ -892,7 +892,7 @@ mod tests {
     #[tokio::test]
     async fn plain_comma_csv_parses_identically_with_no_csv_config_set() {
         // Regression guard: introducing `ExtractionConfig::csv` must not change
-        // default behavior when it is left `None`.
+        // default behavior when it is left `None`. ~keep
         let extractor = CsvExtractor::new();
         let config = ExtractionConfig::default();
         assert!(config.csv.is_none());
@@ -928,7 +928,7 @@ mod tests {
         };
         // A single-row, single-delimiter-occurrence sample defeats consistency-based
         // auto-detection (`detect_delimiter` needs >= 2 rows to score a candidate),
-        // so this only parses correctly when the configured delimiter is honored.
+        // so this only parses correctly when the configured delimiter is honored. ~keep
         let csv_data = b"Name;Age;City\nAlice;30;NYC\n";
 
         let result = extractor

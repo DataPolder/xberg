@@ -911,7 +911,7 @@ pub(crate) async fn extract_mixed_ocr_native(
                     // fall back to `text` only if the backend returned no page_texts.
                     let page_text = page_texts.into_iter().next().unwrap_or(text);
                     // The pipeline's tables and OCR elements used to be dropped here (#60);
-                    // they now ride along on the page's structured document.
+                    // they now ride along on the page's structured document. ~keep
                     let page_doc = match doc {
                         Some(doc) => Some(doc),
                         None if tables.is_empty() && elements.is_empty() => None,
@@ -1676,7 +1676,7 @@ fn analyze_container_markers(elements: &[crate::types::internal::InternalElement
 // The OCR metadata keys come from `crate::ocr_metadata_keys`, which is ungated, rather
 // than from `crate::ocr`: this PDF OCR path also compiles under `ocr-pipeline` (VLM OCR,
 // e.g. the `binstall` CLI) or under `layout-detection` alone (layout without any OCR
-// backend enabled), where the `ocr` module — gated on `ocr`/`ocr-wasm` — is absent.
+// backend enabled), where the `ocr` module — gated on `ocr`/`ocr-wasm` — is absent. ~keep
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
 use crate::ocr_metadata_keys::{OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY, OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY};
 // Same rationale, scoped to `layout-detection` only: `resolved_ocr_correction_degrees` and
@@ -2421,7 +2421,7 @@ pub(crate) async fn extract_with_ocr(
                     if !rt.markdown.is_empty() {
                         // The id is this table's 1-based position in `collected_tables`;
                         // pages are processed strictly in increasing `page_idx` order
-                        // above, so push order is deterministic document order.
+                        // above, so push order is deterministic document order. ~keep
                         let table_index = collected_tables.len();
                         collected_tables.push(recognized_table_to_public_table(rt, (page_idx + 1) as u32, table_index));
                     }

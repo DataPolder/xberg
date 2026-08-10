@@ -141,7 +141,7 @@ pub fn calculate_quality_score(text: &str, metadata: Option<&AHashMap<Cow<'stati
     // short-circuit script and navigation penalties for texts at or below
     // `LARGE_TEXT_LENGTH`, so a short HTML-derived fragment full of nav chrome
     // (breadcrumbs, "Skip to main content", pagination) scored as clean prose
-    // purely because it was short (#267).
+    // purely because it was short (#267). ~keep
     let mut score = 1.0;
 
     let ocr_penalty = calculate_ocr_penalty(text, total_chars);

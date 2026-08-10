@@ -516,7 +516,7 @@ fn handle_odt_frame(
             // `image_data` was pre-populated only from `Pictures/` (#171): a
             // `draw:image` referencing anything else (a linked external file, or a
             // package member outside the standard directory) has no binary to
-            // attach, so the image silently degrades into a text placeholder.
+            // attach, so the image silently degrades into a text placeholder. ~keep
             if let Some(h) = href {
                 builder.add_warning(crate::core::diagnostics::warning(
                     ODT_WARNING_SOURCE,
@@ -738,7 +738,7 @@ pub(crate) fn build_internal_elements(
                         // definition are keyed identically so a consumer can
                         // tell the two apart from the anchor alone, since
                         // `ContentLayer`/`ElementKind` have no separate
-                        // endnote variant to carry that distinction.
+                        // endnote variant to carry that distinction. ~keep
                         let key_prefix = if odt_note_label(child) == "endnote" { "en" } else { "fn" };
                         let note_id = child
                             .attribute(("urn:oasis:names:tc:opendocument:xmlns:text:1.0", "id"))
@@ -888,7 +888,7 @@ pub(crate) fn build_internal_elements(
             // indexes, the alphabetical index, and the bibliography) wrap
             // their rendered entries in `text:index-body`; without this arm
             // they fell through to `_ => {}` and their content was dropped
-            // entirely (#100).
+            // entirely (#100). ~keep
             "table-of-content" | "illustration-index" | "table-index" | "object-index" | "user-index"
             | "alphabetical-index" | "bibliography" => {
                 if let Some(index_body) = node.children().find(|n| n.tag_name().name() == "index-body") {
@@ -1122,7 +1122,7 @@ fn collect_inline_run(
                 // Emitting it verbatim also risks leaking the literal
                 // editor-placeholder text (e.g. LibreOffice's `<number>`) as
                 // if it were real document content (#69). Drop the field
-                // rather than resolve it.
+                // rather than resolve it. ~keep
             }
             "a" => {
                 let start = text.len() as u32;

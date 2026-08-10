@@ -88,7 +88,7 @@ fn capture_spans<T>(body: impl FnOnce() -> T) -> (T, Vec<CapturedSpan>) {
     // interest cache is process-global: a callsite first evaluated while no subscriber
     // was installed keeps a cached "not interested" verdict and its span is then never
     // created at all. Forcing a rebuild on both sides makes the capture depend only on
-    // the subscriber installed here (same hazard as `cache::tests::capture_logs`, #301).
+    // the subscriber installed here (same hazard as `cache::tests::capture_logs`, #301). ~keep
     tracing::callsite::rebuild_interest_cache();
     let value = tracing::subscriber::with_default(subscriber, body);
     tracing::callsite::rebuild_interest_cache();

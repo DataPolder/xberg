@@ -270,7 +270,7 @@ mod tests {
     // Revert line: change `Engine::extract` back to
     // `extract_impl::extract(input, config).await` (dropping `&self.inner`) to make
     // this test fail — `RecordingProgressSink::emit` is then never called and
-    // `stages` stays empty.
+    // `stages` stays empty. ~keep
     #[tokio::test]
     async fn should_emit_start_then_complete_progress_events_for_a_successful_bytes_extraction() {
         let sink = Arc::new(RecordingProgressSink::default());
@@ -407,7 +407,7 @@ mod tests {
     // Revert line: remove the `inner.cache.put(...)` call in the `Ok(output)` arm of
     // `extract_impl::extract` to make this test fail -- `puts` stays 0 after the first
     // (miss) extraction, and the second identical extract also misses (still 0 entries
-    // in the store), so `puts` never reaches 1 either.
+    // in the store), so `puts` never reaches 1 either. ~keep
     #[tokio::test]
     async fn should_populate_cache_on_miss_and_skip_reextraction_on_identical_second_call() {
         let cache = Arc::new(InMemoryCacheBackend::default());
@@ -492,7 +492,7 @@ mod tests {
     // Revert line: move the `PROGRESS_STAGE_CACHE_HIT` emit in `extract_impl.rs` so it
     // no longer runs before the early `return Ok(cached_result)` to make this test fail
     // -- `stages` would then read only `["extract_start"]` instead of including the
-    // cache-hit stage.
+    // cache-hit stage. ~keep
     #[tokio::test]
     async fn should_emit_start_then_cache_hit_progress_events_on_a_cache_hit() {
         let sink = Arc::new(RecordingProgressSink::default());

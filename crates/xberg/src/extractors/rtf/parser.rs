@@ -1100,7 +1100,7 @@ pub(crate) fn extract_text_from_rtf(
     // inside an *ignorable* ancestor (`{\*\shp{\*\shpinst{...{\shptxt ...}`
     // for text boxes) that this parser otherwise skips wholesale. Buffering
     // their content unconditionally -- the same trick `footnote_buf` uses --
-    // lets them survive even while nested under an active `skip_depth` (#86).
+    // lets them survive even while nested under an active `skip_depth` (#86). ~keep
     let mut in_shptxt = false;
     let mut shptxt_depth: i32 = 0;
     let mut shptxt_buf = String::new();

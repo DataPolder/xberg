@@ -568,7 +568,7 @@ pub(crate) fn build_comrak_ast<'a>(doc: &InternalDocument, arena: &'a comrak::Ar
                         // The outer `matches!(parent.data.borrow().value, NodeValue::List(..))`
                         // check above already confirmed `parent` holds `NodeValue::List`, and
                         // `parent` is not reassigned and its `data` is never mutated between
-                        // that check and this match, so this arm cannot be reached.
+                        // that check and this match, so this arm cannot be reached. ~keep
                         _ => unreachable!("parent was already confirmed to be NodeValue::List above"),
                     };
                     let implicit_item = mk(arena, NodeValue::Item(list_meta));
