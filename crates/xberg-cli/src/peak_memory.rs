@@ -17,6 +17,13 @@
 /// Kept separate from [`ru_maxrss_to_bytes`] (which pins `is_linux` to the actual build target via
 /// `cfg!`) so both unit conventions below can be exercised by unit tests on any host platform,
 /// without needing `#[cfg(target_os = ...)]` on the tests themselves.
+///
+/// Gated on `cfg(any(test, unix))` rather than plain `cfg(unix)`: the only non-test caller is
+/// [`ru_maxrss_to_bytes`], itself only called from the `cfg(unix)` `peak_memory_bytes`, so on a
+/// non-test, non-unix build (e.g. Windows release) this would otherwise be genuinely unused. The
+/// `test` half of the predicate keeps it compiled for unit tests on every host platform, per the
+/// doc comment above.
+#[cfg(any(test, unix))]
 fn convert_ru_maxrss(raw: i64, is_linux: bool) -> u64 {
     // Clamp before widening: `getrusage` should never report negative usage, but a negative value
     // has no meaningful byte count, so it saturates to `0` instead of wrapping to a huge `u64`.
@@ -34,6 +41,11 @@ fn convert_ru_maxrss(raw: i64, is_linux: bool) -> u64 {
 /// Mirrors the equivalent conversion in the benchmark harness's Python competitor wrappers (see
 /// `tools/benchmark-harness/scripts/docling_extract.py::_get_peak_memory_bytes`), so both sides of
 /// a memory comparison agree on units instead of one side silently being off by 1024x.
+///
+/// Gated on `cfg(any(test, unix))` for the same reason as [`convert_ru_maxrss`]: its only
+/// non-test caller is the `cfg(unix)` `peak_memory_bytes`, so it is genuinely unused on a
+/// non-test, non-unix (e.g. Windows release) build.
+#[cfg(any(test, unix))]
 pub fn ru_maxrss_to_bytes(raw: i64) -> u64 {
     convert_ru_maxrss(raw, cfg!(target_os = "linux"))
 }
