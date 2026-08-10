@@ -257,3 +257,8 @@ The synchronous `rerank` entry point drives Llm and Plugin backends by blocking 
 - **`top_k`** truncates the response after scoring — it does not reduce inference cost. Always score the full candidate set, then pick.
 - **Sigmoid normalization** is applied automatically to local-model logits so scores fall in `[0, 1]`. LLM rerankers return provider-native scores unchanged.
 - **First-call latency** is dominated by model download. Warm the cache during application startup, not on the first user request.
+
+## See also
+
+- [Retrieval](/guides/retrieval/) — build the candidate set this reranker sharpens
+- [Retrieval Modes](/concepts/retrieval/) — where reranking sits relative to dense, sparse and late-interaction

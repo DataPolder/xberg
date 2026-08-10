@@ -132,6 +132,7 @@ export default defineConfig({
                     {label : "Chunking", slug : "guides/chunking"},
                     {label : "Embeddings", slug : "guides/embeddings"},
                     {label : "Reranking", slug : "guides/reranking"},
+                    {label : "Retrieval", slug : "guides/retrieval"},
                     {label : "Keyword Extraction", slug : "guides/keywords"},
                     {
                       label : "Language Detection",
@@ -256,6 +257,7 @@ export default defineConfig({
                   slug : "concepts/extraction-pipeline",
                 },
                 {label : "Plugin System", slug : "concepts/plugin-system"},
+                {label : "Retrieval Modes", slug : "concepts/retrieval"},
                 {
                   label : "Pure-Rust Inference (tract)",
                   slug : "concepts/tract-inference",

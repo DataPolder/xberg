@@ -58,7 +58,9 @@ See [Reranking](/guides/reranking/) for the full preset catalog, custom HuggingF
 
 ## Hybrid retrieval (reciprocal rank fusion)
 
-Hybrid mode runs up to three retrieval arms in parallel — dense vector KNN, full-text/BM25-style search, and sparse SPLADE — then fuses their rankings with Reciprocal Rank Fusion (RRF):
+Xberg has no built-in hybrid retrieval mode. It gives you the arms — dense, sparse, and late-interaction embeddings plus a reranker — and you combine them in your own retrieval layer, alongside whatever full-text index you already run. This section describes the fusion technique; [Retrieval](/guides/retrieval/) shows it implemented by hand.
+
+The usual approach runs up to three arms in parallel — dense vector KNN, full-text/BM25-style search, and sparse SPLADE — then fuses their rankings with Reciprocal Rank Fusion (RRF):
 
 ```text
 rrf_score(doc) = sum over arms( 1 / (k + rank_in_arm + 1) )
@@ -66,7 +68,7 @@ rrf_score(doc) = sum over arms( 1 / (k + rank_in_arm + 1) )
 
 Each arm contributes `1 / (k + rank + 1)` to a document's fused score, where `rank` is that document's 0-indexed position within the arm's own result list. Documents missing from an arm simply don't contribute for that arm — RRF needs no arm-specific score normalization, which is what makes it a robust way to combine dense cosine similarity, BM25-style text scores, and sparse dot products, three otherwise incomparable scales. Results are sorted by fused RRF score descending.
 
-Hybrid mode requires `query_text` (for the full-text arm); a dense `query_vector` and/or sparse `query_sparse` are optional and enable their respective arms. Late-interaction is a separate retrieval mode (`RetrieveMode::LateInteraction`) and is not one of the three hybrid arms — pair it with reranking instead if you need MaxSim-level accuracy alongside the fused arms.
+Only the arms you actually run contribute, so a fusion over a full-text index plus `embed_texts` results is as valid as one that also folds in `embed_sparse`. Late-interaction is best kept out of the fusion: `max_sim_score` is a reranking-strength signal over a small candidate set, not a first-pass arm, so run it — or `rerank` — *after* the fusion rather than inside it.
 
 ## Choosing a mode
 
@@ -76,4 +78,4 @@ Hybrid mode requires `query_text` (for the full-text arm); a dense `query_vector
 | Exact-term / rare-term recall (IDs, codes, keywords) | Sparse embeddings |
 | Best first-pass accuracy at the cost of storage/compute | ColBERT late-interaction |
 | Sharpen a small candidate set before it reaches an LLM | Reranking |
-| Combine dense, full-text, and sparse strengths in one query | Hybrid (RRF) |
+| Combine dense, full-text, and sparse strengths in one query | Fuse the arms yourself with RRF |
