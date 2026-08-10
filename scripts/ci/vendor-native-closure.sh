@@ -5,6 +5,38 @@ log() { echo "vendor-native-closure: $*" >&2; }
 die() { log "$*"; exit 1; }
 cleanup() { [ -n "${WORKDIR:-}" ] && rm -rf "$WORKDIR"; }
 
+# --- diagnostics for task #490 (mysterious exit 127 late in the vendor loop) ---
+# This script is invoked as `bash vendor-native-closure.sh ...` by the Dockerfile
+# (see docker/Dockerfile.musl-python), so bash — not ash/dash — always interprets
+# it; bash-only constructs below (PS4 expansions, ERR trap, BASH_COMMAND) are safe.
+# `-x` plus a PS4 carrying file:line:function makes every executed command and its
+# location visible in the CI log, so the exact failing invocation is no longer
+# ambiguous even after ~28 prior successful loop iterations. ~keep
+export PS4='+ [vendor-native-closure ${BASH_SOURCE##*/}:${LINENO} ${FUNCNAME[0]:-main}] '
+set -x
+
+# A bare "command not found" (exit 127) from the shell itself — as opposed to an
+# error returned BY patchelf/ldd — most often means either (a) the binary truly
+# isn't on PATH, or (b) the shell couldn't fork/exec it at all (e.g. process/
+# memory exhaustion). Checking both up front rules out (a) immediately; the ERR
+# trap below plus the Dockerfile's df/free dump right before this script runs
+# help distinguish (b) from resource exhaustion mid-run. ~keep
+for tool in patchelf ldd env readlink mktemp find sed grep chmod cp; do
+  command -v "$tool" >/dev/null 2>&1 || die "required tool '$tool' not found on PATH ($PATH)"
+done
+
+# Fires on any command failing under `set -e`, including the exec-failure case
+# that manufactures exit 127; prints the exact source line and command so the
+# next CI run pins precisely which invocation broke.
+#
+# `set -E` is REQUIRED here and not redundant with the `set -euo pipefail` on
+# line 2: without errtrace an ERR trap is NOT inherited by shell functions, and
+# the two suspects (`set_origin_rpath`, `verify_local_closure`) are both
+# functions -- so the trap would stay silent in exactly the frames we are
+# trying to pin. ~keep
+set -E
+trap 'log "ERROR: exit $? at line ${LINENO} (function: ${FUNCNAME[0]:-main}): ${BASH_COMMAND}"' ERR
+
 is_base_lib() {
   case "$1" in
   ld-linux* | ld-musl* | libc.so* | libc.musl* | libc-*.so* | libm.so* | libmvec.so* | \
