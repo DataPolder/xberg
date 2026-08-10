@@ -20,9 +20,105 @@
 
 mod helpers;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use helpers::*;
+use tracing_subscriber::layer::SubscriberExt as _;
 use xberg::core::config::{ExtractionConfig, OcrConfig, OutputFormat};
+
+/// Captures the fields of the `extract_all_paragraphs` skip-diagnosis event
+/// emitted by `ocr::processor::execution::extract_elements_via_iterator`
+/// (`crates/xberg/src/ocr/processor/execution.rs`), so a CI failure can show
+/// *why* per-word paragraph metadata (`is_crown`/`is_list_item`/`justification`)
+/// is missing without needing `RUST_LOG=warn` set on the runner.
+///
+/// Field names must track the `tracing::warn!` call site exactly: `skipped_no_para_info`,
+/// `skipped_no_bbox`, and `extracted_paragraphs`.
+#[derive(Debug, Clone, Default)]
+struct ParagraphSkipEvent {
+    skipped_no_para_info: Option<u64>,
+    skipped_no_bbox: Option<u64>,
+    extracted_paragraphs: Option<u64>,
+}
+
+impl ParagraphSkipEvent {
+    /// An event is "relevant" once it carries at least one of the three
+    /// diagnosis fields; this filters out unrelated `tracing` events that may
+    /// fire during the same extraction call.
+    fn is_relevant(&self) -> bool {
+        self.skipped_no_para_info.is_some() || self.skipped_no_bbox.is_some() || self.extracted_paragraphs.is_some()
+    }
+}
+
+impl tracing::field::Visit for ParagraphSkipEvent {
+    fn record_u64(&mut self, field: &tracing::field::Field, value: u64) {
+        match field.name() {
+            "skipped_no_para_info" => self.skipped_no_para_info = Some(value),
+            "skipped_no_bbox" => self.skipped_no_bbox = Some(value),
+            "extracted_paragraphs" => self.extracted_paragraphs = Some(value),
+            _ => {}
+        }
+    }
+
+    fn record_debug(&mut self, _field: &tracing::field::Field, _value: &dyn std::fmt::Debug) {
+        // every other field (e.g. the event's `message`) is intentionally ignored.
+    }
+}
+
+/// A `tracing` `Layer` that records every emitted event carrying one of the
+/// paragraph-skip diagnosis fields.
+///
+/// ★ This MUST be a process-global default subscriber, not the thread-local
+/// `tracing::subscriber::with_default` used by `tests/api_logging.rs`.
+///
+/// The event being captured is emitted by `perform_ocr`
+/// (`ocr/processor/execution.rs`), which Tesseract reaches through
+/// `processor.process_image(..)` inside the closure that
+/// `ocr/tesseract_backend.rs` hands to `tokio::task::spawn_blocking`. That runs
+/// on a blocking-pool worker thread, and `tracing`'s `with_default` override is
+/// thread-local — so a scoped subscriber installed on the test thread never
+/// sees it and captures nothing at all.
+///
+/// This is safe here and does NOT repeat the `tracing-interest-cache-poisoning`
+/// incident in project memory: that was caused by calling
+/// `rebuild_interest_cache()` by hand outside `with_default`, whereas
+/// `set_global_default` rebuilds the callsite interest cache itself, so the
+/// diagnostic still fires even if another test in this binary evaluated the
+/// callsite first. Each integration-test file is its own binary, so the global
+/// default is scoped to this file's tests. ~keep
+#[derive(Clone, Default)]
+struct ParagraphSkipCapture {
+    events: Arc<Mutex<Vec<ParagraphSkipEvent>>>,
+}
+
+/// Installs the capture layer as the process-global default exactly once and
+/// returns a handle to the shared buffer.
+fn install_paragraph_skip_capture() -> ParagraphSkipCapture {
+    static CAPTURE: std::sync::OnceLock<ParagraphSkipCapture> = std::sync::OnceLock::new();
+    CAPTURE
+        .get_or_init(|| {
+            let capture = ParagraphSkipCapture::default();
+            let subscriber = tracing_subscriber::registry().with(capture.clone());
+            // A global default can only be set once per process; ignore a
+            // late loss of the race, the winner's buffer is the one returned.
+            let _ = tracing::subscriber::set_global_default(subscriber);
+            capture
+        })
+        .clone()
+}
+
+impl<S> tracing_subscriber::Layer<S> for ParagraphSkipCapture
+where
+    S: tracing::Subscriber,
+{
+    fn on_event(&self, event: &tracing::Event<'_>, _ctx: tracing_subscriber::layer::Context<'_, S>) {
+        let mut visitor = ParagraphSkipEvent::default();
+        event.record(&mut visitor);
+        if visitor.is_relevant() {
+            self.events.lock().unwrap().push(visitor);
+        }
+    }
+}
 
 fn tesseract_eng_config(output_format: OutputFormat) -> ExtractionConfig {
     ExtractionConfig {
@@ -82,8 +178,12 @@ fn word_language_is_forwarded_per_ocr_element() {
         return;
     }
     let file_path = get_test_file_path("images/test_hello_world.png");
+
+    let capture = install_paragraph_skip_capture();
+    capture.events.lock().unwrap().clear();
     let result = extract_uri_document_blocking(&file_path, None, &tesseract_eng_config(OutputFormat::Plain))
         .expect("should extract test_hello_world.png with OCR");
+    let captured_paragraph_skip_events = capture.events.lock().unwrap().clone();
 
     let elements = result.ocr_elements.expect("OCR should produce word-level elements");
     assert_eq!(elements.len(), 2, "expected exactly the two words 'Hello' and 'World'");
@@ -115,13 +215,30 @@ fn word_language_is_forwarded_per_ocr_element() {
         // `extract_all_paragraphs` counts and WARNs on exactly which FFI call declined
         // (`skipped_no_para_info` for `TessPageIteratorParagraphInfo` returning 0, `skipped_no_bbox`
         // for `TessPageIteratorBoundingBox` returning 0 at RIL_PARA), giving a way to tell an FFI
-        // refusal from a centroid/bbox matching bug. That said, CI run 31366919399 did not set
-        // `RUST_LOG=warn` and this test binary installs no tracing subscriber, so that signal was
-        // never captured for the failing run: we could not read the counters back to pin the exact
-        // cause to one of the three candidates (para_ok == 0, bbox_ok == 0, or a centroid that
-        // legitimately falls outside every collected paragraph bbox). Given Tesseract's own PSM 11
-        // layout shortcuts, an architecture-dependent floating-point/SIMD difference in its internal
-        // paragraph geometry is the most likely explanation, but this is not independently confirmed.
+        // refusal from a centroid/bbox matching bug:
+        //   - `skipped_no_para_info > 0`                              -> Tesseract declined to describe
+        //     paragraphs at all.
+        //   - `skipped_no_bbox > 0`                                   -> a paragraph was described but had
+        //     no RIL_PARA bbox.
+        //   - both 0 AND `extracted_paragraphs > 0`                   -> the centroid-in-bbox match itself
+        //     missed; the next diagnostic step would be logging the paragraph bbox and the word centroid.
+        //
+        // CI run 31366919399, cited by an earlier version of this comment, was CANCELLED on the
+        // relevant legs and proves nothing; the confirmed arm-passes / macos-passes / x86_64-fails split
+        // is from CI run 31316926033, a completed push to `main`.
+        //
+        // That run's log has zero occurrences of `skipped_no_para_info`/`skipped_no_bbox`: CI sets no
+        // `RUST_LOG`, and (until now) this test installed no `tracing` subscriber, so the warn's fields
+        // were never captured even though they exist. `captured_paragraph_skip_events` below fixes that:
+        // `install_paragraph_skip_capture` registers a capture layer as the PROCESS-GLOBAL default, so a
+        // captured event's fields are folded into this assertion's failure message and can be read
+        // straight off the panic output without `RUST_LOG`.
+        //
+        // Global, not `with_default`, and that distinction is load-bearing: `perform_ocr` emits this warn
+        // underneath `tokio::task::spawn_blocking` (see `ocr/tesseract_backend.rs`), i.e. on a
+        // blocking-pool worker thread. `tracing`'s `with_default` override is thread-local, so a scoped
+        // subscriber installed on the test thread would capture NOTHING here. See the type's doc comment
+        // for why this does not repeat the interest-cache incident in project memory.
         //
         // Absence of paragraph metadata is therefore treated as a legitimate, architecture-dependent
         // outcome here rather than asserted away: keys must be present or absent together, and when
@@ -133,9 +250,13 @@ fn word_language_is_forwarded_per_ocr_element() {
             (has_is_crown, has_is_list_item, has_justification),
             (has_is_crown, has_is_crown, has_is_crown),
             "word {:?} paragraph metadata keys must be all-or-nothing (is_crown/is_list_item/justification \
-             come from the same Option<&ParaInfo>). Full metadata: {:?}",
+             come from the same Option<&ParaInfo>). Full metadata: {:?}. Captured paragraph-skip diagnosis \
+             events (skipped_no_para_info/skipped_no_bbox/extracted_paragraphs; empty means either no skips \
+             occurred or the emitting `spawn_blocking` thread was not observed by this test's capture \
+             layer): {:?}",
             element.text,
-            element.backend_metadata
+            element.backend_metadata,
+            captured_paragraph_skip_events
         );
         if has_is_crown {
             assert_eq!(

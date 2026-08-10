@@ -1,0 +1,24 @@
+---
+id: fixture_python_extract_bytes_input_invalid_mime
+language: python
+target: python
+level: typecheck
+requires: []
+side_effect: safe
+---
+
+extract bytes input with unsupported MIME type
+
+```python title="Python"
+import asyncio
+from pathlib import Path
+from xberg import extract, ExtractInput, ExtractionConfig, ExtractInputKind
+
+async def main() -> None:
+    input = ExtractInput(bytes=Path("test_documents/text/plain.txt").read_bytes(), config={}, filename="plain.txt", kind=ExtractInputKind("bytes"), mime_type="application/x-nonexistent")
+    config = ExtractionConfig()
+    _ = await extract(input, config)
+
+asyncio.run(main())
+
+```

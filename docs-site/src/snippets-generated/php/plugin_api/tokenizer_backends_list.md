@@ -1,0 +1,18 @@
+---
+id: fixture_php_tokenizer_backends_list
+language: php
+target: php
+level: typecheck
+requires: []
+side_effect: safe
+---
+
+List all registered tokenizer backends
+
+```php title="PHP"
+<?php
+
+use Xberg\Xberg;
+$result = Xberg::listTokenizerBackends();
+
+```

@@ -1,5 +1,5 @@
 [workspace]
-alef_version = "0.59.0"
+alef_version = "0.60.0"
 # -D warnings (emitted into every generated Rust binding as #![allow(...)]).
 extra_clippy_allows = ["redundant_field_names"]
 languages = [
@@ -562,12 +562,8 @@ features = [
 
 [[crates.source_crates]]
 name = "crawlberg"
-sources = [
-  "../crawlberg/crates/crawlberg/src/types/config.rs",
-  "../crawlberg/crates/crawlberg/src/types/discovery.rs",
-  "../crawlberg/crates/crawlberg/src/types/results.rs",
-  "../crawlberg/crates/crawlberg/src/net/ssrf.rs",
-]
+from_registry = true
+sources = ["src/types/config.rs", "src/types/discovery.rs", "src/types/results.rs", "src/net/ssrf.rs"]
 roots = ["crawlberg::CrawlConfig", "crawlberg::MapResult"]
 
 [[crates.source_crates]]
@@ -822,7 +818,7 @@ features = [
   # exact list rather than resolving Cargo's feature graph, so the `wasm-target`
   # alias alone satisfies no leaf gate and the generator drops the gated field
   # (#244). Both are already active transitively via wasm-target -> no-ort-target
-  # -> keywords, so this adds no dependency and no wasm bytes.
+  # -> keywords, so this adds no dependency and no wasm bytes. ~keep
   "keywords-yake",
   "keywords-rake",
   # Same reasoning as keywords-yake/keywords-rake above (#244): both are already
@@ -830,7 +826,7 @@ features = [
   # so listing them here adds no dependency and no wasm bytes -- it only makes
   # them visible to alef's literal cfg match.
   # "pdf": PdfConfig/HierarchyConfig are plain scalars + Option<Vec<String>> +
-  # a crate-root-exported nested config -- no foreign types, no known blocker.
+  # a crate-root-exported nested config -- no foreign types, no known blocker. ~keep
   "pdf",
   # "heuristics": fixes the extraction_confidence half of #244. The blocker was
   # never a missing feature flag -- ExtractionConfidence was never re-exported

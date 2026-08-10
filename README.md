@@ -86,7 +86,7 @@
 
 Point Xberg at anything — a PDF, a scanned image, a spreadsheet, an audio file, a URL, a whole archive, or a source tree — and get back clean text, tables, metadata, and structured data. One engine handles format detection, reading, OCR, and extraction, so you never stitch a pipeline together from a dozen libraries.
 
-**101 formats · 115 file extensions** · **371 code languages** · **15 language bindings** · **6 output formats** · OCR · transcription · embeddings
+**100 formats · 120 file extensions** · **371 code languages** · **15 language bindings** · **6 output formats** · OCR · transcription · embeddings
 
 The fastest, most precise open-source document and PDF-to-Markdown engine — [see the benchmarks](https://xberg.io/benchmarks).
 
@@ -104,7 +104,7 @@ Point Xberg at anything — a PDF, a spreadsheet, a scanned image, an audio file
 
 | Capability | What you get |
 |---|---|
-| **101 document formats** | PDFs, Office, images, HTML, email, e-books, scientific publications, structured data across 115 file extensions — intelligent MIME detection, streaming for multi-GB files. |
+| **100 document formats** | PDFs, Office, images, HTML, email, e-books, scientific publications, structured data across 120 file extensions — intelligent MIME detection, streaming for multi-GB files. |
 | **URLs & the web** | Point Xberg at an `http(s)` URL — it fetches and extracts a single document, or crawls and follows links (Auto / Document / Crawl modes via the [crawlberg](https://github.com/xberg-io/crawlberg) engine). *Requires the `url-ingestion` feature.* |
 | **Audio & video transcription** | Speech-to-text from MP3, M4A, WAV, WebM, and MP4 tracks via Whisper ONNX (tiny → large-v3). *Requires the `transcription` feature.* |
 | **Archives, traversed** | List and **recursively** extract nested `.zip`, `.tar`, `.gz`, `.7z` — documents inside documents — guarded by zip-bomb, compression-ratio, and nesting-depth limits. |
@@ -114,7 +114,7 @@ Point Xberg at anything — a PDF, a spreadsheet, a scanned image, an audio file
 | **Embeddings & search** | Local (ONNX) or provider-hosted embeddings (165 providers via liter-llm), sparse and late-interaction, cross-encoder reranking. |
 | **Enrichment** | NER, keyword extraction (YAKE/RAKE), summarization, translation, redaction, page classification, QR detection, language detection, token reduction (TOON). |
 | **Structured extraction** | Schema-driven JSON straight from any document via local (Ollama, LM Studio, vLLM) or hosted LLMs — no prompt engineering. |
-| **6 output formats** | Plain text, Markdown, Djot, HTML, JSON tree, or Structured (same text as Plain, tagged with a `structured` metadata label). Plus DocTags and Graphviz DOT (diagrams recovered from vector SVG/PDF) via dedicated renderers, and any custom renderer registered in the `RendererRegistry`. |
+| **6 output formats** | Plain text, Markdown, Djot, HTML, JSON tree, or Structured (same text as Plain, tagged with a `structured` metadata label). |
 | **Runs anywhere** | Library, CLI (12 commands), REST API (`xberg serve`), MCP server, Docker, Helm — no GPU needed. Content-hash caching, parallel batch, per-file timeouts. |
 
 > Capabilities marked *requires a feature* are Cargo feature flags on the core crate (`url-ingestion`, `transcription`, `reranker`, layout/ORT). Prebuilt language packages and the Docker image bundle the common set; a from-source build enables only what you select.
@@ -435,9 +435,9 @@ Common use cases — see [Quick start guide](https://docs.xberg.io/getting-start
 <details>
 <summary><strong>Full feature list</strong></summary>
 
-### Supported File Formats (101 formats · 115 file extensions)
+### Supported File Formats (100 formats · 120 file extensions)
 
-101 formats across 115 file extensions in 8 major categories with intelligent format detection and comprehensive metadata extraction.
+100 formats across 120 file extensions in 8 major categories with intelligent format detection and comprehensive metadata extraction.
 
 #### Office Documents
 
@@ -515,8 +515,6 @@ Powered by [tree-sitter-language-pack](https://github.com/xberg-io/tree-sitter-l
 | **HTML** | Styled, browser-ready | `<h1>Chapter 1</h1>` |
 | **JSON** | Machine-readable tree structure | Hierarchical sections with heading levels |
 | **Structured** | Same plain-text content as **Plain**, distinguished only by its `structured` output-format metadata label | Byte-identical to Plain output |
-
-Two additional formats aren't counted in the 6 above because they replace `content` with a different vocabulary rather than reformatting the document text: **DocTags** (Docling's tag-stream format) and **DOT** (Graphviz output for a diagram recovered from a vector SVG or PDF source). Both, plus any custom renderer registered in the `RendererRegistry`, are reachable via `output_format`.
 
 ### Deployment Modes
 
@@ -613,7 +611,7 @@ Full guides, API references for every binding, format reference, and configurati
 - [Getting Started](https://docs.xberg.io/getting-started/installation/)
 - [Quick Start](https://docs.xberg.io/getting-started/quickstart/)
 - [Guides](https://docs.xberg.io/guides/extraction/)
-- [API Reference](https://docs.xberg.io/reference/api-python/)
+- [API Reference (Rust core)](https://docs.xberg.io/reference/api-rust/) — every binding has its own page under `/reference/`
 - [Format Reference](https://docs.xberg.io/reference/formats/)
 - [Live Demo](https://docs.xberg.io/demo.html) (browser, WASM)
 
@@ -631,7 +629,7 @@ Join our [Discord community](https://discord.gg/xt9WY3GnKR) for questions and di
 
 Xberg is one of six open-source projects from Kreuzberg, Inc.:
 
-- [Xberg](https://github.com/xberg-io/xberg) — document intelligence: text, tables, metadata from 101 formats with optional OCR.
+- [Xberg](https://github.com/xberg-io/xberg) — document intelligence: text, tables, metadata from 100 formats with optional OCR.
 - [Xberg Enterprise](https://github.com/xberg-io/xberg-enterprise) — managed extraction API with SDKs, dashboards, and observability.
 - [crawlberg](https://github.com/xberg-io/crawlberg) — web crawling and scraping with HTML→Markdown and headless-Chrome fallback.
 - [html-to-markdown](https://github.com/xberg-io/html-to-markdown) — fast, lossless HTML→Markdown engine.

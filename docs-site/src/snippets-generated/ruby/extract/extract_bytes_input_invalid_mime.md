@@ -1,0 +1,16 @@
+---
+id: fixture_ruby_extract_bytes_input_invalid_mime
+language: ruby
+target: ruby
+level: typecheck
+requires: []
+side_effect: safe
+---
+
+extract bytes input with unsupported MIME type
+
+```ruby title="Ruby"
+require "xberg"
+result = Xberg.extract(ExtractInput.new(bytes: File.binread('test_documents/text/plain.txt').bytes, config: {  }, filename: 'plain.txt', kind: 'bytes', mime_type: 'application/x-nonexistent'), {  })
+
+```

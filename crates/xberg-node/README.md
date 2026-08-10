@@ -272,7 +272,7 @@ if (existsSync(configPath)) {
 ### Next Steps
 
 - **[Installation Guide](https://docs.xberg.io/getting-started/installation/)** - Platform-specific setup
-- **[API Documentation](https://docs.xberg.io/reference/api-python/)** - Complete API reference
+- **[API Documentation](https://docs.xberg.io/reference/api-typescript/)** - Complete API reference
 - **[Examples & Guides](https://docs.xberg.io/)** - Full code examples and usage guides
 - **[Configuration Guide](https://docs.xberg.io/guides/configuration/)** - Advanced configuration options
 
@@ -303,9 +303,9 @@ This binding uses NAPI-RS to provide native Node.js bindings with:
 
 ## Features
 
-### Supported File Formats (101 formats · 115 file extensions)
+### Supported File Formats (100 formats · 120 file extensions)
 
-101 formats across 115 file extensions in 8 major categories with intelligent format detection and comprehensive metadata extraction.
+100 formats across 120 file extensions in 8 major categories with intelligent format detection and comprehensive metadata extraction.
 
 #### Office Documents
 
@@ -508,7 +508,7 @@ For advanced configuration options including language detection, table extractio
 ## Documentation
 
 - **[Official Documentation](https://docs.xberg.io/)**
-- **[API Reference](https://docs.xberg.io/reference/api-python/)**
+- **[API Reference](https://docs.xberg.io/reference/api-typescript/)**
 - **[Examples & Guides](https://docs.xberg.io/)**
 
 ## Contributing

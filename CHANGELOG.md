@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Alef now extracts Crawlberg binding types from the pinned registry dependency instead of a
+  neighboring checkout, keeping generated bindings aligned with the version Cargo compiles.
+
 ### Added
 
 - Diagram recovery: vector SVG and vector PDF sources that draw a node/edge diagram (Graphviz,
