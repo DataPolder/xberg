@@ -14,6 +14,8 @@
 //!
 //! # Example
 //!
+//! Not run as a doctest: `pub(crate)`, so it is unreachable from a downstream crate.
+//!
 //! ```ignore
 //! use xberg::extraction::excel::read_excel_file;
 //!

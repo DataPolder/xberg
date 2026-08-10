@@ -12,7 +12,9 @@
 //!
 //! # Examples
 //!
-//! ```ignore
+//! ```rust,no_run
+//! # #[cfg(feature = "keywords")]
+//! # {
 //! # use xberg::keywords::{extract_keywords, KeywordConfig};
 //! let text = "Rust is a systems programming language focused on safety and performance.";
 //!
@@ -23,6 +25,7 @@
 //! for keyword in keywords {
 //!     println!("{}: {:.3}", keyword.text, keyword.score);
 //! }
+//! # }
 //! ```
 //!
 //! ```rust,no_run

@@ -11,12 +11,14 @@
 //!
 //! # Example
 //!
+//! Not run as a doctest: `pub(crate)`, so it is unreachable from a downstream crate.
+//!
 //! ```ignore
 //! use xberg::extraction::pst::extract_pst_messages;
 //!
 //! # fn example() -> xberg::Result<()> {
 //! let pst_bytes = std::fs::read("archive.pst")?;
-//! let messages = extract_pst_messages(&pst_bytes)?;
+//! let (messages, _warnings) = extract_pst_messages(&pst_bytes)?;
 //!
 //! for msg in &messages {
 //!     println!("Subject: {:?}", msg.subject);

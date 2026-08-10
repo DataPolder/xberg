@@ -39,9 +39,10 @@ pub struct FontSizeCluster {
 ///
 /// # Example
 ///
-/// Not run as a doctest: `cluster_font_sizes` and [`TextBlock`] are `pub(crate)`, internal
-/// to the PDF hierarchy pass. Downstream crates see its effect as heading levels on the
-/// extracted document structure.
+/// Not run as a doctest: `cluster_font_sizes` is `pub(crate)`, internal to the PDF
+/// hierarchy pass. ([`TextBlock`] itself is public — only the function is not.)
+/// Downstream crates see its effect as heading levels on the extracted document
+/// structure.
 ///
 /// ```ignore
 /// use xberg::pdf::hierarchy::{TextBlock, BoundingBox, cluster_font_sizes};

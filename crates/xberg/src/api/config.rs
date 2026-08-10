@@ -29,6 +29,8 @@ use crate::{Result, core::ServerConfig};
 ///
 /// # Examples
 ///
+/// Not run as a doctest: `pub(crate)`, so it is unreachable from a downstream crate.
+///
 /// ```ignore
 /// use xberg::api::load_server_config;
 ///

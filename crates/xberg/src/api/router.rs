@@ -135,6 +135,10 @@ pub fn create_router_with_limits(config: ExtractionConfig, limits: ApiSizeLimits
 ///
 /// # Examples
 ///
+/// Not run as a doctest: `pub(crate)`, so it is unreachable from a downstream crate.
+/// [`create_router_with_limits`] is the public entry point with the same shape
+/// minus the server config.
+///
 /// ```ignore
 /// use xberg::{ExtractionConfig, api::{create_router_with_limits_and_server_config, ApiSizeLimits}, core::ServerConfig};
 ///
