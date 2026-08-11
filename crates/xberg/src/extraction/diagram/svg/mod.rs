@@ -440,8 +440,10 @@ mod tests {
 
     #[test]
     fn should_reject_nesting_exactly_one_past_the_bound() {
-        assert!(!exceeds_max_nesting(nested(MAX_NESTING_DEPTH, "").as_bytes()));
-        assert!(exceeds_max_nesting(nested(MAX_NESTING_DEPTH + 1, "").as_bytes()));
+        // `nested` wraps its groups in an `<svg>`, and the root element is a
+        // level of nesting like any other, so `nested(n)` is `n + 1` deep. ~keep
+        assert!(!exceeds_max_nesting(nested(MAX_NESTING_DEPTH - 1, "").as_bytes()));
+        assert!(exceeds_max_nesting(nested(MAX_NESTING_DEPTH, "").as_bytes()));
     }
 
     #[test]

@@ -42,6 +42,10 @@ impl Rect {
         self.width() * self.height()
     }
 
+    fn centre_x(&self) -> f32 {
+        (self.x0 + self.x1) / 2.0
+    }
+
     fn contains(&self, x: f32, y: f32) -> bool {
         x >= self.x0 && x <= self.x1 && y >= self.y0 && y <= self.y1
     }
@@ -56,6 +60,15 @@ impl Rect {
         let width = (self.x1.min(other.x1) - self.x0.max(other.x0)).max(0.0);
         let height = (self.y1.min(other.y1) - self.y0.max(other.y0)).max(0.0);
         width * height
+    }
+
+    /// How far inside the rectangle a point sits, measured to the nearest
+    /// edge. Zero on the border and outside.
+    fn depth_of(&self, x: f32, y: f32) -> f32 {
+        if !self.contains(x, y) {
+            return 0.0;
+        }
+        (x - self.x0).min(self.x1 - x).min(y - self.y0).min(self.y1 - y)
     }
 
     /// Distance from a point to the rectangle, zero when inside.
@@ -174,6 +187,18 @@ const ARROWHEAD_MAX_SIDE_RATIO: f32 = 0.05;
 /// clear of the line, so this has to reach further than shape snapping does.
 const EDGE_LABEL_REACH: f32 = 4.0;
 
+/// How far below a shape a caption may sit, in units of the snap tolerance,
+/// and still be that shape's name. Shorter than the edge-label reach, because
+/// a caption is set tight under the thing it names while an edge label is
+/// pushed clear of the line it belongs to.
+const CAPTION_REACH: f32 = 3.0;
+
+/// Absolute ceiling on that reach. The gap under a caption is set in text, so
+/// it scales with the type size and not with the drawing: on a poster-sized
+/// canvas three snap tolerances is over an inch, and everything within an inch
+/// below a shape would become its name.
+const CAPTION_CEILING: f32 = 48.0;
+
 /// Build a graph from recovered geometry, or `None` when the geometry is not a
 /// graph.
 ///
@@ -243,7 +268,7 @@ pub(crate) fn assemble(
 
     // Text belongs to the innermost shape that contains its anchor: a label
     // inside a box that is itself inside a panel names the box.
-    let owners: Vec<Option<usize>> = labels
+    let mut owners: Vec<Option<usize>> = labels
         .iter()
         .map(|label| {
             kept.iter()
@@ -278,6 +303,51 @@ pub(crate) fn assemble(
         )
         .collect();
 
+    // A grid is an interior layout, so it is judged on the text drawn inside
+    // the shape and never on a caption adopted from outside it below: three
+    // lines of one wrapped caption are rows, and their anchors differ enough in
+    // x to read as columns too, which would condemn the shape as a table.
+    let mut contained: Vec<Vec<&Label>> = vec![Vec::new(); kept.len()];
+    for (label, owner) in labels.iter().zip(&owners) {
+        if let Some(index) = owner {
+            contained[*index].push(label);
+        }
+    }
+    let grids: Vec<bool> = kept
+        .iter()
+        .zip(&contained)
+        .map(|(outline, texts)| holds_a_grid(&outline.bbox, texts))
+        .collect();
+
+    // Which connector endpoints land on each shape, with the arrowhead reach
+    // the edge builder uses. Computed once: the container test asks it of every
+    // enclosed shape, and recomputing it per enclosure-member pair would make
+    // classification quadratic in outlines and linear in connectors at once.
+    let endpoints: Vec<((f32, f32), f32)> = connectors
+        .iter()
+        .flat_map(|c| {
+            [
+                (c.start, snap + touching_arrowhead(&reach, c.start, snap).unwrap_or(0.0)),
+                (c.end, snap + touching_arrowhead(&reach, c.end, snap).unwrap_or(0.0)),
+            ]
+        })
+        .collect();
+    let landings: Vec<Vec<(f32, f32)>> = kept
+        .iter()
+        .map(|outline| {
+            endpoints
+                .iter()
+                .filter(|(point, tolerance)| outline.bbox.distance_to(point.0, point.1) <= *tolerance)
+                .map(|(point, _)| *point)
+                .collect()
+        })
+        .collect();
+
+    // An icon node has no outline to put its caption inside, so the caption
+    // sits underneath the glyph. Adopting it here, after arrowheads are known,
+    // keeps a head from acquiring a name it never had.
+    adopt_captions(&kept, &labels, &arrowheads, &connectors, &mut owners, snap);
+
     // The labels each candidate owns, which is what separates a node from the
     // two things that look most like one: a table and a piece of decoration.
     let mut owned: Vec<Vec<&Label>> = vec![Vec::new(); kept.len()];
@@ -291,13 +361,7 @@ pub(crate) fn assemble(
     // arrowheads are both known: a container is an enclosure nobody labelled,
     // and its enclosed members exclude arrowheads, which sit inside a node's
     // own border without making it one.
-    let is_container = find_containers(&kept, &arrowheads, &owned);
-
-    let grids: Vec<bool> = kept
-        .iter()
-        .zip(&owned)
-        .map(|(outline, texts)| holds_a_grid(&outline.bbox, texts))
-        .collect();
+    let is_container = find_containers(&kept, &arrowheads, &owned, &landings, snap);
 
     // Named nodes are nodes whatever their geometry does, so both tests below
     // only ever condemn a shape nobody labelled.
@@ -306,12 +370,21 @@ pub(crate) fn assemble(
     // drawing rather than several nodes. The wedges of a pie all meet at its
     // centre, and the parts of an icon glyph all sit inside its footprint,
     // where a layout engine keeps real nodes apart.
+    //
+    // Enclosure is excluded, because it is the one way two shapes can overlap
+    // completely and still be two things: a container holds its members, and a
+    // member sitting wholly inside its cluster overlaps it by the member's
+    // whole area. Counting that would condemn every unlabelled node in a
+    // cluster, which is the opposite of what grouping means. Partial overlap,
+    // which is what a pie or a glyph draws, still condemns.
     let overlapping: Vec<bool> = kept
         .iter()
         .enumerate()
         .map(|(i, outline)| {
             kept.iter().enumerate().any(|(j, other)| {
                 i != j
+                    && !other.bbox.encloses(&outline.bbox)
+                    && !outline.bbox.encloses(&other.bbox)
                     && outline.bbox.overlap_area(&other.bbox)
                         > outline.bbox.area().min(other.bbox.area()) * OVERLAP_RATIO
             })
@@ -492,30 +565,64 @@ fn cluster_count(values: impl Iterator<Item = f32>, tolerance: f32) -> usize {
 /// inside a cluster reaches the cluster's border first, so it lands there
 /// instead of on the box it was drawn to.
 ///
-/// Two things keep a real node safe from this test. A UML class box or a
-/// BPMN task carries its own label alongside the compartments or markers it
-/// draws inside itself, so an outline that owns a label is never a container
-/// whatever it encloses. And a node's own incoming arrowheads are drawn just
-/// inside its border and satisfy enclosure exactly as a real member would, so
-/// they are excluded from the count: two arrowheads landing inside an
-/// unlabelled node are not two members grouped by it.
+/// A node's own incoming arrowheads are drawn just inside its border and
+/// satisfy enclosure exactly as a real member would, so they are excluded from
+/// the count: two arrowheads landing inside an unlabelled node are not two
+/// members grouped by it.
+///
+/// A label on the enclosure is not on its own enough to make it a node. Every
+/// renderer that draws clusters captions them — Graphviz puts the cluster's
+/// name inside the border above its members, PlantUML and BPMN put the lane or
+/// pool name in a header band — and that caption belongs to no member, so the
+/// enclosure owns it. What separates such a caption from a UML class box's own
+/// name, or a BPMN task's, is what the enclosure holds: a class box draws
+/// compartments and markers, which are interior detail nothing connects to,
+/// while a cluster groups nodes that the diagram's own connectors land on.
+/// So a labelled enclosure is a container only when the shapes it encloses are
+/// themselves joined to the graph.
+///
+/// "Joined" has to mean joined *within* the enclosure, or a class box would
+/// fail the test for the wrong reason: its compartments run the full width, so
+/// an association arriving at the class's own border is at zero distance from
+/// whichever compartment reaches that height. Requiring the endpoint to sit
+/// clear of the enclosure's border by the snap tolerance separates the two —
+/// a cluster's members are joined well inside it, while everything touching a
+/// class box happens on its rim.
+///
+/// An unlabelled enclosure keeps the older, unconditional rule. Not because
+/// the argument above stops applying, but because it has nothing else it could
+/// be: a shape that groups two others and never says what it is has no claim
+/// to be a node, whereas a labelled one does.
 ///
 /// Enclosure is otherwise the whole test. Nesting is allowed to any depth,
 /// since each container is judged against what it directly contains.
-fn find_containers(outlines: &[Outline], arrowheads: &[bool], owned: &[Vec<&Label>]) -> Vec<bool> {
+fn find_containers(
+    outlines: &[Outline],
+    arrowheads: &[bool],
+    owned: &[Vec<&Label>],
+    landings: &[Vec<(f32, f32)>],
+    snap: f32,
+) -> Vec<bool> {
     outlines
         .iter()
         .enumerate()
         .map(|(i, outer)| {
-            if !owned[i].is_empty() {
-                return false;
-            }
-            let members = outlines
+            let mut members = outlines
                 .iter()
                 .enumerate()
-                .filter(|(j, inner)| *j != i && !arrowheads[*j] && outer.bbox.encloses(&inner.bbox))
-                .count();
-            members >= CONTAINER_MIN_MEMBERS
+                .filter(|(j, inner)| *j != i && !arrowheads[*j] && outer.bbox.encloses(&inner.bbox));
+            if owned[i].is_empty() {
+                return members.count() >= CONTAINER_MIN_MEMBERS;
+            }
+            members
+                .filter(|(j, _)| {
+                    landings
+                        .get(*j)
+                        .is_some_and(|points| points.iter().any(|(x, y)| outer.bbox.depth_of(*x, *y) > snap))
+                })
+                .take(CONTAINER_MIN_MEMBERS)
+                .count()
+                >= CONTAINER_MIN_MEMBERS
         })
         .collect()
 }
@@ -640,6 +747,82 @@ fn snap_to_outline(outlines: &[&Outline], point: (f32, f32), tolerance: f32) -> 
         .map(|(i, _, _)| i)
 }
 
+/// Give an unlabelled shape the caption drawn beneath it.
+///
+/// The AWS and Azure architecture house style draws a node as an icon glyph
+/// with its name underneath and no outline at all, so the name lies outside
+/// every closed region in the drawing and containment finds it no owner.
+///
+/// Three things stop this from eating text that names something else. It only
+/// considers a label containment left unowned, so nothing is taken from the
+/// shape it sits inside. It only offers that label to a shape holding no text
+/// of its own, so an annotation under a captioned box — an org chart's
+/// headcount under a department — stays free, because the department already
+/// says what it is. And the anchor must fall within the shape's own width and
+/// just below its lower edge, which is where a caption goes and where an
+/// unrelated line of prose does not.
+fn adopt_captions(
+    outlines: &[Outline],
+    labels: &[Label],
+    arrowheads: &[bool],
+    connectors: &[Connector],
+    owners: &mut [Option<usize>],
+    snap: f32,
+) {
+    // Frozen before any adoption, so that two lines of one wrapped caption both
+    // reach the same shape and the result does not depend on label order.
+    let mut labelled = vec![false; outlines.len()];
+    for owner in owners.iter().flatten() {
+        labelled[*owner] = true;
+    }
+
+    let reach = (snap * CAPTION_REACH).min(CAPTION_CEILING);
+    for (label, owner) in labels.iter().zip(owners.iter_mut()) {
+        if owner.is_some() {
+            continue;
+        }
+        let Some((index, gap)) = outlines
+            .iter()
+            .enumerate()
+            .filter(|(i, outline)| {
+                !labelled[*i]
+                    && !arrowheads[*i]
+                    && label.x >= outline.bbox.x0
+                    && label.x <= outline.bbox.x1
+                    && label.y > outline.bbox.y1
+                    && label.y - outline.bbox.y1 <= reach
+            })
+            // Nearest above the caption, and on a tie the shape it is centred
+            // under. A banner or rule spanning a row of icons sits below all of
+            // them and would otherwise take every caption in the row.
+            .min_by(|(_, a), (_, b)| {
+                (label.y - a.bbox.y1).total_cmp(&(label.y - b.bbox.y1)).then(
+                    (label.x - a.bbox.centre_x())
+                        .abs()
+                        .total_cmp(&(label.x - b.bbox.centre_x()).abs()),
+                )
+            })
+            .map(|(i, outline)| (i, label.y - outline.bbox.y1))
+        else {
+            continue;
+        };
+
+        // Text under one node and over the next is either this node's caption
+        // or that connector's label, and the same geometry describes both. The
+        // nearer claim wins; without this the caption test runs first and takes
+        // the label even when the connector is an order of magnitude closer.
+        if connectors.iter().any(|connector| {
+            let dx = label.x - connector.midpoint.0;
+            let dy = label.y - connector.midpoint.1;
+            dx.hypot(dy) < gap
+        }) {
+            continue;
+        }
+
+        *owner = Some(index);
+    }
+}
+
 /// Text sitting on a connector, used as the edge label.
 fn nearest_free_label(labels: &[&Label], midpoint: (f32, f32), tolerance: f32) -> Option<String> {
     labels
@@ -685,6 +868,11 @@ mod tests {
             y,
             text: text.to_string(),
         }
+    }
+
+    /// Landing points for a drawing whose connectors reach none of its shapes.
+    fn nowhere(outlines: usize) -> Vec<Vec<(f32, f32)>> {
+        vec![Vec::new(); outlines]
     }
 
     /// A connector leaving a node and returning to it is a self-loop, and the
@@ -1085,13 +1273,10 @@ mod tests {
         assert_eq!(graph.edges.len(), 1);
     }
 
-    // The three tests below call `find_containers` directly rather than through
-    // `assemble`. Going through `assemble` confounds the container test with the
-    // unrelated overlap-decoration test: any shape one outline fully encloses
-    // also satisfies `overlap_area == area`, the same signal that condemns pie
-    // wedges, so an *unlabelled* node built with `assemble` would be dropped by
-    // that test regardless of whether the container fix is even in place. Only
-    // a direct call isolates the mechanism this defect is about. ~keep
+    // The tests below call `find_containers` directly rather than through
+    // `assemble`, so that each states one classification rule and fails for one
+    // reason. `assemble` reaches the same verdicts, and
+    // `an_enclosing_panel_is_a_container_not_a_node` covers it end to end. ~keep
 
     /// Two of a node's own incoming arrowheads, drawn just inside its border,
     /// satisfy `Rect::encloses` exactly as two real members would. They must
@@ -1108,17 +1293,17 @@ mod tests {
         let owned: Vec<Vec<&Label>> = vec![Vec::new(), Vec::new(), Vec::new()];
 
         assert_eq!(
-            find_containers(&outlines, &arrowheads, &owned),
+            find_containers(&outlines, &arrowheads, &owned, &nowhere(3), 4.0),
             vec![false, false, false],
             "two arrowheads inside a node's border are not two members grouped by it"
         );
     }
 
     /// A UML class box or a BPMN task carries its own label alongside the
-    /// compartments or markers it draws inside itself. It must never be
-    /// condemned as a container, whatever it encloses.
+    /// compartments or markers it draws inside itself. Nothing connects to
+    /// those, so the enclosure is a node.
     #[test]
-    fn a_container_test_never_condemns_a_labelled_enclosure() {
+    fn a_labelled_enclosure_of_unconnected_detail_is_a_node() {
         let outlines = vec![
             outline(0.0, 0.0, 100.0, 100.0),
             outline(10.0, 10.0, 40.0, 40.0),
@@ -1129,9 +1314,58 @@ mod tests {
         let owned: Vec<Vec<&Label>> = vec![vec![&caption], Vec::new(), Vec::new()];
 
         assert_eq!(
-            find_containers(&outlines, &arrowheads, &owned),
+            find_containers(&outlines, &arrowheads, &owned, &nowhere(3), 4.0),
             vec![false, false, false],
-            "a labelled enclosure is never a container, whatever it encloses"
+            "compartments nothing connects to are interior detail, not grouped members"
+        );
+    }
+
+    /// A Graphviz cluster is captioned inside its own border, so it owns a
+    /// label exactly as a class box does. What separates them is that its
+    /// members carry the diagram's connectors.
+    #[test]
+    fn a_labelled_enclosure_grouping_connected_shapes_is_a_container() {
+        let outlines = vec![
+            outline(0.0, 0.0, 100.0, 100.0),
+            outline(10.0, 10.0, 40.0, 40.0),
+            outline(60.0, 60.0, 90.0, 90.0),
+        ];
+        let arrowheads = vec![false, false, false];
+        let caption = label(50.0, 5.0, "Ingest");
+        let owned: Vec<Vec<&Label>> = vec![vec![&caption], Vec::new(), Vec::new()];
+        // One connector joining the two members, landing on each well inside
+        // the enclosure rather than on its rim.
+        let landings = vec![Vec::new(), vec![(25.0, 40.0)], vec![(75.0, 60.0)]];
+
+        assert_eq!(
+            find_containers(&outlines, &arrowheads, &owned, &landings, 4.0),
+            vec![true, false, false],
+            "a captioned box grouping two connected shapes is a cluster, not a node"
+        );
+    }
+
+    /// A class box's compartments run its full width, so an association
+    /// arriving at the class's own border is at zero distance from whichever
+    /// compartment reaches that height. Landing on the rim is not being
+    /// grouped, or every UML class in the world becomes a container.
+    #[test]
+    fn a_labelled_enclosure_whose_members_are_touched_only_at_its_rim_is_a_node() {
+        let outlines = vec![
+            outline(0.0, 0.0, 100.0, 100.0),
+            outline(0.0, 10.0, 100.0, 40.0),
+            outline(0.0, 60.0, 100.0, 90.0),
+        ];
+        let arrowheads = vec![false, false, false];
+        let caption = label(50.0, 5.0, "Order");
+        let owned: Vec<Vec<&Label>> = vec![vec![&caption], Vec::new(), Vec::new()];
+        // Two associations arriving on the class's left border, each landing on
+        // a different full-width compartment.
+        let landings = vec![Vec::new(), vec![(0.0, 20.0)], vec![(0.0, 70.0)]];
+
+        assert_eq!(
+            find_containers(&outlines, &arrowheads, &owned, &landings, 4.0),
+            vec![false, false, false],
+            "compartments touched on the enclosure's rim are interior detail"
         );
     }
 
@@ -1148,7 +1382,7 @@ mod tests {
         let owned: Vec<Vec<&Label>> = vec![Vec::new(), Vec::new(), Vec::new()];
 
         assert_eq!(
-            find_containers(&outlines, &arrowheads, &owned),
+            find_containers(&outlines, &arrowheads, &owned, &nowhere(3), 4.0),
             vec![true, false, false]
         );
     }
