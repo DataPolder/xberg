@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Rotated PDF text runs are now reassembled along their own reading axis on the default extraction path, restoring
+  word order and spacing without changing unrotated pages.
+
 - Alef now extracts Crawlberg binding types from the pinned registry dependency instead of a
   neighboring checkout, keeping generated bindings aligned with the version Cargo compiles.
 
