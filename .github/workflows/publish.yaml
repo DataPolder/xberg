@@ -1209,6 +1209,41 @@ jobs:
           cp LICENSE THIRD_PARTY_LICENSES.md "$STAGE/"
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             cp "$BINARY_PATH" "$STAGE/xberg.exe"
+            # Smoke-test the staged tree exactly as a user would unzip it, the
+            # Windows counterpart of the `--version` runs on the macOS and
+            # linux-gnu branches below. The `Setup ONNX Runtime` step above runs
+            # with its default `system` strategy, which exports ORT_STRATEGY=system
+            # and links ONNX Runtime dynamically, while this branch vendors no DLL
+            # into the zip (contrast the Intel-macOS dylib vendoring below). So
+            # this is what decides whether the shipped zip can start at all.
+            # The `Setup ONNX Runtime` step prepends its staged DLL directory
+            # (under the workspace) to PATH; leaving it there would let the
+            # loader satisfy the import from the build tree and pass no matter
+            # what the zip contains, so strip it first — the analogue of
+            # `env -u LD_LIBRARY_PATH` on the linux-gnu branch.
+            WORKSPACE_POSIX="$(pwd)"
+            CLEAN_PATH=""
+            while IFS= read -r path_entry; do
+              [ -n "$path_entry" ] || continue
+              case "$path_entry" in
+                "$WORKSPACE_POSIX" | "$WORKSPACE_POSIX"/*)
+                  continue
+                  ;;
+              esac
+              if [ -e "$path_entry/onnxruntime.dll" ]; then
+                echo "Dropping PATH entry providing onnxruntime.dll: $path_entry"
+                continue
+              fi
+              CLEAN_PATH="${CLEAN_PATH:+$CLEAN_PATH:}$path_entry"
+            done <<<"${PATH//:/$'\n'}"
+            # The loader always searches System32 ahead of PATH, so a DLL there
+            # can still mask a missing vendored copy. Say so in the log rather
+            # than let a green step imply more than it proves.
+            if [ -e "/c/Windows/System32/onnxruntime.dll" ]; then
+              echo "::warning title=Windows CLI smoke test is weakened::C:\\Windows\\System32\\onnxruntime.dll exists on this runner and is searched before PATH, so xberg.exe --version may succeed here on a host DLL that end users do not have"
+            fi
+            PATH="$CLEAN_PATH" "$STAGE/xberg.exe" --version
+            echo "Windows CLI smoke test passed: $STAGE/xberg.exe --version ran without a workspace-provided onnxruntime.dll"
             7z a "${STAGE}.zip" "$STAGE" >/dev/null
           else
             cp "$BINARY_PATH" "$STAGE/xberg"
