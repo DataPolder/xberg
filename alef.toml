@@ -132,15 +132,29 @@ manifest = "packages/dart/pubspec.yaml"
 [workspace.docs.snippets.sessions.kotlin]
 cwd = "packages/kotlin-android"
 manifest = "packages/kotlin-android/build.gradle.kts"
+# Guarded so a machine with no Android SDK SKIPS this build instead of failing it.
+# The previous form derived ANDROID_HOME inline from `readlink $(command -v
+# sdkmanager)`; with sdkmanager absent that passes no argument to readlink, the
+# four nested dirnames each print "usage: dirname string [...]", ANDROID_HOME
+# ends up empty, and gradle aborts. That matters more than it looks: a `before`
+# hook failure aborts the ENTIRE configured snippet check, so every other
+# language goes unvalidated because Android tooling happens to be missing. ~keep
 before = [
-  "ANDROID_HOME=$(dirname $(dirname $(dirname $(dirname $(readlink $(command -v sdkmanager)))))) ./gradlew assembleDebug",
+  'sdk=$(command -v sdkmanager || true); if [ -z "${ANDROID_HOME:-}" ] && [ -n "$sdk" ]; then ANDROID_HOME=$(cd "$(dirname "$sdk")/../../.." && pwd); export ANDROID_HOME; fi; if [ -n "${ANDROID_HOME:-}" ]; then ./gradlew assembleDebug; else echo "alef: no Android SDK (ANDROID_HOME unset, sdkmanager not on PATH); skipping gradle assembleDebug"; fi',
 ]
 
 [workspace.docs.snippets.sessions.kotlin_android]
 cwd = "packages/kotlin-android"
 manifest = "packages/kotlin-android/build.gradle.kts"
+# Guarded so a machine with no Android SDK SKIPS this build instead of failing it.
+# The previous form derived ANDROID_HOME inline from `readlink $(command -v
+# sdkmanager)`; with sdkmanager absent that passes no argument to readlink, the
+# four nested dirnames each print "usage: dirname string [...]", ANDROID_HOME
+# ends up empty, and gradle aborts. That matters more than it looks: a `before`
+# hook failure aborts the ENTIRE configured snippet check, so every other
+# language goes unvalidated because Android tooling happens to be missing. ~keep
 before = [
-  "ANDROID_HOME=$(dirname $(dirname $(dirname $(dirname $(readlink $(command -v sdkmanager)))))) ./gradlew assembleDebug",
+  'sdk=$(command -v sdkmanager || true); if [ -z "${ANDROID_HOME:-}" ] && [ -n "$sdk" ]; then ANDROID_HOME=$(cd "$(dirname "$sdk")/../../.." && pwd); export ANDROID_HOME; fi; if [ -n "${ANDROID_HOME:-}" ]; then ./gradlew assembleDebug; else echo "alef: no Android SDK (ANDROID_HOME unset, sdkmanager not on PATH); skipping gradle assembleDebug"; fi',
 ]
 
 [workspace.docs.snippets.sessions.swift]
@@ -150,7 +164,18 @@ manifest = "packages/swift/Package.swift"
 [workspace.docs.snippets.sessions.zig]
 cwd = "packages/zig"
 manifest = "packages/zig/build.zig"
-env = { ZIG_GLOBAL_CACHE_DIR = ".alef-cache/zig-global" }
+# No ZIG_GLOBAL_CACHE_DIR override here on purpose. We used to set it to the
+# RELATIVE path ".alef-cache/zig-global", which zig could not resolve from the
+# session cwd -- every Zig snippet failed with "unable to resolve zig cache
+# directory: AppDataDirUnavailable" before it ever reached the compiler, masking
+# any real error underneath. alef already exports a per-fingerprint ABSOLUTE
+# cache dir of its own, so overriding it bought nothing and additionally
+# collapsed every Zig session onto one shared cache. ~keep
+# packages/zig/src/xberg.zig:4 does `@cImport(@cInclude("xberg.h"))`, and alef
+# compiles that module with a bare `zig build-exe` that never reads build.zig --
+# so build.zig's addIncludePath does not apply and the header must be supplied
+# here instead. ~keep
+include_paths = ["crates/xberg-ffi/include"]
 
 [workspace.docs.snippets.sessions.c]
 cwd = "crates/xberg-ffi/include"
