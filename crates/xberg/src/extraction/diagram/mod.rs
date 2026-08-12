@@ -18,6 +18,8 @@ mod polyline;
 #[cfg(all(feature = "svg", feature = "xml"))]
 pub(crate) mod svg;
 
+use std::collections::HashMap;
+
 use crate::types::diagram::{DiagramEdge, DiagramGraph, DiagramNode, DiagramShape};
 
 /// Axis-aligned rectangle in canvas coordinates.
@@ -199,6 +201,27 @@ const CAPTION_REACH: f32 = 3.0;
 /// below a shape would become its name.
 const CAPTION_CEILING: f32 = 48.0;
 
+/// Minimum number of parallel, same-style strokes before a group is read as
+/// chart gridlines rather than a coincidence. A chain of linked shapes
+/// routinely has two edges running in the same direction; three sharing a
+/// colour, a dash style, a spacing *and* a span besides is what a plotting
+/// library draws for its scale, and nothing else a diagram draws does all
+/// four at once.
+const GRIDLINE_MIN_COUNT: usize = 3;
+
+/// How far a stroke's own two ends may differ, on the axis it is meant to run
+/// square to, and still count as axis-aligned. A gridline is drawn dead
+/// straight; this only has to absorb floating point noise carried through a
+/// transform, not a genuinely diagonal or curved connector.
+const GRIDLINE_AXIS_EPSILON: f32 = 0.75;
+
+/// How far the gap between two adjacent members of a candidate gridline
+/// family may deviate from the family's own average gap, as a fraction of
+/// that average, and still count as "regular". A plotting library spaces
+/// gridlines by a fixed data interval, so real ones are near-exact; this only
+/// has to absorb rounding in the source file.
+const GRIDLINE_SPACING_TOLERANCE_RATIO: f32 = 0.15;
+
 /// Build a graph from recovered geometry, or `None` when the geometry is not a
 /// graph.
 ///
@@ -279,7 +302,18 @@ pub(crate) fn assemble(
         })
         .collect();
 
+    // Chart chrome, not connectors: a plotting library's gridlines are a
+    // family of parallel, same-style strokes at a regular interval, each
+    // crossing the same span of the plot. Dropped here, before arrowhead
+    // detection and every distance test below, so a gridline can never be
+    // mistaken for either.
     let connectors: Vec<Connector> = connectors.into_iter().take(MAX_CONNECTORS).collect();
+    let is_gridline = find_gridlines(&connectors, snap);
+    let connectors: Vec<Connector> = connectors
+        .into_iter()
+        .zip(is_gridline)
+        .filter_map(|(connector, gridline)| (!gridline).then_some(connector))
+        .collect();
     let arrowheads = find_arrowheads(&kept, &connectors, &owners, snap, canvas_max);
 
     // Every arrowhead a connector may have to reach across: the ones large
@@ -607,7 +641,7 @@ fn find_containers(
         .iter()
         .enumerate()
         .map(|(i, outer)| {
-            let mut members = outlines
+            let members = outlines
                 .iter()
                 .enumerate()
                 .filter(|(j, inner)| *j != i && !arrowheads[*j] && outer.bbox.encloses(&inner.bbox));
@@ -712,6 +746,137 @@ fn find_arrowheads(
         marked[index] = touches;
     }
     marked
+}
+
+/// Mark the connectors that are chart gridlines rather than diagram
+/// connectors.
+///
+/// A gridline is not one open stroke that happens to land on two shapes; it
+/// is one member of a family. A chart draws its gridlines as a set of
+/// parallel strokes, all the same direction, all the same colour and dash
+/// style, and spaced apart by the same interval, because that is what a
+/// scale is: equal steps. Read in isolation, one gridline is indistinguishable
+/// from a connector — that is exactly the GH#1420 defect, where the two ends
+/// of one such stroke land on a chart's first and last bar and read as an
+/// edge between them. What tells the family apart from a diagram is the
+/// other members: nothing a layout engine draws puts three-or-more
+/// same-coloured, same-dashed, axis-aligned strokes at a regular spacing
+/// that all cover the same span of the canvas.
+///
+/// A straightforward "does this stroke cross a shape's interior" rule was
+/// tried and rejected (see GH#1420): it costs real edges in `graphviz_large`
+/// and `mermaid_flow`, and breaks the two tests that deliberately let a
+/// connector pass through, or start deep inside, a third shape. The
+/// regularity of the *family* is the part a real connector never
+/// coincidentally reproduces, so it is what this checks instead of anything
+/// about where a single stroke sits relative to a shape.
+///
+/// A vertical (or horizontal) chain of linked shapes is the closest a real
+/// diagram comes to looking like this: consecutive edges in the same
+/// direction, evenly spaced because the nodes are. `is_gridline_family`
+/// separates the two cases on span: a chain's edges each run only the short,
+/// non-overlapping distance between one pair of nodes, while gridlines all
+/// cross the same plot and so all cover the same ground. A chain drawn
+/// perfectly straight also shares its run-axis position exactly across every
+/// edge (they are collinear), which the spacing check rejects outright,
+/// since gridlines are offset from each other on purpose.
+fn find_gridlines(connectors: &[Connector], snap: f32) -> Vec<bool> {
+    let mut marked = vec![false; connectors.len()];
+
+    // Horizontal and vertical are judged separately: a family only ever runs
+    // one direction, and a diagonal or curved stroke belongs to neither.
+    for horizontal in [true, false] {
+        let mut groups: HashMap<(String, bool), Vec<usize>> = HashMap::new();
+        for (index, connector) in connectors.iter().enumerate() {
+            let axis_aligned = if horizontal {
+                (connector.start.1 - connector.end.1).abs() <= GRIDLINE_AXIS_EPSILON
+            } else {
+                (connector.start.0 - connector.end.0).abs() <= GRIDLINE_AXIS_EPSILON
+            };
+            if !axis_aligned {
+                continue;
+            }
+            let key = (connector.stroke.clone().unwrap_or_default(), connector.dashed);
+            groups.entry(key).or_default().push(index);
+        }
+
+        for indices in groups.values() {
+            if indices.len() >= GRIDLINE_MIN_COUNT && is_gridline_family(connectors, indices, horizontal, snap) {
+                for &index in indices {
+                    marked[index] = true;
+                }
+            }
+        }
+    }
+
+    marked
+}
+
+/// Whether a same-direction, same-style group of connectors is a gridline
+/// family. See [`find_gridlines`] for why span and spacing together are the
+/// test.
+fn is_gridline_family(connectors: &[Connector], indices: &[usize], horizontal: bool, snap: f32) -> bool {
+    let mut axis_positions = Vec::with_capacity(indices.len());
+    let mut run_starts = Vec::with_capacity(indices.len());
+    let mut run_ends = Vec::with_capacity(indices.len());
+    for &index in indices {
+        let connector = &connectors[index];
+        let (axis, run_a, run_b) = if horizontal {
+            (
+                (connector.start.1 + connector.end.1) / 2.0,
+                connector.start.0,
+                connector.end.0,
+            )
+        } else {
+            (
+                (connector.start.0 + connector.end.0) / 2.0,
+                connector.start.1,
+                connector.end.1,
+            )
+        };
+        axis_positions.push(axis);
+        run_starts.push(run_a.min(run_b));
+        run_ends.push(run_a.max(run_b));
+    }
+
+    // A real connector stops at the shapes it joins, so a chain's successive
+    // edges cover different, non-overlapping ground. Gridlines all cross the
+    // same plot, so every member covers the same ground the family's own
+    // snap tolerance considers "the same place".
+    if spread(run_starts.iter().copied()) > snap || spread(run_ends.iter().copied()) > snap {
+        return false;
+    }
+
+    // Offset from each other, and by a consistent amount. A connector chain
+    // running straight down (or across) a page shares this axis position
+    // exactly, since its edges are collinear, so a gap at or below the snap
+    // tolerance here means "chain", not "gridlines": gridlines are spread
+    // apart on purpose, by however much the scale's interval is.
+    let mut sorted = axis_positions;
+    sorted.sort_by(f32::total_cmp);
+    let gaps: Vec<f32> = sorted.windows(2).map(|pair| pair[1] - pair[0]).collect();
+    if gaps.iter().any(|gap| *gap <= snap) {
+        return false;
+    }
+    let average = gaps.iter().sum::<f32>() / gaps.len() as f32;
+    gaps.iter()
+        .all(|gap| (gap - average).abs() <= average * GRIDLINE_SPACING_TOLERANCE_RATIO)
+}
+
+/// Distance between the smallest and largest value in a set of coordinates.
+/// Zero for an empty set, so an empty group never looks like a match by
+/// default.
+fn spread(values: impl Iterator<Item = f32>) -> f32 {
+    let (mut min, mut max) = (f32::INFINITY, f32::NEG_INFINITY);
+    for value in values {
+        min = min.min(value);
+        max = max.max(value);
+    }
+    if min.is_finite() && max.is_finite() {
+        max - min
+    } else {
+        0.0
+    }
 }
 
 /// Size of the arrowhead sitting on `point`, if one does, as the reach a
@@ -859,6 +1024,13 @@ mod tests {
             midpoint: ((start.0 + end.0) / 2.0, (start.1 + end.1) / 2.0),
             stroke: None,
             dashed: false,
+        }
+    }
+
+    fn styled_connector(start: (f32, f32), end: (f32, f32), stroke: &str) -> Connector {
+        Connector {
+            stroke: Some(stroke.to_string()),
+            ..connector(start, end)
         }
     }
 
@@ -1398,6 +1570,99 @@ mod tests {
                 Vec::new(),
             )
             .is_none()
+        );
+    }
+
+    /// GH#1420: a bar chart's gridlines, drawn across the whole plot, land
+    /// exactly on the first and last bar and read as a connector between
+    /// them unless the family they belong to is recognised as chrome. Four
+    /// bars, no genuine connector between any of them, and three gridlines
+    /// sharing one colour, evenly spaced and each spanning the same width —
+    /// nothing here should survive as a graph at all.
+    #[test]
+    fn bar_chart_gridlines_crossing_the_bars_are_not_a_graph() {
+        let bars = vec![
+            outline(120.0, 180.0, 220.0, 380.0),
+            outline(250.0, 240.0, 350.0, 380.0),
+            outline(380.0, 130.0, 480.0, 380.0),
+            outline(510.0, 210.0, 610.0, 380.0),
+        ];
+        let gridlines = vec![
+            styled_connector((120.0, 300.0), (620.0, 300.0), "#cccccc"),
+            styled_connector((120.0, 220.0), (620.0, 220.0), "#cccccc"),
+            styled_connector((120.0, 140.0), (620.0, 140.0), "#cccccc"),
+        ];
+
+        assert!(
+            assemble(None, (700.0, 450.0), bars, gridlines, Vec::new()).is_none(),
+            "chart gridlines that cross the bars must not read as a graph"
+        );
+    }
+
+    /// The gridline family is removed on sight, not just when it is the only
+    /// thing present: a real connector elsewhere in the drawing, in a
+    /// different colour and direction, survives the same pass untouched.
+    #[test]
+    fn gridlines_are_dropped_but_a_genuine_edge_beside_them_survives() {
+        let bars = vec![
+            outline(120.0, 180.0, 220.0, 380.0),
+            outline(250.0, 240.0, 350.0, 380.0),
+            outline(380.0, 130.0, 480.0, 380.0),
+            outline(510.0, 210.0, 610.0, 380.0),
+        ];
+        let extra_nodes = vec![outline(630.0, 0.0, 700.0, 50.0), outline(630.0, 60.0, 700.0, 110.0)];
+        let gridlines = vec![
+            styled_connector((120.0, 300.0), (620.0, 300.0), "#cccccc"),
+            styled_connector((120.0, 220.0), (620.0, 220.0), "#cccccc"),
+            styled_connector((120.0, 140.0), (620.0, 140.0), "#cccccc"),
+        ];
+        let real_edge = styled_connector((665.0, 50.0), (665.0, 60.0), "#333333");
+
+        let mut connectors = gridlines;
+        connectors.push(real_edge);
+        let mut outlines = bars;
+        outlines.extend(extra_nodes);
+
+        let graph = assemble(None, (700.0, 450.0), outlines, connectors, Vec::new()).expect("the real edge survives");
+
+        assert_eq!(
+            graph.edges.len(),
+            1,
+            "only the non-gridline connector is an edge: {:?}",
+            graph.edges
+        );
+        assert_eq!(graph.edges[0].stroke.as_deref(), Some("#333333"));
+    }
+
+    /// A straight top-to-bottom chain of linked shapes is the case a naive
+    /// "regularly spaced, same-direction, same-style strokes" rule would
+    /// wrongly condemn: consecutive edges in a vertical flowchart are
+    /// axis-aligned, share a colour and are evenly spaced because the nodes
+    /// are. What tells them apart from gridlines is span (each edge here
+    /// covers only the short run between its own two nodes) and collinearity
+    /// (they share their run-axis position exactly, which gridlines never
+    /// do). All three edges must survive with their exact endpoints.
+    #[test]
+    fn a_straight_vertical_chain_is_not_mistaken_for_gridlines() {
+        let nodes = vec![
+            outline(0.0, 0.0, 100.0, 50.0),
+            outline(0.0, 100.0, 100.0, 150.0),
+            outline(0.0, 200.0, 100.0, 250.0),
+            outline(0.0, 300.0, 100.0, 350.0),
+        ];
+        let links = vec![
+            styled_connector((50.0, 50.0), (50.0, 100.0), "#000000"),
+            styled_connector((50.0, 150.0), (50.0, 200.0), "#000000"),
+            styled_connector((50.0, 250.0), (50.0, 300.0), "#000000"),
+        ];
+
+        let graph = assemble(None, (400.0, 400.0), nodes, links, Vec::new()).expect("a real chain is a graph");
+
+        let edges: Vec<(usize, usize)> = graph.edges.iter().map(|e| (e.from, e.to)).collect();
+        assert_eq!(
+            edges,
+            vec![(0, 1), (1, 2), (2, 3)],
+            "a real vertical chain loses no edges"
         );
     }
 }
