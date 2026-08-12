@@ -2331,6 +2331,63 @@ jobs:
           pip install hatchling build
           python -m build --wheel
 
+      # Runtime half of the wheel payload guard. `hatch_build.py` refuses to
+      # build a wheel whose staged payload is incomplete, but a build-time file
+      # check cannot prove the packaged binary actually starts: `xberg_cli-1.0.14`
+      # musllinux reached PyPI as a 257-byte launcher script with neither
+      # `xberg.bin` nor the `lib/` tree it execs (GH#1407). Unzip the wheel and
+      # run the binary it ships, mirroring the tarball smoke tests in the
+      # `cli-binaries` job (`compgen -G` + `env -u LD_LIBRARY_PATH ... --version`)
+      # so a wheel cannot pass on a library the runner happens to have.
+      - name: Smoke-test wheel payload
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          case "$TARGET" in
+            x86_64-unknown-linux-gnu | x86_64-unknown-linux-musl) ;;
+            *)
+              echo "::notice title=Wheel smoke test not run::${TARGET} binaries cannot execute on this x86_64 linux runner; the ${TARGET} wheel payload is covered only by the build-time checks in cli-proxy/pypi/hatch_build.py"
+              exit 0
+              ;;
+          esac
+
+          shopt -s nullglob
+          wheels=(cli-proxy/pypi/dist/*.whl)
+          if [ "${#wheels[@]}" -ne 1 ]; then
+            echo "::error::expected exactly one wheel in cli-proxy/pypi/dist, found ${#wheels[@]}"
+            exit 1
+          fi
+
+          UNPACK="${RUNNER_TEMP}/wheel-smoke/${TARGET}"
+          rm -rf "$UNPACK"
+          mkdir -p "$UNPACK"
+          unzip -q "${wheels[0]}" -d "$UNPACK"
+
+          STAGE="${UNPACK}/xberg_cli/bin/${TARGET}"
+          if [ ! -d "$STAGE" ]; then
+            echo "::error::wheel ships no payload directory xberg_cli/bin/${TARGET}"
+            find "$UNPACK" -maxdepth 4
+            exit 1
+          fi
+          # Wheels do not reliably carry the execute bit through force_include.
+          find "$STAGE" -type f -exec chmod u+rx {} +
+          case "$TARGET" in
+            *-unknown-linux-gnu)
+              compgen -G "$STAGE/libheif.so*" >/dev/null \
+                || { echo "::error::wheel payload for ${TARGET} has no libheif.so* beside the binary"; ls -la "$STAGE"; exit 1; }
+              ;;
+            *-unknown-linux-musl)
+              test -f "$STAGE/xberg.bin" \
+                || { echo "::error::wheel payload for ${TARGET} has no xberg.bin; 'xberg' is only a launcher script"; ls -la "$STAGE"; exit 1; }
+              compgen -G "$STAGE/lib/ld-musl-*.so.1" >/dev/null \
+                || { echo "::error::wheel payload for ${TARGET} has no lib/ld-musl-*.so.1 for the launcher to exec"; ls -la "$STAGE"; exit 1; }
+              ;;
+          esac
+          env -u LD_LIBRARY_PATH "$STAGE/xberg" --version
+          echo "Wheel smoke test passed for ${TARGET}: $(basename "${wheels[0]}")"
+
       - name: Upload wheel
         uses: actions/upload-artifact@v7
         with:
