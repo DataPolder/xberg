@@ -209,8 +209,56 @@ fn append_rotated_line(text: &mut String, spans: &[TextSpan], indices: &[usize])
 /// It exists as the cheap gate in front of [`repair_rotated_page_text`]: the
 /// overwhelming majority of pages are entirely upright and must be able to
 /// skip the repair on a single linear scan.
+///
+/// This says only "is there rotation at all" — see [`rotation_is_dominant`]
+/// for the second gate that decides whether the full-page repair is worth
+/// what it costs the rest of the page.
 pub(crate) fn page_has_rotated_spans(spans: &[TextSpan]) -> bool {
     spans.iter().any(|span| !is_unrotated(span.rotation_degrees))
+}
+
+/// Minimum share of a page's span text, by character count, that must carry
+/// non-zero rotation before [`repair_rotated_page_text`] rewrites the page.
+///
+/// [`repair_rotated_page_text`] does not repair only the rotated run — it
+/// replaces the *entire page's* text via [`assemble_reading_order_text`],
+/// whose unrotated path is a legacy verbatim concatenation with no inserted
+/// separators at all (see [`append_run`]'s unrotated branch), unlike
+/// `assemble_page_text` in `pdf::oxide::text` (paragraph/line-break
+/// detection, RTL handling, glyph-fragmentation repair for #962). A page
+/// where rotation is a tiny minority — one rotated caption, axis label, or
+/// section-tab digit sitting on an otherwise entirely upright page — pays
+/// that cost across the whole page to fix a few words, and loses far more
+/// than it gains.
+///
+/// This is not hypothetical: three corpus regressions traced to exactly this
+/// shape. `issue-90-example` and `nougat_004` each carry a single rotated
+/// caption/label on an otherwise upright page; `pdfa_042` carries three-
+/// character rotated section-tab labels (`"2.1"`, `"3.1"`, `"3.2"`) beside
+/// full pages of upright table and prose text — well under 5% of the page's
+/// characters in every case. `MIN_ROTATED_TEXT_SHARE` requires rotation to be
+/// a substantial share of the page — the shape of a genuinely sideways table
+/// or page, GH#1358's actual target — before the whole-page rewrite fires.
+const MIN_ROTATED_TEXT_SHARE: f32 = 0.2;
+
+/// True when rotated spans make up at least [`MIN_ROTATED_TEXT_SHARE`] of the
+/// page's total span text, measured by character count.
+///
+/// Character count (not span count) is the right unit: a page can carry many
+/// short unrotated fragments (kerning splits, table cells) alongside one
+/// short rotated label, and span-count alone would over-weight fragmentation
+/// on either side. An empty page has no dominant rotation by definition.
+fn rotation_is_dominant(spans: &[TextSpan]) -> bool {
+    let mut rotated_chars = 0usize;
+    let mut total_chars = 0usize;
+    for span in spans {
+        let chars = span.text.chars().count();
+        total_chars += chars;
+        if !is_unrotated(span.rotation_degrees) {
+            rotated_chars += chars;
+        }
+    }
+    total_chars > 0 && (rotated_chars as f32 / total_chars as f32) >= MIN_ROTATED_TEXT_SHARE
 }
 
 /// Repair a page whose text contains rotated runs, without layout hints.
@@ -226,9 +274,13 @@ pub(crate) fn page_has_rotated_spans(spans: &[TextSpan]) -> bool {
 /// Returns `None` when the page has no rotated spans, so the caller can leave
 /// that page's existing text completely untouched. That is the safety
 /// property the whole change rests on: an upright page is never rewritten and
-/// its output cannot drift.
+/// its output cannot drift. It also returns `None` when rotation exists but
+/// is not [`rotation_is_dominant`]: replacing the whole page's assembly to
+/// fix a minority of rotated characters costs the upright majority its
+/// paragraph structure, which is a worse trade than leaving the minority
+/// rotated run exactly as unrepaired as it was before GH#1358.
 pub(crate) fn repair_rotated_page_text(spans: &[TextSpan]) -> Option<String> {
-    if !page_has_rotated_spans(spans) {
+    if !page_has_rotated_spans(spans) || !rotation_is_dominant(spans) {
         return None;
     }
 
@@ -505,6 +557,61 @@ mod tests {
                 "the rotated run resolves to advance order; the upright run keeps its given \
                  order and remains separated from the rotated frame"
             );
+        }
+
+        // Regression coverage for the three corpus documents (issue-90-example,
+        // nougat_004, pdfa_042) that #1358's original all-or-nothing gate broke:
+        // each carries a small genuinely-rotated island on an otherwise entirely
+        // upright page, and the old gate replaced the whole page's text —
+        // including the untouched upright majority — with the legacy
+        // no-separator concatenation path.
+        mod rotation_dominance_gate {
+            use super::*;
+
+            #[test]
+            fn should_not_repair_when_rotated_text_is_a_small_minority_of_the_page() {
+                // Mirrors pdfa_042: a three-character rotated section-tab label
+                // ("2.1") beside a page of long upright sentences. Rotated share
+                // is 3 / (3 + 100+) — far under MIN_ROTATED_TEXT_SHARE.
+                let spans = vec![
+                    upright_word(
+                        "This upright paragraph carries the overwhelming majority of the page text",
+                        0.0,
+                        400.0,
+                    ),
+                    upright_word(
+                        "and must keep its normal paragraph and line-break assembly untouched",
+                        50.0,
+                        400.0,
+                    ),
+                    rotated_word("2.1", 500.0, 12.0),
+                ];
+
+                assert!(
+                    page_has_rotated_spans(&spans),
+                    "guard: the page does carry a rotated span"
+                );
+                assert_eq!(
+                    repair_rotated_page_text(&spans),
+                    None,
+                    "a minority rotated label must not trigger a full-page rewrite that costs \
+                     the upright majority its own assembly"
+                );
+            }
+
+            #[test]
+            fn should_repair_when_rotated_text_dominates_the_page() {
+                // The inverse: a page that is mostly the rotated run, matching
+                // GH#1358's actual target (a sideways spec table taking up most
+                // of the page). Rotation is clearly dominant here, so the
+                // full-page repair must still fire.
+                let spans = scrambled_rotated_page();
+
+                assert!(
+                    repair_rotated_page_text(&spans).is_some(),
+                    "an entirely-rotated page must still be repaired"
+                );
+            }
         }
     }
 }
