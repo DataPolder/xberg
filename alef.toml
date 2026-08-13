@@ -270,6 +270,13 @@ exclude = [
   "**/*.diff",
   "**/*.patch",
   "**/frb_generated.rs",
+  # The Dart half of the same flutter_rust_bridge output. Only the Rust half was
+  # excluded, so `poly fmt --check .` reports `would reformat` on all four Dart
+  # bridge files (frb_generated{,.io,.web}.dart and lib.dart) and fails the
+  # Validate (poly) job on every run. Reproduced against poly 0.20.1 locally and
+  # 0.19.7 in CI. Same reasoning as the sibling `**/*.freezed.dart` exclusion
+  # poly already applies: this is generator output nothing should reflow. ~keep
+  "packages/dart/lib/src/xberg_bridge_generated/**",
   "charts/**",
   # ai-rulez-generated coding-agent plugin outputs: owned by `ai-rulez generate
   # --plugin`, never reformatted by poly (would break BLAKE3 provenance). Sources
