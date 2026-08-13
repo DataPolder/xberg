@@ -2436,7 +2436,29 @@ jobs:
                 || { echo "::error::wheel payload for ${TARGET} has no lib/ld-musl-*.so.1 for the launcher to exec"; ls -la "$STAGE"; exit 1; }
               ;;
           esac
-          env -u LD_LIBRARY_PATH "$STAGE/xberg" --version
+          # On failure, dump the closure before exiting. The loader's own message
+          # usually names the missing library, but on musl `$STAGE/xberg` is a
+          # launcher script that execs `ld-musl-*.so.1 xberg.bin`, so the failure
+          # is one indirection away from the binary that actually failed to link
+          # and the bare message can be ambiguous. Task #490 has been unable to
+          # name the missing library across several cycles precisely because the
+          # evidence was never captured at the moment of failure; this makes one
+          # run conclusive instead of buying another round trip. Diagnostics only
+          # -- the `exit 1` preserves the existing failure behaviour exactly.
+          if ! env -u LD_LIBRARY_PATH "$STAGE/xberg" --version; then
+            echo "::group::vendor closure for ${TARGET}"
+            ls -la "$STAGE" || true
+            for probe in "$STAGE/xberg.bin" "$STAGE/xberg"; do
+              [ -f "$probe" ] || continue
+              echo "--- readelf -d $probe (NEEDED/RPATH/RUNPATH) ---"
+              readelf -d "$probe" 2>/dev/null | grep -E 'NEEDED|RPATH|RUNPATH' || echo "(not an ELF, or readelf unavailable)"
+              echo "--- ldd $probe ---"
+              ldd "$probe" 2>&1 || true
+            done
+            echo "::endgroup::"
+            echo "::error::wheel payload for ${TARGET} failed to run; see the closure dump above for the unresolved library"
+            exit 1
+          fi
           echo "Wheel smoke test passed for ${TARGET}: $(basename "${wheels[0]}")"
 
       - name: Upload wheel
