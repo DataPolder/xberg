@@ -39966,9 +39966,9 @@ impl From<xberg::PiiCategory> for PiiCategory {
 impl From<DiffLine> for xberg::DiffLine {
     fn from(val: DiffLine) -> Self {
         match val {
-            DiffLine::Context { _0 } => Self::Context(_0),
-            DiffLine::Added { _0 } => Self::Added(_0),
-            DiffLine::Removed { _0 } => Self::Removed(_0),
+            DiffLine::Context(_0) => Self::Context(_0),
+            DiffLine::Added(_0) => Self::Added(_0),
+            DiffLine::Removed(_0) => Self::Removed(_0),
         }
     }
 }
@@ -39976,9 +39976,9 @@ impl From<DiffLine> for xberg::DiffLine {
 impl From<xberg::DiffLine> for DiffLine {
     fn from(val: xberg::DiffLine) -> Self {
         match val {
-            xberg::DiffLine::Context(_0) => Self::Context { _0: _0.to_string() },
-            xberg::DiffLine::Added(_0) => Self::Added { _0: _0.to_string() },
-            xberg::DiffLine::Removed(_0) => Self::Removed { _0: _0.to_string() },
+            xberg::DiffLine::Context(_0) => Self::Context(_0.to_string()),
+            xberg::DiffLine::Added(_0) => Self::Added(_0.to_string()),
+            xberg::DiffLine::Removed(_0) => Self::Removed(_0.to_string()),
         }
     }
 }
