@@ -239,6 +239,14 @@ exclude = [
   ".claude-plugin/marketplace.json",
   ".agents/plugins/marketplace.json",
   ".ai-rulez-generated.json",
+  # Benchmark cohort manifests are BLAKE3-pinned by value in
+  # tools/benchmark-harness/src/bench_matrix.rs (*_MANIFEST_BLAKE3) and verified
+  # at runtime by validate_artifacts. Any reformat changes the digest and fails
+  # the contract, so these are data files poly must not rewrite -- same reasoning
+  # as the ai-rulez plugin outputs above. Without this, every regen that runs
+  # poly silently re-breaks the pin: it collapsed the `fixtures` array onto one
+  # line in 888023d75d, and 8a60458a7dd was an earlier re-pin for the same cause. ~keep
+  "tools/benchmark-harness/cohorts/**",
 ]
 
 # Opt-in comment-removal sweep. Preserve doc comments (rustdoc is required on
