@@ -361,7 +361,7 @@ pub struct ExtractionConfig {
 
     /// Maximum recursion depth for archive extraction (default: 3).
     /// Set to 0 to disable recursive extraction (legacy behavior).
-    #[serde(default = "default_archive_depth")]
+    #[serde(default = "ExtractionConfig::default_archive_depth")]
     pub max_archive_depth: usize,
 
     /// Tree-sitter language pack configuration (None = tree-sitter disabled).
@@ -461,6 +461,16 @@ pub struct ExtractionConfig {
     pub source_name: Option<String>,
 }
 
+impl ExtractionConfig {
+    /// Default [`Self::max_archive_depth`]: 3 levels of nested archives.
+    ///
+    /// Public and on the type rather than a free private `fn` because generated bindings
+    /// have to call it to reproduce the default, and a private one is out of their reach.
+    pub fn default_archive_depth() -> usize {
+        3
+    }
+}
+
 impl Default for ExtractionConfig {
     fn default() -> Self {
         Self {
@@ -508,7 +518,7 @@ impl Default for ExtractionConfig {
             csv: None,
             concurrency: None,
             url: UrlExtractionConfig::default(),
-            max_archive_depth: default_archive_depth(),
+            max_archive_depth: ExtractionConfig::default_archive_depth(),
             #[cfg(feature = "tree-sitter")]
             tree_sitter: None,
             structured_extraction: None,
@@ -880,10 +890,6 @@ impl ExtractionConfig {
 
 fn default_true() -> bool {
     true
-}
-
-fn default_archive_depth() -> usize {
-    3
 }
 
 /// Default per-embedded-file cap: 50 MiB.
