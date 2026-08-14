@@ -88,7 +88,16 @@ report_output = ".alef/snippet-validation-report.json"
 [workspace.docs.snippets.sessions.rust]
 cwd = "."
 manifest = "crates/xberg/Cargo.toml"
-rust_features = ["api"]
+# Beyond `api`, these three are the features hand-authored snippets actually
+# demonstrate. All are cheap: `keywords-yake` resolves to `stopwords`, which is
+# an empty feature list (Cargo.toml:516,507), and `embedding-presets` is `[]`
+# outright (:463) -- together they add ZERO crates. `pdf` (:61) pulls only
+# pure-Rust parsers.
+# Do NOT reach for `embeddings` (:466) to fix an embedding snippet: it enables
+# `onnx-runtime` (:452) -> `dep:ort` + `ort-bundled`, which DOWNLOADS ONNX
+# Runtime binaries at build time. `embedding-presets` clears the same
+# unresolved-import error for free. ~keep
+rust_features = ["api", "keywords-yake", "embedding-presets", "pdf"]
 # `async-trait` is not optional garnish here: every plugin trait in the public
 # surface (DocumentExtractor, OcrBackend, PostProcessor, Validator) is declared
 # with `#[async_trait]`, so a snippet that implements one CANNOT be written
