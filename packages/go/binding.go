@@ -32,6 +32,62 @@ func lastError() error {
 	if code == 0 {
 		return nil
 	}
+	switch code {
+	case 2080723056:
+		return ErrXbergIo
+	case 191686562:
+		return ErrParsing
+	case 1744734248:
+		return ErrOcr
+	case 2093146707:
+		return ErrValidation
+	case 1740547354:
+		return ErrCache
+	case 1703658036:
+		return ErrImageProcessing
+	case 486450251:
+		return ErrSerialization
+	case 1024192803:
+		return ErrMissingDependency
+	case 1609738224:
+		return ErrPlugin
+	case 1092832257:
+		return ErrLockPoisoned
+	case 299497109:
+		return ErrUnsupportedFormat
+	case 1958776963:
+		return ErrEmbedding
+	case 1326275648:
+		return ErrReranking
+	case 552614954:
+		return ErrTranscription
+	case 1036077712:
+		return ErrTimeout
+	case 524666238:
+		return ErrCancelled
+	case 670246576:
+		return ErrSecurity
+	case 1318675240:
+		return ErrOther
+	case 91451556:
+		return ErrConfigError
+	case 1713417319:
+		return ErrPdfAnalysisError
+	case 949858217:
+		return ErrParse
+	case 380113526:
+		return ErrSchemaValidation
+	case 2093946153:
+		return ErrDeserialize
+	case 2137750517:
+		return ErrIdMismatch
+	case 1285484759:
+		return ErrBadMetaSchema
+	case 973217713:
+		return ErrLoadIo
+	case 1772672798:
+		return ErrSchemaNotObject
+	}
 	ctx := C.xberg_last_error_context()
 	if ctx == nil {
 		return fmt.Errorf("[%d] native error", code)
@@ -7706,14 +7762,14 @@ type PatternMatch struct {
 
 // TokenCounter is an opaque handle type.
 type TokenCounter struct {
-	ptr unsafe.Pointer
+	ptr C.XBERGTokenCounter
 }
 
 // Free releases the resources held by this handle.
 func (h *TokenCounter) Free() {
-	if h.ptr != nil {
-		C.xberg_token_counter_free((*C.XBERGTokenCounter)(h.ptr))
-		h.ptr = nil
+	if h.ptr != 0 {
+		C.xberg_token_counter_free(h.ptr)
+		h.ptr = 0
 	}
 }
 
@@ -10589,27 +10645,27 @@ type MultidocThresholds struct {
 
 // MetaSchema is an opaque handle type.
 type MetaSchema struct {
-	ptr unsafe.Pointer
+	ptr C.XBERGMetaSchema
 }
 
 // Free releases the resources held by this handle.
 func (h *MetaSchema) Free() {
-	if h.ptr != nil {
-		C.xberg_meta_schema_free((*C.XBERGMetaSchema)(h.ptr))
-		h.ptr = nil
+	if h.ptr != 0 {
+		C.xberg_meta_schema_free(h.ptr)
+		h.ptr = 0
 	}
 }
 
 // Registry is an opaque handle type.
 type Registry struct {
-	ptr unsafe.Pointer
+	ptr C.XBERGRegistry
 }
 
 // Free releases the resources held by this handle.
 func (h *Registry) Free() {
-	if h.ptr != nil {
-		C.xberg_registry_free((*C.XBERGRegistry)(h.ptr))
-		h.ptr = nil
+	if h.ptr != 0 {
+		C.xberg_registry_free(h.ptr)
+		h.ptr = 0
 	}
 }
 
@@ -12877,7 +12933,7 @@ func (r *ServerConfig) MaxMultipartFieldMb() (uint, error) {
 // New create a fresh counter with no previous state.
 func TokenCounterNew() *TokenCounter {
 	ptr := C.xberg_token_counter_new()
-	return &TokenCounter{ptr: unsafe.Pointer(ptr)}
+	return &TokenCounter{ptr: ptr}
 }
 
 // WithParseCitations set whether to parse the citation block.
@@ -13118,7 +13174,7 @@ func (h *MetaSchema) ParsePreset(path string, raw []byte) (*Preset, error) {
 	}
 	cRawLen := C.uintptr_t(len(raw))
 
-	ptr := C.xberg_meta_schema_parse_preset((*C.XBERGMetaSchema)(unsafe.Pointer(h.ptr)), cPath, cRaw, cRawLen)
+	ptr := C.xberg_meta_schema_parse_preset(h.ptr, cPath, cRaw, cRawLen)
 	if err := lastError(); err != nil {
 		return nil, err
 	}
@@ -13142,7 +13198,7 @@ func (h *Registry) Get(id string) *Preset {
 	cid := C.CString(id)
 	defer C.free(unsafe.Pointer(cid))
 
-	ptr := C.xberg_registry_get((*C.XBERGRegistry)(unsafe.Pointer(h.ptr)), cid)
+	ptr := C.xberg_registry_get(h.ptr, cid)
 	return func() *Preset {
 		jsonPtr := C.xberg_preset_to_json(ptr)
 		if jsonPtr == nil {
@@ -13159,7 +13215,7 @@ func (h *Registry) Get(id string) *Preset {
 
 // Summaries materialize a [`PresetSummary`] list for the public registry endpoint.
 func (h *Registry) Summaries() []PresetSummary {
-	ptr := C.xberg_registry_summaries((*C.XBERGRegistry)(unsafe.Pointer(h.ptr)))
+	ptr := C.xberg_registry_summaries(h.ptr)
 	return func() []PresetSummary {
 		if ptr == nil {
 			return nil
@@ -13175,13 +13231,13 @@ func (h *Registry) Summaries() []PresetSummary {
 
 // Len number of presets currently loaded.
 func (h *Registry) Len() uint {
-	ptr := C.xberg_registry_len((*C.XBERGRegistry)(unsafe.Pointer(h.ptr)))
+	ptr := C.xberg_registry_len(h.ptr)
 	return uint(ptr)
 }
 
 // IsEmpty whether the registry contains zero presets.
 func (h *Registry) IsEmpty() bool {
-	ptr := C.xberg_registry_is_empty((*C.XBERGRegistry)(unsafe.Pointer(h.ptr)))
+	ptr := C.xberg_registry_is_empty(h.ptr)
 	return ptr != 0
 }
 
@@ -13194,7 +13250,7 @@ func (h *Registry) SampleBytes(presetID string, name string) *[]byte {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
-	ptr := C.xberg_registry_sample_bytes((*C.XBERGRegistry)(unsafe.Pointer(h.ptr)), cPresetID, cName)
+	ptr := C.xberg_registry_sample_bytes(h.ptr, cPresetID, cName)
 	return func() *[]byte {
 		if ptr == nil {
 			return nil
@@ -13223,7 +13279,7 @@ func (h *Registry) ExtendFromDir(dir string) (uint, error) {
 	cDir := C.CString(dir)
 	defer C.free(unsafe.Pointer(cDir))
 
-	ptr := C.xberg_registry_extend_from_dir((*C.XBERGRegistry)(unsafe.Pointer(h.ptr)), cDir)
+	ptr := C.xberg_registry_extend_from_dir(h.ptr, cDir)
 	if err := lastError(); err != nil {
 		return 0, err
 	}

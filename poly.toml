@@ -57,6 +57,7 @@ exclude = [
   ".agents/plugins/marketplace.json",
   ".ai-rulez-generated.json",
   "tools/benchmark-harness/cohorts/**",
+  "packages/dart/lib/src/xberg_bridge_generated/**",
 ]
 
 [lint.markdown.rumdl]
@@ -563,6 +564,7 @@ lint = { exclude = [
   ".agents/plugins/marketplace.json",
   ".ai-rulez-generated.json",
   "tools/benchmark-harness/cohorts/**",
+  "packages/dart/lib/src/xberg_bridge_generated/**",
 ] }
 fmt = { exclude = [
   "**/*.freezed.dart",
@@ -617,6 +619,7 @@ fmt = { exclude = [
   ".agents/plugins/marketplace.json",
   ".ai-rulez-generated.json",
   "tools/benchmark-harness/cohorts/**",
+  "packages/dart/lib/src/xberg_bridge_generated/**",
 ] }
 file_safety = { exclude = [
   # Generated Rust/FFI sources lead with inner attributes (`#![deny(...)]`,
