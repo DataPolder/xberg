@@ -2081,6 +2081,18 @@ functions = [
   "batch_extract_files",
   "batch_extract_files_sync",
 
+  # Both take `TokenizerSource<'a>`, a borrowed enum whose four variants mean
+  # different things (HF model ID, model+revision pair, local `tokenizer.json`
+  # path, embedded bytes). Alef cannot represent it across FFI, so it sanitizes
+  # the parameter to a bare `String` — collapsing all four into one untyped
+  # argument the caller has no way to disambiguate. Neither function appears in
+  # any of the 15 generated bindings today, so excluding them removes nothing
+  # from the published surface; it only stops a lossy one being fabricated.
+  # Excluded rather than suppressed via `suppress_validation_codes` so
+  # `lossy_sanitized_surface` stays armed for every other item. ~keep
+  "try_count_tokens",
+  "preload_tokenizer",
+
 ]
 
 [crates.update.kotlin_android]
