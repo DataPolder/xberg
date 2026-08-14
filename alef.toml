@@ -764,14 +764,20 @@ reexported_types = ["ExtractionResult", "ExtractedDocument", "ExtractionDiff"]
 [crates.python.stubs]
 output = "packages/python/xberg/"
 
+# Every `target_dep_overrides` block below sets `default_features = false`, which
+# replaces the core crate's `default = ["tokio-runtime", "simd-utf8"]` rather than
+# adding to it. Each `*-target` feature reaches `tokio-runtime` transitively, but
+# none reaches `simd-utf8`, so it must be listed explicitly or SIMD UTF-8
+# validation is silently compiled out of every Windows, macOS-Intel and Android
+# binding build. ~keep
 [[crates.python.target_dep_overrides]]
 cfg = 'target_os = "windows"'
-features = ["windows-target"]
+features = ["windows-target", "simd-utf8"]
 default_features = false
 
 [[crates.python.target_dep_overrides]]
 cfg = 'all(target_os = "macos", target_arch = "x86_64")'
-features = ["macos-intel-target"]
+features = ["macos-intel-target", "simd-utf8"]
 default_features = false
 
 [crates.node]
@@ -811,12 +817,12 @@ serde_with = "3"
 
 [[crates.node.target_dep_overrides]]
 cfg = 'target_os = "windows"'
-features = ["windows-target"]
+features = ["windows-target", "simd-utf8"]
 default_features = false
 
 [[crates.node.target_dep_overrides]]
 cfg = 'all(target_os = "macos", target_arch = "x86_64")'
-features = ["macos-intel-target"]
+features = ["macos-intel-target", "simd-utf8"]
 default_features = false
 
 [crates.ruby]
@@ -852,12 +858,12 @@ output = "packages/ruby/sig/"
 # Ruby is the only binding that needs this — every other Windows target is MSVC. ~keep
 [[crates.ruby.target_dep_overrides]]
 cfg = 'target_os = "windows"'
-features = ["windows-gnu-target"]
+features = ["windows-gnu-target", "simd-utf8"]
 default_features = false
 
 [[crates.ruby.target_dep_overrides]]
 cfg = 'all(target_os = "macos", target_arch = "x86_64")'
-features = ["macos-intel-target"]
+features = ["macos-intel-target", "simd-utf8"]
 default_features = false
 
 [crates.php]
@@ -897,12 +903,12 @@ exclude_functions = [
 
 [[crates.php.target_dep_overrides]]
 cfg = 'target_os = "windows"'
-features = ["windows-target"]
+features = ["windows-target", "simd-utf8"]
 default_features = false
 
 [[crates.php.target_dep_overrides]]
 cfg = 'all(target_os = "macos", target_arch = "x86_64")'
-features = ["macos-intel-target"]
+features = ["macos-intel-target", "simd-utf8"]
 default_features = false
 
 [crates.elixir]
@@ -938,12 +944,12 @@ exclude_types = ["Recyclable"]
 
 [[crates.elixir.target_dep_overrides]]
 cfg = 'target_os = "windows"'
-features = ["windows-target"]
+features = ["windows-target", "simd-utf8"]
 default_features = false
 
 [[crates.elixir.target_dep_overrides]]
 cfg = 'all(target_os = "macos", target_arch = "x86_64")'
-features = ["macos-intel-target"]
+features = ["macos-intel-target", "simd-utf8"]
 default_features = false
 
 [crates.wasm]
@@ -1274,22 +1280,22 @@ exclude_functions = [
 
 [[crates.ffi.target_dep_overrides]]
 cfg = 'target_os = "android"'
-features = ["android-target"]
+features = ["android-target", "simd-utf8"]
 default_features = false
 
 [[crates.ffi.target_dep_overrides]]
 cfg = 'target_os = "ios"'
-features = ["android-target"]
+features = ["android-target", "simd-utf8"]
 default_features = false
 
 [[crates.ffi.target_dep_overrides]]
 cfg = 'target_os = "windows"'
-features = ["windows-target"]
+features = ["windows-target", "simd-utf8"]
 default_features = false
 
 [[crates.ffi.target_dep_overrides]]
 cfg = 'all(target_os = "macos", target_arch = "x86_64")'
-features = ["macos-intel-target"]
+features = ["macos-intel-target", "simd-utf8"]
 default_features = false
 
 [crates.go]
@@ -1436,12 +1442,12 @@ exclude_functions = [
 
 [[crates.java.target_dep_overrides]]
 cfg = 'target_os = "windows"'
-features = ["windows-target"]
+features = ["windows-target", "simd-utf8"]
 default_features = false
 
 [[crates.java.target_dep_overrides]]
 cfg = 'all(target_os = "macos", target_arch = "x86_64")'
-features = ["macos-intel-target"]
+features = ["macos-intel-target", "simd-utf8"]
 default_features = false
 
 [crates.dart]
@@ -1522,22 +1528,22 @@ exclude_functions = [
 
 [[crates.dart.target_dep_overrides]]
 cfg = 'target_os = "android"'
-features = ["android-target"]
+features = ["android-target", "simd-utf8"]
 default_features = false
 
 [[crates.dart.target_dep_overrides]]
 cfg = 'target_os = "ios"'
-features = ["android-target"]
+features = ["android-target", "simd-utf8"]
 default_features = false
 
 [[crates.dart.target_dep_overrides]]
 cfg = 'target_os = "windows"'
-features = ["windows-target"]
+features = ["windows-target", "simd-utf8"]
 default_features = false
 
 [[crates.dart.target_dep_overrides]]
 cfg = 'all(target_os = "macos", target_arch = "x86_64")'
-features = ["macos-intel-target"]
+features = ["macos-intel-target", "simd-utf8"]
 default_features = false
 
 [crates.kotlin_android]
@@ -1570,29 +1576,29 @@ exclude_functions = [
 
 [[crates.kotlin_android.target_dep_overrides]]
 cfg = 'target_os = "windows"'
-features = ["windows-target"]
+features = ["windows-target", "simd-utf8"]
 default_features = false
 
 [crates.jni]
 
 [[crates.jni.target_dep_overrides]]
 cfg = 'target_os = "android"'
-features = ["android-target"]
+features = ["android-target", "simd-utf8"]
 default_features = false
 
 [[crates.jni.target_dep_overrides]]
 cfg = 'target_os = "ios"'
-features = ["android-target"]
+features = ["android-target", "simd-utf8"]
 default_features = false
 
 [[crates.jni.target_dep_overrides]]
 cfg = 'target_os = "windows"'
-features = ["windows-target"]
+features = ["windows-target", "simd-utf8"]
 default_features = false
 
 [[crates.jni.target_dep_overrides]]
 cfg = 'all(target_os = "macos", target_arch = "x86_64")'
-features = ["macos-intel-target"]
+features = ["macos-intel-target", "simd-utf8"]
 default_features = false
 
 [crates.swift]
@@ -1694,22 +1700,22 @@ exclude_functions = [
 
 [[crates.swift.target_dep_overrides]]
 cfg = 'target_os = "ios"'
-features = ["android-target"]
+features = ["android-target", "simd-utf8"]
 default_features = false
 
 [[crates.swift.target_dep_overrides]]
 cfg = 'target_os = "android"'
-features = ["android-target"]
+features = ["android-target", "simd-utf8"]
 default_features = false
 
 [[crates.swift.target_dep_overrides]]
 cfg = 'target_os = "windows"'
-features = ["windows-target"]
+features = ["windows-target", "simd-utf8"]
 default_features = false
 
 [[crates.swift.target_dep_overrides]]
 cfg = 'all(target_os = "macos", target_arch = "x86_64")'
-features = ["macos-intel-target"]
+features = ["macos-intel-target", "simd-utf8"]
 default_features = false
 
 # The swift-bridge backend injects the xberg-ffi dependency itself. Without these
@@ -1728,7 +1734,7 @@ default_features = false
 # key and produce a duplicate-key TOML error in the generated manifest.
 [[crates.swift.ffi_target_dep_overrides]]
 cfg = 'any(target_os = "ios", target_os = "android")'
-features = ["android-target"]
+features = ["android-target", "simd-utf8"]
 default_features = false
 
 # NOTE (heic / xberg-ffi on the swift-bridge shim):
