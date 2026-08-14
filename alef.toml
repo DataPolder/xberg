@@ -769,7 +769,12 @@ output = "packages/python/xberg/"
 # adding to it. Each `*-target` feature reaches `tokio-runtime` transitively, but
 # none reaches `simd-utf8`, so it must be listed explicitly or SIMD UTF-8
 # validation is silently compiled out of every Windows, macOS-Intel and Android
-# binding build. ~keep
+# binding build.
+#
+# This applies to `target_dep_overrides` ONLY, because those govern the dep on the
+# core `xberg` crate. It must NOT be copied to `[[crates.swift.ffi_target_dep_overrides]]`,
+# which governs the dep on `xberg-ffi` — a crate that has no `simd-utf8` feature at
+# all, so listing it there makes the generated swift manifest fail to resolve. ~keep
 [[crates.python.target_dep_overrides]]
 cfg = 'target_os = "windows"'
 features = ["windows-target", "simd-utf8"]
@@ -1719,7 +1724,7 @@ default_features = false
 # key and produce a duplicate-key TOML error in the generated manifest.
 [[crates.swift.ffi_target_dep_overrides]]
 cfg = 'any(target_os = "ios", target_os = "android")'
-features = ["android-target", "simd-utf8"]
+features = ["android-target"]
 default_features = false
 
 # NOTE (heic / xberg-ffi on the swift-bridge shim):
