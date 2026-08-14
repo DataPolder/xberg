@@ -2242,26 +2242,6 @@ languages = [
   "zig",
   "homebrew",
 ]
-
-[crates.e2e.snippets]
-output = "docs-site/src/snippets-generated"
-languages = [
-  "python",
-  "rust",
-  "node",
-  "go",
-  "ruby",
-  "elixir",
-  "wasm",
-  "java",
-  "csharp",
-  "php",
-  "dart",
-  "kotlin_android",
-  "swift",
-  "zig",
-  "c",
-]
 fields_optional = [
   "results[0].metadata.format",
   "results[0].metadata.format.excel",
@@ -2337,6 +2317,26 @@ result_fields = [
 ]
 
 fields_method_calls = ["results[0].metadata.format.excel", "metadata.format.excel"]
+
+[crates.e2e.snippets]
+output = "docs-site/src/snippets-generated"
+languages = [
+  "python",
+  "rust",
+  "node",
+  "go",
+  "ruby",
+  "elixir",
+  "wasm",
+  "java",
+  "csharp",
+  "php",
+  "dart",
+  "kotlin_android",
+  "swift",
+  "zig",
+  "c",
+]
 
 [crates.e2e.call]
 function = "extract"
