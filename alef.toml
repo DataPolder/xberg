@@ -1440,16 +1440,6 @@ exclude_functions = [
   "embed_multi_vector_async",
 ]
 
-[[crates.java.target_dep_overrides]]
-cfg = 'target_os = "windows"'
-features = ["windows-target", "simd-utf8"]
-default_features = false
-
-[[crates.java.target_dep_overrides]]
-cfg = 'all(target_os = "macos", target_arch = "x86_64")'
-features = ["macos-intel-target", "simd-utf8"]
-default_features = false
-
 [crates.dart]
 pubspec_name = "xberg"
 lib_name = "xberg"
@@ -1573,11 +1563,6 @@ exclude_functions = [
   "embed_multi_vector",
   "embed_multi_vector_async",
 ]
-
-[[crates.kotlin_android.target_dep_overrides]]
-cfg = 'target_os = "windows"'
-features = ["windows-target", "simd-utf8"]
-default_features = false
 
 [crates.jni]
 
@@ -1815,7 +1800,6 @@ elixir = "packages/elixir/native/xberg_nif/src/"
 wasm = "crates/xberg-wasm/src/"
 java = "packages/java/"
 csharp = "packages/csharp/src/"
-jni = "crates/xberg-jni/src/"
 kotlin_android = "packages/kotlin-android/"
 swift = "packages/swift/Sources/Xberg/"
 dart = "packages/dart/lib/src/"
