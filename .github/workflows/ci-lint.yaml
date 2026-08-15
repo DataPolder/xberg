@@ -286,6 +286,30 @@ jobs:
         # lint warnings into build errors, which has no bearing on this repo. ~keep
         env:
           RUSTFLAGS: ""
+      # Most per-language snippet validators (rust/python/typescript/go/ruby/php/
+      # csharp/java/kotlin/swift/c) are covered for free -- the ubuntu-latest runner
+      # image ships those toolchains preinstalled, so `which tsc`/`which swiftc`/etc.
+      # already succeed with no setup step here. Dart, Elixir, and Zig are not on that
+      # image, so their validators (which::which("dart"/"mix"/"zig")) always reported
+      # Unavailable and those 20 snippets were never actually checked -- confirmed via
+      # `gh run view --job=94784579741 --log`, which shows `... dart N/A ...`,
+      # `... elixir N/A ...`, `... zig N/A ...` in the summary while every other
+      # language shows a real PASS/FAIL. Versions match the e2e matrix
+      # (ci-e2e.yaml) so this job validates snippets against the same toolchains the
+      # generated e2e suites run against. ~keep
+      - name: Setup Dart
+        uses: dart-lang/setup-dart@v1
+        with:
+          sdk: "3.11"
+      - name: Setup Elixir
+        uses: xberg-io/actions/setup-elixir@v1
+        with:
+          elixir-version: "1.19"
+          otp-version: "28"
+      - name: Setup Zig
+        uses: xberg-io/actions/setup-zig@v1
+        with:
+          version: "0.16.0"
       # `task docs:snippets:all` (audit + gaps + syntax-validate) is described
       # as the "canonical docs:snippets gate" in .task/tools/docs.yml, but
       # nothing invoked it -- a broken or orphaned snippet could land
@@ -302,6 +326,17 @@ jobs:
       # lints anything. Pinning skips that request. It also stops a poly release
       # from changing what this gate enforces without a commit here. ~keep
       poly-version: "v0.21.0"
+      # poly.toml:789-793 defines an `alef-snippets` pre-commit hook running
+      # `alef snippets check --strict --cache off`, and `poly lint .` runs it as part of
+      # its whole-project phase. The reusable workflow only installs the alef CLI when
+      # this input is set, and it defaults to false -- so every run that got past
+      # `Format check` died with `× alef-snippets / poly-hook: 1: alef: not found` and
+      # exit 1, with cargo-clippy green beside it (verified in jobs 93568055890 and
+      # 93702252442). The job was permanently red, masked only because `Format check`
+      # failed earlier in almost every run. Setting this also enables the workflow's own
+      # fixture-snippet generate/drift/validate steps, which were skipped for the same
+      # reason. ~keep
+      check-fixture-snippets: true
       setup-rust: true
       # poly's cargo-clippy hook builds the whole workspace, and
       # tools/benchmark-harness depends on xberg with `full`, which pulls
