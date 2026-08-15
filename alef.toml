@@ -1,5 +1,5 @@
 [workspace]
-alef_version = "0.60.2"
+alef_version = "0.61.0"
 # -D warnings (emitted into every generated Rust binding as #![allow(...)]).
 extra_clippy_allows = ["redundant_field_names", "collapsible_if", "vec_init_then_push"]
 languages = [
@@ -1122,6 +1122,21 @@ async-trait = "0.1"
 # dev-only, never part of the published package's dependency graph. ~keep
 [crates.wasm.extra_dev_dependencies]
 wasm-bindgen-test = "0.3"
+
+# The generated FFI lib.rs is written whole by alef and declares no modules of its
+# own, so a hand-written sibling file in crates/xberg-ffi/src/ is unreachable from
+# the crate root: never compiled, absent from the cdylib symbol table, and correctly
+# absent from xberg.h. That silently killed 34 `extern "C"` functions when the
+# hand-written lib.rs was replaced by a generated one -- cancellation.rs (4),
+# config_builder.rs (19) and config/mod.rs (11) -- a link-time break for any C
+# consumer, not a header cosmetic. These three wrap `CancellationToken` and the
+# config builder, which are `alef(skip)`ed on purpose because they need a
+# hand-authored opaque-handle surface alef cannot derive. Declaring them here is
+# what makes them part of the crate again. `pub mod` alone is right: `no_mangle`
+# symbols export regardless of module visibility, cbindgen parses the whole crate,
+# and a glob re-export would risk colliding with generated crate-root items. ~keep
+[crates.custom_modules]
+ffi = ["cancellation", "config_builder", "config"]
 
 [crates.ffi]
 prefix = "xberg"
