@@ -65,10 +65,27 @@ pub type Result<T> = std::result::Result<T, XbergError>;
 /// - `LockPoisoned` - Mutex/RwLock poisoning (should not happen in normal operation)
 /// - `UnsupportedFormat` - Unsupported MIME type or file format
 /// - `Other` - Catch-all for uncommon errors
+/// # FFI error codes — a stable public contract
+///
+/// Each variant carries `#[cfg_attr(alef, alef(error_code = N))]`. Without it alef has no stable
+/// numeric taxonomy to bind to, so `alef_ffi_error_code()` collapses every variant to a single
+/// unknown code and EVERY language binding loses the ability to tell error kinds apart --
+/// `errors.Is(err, ErrOcr)` in Go, the `checkLastError` switch in Java, and Zig's typed error sets
+/// all degrade to one catch-all. Refusing to guess is correct on alef's part; supplying the codes
+/// is our job.
+///
+/// The blocks are `XbergError` 1000-1017, `HeuristicsError` 1100-1101, `LoadError` 1200-1205,
+/// `ResolveError` 1300, chosen to leave room to grow and to stay clear of alef's own reserved
+/// 0-4 (`None`/`Conversion`/`Unknown`/`Panic`/`InvalidHandle`).
+///
+/// These numbers cross the FFI boundary and are compiled into released bindings, so they are
+/// append-only: **never renumber or reuse a code**, and give a new variant the next free number in
+/// its block rather than inserting one in declaration order. ~keep
 #[derive(Debug, Error)]
 pub enum XbergError {
     /// A file system or I/O operation failed. These errors always bubble up unchanged.
     #[error("IO error: {0}")]
+    #[cfg_attr(alef, alef(error_code = 1000))]
     Io(
         #[from]
         #[cfg_attr(alef, alef(skip))]
@@ -77,6 +94,7 @@ pub enum XbergError {
 
     /// Document parsing failed (e.g. corrupt file, unsupported format feature).
     #[error("Parsing error: {message}")]
+    #[cfg_attr(alef, alef(error_code = 1001))]
     Parsing {
         /// Human-readable description of what failed during parsing.
         message: String,
@@ -87,6 +105,7 @@ pub enum XbergError {
 
     /// An OCR engine returned an error or produced unusable output.
     #[error("OCR error: {message}")]
+    #[cfg_attr(alef, alef(error_code = 1002))]
     Ocr {
         /// Human-readable description of the OCR failure.
         message: String,
@@ -97,6 +116,7 @@ pub enum XbergError {
 
     /// Invalid configuration or input parameters were supplied.
     #[error("Validation error: {message}")]
+    #[cfg_attr(alef, alef(error_code = 1003))]
     Validation {
         /// Human-readable description of the validation failure.
         message: String,
@@ -107,6 +127,7 @@ pub enum XbergError {
 
     /// A cache read or write operation failed.
     #[error("Cache error: {message}")]
+    #[cfg_attr(alef, alef(error_code = 1004))]
     Cache {
         /// Human-readable description of the cache failure.
         message: String,
@@ -117,6 +138,7 @@ pub enum XbergError {
 
     /// An image manipulation operation (resize, decode, DPI conversion) failed.
     #[error("Image processing error: {message}")]
+    #[cfg_attr(alef, alef(error_code = 1005))]
     ImageProcessing {
         /// Human-readable description of the image processing failure.
         message: String,
@@ -127,6 +149,7 @@ pub enum XbergError {
 
     /// JSON or MessagePack serialization/deserialization failed.
     #[error("Serialization error: {message}")]
+    #[cfg_attr(alef, alef(error_code = 1006))]
     Serialization {
         /// Human-readable description of the serialization failure.
         message: String,
@@ -137,10 +160,12 @@ pub enum XbergError {
 
     /// A required optional system dependency (e.g. `tesseract`) was not found.
     #[error("Missing dependency: {0}")]
+    #[cfg_attr(alef, alef(error_code = 1007))]
     MissingDependency(String),
 
     /// A registered plugin returned an error during extraction.
     #[error("Plugin error in '{plugin_name}': {message}")]
+    #[cfg_attr(alef, alef(error_code = 1008))]
     Plugin {
         /// Human-readable description of what the plugin failed to do.
         message: String,
@@ -150,14 +175,17 @@ pub enum XbergError {
 
     /// An internal `Mutex` or `RwLock` was found in a poisoned state.
     #[error("Lock poisoned: {0}")]
+    #[cfg_attr(alef, alef(error_code = 1009))]
     LockPoisoned(String),
 
     /// The document's MIME type is not supported by any registered extractor.
     #[error("Unsupported format: {0}")]
+    #[cfg_attr(alef, alef(error_code = 1010))]
     UnsupportedFormat(String),
 
     /// The embedding model or embedding pipeline returned an error.
     #[error("Embedding error: {message}")]
+    #[cfg_attr(alef, alef(error_code = 1011))]
     Embedding {
         /// Human-readable description of the embedding failure.
         message: String,
@@ -170,6 +198,7 @@ pub enum XbergError {
     ///
     /// Since v5.0.0.
     #[error("Reranking error: {message}")]
+    #[cfg_attr(alef, alef(error_code = 1012))]
     Reranking {
         /// Human-readable description of the reranking failure.
         message: String,
@@ -180,6 +209,7 @@ pub enum XbergError {
 
     /// Audio/video transcription failed.
     #[error("Transcription error: {message}")]
+    #[cfg_attr(alef, alef(error_code = 1013))]
     Transcription {
         /// Human-readable description of the transcription failure.
         message: String,
@@ -190,6 +220,7 @@ pub enum XbergError {
 
     /// The extraction operation exceeded the configured time limit.
     #[error("Extraction timed out after {elapsed_ms}ms (limit: {limit_ms}ms)")]
+    #[cfg_attr(alef, alef(error_code = 1014))]
     Timeout {
         /// Wall-clock milliseconds elapsed before the timeout was detected.
         elapsed_ms: u64,
@@ -199,10 +230,12 @@ pub enum XbergError {
 
     /// The extraction was cancelled via a [`crate::cancellation::CancellationToken`].
     #[error("Extraction cancelled")]
+    #[cfg_attr(alef, alef(error_code = 1015))]
     Cancelled,
 
     /// A security policy was violated (e.g. zip bomb, oversized archive).
     #[error("Security violation: {message}")]
+    #[cfg_attr(alef, alef(error_code = 1016))]
     Security {
         /// Human-readable description of the security violation.
         message: String,
@@ -213,6 +246,7 @@ pub enum XbergError {
 
     /// A catch-all for uncommon errors that do not fit another variant.
     #[error("{0}")]
+    #[cfg_attr(alef, alef(error_code = 1017))]
     Other(String),
 }
 
