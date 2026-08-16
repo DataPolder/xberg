@@ -22,6 +22,17 @@ final class FormatSpecificTests: XCTestCase {
         }
     }
 
+    func testFormatDocxEquations() async throws {
+        // DOCX equations extract to LaTeX math in markdown output
+        let inputMockBaseUrl = ProcessInfo.processInfo.environment["MOCK_SERVER_FORMAT_DOCX_EQUATIONS"] ?? (AlefE2EMockServer.baseURL + "/fixtures/format_docx_equations")
+        let inputJson = "{\"filename\":\"equations.docx\",\"kind\":\"uri\",\"mime_type\":\"application/vnd.openxmlformats-officedocument.wordprocessingml.document\",\"uri\":\"$mock_url/docx/equations.docx\"}".replacingOccurrences(of: "$mock_url", with: inputMockBaseUrl)
+        let result = try await Xberg.extract(inputJson, "{\"output_format\":\"markdown\"}")
+        let _vec_results_min_length_b58eca1f = result.results()
+        XCTAssertGreaterThanOrEqual(_vec_results_min_length_b58eca1f[0].content().toString().count, 20)
+        let _vec_results_contains_76c4516a = result.results()
+        XCTAssertTrue("$".isEmpty || _vec_results_contains_76c4516a[0].content().toString().contains("$"), "expected to contain: \("$")")
+    }
+
     func testFormatDocxStandalone() async throws {
         // Standalone DOCX extraction using extract
         let inputMockBaseUrl = ProcessInfo.processInfo.environment["MOCK_SERVER_FORMAT_DOCX_STANDALONE"] ?? (AlefE2EMockServer.baseURL + "/fixtures/format_docx_standalone")

@@ -111,6 +111,7 @@ void main() {
   test('extract_batch over URI inputs', () async {
     final inputs = await Future.wait((jsonDecode(r'[{"kind":"uri","uri":"pdf/fake_memo.pdf"},{"kind":"uri","uri":"text/fake_text.txt"}]') as List<dynamic>).cast<Map<String, dynamic>>().map((m) => createExtractInputFromJson(json: jsonEncode(m))));
     final result = await XbergBridge.extractBatch(inputs);
+    expect(result.results.length, greaterThanOrEqualTo(2));
   });
 
   test('extract_batch with missing URI input', () async {

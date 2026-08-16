@@ -501,6 +501,7 @@ class LayoutDetectionConfig:
     confidence_threshold: float | None
     apply_heuristics: bool
     table_model: TableModel
+    formula_model: FormulaModel | None
     table_overlap_preference: TableOverlapPreference
     acceleration: AccelerationConfig | None
     enable_chart_understanding: bool
@@ -510,6 +511,7 @@ class LayoutDetectionConfig:
         confidence_threshold: float | None = None,
         apply_heuristics: bool | None = None,
         table_model: TableModel | str | None = None,
+        formula_model: FormulaModel | str | None = None,
         table_overlap_preference: TableOverlapPreference | str | None = None,
         acceleration: AccelerationConfig | None = None,
         enable_chart_understanding: bool | None = None,
@@ -2059,9 +2061,14 @@ class ImagePreprocessingMetadata:
 
 class Formula:
     latex: str
-    bbox: BoundingBox
-    page: int
-    def __init__(self, latex: str, bbox: BoundingBox, page: int) -> None: ...
+    bbox: BoundingBox | None
+    page: int | None
+    def __init__(
+        self,
+        latex: str,
+        bbox: BoundingBox | None = None,
+        page: int | None = None,
+    ) -> None: ...
 
 class CodeMetadata:
     chunks: list[CodeChunkInfo]
@@ -3779,6 +3786,10 @@ class LateInteractionModelType:
     def __str__(self) -> str: ...
     def __repr__(self) -> str: ...
 
+class FormulaModel:
+    LATEX_OCR: FormulaModel = ...
+    def __init__(self, value: int | str) -> None: ...
+
 class TableModel:
     TATR: TableModel = ...
     SLANET_WIRED: TableModel = ...
@@ -4449,6 +4460,7 @@ class ElementType:
     IMAGE: ElementType = ...
     PAGE_BREAK: ElementType = ...
     CODE_BLOCK: ElementType = ...
+    FORMULA: ElementType = ...
     BLOCK_QUOTE: ElementType = ...
     FOOTER: ElementType = ...
     HEADER: ElementType = ...

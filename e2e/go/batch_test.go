@@ -94,10 +94,11 @@ func Test_ExtractBatchUriBasic(t *testing.T) {
 	if err := json.Unmarshal([]byte(`[{"kind":"uri","uri":"pdf/fake_memo.pdf"},{"kind":"uri","uri":"text/fake_text.txt"}]`), &inputs); err != nil {
 		t.Fatalf("config parse failed: %v", err)
 	}
-	_, err := xberg.ExtractBatch(inputs, xberg.ExtractionConfig{})
+	result, err := xberg.ExtractBatch(inputs, xberg.ExtractionConfig{})
 	if err != nil {
 		t.Fatalf("call failed: %v", err)
 	}
+	assert.GreaterOrEqual(t, len(result.Results), 2, "expected at least 2 elements")
 }
 
 func Test_ExtractBatchUriNotFound(t *testing.T) {

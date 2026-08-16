@@ -79,7 +79,8 @@ describe("batch", () => {
 		await extractBatch([{ kind: "uri", uri: "/nonexistent/a.pdf" }, { kind: "uri", uri: "/nonexistent/b.txt" }], undefined);
 	}, 30000);
 	it("extract_batch_uri_basic: extract_batch over URI inputs", async () => {
-		await extractBatch([{ kind: "uri", uri: "pdf/fake_memo.pdf" }, { kind: "uri", uri: "text/fake_text.txt" }], undefined);
+		const result = await extractBatch([{ kind: "uri", uri: "pdf/fake_memo.pdf" }, { kind: "uri", uri: "text/fake_text.txt" }], undefined);
+    expect(result.results.length).toBeGreaterThanOrEqual(2);
 	}, 30000);
 	it("extract_batch_uri_not_found: extract_batch with missing URI input", async () => {
 		await extractBatch([{ kind: "uri", uri: "/nonexistent/a.pdf" }], undefined);

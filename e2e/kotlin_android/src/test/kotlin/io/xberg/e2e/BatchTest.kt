@@ -80,6 +80,7 @@ class BatchTest {
     fun testExtractBatchUriBasic() = runBlocking {
         // extract_batch over URI inputs
         val result = Xberg.extractBatch(listOf(MAPPER.readValue("{\"kind\":\"uri\",\"uri\":\"pdf/fake_memo.pdf\"}", ExtractInput::class.java), MAPPER.readValue("{\"kind\":\"uri\",\"uri\":\"text/fake_text.txt\"}", ExtractInput::class.java)), ExtractionConfig())
+        assertTrue(result.results.size >= 2, "expected at least 2 elements")
     }
 
     @Test

@@ -956,16 +956,20 @@ typedef struct XBERGFormatMetadata XBERGFormatMetadata;
  */
 typedef struct XBERGFormattedBlock XBERGFormattedBlock;
 /**
- * A mathematical formula detected and recognized in a document.
+ * A mathematical formula extracted from a document.
  *
- * Populated by the layout-guided formula pipeline: regions classified as
- * `LayoutClass::Formula` are routed to the formula OCR task, which returns the
- * LaTeX source for the region. The field is always present on
- * `ExtractedDocument` (super::extraction::ExtractedDocument) but only populated
- * when the `layout-detection` feature is active and the document contains
- * formula regions.
+ * Three kinds of sources populate this type. Layout-guided OCR detects
+ * formula regions and recognizes them; those formulas carry a `bbox` and a
+ * `page`. VLM OCR recognizes formulas in transcribed text without layout, so
+ * its formulas carry no geometry. Markup extraction (DOCX, PPTX, ODT, EPUB,
+ * HTML, JATS, LaTeX, Markdown, and related formats) converts embedded math
+ * to LaTeX, also without geometry.
  */
 typedef struct XBERGFormula XBERGFormula;
+/**
+ * Formula recognition model selection.
+ */
+typedef struct XBERGFormulaModel XBERGFormulaModel;
 /**
  * Individual grid cell with position and span metadata.
  */
@@ -5641,6 +5645,15 @@ int32_t xberg_layout_detection_config_apply_heuristics(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_layout_detection_config_table_model(XBERGAlefHandle handle);
+
+/**
+ * Get the `formula_model` field from a `LayoutDetectionConfig`.
+ * A non-null returned handle is owned by the caller.
+ * It must be freed with `xberg_formula_model_free`.
+ * # Safety
+ * Pointer must be a valid handle returned by this library.
+ */
+XBERGAlefHandle xberg_layout_detection_config_formula_model(XBERGAlefHandle handle);
 
 /**
  * Get the `table_overlap_preference` field from a `LayoutDetectionConfig`.
@@ -20330,6 +20343,21 @@ int32_t xberg_late_interaction_model_type_from_i32(int32_t value);
 int32_t xberg_late_interaction_model_type_from_str(const char *name);
 
 /**
+ * Convert an integer to a `FormulaModel` variant. Returns -1 on invalid input.
+ * # Safety
+ * Caller must ensure all pointer arguments are valid or null.
+ * Returned pointers must be freed with the appropriate free function.
+ */
+int32_t xberg_formula_model_from_i32(int32_t value);
+
+/**
+ * Convert a `FormulaModel` serde wire value (C string) to its integer discriminant. Returns -1 on invalid input.
+ * # Safety
+ * Caller must ensure `ptr` is a valid pointer to a `c_char` or null.
+ */
+int32_t xberg_formula_model_from_str(const char *name);
+
+/**
  * Convert an integer to a `TableModel` variant. Returns -1 on invalid input.
  * # Safety
  * Caller must ensure all pointer arguments are valid or null.
@@ -21768,6 +21796,31 @@ char *xberg_late_interaction_model_type_to_json(const XBERGLateInteractionModelT
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_late_interaction_model_type_to_string(const XBERGLateInteractionModelType *ptr);
+
+/**
+ * Free a heap-allocated `FormulaModel` returned by a pointer-returning FFI function.
+ * # Safety
+ * Pointer must have been returned by this library, or be null.
+ */
+void xberg_formula_model_free(XBERGFormulaModel *ptr);
+
+/**
+ * Serialize a heap-allocated `FormulaModel` to a JSON string.
+ * # Safety
+ * `ptr` must be a valid, non-null pointer returned by a `xberg` function.
+ * The returned string must be freed with `xberg_free_string`.
+ */
+char *xberg_formula_model_to_json(const XBERGFormulaModel *ptr);
+
+/**
+ * Render a heap-allocated `FormulaModel` as its string representation
+ * (the unit-variant name as serialized by serde — e.g. `"completed"`,
+ * without surrounding JSON quotes).
+ * # Safety
+ * `ptr` must be a valid, non-null pointer returned by a `xberg` function.
+ * The returned string must be freed with `xberg_free_string`.
+ */
+char *xberg_formula_model_to_string(const XBERGFormulaModel *ptr);
 
 /**
  * Free a heap-allocated `TableModel` returned by a pointer-returning FFI function.

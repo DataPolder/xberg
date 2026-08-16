@@ -673,6 +673,7 @@ pub struct LayoutDetectionConfig {
     pub confidence_threshold: Option<f32>,
     pub apply_heuristics: bool,
     pub table_model: TableModel,
+    pub formula_model: Option<FormulaModel>,
     pub table_overlap_preference: TableOverlapPreference,
     pub acceleration: Option<AccelerationConfig>,
     pub enable_chart_understanding: bool,
@@ -691,6 +692,7 @@ impl LayoutDetectionConfig {
                 .get("table_model")
                 .and_then(|t| t.decode().ok())
                 .unwrap_or_default(),
+            formula_model: opts.get("formula_model").and_then(|t| t.decode().ok()),
             table_overlap_preference: opts
                 .get("table_overlap_preference")
                 .and_then(|t| t.decode().ok())
@@ -2284,8 +2286,8 @@ pub struct ImagePreprocessingMetadata {
 #[module = "Xberg.Formula"]
 pub struct Formula {
     pub latex: String,
-    pub bbox: BoundingBox,
-    pub page: u32,
+    pub bbox: Option<BoundingBox>,
+    pub page: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, rustler::NifMap)]
@@ -4208,6 +4210,18 @@ impl Default for LateInteractionModelType {
 }
 
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, rustler::NifUnitEnum)]
+pub enum FormulaModel {
+    LatexOcr,
+}
+
+#[allow(clippy::derivable_impls)]
+impl Default for FormulaModel {
+    fn default() -> Self {
+        Self::LatexOcr
+    }
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, rustler::NifUnitEnum)]
 pub enum TableModel {
     Tatr,
     SlanetWired,
@@ -4936,6 +4950,7 @@ pub enum ElementType {
     Image,
     PageBreak,
     CodeBlock,
+    Formula,
     BlockQuote,
     Footer,
     Header,
@@ -11060,6 +11075,7 @@ impl From<LayoutDetectionConfig> for xberg::LayoutDetectionConfig {
             confidence_threshold: val.confidence_threshold,
             apply_heuristics: val.apply_heuristics,
             table_model: val.table_model.into(),
+            formula_model: val.formula_model.map(Into::into),
             table_overlap_preference: val.table_overlap_preference.into(),
             acceleration: val.acceleration.map(Into::into),
             enable_chart_understanding: val.enable_chart_understanding,
@@ -11076,6 +11092,7 @@ impl From<xberg::LayoutDetectionConfig> for LayoutDetectionConfig {
             confidence_threshold: val.confidence_threshold,
             apply_heuristics: val.apply_heuristics,
             table_model: val.table_model.into(),
+            formula_model: val.formula_model.map(Into::into),
             table_overlap_preference: val.table_overlap_preference.into(),
             acceleration: val.acceleration.map(Into::into),
             enable_chart_understanding: val.enable_chart_understanding,
@@ -13205,7 +13222,7 @@ impl From<Formula> for xberg::Formula {
     fn from(val: Formula) -> Self {
         Self {
             latex: val.latex,
-            bbox: val.bbox.into(),
+            bbox: val.bbox.map(Into::into),
             page: val.page,
         }
     }
@@ -13216,7 +13233,7 @@ impl From<xberg::Formula> for Formula {
     fn from(val: xberg::Formula) -> Self {
         Self {
             latex: val.latex.to_string(),
-            bbox: val.bbox.into(),
+            bbox: val.bbox.map(Into::into),
             page: val.page,
         }
     }
@@ -15796,6 +15813,22 @@ impl From<xberg::LateInteractionModelType> for LateInteractionModelType {
     }
 }
 
+impl From<FormulaModel> for xberg::core::config::layout::FormulaModel {
+    fn from(val: FormulaModel) -> Self {
+        match val {
+            FormulaModel::LatexOcr => Self::LatexOcr,
+        }
+    }
+}
+
+impl From<xberg::core::config::layout::FormulaModel> for FormulaModel {
+    fn from(val: xberg::core::config::layout::FormulaModel) -> Self {
+        match val {
+            xberg::core::config::layout::FormulaModel::LatexOcr => Self::LatexOcr,
+        }
+    }
+}
+
 impl From<TableModel> for xberg::TableModel {
     fn from(val: TableModel) -> Self {
         match val {
@@ -16889,6 +16922,7 @@ impl From<ElementType> for xberg::ElementType {
             ElementType::Image => Self::Image,
             ElementType::PageBreak => Self::PageBreak,
             ElementType::CodeBlock => Self::CodeBlock,
+            ElementType::Formula => Self::Formula,
             ElementType::BlockQuote => Self::BlockQuote,
             ElementType::Footer => Self::Footer,
             ElementType::Header => Self::Header,
@@ -16907,6 +16941,7 @@ impl From<xberg::ElementType> for ElementType {
             xberg::ElementType::Image => Self::Image,
             xberg::ElementType::PageBreak => Self::PageBreak,
             xberg::ElementType::CodeBlock => Self::CodeBlock,
+            xberg::ElementType::Formula => Self::Formula,
             xberg::ElementType::BlockQuote => Self::BlockQuote,
             xberg::ElementType::Footer => Self::Footer,
             xberg::ElementType::Header => Self::Header,

@@ -58,6 +58,14 @@ function _alefE2eFormatMetadataDisplay(fm: unknown): string {
 
 describe("format_specific", () => {
 
+	it("format_docx_equations: DOCX equations extract to LaTeX math in markdown output", async () => {
+		const inputMockBaseUrl = process.env.MOCK_SERVER_FORMAT_DOCX_EQUATIONS ?? `${process.env.MOCK_SERVER_URL}/fixtures/format_docx_equations`;
+		const inputJson = JSON.stringify({ filename: "equations.docx", kind: "uri", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", uri: "$mock_url/docx/equations.docx" }).replaceAll("$mock_url", inputMockBaseUrl);
+		const input = JSON.parse(inputJson) as ExtractInput;
+		const result = await extract(input, { outputFormat: OutputFormat.Markdown } as ExtractionConfig);
+    expect(result.results[0].content.length).toBeGreaterThanOrEqual(20);
+    expect(result.results[0].content).toContain("$");
+	}, 30000);
 	it("format_docx_standalone: Standalone DOCX extraction using extract", async () => {
 		const inputMockBaseUrl = process.env.MOCK_SERVER_FORMAT_DOCX_STANDALONE ?? `${process.env.MOCK_SERVER_URL}/fixtures/format_docx_standalone`;
 		const inputJson = JSON.stringify({ filename: "fake.docx", kind: "uri", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", uri: "$mock_url/docx/fake.docx" }).replaceAll("$mock_url", inputMockBaseUrl);

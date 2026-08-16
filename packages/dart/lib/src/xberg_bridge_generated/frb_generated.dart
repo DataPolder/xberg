@@ -13308,6 +13308,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  FormulaModel dco_decode_box_autoadd_formula_model(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_formula_model(raw);
+  }
+
+  @protected
   HeadingContext dco_decode_box_autoadd_heading_context(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_heading_context(raw);
@@ -15499,9 +15505,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
     return Formula(
       latex: dco_decode_String(arr[0]),
-      bbox: dco_decode_bounding_box(arr[1]),
-      page: dco_decode_i_64(arr[2]),
+      bbox: dco_decode_opt_box_autoadd_bounding_box(arr[1]),
+      page: dco_decode_opt_box_autoadd_i_64(arr[2]),
     );
+  }
+
+  @protected
+  FormulaModel dco_decode_formula_model(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return FormulaModel.values[raw as int];
   }
 
   @protected
@@ -16029,16 +16041,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   LayoutDetectionConfig dco_decode_layout_detection_config(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 7)
-      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    if (arr.length != 8)
+      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
     return LayoutDetectionConfig(
       strategy: dco_decode_layout_strategy(arr[0]),
       confidenceThreshold: dco_decode_opt_box_autoadd_f_64(arr[1]),
       applyHeuristics: dco_decode_bool(arr[2]),
       tableModel: dco_decode_table_model(arr[3]),
-      tableOverlapPreference: dco_decode_table_overlap_preference(arr[4]),
-      acceleration: dco_decode_opt_box_autoadd_acceleration_config(arr[5]),
-      enableChartUnderstanding: dco_decode_bool(arr[6]),
+      formulaModel: dco_decode_opt_box_autoadd_formula_model(arr[4]),
+      tableOverlapPreference: dco_decode_table_overlap_preference(arr[5]),
+      acceleration: dco_decode_opt_box_autoadd_acceleration_config(arr[6]),
+      enableChartUnderstanding: dco_decode_bool(arr[7]),
     );
   }
 
@@ -17522,6 +17535,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   FormatMetadata? dco_decode_opt_box_autoadd_format_metadata(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_box_autoadd_format_metadata(raw);
+  }
+
+  @protected
+  FormulaModel? dco_decode_opt_box_autoadd_formula_model(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_formula_model(raw);
   }
 
   @protected
@@ -21035,6 +21054,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  FormulaModel sse_decode_box_autoadd_formula_model(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_formula_model(deserializer));
+  }
+
+  @protected
   HeadingContext sse_decode_box_autoadd_heading_context(
     SseDeserializer deserializer,
   ) {
@@ -23776,9 +23803,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Formula sse_decode_formula(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_latex = sse_decode_String(deserializer);
-    var var_bbox = sse_decode_bounding_box(deserializer);
-    var var_page = sse_decode_i_64(deserializer);
+    var var_bbox = sse_decode_opt_box_autoadd_bounding_box(deserializer);
+    var var_page = sse_decode_opt_box_autoadd_i_64(deserializer);
     return Formula(latex: var_latex, bbox: var_bbox, page: var_page);
+  }
+
+  @protected
+  FormulaModel sse_decode_formula_model(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return FormulaModel.values[inner];
   }
 
   @protected
@@ -24430,6 +24464,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_confidenceThreshold = sse_decode_opt_box_autoadd_f_64(deserializer);
     var var_applyHeuristics = sse_decode_bool(deserializer);
     var var_tableModel = sse_decode_table_model(deserializer);
+    var var_formulaModel = sse_decode_opt_box_autoadd_formula_model(
+      deserializer,
+    );
     var var_tableOverlapPreference = sse_decode_table_overlap_preference(
       deserializer,
     );
@@ -24442,6 +24479,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       confidenceThreshold: var_confidenceThreshold,
       applyHeuristics: var_applyHeuristics,
       tableModel: var_tableModel,
+      formulaModel: var_formulaModel,
       tableOverlapPreference: var_tableOverlapPreference,
       acceleration: var_acceleration,
       enableChartUnderstanding: var_enableChartUnderstanding,
@@ -26876,6 +26914,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
     if (sse_decode_bool(deserializer)) {
       return (sse_decode_box_autoadd_format_metadata(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  FormulaModel? sse_decode_opt_box_autoadd_formula_model(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_formula_model(deserializer));
     } else {
       return null;
     }
@@ -31497,6 +31548,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_formula_model(
+    FormulaModel self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_formula_model(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_heading_context(
     HeadingContext self,
     SseSerializer serializer,
@@ -33689,8 +33749,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   void sse_encode_formula(Formula self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.latex, serializer);
-    sse_encode_bounding_box(self.bbox, serializer);
-    sse_encode_i_64(self.page, serializer);
+    sse_encode_opt_box_autoadd_bounding_box(self.bbox, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.page, serializer);
+  }
+
+  @protected
+  void sse_encode_formula_model(FormulaModel self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
   }
 
   @protected
@@ -34177,6 +34243,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_box_autoadd_f_64(self.confidenceThreshold, serializer);
     sse_encode_bool(self.applyHeuristics, serializer);
     sse_encode_table_model(self.tableModel, serializer);
+    sse_encode_opt_box_autoadd_formula_model(self.formulaModel, serializer);
     sse_encode_table_overlap_preference(
       self.tableOverlapPreference,
       serializer,
@@ -36285,6 +36352,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self != null, serializer);
     if (self != null) {
       sse_encode_box_autoadd_format_metadata(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_formula_model(
+    FormulaModel? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_formula_model(self, serializer);
     }
   }
 

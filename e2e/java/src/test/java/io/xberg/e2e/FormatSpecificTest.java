@@ -20,6 +20,22 @@ public class FormatSpecificTest {
         }    }
 
     @Test
+    void testFormatDocxEquations() throws Exception {
+        // DOCX equations extract to LaTeX math in markdown output
+        String inputMockBaseUrl = System.getProperty("mockServer.format_docx_equations", System.getenv().getOrDefault("MOCK_SERVER_FORMAT_DOCX_EQUATIONS", System.getProperty("mockServerUrl", System.getenv("MOCK_SERVER_URL")) + "/fixtures/format_docx_equations"));
+        String inputJson = "{\"filename\":\"equations.docx\",\"kind\":\"uri\",\"mime_type\":\"application/vnd.openxmlformats-officedocument.wordprocessingml.document\",\"uri\":\"$mock_url/docx/equations.docx\"}".replace("$mock_url", inputMockBaseUrl);
+        var input = JsonUtil.fromJson(inputJson, ExtractInput.class);
+        var config = JsonUtil.fromJson("{\"output_format\":\"markdown\"}", ExtractionConfig.class);
+
+        var result = Xberg.extract(input, config);
+assertTrue(result.results().get(0).content().length() >= 20, "expected length >= 20");
+assertTrue(result.results().get(0).content().contains("$"), "expected to contain: " + "$");
+
+
+    }
+
+
+    @Test
     void testFormatDocxStandalone() throws Exception {
         // Standalone DOCX extraction using extract
         String inputMockBaseUrl = System.getProperty("mockServer.format_docx_standalone", System.getenv().getOrDefault("MOCK_SERVER_FORMAT_DOCX_STANDALONE", System.getProperty("mockServerUrl", System.getenv("MOCK_SERVER_URL")) + "/fixtures/format_docx_standalone"));

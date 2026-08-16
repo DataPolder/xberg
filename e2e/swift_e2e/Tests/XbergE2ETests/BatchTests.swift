@@ -79,6 +79,7 @@ final class BatchTests: XCTestCase {
         let inputsArray = [_item_inputsArray_0, _item_inputsArray_1]
         let configObj = try Xberg.extractionConfigFromJson("{}")
         let result = try await Xberg.extractBatch(inputs: inputsArray, config: configObj)
+        XCTAssertGreaterThanOrEqual(result.results().count, 2)
     }
 
     func testExtractBatchUriNotFound() async throws {

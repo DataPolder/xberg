@@ -163,6 +163,16 @@ void main() {
     }
   });
 
+  test('DOCX equations extract to LaTeX math in markdown output', () async {
+    final _inputMockBaseUrl = _fixtureUrl("format_docx_equations");
+    final _inputJson = '{"filename":"equations.docx","kind":"uri","mime_type":"application/vnd.openxmlformats-officedocument.wordprocessingml.document","uri":"\$mock_url/docx/equations.docx"}'.replaceAll(r'$mock_url', _inputMockBaseUrl);
+    final _input = await createExtractInputFromJson(json: _inputJson);
+    final _config = await createExtractionConfigFromJson(json: '{"output_format":"markdown"}');
+    final result = await XbergBridge.extract(_input, config: _config);
+    expect(result.results[0].content.length, greaterThanOrEqualTo(20));
+    expect(result.results[0].content, contains('\$'));
+  });
+
   test('Standalone DOCX extraction using extract', () async {
     final _inputMockBaseUrl = _fixtureUrl("format_docx_standalone");
     final _inputJson = '{"filename":"fake.docx","kind":"uri","mime_type":"application/vnd.openxmlformats-officedocument.wordprocessingml.document","uri":"\$mock_url/docx/fake.docx"}'.replaceAll(r'$mock_url', _inputMockBaseUrl);

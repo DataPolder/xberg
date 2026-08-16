@@ -5,6 +5,27 @@
 defmodule E2e.FormatSpecificTest do
   use ExUnit.Case, async: false
 
+  describe "format_docx_equations" do
+    test "format_docx_equations" do
+      input_mock_base_url =
+        System.get_env("MOCK_SERVER_FORMAT_DOCX_EQUATIONS") || "#{System.get_env("MOCK_SERVER_URL")}/fixtures/format_docx_equations"
+
+      input_value = %Xberg.ExtractInput{
+        filename: "equations.docx",
+        kind: "uri",
+        mime_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        uri: String.replace("$mock_url/docx/equations.docx", "$mock_url", input_mock_base_url)
+      }
+
+      {:ok, result} = Xberg.extract(input: input_value, config: "{\"output_format\":\"markdown\"}")
+
+      assert (is_binary(Enum.at(result.results, 0).content) && byte_size(Enum.at(result.results, 0).content) >= 20) ||
+               (is_list(Enum.at(result.results, 0).content) && length(Enum.at(result.results, 0).content) >= 20)
+
+      assert String.contains?(to_string(Enum.at(result.results, 0).content), "$")
+    end
+  end
+
   describe "format_docx_standalone" do
     test "format_docx_standalone" do
       input_mock_base_url =

@@ -39,6 +39,20 @@ class FormatSpecificTest {
         private val MAPPER = ObjectMapper().registerModule(Jdk8Module()).registerKotlinModule().setPropertyNamingStrategy(com.fasterxml.jackson.databind.PropertyNamingStrategies.SNAKE_CASE)
     }
     @Test
+    fun testFormatDocxEquations() = runBlocking {
+        // DOCX equations extract to LaTeX math in markdown output
+        val inputMockBaseUrl = System.getProperty("mockServer.format_docx_equations", System.getenv("MOCK_SERVER_FORMAT_DOCX_EQUATIONS") ?: ((System.getProperty("mockServerUrl", System.getenv("MOCK_SERVER_URL") ?: "") ?: "") + "/fixtures/format_docx_equations"))
+        val inputJson = "{\"filename\":\"equations.docx\",\"kind\":\"uri\",\"mime_type\":\"application/vnd.openxmlformats-officedocument.wordprocessingml.document\",\"uri\":\"\$mock_url/docx/equations.docx\"}".replace("\$mock_url", inputMockBaseUrl)
+        val input = MAPPER.readValue(inputJson, ExtractInput::class.java)
+        val config = MAPPER.readValue("{\"output_format\":\"markdown\"}", ExtractionConfig::class.java)
+        val input = MAPPER.readValue("{\"filename\":\"equations.docx\",\"kind\":\"uri\",\"mime_type\":\"application/vnd.openxmlformats-officedocument.wordprocessingml.document\",\"uri\":\"\$mock_url/docx/equations.docx\"}", ExtractInput::class.java)
+        val config = MAPPER.readValue("{\"output_format\":\"markdown\"}", ExtractionConfig::class.java)
+        val result = Xberg.extract(input, config)
+        assertTrue(result.results.first().content.length >= 20, "expected length >= 20")
+        assertTrue(result.results.first().content.contains("\$"), "expected to contain: " + "\$")
+    }
+
+    @Test
     fun testFormatDocxStandalone() = runBlocking {
         // Standalone DOCX extraction using extract
         val inputMockBaseUrl = System.getProperty("mockServer.format_docx_standalone", System.getenv("MOCK_SERVER_FORMAT_DOCX_STANDALONE") ?: ((System.getProperty("mockServerUrl", System.getenv("MOCK_SERVER_URL") ?: "") ?: "") + "/fixtures/format_docx_standalone"))

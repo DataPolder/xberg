@@ -79,6 +79,7 @@ assertEquals(0, result.results().size(), "expected exactly 0 elements");
     void testExtractBatchUriBasic() throws Exception {
         // extract_batch over URI inputs
         var result = Xberg.extractBatch(java.util.Arrays.asList(JsonUtil.fromJson("{\"kind\":\"uri\",\"uri\":\"pdf/fake_memo.pdf\"}", ExtractInput.class), JsonUtil.fromJson("{\"kind\":\"uri\",\"uri\":\"text/fake_text.txt\"}", ExtractInput.class)), ExtractionConfig.builder().build());
+assertTrue(result.results().size() >= 2, "expected at least 2 elements");
 
 
     }

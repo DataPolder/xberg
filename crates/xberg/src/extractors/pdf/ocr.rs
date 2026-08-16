@@ -833,6 +833,29 @@ fn build_mixed_ocr_page_document(
     Some(assembled)
 }
 
+/// Convert one OCR formula bbox to PDF points.
+///
+/// Backends can rescale the page image before OCR; when the result metadata
+/// carries the processed dimensions, those describe the bbox's pixel space
+/// and take precedence over the rendered dimensions.
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+fn formula_bbox_to_page_points(
+    formula: &mut crate::types::Formula,
+    doc: &pdf_oxide::PdfDocument,
+    page_idx: usize,
+    metadata: Option<&crate::types::Metadata>,
+    rendered_w: u32,
+    rendered_h: u32,
+) {
+    if let Some(bbox) = formula.bbox {
+        let (px_w, px_h) = metadata
+            .and_then(processed_ocr_layout_dimensions)
+            .unwrap_or((rendered_w, rendered_h));
+        let (w_pt, h_pt) = crate::pdf::render::get_page_dimensions_pt(doc, page_idx);
+        formula.bbox = Some(crate::pdf::render::pixel_bbox_to_pdf_points(bbox, px_w, px_h, w_pt, h_pt));
+    }
+}
+
 /// Flip the bboxes of a document's table elements from a top-left to a bottom-left
 /// origin, in points.
 ///
@@ -1083,8 +1106,15 @@ pub(crate) async fn extract_mixed_ocr_native(
                     let (text, tables, elements, doc, usage, page_texts, _rasters, formulas) = result?;
                     accumulated_llm_usage.extend(usage);
                     let page_number = (page_idx + 1) as u32;
+                    let page_dims = page_images
+                        .iter()
+                        .find(|(i, _)| *i == page_idx)
+                        .map(|(_, img)| (img.width(), img.height()));
                     for mut formula in formulas {
-                        formula.page = page_number;
+                        formula.page = Some(page_number);
+                        if let Some((w, h)) = page_dims {
+                            formula_bbox_to_page_points(&mut formula, &render_doc, page_idx, None, w, h);
+                        }
                         accumulated_formulas.push(formula);
                     }
                     // `run_ocr_pipeline`/`extract_with_ocr` assemble `text` as if this
@@ -1137,7 +1167,15 @@ pub(crate) async fn extract_mixed_ocr_native(
                     accumulated_llm_usage.extend(usage);
                     let page_number = (*page_idx + 1) as u32;
                     for mut formula in formulas {
-                        formula.page = page_number;
+                        formula.page = Some(page_number);
+                        formula_bbox_to_page_points(
+                            &mut formula,
+                            &render_doc,
+                            *page_idx,
+                            None,
+                            image.width(),
+                            image.height(),
+                        );
                         accumulated_formulas.push(formula);
                     }
                     let page_text = page_texts.into_iter().next().unwrap_or(text);
@@ -1249,8 +1287,22 @@ pub(crate) async fn extract_mixed_ocr_native(
                 if let Some(usage) = extraction_result.llm_usage.take() {
                     accumulated_llm_usage.extend(usage);
                 }
+                let page_dims = encoded
+                    .iter()
+                    .find(|(encoded_page, ..)| *encoded_page == page_idx)
+                    .map(|(_, _, w, h)| (*w, *h));
                 for mut formula in std::mem::take(&mut extraction_result.formulas) {
-                    formula.page = (page_idx + 1) as u32;
+                    formula.page = Some((page_idx + 1) as u32);
+                    if let Some((w, h)) = page_dims {
+                        formula_bbox_to_page_points(
+                            &mut formula,
+                            &render_doc,
+                            page_idx,
+                            Some(&extraction_result.metadata),
+                            w,
+                            h,
+                        );
+                    }
                     accumulated_formulas.push(formula);
                 }
                 // The backend's own warnings used to be dropped on this route (#60).
@@ -1288,7 +1340,8 @@ pub(crate) async fn extract_mixed_ocr_native(
                     accumulated_llm_usage.extend(usage);
                 }
                 for mut formula in std::mem::take(&mut extraction_result.formulas) {
-                    formula.page = (*page_idx + 1) as u32;
+                    formula.page = Some((*page_idx + 1) as u32);
+                    formula_bbox_to_page_points(&mut formula, &render_doc, *page_idx, Some(&extraction_result.metadata), *width, *height);
                     accumulated_formulas.push(formula);
                 }
                 crate::core::diagnostics::dedup_extend_warnings(
@@ -1881,15 +1934,15 @@ fn analyze_container_markers(elements: &[crate::types::internal::InternalElement
 // than from `crate::ocr`: this PDF OCR path also compiles under `ocr-pipeline` (VLM OCR,
 // e.g. the `binstall` CLI) or under `layout-detection` alone (layout without any OCR
 // backend enabled), where the `ocr` module — gated on `ocr`/`ocr-wasm` — is absent. ~keep
-#[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
+#[cfg(any(feature = "ocr", feature = "ocr-wasm", all(feature = "ocr-pipeline", feature = "pdf")))]
 use crate::ocr_metadata_keys::{OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY, OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY};
 // Same rationale, scoped to `layout-detection` only: `resolved_ocr_correction_degrees` and
 // `transform_ocr_elements_to_render_space` (both `layout-detection`-only) are the sole
 // readers of these two key names in this file.
-#[cfg(feature = "layout-detection")]
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
 use crate::ocr_metadata_keys::{OCR_AUTO_ROTATED_METADATA_KEY, OCR_ORIENTATION_DEGREES_METADATA_KEY};
 
-#[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
+#[cfg(any(feature = "ocr", feature = "ocr-wasm", all(feature = "ocr-pipeline", feature = "pdf")))]
 fn valid_ocr_layout_dimension(value: &serde_json::Value) -> Option<u32> {
     let value = value.as_f64()?;
     if !value.is_finite() || value <= 0.0 || value > u32::MAX as f64 || value.fract() != 0.0 {
@@ -1898,7 +1951,7 @@ fn valid_ocr_layout_dimension(value: &serde_json::Value) -> Option<u32> {
     Some(value as u32)
 }
 
-#[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
+#[cfg(any(feature = "ocr", feature = "ocr-wasm", all(feature = "ocr-pipeline", feature = "pdf")))]
 fn processed_ocr_layout_dimensions(metadata: &crate::types::Metadata) -> Option<(u32, u32)> {
     let width = metadata
         .additional
@@ -1915,7 +1968,7 @@ fn processed_ocr_layout_dimensions(metadata: &crate::types::Metadata) -> Option<
     }
 }
 
-#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+#[cfg(any(feature = "ocr", feature = "ocr-wasm"))]
 fn resolved_ocr_layout_dimensions(
     metadata: &crate::types::Metadata,
     render_width: u32,
@@ -1924,7 +1977,7 @@ fn resolved_ocr_layout_dimensions(
     processed_ocr_layout_dimensions(metadata).unwrap_or((render_width, render_height))
 }
 
-#[cfg(feature = "layout-detection")]
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
 fn scale_detection_to_dimensions(
     detection: &crate::layout::DetectionResult,
     target_width: u32,
@@ -1948,7 +2001,7 @@ fn scale_detection_to_dimensions(
     scaled
 }
 
-#[cfg(feature = "layout-detection")]
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
 fn resolved_ocr_correction_degrees(metadata: &crate::types::Metadata) -> Option<u16> {
     if !metadata
         .additional
@@ -1968,7 +2021,7 @@ fn resolved_ocr_correction_degrees(metadata: &crate::types::Metadata) -> Option<
     Some(((360 - orientation) % 360) as u16)
 }
 
-#[cfg(feature = "layout-detection")]
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
 fn rotate_detection(
     mut detection: crate::layout::DetectionResult,
     correction_degrees: u16,
@@ -2005,7 +2058,7 @@ fn rotate_detection(
     detection
 }
 
-#[cfg(feature = "layout-detection")]
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
 fn scale_detection_to_ocr_coordinates(
     detection: &crate::layout::DetectionResult,
     metadata: &crate::types::Metadata,
@@ -2027,7 +2080,7 @@ fn scale_detection_to_ocr_coordinates(
     rotate_detection(scaled, correction_degrees)
 }
 
-#[cfg(feature = "layout-detection")]
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
 fn inverse_rotate_ocr_point(
     x: f64,
     y: f64,
@@ -2043,7 +2096,7 @@ fn inverse_rotate_ocr_point(
     }
 }
 
-#[cfg(feature = "layout-detection")]
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
 fn transform_ocr_point_to_render(
     point: (u32, u32),
     correction_degrees: u16,
@@ -2068,7 +2121,7 @@ fn transform_ocr_point_to_render(
     (render_x, render_y)
 }
 
-#[cfg(feature = "layout-detection")]
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
 fn transform_ocr_geometry_to_render(
     geometry: &crate::types::OcrBoundingGeometry,
     correction_degrees: u16,
@@ -2112,7 +2165,7 @@ fn transform_ocr_geometry_to_render(
     }
 }
 
-#[cfg(feature = "layout-detection")]
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
 fn transform_ocr_elements_to_render_space(
     elements: &[crate::types::OcrElement],
     metadata: &crate::types::Metadata,
@@ -2152,7 +2205,7 @@ fn transform_ocr_elements_to_render_space(
         .collect()
 }
 
-#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "layout-detection"))]
+#[cfg(all(any(feature = "ocr", feature = "ocr-wasm"), feature = "layout-detection"))]
 fn assemble_ocr_page_paragraphs(
     doc: &crate::types::internal::InternalDocument,
     page_height: u32,
@@ -2192,7 +2245,7 @@ fn fill_unstructured_ocr_pages(
 /// from randomness or wall-clock time, so the same input document always
 /// produces the same id. See [`crate::types::Table::table_id`] for the shared
 /// scheme doc.
-#[cfg(feature = "layout-detection")]
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
 fn recognized_table_to_public_table(
     recognized: &crate::RecognizedTable,
     page_number: u32,
@@ -2275,7 +2328,7 @@ pub(crate) async fn extract_with_ocr(
     let structured_ocr_config;
     let ocr_config = {
         let cfg = ensure_elements_enabled(base_ocr_config);
-        #[cfg(feature = "layout-detection")]
+        #[cfg(all(feature = "ocr", feature = "layout-detection"))]
         let cfg = if layout_detections.is_some() || backend.emits_structured_markdown() {
             inject_layout_config_to_backend(&cfg, config)
         } else {
@@ -2521,7 +2574,12 @@ pub(crate) async fn extract_with_ocr(
             }
 
             for mut formula in ocr_result.formulas {
-                formula.page = (page_idx + 1) as u32;
+                formula.page = Some((page_idx + 1) as u32);
+                #[cfg(feature = "pdf")]
+                if let Some((doc, _, _)) = lazy_pdf_render_state.as_ref() {
+                    let (w, h) = (encoded_batch[offset].2, encoded_batch[offset].3);
+                    formula_bbox_to_page_points(&mut formula, doc, page_idx, Some(&ocr_result.metadata), w, h);
+                }
                 accumulated_formulas.push(formula);
             }
 
@@ -2572,7 +2630,7 @@ pub(crate) async fn extract_with_ocr(
                 }
             }
 
-            #[cfg(feature = "layout-detection")]
+            #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
             if ocr_result.ocr_internal_document.is_some()
                 || ocr_result
                     .ocr_elements
@@ -5683,13 +5741,13 @@ Buffers:           50000 kB
                     content: "page text".to_string(),
                     formulas: vec![crate::types::Formula {
                         latex: "E = mc^2".to_string(),
-                        bbox: BoundingBox {
+                        bbox: Some(BoundingBox {
                             x0: 0.0,
                             y0: 0.0,
                             x1: 100.0,
                             y1: 50.0,
-                        },
-                        page: 0,
+                        }),
+                        page: None,
                     }],
                     ..Default::default()
                 })
@@ -5756,7 +5814,10 @@ Buffers:           50000 kB
 
         assert_eq!(formulas.len(), 2, "one formula per page, got {}", formulas.len());
 
-        let mut pages: Vec<u32> = formulas.iter().map(|f| f.page).collect();
+        let mut pages: Vec<u32> = formulas
+            .iter()
+            .map(|f| f.page.expect("OCR formulas must have a renumbered page"))
+            .collect();
         pages.sort_unstable();
         assert_eq!(
             pages,
@@ -6073,7 +6134,7 @@ Name: ___
         );
     }
 
-    #[cfg(feature = "layout-detection")]
+    #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
     #[test]
     fn ocr_layout_dimensions_use_valid_processed_image_metadata() {
         let mut metadata = crate::types::Metadata::default();
@@ -6089,7 +6150,7 @@ Name: ___
         assert_eq!(resolved_ocr_layout_dimensions(&metadata, 1000, 1500), (2000, 3000));
     }
 
-    #[cfg(feature = "layout-detection")]
+    #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
     #[test]
     fn ocr_layout_dimensions_fall_back_for_incomplete_or_invalid_metadata() {
         let mut metadata = crate::types::Metadata::default();
@@ -6115,7 +6176,7 @@ Name: ___
         assert_eq!(resolved_ocr_layout_dimensions(&metadata, 1000, 1500), (1000, 1500));
     }
 
-    #[cfg(feature = "layout-detection")]
+    #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
     #[test]
     fn detection_scaling_targets_ocr_coordinate_space() {
         let detection = crate::layout::DetectionResult {
@@ -6143,7 +6204,7 @@ Name: ___
         assert_eq!(scaled.detections[0].bbox.y2, 600.0);
     }
 
-    #[cfg(feature = "layout-detection")]
+    #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
     fn rotated_ocr_metadata(final_width: u32, final_height: u32, orientation_degrees: i32) -> crate::types::Metadata {
         let mut metadata = crate::types::Metadata::default();
         metadata.additional.insert(
@@ -6165,7 +6226,7 @@ Name: ___
         metadata
     }
 
-    #[cfg(feature = "layout-detection")]
+    #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
     fn rotation_test_detection() -> crate::layout::DetectionResult {
         crate::layout::DetectionResult {
             page_width: 100,
@@ -6183,7 +6244,7 @@ Name: ___
         }
     }
 
-    #[cfg(feature = "layout-detection")]
+    #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
     #[test]
     fn ocr_detection_rotation_matches_clockwise_90_pixel_transform() {
         let metadata = rotated_ocr_metadata(200, 100, 270);

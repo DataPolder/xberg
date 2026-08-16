@@ -35,7 +35,7 @@ async def test_error_empty_bytes() -> None:
     input = ExtractInput(bytes=[], config={}, filename="empty.txt", kind=ExtractInputKind("bytes"), mime_type="text/plain")
     config = ExtractionConfig()
 
-    _ = await extract(input, config)
+    await extract(input, config)
 
 
 @pytest.mark.asyncio

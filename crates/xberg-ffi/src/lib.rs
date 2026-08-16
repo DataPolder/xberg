@@ -17,7 +17,9 @@
     clippy::unnecessary_fallible_conversions,
     clippy::useless_conversion,
     clippy::type_complexity,
-    clippy::clone_on_copy
+    clippy::clone_on_copy,
+    clippy::collapsible_if,
+    clippy::vec_init_then_push
 )]
 #![allow(
     clippy::missing_safety_doc,
@@ -453,6 +455,14 @@ fn html_theme_from_i32_rs(v: i32) -> Option<xberg::HtmlTheme> {
 }
 
 #[allow(dead_code)]
+fn formula_model_from_i32_rs(v: i32) -> Option<xberg::core::config::layout::FormulaModel> {
+    match v {
+        0 => Some(xberg::core::config::layout::FormulaModel::LatexOcr),
+        _ => None,
+    }
+}
+
+#[allow(dead_code)]
 fn table_model_from_i32_rs(v: i32) -> Option<xberg::TableModel> {
     match v {
         0 => Some(xberg::TableModel::Tatr),
@@ -776,9 +786,10 @@ fn element_type_from_i32_rs(v: i32) -> Option<xberg::ElementType> {
         5 => Some(xberg::ElementType::Image),
         6 => Some(xberg::ElementType::PageBreak),
         7 => Some(xberg::ElementType::CodeBlock),
-        8 => Some(xberg::ElementType::BlockQuote),
-        9 => Some(xberg::ElementType::Footer),
-        10 => Some(xberg::ElementType::Header),
+        8 => Some(xberg::ElementType::Formula),
+        9 => Some(xberg::ElementType::BlockQuote),
+        10 => Some(xberg::ElementType::Footer),
+        11 => Some(xberg::ElementType::Header),
         _ => None,
     }
 }
@@ -8352,6 +8363,38 @@ pub unsafe extern "C" fn xberg_layout_detection_config_table_model(handle: AlefH
                     0
                 }
             });
+        match result {
+            Ok(value) => value,
+            Err(error) => {
+                set_handle_error(&error);
+                0
+            }
+        }
+    })
+}
+
+#[cfg(feature = "layout-types")]
+/// Get the `formula_model` field from a `LayoutDetectionConfig`.
+/// A non-null returned handle is owned by the caller.
+/// It must be freed with `xberg_formula_model_free`.
+/// # Safety
+/// Pointer must be a valid handle returned by this library.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn xberg_layout_detection_config_formula_model(handle: AlefHandle) -> AlefHandle {
+    catch_ffi_panic(0, || {
+        if handle == 0 {
+            return 0;
+        }
+        let result = with_handle::<xberg::LayoutDetectionConfig, _>(handle, |obj| match &obj.formula_model {
+            Some(val) => match insert_handle(*val) {
+                Ok(handle) => handle,
+                Err(error) => {
+                    set_handle_error(&error);
+                    0
+                }
+            },
+            None => 0,
+        });
         match result {
             Ok(value) => value,
             Err(error) => {
@@ -33678,12 +33721,15 @@ pub unsafe extern "C" fn xberg_formula_bbox(handle: AlefHandle) -> AlefHandle {
         if handle == 0 {
             return 0;
         }
-        let result = with_handle::<xberg::Formula, _>(handle, |obj| match insert_handle(obj.bbox) {
-            Ok(handle) => handle,
-            Err(error) => {
-                set_handle_error(&error);
-                0
-            }
+        let result = with_handle::<xberg::Formula, _>(handle, |obj| match &obj.bbox {
+            Some(val) => match insert_handle(*val) {
+                Ok(handle) => handle,
+                Err(error) => {
+                    set_handle_error(&error);
+                    0
+                }
+            },
+            None => 0,
         });
         match result {
             Ok(value) => value,
@@ -33704,7 +33750,10 @@ pub unsafe extern "C" fn xberg_formula_page(handle: AlefHandle) -> u32 {
         if handle == 0 {
             return 0;
         }
-        let result = with_handle::<xberg::Formula, _>(handle, |obj| obj.page);
+        let result = with_handle::<xberg::Formula, _>(handle, |obj| match &obj.page {
+            Some(val) => *val,
+            None => 0,
+        });
         match result {
             Ok(value) => value,
             Err(error) => {
@@ -61553,6 +61602,51 @@ pub unsafe extern "C" fn xberg_late_interaction_model_type_from_str(name: *const
     })
 }
 
+/// Convert an integer to a `FormulaModel` variant. Returns -1 on invalid input.
+/// # Safety
+/// Caller must ensure all pointer arguments are valid or null.
+/// Returned pointers must be freed with the appropriate free function.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn xberg_formula_model_from_i32(value: i32) -> i32 {
+    catch_ffi_panic(-1, || {
+        match value {
+            0 => 0, // LatexOcr
+            _ => {
+                set_last_error(1, "Invalid FormulaModel variant");
+                -1
+            }
+        }
+    })
+}
+
+/// Convert a `FormulaModel` serde wire value (C string) to its integer discriminant. Returns -1 on invalid input.
+/// # Safety
+/// Caller must ensure `ptr` is a valid pointer to a `c_char` or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn xberg_formula_model_from_str(name: *const c_char) -> i32 {
+    catch_ffi_panic(-1, || {
+        if name.is_null() {
+            set_last_error(1, "Null pointer passed for enum name");
+            return -1;
+        }
+        // SAFETY: null check above guarantees name is a valid pointer; string is valid UTF-8 from caller.
+        let s = match unsafe { CStr::from_ptr(name) }.to_str() {
+            Ok(s) => s,
+            Err(_) => {
+                set_last_error(1, "Invalid UTF-8 in enum name");
+                return -1;
+            }
+        };
+        match s {
+            "latex_ocr" => 0,
+            _ => {
+                set_last_error(1, "Unknown FormulaModel variant");
+                -1
+            }
+        }
+    })
+}
+
 /// Convert an integer to a `TableModel` variant. Returns -1 on invalid input.
 /// # Safety
 /// Caller must ensure all pointer arguments are valid or null.
@@ -63453,9 +63547,10 @@ pub unsafe extern "C" fn xberg_element_type_from_i32(value: i32) -> i32 {
             5 => 5,   // Image
             6 => 6,   // PageBreak
             7 => 7,   // CodeBlock
-            8 => 8,   // BlockQuote
-            9 => 9,   // Footer
-            10 => 10, // Header
+            8 => 8,   // Formula
+            9 => 9,   // BlockQuote
+            10 => 10, // Footer
+            11 => 11, // Header
             _ => {
                 set_last_error(1, "Invalid ElementType variant");
                 -1
@@ -63491,9 +63586,10 @@ pub unsafe extern "C" fn xberg_element_type_from_str(name: *const c_char) -> i32
             "image" => 5,
             "page_break" => 6,
             "code_block" => 7,
-            "block_quote" => 8,
-            "footer" => 9,
-            "header" => 10,
+            "formula" => 8,
+            "block_quote" => 9,
+            "footer" => 10,
+            "header" => 11,
             _ => {
                 set_last_error(1, "Unknown ElementType variant");
                 -1
@@ -66570,6 +66666,80 @@ pub unsafe extern "C" fn xberg_late_interaction_model_type_to_string(
             Ok(cs) => cs.into_raw(),
             Err(_) => {
                 set_last_error(1, "LateInteractionModelType variant contained interior NUL byte");
+                std::ptr::null_mut()
+            }
+        }
+    })
+}
+
+/// Free a heap-allocated `FormulaModel` returned by a pointer-returning FFI function.
+/// # Safety
+/// Pointer must have been returned by this library, or be null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn xberg_formula_model_free(ptr: *mut xberg::core::config::layout::FormulaModel) {
+    catch_ffi_panic((), || {
+        if !ptr.is_null() {
+            // SAFETY: ptr was allocated by Box::into_raw; caller ensures no aliases.
+            unsafe {
+                drop(Box::from_raw(ptr));
+            }
+        }
+    })
+}
+
+/// Serialize a heap-allocated `FormulaModel` to a JSON string.
+/// # Safety
+/// `ptr` must be a valid, non-null pointer returned by a `xberg` function.
+/// The returned string must be freed with `xberg_free_string`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn xberg_formula_model_to_json(
+    ptr: *const xberg::core::config::layout::FormulaModel,
+) -> *mut c_char {
+    catch_ffi_panic(std::ptr::null_mut(), || {
+        if ptr.is_null() {
+            set_last_error(1, "Null pointer passed to xberg_formula_model_to_json");
+            return std::ptr::null_mut();
+        }
+        // SAFETY: null check above guarantees ptr is valid; no mutable aliases held.
+        let val = unsafe { &*ptr };
+        match serde_json::to_string(val) {
+            Ok(s) => match CString::new(s) {
+                Ok(cs) => cs.into_raw(),
+                Err(_) => std::ptr::null_mut(),
+            },
+            Err(e) => {
+                set_last_error(2, &e.to_string());
+                std::ptr::null_mut()
+            }
+        }
+    })
+}
+
+/// Render a heap-allocated `FormulaModel` as its string representation
+/// (the unit-variant name as serialized by serde — e.g. `"completed"`,
+/// without surrounding JSON quotes).
+/// # Safety
+/// `ptr` must be a valid, non-null pointer returned by a `xberg` function.
+/// The returned string must be freed with `xberg_free_string`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn xberg_formula_model_to_string(
+    ptr: *const xberg::core::config::layout::FormulaModel,
+) -> *mut c_char {
+    catch_ffi_panic(std::ptr::null_mut(), || {
+        if ptr.is_null() {
+            set_last_error(1, "Null pointer passed to xberg_formula_model_to_string");
+            return std::ptr::null_mut();
+        }
+        // SAFETY: null check above guarantees ptr is valid; no mutable aliases held.
+        let val = unsafe { &*ptr };
+        let s: String = serde_json::to_value(val)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_owned))
+            .unwrap_or_default();
+        match CString::new(s) {
+            Ok(cs) => cs.into_raw(),
+            Err(_) => {
+                set_last_error(1, "FormulaModel variant contained interior NUL byte");
                 std::ptr::null_mut()
             }
         }
