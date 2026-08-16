@@ -1136,7 +1136,16 @@ wasm-bindgen-test = "0.3"
 # symbols export regardless of module visibility, cbindgen parses the whole crate,
 # and a glob re-export would risk colliding with generated crate-root items. ~keep
 [crates.custom_modules]
-ffi = ["cancellation", "config_builder", "config"]
+# Emptied when the three hand-written modules it named were deleted. alef only
+# *declares* a custom module in the generated lib.rs; it never generates the
+# contents, so every name here must have a hand-written file behind it or
+# generation aborts. `cancellation`, `config_builder` and `config` had rotted --
+# 2073 lines and 34 `extern "C"` fns referencing `crate::helpers`,
+# `crate::ffi_panic_guard` and `config/{html,parse}.rs`, none of which exist --
+# and were never in the shipped ABI: not one appeared among the 2525
+# declarations in `include/xberg.h`, because no `mod` statement ever compiled
+# them. Re-add a name here only alongside a module that builds. ~keep
+ffi = []
 
 [crates.ffi]
 prefix = "xberg"
@@ -2624,7 +2633,7 @@ module = "xberg"
 
 [crates.e2e.calls.clear_ocr_backends]
 result_is_simple = true
-function = ""
+function = "clear_ocr_backends"
 module = ""
 async = false
 returns_result = false
@@ -2690,7 +2699,7 @@ class = "OcrBackendBridge"
 
 [crates.e2e.calls.clear_post_processors]
 result_is_simple = true
-function = ""
+function = "clear_post_processors"
 module = ""
 async = false
 returns_result = false
@@ -2756,7 +2765,7 @@ class = "PostProcessorBridge"
 
 [crates.e2e.calls.clear_validators]
 result_is_simple = true
-function = ""
+function = "clear_validators"
 module = ""
 async = false
 returns_result = false
@@ -2822,7 +2831,7 @@ class = "ValidatorBridge"
 
 [crates.e2e.calls.unregister_ocr_backend]
 result_is_simple = true
-function = ""
+function = "unregister_ocr_backend"
 module = ""
 async = false
 returns_result = false
@@ -2888,7 +2897,7 @@ class = "OcrBackendBridge"
 
 [crates.e2e.calls.unregister_post_processor]
 result_is_simple = true
-function = ""
+function = "unregister_post_processor"
 module = ""
 async = false
 returns_result = false
@@ -2954,7 +2963,7 @@ class = "PostProcessorBridge"
 
 [crates.e2e.calls.unregister_validator]
 result_is_simple = true
-function = ""
+function = "unregister_validator"
 module = ""
 async = false
 returns_result = false
@@ -3020,7 +3029,7 @@ class = "ValidatorBridge"
 
 [crates.e2e.calls.register_ocr_backend]
 result_is_simple = true
-function = ""
+function = "register_ocr_backend"
 module = ""
 async = false
 returns_result = false
@@ -3087,7 +3096,7 @@ class = "OcrBackendBridge"
 
 [crates.e2e.calls.register_post_processor]
 result_is_simple = true
-function = ""
+function = "register_post_processor"
 module = ""
 async = false
 returns_result = false
@@ -3154,7 +3163,7 @@ class = "PostProcessorBridge"
 
 [crates.e2e.calls.register_validator]
 result_is_simple = true
-function = ""
+function = "register_validator"
 module = ""
 async = false
 returns_result = false
@@ -3221,7 +3230,7 @@ class = "ValidatorBridge"
 
 [crates.e2e.calls.register_embedding_backend]
 result_is_simple = true
-function = ""
+function = "register_embedding_backend"
 module = ""
 async = false
 returns_result = false
@@ -3288,7 +3297,7 @@ class = "EmbeddingBackendBridge"
 
 [crates.e2e.calls.unregister_embedding_backend]
 result_is_simple = true
-function = ""
+function = "unregister_embedding_backend"
 module = ""
 async = false
 returns_result = false
@@ -3354,7 +3363,7 @@ class = "EmbeddingBackendBridge"
 
 [crates.e2e.calls.clear_embedding_backends]
 result_is_simple = true
-function = ""
+function = "clear_embedding_backends"
 module = ""
 async = false
 returns_result = false
@@ -3421,7 +3430,7 @@ class = "EmbeddingBackendBridge"
 
 [crates.e2e.calls.register_reranker_backend]
 result_is_simple = true
-function = ""
+function = "register_reranker_backend"
 module = ""
 async = false
 returns_result = false
@@ -3488,7 +3497,7 @@ class = "RerankerBackendBridge"
 
 [crates.e2e.calls.unregister_reranker_backend]
 result_is_simple = true
-function = ""
+function = "unregister_reranker_backend"
 module = ""
 async = false
 returns_result = false
@@ -3554,7 +3563,7 @@ class = "RerankerBackendBridge"
 
 [crates.e2e.calls.clear_reranker_backends]
 result_is_simple = true
-function = ""
+function = "clear_reranker_backends"
 module = ""
 async = false
 returns_result = false
@@ -3621,7 +3630,7 @@ class = "RerankerBackendBridge"
 
 [crates.e2e.calls.register_tokenizer_backend]
 result_is_simple = true
-function = ""
+function = "register_tokenizer_backend"
 module = ""
 async = false
 returns_result = false
@@ -3688,7 +3697,7 @@ class = "TokenizerBackendBridge"
 
 [crates.e2e.calls.unregister_tokenizer_backend]
 result_is_simple = true
-function = ""
+function = "unregister_tokenizer_backend"
 module = ""
 async = false
 returns_result = false
@@ -3754,7 +3763,7 @@ class = "TokenizerBackendBridge"
 
 [crates.e2e.calls.clear_tokenizer_backends]
 result_is_simple = true
-function = ""
+function = "clear_tokenizer_backends"
 module = ""
 async = false
 returns_result = false
@@ -3820,7 +3829,7 @@ class = "TokenizerBackendBridge"
 
 [crates.e2e.calls.register_renderer]
 result_is_simple = true
-function = ""
+function = "register_renderer"
 module = ""
 async = false
 returns_result = false
@@ -3887,7 +3896,7 @@ class = "RendererBridge"
 
 [crates.e2e.calls.unregister_renderer]
 result_is_simple = true
-function = ""
+function = "unregister_renderer"
 module = ""
 async = false
 returns_result = false
@@ -3953,7 +3962,7 @@ class = "RendererBridge"
 
 [crates.e2e.calls.clear_renderers]
 result_is_simple = true
-function = ""
+function = "clear_renderers"
 module = ""
 async = false
 returns_result = false
