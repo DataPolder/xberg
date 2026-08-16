@@ -19,7 +19,7 @@
 use super::OxideDocument;
 use crate::pdf::error::{PdfError, Result};
 use crate::pdf::table_reconstruct::table_to_markdown;
-use crate::types::{BoundingBox, Table};
+use crate::types::{BoundingBox, ProcessingWarning, Table};
 use std::collections::HashSet;
 
 /// Cap on candidate vertical regions per page. Real tables fit comfortably
@@ -97,8 +97,12 @@ enum HeuristicTableRejection {
 ///
 /// # Returns
 ///
-/// A `Vec<Table>` containing all detected tables with cells, markdown, and bounding boxes.
-pub(crate) fn extract_tables_native(doc: &mut OxideDocument) -> Result<Vec<Table>> {
+/// A `Vec<Table>` containing all detected tables with cells, markdown, and bounding boxes,
+/// together with a `Vec<ProcessingWarning>` describing any pages whose native table detection
+/// failed (issue #74). A per-page failure is skipped rather than aborting the whole document,
+/// so without a warning that page would be silently indistinguishable from a page that simply
+/// has no table.
+pub(crate) fn extract_tables_native(doc: &mut OxideDocument) -> Result<(Vec<Table>, Vec<ProcessingWarning>)> {
     let page_count = doc
         .doc
         .page_count()
@@ -106,17 +110,18 @@ pub(crate) fn extract_tables_native(doc: &mut OxideDocument) -> Result<Vec<Table
 
     let config = pdf_oxide::structure::spatial_table_detector::TableDetectionConfig::strict();
     let mut all_tables = Vec::new();
+    let mut warnings = Vec::new();
 
     for page_idx in 0..page_count {
+        let page_number = (page_idx + 1) as u32;
         let extracted = match doc.doc.extract_tables_with_config(page_idx, config.clone()) {
             Ok(tables) => tables,
             Err(e) => {
                 tracing::warn!(page = page_idx, "pdf_oxide extract_tables failed: {e}");
+                warnings.push(native_table_extraction_failure_warning(page_number, &e));
                 continue;
             }
         };
-
-        let page_number = (page_idx + 1) as u32;
 
         for extracted_table in extracted {
             if extracted_table.rows.is_empty() || extracted_table.col_count == 0 {
@@ -156,7 +161,19 @@ pub(crate) fn extract_tables_native(doc: &mut OxideDocument) -> Result<Vec<Table
         }
     }
 
-    Ok(all_tables)
+    Ok((all_tables, warnings))
+}
+
+/// Build the `ProcessingWarning` for a page whose native (strict-mode) table detection
+/// failed (issue #74). Named per page and cause so the warning is actionable without
+/// leaking internal file paths or system details.
+fn native_table_extraction_failure_warning(page_number: u32, error: &pdf_oxide::Error) -> ProcessingWarning {
+    ProcessingWarning {
+        source: std::borrow::Cow::Borrowed("pdf_tables"),
+        message: std::borrow::Cow::Owned(format!(
+            "table extraction failed for page {page_number}: {error}; tables on this page were skipped"
+        )),
+    }
 }
 
 /// Extract bordered tables from all pages using a relaxed Lines-strategy config.
@@ -175,7 +192,15 @@ pub(crate) fn extract_tables_native(doc: &mut OxideDocument) -> Result<Vec<Table
 ///
 /// `skip_pages` (1-indexed) suppresses this pass on pages where a higher-priority
 /// detector already produced a result. Pass an empty set to run on every page.
-pub(crate) fn extract_tables_bordered(doc: &mut OxideDocument, skip_pages: &HashSet<u32>) -> Result<Vec<Table>> {
+///
+/// # Returns
+///
+/// A `Vec<Table>` of detected bordered tables, together with a `Vec<ProcessingWarning>`
+/// describing any (non-skipped) pages whose bordered-table detection failed (issue #74).
+pub(crate) fn extract_tables_bordered(
+    doc: &mut OxideDocument,
+    skip_pages: &HashSet<u32>,
+) -> Result<(Vec<Table>, Vec<ProcessingWarning>)> {
     use pdf_oxide::structure::spatial_table_detector::{TableDetectionConfig, TableStrategy};
 
     let page_count = doc
@@ -199,6 +224,7 @@ pub(crate) fn extract_tables_bordered(doc: &mut OxideDocument, skip_pages: &Hash
     };
 
     let mut all_tables = Vec::new();
+    let mut warnings = Vec::new();
 
     for page_idx in 0..page_count {
         let page_number = (page_idx + 1) as u32;
@@ -210,6 +236,7 @@ pub(crate) fn extract_tables_bordered(doc: &mut OxideDocument, skip_pages: &Hash
             Ok(tables) => tables,
             Err(e) => {
                 tracing::warn!(page = page_idx, "pdf_oxide bordered extract_tables failed: {e}");
+                warnings.push(bordered_table_extraction_failure_warning(page_number, &e));
                 continue;
             }
         };
@@ -252,7 +279,20 @@ pub(crate) fn extract_tables_bordered(doc: &mut OxideDocument, skip_pages: &Hash
         }
     }
 
-    Ok(all_tables)
+    Ok((all_tables, warnings))
+}
+
+/// Build the `ProcessingWarning` for a page whose bordered (relaxed Lines-strategy)
+/// table detection failed (issue #74). Named per page and cause so the warning is
+/// actionable without leaking internal file paths or system details.
+fn bordered_table_extraction_failure_warning(page_number: u32, error: &pdf_oxide::Error) -> ProcessingWarning {
+    ProcessingWarning {
+        source: std::borrow::Cow::Borrowed("pdf_tables"),
+        message: std::borrow::Cow::Owned(format!(
+            "bordered table extraction failed for page {page_number}: {error}; bordered tables on \
+             this page were skipped"
+        )),
+    }
 }
 
 /// Owned hierarchy segments produced while detecting heuristic tables.
@@ -3340,10 +3380,15 @@ mod tests {
     fn extract_tables_native_misses_two_column_bordered_table() {
         let bytes = build_two_column_bordered_table_pdf();
         let mut doc = OxideDocument::open_bytes(&bytes).expect("open synthetic PDF");
-        let tables = extract_tables_native(&mut doc).expect("extract_tables_native must not error");
+        let (tables, warnings) = extract_tables_native(&mut doc).expect("extract_tables_native must not error");
         assert!(
             tables.is_empty(),
             "extract_tables_native (strict, min 3 cols) must not detect a 2-column table; got: {tables:?}"
+        );
+        assert_eq!(
+            warnings.len(),
+            0,
+            "a page with no table (not a failure) must not produce a warning; got: {warnings:?}"
         );
     }
 
@@ -3354,7 +3399,8 @@ mod tests {
         let bytes = build_two_column_bordered_table_pdf();
         let mut doc = OxideDocument::open_bytes(&bytes).expect("open synthetic PDF");
         let skip = HashSet::new();
-        let tables = extract_tables_bordered(&mut doc, &skip).expect("extract_tables_bordered must not error");
+        let (tables, warnings) =
+            extract_tables_bordered(&mut doc, &skip).expect("extract_tables_bordered must not error");
         assert!(
             !tables.is_empty(),
             "extract_tables_bordered must detect the 2-column stroke-bordered table"
@@ -3368,6 +3414,11 @@ mod tests {
         );
         assert_eq!(table.page_number, 1);
         assert!(!table.markdown.trim().is_empty(), "must produce non-empty markdown");
+        assert_eq!(
+            warnings.len(),
+            0,
+            "a successfully detected table must not produce a warning; got: {warnings:?}"
+        );
     }
 
     /// `extract_tables_bordered` must skip pages listed in `skip_pages`.
@@ -3377,10 +3428,47 @@ mod tests {
         let mut doc = OxideDocument::open_bytes(&bytes).expect("open synthetic PDF");
         let mut skip = HashSet::new();
         skip.insert(1u32);
-        let tables = extract_tables_bordered(&mut doc, &skip).expect("extract_tables_bordered must not error");
+        let (tables, warnings) =
+            extract_tables_bordered(&mut doc, &skip).expect("extract_tables_bordered must not error");
         assert!(
             tables.is_empty(),
             "skip_pages={{1}} must suppress the only page; got: {tables:?}"
+        );
+        assert_eq!(
+            warnings.len(),
+            0,
+            "a page suppressed by skip_pages must not produce a warning; got: {warnings:?}"
+        );
+    }
+
+    /// `native_table_extraction_failure_warning` must name the operation
+    /// ("table extraction"), the exact page number, and embed the underlying pdf_oxide
+    /// error, so a per-page native-detection failure is visible to callers instead of
+    /// being indistinguishable from a page that simply has no table.
+    #[test]
+    fn native_table_extraction_failure_warning_names_page_and_cause() {
+        let error = pdf_oxide::Error::InvalidPdf("corrupt content stream".to_string());
+        let warning = native_table_extraction_failure_warning(3, &error);
+        assert_eq!(warning.source.as_ref(), "pdf_tables");
+        assert_eq!(
+            warning.message.as_ref(),
+            "table extraction failed for page 3: Invalid PDF: corrupt content stream; \
+             tables on this page were skipped"
+        );
+    }
+
+    /// `bordered_table_extraction_failure_warning` must name the operation
+    /// ("bordered table extraction"), the exact page number, and embed the underlying
+    /// pdf_oxide error.
+    #[test]
+    fn bordered_table_extraction_failure_warning_names_page_and_cause() {
+        let error = pdf_oxide::Error::InvalidPdf("malformed table grid".to_string());
+        let warning = bordered_table_extraction_failure_warning(7, &error);
+        assert_eq!(warning.source.as_ref(), "pdf_tables");
+        assert_eq!(
+            warning.message.as_ref(),
+            "bordered table extraction failed for page 7: Invalid PDF: malformed table grid; \
+             bordered tables on this page were skipped"
         );
     }
 }

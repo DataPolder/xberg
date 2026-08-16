@@ -39,6 +39,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `cargo install xberg-cli` works again. `tree-sitter-language-pack` 1.15.0 added two required
+  fields to the public `ProcessConfig` struct in a minor release, so every caller constructing it
+  with a struct literal failed to compile with `E0063`. Published 1.0.14 declares `"1.14.1"` under
+  caret semantics and therefore resolves 1.15.0, and `cargo install` cannot pin a transitive
+  dependency, so there was no user-side workaround. The dependency is now upgraded and both fields
+  are set explicitly; they default to `None`, matching the previous unbounded parser behaviour
+  (#1446).
+- Nine features are no longer compiled out of Windows builds. `captioning`, `translation`,
+  `summarization-llm`, `ner-llm`, `redaction-ml`, `redaction-rehydrate`, `static-embeddings`,
+  `enrichment` and `otel` were absent from `windows-target`, so the published Windows wheel and
+  every other binding resolving through it silently lacked that functionality even though each
+  gates real code. Six needed no new dependencies at all; the other three pull only pure-Rust
+  crates. `heic` remains excluded — it needs native libheif via vcpkg (#1443).
+- A PDF page whose table extraction fails is no longer silently dropped. The per-page failure was
+  logged and skipped, so callers received tables from every other page with no way to distinguish
+  the failure from a page that genuinely has no table. Both the native and bordered detectors now
+  report it as a processing warning naming the page and the underlying cause, matching how
+  annotation, image and form-field extraction already surface partial failures.
 - Scanned PDFs now produce formulas. A page whose OCR backend emits plain text only (tesseract on
   a rasterized page) had its layout-detected formula regions silently dropped, because recognition
   only replaced existing formula text and skipped any page whose counts differed. Regions now pair
