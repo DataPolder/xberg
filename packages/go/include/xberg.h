@@ -4797,6 +4797,7 @@ XBERGAlefHandle xberg_file_extraction_config_captioning(XBERGAlefHandle handle);
  */
 int32_t xberg_file_extraction_config_qr_codes(XBERGAlefHandle handle);
 
+#if defined(XBERG_FEATURE_SVG)
 /**
  * Create a `SvgOptions` from a JSON string. Returns null on failure.
  * # Safety
@@ -4804,7 +4805,9 @@ int32_t xberg_file_extraction_config_qr_codes(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_svg_options_free`.
  */
 XBERGAlefHandle xberg_svg_options_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_SVG)
 /**
  * Serialize a `SvgOptions` to a JSON string. Returns null on failure.
  * # Safety
@@ -4812,27 +4815,34 @@ XBERGAlefHandle xberg_svg_options_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_svg_options_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_SVG)
 /**
  * Free a `SvgOptions` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_svg_options_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_SVG)
 /**
  * Get the `sanitize` field from a `SvgOptions`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_svg_options_sanitize(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_SVG)
 /**
  * Get the `render_dpi` field from a `SvgOptions`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 float xberg_svg_options_render_dpi(XBERGAlefHandle handle);
+#endif
 
 /**
  * Create a `ExtractInput` from a JSON string. Returns null on failure.
@@ -5440,6 +5450,7 @@ double xberg_language_detection_config_min_confidence(XBERGAlefHandle handle);
  */
 int32_t xberg_language_detection_config_detect_multiple(XBERGAlefHandle handle);
 
+#if defined(XBERG_FEATURE_HTML)
 /**
  * Create a `HtmlOutputConfig` from a JSON string. Returns null on failure.
  * # Safety
@@ -5447,7 +5458,9 @@ int32_t xberg_language_detection_config_detect_multiple(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_html_output_config_free`.
  */
 XBERGAlefHandle xberg_html_output_config_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_HTML)
 /**
  * Serialize a `HtmlOutputConfig` to a JSON string. Returns null on failure.
  * # Safety
@@ -5455,14 +5468,18 @@ XBERGAlefHandle xberg_html_output_config_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_html_output_config_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HTML)
 /**
  * Free a `HtmlOutputConfig` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_html_output_config_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HTML)
 /**
  * Get the `css` field from a `HtmlOutputConfig`.
  * A non-null returned pointer is owned by the caller.
@@ -5471,7 +5488,9 @@ void xberg_html_output_config_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_html_output_config_css(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HTML)
 /**
  * Get the `css_file` field from a `HtmlOutputConfig`.
  * A non-null returned pointer is owned by the caller.
@@ -5480,7 +5499,9 @@ char *xberg_html_output_config_css(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_html_output_config_css_file(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HTML)
 /**
  * Get the `theme` field from a `HtmlOutputConfig`.
  * A non-null returned handle is owned by the caller.
@@ -5489,7 +5510,9 @@ char *xberg_html_output_config_css_file(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_html_output_config_theme(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HTML)
 /**
  * Get the `class_prefix` field from a `HtmlOutputConfig`.
  * A non-null returned pointer is owned by the caller.
@@ -5498,13 +5521,16 @@ XBERGAlefHandle xberg_html_output_config_theme(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_html_output_config_class_prefix(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HTML)
 /**
  * Get the `embed_css` field from a `HtmlOutputConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_html_output_config_embed_css(XBERGAlefHandle handle);
+#endif
 
 /**
  * Create a `LateInteractionConfig` from a JSON string. Returns null on failure.
@@ -5591,6 +5617,7 @@ XBERGAlefHandle xberg_late_interaction_config_acceleration(XBERGAlefHandle handl
  */
 uint64_t xberg_late_interaction_config_max_embed_duration_secs(XBERGAlefHandle handle);
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Create a `LayoutDetectionConfig` from a JSON string. Returns null on failure.
  * # Safety
@@ -5598,7 +5625,9 @@ uint64_t xberg_late_interaction_config_max_embed_duration_secs(XBERGAlefHandle h
  * Returned handle must be freed with `xberg_layout_detection_config_free`.
  */
 XBERGAlefHandle xberg_layout_detection_config_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Serialize a `LayoutDetectionConfig` to a JSON string. Returns null on failure.
  * # Safety
@@ -5606,14 +5635,18 @@ XBERGAlefHandle xberg_layout_detection_config_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_layout_detection_config_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Free a `LayoutDetectionConfig` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_layout_detection_config_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Get the `strategy` field from a `LayoutDetectionConfig`.
  * A non-null returned handle is owned by the caller.
@@ -5622,21 +5655,27 @@ void xberg_layout_detection_config_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_layout_detection_config_strategy(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Get the `confidence_threshold` field from a `LayoutDetectionConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 float xberg_layout_detection_config_confidence_threshold(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Get the `apply_heuristics` field from a `LayoutDetectionConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_layout_detection_config_apply_heuristics(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Get the `table_model` field from a `LayoutDetectionConfig`.
  * A non-null returned handle is owned by the caller.
@@ -5645,7 +5684,9 @@ int32_t xberg_layout_detection_config_apply_heuristics(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_layout_detection_config_table_model(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Get the `formula_model` field from a `LayoutDetectionConfig`.
  * A non-null returned handle is owned by the caller.
@@ -5654,7 +5695,9 @@ XBERGAlefHandle xberg_layout_detection_config_table_model(XBERGAlefHandle handle
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_layout_detection_config_formula_model(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Get the `table_overlap_preference` field from a `LayoutDetectionConfig`.
  * A non-null returned handle is owned by the caller.
@@ -5663,7 +5706,9 @@ XBERGAlefHandle xberg_layout_detection_config_formula_model(XBERGAlefHandle hand
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_layout_detection_config_table_overlap_preference(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Get the `acceleration` field from a `LayoutDetectionConfig`.
  * A non-null returned handle is owned by the caller.
@@ -5672,13 +5717,16 @@ XBERGAlefHandle xberg_layout_detection_config_table_overlap_preference(XBERGAlef
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_layout_detection_config_acceleration(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Get the `enable_chart_understanding` field from a `LayoutDetectionConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_layout_detection_config_enable_chart_understanding(XBERGAlefHandle handle);
+#endif
 
 /**
  * Create a `LlmConfig` from a JSON string. Returns null on failure.
@@ -6841,6 +6889,7 @@ int32_t xberg_page_config_insert_page_markers(XBERGAlefHandle handle);
  */
 char *xberg_page_config_marker_format(XBERGAlefHandle handle);
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Create a `PdfConfig` from a JSON string. Returns null on failure.
  * # Safety
@@ -6848,7 +6897,9 @@ char *xberg_page_config_marker_format(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_pdf_config_free`.
  */
 XBERGAlefHandle xberg_pdf_config_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Serialize a `PdfConfig` to a JSON string. Returns null on failure.
  * # Safety
@@ -6856,28 +6907,36 @@ XBERGAlefHandle xberg_pdf_config_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_pdf_config_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Free a `PdfConfig` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_pdf_config_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Get the `extract_images` field from a `PdfConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_pdf_config_extract_images(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Get the `extract_tables` field from a `PdfConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_pdf_config_extract_tables(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Get the `passwords` field from a `PdfConfig`.
  * A non-null returned pointer is owned by the caller.
@@ -6886,14 +6945,18 @@ int32_t xberg_pdf_config_extract_tables(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_pdf_config_passwords(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Get the `extract_metadata` field from a `PdfConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_pdf_config_extract_metadata(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Get the `hierarchy` field from a `PdfConfig`.
  * A non-null returned handle is owned by the caller.
@@ -6902,56 +6965,72 @@ int32_t xberg_pdf_config_extract_metadata(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_pdf_config_hierarchy(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Get the `extract_annotations` field from a `PdfConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_pdf_config_extract_annotations(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Get the `top_margin_fraction` field from a `PdfConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 float xberg_pdf_config_top_margin_fraction(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Get the `bottom_margin_fraction` field from a `PdfConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 float xberg_pdf_config_bottom_margin_fraction(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Get the `allow_single_column_tables` field from a `PdfConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_pdf_config_allow_single_column_tables(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Get the `ocr_inline_images` field from a `PdfConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_pdf_config_ocr_inline_images(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Get the `extract_form_fields` field from a `PdfConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_pdf_config_extract_form_fields(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Get the `reading_order` field from a `PdfConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_pdf_config_reading_order(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Create a `HierarchyConfig` from a JSON string. Returns null on failure.
  * # Safety
@@ -6959,7 +7038,9 @@ int32_t xberg_pdf_config_reading_order(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_hierarchy_config_free`.
  */
 XBERGAlefHandle xberg_hierarchy_config_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Serialize a `HierarchyConfig` to a JSON string. Returns null on failure.
  * # Safety
@@ -6967,34 +7048,43 @@ XBERGAlefHandle xberg_hierarchy_config_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_hierarchy_config_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Free a `HierarchyConfig` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_hierarchy_config_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Get the `enabled` field from a `HierarchyConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_hierarchy_config_enabled(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Get the `k_clusters` field from a `HierarchyConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uintptr_t xberg_hierarchy_config_k_clusters(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Get the `include_bbox` field from a `HierarchyConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_hierarchy_config_include_bbox(XBERGAlefHandle handle);
+#endif
 
 /**
  * Create a `PostProcessorConfig` from a JSON string. Returns null on failure.
@@ -7688,6 +7778,7 @@ uint32_t xberg_summarization_config_max_tokens(XBERGAlefHandle handle);
  */
 XBERGAlefHandle xberg_summarization_config_llm(XBERGAlefHandle handle);
 
+#if defined(XBERG_FEATURE_TRANSCRIPTION_TYPES)
 /**
  * Create a `TranscriptionConfig` from a JSON string. Returns null on failure.
  * # Safety
@@ -7695,7 +7786,9 @@ XBERGAlefHandle xberg_summarization_config_llm(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_transcription_config_free`.
  */
 XBERGAlefHandle xberg_transcription_config_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_TRANSCRIPTION_TYPES)
 /**
  * Serialize a `TranscriptionConfig` to a JSON string. Returns null on failure.
  * # Safety
@@ -7703,21 +7796,27 @@ XBERGAlefHandle xberg_transcription_config_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_transcription_config_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TRANSCRIPTION_TYPES)
 /**
  * Free a `TranscriptionConfig` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_transcription_config_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TRANSCRIPTION_TYPES)
 /**
  * Get the `enabled` field from a `TranscriptionConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_transcription_config_enabled(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TRANSCRIPTION_TYPES)
 /**
  * Get the `model` field from a `TranscriptionConfig`.
  * A non-null returned handle is owned by the caller.
@@ -7726,7 +7825,9 @@ int32_t xberg_transcription_config_enabled(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_transcription_config_model(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TRANSCRIPTION_TYPES)
 /**
  * Get the `language` field from a `TranscriptionConfig`.
  * A non-null returned pointer is owned by the caller.
@@ -7735,35 +7836,45 @@ XBERGAlefHandle xberg_transcription_config_model(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_transcription_config_language(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TRANSCRIPTION_TYPES)
 /**
  * Get the `timestamps` field from a `TranscriptionConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_transcription_config_timestamps(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TRANSCRIPTION_TYPES)
 /**
  * Get the `max_duration_ms` field from a `TranscriptionConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint64_t xberg_transcription_config_max_duration_ms(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TRANSCRIPTION_TYPES)
 /**
  * Get the `max_bytes` field from a `TranscriptionConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint64_t xberg_transcription_config_max_bytes(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TRANSCRIPTION_TYPES)
 /**
  * Get the `timeout_ms` field from a `TranscriptionConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint64_t xberg_transcription_config_timeout_ms(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TRANSCRIPTION_TYPES)
 /**
  * Get the `model_cache_dir` field from a `TranscriptionConfig`.
  * A non-null returned pointer is owned by the caller.
@@ -7772,20 +7883,25 @@ uint64_t xberg_transcription_config_timeout_ms(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_transcription_config_model_cache_dir(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TRANSCRIPTION_TYPES)
 /**
  * Get the `allow_network` field from a `TranscriptionConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_transcription_config_allow_network(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TRANSCRIPTION_TYPES)
 /**
  * Get the `verify_hash` field from a `TranscriptionConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_transcription_config_verify_hash(XBERGAlefHandle handle);
+#endif
 
 /**
  * Create a `TranslationConfig` from a JSON string. Returns null on failure.
@@ -7844,6 +7960,7 @@ int32_t xberg_translation_config_preserve_markup(XBERGAlefHandle handle);
  */
 XBERGAlefHandle xberg_translation_config_llm(XBERGAlefHandle handle);
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Create a `TreeSitterConfig` from a JSON string. Returns null on failure.
  * # Safety
@@ -7851,7 +7968,9 @@ XBERGAlefHandle xberg_translation_config_llm(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_tree_sitter_config_free`.
  */
 XBERGAlefHandle xberg_tree_sitter_config_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Serialize a `TreeSitterConfig` to a JSON string. Returns null on failure.
  * # Safety
@@ -7859,21 +7978,27 @@ XBERGAlefHandle xberg_tree_sitter_config_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_tree_sitter_config_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Free a `TreeSitterConfig` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_tree_sitter_config_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Get the `enabled` field from a `TreeSitterConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_tree_sitter_config_enabled(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Get the `cache_dir` field from a `TreeSitterConfig`.
  * A non-null returned pointer is owned by the caller.
@@ -7882,7 +8007,9 @@ int32_t xberg_tree_sitter_config_enabled(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_tree_sitter_config_cache_dir(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Get the `languages` field from a `TreeSitterConfig`.
  * A non-null returned pointer is owned by the caller.
@@ -7891,7 +8018,9 @@ char *xberg_tree_sitter_config_cache_dir(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_tree_sitter_config_languages(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Get the `groups` field from a `TreeSitterConfig`.
  * A non-null returned pointer is owned by the caller.
@@ -7900,7 +8029,9 @@ char *xberg_tree_sitter_config_languages(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_tree_sitter_config_groups(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Get the `process` field from a `TreeSitterConfig`.
  * A non-null returned handle is owned by the caller.
@@ -7909,7 +8040,9 @@ char *xberg_tree_sitter_config_groups(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_tree_sitter_config_process(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Create a `TreeSitterProcessConfig` from a JSON string. Returns null on failure.
  * # Safety
@@ -7917,7 +8050,9 @@ XBERGAlefHandle xberg_tree_sitter_config_process(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_tree_sitter_process_config_free`.
  */
 XBERGAlefHandle xberg_tree_sitter_process_config_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Serialize a `TreeSitterProcessConfig` to a JSON string. Returns null on failure.
  * # Safety
@@ -7925,77 +8060,99 @@ XBERGAlefHandle xberg_tree_sitter_process_config_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_tree_sitter_process_config_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Free a `TreeSitterProcessConfig` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_tree_sitter_process_config_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Get the `structure` field from a `TreeSitterProcessConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_tree_sitter_process_config_structure(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Get the `imports` field from a `TreeSitterProcessConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_tree_sitter_process_config_imports(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Get the `exports` field from a `TreeSitterProcessConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_tree_sitter_process_config_exports(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Get the `comments` field from a `TreeSitterProcessConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_tree_sitter_process_config_comments(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Get the `docstrings` field from a `TreeSitterProcessConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_tree_sitter_process_config_docstrings(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Get the `symbols` field from a `TreeSitterProcessConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_tree_sitter_process_config_symbols(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Get the `diagnostics` field from a `TreeSitterProcessConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_tree_sitter_process_config_diagnostics(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Get the `data_extraction` field from a `TreeSitterProcessConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_tree_sitter_process_config_data_extraction(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Get the `chunk_max_size` field from a `TreeSitterProcessConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uintptr_t xberg_tree_sitter_process_config_chunk_max_size(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Get the `content_mode` field from a `TreeSitterProcessConfig`.
  * A non-null returned handle is owned by the caller.
@@ -8004,6 +8161,7 @@ uintptr_t xberg_tree_sitter_process_config_chunk_max_size(XBERGAlefHandle handle
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_tree_sitter_process_config_content_mode(XBERGAlefHandle handle);
+#endif
 
 /**
  * Create a `SupportedFormat` from a JSON string. Returns null on failure.
@@ -8046,6 +8204,7 @@ char *xberg_supported_format_extension(XBERGAlefHandle handle);
  */
 char *xberg_supported_format_mime_type(XBERGAlefHandle handle);
 
+#if defined(XBERG_FEATURE_API_TYPES)
 /**
  * Create a `ServerConfig` from a JSON string. Returns null on failure.
  * # Safety
@@ -8053,7 +8212,9 @@ char *xberg_supported_format_mime_type(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_server_config_free`.
  */
 XBERGAlefHandle xberg_server_config_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_API_TYPES)
 /**
  * Serialize a `ServerConfig` to a JSON string. Returns null on failure.
  * # Safety
@@ -8061,14 +8222,18 @@ XBERGAlefHandle xberg_server_config_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_server_config_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_API_TYPES)
 /**
  * Free a `ServerConfig` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_server_config_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_API_TYPES)
 /**
  * Get the `host` field from a `ServerConfig`.
  * A non-null returned pointer is owned by the caller.
@@ -8077,14 +8242,18 @@ void xberg_server_config_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_server_config_host(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_API_TYPES)
 /**
  * Get the `port` field from a `ServerConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint16_t xberg_server_config_port(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_API_TYPES)
 /**
  * Get the `cors_origins` field from a `ServerConfig`.
  * A non-null returned pointer is owned by the caller.
@@ -8093,21 +8262,27 @@ uint16_t xberg_server_config_port(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_server_config_cors_origins(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_API_TYPES)
 /**
  * Get the `max_request_body_bytes` field from a `ServerConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uintptr_t xberg_server_config_max_request_body_bytes(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_API_TYPES)
 /**
  * Get the `max_multipart_field_bytes` field from a `ServerConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uintptr_t xberg_server_config_max_multipart_field_bytes(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_API_TYPES)
 /**
  * Get the server listen address (host:port).
  * \note SAFETY: Caller must ensure all pointer arguments are valid or null. Returned pointers must be
@@ -8120,7 +8295,9 @@ uintptr_t xberg_server_config_max_multipart_field_bytes(XBERGAlefHandle handle);
  * \endcode
  */
 char *xberg_server_config_listen_addr(XBERGAlefHandle this_);
+#endif
 
+#if defined(XBERG_FEATURE_API_TYPES)
 /**
  * Check if CORS allows all origins.
  *
@@ -8139,7 +8316,9 @@ char *xberg_server_config_listen_addr(XBERGAlefHandle this_);
  * \endcode
  */
 int32_t xberg_server_config_cors_allows_all(XBERGAlefHandle this_);
+#endif
 
+#if defined(XBERG_FEATURE_API_TYPES)
 /**
  * Check if a given origin is allowed by CORS configuration.
  *
@@ -8162,7 +8341,9 @@ int32_t xberg_server_config_cors_allows_all(XBERGAlefHandle this_);
  */
 int32_t xberg_server_config_is_origin_allowed(XBERGAlefHandle this_,
                                               const char *origin);
+#endif
 
+#if defined(XBERG_FEATURE_API_TYPES)
 /**
  * Get maximum request body size in megabytes (rounded up).
  * \note SAFETY: Caller must ensure all pointer arguments are valid or null. Returned pointers must be
@@ -8175,7 +8356,9 @@ int32_t xberg_server_config_is_origin_allowed(XBERGAlefHandle this_,
  * \endcode
  */
 uintptr_t xberg_server_config_max_request_body_mb(XBERGAlefHandle this_);
+#endif
 
+#if defined(XBERG_FEATURE_API_TYPES)
 /**
  * Get maximum multipart field size in megabytes (rounded up).
  * \note SAFETY: Caller must ensure all pointer arguments are valid or null. Returned pointers must be
@@ -8188,6 +8371,7 @@ uintptr_t xberg_server_config_max_request_body_mb(XBERGAlefHandle this_);
  * \endcode
  */
 uintptr_t xberg_server_config_max_multipart_field_mb(XBERGAlefHandle this_);
+#endif
 
 /**
  * Create a `StructuredDataResult` from a JSON string. Returns null on failure.
@@ -8266,6 +8450,7 @@ char *xberg_structured_data_result_value(XBERGAlefHandle handle);
  */
 char *xberg_structured_data_result_flattened(XBERGAlefHandle handle);
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Create a `DocxAppProperties` from a JSON string. Returns null on failure.
  * # Safety
@@ -8273,7 +8458,9 @@ char *xberg_structured_data_result_flattened(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_docx_app_properties_free`.
  */
 XBERGAlefHandle xberg_docx_app_properties_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Serialize a `DocxAppProperties` to a JSON string. Returns null on failure.
  * # Safety
@@ -8281,14 +8468,18 @@ XBERGAlefHandle xberg_docx_app_properties_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_docx_app_properties_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Free a `DocxAppProperties` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_docx_app_properties_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Get the `application` field from a `DocxAppProperties`.
  * A non-null returned pointer is owned by the caller.
@@ -8297,7 +8488,9 @@ void xberg_docx_app_properties_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_docx_app_properties_application(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Get the `app_version` field from a `DocxAppProperties`.
  * A non-null returned pointer is owned by the caller.
@@ -8306,7 +8499,9 @@ char *xberg_docx_app_properties_application(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_docx_app_properties_app_version(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Get the `template` field from a `DocxAppProperties`.
  * A non-null returned pointer is owned by the caller.
@@ -8315,56 +8510,72 @@ char *xberg_docx_app_properties_app_version(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_docx_app_properties_template(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Get the `total_time` field from a `DocxAppProperties`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_docx_app_properties_total_time(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Get the `pages` field from a `DocxAppProperties`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_docx_app_properties_pages(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Get the `words` field from a `DocxAppProperties`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_docx_app_properties_words(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Get the `characters` field from a `DocxAppProperties`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_docx_app_properties_characters(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Get the `characters_with_spaces` field from a `DocxAppProperties`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_docx_app_properties_characters_with_spaces(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Get the `lines` field from a `DocxAppProperties`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_docx_app_properties_lines(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Get the `paragraphs` field from a `DocxAppProperties`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_docx_app_properties_paragraphs(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Get the `company` field from a `DocxAppProperties`.
  * A non-null returned pointer is owned by the caller.
@@ -8373,41 +8584,52 @@ int32_t xberg_docx_app_properties_paragraphs(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_docx_app_properties_company(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Get the `doc_security` field from a `DocxAppProperties`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_docx_app_properties_doc_security(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Get the `scale_crop` field from a `DocxAppProperties`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_docx_app_properties_scale_crop(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Get the `links_up_to_date` field from a `DocxAppProperties`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_docx_app_properties_links_up_to_date(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Get the `shared_doc` field from a `DocxAppProperties`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_docx_app_properties_shared_doc(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Get the `hyperlinks_changed` field from a `DocxAppProperties`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_docx_app_properties_hyperlinks_changed(XBERGAlefHandle handle);
+#endif
 
 /**
  * Create a `XlsxAppProperties` from a JSON string. Returns null on failure.
@@ -8641,6 +8863,7 @@ char *xberg_pptx_app_properties_presentation_format(XBERGAlefHandle handle);
  */
 char *xberg_pptx_app_properties_slide_titles(XBERGAlefHandle handle);
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Create a `CoreProperties` from a JSON string. Returns null on failure.
  * # Safety
@@ -8648,7 +8871,9 @@ char *xberg_pptx_app_properties_slide_titles(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_core_properties_free`.
  */
 XBERGAlefHandle xberg_core_properties_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Serialize a `CoreProperties` to a JSON string. Returns null on failure.
  * # Safety
@@ -8656,14 +8881,18 @@ XBERGAlefHandle xberg_core_properties_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_core_properties_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Free a `CoreProperties` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_core_properties_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Get the `title` field from a `CoreProperties`.
  * A non-null returned pointer is owned by the caller.
@@ -8672,7 +8901,9 @@ void xberg_core_properties_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_core_properties_title(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Get the `subject` field from a `CoreProperties`.
  * A non-null returned pointer is owned by the caller.
@@ -8681,7 +8912,9 @@ char *xberg_core_properties_title(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_core_properties_subject(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Get the `creator` field from a `CoreProperties`.
  * A non-null returned pointer is owned by the caller.
@@ -8690,7 +8923,9 @@ char *xberg_core_properties_subject(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_core_properties_creator(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Get the `keywords` field from a `CoreProperties`.
  * A non-null returned pointer is owned by the caller.
@@ -8699,7 +8934,9 @@ char *xberg_core_properties_creator(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_core_properties_keywords(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Get the `description` field from a `CoreProperties`.
  * A non-null returned pointer is owned by the caller.
@@ -8708,7 +8945,9 @@ char *xberg_core_properties_keywords(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_core_properties_description(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Get the `last_modified_by` field from a `CoreProperties`.
  * A non-null returned pointer is owned by the caller.
@@ -8717,7 +8956,9 @@ char *xberg_core_properties_description(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_core_properties_last_modified_by(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Get the `revision` field from a `CoreProperties`.
  * A non-null returned pointer is owned by the caller.
@@ -8726,7 +8967,9 @@ char *xberg_core_properties_last_modified_by(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_core_properties_revision(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Get the `created` field from a `CoreProperties`.
  * A non-null returned pointer is owned by the caller.
@@ -8735,7 +8978,9 @@ char *xberg_core_properties_revision(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_core_properties_created(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Get the `modified` field from a `CoreProperties`.
  * A non-null returned pointer is owned by the caller.
@@ -8744,7 +8989,9 @@ char *xberg_core_properties_created(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_core_properties_modified(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Get the `category` field from a `CoreProperties`.
  * A non-null returned pointer is owned by the caller.
@@ -8753,7 +9000,9 @@ char *xberg_core_properties_modified(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_core_properties_category(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Get the `content_status` field from a `CoreProperties`.
  * A non-null returned pointer is owned by the caller.
@@ -8762,7 +9011,9 @@ char *xberg_core_properties_category(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_core_properties_content_status(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Get the `language` field from a `CoreProperties`.
  * A non-null returned pointer is owned by the caller.
@@ -8771,7 +9022,9 @@ char *xberg_core_properties_content_status(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_core_properties_language(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Get the `identifier` field from a `CoreProperties`.
  * A non-null returned pointer is owned by the caller.
@@ -8780,7 +9033,9 @@ char *xberg_core_properties_language(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_core_properties_identifier(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Get the `version` field from a `CoreProperties`.
  * A non-null returned pointer is owned by the caller.
@@ -8789,7 +9044,9 @@ char *xberg_core_properties_identifier(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_core_properties_version(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Get the `last_printed` field from a `CoreProperties`.
  * A non-null returned pointer is owned by the caller.
@@ -8798,6 +9055,7 @@ char *xberg_core_properties_version(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_core_properties_last_printed(XBERGAlefHandle handle);
+#endif
 
 /**
  * Create a `SecurityLimits` from a JSON string. Returns null on failure.
@@ -8885,6 +9143,7 @@ uintptr_t xberg_security_limits_max_xml_depth(XBERGAlefHandle handle);
  */
 uintptr_t xberg_security_limits_max_table_cells(XBERGAlefHandle handle);
 
+#if defined(XBERG_FEATURE_QUALITY)
 /**
  * Create a `TokenReductionConfig` from a JSON string. Returns null on failure.
  * # Safety
@@ -8892,7 +9151,9 @@ uintptr_t xberg_security_limits_max_table_cells(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_token_reduction_config_free`.
  */
 XBERGAlefHandle xberg_token_reduction_config_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_QUALITY)
 /**
  * Serialize a `TokenReductionConfig` to a JSON string. Returns null on failure.
  * # Safety
@@ -8900,14 +9161,18 @@ XBERGAlefHandle xberg_token_reduction_config_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_token_reduction_config_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_QUALITY)
 /**
  * Free a `TokenReductionConfig` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_token_reduction_config_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_QUALITY)
 /**
  * Get the `level` field from a `TokenReductionConfig`.
  * A non-null returned handle is owned by the caller.
@@ -8916,7 +9181,9 @@ void xberg_token_reduction_config_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_token_reduction_config_level(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_QUALITY)
 /**
  * Get the `language_hint` field from a `TokenReductionConfig`.
  * A non-null returned pointer is owned by the caller.
@@ -8925,42 +9192,54 @@ XBERGAlefHandle xberg_token_reduction_config_level(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_token_reduction_config_language_hint(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_QUALITY)
 /**
  * Get the `preserve_markdown` field from a `TokenReductionConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_token_reduction_config_preserve_markdown(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_QUALITY)
 /**
  * Get the `preserve_code` field from a `TokenReductionConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_token_reduction_config_preserve_code(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_QUALITY)
 /**
  * Get the `semantic_threshold` field from a `TokenReductionConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 float xberg_token_reduction_config_semantic_threshold(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_QUALITY)
 /**
  * Get the `enable_parallel` field from a `TokenReductionConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_token_reduction_config_enable_parallel(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_QUALITY)
 /**
  * Get the `use_simd` field from a `TokenReductionConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_token_reduction_config_use_simd(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_QUALITY)
 /**
  * Get the `custom_stopwords` field from a `TokenReductionConfig`.
  * A non-null returned pointer is owned by the caller.
@@ -8969,7 +9248,9 @@ int32_t xberg_token_reduction_config_use_simd(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_token_reduction_config_custom_stopwords(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_QUALITY)
 /**
  * Get the `preserve_patterns` field from a `TokenReductionConfig`.
  * A non-null returned pointer is owned by the caller.
@@ -8978,27 +9259,34 @@ char *xberg_token_reduction_config_custom_stopwords(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_token_reduction_config_preserve_patterns(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_QUALITY)
 /**
  * Get the `target_reduction` field from a `TokenReductionConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 float xberg_token_reduction_config_target_reduction(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_QUALITY)
 /**
  * Get the `enable_semantic_clustering` field from a `TokenReductionConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_token_reduction_config_enable_semantic_clustering(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_QUALITY)
 /**
  * Get the `preserve_important_words` field from a `TokenReductionConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_token_reduction_config_preserve_important_words(XBERGAlefHandle handle);
+#endif
 
 /**
  * Create a `PatternMatch` from a JSON string. Returns null on failure.
@@ -9055,15 +9343,20 @@ XBERGAlefHandle xberg_pattern_match_category(XBERGAlefHandle handle);
  */
 char *xberg_pattern_match_text(XBERGAlefHandle handle);
 
+#if defined(XBERG_FEATURE_REDACTION)
 /**
  * Free a `TokenCounter` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_token_counter_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_REDACTION)
 XBERGAlefHandle xberg_token_counter_new(void);
+#endif
 
+#if defined(XBERG_FEATURE_MARKDOWN_FOOTNOTES)
 /**
  * Create a `FootnoteConfig` from a JSON string. Returns null on failure.
  * # Safety
@@ -9071,7 +9364,9 @@ XBERGAlefHandle xberg_token_counter_new(void);
  * Returned handle must be freed with `xberg_footnote_config_free`.
  */
 XBERGAlefHandle xberg_footnote_config_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_MARKDOWN_FOOTNOTES)
 /**
  * Serialize a `FootnoteConfig` to a JSON string. Returns null on failure.
  * # Safety
@@ -9079,21 +9374,27 @@ XBERGAlefHandle xberg_footnote_config_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_footnote_config_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_MARKDOWN_FOOTNOTES)
 /**
  * Free a `FootnoteConfig` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_footnote_config_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_MARKDOWN_FOOTNOTES)
 /**
  * Get the `parse_citations` field from a `FootnoteConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_footnote_config_parse_citations(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_MARKDOWN_FOOTNOTES)
 /**
  * Set whether to parse the citation block.
  * \note SAFETY: Caller must ensure all pointer arguments are valid or null. Returned pointers must be
@@ -9101,7 +9402,9 @@ int32_t xberg_footnote_config_parse_citations(XBERGAlefHandle handle);
  */
 XBERGAlefHandle xberg_footnote_config_with_parse_citations(XBERGAlefHandle this_,
                                                            int32_t enabled);
+#endif
 
+#if defined(XBERG_FEATURE_MARKDOWN_FOOTNOTES)
 /**
  * Create a `FootnoteAnchor` from a JSON string. Returns null on failure.
  * # Safety
@@ -9109,7 +9412,9 @@ XBERGAlefHandle xberg_footnote_config_with_parse_citations(XBERGAlefHandle this_
  * Returned handle must be freed with `xberg_footnote_anchor_free`.
  */
 XBERGAlefHandle xberg_footnote_anchor_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_MARKDOWN_FOOTNOTES)
 /**
  * Serialize a `FootnoteAnchor` to a JSON string. Returns null on failure.
  * # Safety
@@ -9117,14 +9422,18 @@ XBERGAlefHandle xberg_footnote_anchor_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_footnote_anchor_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_MARKDOWN_FOOTNOTES)
 /**
  * Free a `FootnoteAnchor` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_footnote_anchor_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_MARKDOWN_FOOTNOTES)
 /**
  * Get the `label` field from a `FootnoteAnchor`.
  * A non-null returned pointer is owned by the caller.
@@ -9133,14 +9442,18 @@ void xberg_footnote_anchor_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_footnote_anchor_label(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_MARKDOWN_FOOTNOTES)
 /**
  * Get the `offset` field from a `FootnoteAnchor`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uintptr_t xberg_footnote_anchor_offset(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_MARKDOWN_FOOTNOTES)
 /**
  * Create a `FootnoteDefinition` from a JSON string. Returns null on failure.
  * # Safety
@@ -9148,7 +9461,9 @@ uintptr_t xberg_footnote_anchor_offset(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_footnote_definition_free`.
  */
 XBERGAlefHandle xberg_footnote_definition_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_MARKDOWN_FOOTNOTES)
 /**
  * Serialize a `FootnoteDefinition` to a JSON string. Returns null on failure.
  * # Safety
@@ -9156,14 +9471,18 @@ XBERGAlefHandle xberg_footnote_definition_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_footnote_definition_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_MARKDOWN_FOOTNOTES)
 /**
  * Free a `FootnoteDefinition` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_footnote_definition_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_MARKDOWN_FOOTNOTES)
 /**
  * Get the `label` field from a `FootnoteDefinition`.
  * A non-null returned pointer is owned by the caller.
@@ -9172,7 +9491,9 @@ void xberg_footnote_definition_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_footnote_definition_label(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_MARKDOWN_FOOTNOTES)
 /**
  * Get the `content` field from a `FootnoteDefinition`.
  * A non-null returned pointer is owned by the caller.
@@ -9181,14 +9502,18 @@ char *xberg_footnote_definition_label(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_footnote_definition_content(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_MARKDOWN_FOOTNOTES)
 /**
  * Get the `offset` field from a `FootnoteDefinition`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uintptr_t xberg_footnote_definition_offset(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_MARKDOWN_FOOTNOTES)
 /**
  * Create a `Citation` from a JSON string. Returns null on failure.
  * # Safety
@@ -9196,7 +9521,9 @@ uintptr_t xberg_footnote_definition_offset(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_citation_free`.
  */
 XBERGAlefHandle xberg_citation_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_MARKDOWN_FOOTNOTES)
 /**
  * Serialize a `Citation` to a JSON string. Returns null on failure.
  * # Safety
@@ -9204,14 +9531,18 @@ XBERGAlefHandle xberg_citation_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_citation_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_MARKDOWN_FOOTNOTES)
 /**
  * Free a `Citation` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_citation_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_MARKDOWN_FOOTNOTES)
 /**
  * Get the `label` field from a `Citation`.
  * A non-null returned pointer is owned by the caller.
@@ -9220,7 +9551,9 @@ void xberg_citation_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_citation_label(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_MARKDOWN_FOOTNOTES)
 /**
  * Get the `source` field from a `Citation`.
  * A non-null returned pointer is owned by the caller.
@@ -9229,7 +9562,9 @@ char *xberg_citation_label(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_citation_source(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_MARKDOWN_FOOTNOTES)
 /**
  * Get the `locator` field from a `Citation`.
  * A non-null returned pointer is owned by the caller.
@@ -9238,7 +9573,9 @@ char *xberg_citation_source(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_citation_locator(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_MARKDOWN_FOOTNOTES)
 /**
  * Get the `excerpt` field from a `Citation`.
  * A non-null returned pointer is owned by the caller.
@@ -9247,6 +9584,7 @@ char *xberg_citation_locator(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_citation_excerpt(XBERGAlefHandle handle);
+#endif
 
 /**
  * Create a `PdfAnnotation` from a JSON string. Returns null on failure.
@@ -12748,6 +13086,7 @@ XBERGAlefHandle xberg_formula_bbox(XBERGAlefHandle handle);
  */
 uint32_t xberg_formula_page(XBERGAlefHandle handle);
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Create a `CodeMetadata` from a JSON string. Returns null on failure.
  * # Safety
@@ -12755,7 +13094,9 @@ uint32_t xberg_formula_page(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_code_metadata_free`.
  */
 XBERGAlefHandle xberg_code_metadata_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Serialize a `CodeMetadata` to a JSON string. Returns null on failure.
  * # Safety
@@ -12763,14 +13104,18 @@ XBERGAlefHandle xberg_code_metadata_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_code_metadata_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Free a `CodeMetadata` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_code_metadata_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Get the `chunks` field from a `CodeMetadata`.
  * A non-null returned pointer is owned by the caller.
@@ -12779,7 +13124,9 @@ void xberg_code_metadata_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_code_metadata_chunks(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Get the `data` field from a `CodeMetadata`.
  * A non-null returned handle is owned by the caller.
@@ -12788,7 +13135,9 @@ char *xberg_code_metadata_chunks(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_code_metadata_data(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Create a `CodeChunkInfo` from a JSON string. Returns null on failure.
  * # Safety
@@ -12796,7 +13145,9 @@ XBERGAlefHandle xberg_code_metadata_data(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_code_chunk_info_free`.
  */
 XBERGAlefHandle xberg_code_chunk_info_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Serialize a `CodeChunkInfo` to a JSON string. Returns null on failure.
  * # Safety
@@ -12804,14 +13155,18 @@ XBERGAlefHandle xberg_code_chunk_info_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_code_chunk_info_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Free a `CodeChunkInfo` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_code_chunk_info_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Get the `text` field from a `CodeChunkInfo`.
  * A non-null returned pointer is owned by the caller.
@@ -12820,7 +13175,9 @@ void xberg_code_chunk_info_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_code_chunk_info_text(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Get the `context_path` field from a `CodeChunkInfo`.
  * A non-null returned pointer is owned by the caller.
@@ -12829,7 +13186,9 @@ char *xberg_code_chunk_info_text(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_code_chunk_info_context_path(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Get the `node_types` field from a `CodeChunkInfo`.
  * A non-null returned pointer is owned by the caller.
@@ -12838,21 +13197,27 @@ char *xberg_code_chunk_info_context_path(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_code_chunk_info_node_types(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Get the `byte_start` field from a `CodeChunkInfo`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uintptr_t xberg_code_chunk_info_byte_start(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Get the `byte_end` field from a `CodeChunkInfo`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uintptr_t xberg_code_chunk_info_byte_end(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Create a `CodeDataAttribute` from a JSON string. Returns null on failure.
  * # Safety
@@ -12860,7 +13225,9 @@ uintptr_t xberg_code_chunk_info_byte_end(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_code_data_attribute_free`.
  */
 XBERGAlefHandle xberg_code_data_attribute_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Serialize a `CodeDataAttribute` to a JSON string. Returns null on failure.
  * # Safety
@@ -12868,14 +13235,18 @@ XBERGAlefHandle xberg_code_data_attribute_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_code_data_attribute_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Free a `CodeDataAttribute` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_code_data_attribute_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Get the `name` field from a `CodeDataAttribute`.
  * A non-null returned pointer is owned by the caller.
@@ -12884,7 +13255,9 @@ void xberg_code_data_attribute_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_code_data_attribute_name(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Get the `value` field from a `CodeDataAttribute`.
  * A non-null returned pointer is owned by the caller.
@@ -12893,21 +13266,27 @@ char *xberg_code_data_attribute_name(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_code_data_attribute_value(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Get the `byte_start` field from a `CodeDataAttribute`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uintptr_t xberg_code_data_attribute_byte_start(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Get the `byte_end` field from a `CodeDataAttribute`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uintptr_t xberg_code_data_attribute_byte_end(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Create a `CodeDataNode` from a JSON string. Returns null on failure.
  * # Safety
@@ -12915,7 +13294,9 @@ uintptr_t xberg_code_data_attribute_byte_end(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_code_data_node_free`.
  */
 XBERGAlefHandle xberg_code_data_node_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Serialize a `CodeDataNode` to a JSON string. Returns null on failure.
  * # Safety
@@ -12923,14 +13304,18 @@ XBERGAlefHandle xberg_code_data_node_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_code_data_node_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Free a `CodeDataNode` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_code_data_node_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Get the `kind` field from a `CodeDataNode`.
  * A non-null returned handle is owned by the caller.
@@ -12939,7 +13324,9 @@ void xberg_code_data_node_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_code_data_node_kind(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Get the `key` field from a `CodeDataNode`.
  * A non-null returned pointer is owned by the caller.
@@ -12948,7 +13335,9 @@ XBERGAlefHandle xberg_code_data_node_kind(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_code_data_node_key(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Get the `value` field from a `CodeDataNode`.
  * A non-null returned pointer is owned by the caller.
@@ -12957,7 +13346,9 @@ char *xberg_code_data_node_key(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_code_data_node_value(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Get the `attributes` field from a `CodeDataNode`.
  * A non-null returned pointer is owned by the caller.
@@ -12966,7 +13357,9 @@ char *xberg_code_data_node_value(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_code_data_node_attributes(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Get the `children` field from a `CodeDataNode`.
  * A non-null returned pointer is owned by the caller.
@@ -12975,20 +13368,25 @@ char *xberg_code_data_node_attributes(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_code_data_node_children(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Get the `byte_start` field from a `CodeDataNode`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uintptr_t xberg_code_data_node_byte_start(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Get the `byte_end` field from a `CodeDataNode`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uintptr_t xberg_code_data_node_byte_end(XBERGAlefHandle handle);
+#endif
 
 /**
  * Create a `Metadata` from a JSON string. Returns null on failure.
@@ -14109,6 +14507,7 @@ uint32_t xberg_pptx_metadata_image_count(XBERGAlefHandle handle);
  */
 uint32_t xberg_pptx_metadata_table_count(XBERGAlefHandle handle);
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Create a `DocxMetadata` from a JSON string. Returns null on failure.
  * # Safety
@@ -14116,7 +14515,9 @@ uint32_t xberg_pptx_metadata_table_count(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_docx_metadata_free`.
  */
 XBERGAlefHandle xberg_docx_metadata_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Serialize a `DocxMetadata` to a JSON string. Returns null on failure.
  * # Safety
@@ -14124,14 +14525,18 @@ XBERGAlefHandle xberg_docx_metadata_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_docx_metadata_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Free a `DocxMetadata` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_docx_metadata_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Get the `core_properties` field from a `DocxMetadata`.
  * A non-null returned handle is owned by the caller.
@@ -14140,7 +14545,9 @@ void xberg_docx_metadata_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_docx_metadata_core_properties(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Get the `app_properties` field from a `DocxMetadata`.
  * A non-null returned handle is owned by the caller.
@@ -14149,7 +14556,9 @@ XBERGAlefHandle xberg_docx_metadata_core_properties(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_docx_metadata_app_properties(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_OFFICE)
 /**
  * Get the `custom_properties` field from a `DocxMetadata`.
  * A non-null returned pointer is owned by the caller.
@@ -14158,6 +14567,7 @@ XBERGAlefHandle xberg_docx_metadata_app_properties(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_docx_metadata_custom_properties(XBERGAlefHandle handle);
+#endif
 
 /**
  * Create a `CsvMetadata` from a JSON string. Returns null on failure.
@@ -14752,6 +15162,7 @@ void xberg_pst_metadata_free(XBERGAlefHandle handle);
  */
 uintptr_t xberg_pst_metadata_message_count(XBERGAlefHandle handle);
 
+#if defined(XBERG_FEATURE_TRANSCRIPTION_TYPES)
 /**
  * Create a `AudioMetadata` from a JSON string. Returns null on failure.
  * # Safety
@@ -14759,7 +15170,9 @@ uintptr_t xberg_pst_metadata_message_count(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_audio_metadata_free`.
  */
 XBERGAlefHandle xberg_audio_metadata_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_TRANSCRIPTION_TYPES)
 /**
  * Serialize a `AudioMetadata` to a JSON string. Returns null on failure.
  * # Safety
@@ -14767,21 +15180,27 @@ XBERGAlefHandle xberg_audio_metadata_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_audio_metadata_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TRANSCRIPTION_TYPES)
 /**
  * Free a `AudioMetadata` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_audio_metadata_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TRANSCRIPTION_TYPES)
 /**
  * Get the `duration_ms` field from a `AudioMetadata`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint64_t xberg_audio_metadata_duration_ms(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TRANSCRIPTION_TYPES)
 /**
  * Get the `codec` field from a `AudioMetadata`.
  * A non-null returned pointer is owned by the caller.
@@ -14790,7 +15209,9 @@ uint64_t xberg_audio_metadata_duration_ms(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_audio_metadata_codec(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TRANSCRIPTION_TYPES)
 /**
  * Get the `container` field from a `AudioMetadata`.
  * A non-null returned pointer is owned by the caller.
@@ -14799,27 +15220,34 @@ char *xberg_audio_metadata_codec(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_audio_metadata_container(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TRANSCRIPTION_TYPES)
 /**
  * Get the `sample_rate_hz` field from a `AudioMetadata`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint32_t xberg_audio_metadata_sample_rate_hz(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TRANSCRIPTION_TYPES)
 /**
  * Get the `channels` field from a `AudioMetadata`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint16_t xberg_audio_metadata_channels(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TRANSCRIPTION_TYPES)
 /**
  * Get the `bitrate` field from a `AudioMetadata`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint32_t xberg_audio_metadata_bitrate(XBERGAlefHandle handle);
+#endif
 
 /**
  * Create a `OcrConfidence` from a JSON string. Returns null on failure.
@@ -16193,6 +16621,7 @@ uint32_t xberg_extracted_uri_page(XBERGAlefHandle handle);
  */
 XBERGAlefHandle xberg_extracted_uri_kind(XBERGAlefHandle handle);
 
+#if defined(XBERG_FEATURE_API)
 /**
  * Create a `DetectResponse` from a JSON string. Returns null on failure.
  * # Safety
@@ -16200,7 +16629,9 @@ XBERGAlefHandle xberg_extracted_uri_kind(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_detect_response_free`.
  */
 XBERGAlefHandle xberg_detect_response_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_API)
 /**
  * Serialize a `DetectResponse` to a JSON string. Returns null on failure.
  * # Safety
@@ -16208,14 +16639,18 @@ XBERGAlefHandle xberg_detect_response_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_detect_response_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_API)
 /**
  * Free a `DetectResponse` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_detect_response_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_API)
 /**
  * Get the `mime_type` field from a `DetectResponse`.
  * A non-null returned pointer is owned by the caller.
@@ -16224,7 +16659,9 @@ void xberg_detect_response_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_detect_response_mime_type(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_API)
 /**
  * Get the `filename` field from a `DetectResponse`.
  * A non-null returned pointer is owned by the caller.
@@ -16233,7 +16670,9 @@ char *xberg_detect_response_mime_type(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_detect_response_filename(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Create a `DiffOptions` from a JSON string. Returns null on failure.
  * # Safety
@@ -16241,7 +16680,9 @@ char *xberg_detect_response_filename(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_diff_options_free`.
  */
 XBERGAlefHandle xberg_diff_options_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Serialize a `DiffOptions` to a JSON string. Returns null on failure.
  * # Safety
@@ -16249,35 +16690,45 @@ XBERGAlefHandle xberg_diff_options_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_diff_options_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Free a `DiffOptions` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_diff_options_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Get the `include_metadata` field from a `DiffOptions`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_diff_options_include_metadata(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Get the `include_embedded` field from a `DiffOptions`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_diff_options_include_embedded(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Get the `max_content_chars` field from a `DiffOptions`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uintptr_t xberg_diff_options_max_content_chars(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Create a `ExtractionDiff` from a JSON string. Returns null on failure.
  * # Safety
@@ -16285,7 +16736,9 @@ uintptr_t xberg_diff_options_max_content_chars(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_extraction_diff_free`.
  */
 XBERGAlefHandle xberg_extraction_diff_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Serialize a `ExtractionDiff` to a JSON string. Returns null on failure.
  * # Safety
@@ -16293,14 +16746,18 @@ XBERGAlefHandle xberg_extraction_diff_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_extraction_diff_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Free a `ExtractionDiff` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_extraction_diff_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Get the `content_diff` field from a `ExtractionDiff`.
  * A non-null returned pointer is owned by the caller.
@@ -16309,7 +16766,9 @@ void xberg_extraction_diff_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_extraction_diff_content_diff(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Get the `tables_added` field from a `ExtractionDiff`.
  * A non-null returned pointer is owned by the caller.
@@ -16318,7 +16777,9 @@ char *xberg_extraction_diff_content_diff(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_extraction_diff_tables_added(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Get the `tables_removed` field from a `ExtractionDiff`.
  * A non-null returned pointer is owned by the caller.
@@ -16327,7 +16788,9 @@ char *xberg_extraction_diff_tables_added(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_extraction_diff_tables_removed(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Get the `tables_changed` field from a `ExtractionDiff`.
  * A non-null returned pointer is owned by the caller.
@@ -16336,7 +16799,9 @@ char *xberg_extraction_diff_tables_removed(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_extraction_diff_tables_changed(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Get the `metadata_changed` field from a `ExtractionDiff`.
  * A non-null returned pointer is owned by the caller.
@@ -16345,7 +16810,9 @@ char *xberg_extraction_diff_tables_changed(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_extraction_diff_metadata_changed(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Get the `embedded_changes` field from a `ExtractionDiff`.
  * A non-null returned handle is owned by the caller.
@@ -16354,7 +16821,9 @@ char *xberg_extraction_diff_metadata_changed(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_extraction_diff_embedded_changes(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Create a `DiffHunk` from a JSON string. Returns null on failure.
  * # Safety
@@ -16362,7 +16831,9 @@ XBERGAlefHandle xberg_extraction_diff_embedded_changes(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_diff_hunk_free`.
  */
 XBERGAlefHandle xberg_diff_hunk_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Serialize a `DiffHunk` to a JSON string. Returns null on failure.
  * # Safety
@@ -16370,42 +16841,54 @@ XBERGAlefHandle xberg_diff_hunk_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_diff_hunk_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Free a `DiffHunk` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_diff_hunk_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Get the `from_line` field from a `DiffHunk`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uintptr_t xberg_diff_hunk_from_line(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Get the `from_count` field from a `DiffHunk`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uintptr_t xberg_diff_hunk_from_count(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Get the `to_line` field from a `DiffHunk`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uintptr_t xberg_diff_hunk_to_line(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Get the `to_count` field from a `DiffHunk`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uintptr_t xberg_diff_hunk_to_count(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Get the `lines` field from a `DiffHunk`.
  * A non-null returned pointer is owned by the caller.
@@ -16414,7 +16897,9 @@ uintptr_t xberg_diff_hunk_to_count(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_diff_hunk_lines(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Create a `TableDiff` from a JSON string. Returns null on failure.
  * # Safety
@@ -16422,7 +16907,9 @@ char *xberg_diff_hunk_lines(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_table_diff_free`.
  */
 XBERGAlefHandle xberg_table_diff_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Serialize a `TableDiff` to a JSON string. Returns null on failure.
  * # Safety
@@ -16430,28 +16917,36 @@ XBERGAlefHandle xberg_table_diff_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_table_diff_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Free a `TableDiff` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_table_diff_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Get the `from_index` field from a `TableDiff`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uintptr_t xberg_table_diff_from_index(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Get the `to_index` field from a `TableDiff`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uintptr_t xberg_table_diff_to_index(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Get the `cell_changes` field from a `TableDiff`.
  * A non-null returned pointer is owned by the caller.
@@ -16460,7 +16955,9 @@ uintptr_t xberg_table_diff_to_index(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_table_diff_cell_changes(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Create a `EmbeddedChanges` from a JSON string. Returns null on failure.
  * # Safety
@@ -16468,7 +16965,9 @@ char *xberg_table_diff_cell_changes(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_embedded_changes_free`.
  */
 XBERGAlefHandle xberg_embedded_changes_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Serialize a `EmbeddedChanges` to a JSON string. Returns null on failure.
  * # Safety
@@ -16476,14 +16975,18 @@ XBERGAlefHandle xberg_embedded_changes_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_embedded_changes_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Free a `EmbeddedChanges` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_embedded_changes_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Get the `added` field from a `EmbeddedChanges`.
  * A non-null returned pointer is owned by the caller.
@@ -16492,7 +16995,9 @@ void xberg_embedded_changes_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_embedded_changes_added(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Get the `removed` field from a `EmbeddedChanges`.
  * A non-null returned pointer is owned by the caller.
@@ -16501,7 +17006,9 @@ char *xberg_embedded_changes_added(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_embedded_changes_removed(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Get the `changed` field from a `EmbeddedChanges`.
  * A non-null returned pointer is owned by the caller.
@@ -16510,7 +17017,9 @@ char *xberg_embedded_changes_removed(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_embedded_changes_changed(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Create a `EmbeddedDiff` from a JSON string. Returns null on failure.
  * # Safety
@@ -16518,7 +17027,9 @@ char *xberg_embedded_changes_changed(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_embedded_diff_free`.
  */
 XBERGAlefHandle xberg_embedded_diff_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Serialize a `EmbeddedDiff` to a JSON string. Returns null on failure.
  * # Safety
@@ -16526,14 +17037,18 @@ XBERGAlefHandle xberg_embedded_diff_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_embedded_diff_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Free a `EmbeddedDiff` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_embedded_diff_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Get the `path` field from a `EmbeddedDiff`.
  * A non-null returned pointer is owned by the caller.
@@ -16542,7 +17057,9 @@ void xberg_embedded_diff_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_embedded_diff_path(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_DIFF)
 /**
  * Get the `diff` field from a `EmbeddedDiff`.
  * A non-null returned handle is owned by the caller.
@@ -16551,7 +17068,9 @@ char *xberg_embedded_diff_path(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_embedded_diff_diff(XBERGAlefHandle handle);
+#endif
 
+#if (defined(XBERG_FEATURE_RERANKER_PRESETS) || defined(XBERG_FEATURE_RERANKER))
 /**
  * Create a `RerankedDocument` from a JSON string. Returns null on failure.
  * # Safety
@@ -16559,7 +17078,9 @@ XBERGAlefHandle xberg_embedded_diff_diff(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_reranked_document_free`.
  */
 XBERGAlefHandle xberg_reranked_document_from_json(const char *json);
+#endif
 
+#if (defined(XBERG_FEATURE_RERANKER_PRESETS) || defined(XBERG_FEATURE_RERANKER))
 /**
  * Serialize a `RerankedDocument` to a JSON string. Returns null on failure.
  * # Safety
@@ -16567,28 +17088,36 @@ XBERGAlefHandle xberg_reranked_document_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_reranked_document_to_json(XBERGAlefHandle handle);
+#endif
 
+#if (defined(XBERG_FEATURE_RERANKER_PRESETS) || defined(XBERG_FEATURE_RERANKER))
 /**
  * Free a `RerankedDocument` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_reranked_document_free(XBERGAlefHandle handle);
+#endif
 
+#if (defined(XBERG_FEATURE_RERANKER_PRESETS) || defined(XBERG_FEATURE_RERANKER))
 /**
  * Get the `index` field from a `RerankedDocument`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uintptr_t xberg_reranked_document_index(XBERGAlefHandle handle);
+#endif
 
+#if (defined(XBERG_FEATURE_RERANKER_PRESETS) || defined(XBERG_FEATURE_RERANKER))
 /**
  * Get the `score` field from a `RerankedDocument`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 float xberg_reranked_document_score(XBERGAlefHandle handle);
+#endif
 
+#if (defined(XBERG_FEATURE_RERANKER_PRESETS) || defined(XBERG_FEATURE_RERANKER))
 /**
  * Get the `document` field from a `RerankedDocument`.
  * A non-null returned pointer is owned by the caller.
@@ -16597,7 +17126,9 @@ float xberg_reranked_document_score(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_reranked_document_document(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS)
 /**
  * Create a `SparseEmbedding` from a JSON string. Returns null on failure.
  * # Safety
@@ -16605,7 +17136,9 @@ char *xberg_reranked_document_document(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_sparse_embedding_free`.
  */
 XBERGAlefHandle xberg_sparse_embedding_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS)
 /**
  * Serialize a `SparseEmbedding` to a JSON string. Returns null on failure.
  * # Safety
@@ -16613,14 +17146,18 @@ XBERGAlefHandle xberg_sparse_embedding_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_sparse_embedding_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS)
 /**
  * Free a `SparseEmbedding` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_sparse_embedding_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS)
 /**
  * Get the `indices` field from a `SparseEmbedding`.
  * A non-null returned pointer is owned by the caller.
@@ -16629,7 +17166,9 @@ void xberg_sparse_embedding_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_sparse_embedding_indices(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS)
 /**
  * Get the `values` field from a `SparseEmbedding`.
  * A non-null returned pointer is owned by the caller.
@@ -16638,7 +17177,9 @@ char *xberg_sparse_embedding_indices(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_sparse_embedding_values(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS)
 /**
  * Create a `SparseEmbeddingPreset` from a JSON string. Returns null on failure.
  * # Safety
@@ -16646,7 +17187,9 @@ char *xberg_sparse_embedding_values(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_sparse_embedding_preset_free`.
  */
 XBERGAlefHandle xberg_sparse_embedding_preset_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS)
 /**
  * Serialize a `SparseEmbeddingPreset` to a JSON string. Returns null on failure.
  * # Safety
@@ -16654,14 +17197,18 @@ XBERGAlefHandle xberg_sparse_embedding_preset_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_sparse_embedding_preset_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS)
 /**
  * Free a `SparseEmbeddingPreset` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_sparse_embedding_preset_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS)
 /**
  * Get the `name` field from a `SparseEmbeddingPreset`.
  * A non-null returned pointer is owned by the caller.
@@ -16670,7 +17217,9 @@ void xberg_sparse_embedding_preset_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_sparse_embedding_preset_name(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS)
 /**
  * Get the `model_repo` field from a `SparseEmbeddingPreset`.
  * A non-null returned pointer is owned by the caller.
@@ -16679,7 +17228,9 @@ char *xberg_sparse_embedding_preset_name(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_sparse_embedding_preset_model_repo(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS)
 /**
  * Get the `model_file` field from a `SparseEmbeddingPreset`.
  * A non-null returned pointer is owned by the caller.
@@ -16688,7 +17239,9 @@ char *xberg_sparse_embedding_preset_model_repo(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_sparse_embedding_preset_model_file(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS)
 /**
  * Get the `additional_files` field from a `SparseEmbeddingPreset`.
  * A non-null returned pointer is owned by the caller.
@@ -16697,14 +17250,18 @@ char *xberg_sparse_embedding_preset_model_file(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_sparse_embedding_preset_additional_files(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS)
 /**
  * Get the `max_length` field from a `SparseEmbeddingPreset`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uintptr_t xberg_sparse_embedding_preset_max_length(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS)
 /**
  * Get the `description` field from a `SparseEmbeddingPreset`.
  * A non-null returned pointer is owned by the caller.
@@ -16713,7 +17270,9 @@ uintptr_t xberg_sparse_embedding_preset_max_length(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_sparse_embedding_preset_description(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
 /**
  * Create a `MultiVectorEmbedding` from a JSON string. Returns null on failure.
  * # Safety
@@ -16721,7 +17280,9 @@ char *xberg_sparse_embedding_preset_description(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_multi_vector_embedding_free`.
  */
 XBERGAlefHandle xberg_multi_vector_embedding_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
 /**
  * Serialize a `MultiVectorEmbedding` to a JSON string. Returns null on failure.
  * # Safety
@@ -16729,28 +17290,36 @@ XBERGAlefHandle xberg_multi_vector_embedding_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_multi_vector_embedding_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
 /**
  * Free a `MultiVectorEmbedding` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_multi_vector_embedding_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
 /**
  * Get the `num_tokens` field from a `MultiVectorEmbedding`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint32_t xberg_multi_vector_embedding_num_tokens(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
 /**
  * Get the `dim` field from a `MultiVectorEmbedding`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint32_t xberg_multi_vector_embedding_dim(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
 /**
  * Get the `data` field from a `MultiVectorEmbedding`.
  * A non-null returned pointer is owned by the caller.
@@ -16759,7 +17328,9 @@ uint32_t xberg_multi_vector_embedding_dim(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_multi_vector_embedding_data(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
 /**
  * Returns `true` if `data` holds exactly `num_tokens * dim` values â i.e.
  * the flat buffer matches the declared shape.
@@ -16777,7 +17348,9 @@ char *xberg_multi_vector_embedding_data(XBERGAlefHandle handle);
  * freed with the appropriate free function.
  */
 int32_t xberg_multi_vector_embedding_is_well_formed(XBERGAlefHandle this_);
+#endif
 
+#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
 /**
  * Create a `LateInteractionPreset` from a JSON string. Returns null on failure.
  * # Safety
@@ -16785,7 +17358,9 @@ int32_t xberg_multi_vector_embedding_is_well_formed(XBERGAlefHandle this_);
  * Returned handle must be freed with `xberg_late_interaction_preset_free`.
  */
 XBERGAlefHandle xberg_late_interaction_preset_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
 /**
  * Serialize a `LateInteractionPreset` to a JSON string. Returns null on failure.
  * # Safety
@@ -16793,14 +17368,18 @@ XBERGAlefHandle xberg_late_interaction_preset_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_late_interaction_preset_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
 /**
  * Free a `LateInteractionPreset` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_late_interaction_preset_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
 /**
  * Get the `name` field from a `LateInteractionPreset`.
  * A non-null returned pointer is owned by the caller.
@@ -16809,7 +17388,9 @@ void xberg_late_interaction_preset_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_late_interaction_preset_name(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
 /**
  * Get the `model_repo` field from a `LateInteractionPreset`.
  * A non-null returned pointer is owned by the caller.
@@ -16818,7 +17399,9 @@ char *xberg_late_interaction_preset_name(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_late_interaction_preset_model_repo(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
 /**
  * Get the `model_file` field from a `LateInteractionPreset`.
  * A non-null returned pointer is owned by the caller.
@@ -16827,7 +17410,9 @@ char *xberg_late_interaction_preset_model_repo(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_late_interaction_preset_model_file(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
 /**
  * Get the `additional_files` field from a `LateInteractionPreset`.
  * A non-null returned pointer is owned by the caller.
@@ -16836,28 +17421,36 @@ char *xberg_late_interaction_preset_model_file(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_late_interaction_preset_additional_files(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
 /**
  * Get the `max_length` field from a `LateInteractionPreset`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uintptr_t xberg_late_interaction_preset_max_length(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
 /**
  * Get the `query_max_length` field from a `LateInteractionPreset`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uintptr_t xberg_late_interaction_preset_query_max_length(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
 /**
  * Get the `dim` field from a `LateInteractionPreset`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uintptr_t xberg_late_interaction_preset_dim(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
 /**
  * Get the `description` field from a `LateInteractionPreset`.
  * A non-null returned pointer is owned by the caller.
@@ -16866,7 +17459,9 @@ uintptr_t xberg_late_interaction_preset_dim(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_late_interaction_preset_description(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
 /**
  * Create a `LateInteractionMatch` from a JSON string. Returns null on failure.
  * # Safety
@@ -16874,7 +17469,9 @@ char *xberg_late_interaction_preset_description(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_late_interaction_match_free`.
  */
 XBERGAlefHandle xberg_late_interaction_match_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
 /**
  * Serialize a `LateInteractionMatch` to a JSON string. Returns null on failure.
  * # Safety
@@ -16882,28 +17479,36 @@ XBERGAlefHandle xberg_late_interaction_match_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_late_interaction_match_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
 /**
  * Free a `LateInteractionMatch` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_late_interaction_match_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
 /**
  * Get the `index` field from a `LateInteractionMatch`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uintptr_t xberg_late_interaction_match_index(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
 /**
  * Get the `score` field from a `LateInteractionMatch`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 float xberg_late_interaction_match_score(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_KEYWORDS_YAKE)
 /**
  * Create a `YakeParams` from a JSON string. Returns null on failure.
  * # Safety
@@ -16911,7 +17516,9 @@ float xberg_late_interaction_match_score(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_yake_params_free`.
  */
 XBERGAlefHandle xberg_yake_params_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_KEYWORDS_YAKE)
 /**
  * Serialize a `YakeParams` to a JSON string. Returns null on failure.
  * # Safety
@@ -16919,21 +17526,27 @@ XBERGAlefHandle xberg_yake_params_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_yake_params_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_KEYWORDS_YAKE)
 /**
  * Free a `YakeParams` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_yake_params_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_KEYWORDS_YAKE)
 /**
  * Get the `window_size` field from a `YakeParams`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uintptr_t xberg_yake_params_window_size(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_KEYWORDS_RAKE)
 /**
  * Create a `RakeParams` from a JSON string. Returns null on failure.
  * # Safety
@@ -16941,7 +17554,9 @@ uintptr_t xberg_yake_params_window_size(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_rake_params_free`.
  */
 XBERGAlefHandle xberg_rake_params_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_KEYWORDS_RAKE)
 /**
  * Serialize a `RakeParams` to a JSON string. Returns null on failure.
  * # Safety
@@ -16949,28 +17564,36 @@ XBERGAlefHandle xberg_rake_params_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_rake_params_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_KEYWORDS_RAKE)
 /**
  * Free a `RakeParams` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_rake_params_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_KEYWORDS_RAKE)
 /**
  * Get the `min_word_length` field from a `RakeParams`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uintptr_t xberg_rake_params_min_word_length(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_KEYWORDS_RAKE)
 /**
  * Get the `max_words_per_phrase` field from a `RakeParams`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uintptr_t xberg_rake_params_max_words_per_phrase(XBERGAlefHandle handle);
+#endif
 
+#if (defined(XBERG_FEATURE_KEYWORDS_YAKE) || defined(XBERG_FEATURE_KEYWORDS_RAKE))
 /**
  * Create a `KeywordConfig` from a JSON string. Returns null on failure.
  * # Safety
@@ -16978,7 +17601,9 @@ uintptr_t xberg_rake_params_max_words_per_phrase(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_keyword_config_free`.
  */
 XBERGAlefHandle xberg_keyword_config_from_json(const char *json);
+#endif
 
+#if (defined(XBERG_FEATURE_KEYWORDS_YAKE) || defined(XBERG_FEATURE_KEYWORDS_RAKE))
 /**
  * Serialize a `KeywordConfig` to a JSON string. Returns null on failure.
  * # Safety
@@ -16986,14 +17611,18 @@ XBERGAlefHandle xberg_keyword_config_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_keyword_config_to_json(XBERGAlefHandle handle);
+#endif
 
+#if (defined(XBERG_FEATURE_KEYWORDS_YAKE) || defined(XBERG_FEATURE_KEYWORDS_RAKE))
 /**
  * Free a `KeywordConfig` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_keyword_config_free(XBERGAlefHandle handle);
+#endif
 
+#if (defined(XBERG_FEATURE_KEYWORDS_YAKE) || defined(XBERG_FEATURE_KEYWORDS_RAKE))
 /**
  * Get the `algorithm` field from a `KeywordConfig`.
  * A non-null returned handle is owned by the caller.
@@ -17002,21 +17631,27 @@ void xberg_keyword_config_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_keyword_config_algorithm(XBERGAlefHandle handle);
+#endif
 
+#if (defined(XBERG_FEATURE_KEYWORDS_YAKE) || defined(XBERG_FEATURE_KEYWORDS_RAKE))
 /**
  * Get the `max_keywords` field from a `KeywordConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uintptr_t xberg_keyword_config_max_keywords(XBERGAlefHandle handle);
+#endif
 
+#if (defined(XBERG_FEATURE_KEYWORDS_YAKE) || defined(XBERG_FEATURE_KEYWORDS_RAKE))
 /**
  * Get the `min_score` field from a `KeywordConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 float xberg_keyword_config_min_score(XBERGAlefHandle handle);
+#endif
 
+#if (defined(XBERG_FEATURE_KEYWORDS_YAKE) || defined(XBERG_FEATURE_KEYWORDS_RAKE))
 /**
  * Get the `language` field from a `KeywordConfig`.
  * A non-null returned pointer is owned by the caller.
@@ -17025,7 +17660,9 @@ float xberg_keyword_config_min_score(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_keyword_config_language(XBERGAlefHandle handle);
+#endif
 
+#if (defined(XBERG_FEATURE_KEYWORDS_YAKE) || defined(XBERG_FEATURE_KEYWORDS_RAKE))
 /**
  * Get the `yake_params` field from a `KeywordConfig`.
  * A non-null returned handle is owned by the caller.
@@ -17034,7 +17671,9 @@ char *xberg_keyword_config_language(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_keyword_config_yake_params(XBERGAlefHandle handle);
+#endif
 
+#if (defined(XBERG_FEATURE_KEYWORDS_YAKE) || defined(XBERG_FEATURE_KEYWORDS_RAKE))
 /**
  * Get the `rake_params` field from a `KeywordConfig`.
  * A non-null returned handle is owned by the caller.
@@ -17043,7 +17682,9 @@ XBERGAlefHandle xberg_keyword_config_yake_params(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_keyword_config_rake_params(XBERGAlefHandle handle);
+#endif
 
+#if (defined(XBERG_FEATURE_KEYWORDS_YAKE) || defined(XBERG_FEATURE_KEYWORDS_RAKE))
 /**
  * Create a `Keyword` from a JSON string. Returns null on failure.
  * # Safety
@@ -17051,7 +17692,9 @@ XBERGAlefHandle xberg_keyword_config_rake_params(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_keyword_free`.
  */
 XBERGAlefHandle xberg_keyword_from_json(const char *json);
+#endif
 
+#if (defined(XBERG_FEATURE_KEYWORDS_YAKE) || defined(XBERG_FEATURE_KEYWORDS_RAKE))
 /**
  * Serialize a `Keyword` to a JSON string. Returns null on failure.
  * # Safety
@@ -17059,14 +17702,18 @@ XBERGAlefHandle xberg_keyword_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_keyword_to_json(XBERGAlefHandle handle);
+#endif
 
+#if (defined(XBERG_FEATURE_KEYWORDS_YAKE) || defined(XBERG_FEATURE_KEYWORDS_RAKE))
 /**
  * Free a `Keyword` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_keyword_free(XBERGAlefHandle handle);
+#endif
 
+#if (defined(XBERG_FEATURE_KEYWORDS_YAKE) || defined(XBERG_FEATURE_KEYWORDS_RAKE))
 /**
  * Get the `text` field from a `Keyword`.
  * A non-null returned pointer is owned by the caller.
@@ -17075,14 +17722,18 @@ void xberg_keyword_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_keyword_text(XBERGAlefHandle handle);
+#endif
 
+#if (defined(XBERG_FEATURE_KEYWORDS_YAKE) || defined(XBERG_FEATURE_KEYWORDS_RAKE))
 /**
  * Get the `score` field from a `Keyword`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 float xberg_keyword_score(XBERGAlefHandle handle);
+#endif
 
+#if (defined(XBERG_FEATURE_KEYWORDS_YAKE) || defined(XBERG_FEATURE_KEYWORDS_RAKE))
 /**
  * Get the `algorithm` field from a `Keyword`.
  * A non-null returned handle is owned by the caller.
@@ -17091,7 +17742,9 @@ float xberg_keyword_score(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_keyword_algorithm(XBERGAlefHandle handle);
+#endif
 
+#if (defined(XBERG_FEATURE_KEYWORDS_YAKE) || defined(XBERG_FEATURE_KEYWORDS_RAKE))
 /**
  * Get the `positions` field from a `Keyword`.
  * A non-null returned pointer is owned by the caller.
@@ -17100,7 +17753,9 @@ XBERGAlefHandle xberg_keyword_algorithm(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_keyword_positions(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Create a `DocumentMetadata` from a JSON string. Returns null on failure.
  * # Safety
@@ -17108,7 +17763,9 @@ char *xberg_keyword_positions(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_document_metadata_free`.
  */
 XBERGAlefHandle xberg_document_metadata_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Serialize a `DocumentMetadata` to a JSON string. Returns null on failure.
  * # Safety
@@ -17116,14 +17773,18 @@ XBERGAlefHandle xberg_document_metadata_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_document_metadata_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Free a `DocumentMetadata` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_document_metadata_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `mime_type` field from a `DocumentMetadata`.
  * A non-null returned pointer is owned by the caller.
@@ -17132,28 +17793,36 @@ void xberg_document_metadata_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_document_metadata_mime_type(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `size_bytes` field from a `DocumentMetadata`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint64_t xberg_document_metadata_size_bytes(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `page_count` field from a `DocumentMetadata`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint32_t xberg_document_metadata_page_count(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `force_ocr` field from a `DocumentMetadata`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_document_metadata_force_ocr(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `user_chunk_config` field from a `DocumentMetadata`.
  * A non-null returned handle is owned by the caller.
@@ -17162,14 +17831,18 @@ int32_t xberg_document_metadata_force_ocr(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_document_metadata_user_chunk_config(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `chunking_enabled` field from a `DocumentMetadata`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_document_metadata_chunking_enabled(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Create a `UserChunkConfig` from a JSON string. Returns null on failure.
  * # Safety
@@ -17177,7 +17850,9 @@ int32_t xberg_document_metadata_chunking_enabled(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_user_chunk_config_free`.
  */
 XBERGAlefHandle xberg_user_chunk_config_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Serialize a `UserChunkConfig` to a JSON string. Returns null on failure.
  * # Safety
@@ -17185,14 +17860,18 @@ XBERGAlefHandle xberg_user_chunk_config_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_user_chunk_config_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Free a `UserChunkConfig` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_user_chunk_config_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `page_ranges` field from a `UserChunkConfig`.
  * A non-null returned pointer is owned by the caller.
@@ -17201,28 +17880,36 @@ void xberg_user_chunk_config_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_user_chunk_config_page_ranges(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `pages_per_chunk` field from a `UserChunkConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint32_t xberg_user_chunk_config_pages_per_chunk(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `force_chunking` field from a `UserChunkConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_user_chunk_config_force_chunking(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `disable_chunking` field from a `UserChunkConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_user_chunk_config_disable_chunking(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Create a `ExtractionConfidence` from a JSON string. Returns null on failure.
  * # Safety
@@ -17230,7 +17917,9 @@ int32_t xberg_user_chunk_config_disable_chunking(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_extraction_confidence_free`.
  */
 XBERGAlefHandle xberg_extraction_confidence_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Serialize a `ExtractionConfidence` to a JSON string. Returns null on failure.
  * # Safety
@@ -17238,28 +17927,36 @@ XBERGAlefHandle xberg_extraction_confidence_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_extraction_confidence_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Free a `ExtractionConfidence` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_extraction_confidence_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `text_coverage` field from a `ExtractionConfidence`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 float xberg_extraction_confidence_text_coverage(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `ocr_aggregate` field from a `ExtractionConfidence`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 float xberg_extraction_confidence_ocr_aggregate(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `schema_compliance` field from a `ExtractionConfidence`.
  * A non-null returned handle is owned by the caller.
@@ -17268,14 +17965,18 @@ float xberg_extraction_confidence_ocr_aggregate(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_extraction_confidence_schema_compliance(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `combined` field from a `ExtractionConfidence`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 float xberg_extraction_confidence_combined(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Create a `HeuristicsConfig` from a JSON string. Returns null on failure.
  * # Safety
@@ -17283,7 +17984,9 @@ float xberg_extraction_confidence_combined(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_heuristics_config_free`.
  */
 XBERGAlefHandle xberg_heuristics_config_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Serialize a `HeuristicsConfig` to a JSON string. Returns null on failure.
  * # Safety
@@ -17291,91 +17994,117 @@ XBERGAlefHandle xberg_heuristics_config_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_heuristics_config_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Free a `HeuristicsConfig` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_heuristics_config_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `enable_pdf_text_heuristics` field from a `HeuristicsConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_heuristics_config_enable_pdf_text_heuristics(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `text_layer_threshold` field from a `HeuristicsConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 float xberg_heuristics_config_text_layer_threshold(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `file_size_threshold_bytes` field from a `HeuristicsConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint64_t xberg_heuristics_config_file_size_threshold_bytes(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `page_count_threshold` field from a `HeuristicsConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint32_t xberg_heuristics_config_page_count_threshold(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `target_pages_per_chunk` field from a `HeuristicsConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint32_t xberg_heuristics_config_target_pages_per_chunk(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `max_pages_per_chunk` field from a `HeuristicsConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint32_t xberg_heuristics_config_max_pages_per_chunk(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `disk_processing_threshold_bytes` field from a `HeuristicsConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint64_t xberg_heuristics_config_disk_processing_threshold_bytes(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `min_chars_per_page` field from a `HeuristicsConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint32_t xberg_heuristics_config_min_chars_per_page(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `max_xlsx_sheet_count` field from a `HeuristicsConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint32_t xberg_heuristics_config_max_xlsx_sheet_count(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `max_xlsx_workbook_cells` field from a `HeuristicsConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint64_t xberg_heuristics_config_max_xlsx_workbook_cells(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `max_pptx_embedded_count` field from a `HeuristicsConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint32_t xberg_heuristics_config_max_pptx_embedded_count(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Validate the configuration.
  * \note Returns `HeuristicsError.ConfigError` when:
@@ -17386,7 +18115,9 @@ uint32_t xberg_heuristics_config_max_pptx_embedded_count(XBERGAlefHandle handle)
  * freed with the appropriate free function.
  */
 int32_t xberg_heuristics_config_validate(XBERGAlefHandle this_);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Create a `ChunkInfo` from a JSON string. Returns null on failure.
  * # Safety
@@ -17394,7 +18125,9 @@ int32_t xberg_heuristics_config_validate(XBERGAlefHandle this_);
  * Returned handle must be freed with `xberg_chunk_info_free`.
  */
 XBERGAlefHandle xberg_chunk_info_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Serialize a `ChunkInfo` to a JSON string. Returns null on failure.
  * # Safety
@@ -17402,21 +18135,27 @@ XBERGAlefHandle xberg_chunk_info_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_chunk_info_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Free a `ChunkInfo` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_chunk_info_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `index` field from a `ChunkInfo`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint32_t xberg_chunk_info_index(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `pages` field from a `ChunkInfo`.
  * A non-null returned handle is owned by the caller.
@@ -17425,14 +18164,18 @@ uint32_t xberg_chunk_info_index(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_chunk_info_pages(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `estimated_time_ms` field from a `ChunkInfo`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint64_t xberg_chunk_info_estimated_time_ms(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Create a `PageRange` from a JSON string. Returns null on failure.
  * # Safety
@@ -17440,7 +18183,9 @@ uint64_t xberg_chunk_info_estimated_time_ms(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_page_range_free`.
  */
 XBERGAlefHandle xberg_page_range_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Serialize a `PageRange` to a JSON string. Returns null on failure.
  * # Safety
@@ -17448,35 +18193,45 @@ XBERGAlefHandle xberg_page_range_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_page_range_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Free a `PageRange` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_page_range_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `start` field from a `PageRange`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint32_t xberg_page_range_start(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `end` field from a `PageRange`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint32_t xberg_page_range_end(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the number of pages in this range.
  * \note SAFETY: Caller must ensure all pointer arguments are valid or null. Returned pointers must be
  * freed with the appropriate free function.
  */
 uint32_t xberg_page_range_page_count(XBERGAlefHandle this_);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Create a `MultidocInput` from a JSON string. Returns null on failure.
  * # Safety
@@ -17484,7 +18239,9 @@ uint32_t xberg_page_range_page_count(XBERGAlefHandle this_);
  * Returned handle must be freed with `xberg_multidoc_input_free`.
  */
 XBERGAlefHandle xberg_multidoc_input_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Serialize a `MultidocInput` to a JSON string. Returns null on failure.
  * # Safety
@@ -17492,21 +18249,27 @@ XBERGAlefHandle xberg_multidoc_input_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_multidoc_input_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Free a `MultidocInput` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_multidoc_input_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `page_count` field from a `MultidocInput`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint32_t xberg_multidoc_input_page_count(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `pages` field from a `MultidocInput`.
  * A non-null returned pointer is owned by the caller.
@@ -17515,7 +18278,9 @@ uint32_t xberg_multidoc_input_page_count(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_multidoc_input_pages(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Create a `PageSignals` from a JSON string. Returns null on failure.
  * # Safety
@@ -17523,7 +18288,9 @@ char *xberg_multidoc_input_pages(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_page_signals_free`.
  */
 XBERGAlefHandle xberg_page_signals_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Serialize a `PageSignals` to a JSON string. Returns null on failure.
  * # Safety
@@ -17531,21 +18298,27 @@ XBERGAlefHandle xberg_page_signals_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_page_signals_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Free a `PageSignals` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_page_signals_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `page_number` field from a `PageSignals`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint32_t xberg_page_signals_page_number(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `text_excerpt` field from a `PageSignals`.
  * A non-null returned pointer is owned by the caller.
@@ -17554,35 +18327,45 @@ uint32_t xberg_page_signals_page_number(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_page_signals_text_excerpt(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `starts_with_letterhead_like` field from a `PageSignals`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_page_signals_starts_with_letterhead_like(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `has_page_number_one_marker` field from a `PageSignals`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_page_signals_has_page_number_one_marker(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `has_signature_block` field from a `PageSignals`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_page_signals_has_signature_block(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `layout_text_density` field from a `PageSignals`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 float xberg_page_signals_layout_text_density(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Derive signals from raw page text.
  *
@@ -17601,7 +18384,9 @@ float xberg_page_signals_layout_text_density(XBERGAlefHandle handle);
 XBERGAlefHandle xberg_page_signals_from_page_text(uint32_t page_number,
                                                   const char *text,
                                                   float layout_text_density);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Create a `DocumentBoundary` from a JSON string. Returns null on failure.
  * # Safety
@@ -17609,7 +18394,9 @@ XBERGAlefHandle xberg_page_signals_from_page_text(uint32_t page_number,
  * Returned handle must be freed with `xberg_document_boundary_free`.
  */
 XBERGAlefHandle xberg_document_boundary_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Serialize a `DocumentBoundary` to a JSON string. Returns null on failure.
  * # Safety
@@ -17617,35 +18404,45 @@ XBERGAlefHandle xberg_document_boundary_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_document_boundary_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Free a `DocumentBoundary` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_document_boundary_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `start_page` field from a `DocumentBoundary`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint32_t xberg_document_boundary_start_page(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `end_page` field from a `DocumentBoundary`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint32_t xberg_document_boundary_end_page(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `confidence` field from a `DocumentBoundary`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 float xberg_document_boundary_confidence(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `reason` field from a `DocumentBoundary`.
  * A non-null returned handle is owned by the caller.
@@ -17654,7 +18451,9 @@ float xberg_document_boundary_confidence(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_document_boundary_reason(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Create a `MultidocThresholds` from a JSON string. Returns null on failure.
  * # Safety
@@ -17662,7 +18461,9 @@ XBERGAlefHandle xberg_document_boundary_reason(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_multidoc_thresholds_free`.
  */
 XBERGAlefHandle xberg_multidoc_thresholds_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Serialize a `MultidocThresholds` to a JSON string. Returns null on failure.
  * # Safety
@@ -17670,37 +18471,49 @@ XBERGAlefHandle xberg_multidoc_thresholds_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_multidoc_thresholds_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Free a `MultidocThresholds` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_multidoc_thresholds_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `density_shift_threshold` field from a `MultidocThresholds`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 float xberg_multidoc_thresholds_density_shift_threshold(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Get the `bigram_overlap_min` field from a `MultidocThresholds`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 float xberg_multidoc_thresholds_bigram_overlap_min(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Free a `MetaSchema` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_meta_schema_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 XBERGAlefHandle xberg_meta_schema_compile(const char *meta_schema_json);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Validate `raw` against the meta-schema and deserialize into a `Preset`,
  * stamping the fingerprint over the canonical file bytes.
@@ -17711,16 +18524,22 @@ XBERGAlefHandle xberg_meta_schema_parse_preset(XBERGAlefHandle this_,
                                                const char *path,
                                                const uint8_t *raw,
                                                uintptr_t raw_len);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Free a `Registry` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_registry_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 XBERGAlefHandle xberg_registry_load_embedded(void);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Look up a preset by its identifier.
  * \note SAFETY: Caller must ensure all pointer arguments are valid or null. Returned pointers must be
@@ -17728,28 +18547,36 @@ XBERGAlefHandle xberg_registry_load_embedded(void);
  */
 XBERGAlefHandle xberg_registry_get(XBERGAlefHandle this_,
                                    const char *id);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Materialize a `PresetSummary` list for the public registry endpoint.
  * \note SAFETY: Caller must ensure all pointer arguments are valid or null. Returned pointers must be
  * freed with the appropriate free function.
  */
 char *xberg_registry_summaries(XBERGAlefHandle this_);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Number of presets currently loaded.
  * \note SAFETY: Caller must ensure all pointer arguments are valid or null. Returned pointers must be
  * freed with the appropriate free function.
  */
 uintptr_t xberg_registry_len(XBERGAlefHandle this_);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Whether the registry contains zero presets.
  * \note SAFETY: Caller must ensure all pointer arguments are valid or null. Returned pointers must be
  * freed with the appropriate free function.
  */
 int32_t xberg_registry_is_empty(XBERGAlefHandle this_);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Read raw sample bytes for `<preset_id>` from
  * `library/<id>/samples/<name>`. Returns `None` when the file is absent.
@@ -17759,7 +18586,9 @@ int32_t xberg_registry_is_empty(XBERGAlefHandle this_);
 uint8_t *xberg_registry_sample_bytes(XBERGAlefHandle this_,
                                      const char *preset_id,
                                      const char *name);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Load additional preset files from a runtime directory and insert them
  * into this registry.
@@ -17781,7 +18610,9 @@ uint8_t *xberg_registry_sample_bytes(XBERGAlefHandle this_,
  */
 uintptr_t xberg_registry_extend_from_dir(XBERGAlefHandle this_,
                                          const char *dir);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Create a `ResolvedPreset` from a JSON string. Returns null on failure.
  * # Safety
@@ -17789,7 +18620,9 @@ uintptr_t xberg_registry_extend_from_dir(XBERGAlefHandle this_,
  * Returned handle must be freed with `xberg_resolved_preset_free`.
  */
 XBERGAlefHandle xberg_resolved_preset_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Serialize a `ResolvedPreset` to a JSON string. Returns null on failure.
  * # Safety
@@ -17797,14 +18630,18 @@ XBERGAlefHandle xberg_resolved_preset_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_resolved_preset_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Free a `ResolvedPreset` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_resolved_preset_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Get the `id` field from a `ResolvedPreset`.
  * A non-null returned pointer is owned by the caller.
@@ -17813,7 +18650,9 @@ void xberg_resolved_preset_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_resolved_preset_id(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Get the `version` field from a `ResolvedPreset`.
  * A non-null returned pointer is owned by the caller.
@@ -17822,7 +18661,9 @@ char *xberg_resolved_preset_id(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_resolved_preset_version(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Get the `fingerprint` field from a `ResolvedPreset`.
  * A non-null returned pointer is owned by the caller.
@@ -17831,7 +18672,9 @@ char *xberg_resolved_preset_version(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_resolved_preset_fingerprint(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Get the `schema_name` field from a `ResolvedPreset`.
  * A non-null returned pointer is owned by the caller.
@@ -17840,7 +18683,9 @@ char *xberg_resolved_preset_fingerprint(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_resolved_preset_schema_name(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Get the `schema` field from a `ResolvedPreset`.
  * A non-null returned pointer is owned by the caller.
@@ -17849,7 +18694,9 @@ char *xberg_resolved_preset_schema_name(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_resolved_preset_schema(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Get the `system_prompt` field from a `ResolvedPreset`.
  * A non-null returned pointer is owned by the caller.
@@ -17858,7 +18705,9 @@ char *xberg_resolved_preset_schema(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_resolved_preset_system_prompt(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Get the `merge_mode` field from a `ResolvedPreset`.
  * A non-null returned handle is owned by the caller.
@@ -17867,7 +18716,9 @@ char *xberg_resolved_preset_system_prompt(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_resolved_preset_merge_mode(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Get the `preferred_call_mode` field from a `ResolvedPreset`.
  * A non-null returned handle is owned by the caller.
@@ -17876,14 +18727,18 @@ XBERGAlefHandle xberg_resolved_preset_merge_mode(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_resolved_preset_preferred_call_mode(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Get the `emit_citations` field from a `ResolvedPreset`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_resolved_preset_emit_citations(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Create a `PresetSample` from a JSON string. Returns null on failure.
  * # Safety
@@ -17891,7 +18746,9 @@ int32_t xberg_resolved_preset_emit_citations(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_preset_sample_free`.
  */
 XBERGAlefHandle xberg_preset_sample_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Serialize a `PresetSample` to a JSON string. Returns null on failure.
  * # Safety
@@ -17899,14 +18756,18 @@ XBERGAlefHandle xberg_preset_sample_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_preset_sample_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Free a `PresetSample` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_preset_sample_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Get the `input_path` field from a `PresetSample`.
  * A non-null returned pointer is owned by the caller.
@@ -17915,7 +18776,9 @@ void xberg_preset_sample_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_preset_sample_input_path(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Get the `output_path` field from a `PresetSample`.
  * A non-null returned pointer is owned by the caller.
@@ -17924,7 +18787,9 @@ char *xberg_preset_sample_input_path(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_preset_sample_output_path(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Create a `Preset` from a JSON string. Returns null on failure.
  * # Safety
@@ -17932,7 +18797,9 @@ char *xberg_preset_sample_output_path(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_preset_free`.
  */
 XBERGAlefHandle xberg_preset_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Serialize a `Preset` to a JSON string. Returns null on failure.
  * # Safety
@@ -17940,14 +18807,18 @@ XBERGAlefHandle xberg_preset_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_preset_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Free a `Preset` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_preset_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Get the `id` field from a `Preset`.
  * A non-null returned pointer is owned by the caller.
@@ -17956,7 +18827,9 @@ void xberg_preset_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_preset_id(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Get the `version` field from a `Preset`.
  * A non-null returned pointer is owned by the caller.
@@ -17965,7 +18838,9 @@ char *xberg_preset_id(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_preset_version(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Get the `schema_name` field from a `Preset`.
  * A non-null returned pointer is owned by the caller.
@@ -17974,7 +18849,9 @@ char *xberg_preset_version(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_preset_schema_name(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Get the `description` field from a `Preset`.
  * A non-null returned pointer is owned by the caller.
@@ -17983,7 +18860,9 @@ char *xberg_preset_schema_name(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_preset_description(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Get the `category` field from a `Preset`.
  * A non-null returned handle is owned by the caller.
@@ -17992,7 +18871,9 @@ char *xberg_preset_description(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_preset_category(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Get the `tags` field from a `Preset`.
  * A non-null returned pointer is owned by the caller.
@@ -18001,7 +18882,9 @@ XBERGAlefHandle xberg_preset_category(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_preset_tags(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Get the `schema` field from a `Preset`.
  * A non-null returned pointer is owned by the caller.
@@ -18010,7 +18893,9 @@ char *xberg_preset_tags(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_preset_schema(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Get the `system_prompt` field from a `Preset`.
  * A non-null returned pointer is owned by the caller.
@@ -18019,7 +18904,9 @@ char *xberg_preset_schema(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_preset_system_prompt(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Get the `context_template` field from a `Preset`.
  * A non-null returned pointer is owned by the caller.
@@ -18028,7 +18915,9 @@ char *xberg_preset_system_prompt(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_preset_context_template(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Get the `merge_mode` field from a `Preset`.
  * A non-null returned handle is owned by the caller.
@@ -18037,7 +18926,9 @@ char *xberg_preset_context_template(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_preset_merge_mode(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Get the `preferred_call_mode` field from a `Preset`.
  * A non-null returned handle is owned by the caller.
@@ -18046,14 +18937,18 @@ XBERGAlefHandle xberg_preset_merge_mode(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_preset_preferred_call_mode(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Get the `emit_citations` field from a `Preset`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_preset_emit_citations(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Get the `sample` field from a `Preset`.
  * A non-null returned handle is owned by the caller.
@@ -18062,7 +18957,9 @@ int32_t xberg_preset_emit_citations(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_preset_sample(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Get the `fingerprint` field from a `Preset`.
  * A non-null returned pointer is owned by the caller.
@@ -18071,7 +18968,9 @@ XBERGAlefHandle xberg_preset_sample(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_preset_fingerprint(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Create a `PresetSummary` from a JSON string. Returns null on failure.
  * # Safety
@@ -18079,7 +18978,9 @@ char *xberg_preset_fingerprint(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_preset_summary_free`.
  */
 XBERGAlefHandle xberg_preset_summary_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Serialize a `PresetSummary` to a JSON string. Returns null on failure.
  * # Safety
@@ -18087,14 +18988,18 @@ XBERGAlefHandle xberg_preset_summary_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_preset_summary_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Free a `PresetSummary` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_preset_summary_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Get the `id` field from a `PresetSummary`.
  * A non-null returned pointer is owned by the caller.
@@ -18103,7 +19008,9 @@ void xberg_preset_summary_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_preset_summary_id(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Get the `version` field from a `PresetSummary`.
  * A non-null returned pointer is owned by the caller.
@@ -18112,7 +19019,9 @@ char *xberg_preset_summary_id(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_preset_summary_version(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Get the `schema_name` field from a `PresetSummary`.
  * A non-null returned pointer is owned by the caller.
@@ -18121,7 +19030,9 @@ char *xberg_preset_summary_version(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_preset_summary_schema_name(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Get the `description` field from a `PresetSummary`.
  * A non-null returned pointer is owned by the caller.
@@ -18130,7 +19041,9 @@ char *xberg_preset_summary_schema_name(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_preset_summary_description(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Get the `category` field from a `PresetSummary`.
  * A non-null returned handle is owned by the caller.
@@ -18139,7 +19052,9 @@ char *xberg_preset_summary_description(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_preset_summary_category(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Get the `tags` field from a `PresetSummary`.
  * A non-null returned pointer is owned by the caller.
@@ -18148,7 +19063,9 @@ XBERGAlefHandle xberg_preset_summary_category(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_preset_summary_tags(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Get the `preferred_call_mode` field from a `PresetSummary`.
  * A non-null returned handle is owned by the caller.
@@ -18157,14 +19074,18 @@ char *xberg_preset_summary_tags(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_preset_summary_preferred_call_mode(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Get the `emit_citations` field from a `PresetSummary`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_preset_summary_emit_citations(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Get the `fingerprint` field from a `PresetSummary`.
  * A non-null returned pointer is owned by the caller.
@@ -18173,6 +19094,7 @@ int32_t xberg_preset_summary_emit_citations(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_preset_summary_fingerprint(XBERGAlefHandle handle);
+#endif
 
 /**
  * Create a `DoctorCheck` from a JSON string. Returns null on failure.
@@ -18300,6 +19222,7 @@ char *xberg_doctor_report_checks(XBERGAlefHandle handle);
  */
 int32_t xberg_doctor_report_is_ok(XBERGAlefHandle this_);
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Create a `PaddleOcrConfig` from a JSON string. Returns null on failure.
  * # Safety
@@ -18307,7 +19230,9 @@ int32_t xberg_doctor_report_is_ok(XBERGAlefHandle this_);
  * Returned handle must be freed with `xberg_paddle_ocr_config_free`.
  */
 XBERGAlefHandle xberg_paddle_ocr_config_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Serialize a `PaddleOcrConfig` to a JSON string. Returns null on failure.
  * # Safety
@@ -18315,14 +19240,18 @@ XBERGAlefHandle xberg_paddle_ocr_config_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_paddle_ocr_config_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Free a `PaddleOcrConfig` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_paddle_ocr_config_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Get the `language` field from a `PaddleOcrConfig`.
  * A non-null returned pointer is owned by the caller.
@@ -18331,7 +19260,9 @@ void xberg_paddle_ocr_config_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_paddle_ocr_config_language(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Get the `cache_dir` field from a `PaddleOcrConfig`.
  * A non-null returned pointer is owned by the caller.
@@ -18340,70 +19271,90 @@ char *xberg_paddle_ocr_config_language(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_paddle_ocr_config_cache_dir(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Get the `use_angle_cls` field from a `PaddleOcrConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_paddle_ocr_config_use_angle_cls(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Get the `enable_table_detection` field from a `PaddleOcrConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_paddle_ocr_config_enable_table_detection(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Get the `det_db_thresh` field from a `PaddleOcrConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 float xberg_paddle_ocr_config_det_db_thresh(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Get the `det_db_box_thresh` field from a `PaddleOcrConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 float xberg_paddle_ocr_config_det_db_box_thresh(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Get the `det_db_unclip_ratio` field from a `PaddleOcrConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 float xberg_paddle_ocr_config_det_db_unclip_ratio(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Get the `det_limit_side_len` field from a `PaddleOcrConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint32_t xberg_paddle_ocr_config_det_limit_side_len(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Get the `rec_batch_num` field from a `PaddleOcrConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint32_t xberg_paddle_ocr_config_rec_batch_num(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Get the `padding` field from a `PaddleOcrConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint32_t xberg_paddle_ocr_config_padding(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Get the `drop_score` field from a `PaddleOcrConfig`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 float xberg_paddle_ocr_config_drop_score(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Get the `model_tier` field from a `PaddleOcrConfig`.
  * A non-null returned pointer is owned by the caller.
@@ -18412,7 +19363,9 @@ float xberg_paddle_ocr_config_drop_score(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_paddle_ocr_config_model_tier(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Get the `model_version` field from a `PaddleOcrConfig`.
  * A non-null returned pointer is owned by the caller.
@@ -18421,7 +19374,9 @@ char *xberg_paddle_ocr_config_model_tier(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_paddle_ocr_config_model_version(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Get the `inference_backend` field from a `PaddleOcrConfig`.
  * A non-null returned handle is owned by the caller.
@@ -18430,7 +19385,9 @@ char *xberg_paddle_ocr_config_model_version(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_paddle_ocr_config_inference_backend(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Sets a custom Hugging Face Hub cache root for model files.
  * \param path Path to cache directory
@@ -18446,7 +19403,9 @@ XBERGAlefHandle xberg_paddle_ocr_config_inference_backend(XBERGAlefHandle handle
  */
 XBERGAlefHandle xberg_paddle_ocr_config_with_cache_dir(XBERGAlefHandle this_,
                                                        const char *path);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Enables or disables table structure detection.
  * \param enable Whether to enable table detection
@@ -18461,7 +19420,9 @@ XBERGAlefHandle xberg_paddle_ocr_config_with_cache_dir(XBERGAlefHandle this_,
  */
 XBERGAlefHandle xberg_paddle_ocr_config_with_table_detection(XBERGAlefHandle this_,
                                                              int32_t enable);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Enables or disables angle classification for rotated text.
  * \param enable Whether to enable angle classification
@@ -18470,7 +19431,9 @@ XBERGAlefHandle xberg_paddle_ocr_config_with_table_detection(XBERGAlefHandle thi
  */
 XBERGAlefHandle xberg_paddle_ocr_config_with_angle_cls(XBERGAlefHandle this_,
                                                        int32_t enable);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Sets the database threshold for text detection.
  * \param threshold Detection threshold (0.0-1.0)
@@ -18479,7 +19442,9 @@ XBERGAlefHandle xberg_paddle_ocr_config_with_angle_cls(XBERGAlefHandle this_,
  */
 XBERGAlefHandle xberg_paddle_ocr_config_with_det_db_thresh(XBERGAlefHandle this_,
                                                            float threshold);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Sets the box threshold for text bounding box refinement.
  * \param threshold Box threshold (0.0-1.0)
@@ -18488,7 +19453,9 @@ XBERGAlefHandle xberg_paddle_ocr_config_with_det_db_thresh(XBERGAlefHandle this_
  */
 XBERGAlefHandle xberg_paddle_ocr_config_with_det_db_box_thresh(XBERGAlefHandle this_,
                                                                float threshold);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Sets the unclip ratio for expanding text bounding boxes.
  * \param ratio Unclip ratio (typically 1.5-2.0)
@@ -18497,7 +19464,9 @@ XBERGAlefHandle xberg_paddle_ocr_config_with_det_db_box_thresh(XBERGAlefHandle t
  */
 XBERGAlefHandle xberg_paddle_ocr_config_with_det_db_unclip_ratio(XBERGAlefHandle this_,
                                                                  float ratio);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Sets the maximum side length for detection images.
  * \param length Maximum side length in pixels
@@ -18506,7 +19475,9 @@ XBERGAlefHandle xberg_paddle_ocr_config_with_det_db_unclip_ratio(XBERGAlefHandle
  */
 XBERGAlefHandle xberg_paddle_ocr_config_with_det_limit_side_len(XBERGAlefHandle this_,
                                                                 uint32_t length);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Sets the batch size for recognition inference.
  * \param batch_size Number of text regions to process simultaneously
@@ -18515,7 +19486,9 @@ XBERGAlefHandle xberg_paddle_ocr_config_with_det_limit_side_len(XBERGAlefHandle 
  */
 XBERGAlefHandle xberg_paddle_ocr_config_with_rec_batch_num(XBERGAlefHandle this_,
                                                            uint32_t batch_size);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Sets the minimum recognition confidence threshold.
  * \param score Minimum confidence (0.0-1.0), text below this is dropped
@@ -18524,7 +19497,9 @@ XBERGAlefHandle xberg_paddle_ocr_config_with_rec_batch_num(XBERGAlefHandle this_
  */
 XBERGAlefHandle xberg_paddle_ocr_config_with_drop_score(XBERGAlefHandle this_,
                                                         float score);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Sets padding in pixels added around images before detection.
  * \param padding Padding in pixels (0-100)
@@ -18533,7 +19508,9 @@ XBERGAlefHandle xberg_paddle_ocr_config_with_drop_score(XBERGAlefHandle this_,
  */
 XBERGAlefHandle xberg_paddle_ocr_config_with_padding(XBERGAlefHandle this_,
                                                      uint32_t padding);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Sets the model tier controlling detection/recognition model size.
  * \param tier `"mobile"` (default, lightweight, faster) or `"server"` (high accuracy, GPU/complex
@@ -18543,7 +19520,9 @@ XBERGAlefHandle xberg_paddle_ocr_config_with_padding(XBERGAlefHandle this_,
  */
 XBERGAlefHandle xberg_paddle_ocr_config_with_model_tier(XBERGAlefHandle this_,
                                                         const char *tier);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Sets the model generation.
  * \param version `"pp-ocrv6"` (default) or `"pp-ocrv5"`. Under `"pp-ocrv6"`, `model_tier` selects
@@ -18553,7 +19532,9 @@ XBERGAlefHandle xberg_paddle_ocr_config_with_model_tier(XBERGAlefHandle this_,
  */
 XBERGAlefHandle xberg_paddle_ocr_config_with_model_version(XBERGAlefHandle this_,
                                                            const char *version);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Create a `ModelPaths` from a JSON string. Returns null on failure.
  * # Safety
@@ -18561,7 +19542,9 @@ XBERGAlefHandle xberg_paddle_ocr_config_with_model_version(XBERGAlefHandle this_
  * Returned handle must be freed with `xberg_model_paths_free`.
  */
 XBERGAlefHandle xberg_model_paths_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Serialize a `ModelPaths` to a JSON string. Returns null on failure.
  * # Safety
@@ -18569,14 +19552,18 @@ XBERGAlefHandle xberg_model_paths_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_model_paths_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Free a `ModelPaths` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_model_paths_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Get the `det_model` field from a `ModelPaths`.
  * A non-null returned pointer is owned by the caller.
@@ -18585,7 +19572,9 @@ void xberg_model_paths_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_model_paths_det_model(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Get the `cls_model` field from a `ModelPaths`.
  * A non-null returned pointer is owned by the caller.
@@ -18594,7 +19583,9 @@ char *xberg_model_paths_det_model(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_model_paths_cls_model(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Get the `rec_model` field from a `ModelPaths`.
  * A non-null returned pointer is owned by the caller.
@@ -18603,7 +19594,9 @@ char *xberg_model_paths_cls_model(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_model_paths_rec_model(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Get the `dict_file` field from a `ModelPaths`.
  * A non-null returned pointer is owned by the caller.
@@ -18612,7 +19605,9 @@ char *xberg_model_paths_rec_model(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_model_paths_dict_file(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_AUTO_ROTATE_TYPES)
 /**
  * Create a `OrientationResult` from a JSON string. Returns null on failure.
  * # Safety
@@ -18620,7 +19615,9 @@ char *xberg_model_paths_dict_file(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_orientation_result_free`.
  */
 XBERGAlefHandle xberg_orientation_result_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_AUTO_ROTATE_TYPES)
 /**
  * Serialize a `OrientationResult` to a JSON string. Returns null on failure.
  * # Safety
@@ -18628,28 +19625,36 @@ XBERGAlefHandle xberg_orientation_result_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_orientation_result_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_AUTO_ROTATE_TYPES)
 /**
  * Free a `OrientationResult` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_orientation_result_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_AUTO_ROTATE_TYPES)
 /**
  * Get the `degrees` field from a `OrientationResult`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint32_t xberg_orientation_result_degrees(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_AUTO_ROTATE_TYPES)
 /**
  * Get the `confidence` field from a `OrientationResult`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 float xberg_orientation_result_confidence(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Create a `BBox` from a JSON string. Returns null on failure.
  * # Safety
@@ -18657,7 +19662,9 @@ float xberg_orientation_result_confidence(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_b_box_free`.
  */
 XBERGAlefHandle xberg_b_box_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Serialize a `BBox` to a JSON string. Returns null on failure.
  * # Safety
@@ -18665,42 +19672,54 @@ XBERGAlefHandle xberg_b_box_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_b_box_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Free a `BBox` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_b_box_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Get the `x1` field from a `BBox`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 float xberg_b_box_x1(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Get the `y1` field from a `BBox`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 float xberg_b_box_y1(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Get the `x2` field from a `BBox`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 float xberg_b_box_x2(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Get the `y2` field from a `BBox`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 float xberg_b_box_y2(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Create a `LayoutDetection` from a JSON string. Returns null on failure.
  * # Safety
@@ -18708,7 +19727,9 @@ float xberg_b_box_y2(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_layout_detection_free`.
  */
 XBERGAlefHandle xberg_layout_detection_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Serialize a `LayoutDetection` to a JSON string. Returns null on failure.
  * # Safety
@@ -18716,14 +19737,18 @@ XBERGAlefHandle xberg_layout_detection_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_layout_detection_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Free a `LayoutDetection` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_layout_detection_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Get the `class_name` field from a `LayoutDetection`.
  * A non-null returned handle is owned by the caller.
@@ -18732,14 +19757,18 @@ void xberg_layout_detection_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_layout_detection_class_name(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Get the `confidence` field from a `LayoutDetection`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 float xberg_layout_detection_confidence(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Get the `bbox` field from a `LayoutDetection`.
  * A non-null returned handle is owned by the caller.
@@ -18748,7 +19777,9 @@ float xberg_layout_detection_confidence(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_layout_detection_bbox(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Create a `RecognizedTable` from a JSON string. Returns null on failure.
  * # Safety
@@ -18756,7 +19787,9 @@ XBERGAlefHandle xberg_layout_detection_bbox(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_recognized_table_free`.
  */
 XBERGAlefHandle xberg_recognized_table_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Serialize a `RecognizedTable` to a JSON string. Returns null on failure.
  * # Safety
@@ -18764,14 +19797,18 @@ XBERGAlefHandle xberg_recognized_table_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_recognized_table_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Free a `RecognizedTable` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_recognized_table_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Get the `detection_bbox` field from a `RecognizedTable`.
  * A non-null returned handle is owned by the caller.
@@ -18780,7 +19817,9 @@ void xberg_recognized_table_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_recognized_table_detection_bbox(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Get the `cells` field from a `RecognizedTable`.
  * A non-null returned pointer is owned by the caller.
@@ -18789,7 +19828,9 @@ XBERGAlefHandle xberg_recognized_table_detection_bbox(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_recognized_table_cells(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Get the `markdown` field from a `RecognizedTable`.
  * A non-null returned pointer is owned by the caller.
@@ -18798,7 +19839,9 @@ char *xberg_recognized_table_cells(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_recognized_table_markdown(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Create a `DetectionResult` from a JSON string. Returns null on failure.
  * # Safety
@@ -18806,7 +19849,9 @@ char *xberg_recognized_table_markdown(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_detection_result_free`.
  */
 XBERGAlefHandle xberg_detection_result_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Serialize a `DetectionResult` to a JSON string. Returns null on failure.
  * # Safety
@@ -18814,28 +19859,36 @@ XBERGAlefHandle xberg_detection_result_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_detection_result_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Free a `DetectionResult` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_detection_result_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Get the `page_width` field from a `DetectionResult`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint32_t xberg_detection_result_page_width(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Get the `page_height` field from a `DetectionResult`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint32_t xberg_detection_result_page_height(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Get the `detections` field from a `DetectionResult`.
  * A non-null returned pointer is owned by the caller.
@@ -18844,7 +19897,9 @@ uint32_t xberg_detection_result_page_height(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_detection_result_detections(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Create a `EmbeddedFile` from a JSON string. Returns null on failure.
  * # Safety
@@ -18852,7 +19907,9 @@ char *xberg_detection_result_detections(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_embedded_file_free`.
  */
 XBERGAlefHandle xberg_embedded_file_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Serialize a `EmbeddedFile` to a JSON string. Returns null on failure.
  * # Safety
@@ -18860,14 +19917,18 @@ XBERGAlefHandle xberg_embedded_file_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_embedded_file_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Free a `EmbeddedFile` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_embedded_file_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Get the `name` field from a `EmbeddedFile`.
  * A non-null returned pointer is owned by the caller.
@@ -18876,7 +19937,9 @@ void xberg_embedded_file_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_embedded_file_name(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Get the `data` field from a `EmbeddedFile`.
  * The returned byte pointer is borrowed from `ptr` and must not be freed.
@@ -18886,14 +19949,18 @@ char *xberg_embedded_file_name(XBERGAlefHandle handle);
  */
 uint8_t *xberg_embedded_file_data(XBERGAlefHandle handle,
                                   uintptr_t *out_len);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Get the `compressed_size` field from a `EmbeddedFile`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uintptr_t xberg_embedded_file_compressed_size(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Get the `mime_type` field from a `EmbeddedFile`.
  * A non-null returned pointer is owned by the caller.
@@ -18902,7 +19969,9 @@ uintptr_t xberg_embedded_file_compressed_size(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_embedded_file_mime_type(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Create a `PdfMetadata` from a JSON string. Returns null on failure.
  * # Safety
@@ -18910,7 +19979,9 @@ char *xberg_embedded_file_mime_type(XBERGAlefHandle handle);
  * Returned handle must be freed with `xberg_pdf_metadata_free`.
  */
 XBERGAlefHandle xberg_pdf_metadata_from_json(const char *json);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Serialize a `PdfMetadata` to a JSON string. Returns null on failure.
  * # Safety
@@ -18918,14 +19989,18 @@ XBERGAlefHandle xberg_pdf_metadata_from_json(const char *json);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_pdf_metadata_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Free a `PdfMetadata` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_pdf_metadata_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Get the `pdf_version` field from a `PdfMetadata`.
  * A non-null returned pointer is owned by the caller.
@@ -18934,7 +20009,9 @@ void xberg_pdf_metadata_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_pdf_metadata_pdf_version(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Get the `producer` field from a `PdfMetadata`.
  * A non-null returned pointer is owned by the caller.
@@ -18943,42 +20020,54 @@ char *xberg_pdf_metadata_pdf_version(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_pdf_metadata_producer(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Get the `is_encrypted` field from a `PdfMetadata`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_pdf_metadata_is_encrypted(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Get the `width` field from a `PdfMetadata`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int64_t xberg_pdf_metadata_width(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Get the `height` field from a `PdfMetadata`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 int64_t xberg_pdf_metadata_height(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Get the `page_count` field from a `PdfMetadata`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 uint32_t xberg_pdf_metadata_page_count(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Get the `scanned_confidence` field from a `PdfMetadata`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 float xberg_pdf_metadata_scanned_confidence(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Get the `scanned_pages` field from a `PdfMetadata`.
  * A non-null returned pointer is owned by the caller.
@@ -18987,7 +20076,9 @@ float xberg_pdf_metadata_scanned_confidence(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_pdf_metadata_scanned_pages(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Get the `layout_gated_pages` field from a `PdfMetadata`.
  * A non-null returned pointer is owned by the caller.
@@ -18996,7 +20087,9 @@ char *xberg_pdf_metadata_scanned_pages(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_pdf_metadata_layout_gated_pages(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Get the `layout_gate_reasons` field from a `PdfMetadata`.
  * A non-null returned pointer is owned by the caller.
@@ -19005,14 +20098,18 @@ char *xberg_pdf_metadata_layout_gated_pages(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_pdf_metadata_layout_gate_reasons(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_CLASSIFICATION)
 /**
  * Free a `ChunkClassificationEnrichmentConfig` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_chunk_classification_enrichment_config_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_CLASSIFICATION)
 /**
  * Get the `config` field from a `ChunkClassificationEnrichmentConfig`.
  * A non-null returned handle is owned by the caller.
@@ -19021,6 +20118,7 @@ void xberg_chunk_classification_enrichment_config_free(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle xberg_chunk_classification_enrichment_config_config(XBERGAlefHandle handle);
+#endif
 
 /**
  * Create a `ProxyConfig` from a JSON string. Returns null on failure.
@@ -23376,6 +24474,7 @@ XBERGAlefHandle xberg_extract(XBERGAlefHandle input,
 XBERGAlefHandle xberg_extract_batch(const char *inputs,
                                     XBERGAlefHandle config);
 
+#if defined(XBERG_FEATURE_URL_INGESTION)
 /**
  * Discover all pages and sitemaps reachable from `uri` without extracting document content.
  *
@@ -23392,6 +24491,7 @@ XBERGAlefHandle xberg_extract_batch(const char *inputs,
  */
 XBERGAlefHandle xberg_map_url(const char *uri,
                               XBERGAlefHandle config);
+#endif
 
 /**
  * List all supported document formats.
@@ -23632,6 +24732,7 @@ uintptr_t xberg_list_validators_len(void);
 int32_t xberg_classify_chunks(XBERGAlefHandle result,
                               XBERGAlefHandle config);
 
+#if defined(XBERG_FEATURE_MARKDOWN_FOOTNOTES)
 /**
  * Find unmarked claims in markdown text.
  *
@@ -23657,7 +24758,9 @@ int32_t xberg_classify_chunks(XBERGAlefHandle result,
  * \endcode
  */
 char *xberg_find_unmarked_claims(const char *markdown);
+#endif
 
+#if defined(XBERG_FEATURE_MARKDOWN_FOOTNOTES)
 /**
  * Return the byte length of the C string most recently returned by `xberg_find_unmarked_claims` on
  * this thread. Returns 0 when the primary call returned null or failed before producing a string.
@@ -23666,7 +24769,9 @@ char *xberg_find_unmarked_claims(const char *markdown);
  * with `xberg_find_unmarked_claims`.
  */
 uintptr_t xberg_find_unmarked_claims_len(const char *_markdown);
+#endif
 
+#if defined(XBERG_FEATURE_MARKDOWN_FOOTNOTES)
 /**
  * Verify that an excerpt appears verbatim in source text.
  *
@@ -23691,7 +24796,9 @@ uintptr_t xberg_find_unmarked_claims_len(const char *_markdown);
  */
 int32_t xberg_verify_excerpt(const char *excerpt,
                              const char *source_text);
+#endif
 
+#if ((defined(XBERG_FEATURE_SPARSE_EMBEDDINGS) && defined(XBERG_FEATURE_TOKIO_RUNTIME)) || (defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS) && !defined(XBERG_FEATURE_SPARSE_EMBEDDINGS) && defined(XBERG_FEATURE_TOKIO_RUNTIME)))
 /**
  * Async wrapper over `embed_sparse`: runs the blocking ONNX inference on a
  * bounded blocking-task pool so it does not stall the async runtime.
@@ -23702,7 +24809,9 @@ int32_t xberg_verify_excerpt(const char *excerpt,
  */
 char *xberg_embed_sparse_async(const char *texts,
                                XBERGAlefHandle config);
+#endif
 
+#if ((defined(XBERG_FEATURE_SPARSE_EMBEDDINGS) && defined(XBERG_FEATURE_TOKIO_RUNTIME)) || (defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS) && !defined(XBERG_FEATURE_SPARSE_EMBEDDINGS) && defined(XBERG_FEATURE_TOKIO_RUNTIME)))
 /**
  * Return the byte length of the C string most recently returned by `xberg_embed_sparse_async` on this
  * thread. Returns 0 when the primary call returned null or failed before producing a string. Enables
@@ -23712,7 +24821,9 @@ char *xberg_embed_sparse_async(const char *texts,
  */
 uintptr_t xberg_embed_sparse_async_len(const char *_texts,
                                        XBERGAlefHandle _config);
+#endif
 
+#if ((defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS) || defined(XBERG_FEATURE_LATE_INTERACTION)) || defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS))
 /**
  * Score a query against a document using ColBERT's MaxSim operator: for each
  * query token vector, take the maximum dot product against any document
@@ -23731,7 +24842,9 @@ uintptr_t xberg_embed_sparse_async_len(const char *_texts,
  */
 double xberg_max_sim_score(XBERGAlefHandle query,
                            XBERGAlefHandle doc);
+#endif
 
+#if ((defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS) || defined(XBERG_FEATURE_LATE_INTERACTION)) || defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS))
 /**
  * Rank a set of documents against a query by MaxSim score, descending.
  *
@@ -23746,7 +24859,9 @@ double xberg_max_sim_score(XBERGAlefHandle query,
  */
 char *xberg_max_sim_rank(XBERGAlefHandle query,
                          const char *docs);
+#endif
 
+#if ((defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS) || defined(XBERG_FEATURE_LATE_INTERACTION)) || defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS))
 /**
  * Return the byte length of the C string most recently returned by `xberg_max_sim_rank` on this
  * thread. Returns 0 when the primary call returned null or failed before producing a string. Enables
@@ -23756,7 +24871,9 @@ char *xberg_max_sim_rank(XBERGAlefHandle query,
  */
 uintptr_t xberg_max_sim_rank_len(XBERGAlefHandle _query,
                                  const char *_docs);
+#endif
 
+#if ((defined(XBERG_FEATURE_LATE_INTERACTION) && defined(XBERG_FEATURE_TOKIO_RUNTIME)) || (defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS) && !defined(XBERG_FEATURE_LATE_INTERACTION) && defined(XBERG_FEATURE_TOKIO_RUNTIME)))
 /**
  * Async wrapper over `embed_multi_vector`: runs the blocking ONNX inference
  * on a bounded blocking-task pool so it does not stall the async runtime.
@@ -23768,7 +24885,9 @@ uintptr_t xberg_max_sim_rank_len(XBERGAlefHandle _query,
 char *xberg_embed_multi_vector_async(const char *texts,
                                      XBERGAlefHandle config,
                                      int32_t is_query);
+#endif
 
+#if ((defined(XBERG_FEATURE_LATE_INTERACTION) && defined(XBERG_FEATURE_TOKIO_RUNTIME)) || (defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS) && !defined(XBERG_FEATURE_LATE_INTERACTION) && defined(XBERG_FEATURE_TOKIO_RUNTIME)))
 /**
  * Return the byte length of the C string most recently returned by `xberg_embed_multi_vector_async` on
  * this thread. Returns 0 when the primary call returned null or failed before producing a string.
@@ -23779,6 +24898,7 @@ char *xberg_embed_multi_vector_async(const char *texts,
 uintptr_t xberg_embed_multi_vector_async_len(const char *_texts,
                                              XBERGAlefHandle _config,
                                              int32_t _is_query);
+#endif
 
 /**
  * Probe the backends and settings in `config` and report what will actually
@@ -23791,6 +24911,7 @@ uintptr_t xberg_embed_multi_vector_async_len(const char *_texts,
  */
 XBERGAlefHandle xberg_doctor(XBERGAlefHandle config);
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Install `PdfOxideWarningCapture` as the process-wide `log` backend,
  * exactly once.
@@ -23822,7 +24943,9 @@ XBERGAlefHandle xberg_doctor(XBERGAlefHandle config);
  * freed with the appropriate free function.
  */
 int32_t xberg_install_pdf_render_diagnostics(void);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Drain the glyph-drop `ProcessingWarning`s accumulated on this thread by
  * render calls since the last call to this function.
@@ -23858,7 +24981,9 @@ int32_t xberg_install_pdf_render_diagnostics(void);
  * freed with the appropriate free function.
  */
 char *xberg_take_pdf_oxide_render_warnings(void);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Return the byte length of the C string most recently returned by
  * `xberg_take_pdf_oxide_render_warnings` on this thread. Returns 0 when the primary call returned null
@@ -23868,7 +24993,9 @@ char *xberg_take_pdf_oxide_render_warnings(void);
  * with `xberg_take_pdf_oxide_render_warnings`.
  */
 uintptr_t xberg_take_pdf_oxide_render_warnings_len(void);
+#endif
 
+#if defined(XBERG_FEATURE_TRANSCRIPTION)
 /**
  * Build the four (or three) token Whisper decoder prompt.
  *
@@ -23885,7 +25012,9 @@ char *xberg_build_decoder_prompt_tokens(uint32_t start_of_transcript,
                                         uint32_t transcribe,
                                         uint32_t no_timestamps,
                                         int32_t timestamps);
+#endif
 
+#if defined(XBERG_FEATURE_TRANSCRIPTION)
 /**
  * Return the byte length of the C string most recently returned by `xberg_build_decoder_prompt_tokens`
  * on this thread. Returns 0 when the primary call returned null or failed before producing a string.
@@ -23898,7 +25027,9 @@ uintptr_t xberg_build_decoder_prompt_tokens_len(uint32_t _start_of_transcript,
                                                 uint32_t _transcribe,
                                                 uint32_t _no_timestamps,
                                                 int32_t _timestamps);
+#endif
 
+#if defined(XBERG_FEATURE_TRANSCRIPTION)
 /**
  * Convert a raw Whisper timestamp token ID to a millisecond offset from the
  * start of the 30-second chunk it was decoded in.
@@ -23910,6 +25041,7 @@ uintptr_t xberg_build_decoder_prompt_tokens_len(uint32_t _start_of_transcript,
  */
 uint32_t xberg_timestamp_token_to_ms(uint32_t token_id,
                                      uint32_t timestamp_begin_id);
+#endif
 
 /**
  * Register a C plugin implementing `OcrBackend` via a vtable.
