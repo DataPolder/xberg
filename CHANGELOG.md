@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The generated C header now guards its feature-gated exports. Every `[defines]` key in
+  `cbindgen.toml` was written with escaped quotes, which cbindgen never matches, so the header
+  declared hundreds of `#[cfg(feature = "...")]` symbols with no `#if defined(XBERG_FEATURE_*)`
+  guard at all. Building the FFI without default features left Go and Zig with link errors, and
+  let C# compile cleanly and then throw `EntryPointNotFoundException` at runtime, because
+  `DllImport` resolves lazily. Both the FFI header and the copy vendored for cgo gain 537 guards.
+
+- Every `XbergError`, `HeuristicsError`, `LoadError` and `ResolveError` variant now carries a
+  stable FFI error code, so bindings can tell error kinds apart again. Without the codes the FFI
+  reported one indistinguishable value for every failure: `errors.Is(err, ErrOcr)` in Go could
+  never be true, Java's error switch fell through to a generic exception, and Zig returned the
+  same variant for a validation failure and an I/O failure. The codes cross the FFI boundary and
+  are append-only — a new variant takes the next free number in its block rather than one
+  inserted in declaration order.
+
+### Removed
+
+- The `cancellation`, `config_builder` and `config` modules in `xberg-ffi` (34 `extern "C"`
+  functions). No `mod` statement ever declared them, so they were never compiled and never
+  exported — none of their symbols appear among the 2525 declarations in the published C header,
+  so no C, Swift, Go or Zig consumer can have been calling them.
+
 ### Changed
 
 - **Breaking:** `Formula.bbox` and `Formula.page` are now optional. Markup sources (DOCX, PPTX,
