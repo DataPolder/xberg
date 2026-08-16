@@ -5459,6 +5459,19 @@ Buffers:           50000 kB
         assert!(result.6.is_empty());
     }
 
+    /// Root of the shared `test_documents` fixture corpus, resolved relative to this
+    /// crate's manifest dir (mirrors the identically named helper in
+    /// `crate::pdf::oxide::images` test module).
+    #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
+    fn test_documents_dir() -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("test_documents")
+    }
+
     /// Minimal 2-page PDF (no content streams, just two bare `/Page` objects) for
     /// tests that need `extract_mixed_ocr_native` to target a specific *later* page.
     /// Mirrors `crate::pdf::render::build_minimal_pdf_with_mediabox`, which already
@@ -5708,6 +5721,355 @@ Buffers:           50000 kB
         );
 
         crate::plugins::unregister_ocr_backend("below-threshold-warning-test-backend").unwrap();
+    }
+
+    /// #1444: `run_ocr_pipeline` has no OCR execution loop of its own -- every stage is
+    /// delegated to `extract_with_ocr`, which already carries the force_ocr image-XObject
+    /// fallback (#1355, lines ~2593-2630). This proves that delegation actually threads
+    /// the recovered text and its warning through the pipeline route's return value: a
+    /// page whose OCR text comes back blank, but whose page carries a real (decodable)
+    /// image XObject, must be retried against the embedded image bytes and the recovered
+    /// text must replace the blank result.
+    #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
+    #[tokio::test]
+    async fn should_recover_blank_pipeline_page_and_warn_when_embedded_image_exists() {
+        use crate::core::config::{OcrConfig, OcrPipelineConfig, OcrPipelineStage, OcrQualityThresholds};
+        use crate::plugins::{OcrBackend, OcrBackendType, Plugin};
+        use crate::types::ExtractedDocument;
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        const BACKEND_NAME: &str = "pipeline-blank-recovery-test-backend";
+        const RECOVERED_TEXT: &str = "RECOVERED PAGE TEXT";
+
+        // Returns blank text on the first call (the full-page render) and recovered
+        // text on every later call (the force_ocr fallback retry over embedded image
+        // bytes). The fixture has exactly one page, so the call order is deterministic.
+        struct BlankThenRecoverBackend {
+            calls: Arc<AtomicUsize>,
+        }
+
+        #[async_trait::async_trait]
+        impl OcrBackend for BlankThenRecoverBackend {
+            fn backend_type(&self) -> OcrBackendType {
+                OcrBackendType::Custom
+            }
+            fn supports_language(&self, _: &str) -> bool {
+                true
+            }
+            async fn process_image(&self, _: &[u8], _: &OcrConfig) -> crate::Result<ExtractedDocument> {
+                let call_number = self.calls.fetch_add(1, Ordering::SeqCst);
+                let content = if call_number == 0 {
+                    String::new()
+                } else {
+                    RECOVERED_TEXT.to_string()
+                };
+                Ok(ExtractedDocument {
+                    content,
+                    ..Default::default()
+                })
+            }
+            fn supports_document_processing(&self) -> bool {
+                false
+            }
+        }
+
+        impl Plugin for BlankThenRecoverBackend {
+            fn name(&self) -> &str {
+                BACKEND_NAME
+            }
+            fn version(&self) -> String {
+                "1.0.0".to_string()
+            }
+            fn initialize(&self) -> crate::Result<()> {
+                Ok(())
+            }
+            fn shutdown(&self) -> crate::Result<()> {
+                Ok(())
+            }
+        }
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        crate::plugins::register_ocr_backend(Arc::new(BlankThenRecoverBackend { calls: calls.clone() })).unwrap();
+
+        // Single page, exactly one embedded (DCT/JPEG) image XObject -- verified via
+        // `mutool info -I` and already relied on by
+        // `test_page_ocr_fallback_image_bytes_recovers_real_image` in
+        // `crate::pdf::oxide::images`.
+        let pdf_path = test_documents_dir().join("pdf/embedded_images_tables.pdf");
+        let pdf_bytes = std::fs::read(&pdf_path).expect("failed to read test PDF fixture");
+
+        let pipeline = OcrPipelineConfig {
+            stages: vec![OcrPipelineStage {
+                backend: BACKEND_NAME.to_string(),
+                priority: 100,
+                language: None,
+                tesseract_config: None,
+                paddle_ocr_config: None,
+                vlm_config: None,
+                backend_options: None,
+            }],
+            // Accept the first (only) stage unconditionally so the test exercises the
+            // fallback recovery in isolation, not the best-effort selection branch.
+            quality_thresholds: OcrQualityThresholds {
+                pipeline_min_quality: 0.0,
+                ..Default::default()
+            },
+        };
+        let config = ExtractionConfig {
+            ocr: Some(OcrConfig {
+                pipeline: Some(pipeline.clone()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let result = run_ocr_pipeline(
+            Some(&pdf_bytes),
+            None,
+            #[cfg(feature = "layout-detection")]
+            None,
+            &config,
+            &pipeline,
+            None,
+        )
+        .await;
+
+        crate::plugins::unregister_ocr_backend(BACKEND_NAME).unwrap();
+
+        let (text, _, _, doc, _, _, _, _) = result.expect("pipeline run must succeed");
+        assert_eq!(
+            text, RECOVERED_TEXT,
+            "recovered fallback text must replace the blank OCR result in the pipeline route"
+        );
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            2,
+            "expected exactly one full-page OCR call and one fallback OCR call"
+        );
+
+        let warnings = doc
+            .expect("the fallback warning must produce an internal document")
+            .processing_warnings;
+        assert_eq!(
+            warnings.len(),
+            1,
+            "expected exactly one processing warning, got: {warnings:?}"
+        );
+        assert_eq!(warnings[0].source.as_ref(), "ocr");
+        assert_eq!(
+            warnings[0].message.as_ref(),
+            "Page 1 rendered blank but contains 1 image XObject(s) the PDF rasterizer could not draw; \
+             OCR was retried on the embedded image bytes."
+        );
+    }
+
+    /// #1444: a blank OCR result on a page with no embedded image XObjects has nothing
+    /// to recover from. The pipeline route must not fabricate content and must not emit
+    /// the force_ocr fallback warning -- `page_ocr_fallback_image_bytes` degrades to an
+    /// empty vec, and the reference implementation's `if !fallback_images.is_empty()`
+    /// guard is a no-op in that case.
+    #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
+    #[tokio::test]
+    async fn should_not_warn_or_fabricate_content_when_blank_pipeline_page_has_no_embedded_images() {
+        use crate::core::config::{OcrConfig, OcrPipelineConfig, OcrPipelineStage, OcrQualityThresholds};
+        use crate::plugins::{OcrBackend, OcrBackendType, Plugin};
+        use crate::types::ExtractedDocument;
+        use std::sync::Arc;
+
+        const BACKEND_NAME: &str = "pipeline-no-image-blank-test-backend";
+
+        struct AlwaysBlankBackend;
+
+        #[async_trait::async_trait]
+        impl OcrBackend for AlwaysBlankBackend {
+            fn backend_type(&self) -> OcrBackendType {
+                OcrBackendType::Custom
+            }
+            fn supports_language(&self, _: &str) -> bool {
+                true
+            }
+            async fn process_image(&self, _: &[u8], _: &OcrConfig) -> crate::Result<ExtractedDocument> {
+                Ok(ExtractedDocument::default())
+            }
+            fn supports_document_processing(&self) -> bool {
+                false
+            }
+        }
+
+        impl Plugin for AlwaysBlankBackend {
+            fn name(&self) -> &str {
+                BACKEND_NAME
+            }
+            fn version(&self) -> String {
+                "1.0.0".to_string()
+            }
+            fn initialize(&self) -> crate::Result<()> {
+                Ok(())
+            }
+            fn shutdown(&self) -> crate::Result<()> {
+                Ok(())
+            }
+        }
+
+        crate::plugins::register_ocr_backend(Arc::new(AlwaysBlankBackend)).unwrap();
+
+        // No content stream, no resources, no image XObjects.
+        let pdf_bytes = crate::pdf::render::build_minimal_pdf_with_mediabox(612.0, 792.0);
+
+        let pipeline = OcrPipelineConfig {
+            stages: vec![OcrPipelineStage {
+                backend: BACKEND_NAME.to_string(),
+                priority: 100,
+                language: None,
+                tesseract_config: None,
+                paddle_ocr_config: None,
+                vlm_config: None,
+                backend_options: None,
+            }],
+            quality_thresholds: OcrQualityThresholds {
+                pipeline_min_quality: 0.0,
+                ..Default::default()
+            },
+        };
+        let config = ExtractionConfig {
+            ocr: Some(OcrConfig {
+                pipeline: Some(pipeline.clone()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let result = run_ocr_pipeline(
+            Some(&pdf_bytes),
+            None,
+            #[cfg(feature = "layout-detection")]
+            None,
+            &config,
+            &pipeline,
+            None,
+        )
+        .await;
+
+        crate::plugins::unregister_ocr_backend(BACKEND_NAME).unwrap();
+
+        let (text, _, _, doc, _, _, _, _) = result.expect("pipeline run must succeed");
+        assert_eq!(text, "", "a page with no recoverable images must not fabricate content");
+        assert!(
+            doc.is_none(),
+            "a page with no recoverable images must not produce an internal document, got: {doc:?}"
+        );
+    }
+
+    /// #1444: the force_ocr fallback warning is deliberately unconditional on recovery
+    /// succeeding (reference implementation, ocr.rs ~2618-2630) -- it fires whenever the
+    /// page had image XObjects worth retrying, even if the retry also comes back blank.
+    /// The defining property of the original bug is silence, so the warning is the part
+    /// that must never be skipped, independent of whether any text was recovered.
+    #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
+    #[tokio::test]
+    async fn should_warn_when_pipeline_fallback_ocr_recovers_nothing() {
+        use crate::core::config::{OcrConfig, OcrPipelineConfig, OcrPipelineStage, OcrQualityThresholds};
+        use crate::plugins::{OcrBackend, OcrBackendType, Plugin};
+        use crate::types::ExtractedDocument;
+        use std::sync::Arc;
+
+        const BACKEND_NAME: &str = "pipeline-unrecoverable-blank-test-backend";
+
+        struct AlwaysBlankBackend;
+
+        #[async_trait::async_trait]
+        impl OcrBackend for AlwaysBlankBackend {
+            fn backend_type(&self) -> OcrBackendType {
+                OcrBackendType::Custom
+            }
+            fn supports_language(&self, _: &str) -> bool {
+                true
+            }
+            async fn process_image(&self, _: &[u8], _: &OcrConfig) -> crate::Result<ExtractedDocument> {
+                Ok(ExtractedDocument::default())
+            }
+            fn supports_document_processing(&self) -> bool {
+                false
+            }
+        }
+
+        impl Plugin for AlwaysBlankBackend {
+            fn name(&self) -> &str {
+                BACKEND_NAME
+            }
+            fn version(&self) -> String {
+                "1.0.0".to_string()
+            }
+            fn initialize(&self) -> crate::Result<()> {
+                Ok(())
+            }
+            fn shutdown(&self) -> crate::Result<()> {
+                Ok(())
+            }
+        }
+
+        crate::plugins::register_ocr_backend(Arc::new(AlwaysBlankBackend)).unwrap();
+
+        let pdf_path = test_documents_dir().join("pdf/embedded_images_tables.pdf");
+        let pdf_bytes = std::fs::read(&pdf_path).expect("failed to read test PDF fixture");
+
+        let pipeline = OcrPipelineConfig {
+            stages: vec![OcrPipelineStage {
+                backend: BACKEND_NAME.to_string(),
+                priority: 100,
+                language: None,
+                tesseract_config: None,
+                paddle_ocr_config: None,
+                vlm_config: None,
+                backend_options: None,
+            }],
+            quality_thresholds: OcrQualityThresholds {
+                pipeline_min_quality: 0.0,
+                ..Default::default()
+            },
+        };
+        let config = ExtractionConfig {
+            ocr: Some(OcrConfig {
+                pipeline: Some(pipeline.clone()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let result = run_ocr_pipeline(
+            Some(&pdf_bytes),
+            None,
+            #[cfg(feature = "layout-detection")]
+            None,
+            &config,
+            &pipeline,
+            None,
+        )
+        .await;
+
+        crate::plugins::unregister_ocr_backend(BACKEND_NAME).unwrap();
+
+        let (text, _, _, doc, _, _, _, _) = result.expect("pipeline run must succeed");
+        assert_eq!(
+            text, "",
+            "an unrecovered blank page must not fabricate content even though the warning fires"
+        );
+
+        let warnings = doc
+            .expect("the fallback warning must produce an internal document even with no recovered text")
+            .processing_warnings;
+        assert_eq!(
+            warnings.len(),
+            1,
+            "expected exactly one processing warning, got: {warnings:?}"
+        );
+        assert_eq!(warnings[0].source.as_ref(), "ocr");
+        assert_eq!(
+            warnings[0].message.as_ref(),
+            "Page 1 rendered blank but contains 1 image XObject(s) the PDF rasterizer could not draw; \
+             OCR was retried on the embedded image bytes."
+        );
     }
 
     /// Verifies that formulas returned by a per-page OCR backend are accumulated and
