@@ -353,6 +353,7 @@ impl XbergError {
 /// This is not part of the public API: it exists solely so `api::error::ApiError`'s
 /// `From<XbergError>` conversion has a single canonical source for its status-code grouping
 /// instead of a private copy of the match.
+#[cfg(feature = "api")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(alef, alef(skip))]
 pub(crate) enum ApiStatusCategory {
@@ -369,6 +370,7 @@ pub(crate) enum ApiStatusCategory {
 /// This is not part of the public API: it exists solely so `mcp::errors::map_xberg_error_to_mcp`
 /// has a single canonical source for its error-code grouping instead of a private copy of the
 /// match.
+#[cfg(feature = "mcp")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(alef, alef(skip))]
 pub(crate) enum McpErrorCategory {
@@ -387,6 +389,7 @@ impl XbergError {
     ///
     /// Exhaustive over every variant. This is the single source of truth for
     /// `api::types::ErrorResponse::error_type`; do not duplicate this match elsewhere.
+    #[cfg(feature = "api")]
     #[cfg_attr(alef, alef(skip))]
     pub(crate) fn api_error_type(&self) -> &'static str {
         match self {
@@ -415,6 +418,7 @@ impl XbergError {
     ///
     /// This is the single source of truth for `api::error::ApiError`'s `From<XbergError>`
     /// status-code selection; do not duplicate this match elsewhere.
+    #[cfg(feature = "api")]
     #[cfg_attr(alef, alef(skip))]
     pub(crate) fn api_status_category(&self) -> ApiStatusCategory {
         match self {
@@ -466,6 +470,7 @@ impl XbergError {
     ///
     /// This is the single source of truth for `mcp::errors::map_xberg_error_to_mcp`'s error-code
     /// selection; do not duplicate this match elsewhere.
+    #[cfg(feature = "mcp")]
     #[cfg_attr(alef, alef(skip))]
     pub(crate) fn mcp_error_category(&self) -> McpErrorCategory {
         match self {
@@ -707,6 +712,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "api")]
     #[test]
     fn should_map_every_variant_to_its_canonical_api_error_type() {
         assert_eq!(XbergError::Io(std::io::Error::other("t")).api_error_type(), "IOError");
@@ -738,6 +744,7 @@ mod tests {
         assert_eq!(XbergError::reranking("t").api_error_type(), "RerankingError");
     }
 
+    #[cfg(feature = "api")]
     #[test]
     fn should_categorize_validation_and_unsupported_format_as_bad_request() {
         assert_eq!(XbergError::validation("t").api_status_category(), ApiStatusCategory::Validation);
@@ -747,12 +754,14 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "api")]
     #[test]
     fn should_categorize_parsing_and_ocr_as_unprocessable_entity() {
         assert_eq!(XbergError::parsing("t").api_status_category(), ApiStatusCategory::Unprocessable);
         assert_eq!(XbergError::ocr("t").api_status_category(), ApiStatusCategory::Unprocessable);
     }
 
+    #[cfg(feature = "api")]
     #[test]
     fn should_default_remaining_variants_to_internal_server_error() {
         assert_eq!(
@@ -831,6 +840,7 @@ mod tests {
         assert_eq!(XbergError::reranking("t").extraction_error_code(), 1099);
     }
 
+    #[cfg(feature = "mcp")]
     #[test]
     fn should_categorize_client_input_errors_as_invalid_params_for_mcp() {
         assert_eq!(XbergError::validation("t").mcp_error_category(), McpErrorCategory::InvalidParams);
@@ -845,16 +855,19 @@ mod tests {
         assert_eq!(XbergError::security("t").mcp_error_category(), McpErrorCategory::InvalidParams);
     }
 
+    #[cfg(feature = "mcp")]
     #[test]
     fn should_categorize_parsing_as_parse_error_for_mcp() {
         assert_eq!(XbergError::parsing("t").mcp_error_category(), McpErrorCategory::ParseError);
     }
 
+    #[cfg(feature = "mcp")]
     #[test]
     fn should_categorize_cancelled_as_cancelled_for_mcp() {
         assert_eq!(XbergError::Cancelled.mcp_error_category(), McpErrorCategory::Cancelled);
     }
 
+    #[cfg(feature = "mcp")]
     #[test]
     fn should_default_remaining_variants_to_internal_for_mcp() {
         assert_eq!(
