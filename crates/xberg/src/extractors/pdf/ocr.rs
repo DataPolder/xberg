@@ -1465,9 +1465,28 @@ fn accepted_ocr_page_replacements(
         }
     }
 
+    // An accepted replacement OVERWRITES the page's native byte range, so a page whose
+    // OCR came back effectively empty must not be accepted: doing so deletes whatever the
+    // native text layer had and makes the OCR run return *less* than not running it at all.
+    // `!text.trim().is_empty()` is too weak a bar -- a single stray character cleared it,
+    // which is exactly what a blank/failed page render produces. Use the same blank
+    // threshold the rest of the crate uses so one definition governs both. ~keep
     ocr_results
         .iter()
-        .filter(|(page, text)| valid_pages.contains(page) && !text.trim().is_empty())
+        .filter(|(page, text)| {
+            if !valid_pages.contains(page) {
+                return false;
+            }
+            if crate::extraction::blank_detection::is_page_text_blank(text) {
+                tracing::warn!(
+                    page = **page,
+                    chars = text.trim().chars().count(),
+                    "rejecting mixed OCR page whose OCR output is blank; keeping native text for this page"
+                );
+                return false;
+            }
+            true
+        })
         .map(|(&page, text)| (page, text.clone()))
         .collect()
 }
@@ -1493,6 +1512,38 @@ fn apply_ocr_page_replacements(
     }
 
     result
+}
+
+/// Re-map page boundaries onto the text produced by `apply_ocr_page_replacements`.
+///
+/// Replacing a page's byte range with OCR text of a different length shifts every
+/// later offset, so the input boundaries describe the NATIVE text and are wrong for
+/// the merged result. Without this, anything downstream that maps a byte offset back
+/// to a page number -- including page tagging on the flat-document path -- either
+/// mis-attributes content or has to give up and emit no pages at all. Walks forward
+/// accumulating the per-page delta; unreplaced pages simply shift by the running
+/// total, so gaps between boundaries are preserved. ~keep
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+pub(crate) fn boundaries_after_replacements(
+    boundaries: &[crate::types::PageBoundary],
+    accepted: &ahash::AHashMap<u32, String>,
+) -> Vec<crate::types::PageBoundary> {
+    let mut adjusted: Vec<crate::types::PageBoundary> = boundaries.to_vec();
+    adjusted.sort_by_key(|boundary| boundary.byte_start);
+
+    let mut delta: isize = 0;
+    for boundary in &mut adjusted {
+        let original_start = boundary.byte_start;
+        let original_end = boundary.byte_end;
+        boundary.byte_start = original_start.saturating_add_signed(delta);
+        if let Some(ocr_text) = accepted.get(&boundary.page_number) {
+            let old_len = original_end.saturating_sub(original_start);
+            delta += ocr_text.len() as isize - old_len as isize;
+        }
+        boundary.byte_end = original_end.saturating_add_signed(delta);
+    }
+
+    adjusted
 }
 
 /// Replace native text-flow elements on OCR'd pages while preserving the
@@ -3436,6 +3487,102 @@ mod tests {
     #[cfg(feature = "ocr")]
     fn t() -> OcrQualityThresholds {
         OcrQualityThresholds::default()
+    }
+
+    #[cfg(feature = "ocr")]
+    fn boundary(page_number: u32, byte_start: usize, byte_end: usize) -> crate::types::PageBoundary {
+        crate::types::PageBoundary {
+            byte_start,
+            byte_end,
+            page_number,
+        }
+    }
+
+    /// A page whose OCR came back effectively blank must NOT overwrite that page's native
+    /// text. Reported against a 16-page scanned ordinance whose page renders were empty:
+    /// tesseract returned a couple of noise characters per page, every one cleared the old
+    /// `!text.trim().is_empty()` bar, and the accepted replacements deleted the native text
+    /// -- so enabling OCR returned FEWER characters than not enabling it (174 vs 185).
+    #[test]
+    #[cfg(feature = "ocr")]
+    fn should_reject_blank_ocr_page_rather_than_overwrite_native_text() {
+        let native = "Page one has real native content here.\nPage two also has real content.";
+        let split = native.find('\n').expect("newline") + 1;
+        let boundaries = vec![boundary(1, 0, split), boundary(2, split, native.len())];
+
+        let mut ocr_results: ahash::AHashMap<u32, String> = ahash::AHashMap::new();
+        // What a blank page render actually produces: a scrap of noise.
+        ocr_results.insert(1, "  a \n".to_string());
+
+        let accepted = accepted_ocr_page_replacements(native, &boundaries, &ocr_results);
+        assert!(
+            accepted.is_empty(),
+            "blank OCR output must not be accepted as a replacement, got {accepted:?}"
+        );
+
+        let merged = apply_ocr_page_replacements(native, &boundaries, &accepted);
+        assert_eq!(merged, native, "native text must survive a blank OCR page untouched");
+        assert!(
+            merged.chars().filter(|c| !c.is_whitespace()).count()
+                >= native.chars().filter(|c| !c.is_whitespace()).count(),
+            "OCR must never reduce the non-whitespace character count below native"
+        );
+    }
+
+    /// The complement: real OCR text still replaces the page, so the guard above cannot be
+    /// satisfied by simply refusing everything.
+    #[test]
+    #[cfg(feature = "ocr")]
+    fn should_still_accept_ocr_page_with_real_recovered_text() {
+        let native = "garbled\nPage two native.";
+        let split = native.find('\n').expect("newline") + 1;
+        let boundaries = vec![boundary(1, 0, split), boundary(2, split, native.len())];
+
+        let mut ocr_results: ahash::AHashMap<u32, String> = ahash::AHashMap::new();
+        ocr_results.insert(1, "ORDINANCE NO. 2197\n".to_string());
+
+        let accepted = accepted_ocr_page_replacements(native, &boundaries, &ocr_results);
+        assert_eq!(accepted.len(), 1, "a page with real OCR text must be accepted");
+
+        let merged = apply_ocr_page_replacements(native, &boundaries, &accepted);
+        assert!(merged.contains("ORDINANCE NO. 2197"), "OCR text must reach the output");
+        assert!(merged.contains("Page two native."), "untouched pages must be preserved");
+    }
+
+    /// Replacing a page with OCR text of a different length shifts every later offset, so
+    /// the native boundaries no longer describe the merged text. Anything mapping a byte
+    /// offset back to a page -- including page tagging, which is what `doc.pages` is built
+    /// from -- reads the wrong page without this re-map.
+    #[test]
+    #[cfg(feature = "ocr")]
+    fn should_remap_page_boundaries_onto_the_merged_text() {
+        let native = "AAA\nBBB\nCCC";
+        let boundaries = vec![boundary(1, 0, 4), boundary(2, 4, 8), boundary(3, 8, native.len())];
+
+        let mut accepted: ahash::AHashMap<u32, String> = ahash::AHashMap::new();
+        accepted.insert(2, "LONGER PAGE TWO\n".to_string());
+
+        let merged = apply_ocr_page_replacements(native, &boundaries, &accepted);
+        let remapped = boundaries_after_replacements(&boundaries, &accepted);
+
+        assert_eq!(remapped.len(), 3);
+        // Page 1 is before the replacement: unchanged.
+        assert_eq!((remapped[0].byte_start, remapped[0].byte_end), (0, 4));
+        // Page 2 grew to the replacement's length.
+        assert_eq!(remapped[1].byte_start, 4);
+        assert_eq!(remapped[1].byte_end, 4 + "LONGER PAGE TWO\n".len());
+        // Page 3 shifted by the delta, and must still address its own text.
+        assert_eq!(remapped[2].byte_end, merged.len());
+        assert_eq!(
+            &merged[remapped[2].byte_start..remapped[2].byte_end],
+            "CCC",
+            "page 3 must still resolve to its own content after the shift"
+        );
+        assert_eq!(
+            &merged[remapped[1].byte_start..remapped[1].byte_end],
+            "LONGER PAGE TWO\n",
+            "page 2 must resolve to the OCR text that replaced it"
+        );
     }
 
     /// Issue #181: TATR tables recognized during full-document OCR must carry a

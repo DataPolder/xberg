@@ -103,12 +103,53 @@ enum PdfDocumentOrigin {
 /// neither is guaranteed LF-only: `crate::pdf::text::fix_pdf_control_chars` explicitly
 /// whitelists `\r` as a character to preserve, and the VLM OCR backend returns model
 /// markdown verbatim from an HTTP response. Normalize before splitting (#316).
-fn flat_pdf_document(text: &str, mime_type: &str) -> InternalDocument {
+/// `boundaries` must describe `text` itself, not some earlier revision of it -- on the
+/// mixed path that means the output of `ocr::boundaries_after_replacements`, since OCR
+/// replacement shifts every later offset. When supplied, each paragraph is tagged with
+/// the page its start offset falls in.
+///
+/// Tagging matters well beyond bookkeeping: `ExtractedDocument.pages` is derived from
+/// `element.page` (`extraction::derive::build_pages`), so a flat document with no page
+/// tags yields `pages: None` -- indistinguishable at the call site from "this document
+/// has no pages", and a silent shape change between the native and OCR paths for the
+/// same input. Every arm that falls back here previously lost per-page access entirely. ~keep
+fn flat_pdf_document(text: &str, mime_type: &str, boundaries: Option<&[crate::types::PageBoundary]>) -> InternalDocument {
     let mut doc = InternalDocument::new("pdf");
     doc.mime_type = mime_type.to_string();
-    let text = crate::extraction::transform::normalize_line_endings(text);
-    for paragraph in text.split("\n\n").map(str::trim).filter(|text| !text.is_empty()) {
-        doc.push_element(InternalElement::text(ElementKind::Paragraph, paragraph, 0));
+    let normalized = crate::extraction::transform::normalize_line_endings(text);
+
+    // Normalization rewrites CRLF to LF, which shifts offsets; boundaries are only
+    // usable when it changed nothing. Falling back to untagged paragraphs is the
+    // pre-existing behaviour, so a CRLF document is no worse off than before.
+    let usable: Option<&[crate::types::PageBoundary]> = boundaries.filter(|bounds| {
+        normalized.len() == text.len()
+            && !bounds.is_empty()
+            && bounds.iter().all(|b| b.byte_start <= b.byte_end && b.byte_end <= normalized.len())
+    });
+
+    let page_at = |offset: usize| -> Option<u32> {
+        usable?
+            .iter()
+            .find(|b| offset >= b.byte_start && offset < b.byte_end)
+            .map(|b| b.page_number)
+    };
+
+    let mut cursor = 0usize;
+    for raw in normalized.split("\n\n") {
+        let offset = cursor;
+        cursor += raw.len() + 2; // the split consumed the two-byte separator
+        let paragraph = raw.trim();
+        if paragraph.is_empty() {
+            continue;
+        }
+        // Offset of the trimmed text, so a paragraph sitting just after a page break is
+        // attributed to the page its visible content is on rather than the previous one.
+        let text_offset = offset + (raw.len() - raw.trim_start().len());
+        let element = InternalElement::text(ElementKind::Paragraph, paragraph, 0);
+        doc.push_element(match page_at(text_offset) {
+            Some(page) => element.with_page(page),
+            None => element,
+        });
     }
     doc
 }
@@ -164,9 +205,10 @@ fn select_native_pdf_document(
     text: &str,
     mime_type: &str,
     pre_rendered_doc: Option<InternalDocument>,
+    boundaries: Option<&[crate::types::PageBoundary]>,
 ) -> (InternalDocument, bool) {
     let Some(mut document) = pre_rendered_doc else {
-        return (flat_pdf_document(text, mime_type), false);
+        return (flat_pdf_document(text, mime_type, boundaries), false);
     };
     document.mime_type = mime_type.to_string();
 
@@ -180,7 +222,7 @@ fn select_native_pdf_document(
         minimum_coverage = MIN_STRUCTURED_NATIVE_TOKEN_COVERAGE,
         "PDF structure omitted substantial native text; using complete native text"
     );
-    (flat_pdf_document(text, mime_type), false)
+    (flat_pdf_document(text, mime_type, boundaries), false)
 }
 
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
@@ -192,10 +234,11 @@ fn select_pdf_document(
     ocr_internal_doc: Option<InternalDocument>,
     ocr_results: Option<&ahash::AHashMap<u32, String>>,
     structured_ocr_pages: Option<&ahash::AHashMap<u32, InternalDocument>>,
+    boundaries: Option<&[crate::types::PageBoundary]>,
 ) -> (InternalDocument, PdfDocumentOrigin, bool) {
     let (mut doc, origin, structured) = match extraction_method {
         ExtractionMethod::Native => {
-            let (document, structured) = select_native_pdf_document(text, mime_type, pre_rendered_doc);
+            let (document, structured) = select_native_pdf_document(text, mime_type, pre_rendered_doc, boundaries);
             (document, PdfDocumentOrigin::Native, structured)
         }
         ExtractionMethod::Mixed => match pre_rendered_doc {
@@ -209,11 +252,19 @@ fn select_pdf_document(
                 }
                 (doc, PdfDocumentOrigin::Mixed, true)
             }
-            None => (flat_pdf_document(text, mime_type), PdfDocumentOrigin::Mixed, false),
+            None => (
+                flat_pdf_document(text, mime_type, boundaries),
+                PdfDocumentOrigin::Mixed,
+                false,
+            ),
         },
         ExtractionMethod::Ocr => match ocr_internal_doc {
             Some(doc) => (doc, PdfDocumentOrigin::Ocr, true),
-            None => (flat_pdf_document(text, mime_type), PdfDocumentOrigin::Ocr, false),
+            None => (
+                flat_pdf_document(text, mime_type, boundaries),
+                PdfDocumentOrigin::Ocr,
+                false,
+            ),
         },
     };
     doc.mime_type = mime_type.to_string();
@@ -1503,6 +1554,19 @@ impl PdfExtractor {
                     mixed_formulas,
                     mixed_warnings,
                 ) = ocr::extract_mixed_ocr_native(&native_text, bounds, &scanned_pages, content, config, path).await?;
+                // `Mixed` must mean "OCR contributed text", not "OCR was attempted". When
+                // every candidate page was rejected (blank render, failed decode, empty
+                // backend output) nothing was replaced and the result IS the native text --
+                // reporting `Mixed` there tells a caller the document was OCR'd when it was
+                // not, which is how a silent whole-document OCR failure reads as success. ~keep
+                let ocr_contributed = !results_map.is_empty();
+                if !ocr_contributed {
+                    tracing::warn!(
+                        candidate_pages = scanned_pages.len(),
+                        "OCR was attempted on every detected scanned page but no page produced usable \
+                         text; reporting the native extraction method rather than `mixed`"
+                    );
+                }
                 ocr_llm_usage = mixed_llm_usage;
                 ocr_results_map = Some(results_map);
                 structured_ocr_pages = Some(mixed_structured_pages);
@@ -1511,7 +1575,11 @@ impl PdfExtractor {
                     ocr_formulas = mixed_formulas;
                 }
                 ocr_fallback_warnings.extend(mixed_warnings);
-                (mixed, ExtractionMethod::Mixed)
+                if ocr_contributed {
+                    (mixed, ExtractionMethod::Mixed)
+                } else {
+                    (mixed, ExtractionMethod::Native)
+                }
             } else {
                 tracing::warn!("scanned pages detected but no page boundaries available; using native text");
                 (native_text, ExtractionMethod::Native)
@@ -1823,6 +1891,16 @@ impl PdfExtractor {
 
         let used_ocr = extraction_method.used_ocr();
 
+        // `boundaries` index the NATIVE text; on the mixed path the OCR replacements have
+        // already shifted every later offset, so re-map before handing them to the document
+        // selector or page tagging would attribute content to the wrong page. ~keep
+        #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+        let selector_boundaries: Option<Vec<crate::types::PageBoundary>> = boundaries.as_ref().map(|bounds| {
+            match ocr_results_map.as_ref() {
+                Some(accepted) if !accepted.is_empty() => ocr::boundaries_after_replacements(bounds, accepted),
+                _ => bounds.clone(),
+            }
+        });
         #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
         let (mut doc, document_origin, document_is_structured) = select_pdf_document(
             extraction_method,
@@ -1832,9 +1910,11 @@ impl PdfExtractor {
             ocr_internal_doc.take(),
             ocr_results_map.as_ref(),
             structured_ocr_pages.as_ref(),
+            selector_boundaries.as_deref(),
         );
         #[cfg(not(any(feature = "ocr", feature = "ocr-pipeline")))]
-        let (mut doc, document_is_structured) = select_native_pdf_document(&text, mime_type, pre_rendered_doc);
+        let (mut doc, document_is_structured) =
+            select_native_pdf_document(&text, mime_type, pre_rendered_doc, boundaries.as_deref());
         #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
         tracing::debug!(?document_origin, document_is_structured, "selected PDF document origin");
 
@@ -2213,6 +2293,57 @@ mod tests {
             .join(" ")
     }
 
+    /// `ExtractedDocument.pages` is derived from `element.page`, so a flat document with no
+    /// page tags yields `pages: None` -- which a caller cannot distinguish from "this
+    /// document has no pages". Reported against a 16-page scanned PDF where native mode
+    /// returned 16 pages and enabling OCR returned `None`, so `list(doc.pages)` raised
+    /// TypeError on the very mode that exists to give per-page OCR routing.
+    #[test]
+    fn should_tag_flat_document_paragraphs_with_their_page_numbers() {
+        let text = "Page one body.\n\nPage two body.\n\nPage three body.";
+        let first = text.find("Page two").expect("page two");
+        let second = text.find("Page three").expect("page three");
+        let boundaries = vec![
+            crate::types::PageBoundary {
+                byte_start: 0,
+                byte_end: first,
+                page_number: 1,
+            },
+            crate::types::PageBoundary {
+                byte_start: first,
+                byte_end: second,
+                page_number: 2,
+            },
+            crate::types::PageBoundary {
+                byte_start: second,
+                byte_end: text.len(),
+                page_number: 3,
+            },
+        ];
+
+        let doc = flat_pdf_document(text, "application/pdf", Some(&boundaries));
+
+        assert_eq!(doc.elements.len(), 3, "one paragraph per page");
+        assert_eq!(
+            doc.elements.iter().map(|e| e.page).collect::<Vec<_>>(),
+            vec![Some(1), Some(2), Some(3)],
+            "every paragraph must carry the page its content is on"
+        );
+    }
+
+    /// Without boundaries the pre-existing untagged behaviour stands, so a caller that has
+    /// no page information is no worse off than before.
+    #[test]
+    fn should_leave_flat_document_untagged_when_no_boundaries_are_available() {
+        let doc = flat_pdf_document("Only body.\n\nSecond para.", "application/pdf", None);
+
+        assert_eq!(doc.elements.len(), 2);
+        assert!(
+            doc.elements.iter().all(|e| e.page.is_none()),
+            "no boundaries means no page attribution, not a guessed one"
+        );
+    }
+
     #[test]
     fn should_fall_back_to_native_text_when_structure_drops_substantial_content() {
         let native_text = coverage_native_text();
@@ -2220,7 +2351,7 @@ mod tests {
         let mut structured = InternalDocument::new("pdf");
         structured.push_element(InternalElement::text(ElementKind::Heading { level: 1 }, represented, 0));
 
-        let (selected, is_structured) = select_native_pdf_document(&native_text, "application/pdf", Some(structured));
+        let (selected, is_structured) = select_native_pdf_document(&native_text, "application/pdf", Some(structured), None);
 
         assert!(!is_structured);
         assert_eq!(selected.elements.len(), 1);
@@ -2234,7 +2365,7 @@ mod tests {
         let mut structured = InternalDocument::new("pdf");
         structured.push_element(InternalElement::text(ElementKind::Heading { level: 1 }, represented, 0));
 
-        let (selected, is_structured) = select_native_pdf_document(&native_text, "application/pdf", Some(structured));
+        let (selected, is_structured) = select_native_pdf_document(&native_text, "application/pdf", Some(structured), None);
 
         assert!(is_structured);
         assert!(matches!(selected.elements[0].kind, ElementKind::Heading { level: 1 }));
@@ -2249,7 +2380,7 @@ mod tests {
             ..Default::default()
         });
 
-        let (_, is_structured) = select_native_pdf_document(&native_text, "application/pdf", Some(structured));
+        let (_, is_structured) = select_native_pdf_document(&native_text, "application/pdf", Some(structured), None);
 
         assert!(is_structured);
     }
@@ -2260,7 +2391,7 @@ mod tests {
         structured.push_element(InternalElement::text(ElementKind::Heading { level: 1 }, "Title", 0));
 
         let (selected, is_structured) =
-            select_native_pdf_document("Title and body", "application/pdf", Some(structured));
+            select_native_pdf_document("Title and body", "application/pdf", Some(structured), None);
 
         assert!(is_structured);
         assert!(matches!(selected.elements[0].kind, ElementKind::Heading { level: 1 }));
@@ -2730,6 +2861,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
 
         assert_eq!(origin, PdfDocumentOrigin::Ocr);
@@ -2773,6 +2905,7 @@ mod tests {
             None,
             Some(&results),
             None,
+            None,
         );
 
         assert_eq!(origin, PdfDocumentOrigin::Mixed);
@@ -2808,6 +2941,7 @@ mod tests {
             "application/pdf",
             None,
             Some(ocr_doc),
+            None,
             None,
             None,
         );
