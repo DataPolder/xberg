@@ -53,13 +53,22 @@ RUN file /build/xberg && \
 
 FROM alpine:3.21
 
+# Alpine's `onnxruntime` ships a 16.7 MB `onnx_test_runner` test harness, and pulls
+# `protoc` in transitively for its codegen executables. None of them are reachable at
+# runtime -- the CLI links `libonnxruntime.so` and `libprotoc.so`, not these binaries --
+# so they are deleted in the same layer as the install (a later `rm` would leave the
+# bytes in the lower layer and shrink nothing). Worth ~23 MB on amd64, measured. Do NOT
+# extend this to the libheif codecs: `libheif-x265`/`libheif-aom` back HEIC *encoding*,
+# which is a supported image output format (core/image_encode.rs). ~keep
 RUN apk add --no-cache libgcc && \
     apk add --no-cache \
         libstdc++ \
         onnxruntime \
         libheif libheif-libde265 libheif-aom libheif-dav1d libheif-x265 \
     --repository=https://dl-cdn.alpinelinux.org/alpine/edge/community \
-    --repository=https://dl-cdn.alpinelinux.org/alpine/edge/main
+    --repository=https://dl-cdn.alpinelinux.org/alpine/edge/main && \
+    rm -f /usr/bin/onnx_test_runner /usr/bin/protoc /usr/bin/protoc-[0-9]* \
+          /usr/bin/protoc-gen-upb-* /usr/bin/protoc-gen-upbdefs-*
 
 COPY --from=builder /build/xberg /usr/local/bin/xberg
 

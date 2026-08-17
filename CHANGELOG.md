@@ -35,6 +35,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The `cli` Docker image no longer ships build-time executables it cannot reach at runtime.
+  Alpine's `onnxruntime` package includes a 16.7 MB `onnx_test_runner` test harness and pulls in
+  `protoc`'s codegen binaries transitively; the CLI links `libonnxruntime.so` and `libprotoc.so`,
+  never those executables. Deleting them in the same layer as the install (a later `rm` leaves the
+  bytes in the lower layer) takes about 23 MB off the amd64 image. The libheif codec plugins are
+  deliberately kept: `libheif-x265` and `libheif-aom` back HEIC *encoding*, which is a supported
+  image output format.
+
 - **Breaking:** `Formula.bbox` and `Formula.page` are now optional. Markup sources (DOCX, PPTX,
   ODT, EPUB, HTML, JATS, LaTeX, Markdown, and related formats) produce formulas with no geometry;
   the old required fields forced fake values on those paths (a zeroed bbox and `page: 1` on VLM
