@@ -76,9 +76,7 @@ pub struct RerankerConfig {
 impl Default for RerankerConfig {
     fn default() -> Self {
         Self {
-            model: RerankerModelType::Preset {
-                name: "balanced".to_string(),
-            },
+            model: default_reranker_model(),
             top_k: None,
             batch_size: 32,
             show_download_progress: false,

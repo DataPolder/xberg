@@ -455,9 +455,7 @@ pub struct EmbeddingConfig {
 impl Default for EmbeddingConfig {
     fn default() -> Self {
         Self {
-            model: EmbeddingModelType::Preset {
-                name: "balanced".to_string(),
-            },
+            model: default_balanced_embedding_model(),
             normalize: true,
             batch_size: 32,
             show_download_progress: false,
@@ -589,6 +587,12 @@ fn default_batch_size() -> usize {
 fn default_model() -> EmbeddingModelType {
     EmbeddingModelType::Preset {
         name: "gte-modernbert-base".to_string(),
+    }
+}
+
+fn default_balanced_embedding_model() -> EmbeddingModelType {
+    EmbeddingModelType::Preset {
+        name: "balanced".to_string(),
     }
 }
 
