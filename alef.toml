@@ -4217,7 +4217,7 @@ package_manager = ["composer"]
 features = { ocr = true, async = false, plugin_system = true, embeddings = true, code_intelligence = true }
 ocr_backends = ["tesseract", "paddleocr", "sceptre"]
 optional_sections = ["composer_installation", "system_requirements"]
-snippets = { basic_extraction = "quickstart/basic_extraction_oop.php", batch_processing = "extraction/batch_processing.php", ocr_configuration = "ocr/basic_ocr.php" }
+snippets = { basic_extraction = "quickstart/basic_extraction_oop.md", batch_processing = "extraction/batch_processing.md", ocr_configuration = "ocr/basic_ocr.md" }
 
 [crates.readme.languages.ruby]
 template = "ruby.md"
@@ -4243,7 +4243,7 @@ package_manager = ["nuget"]
 features = { ocr = true, async = true, plugin_system = true, embeddings = true, code_intelligence = true }
 ocr_backends = ["tesseract", "paddleocr", "sceptre"]
 optional_sections = ["dotnet_installation", "system_requirements"]
-snippets = { basic_extraction = "getting-started/basic_usage.cs", async_extraction = "advanced/async_extraction.cs", batch_processing = "advanced/batch_processing.cs", ocr_configuration = "ocr/tesseract_backend.cs" }
+snippets = { basic_extraction = "getting-started/basic_usage.md", async_extraction = "advanced/async_extraction.md", batch_processing = "advanced/batch_processing.md", ocr_configuration = "ocr/tesseract_backend.md" }
 
 [crates.readme.languages.elixir]
 template = "language_package.md"
@@ -4256,7 +4256,7 @@ package_manager = ["mix"]
 features = { ocr = true, async = true, plugin_system = true, embeddings = true, code_intelligence = true }
 ocr_backends = ["tesseract", "paddleocr", "sceptre"]
 optional_sections = ["mix_installation", "async_with_tasks", "plugin_system"]
-snippets = { basic_extraction = "getting-started/basic_usage.exs", async_extraction = "core/extract.md", batch_processing = "core/extract_batch.md", ocr_configuration = "ocr/tesseract_basic.md", plugin_system = "plugins/word_count_processor.exs" }
+snippets = { basic_extraction = "getting-started/basic_usage.md", async_extraction = "core/extract.md", batch_processing = "core/extract_batch.md", ocr_configuration = "ocr/tesseract_basic.md", plugin_system = "plugins/word_count_processor.md" }
 
 [crates.readme.languages.wasm]
 template = "language_package.md"
@@ -4270,7 +4270,7 @@ package_manager = ["pnpm"]
 features = { ocr = true, async = true, plugin_system = true, embeddings = false, code_intelligence = true }
 ocr_backends = ["tesseract-wasm", "sceptre (opt-in worker API)"]
 optional_sections = ["multi_threading", "ocr_support", "performance_comparison"]
-snippets = { basic_extraction = "getting-started/basic-extract.ts", browser_extraction = "getting-started/browser-file-input.ts", node_extraction = "getting-started/basic-extract.ts", async_extraction = "getting-started/async-extraction.ts", cloudflare_workers = "getting-started/runtime-detection.ts", batch_processing = "getting-started/batch-processing.ts", ocr_configuration = "ocr/enable-ocr.ts" }
+snippets = { basic_extraction = "getting-started/basic-extract.md", browser_extraction = "getting-started/browser-file-input.md", node_extraction = "getting-started/basic-extract.md", async_extraction = "getting-started/async-extraction.md", cloudflare_workers = "getting-started/runtime-detection.md", batch_processing = "getting-started/batch-processing.md", ocr_configuration = "ocr/enable-ocr.md" }
 
 [crates.readme.languages.ffi]
 template = "language_package.md"
