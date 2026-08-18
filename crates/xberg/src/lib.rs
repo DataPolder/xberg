@@ -474,8 +474,8 @@ pub use plugins::{
 
 #[cfg_attr(alef, alef(skip))]
 pub use plugins::{
-    ConfidenceSemantics, DocumentExtractor, EmbeddingBackend, OcrBackend, OcrBackendType, PostProcessor,
-    ProcessingStage, Renderer, RerankerBackend, TokenizerBackend, Validator,
+    ConfidenceSemantics, DocumentExtractor, EmbeddingBackend, OcrBackend, OcrBackendType, PageOrientationHandling,
+    PostProcessor, ProcessingStage, Renderer, RerankerBackend, TokenizerBackend, Validator,
 };
 
 #[cfg(feature = "embedding-presets")]

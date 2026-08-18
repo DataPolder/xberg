@@ -564,6 +564,9 @@ impl OcrBackend for GlmOcrBackend {
     fn confidence_semantics(&self) -> crate::plugins::ConfidenceSemantics {
         crate::plugins::ConfidenceSemantics::None
     }
+
+    // Rotation handling has not been measured for this backend; it stays on the trait's
+    // `RequiresUpright` default.
 }
 
 /// Paired-mode dispatch: run PP-DocLayout-V3, crop regions, dispatch per-region task.

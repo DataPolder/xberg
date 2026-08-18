@@ -425,6 +425,12 @@ impl OcrBackend for TesseractBackend {
         crate::plugins::ConfidenceSemantics::Legibility { scale_max: 100.0 }
     }
 
+    /// Measured on a `/Rotate 270` scanned ordinance: Tesseract reconstructs correct reading
+    /// order on the sideways raster outright, with no upright-render step required.
+    fn page_orientation_handling(&self) -> crate::plugins::PageOrientationHandling {
+        crate::plugins::PageOrientationHandling::SelfCorrecting
+    }
+
     #[cfg_attr(alef, alef(skip))]
     fn probe(&self, config: &OcrConfig) -> crate::doctor::DoctorCheck {
         #[cfg(target_arch = "wasm32")]

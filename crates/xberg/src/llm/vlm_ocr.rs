@@ -120,6 +120,9 @@ impl OcrBackend for VlmOcrBackend {
         crate::plugins::ConfidenceSemantics::None
     }
 
+    // Rotation handling has not been measured for this backend; it stays on the trait's
+    // `RequiresUpright` default.
+
     #[cfg_attr(alef, alef(skip))]
     fn probe(&self, config: &crate::OcrConfig) -> crate::doctor::DoctorCheck {
         use crate::doctor::DoctorCheck;

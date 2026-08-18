@@ -266,6 +266,9 @@ impl OcrBackend for TrocrBackend {
     fn confidence_semantics(&self) -> crate::plugins::ConfidenceSemantics {
         crate::plugins::ConfidenceSemantics::None
     }
+
+    // Rotation handling has not been measured for this backend; it stays on the trait's
+    // `RequiresUpright` default.
 }
 
 #[cfg(test)]

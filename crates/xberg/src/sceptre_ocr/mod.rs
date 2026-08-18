@@ -299,6 +299,14 @@ impl OcrBackend for SceptreOcrBackend {
     fn confidence_semantics(&self) -> crate::plugins::ConfidenceSemantics {
         crate::plugins::ConfidenceSemantics::Uncalibrated
     }
+
+    /// Measured on a `/Rotate 270` scanned ordinance: sceptre produced character garbage on the
+    /// sideways raster and only read correctly once the same page was rendered upright first.
+    /// This is the same value as the trait default, made explicit here because it is a
+    /// measurement, not an unverified inheritance.
+    fn page_orientation_handling(&self) -> crate::plugins::PageOrientationHandling {
+        crate::plugins::PageOrientationHandling::RequiresUpright
+    }
 }
 
 struct BlockingOutput {

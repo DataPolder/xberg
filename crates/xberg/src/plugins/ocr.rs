@@ -51,6 +51,28 @@ pub enum ConfidenceSemantics {
     None,
 }
 
+/// How a backend copes with a page raster whose text is not upright.
+///
+/// Rotated-page handling is a backend capability, not a universal guarantee. An A/B run this
+/// session against `/Rotate 270` scanned pages showed the three handled cases genuinely differ:
+/// Tesseract reconstructs correct reading order on a sideways raster outright; PaddleOCR
+/// recognises the rotated text correctly (it warps each detected quad upright before running
+/// recognition) but leaves its block list in raw raster `(y, x)` order, so the caller must
+/// reorder; sceptre produces character garbage on the same sideways raster and only reads
+/// correctly once the page is rendered upright first. A caller that skips an upright-render step
+/// for a backend that actually needs one gets silent garbage, not an error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PageOrientationHandling {
+    /// Reconstructs reading order regardless of page rotation — safe to hand a
+    /// raster in any orientation.
+    SelfCorrecting,
+    /// Recognises rotated text correctly but emits blocks in raw raster order,
+    /// so the caller must reorder.
+    RecognisesRotatedText,
+    /// Requires an upright raster; rotated text produces garbage.
+    RequiresUpright,
+}
+
 /// Trait for OCR backend plugins.
 ///
 /// Implement this trait to add custom OCR capabilities. OCR backends can be:
@@ -349,6 +371,18 @@ pub trait OcrBackend: Plugin {
     /// tracks legibility on a known scale.
     fn confidence_semantics(&self) -> ConfidenceSemantics {
         ConfidenceSemantics::Uncalibrated
+    }
+
+    /// Declare how this backend copes with a page raster whose text is not upright.
+    ///
+    /// Defaults to [`PageOrientationHandling::RequiresUpright`]. This default is deliberately
+    /// the least capable option, not [`PageOrientationHandling::SelfCorrecting`]: a new backend
+    /// must not silently inherit Tesseract's ability to reconstruct reading order on a rotated
+    /// raster and then quietly emit garbage the first time it faces one (see the type's doc
+    /// comment for the measured A/B behind this). Override this only after validating the
+    /// backend's actual behaviour on a rotated page.
+    fn page_orientation_handling(&self) -> PageOrientationHandling {
+        PageOrientationHandling::RequiresUpright
     }
 
     /// Process a document file directly via OCR.
@@ -783,6 +817,24 @@ mod tests {
             ConfidenceSemantics::Legibility { scale_max } => assert_eq!(scale_max, 255.0),
             other => panic!("expected the declared Legibility semantics, got {other:?}"),
         }
+    }
+
+    /// Regression guard for the rotation-handling capability: a backend that does not declare
+    /// `page_orientation_handling` must default to `RequiresUpright`, never to `SelfCorrecting`.
+    /// Defaulting to `SelfCorrecting` would let a new backend that cannot self-correct silently
+    /// inherit Tesseract's guarantee and emit garbage the first time it is handed a rotated
+    /// raster, mirroring the sceptre confidence-gating failure above.
+    #[test]
+    fn should_default_to_requires_upright_for_a_backend_that_does_not_declare_orientation_handling() {
+        let backend = MockOcrBackend {
+            languages: vec!["eng".to_string()],
+        };
+
+        let dynamic: &dyn OcrBackend = &backend;
+        assert_eq!(
+            dynamic.page_orientation_handling(),
+            PageOrientationHandling::RequiresUpright
+        );
     }
 
     #[tokio::test]

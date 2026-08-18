@@ -1164,6 +1164,13 @@ impl OcrBackend for PaddleOcrBackend {
         crate::plugins::ConfidenceSemantics::None
     }
 
+    /// Measured on a `/Rotate 270` scanned ordinance: PaddleOCR warps each detected min-area-rect
+    /// quad upright before recognition, so the recognised text is correct, but the block list
+    /// stays in raw raster `(y, x)` order — the caller must reorder blocks itself.
+    fn page_orientation_handling(&self) -> crate::plugins::PageOrientationHandling {
+        crate::plugins::PageOrientationHandling::RecognisesRotatedText
+    }
+
     fn supported_languages(&self) -> Vec<String> {
         super::SUPPORTED_LANGUAGES.iter().map(|s| s.to_string()).collect()
     }

@@ -227,6 +227,10 @@ impl OcrBackend for TesseractWasmBackend {
     fn confidence_semantics(&self) -> crate::plugins::ConfidenceSemantics {
         crate::plugins::ConfidenceSemantics::None
     }
+
+    // Rotation handling has not been measured for this backend; it stays on the trait's
+    // `RequiresUpright` default rather than inheriting the native Tesseract backend's measured
+    // `SelfCorrecting` value.
 }
 
 /// Returns the compile-time-bundled English tessdata when the
