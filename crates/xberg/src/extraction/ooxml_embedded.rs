@@ -36,7 +36,7 @@ pub(crate) async fn extract_ooxml_embedded_objects(
         Err(_) => return (children, warnings),
     };
 
-    let embedding_names: Vec<String> = (0..archive.len())
+    let mut embedding_names: Vec<String> = (0..archive.len())
         .filter_map(|i| {
             let file = archive.by_index(i).ok()?;
             let name = file.name().to_string();
@@ -50,6 +50,19 @@ pub(crate) async fn extract_ooxml_embedded_objects(
 
     if embedding_names.is_empty() {
         return (children, warnings);
+    }
+
+    let max_files_in_archive = config.security_limits.clone().unwrap_or_default().max_files_in_archive;
+    if embedding_names.len() > max_files_in_archive {
+        let skipped = embedding_names.len() - max_files_in_archive;
+        warnings.push(ProcessingWarning {
+            source: Cow::Owned(format!("{}_embedded_objects", source_label)),
+            message: Cow::Owned(format!(
+                "Skipped {} embedded object(s) under '{}': max_files_in_archive ({}) reached",
+                skipped, embeddings_prefix, max_files_in_archive
+            )),
+        });
+        embedding_names.truncate(max_files_in_archive);
     }
 
     if config.max_archive_depth == 0 {
@@ -248,13 +261,26 @@ mod tests {
 
     /// Build a minimal ZIP in memory with one file at the given path and contents.
     fn make_zip_with_file(entry_path: &str, entry_data: &[u8]) -> Vec<u8> {
+        make_zip_with_files(&[(entry_path, entry_data)])
+    }
+
+    /// Build a minimal ZIP in memory with several files at the given paths and contents.
+    fn make_zip_with_files(entries: &[(&str, &[u8])]) -> Vec<u8> {
         let buf = Cursor::new(Vec::new());
         let mut zip = zip::ZipWriter::new(buf);
         let options = zip::write::FileOptions::<()>::default().compression_method(zip::CompressionMethod::Stored);
-        zip.start_file(entry_path, options).unwrap();
-        zip.write_all(entry_data).unwrap();
+        for (entry_path, entry_data) in entries {
+            zip.start_file(*entry_path, options).unwrap();
+            zip.write_all(entry_data).unwrap();
+        }
         zip.finish().unwrap().into_inner()
     }
+
+    /// Bytes with no recognizable magic and no valid UTF-8, so both the byte-sniffing and
+    /// extension-based MIME fallbacks fail deterministically regardless of which optional
+    /// extractor features are compiled in. Used to make "how many embeddings were processed"
+    /// observable purely by counting "MIME type could not be determined" warnings.
+    const UNDETECTABLE_MIME_BYTES: &[u8] = &[0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87];
 
     #[tokio::test]
     async fn test_embedded_file_over_cap_skipped_with_warning() {
@@ -495,6 +521,191 @@ mod tests {
             warnings.is_empty(),
             "no embeddings exist, so no depth warning should be emitted: {:?}",
             warnings
+        );
+    }
+
+    #[tokio::test]
+    async fn test_embedded_objects_exceeding_max_files_in_archive_are_rejected() {
+        // 5 embedded entries, each undetectable by MIME so every processed entry produces
+        // exactly one "MIME type could not be determined" warning. Unfixed code reads no
+        // count limit at all, so it would process and warn on all 5; the fixed code must
+        // stop after `max_files_in_archive` (2) and report the remaining 3 as skipped.
+        let entries: Vec<(String, Vec<u8>)> = (0..5)
+            .map(|i| (format!("word/embeddings/blob{i}"), UNDETECTABLE_MIME_BYTES.to_vec()))
+            .collect();
+        let entry_refs: Vec<(&str, &[u8])> = entries.iter().map(|(p, d)| (p.as_str(), d.as_slice())).collect();
+        let zip_bytes = make_zip_with_files(&entry_refs);
+
+        let config = ExtractionConfig {
+            security_limits: Some(crate::extractors::security::SecurityLimits {
+                max_files_in_archive: 2,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let (children, warnings) =
+            extract_ooxml_embedded_objects(&zip_bytes, "word/embeddings/", "test", &config).await;
+
+        assert!(children.is_empty(), "undetectable-MIME entries never produce children");
+
+        let cap_warnings: Vec<_> = warnings
+            .iter()
+            .filter(|w| w.message.contains("max_files_in_archive"))
+            .collect();
+        assert_eq!(cap_warnings.len(), 1, "expected exactly one cap warning: {:?}", warnings);
+        assert!(
+            cap_warnings[0].message.contains("Skipped 3"),
+            "warning must report the 3 skipped entries: {}",
+            cap_warnings[0].message
+        );
+        assert!(
+            cap_warnings[0].message.contains("max_files_in_archive (2)"),
+            "warning must name the limit that was hit: {}",
+            cap_warnings[0].message
+        );
+
+        let processed_warnings: Vec<_> = warnings
+            .iter()
+            .filter(|w| w.message.contains("MIME type could not be determined"))
+            .collect();
+        assert_eq!(
+            processed_warnings.len(),
+            2,
+            "only max_files_in_archive (2) entries must be processed, not all 5: {:?}",
+            warnings
+        );
+    }
+
+    #[tokio::test]
+    async fn test_embedded_objects_just_under_max_files_in_archive_all_process() {
+        // 4 entries against a cap of 5: every entry must still be attempted and no cap
+        // warning should fire. A fix that rejects everything (e.g. off-by-one, or clamping
+        // to 0) would fail this.
+        let entries: Vec<(String, Vec<u8>)> = (0..4)
+            .map(|i| (format!("word/embeddings/blob{i}"), UNDETECTABLE_MIME_BYTES.to_vec()))
+            .collect();
+        let entry_refs: Vec<(&str, &[u8])> = entries.iter().map(|(p, d)| (p.as_str(), d.as_slice())).collect();
+        let zip_bytes = make_zip_with_files(&entry_refs);
+
+        let config = ExtractionConfig {
+            security_limits: Some(crate::extractors::security::SecurityLimits {
+                max_files_in_archive: 5,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let (_children, warnings) =
+            extract_ooxml_embedded_objects(&zip_bytes, "word/embeddings/", "test", &config).await;
+
+        let cap_warnings: Vec<_> = warnings
+            .iter()
+            .filter(|w| w.message.contains("max_files_in_archive"))
+            .collect();
+        assert!(
+            cap_warnings.is_empty(),
+            "no cap warning expected when the count is under the limit: {:?}",
+            warnings
+        );
+
+        let processed_warnings: Vec<_> = warnings
+            .iter()
+            .filter(|w| w.message.contains("MIME type could not be determined"))
+            .collect();
+        assert_eq!(
+            processed_warnings.len(),
+            4,
+            "all 4 entries must be processed when under the cap: {:?}",
+            warnings
+        );
+    }
+
+    #[tokio::test]
+    async fn test_legitimate_document_under_max_files_in_archive_extracts_successfully() {
+        // A real, extractable payload (plain text) under the cap must still produce a
+        // child entry — proving the fix does not merely suppress warnings but leaves
+        // legitimate extraction intact.
+        let zip_bytes = make_zip_with_file("word/embeddings/note.txt", b"Hello, world!");
+
+        let config = ExtractionConfig {
+            security_limits: Some(crate::extractors::security::SecurityLimits {
+                max_files_in_archive: 10,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let (children, warnings) =
+            extract_ooxml_embedded_objects(&zip_bytes, "word/embeddings/", "test", &config).await;
+
+        assert_eq!(
+            children.len(),
+            1,
+            "the single embedded file, well under the cap, must be extracted: {:?}",
+            warnings
+        );
+        assert!(
+            !warnings.iter().any(|w| w.message.contains("max_files_in_archive")),
+            "no cap warning expected: {:?}",
+            warnings
+        );
+    }
+
+    #[tokio::test]
+    async fn test_nested_container_enforces_max_files_in_archive_independently() {
+        // Per-container accounting: `extract_ooxml_embedded_objects` is invoked once per
+        // container (the outer DOCX/PPTX/XLSX, and again recursively for any embedded
+        // OOXML container found inside it, via `extract_bytes`). This test proves the cap
+        // is applied fresh to each container's own embeddings directory rather than
+        // decremented from some shared, cumulative counter: an outer container with 2
+        // embeddings (under a cap of 2) and, independently, an inner container with 5
+        // embeddings (over the same cap of 2) each get judged solely against their own
+        // entry count.
+        let outer_entries: Vec<(String, Vec<u8>)> = (0..2)
+            .map(|i| (format!("word/embeddings/outer{i}"), UNDETECTABLE_MIME_BYTES.to_vec()))
+            .collect();
+        let outer_refs: Vec<(&str, &[u8])> = outer_entries.iter().map(|(p, d)| (p.as_str(), d.as_slice())).collect();
+        let outer_zip_bytes = make_zip_with_files(&outer_refs);
+
+        let inner_entries: Vec<(String, Vec<u8>)> = (0..5)
+            .map(|i| (format!("word/embeddings/inner{i}"), UNDETECTABLE_MIME_BYTES.to_vec()))
+            .collect();
+        let inner_refs: Vec<(&str, &[u8])> = inner_entries.iter().map(|(p, d)| (p.as_str(), d.as_slice())).collect();
+        let inner_zip_bytes = make_zip_with_files(&inner_refs);
+
+        let config = ExtractionConfig {
+            security_limits: Some(crate::extractors::security::SecurityLimits {
+                max_files_in_archive: 2,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let (_outer_children, outer_warnings) =
+            extract_ooxml_embedded_objects(&outer_zip_bytes, "word/embeddings/", "outer", &config).await;
+        let (_inner_children, inner_warnings) =
+            extract_ooxml_embedded_objects(&inner_zip_bytes, "word/embeddings/", "inner", &config).await;
+
+        assert!(
+            !outer_warnings.iter().any(|w| w.message.contains("max_files_in_archive")),
+            "outer container is exactly at the cap and must not warn: {:?}",
+            outer_warnings
+        );
+        let inner_cap_warnings: Vec<_> = inner_warnings
+            .iter()
+            .filter(|w| w.message.contains("max_files_in_archive"))
+            .collect();
+        assert_eq!(
+            inner_cap_warnings.len(),
+            1,
+            "inner container independently exceeds the same cap: {:?}",
+            inner_warnings
+        );
+        assert!(
+            inner_cap_warnings[0].message.contains("Skipped 3"),
+            "inner container's own 5 entries against a cap of 2 must skip 3: {}",
+            inner_cap_warnings[0].message
         );
     }
 }
