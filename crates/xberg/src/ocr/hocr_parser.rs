@@ -154,6 +154,13 @@ struct HocrProperties {
     x_font: Option<String>,
     /// Font size in points.
     x_fsize: Option<u32>,
+    /// Whether the word is rendered in a bold font, from the word's `x_bold`
+    /// hOCR property. Only present on `ocrx_word` titles when Tesseract's
+    /// `hocr_font_info` variable is enabled (`ocr/processor/config.rs`).
+    x_bold: bool,
+    /// Whether the word is rendered in an italic font, from the word's
+    /// `x_italic` hOCR property. Same availability as `x_bold`.
+    x_italic: bool,
     /// x-height in pixels — the height of the line's lowercase letters
     /// excluding ascenders/descenders. Emitted by Tesseract on `ocr_line`/
     /// `ocrx_line` titles, not on individual words. A better heading signal
@@ -224,6 +231,12 @@ fn parse_title_properties(title: &str) -> HocrProperties {
                     props.x_fsize = Some(val);
                 }
             }
+            "x_bold" => {
+                props.x_bold = true;
+            }
+            "x_italic" => {
+                props.x_italic = true;
+            }
             "x_size" => {
                 if let Some(val) = tokens.next().and_then(|s| s.parse::<f64>().ok()) {
                     props.x_size = Some(val);
@@ -265,6 +278,12 @@ struct HocrWordInfo {
     font_size: Option<u32>,
     /// Text rotation angle in degrees, from the word's `textangle` hOCR property.
     text_angle: Option<f64>,
+    /// Font family name, from the word's `x_font` hOCR property.
+    font_name: Option<String>,
+    /// Whether the word is bold, from the word's `x_bold` hOCR property.
+    is_bold: bool,
+    /// Whether the word is italic, from the word's `x_italic` hOCR property.
+    is_italic: bool,
 }
 
 /// Per-`ocr_line`/`ocrx_line` metadata parsed from that tag's own `title`
@@ -332,6 +351,56 @@ pub(crate) const HOCR_LINE_FONT_SIZES_ATTRIBUTE: &str = "line_font_sizes";
 /// `\n`-separated lines of the element's `text`, with the same empty-field
 /// alignment rule as [`HOCR_LINE_FONT_SIZES_ATTRIBUTE`].
 pub(crate) const HOCR_LINE_X_HEIGHTS_ATTRIBUTE: &str = "line_x_heights";
+
+/// Attribute key holding the fraction (0.0-1.0, as a decimal string) of the
+/// paragraph's words that Tesseract reported as bold via `x_bold`. Only
+/// populated on `ocrx_word` titles when `hocr_font_info` is enabled
+/// (`ocr/processor/config.rs`). Boldness is an independent heading cue from
+/// font size, restoring a signal `from_ocr_elements` consumed before it was
+/// deleted as collateral of an unrelated refactor (commit `22161b0d1cc`).
+pub(crate) const HOCR_BOLD_FRACTION_ATTRIBUTE: &str = "x_bold_fraction";
+
+/// Attribute key holding the fraction (0.0-1.0, as a decimal string) of the
+/// paragraph's words that Tesseract reported as italic via `x_italic`. Same
+/// availability and provenance as [`HOCR_BOLD_FRACTION_ATTRIBUTE`].
+pub(crate) const HOCR_ITALIC_FRACTION_ATTRIBUTE: &str = "x_italic_fraction";
+
+/// Attribute key holding the most common font family name (from `x_font`)
+/// among the paragraph's words, when at least one word reported one.
+pub(crate) const HOCR_FONT_NAME_ATTRIBUTE: &str = "x_font";
+
+/// Bold/italic fraction and dominant font name aggregated across a
+/// paragraph's words.
+struct WordStyleAggregate {
+    bold_fraction: f64,
+    italic_fraction: f64,
+    dominant_font_name: Option<String>,
+}
+
+/// Aggregate the `x_bold`/`x_italic`/`x_font` hOCR word properties into
+/// paragraph-level signals. `words` must be non-empty.
+fn aggregate_word_style(words: &[&HocrWordInfo]) -> WordStyleAggregate {
+    let word_count = words.len() as f64;
+    let bold_count = words.iter().filter(|w| w.is_bold).count() as f64;
+    let italic_count = words.iter().filter(|w| w.is_italic).count() as f64;
+
+    let mut font_name_counts: std::collections::HashMap<&str, u32> = std::collections::HashMap::new();
+    for word in words {
+        if let Some(ref name) = word.font_name {
+            *font_name_counts.entry(name.as_str()).or_insert(0) += 1;
+        }
+    }
+    let dominant_font_name = font_name_counts
+        .into_iter()
+        .max_by_key(|(_, count)| *count)
+        .map(|(name, _)| name.to_string());
+
+    WordStyleAggregate {
+        bold_fraction: bold_count / word_count,
+        italic_fraction: italic_count / word_count,
+        dominant_font_name,
+    }
+}
 
 /// Render one optional numeric value per line as a comma-joined string,
 /// preserving line position (a missing value becomes an empty field) so a
@@ -444,6 +513,9 @@ fn parse_paragraph(
                     confidence: props.x_wconf,
                     font_size: props.x_fsize,
                     text_angle: props.textangle,
+                    font_name: props.x_font,
+                    is_bold: props.x_bold,
+                    is_italic: props.x_italic,
                 });
             }
             continue;
@@ -458,6 +530,8 @@ fn parse_paragraph(
     if all_words.is_empty() {
         return (None, pos);
     }
+
+    let style = aggregate_word_style(&all_words);
 
     let text: String = lines
         .iter()
@@ -645,6 +719,20 @@ fn parse_paragraph(
         elem.attributes
             .get_or_insert_with(Default::default)
             .insert(HOCR_LINE_X_HEIGHTS_ATTRIBUTE.to_string(), join_per_line_values(&line_x_heights));
+    }
+    {
+        let attrs = elem.attributes.get_or_insert_with(Default::default);
+        attrs.insert(
+            HOCR_BOLD_FRACTION_ATTRIBUTE.to_string(),
+            style.bold_fraction.to_string(),
+        );
+        attrs.insert(
+            HOCR_ITALIC_FRACTION_ATTRIBUTE.to_string(),
+            style.italic_fraction.to_string(),
+        );
+        if let Some(font_name) = style.dominant_font_name {
+            attrs.insert(HOCR_FONT_NAME_ATTRIBUTE.to_string(), font_name);
+        }
     }
 
     (Some(elem), pos)
@@ -932,6 +1020,20 @@ mod tests {
     }
 
     #[test]
+    fn test_bold_and_italic_flag_parsing() {
+        let props = parse_title_properties("x_wconf 95; x_bold; x_italic");
+        assert!(props.x_bold);
+        assert!(props.x_italic);
+    }
+
+    #[test]
+    fn test_bold_and_italic_default_to_false_when_absent() {
+        let props = parse_title_properties("x_wconf 95");
+        assert!(!props.x_bold);
+        assert!(!props.x_italic);
+    }
+
+    #[test]
     fn test_has_class() {
         assert!(has_class(
             r#"div class="ocr_page" title="bbox 0 0 100 100""#,
@@ -962,6 +1064,48 @@ mod tests {
         let doc = parse_hocr_to_internal_document(hocr);
         let attrs = doc.elements[0].attributes.as_ref().expect("attributes present");
         assert_eq!(attrs.get(HOCR_FONT_SIZE_ATTRIBUTE), Some(&"22".to_string()));
+    }
+
+    #[test]
+    fn test_paragraph_stores_bold_italic_fraction_and_font_name_attributes() {
+        // Two bold words out of four total ("HEADING" split into two spans),
+        // one italic, and a single reported font family.
+        let hocr = r#"<div class='ocr_page' title='ppageno 0'>
+            <p class='ocr_par'>
+                <span class='ocr_line'>
+                    <span class='ocrx_word' title='bbox 10 10 50 30; x_wconf 90; x_font "Arial"; x_bold'>HEAD</span>
+                    <span class='ocrx_word' title='bbox 60 10 100 30; x_wconf 90; x_font "Arial"; x_bold'>ING</span>
+                    <span class='ocrx_word' title='bbox 110 10 150 30; x_wconf 90; x_font "Arial"; x_italic'>plain</span>
+                    <span class='ocrx_word' title='bbox 160 10 200 30; x_wconf 90; x_font "Arial"'>text</span>
+                </span>
+            </p>
+        </div>"#;
+
+        let doc = parse_hocr_to_internal_document(hocr);
+        let attrs = doc.elements[0].attributes.as_ref().expect("attributes present");
+
+        // Without the fix, `HOCR_BOLD_FRACTION_ATTRIBUTE`/`HOCR_ITALIC_FRACTION_ATTRIBUTE`
+        // are never inserted (parse_paragraph has no bold/italic aggregation), so this
+        // lookup returns None and the assert_eq fails against `Some("0.5")`.
+        assert_eq!(attrs.get(HOCR_BOLD_FRACTION_ATTRIBUTE), Some(&"0.5".to_string()));
+        assert_eq!(attrs.get(HOCR_ITALIC_FRACTION_ATTRIBUTE), Some(&"0.25".to_string()));
+        assert_eq!(attrs.get(HOCR_FONT_NAME_ATTRIBUTE), Some(&"Arial".to_string()));
+    }
+
+    #[test]
+    fn test_paragraph_all_words_non_bold_reports_zero_bold_fraction() {
+        let hocr = r#"<div class="ocr_page" title="ppageno 0">
+            <p class="ocr_par">
+                <span class="ocrx_word" title="bbox 10 10 50 30; x_wconf 90">plain</span>
+            </p>
+        </div>"#;
+
+        let doc = parse_hocr_to_internal_document(hocr);
+        let attrs = doc.elements[0].attributes.as_ref().expect("attributes present");
+
+        assert_eq!(attrs.get(HOCR_BOLD_FRACTION_ATTRIBUTE), Some(&"0".to_string()));
+        assert_eq!(attrs.get(HOCR_ITALIC_FRACTION_ATTRIBUTE), Some(&"0".to_string()));
+        assert_eq!(attrs.get(HOCR_FONT_NAME_ATTRIBUTE), None);
     }
 
     #[test]
