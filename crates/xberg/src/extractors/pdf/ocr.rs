@@ -390,6 +390,105 @@ fn normalize_markdown_for_scoring(text: &str) -> String {
 /// Used by the pipeline to decide whether to accept a result or try the next backend.
 /// Higher is better. Combines multiple signal dimensions into a single score.
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+/// Tesseract's mean confidence for a page, 0-100, if the backend reported one.
+///
+/// Written by `perform_ocr` from `api.mean_text_conf()`. Backends that do not report it
+/// (and Tesseract itself, when it read nothing) simply yield `None`.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn mean_text_conf_of(metadata: &ahash::AHashMap<std::borrow::Cow<'_, str>, serde_json::Value>) -> Option<f64> {
+    let value = metadata.get("mean_text_conf")?;
+    let conf = value.as_f64().or_else(|| value.as_i64().map(|v| v as f64))?;
+    // -1 is Tesseract's "no confidence available" sentinel.
+    (conf >= 0.0).then_some(conf)
+}
+
+/// Statistics for judging an OCR result, scored over prose rather than Markdown scaffolding.
+///
+/// A table's delimiter rows (`| --- | --- |`) are entirely one-character tokens, so scoring the
+/// raw Markdown makes a page of perfectly good tabular OCR look exactly like line-art noise.
+/// [`compute_quality_score`] already normalizes for this (#1341); the veto has to as well, or a
+/// scanned table becomes its most likely false positive.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn ocr_output_stats(text: &str, thresholds: &OcrQualityThresholds) -> NativeTextStats {
+    let normalized = normalize_markdown_for_scoring(text.trim());
+    let scoring_input = if normalized.trim().is_empty() {
+        text.trim()
+    } else {
+        normalized.as_str()
+    };
+    NativeTextStats::compute(scoring_input, thresholds)
+}
+
+/// Is this OCR result recognition noise rather than page content?
+///
+/// An OCR engine run over line art — a scanned survey plat, an engineering drawing, the
+/// flourish of a signature — does not fail. It returns confident-looking strings that are
+/// not words (`MAM RAM SAL, Eid wat au TH.8) FLAT`), and nothing downstream distinguishes
+/// them from prose. Before the JBIG2 `/ImageMask` fix such pages rendered blank and OCR'd to
+/// nothing, so the noise was invisible; once the masks paint, the drawings are legible to the
+/// rasterizer and the engine dutifully "reads" them.
+///
+/// [`compute_quality_score`] cannot make this call. It is a weighted blend, so one
+/// catastrophic signal is diluted by five healthy ones: measured across the 16 pages of a
+/// recorded ordinance, pure drawing noise scored 0.81-0.85 against 0.94-0.98 for clean prose.
+/// A 0.09 separation is not something to threshold on. A *rejection* decision needs a veto on
+/// the one signal that actually discriminates, not an average.
+///
+/// That signal is the short-word ratio, which [`NativeTextStats`] already computes. On the
+/// same document prose ran 0.04-0.28 and the drawings 0.42-0.47.
+///
+/// The cost here is asymmetric — a false positive deletes real text, a false negative only
+/// leaves noise in place — so this is deliberately conservative: it declines to judge pages
+/// with too few words to make the ratio meaningful, and its threshold sits in the middle of
+/// the measured gap rather than at either edge.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+pub(crate) fn is_ocr_recognition_noise(text: &str, thresholds: &OcrQualityThresholds) -> bool {
+    let stats = ocr_output_stats(text, thresholds);
+    if stats.word_count < thresholds.min_words_for_ocr_output_check {
+        return false;
+    }
+    stats.fragmented_word_ratio >= thresholds.max_ocr_output_fragmented_word_ratio
+}
+
+/// Accept a page's OCR text, or drop it and record why.
+///
+/// Returns the empty string for a rejected page. A rejected page must not fall back to
+/// anything: the alternative to noise here is nothing, and a drawing that produced no
+/// readable words genuinely has none. The warning is the only trace, so it always fires —
+/// a page silently losing its text would be worse than the noise it replaces.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn accept_or_reject_ocr_page(
+    page_index: usize,
+    content: String,
+    thresholds: &OcrQualityThresholds,
+    warnings: &mut Vec<crate::types::ProcessingWarning>,
+) -> String {
+    if !is_ocr_recognition_noise(&content, thresholds) {
+        return content;
+    }
+    let stats = ocr_output_stats(&content, thresholds);
+    tracing::warn!(
+        page = page_index + 1,
+        words = stats.word_count,
+        fragmented_word_ratio = stats.fragmented_word_ratio,
+        threshold = thresholds.max_ocr_output_fragmented_word_ratio,
+        "rejecting OCR output as recognition noise; the page contributes no text"
+    );
+    warnings.push(crate::types::ProcessingWarning {
+        source: std::borrow::Cow::Borrowed("ocr"),
+        message: std::borrow::Cow::Owned(format!(
+            "Page {} produced OCR output that is recognition noise rather than text \
+             ({:.0}% of {} words are 1-2 characters, threshold {:.0}%); the page is most \
+             likely a drawing or diagram. Its text was discarded.",
+            page_index + 1,
+            stats.fragmented_word_ratio * 100.0,
+            stats.word_count,
+            thresholds.max_ocr_output_fragmented_word_ratio * 100.0
+        )),
+    });
+    String::new()
+}
+
 pub(crate) fn compute_quality_score(text: &str, thresholds: &OcrQualityThresholds) -> f64 {
     let trimmed = text.trim();
     if trimmed.is_empty() {
@@ -852,7 +951,9 @@ fn formula_bbox_to_page_points(
             .and_then(processed_ocr_layout_dimensions)
             .unwrap_or((rendered_w, rendered_h));
         let (w_pt, h_pt) = crate::pdf::render::get_page_dimensions_pt(doc, page_idx);
-        formula.bbox = Some(crate::pdf::render::pixel_bbox_to_pdf_points(bbox, px_w, px_h, w_pt, h_pt));
+        formula.bbox = Some(crate::pdf::render::pixel_bbox_to_pdf_points(
+            bbox, px_w, px_h, w_pt, h_pt,
+        ));
     }
 }
 
@@ -1054,6 +1155,9 @@ pub(crate) async fn extract_mixed_ocr_native(
 
     let total = page_indices.len();
     let mut ocr_results: ahash::AHashMap<u32, String> = ahash::AHashMap::with_capacity(total);
+    // Tesseract's own mean confidence for each page it read, 0-100. Captured here because
+    // the per-page metadata is gone by the time `ocr_results` is judged.
+    let mut page_mean_confidence: ahash::AHashMap<u32, f64> = ahash::AHashMap::new();
     let mut structured_ocr_pages: ahash::AHashMap<u32, crate::types::internal::InternalDocument> =
         ahash::AHashMap::with_capacity(total);
     let mut accumulated_llm_usage: Vec<crate::types::LlmUsage> = Vec::new();
@@ -1329,6 +1433,9 @@ pub(crate) async fn extract_mixed_ocr_native(
                     );
                     structured_ocr_pages.insert((page_idx + 1) as u32, page_doc);
                 }
+                if let Some(conf) = mean_text_conf_of(&extraction_result.metadata.additional) {
+                    page_mean_confidence.insert((page_idx + 1) as u32, conf);
+                }
                 ocr_results.insert((page_idx + 1) as u32, extraction_result.content);
             }
         }
@@ -1341,7 +1448,14 @@ pub(crate) async fn extract_mixed_ocr_native(
                 }
                 for mut formula in std::mem::take(&mut extraction_result.formulas) {
                     formula.page = Some((*page_idx + 1) as u32);
-                    formula_bbox_to_page_points(&mut formula, &render_doc, *page_idx, Some(&extraction_result.metadata), *width, *height);
+                    formula_bbox_to_page_points(
+                        &mut formula,
+                        &render_doc,
+                        *page_idx,
+                        Some(&extraction_result.metadata),
+                        *width,
+                        *height,
+                    );
                     accumulated_formulas.push(formula);
                 }
                 crate::core::diagnostics::dedup_extend_warnings(
@@ -1363,6 +1477,9 @@ pub(crate) async fn extract_mixed_ocr_native(
                     );
                     structured_ocr_pages.insert((*page_idx + 1) as u32, page_doc);
                 }
+                if let Some(conf) = mean_text_conf_of(&extraction_result.metadata.additional) {
+                    page_mean_confidence.insert((*page_idx + 1) as u32, conf);
+                }
                 ocr_results.insert((*page_idx + 1) as u32, extraction_result.content);
             }
         }
@@ -1374,6 +1491,68 @@ pub(crate) async fn extract_mixed_ocr_native(
             }
         }
     }
+
+    // Drop pages whose OCR is recognition noise before they are accepted as replacements.
+    // A rejected page keeps its native text, which for a scanned drawing is nothing — the
+    // correct outcome, since the page has no readable words to begin with.
+    let ocr_output_thresholds = config
+        .ocr
+        .as_ref()
+        .and_then(|ocr| ocr.quality_thresholds.clone())
+        .unwrap_or_default();
+    ocr_results.retain(|page_number, text| {
+        let confidence = page_mean_confidence.get(page_number).copied();
+        tracing::debug!(page = *page_number, ?confidence, "OCR page mean confidence");
+
+        // The engine's own confidence is the sharper instrument, so it decides when it is
+        // available; the text heuristic only covers backends that report none.
+        let rejected_by_confidence = ocr_output_thresholds.min_ocr_mean_confidence > 0.0
+            && confidence.is_some_and(|c| c < ocr_output_thresholds.min_ocr_mean_confidence);
+        if !rejected_by_confidence && (confidence.is_some() || !is_ocr_recognition_noise(text, &ocr_output_thresholds))
+        {
+            return true;
+        }
+        if rejected_by_confidence {
+            let conf = confidence.unwrap_or_default();
+            tracing::warn!(
+                page = *page_number,
+                mean_confidence = conf,
+                threshold = ocr_output_thresholds.min_ocr_mean_confidence,
+                "rejecting OCR output as recognition noise; the page contributes no text"
+            );
+            accumulated_warnings.push(crate::types::ProcessingWarning {
+                source: std::borrow::Cow::Borrowed("ocr"),
+                message: std::borrow::Cow::Owned(format!(
+                    "Page {page_number} produced OCR output the engine had little confidence in \
+                     (mean confidence {conf:.0} of 100, threshold {:.0}); the page is most likely \
+                     a drawing or diagram. Its text was discarded.",
+                    ocr_output_thresholds.min_ocr_mean_confidence
+                )),
+            });
+            return false;
+        }
+        let stats = ocr_output_stats(text, &ocr_output_thresholds);
+        tracing::warn!(
+            page = *page_number,
+            words = stats.word_count,
+            fragmented_word_ratio = stats.fragmented_word_ratio,
+            threshold = ocr_output_thresholds.max_ocr_output_fragmented_word_ratio,
+            "rejecting OCR output as recognition noise; the page contributes no text"
+        );
+        accumulated_warnings.push(crate::types::ProcessingWarning {
+            source: std::borrow::Cow::Borrowed("ocr"),
+            message: std::borrow::Cow::Owned(format!(
+                "Page {} produced OCR output that is recognition noise rather than text \
+                 ({:.0}% of {} words are 1-2 characters, threshold {:.0}%); the page is most \
+                 likely a drawing or diagram. Its text was discarded.",
+                page_number,
+                stats.fragmented_word_ratio * 100.0,
+                stats.word_count,
+                ocr_output_thresholds.max_ocr_output_fragmented_word_ratio * 100.0
+            )),
+        });
+        false
+    });
 
     let accepted_replacements = accepted_ocr_page_replacements(native_text, boundaries, &ocr_results);
     structured_ocr_pages.retain(|page, _| accepted_replacements.contains_key(page));
@@ -1985,7 +2164,11 @@ fn analyze_container_markers(elements: &[crate::types::internal::InternalElement
 // than from `crate::ocr`: this PDF OCR path also compiles under `ocr-pipeline` (VLM OCR,
 // e.g. the `binstall` CLI) or under `layout-detection` alone (layout without any OCR
 // backend enabled), where the `ocr` module — gated on `ocr`/`ocr-wasm` — is absent. ~keep
-#[cfg(any(feature = "ocr", feature = "ocr-wasm", all(feature = "ocr-pipeline", feature = "pdf")))]
+#[cfg(any(
+    feature = "ocr",
+    feature = "ocr-wasm",
+    all(feature = "ocr-pipeline", feature = "pdf")
+))]
 use crate::ocr_metadata_keys::{OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY, OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY};
 // Same rationale, scoped to `layout-detection` only: `resolved_ocr_correction_degrees` and
 // `transform_ocr_elements_to_render_space` (both `layout-detection`-only) are the sole
@@ -1993,7 +2176,11 @@ use crate::ocr_metadata_keys::{OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY, OCR_PROC
 #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
 use crate::ocr_metadata_keys::{OCR_AUTO_ROTATED_METADATA_KEY, OCR_ORIENTATION_DEGREES_METADATA_KEY};
 
-#[cfg(any(feature = "ocr", feature = "ocr-wasm", all(feature = "ocr-pipeline", feature = "pdf")))]
+#[cfg(any(
+    feature = "ocr",
+    feature = "ocr-wasm",
+    all(feature = "ocr-pipeline", feature = "pdf")
+))]
 fn valid_ocr_layout_dimension(value: &serde_json::Value) -> Option<u32> {
     let value = value.as_f64()?;
     if !value.is_finite() || value <= 0.0 || value > u32::MAX as f64 || value.fract() != 0.0 {
@@ -2002,7 +2189,11 @@ fn valid_ocr_layout_dimension(value: &serde_json::Value) -> Option<u32> {
     Some(value as u32)
 }
 
-#[cfg(any(feature = "ocr", feature = "ocr-wasm", all(feature = "ocr-pipeline", feature = "pdf")))]
+#[cfg(any(
+    feature = "ocr",
+    feature = "ocr-wasm",
+    all(feature = "ocr-pipeline", feature = "pdf")
+))]
 fn processed_ocr_layout_dimensions(metadata: &crate::types::Metadata) -> Option<(u32, u32)> {
     let width = metadata
         .additional
@@ -2490,6 +2681,11 @@ pub(crate) async fn extract_with_ocr(
     #[cfg(feature = "pdf")]
     let mut image_fallback_warnings: Vec<crate::types::ProcessingWarning> = Vec::new();
 
+    // Judged per page just before the OCR text is accepted, so a drawing page contributes
+    // nothing instead of contributing invented words. See `is_ocr_recognition_noise`.
+    let ocr_output_thresholds = base_ocr_config.quality_thresholds.clone().unwrap_or_default();
+    let mut recognition_noise_warnings: Vec<crate::types::ProcessingWarning> = Vec::new();
+
     #[cfg(feature = "layout-detection")]
     let mut tatr_model = if layout_detections.is_some() {
         crate::layout::take_or_create_tatr(
@@ -2759,7 +2955,12 @@ pub(crate) async fn extract_with_ocr(
                     let png_bytes = bytes::Bytes::copy_from_slice(png_arc.as_ref());
                     captured_rasters.push(build_page_raster_image(page_idx, png_bytes, *w, *h));
                 }
-                page_texts[page_idx] = ocr_result.content;
+                page_texts[page_idx] = accept_or_reject_ocr_page(
+                    page_idx,
+                    ocr_result.content,
+                    &ocr_output_thresholds,
+                    &mut recognition_noise_warnings,
+                );
                 continue;
             }
 
@@ -2779,7 +2980,12 @@ pub(crate) async fn extract_with_ocr(
                 let png_bytes = bytes::Bytes::copy_from_slice(png_arc.as_ref());
                 captured_rasters.push(build_page_raster_image(page_idx, png_bytes, *w, *h));
             }
-            page_texts[page_idx] = ocr_result.content;
+            page_texts[page_idx] = accept_or_reject_ocr_page(
+                page_idx,
+                ocr_result.content,
+                &ocr_output_thresholds,
+                &mut recognition_noise_warnings,
+            );
         }
     }
 
@@ -2835,7 +3041,15 @@ pub(crate) async fn extract_with_ocr(
     };
 
     #[cfg(feature = "pdf")]
-    let ocr_doc = attach_ocr_fallback_warnings(ocr_doc, &result, image_fallback_warnings);
+    let ocr_doc = {
+        let mut warnings = image_fallback_warnings;
+        warnings.extend(recognition_noise_warnings);
+        attach_ocr_fallback_warnings(ocr_doc, &result, warnings)
+    };
+    // Without `pdf` there is no page renderer, so no page-level OCR runs and the vector is
+    // always empty; bind it so the non-pdf build does not warn about an unused value.
+    #[cfg(not(feature = "pdf"))]
+    let _ = recognition_noise_warnings;
 
     Ok((
         result,
@@ -7558,5 +7772,223 @@ Name: ___
                 "/Rotate {rotation}: converted bbox must fit within the page"
             );
         }
+    }
+}
+
+/// Coverage for the OCR recognition-noise veto.
+///
+/// The asymmetry is the whole design: a false positive deletes a page of real text, a false
+/// negative only leaves noise in place. So the negative cases here — legitimate pages that
+/// must survive — carry more weight than the positive ones.
+#[cfg(all(test, any(feature = "ocr", feature = "ocr-pipeline")))]
+mod recognition_noise_tests {
+    use super::{NativeTextStats, is_ocr_recognition_noise, ocr_output_stats};
+    use crate::core::config::OcrQualityThresholds;
+
+    /// Verbatim from page 4 of a recorded municipal ordinance: Tesseract run over a scanned
+    /// surveyor's plat. Every "word" here is an artifact of line art, not text.
+    const PLAT_DRAWING_NOISE: &str = "\
+LAKE POINTE SECTION 5 PLAT NU. 20060126 F.B.C.P.R. \
+1 |: LAKE POINTE Zt } = ti | SECTION 4 - / ae | | | PLal NG. 200601237 A 5 oe \
+: { L -W.5..R- —— 2 oe | ‘a. * MOI ARES a es \
+MAM RAM SAL, Eid wat au TH.8) FLAT. ” <*> suum he tet cu? Oe imer \
+AT ace im Cum BOCES SIOT TT. ie 4S ayi.0- 2 ub vee gman Suita \
+‘1mC bo int (aa so Givicengo. Cunt A. cumin Lipa THIS mat Saakt Of MLSINICIED \
+ot ee Steric im wt Pum ic or * oud OF o nue ow paapnace & ft LibuR DIMtChY";
+
+    /// Verbatim from page 1 of the same document — ordinary legal prose.
+    const ORDINANCE_PROSE: &str = "\
+WHEREAS, the current property owner has requested that approximately 0.7906 acres of \
+land located within the City of Sugar Land (the \"City\"), at the Southeast corner of Lake \
+Pointe Parkway and Creek Bend Drive, be rezoned from Business Office (B-O) District to \
+Planned Development (PD) District Final Development Plan; and WHEREAS, the City Planning \
+and Zoning Commission forwarded its final report to the City Council, recommending \
+approval of the rezoning request; and";
+
+    #[test]
+    fn should_reject_ocr_of_a_scanned_drawing() {
+        let thresholds = OcrQualityThresholds::default();
+        let stats = NativeTextStats::compute(PLAT_DRAWING_NOISE, &thresholds);
+
+        assert!(
+            stats.fragmented_word_ratio >= 0.35,
+            "fixture is not representative: short-word ratio is {:.3}, expected >= 0.35",
+            stats.fragmented_word_ratio
+        );
+        assert!(is_ocr_recognition_noise(PLAT_DRAWING_NOISE, &thresholds));
+    }
+
+    #[test]
+    fn should_keep_ordinary_prose() {
+        let thresholds = OcrQualityThresholds::default();
+        assert!(!is_ocr_recognition_noise(ORDINANCE_PROSE, &thresholds));
+    }
+
+    #[test]
+    fn should_decline_to_judge_a_page_with_too_few_words() {
+        // The ratio is not meaningful on a handful of tokens, so the veto must abstain
+        // rather than delete. This fixture is a real excerpt from the same plat page and
+        // clears the ratio easily — only the word-count guard keeps it.
+        let sliver = "1 |: Zt } = ti / ae A 5 oe : { L 2 oe";
+        let thresholds = OcrQualityThresholds::default();
+        let stats = NativeTextStats::compute(sliver, &thresholds);
+
+        assert!(
+            stats.fragmented_word_ratio >= thresholds.max_ocr_output_fragmented_word_ratio,
+            "fixture must exceed the ratio ({:.3}), or the word-count guard is not what is \
+             being tested",
+            stats.fragmented_word_ratio
+        );
+        assert!(stats.word_count < thresholds.min_words_for_ocr_output_check);
+        assert!(!is_ocr_recognition_noise(sliver, &thresholds));
+    }
+
+    #[test]
+    fn should_keep_a_signature_block() {
+        // Legitimately short-word-heavy prose that must survive on the ratio alone, with no
+        // help from the word-count guard.
+        let signature_block = "By: /s/ J. D. R. Its: CFO Date: 3/16/20 No. 2197 ATTEST: City Secretary \
+             APPROVED AS TO FORM: City Attorney for the City of Sugar Land, Texas";
+        let thresholds = OcrQualityThresholds::default();
+        let stats = NativeTextStats::compute(signature_block, &thresholds);
+
+        assert!(
+            stats.word_count >= thresholds.min_words_for_ocr_output_check,
+            "fixture must clear the word-count guard so the ratio is what is tested"
+        );
+        assert!(!is_ocr_recognition_noise(signature_block, &thresholds));
+    }
+
+    #[test]
+    fn should_keep_a_page_of_tabular_ocr() {
+        // A Markdown table's delimiter row is entirely one-character tokens. Scoring the raw
+        // Markdown would make good tabular OCR indistinguishable from line-art noise, so this
+        // is the veto's most likely false positive and the reason it scores normalized prose.
+        let table_page = "\
+Annual Report Summary of Operating Results by Region and Quarter
+
+| Region | Quarter | Revenue | Growth |
+| --- | --- | --- | --- |
+| North | Q1 | 1,240 | 4.2 |
+| North | Q2 | 1,310 | 5.6 |
+| South | Q1 | 980 | 2.1 |
+| South | Q2 | 1,045 | 6.6 |
+
+Revenue is reported in thousands of dollars and growth is year over year.";
+        let thresholds = OcrQualityThresholds::default();
+
+        assert!(
+            !is_ocr_recognition_noise(table_page, &thresholds),
+            "tabular OCR must survive; raw short-word ratio is {:.3}",
+            NativeTextStats::compute(table_page, &thresholds).fragmented_word_ratio
+        );
+    }
+
+    #[test]
+    fn should_score_prose_not_markdown_scaffolding() {
+        // Pin the mechanism, not just the outcome: the raw text must look worse than the
+        // normalized text, or the normalization above is not doing anything.
+        let table_page = "| a | b | c |\n| --- | --- | --- |\n| 1 | 2 | 3 |\n\n\
+Each row of the preceding table records one measurement taken during the survey period.";
+        let thresholds = OcrQualityThresholds::default();
+
+        let raw = NativeTextStats::compute(table_page, &thresholds).fragmented_word_ratio;
+        let normalized = ocr_output_stats(table_page, &thresholds).fragmented_word_ratio;
+
+        assert!(
+            normalized < raw,
+            "normalization changed nothing: raw {raw:.3} vs normalized {normalized:.3}"
+        );
+    }
+
+    #[test]
+    fn should_read_mean_confidence_from_backend_metadata() {
+        use super::mean_text_conf_of;
+        let mut m: ahash::AHashMap<std::borrow::Cow<'_, str>, serde_json::Value> = Default::default();
+
+        assert_eq!(
+            mean_text_conf_of(&m),
+            None,
+            "absent key means the backend reported none"
+        );
+
+        m.insert("mean_text_conf".into(), serde_json::json!(93));
+        assert_eq!(mean_text_conf_of(&m), Some(93.0), "integers must parse");
+
+        m.insert("mean_text_conf".into(), serde_json::json!(57.5));
+        assert_eq!(mean_text_conf_of(&m), Some(57.5), "floats must parse");
+
+        // Tesseract returns -1 when it has no confidence to report. Treating that as a
+        // score would reject every such page, so it must read as "unavailable" instead.
+        m.insert("mean_text_conf".into(), serde_json::json!(-1));
+        assert_eq!(mean_text_conf_of(&m), None);
+    }
+
+    #[test]
+    fn confidence_default_sits_between_the_measured_populations() {
+        // Per-page mean confidence measured by xberg over a recorded ordinance
+        // (Tesseract 5.5.3): prose 89-95, scanned drawings 36-62. The default must
+        // separate them. If a future change moves the default outside that band, this
+        // fails before any document is silently re-graded.
+        let thresholds = OcrQualityThresholds::default();
+        let prose = [95.0, 89.0, 95.0, 95.0, 93.0, 93.0, 94.0, 94.0, 95.0, 92.0];
+        let drawings = [36.0, 58.0, 62.0, 58.0, 57.0];
+
+        let worst_prose = prose.iter().cloned().fold(f64::INFINITY, f64::min);
+        let best_drawing = drawings.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+
+        assert!(
+            best_drawing < thresholds.min_ocr_mean_confidence,
+            "a drawing at {best_drawing} would survive the {} floor",
+            thresholds.min_ocr_mean_confidence
+        );
+        assert!(
+            thresholds.min_ocr_mean_confidence < worst_prose,
+            "prose at {worst_prose} would be rejected by the {} floor",
+            thresholds.min_ocr_mean_confidence
+        );
+    }
+
+    #[test]
+    fn should_keep_empty_output_out_of_the_veto() {
+        // Blank pages are rejected earlier by their own check; the veto must not also claim
+        // them, or the warning it emits would be wrong about why the page is empty.
+        let thresholds = OcrQualityThresholds::default();
+        assert!(!is_ocr_recognition_noise("", &thresholds));
+        assert!(!is_ocr_recognition_noise("   \n\n  ", &thresholds));
+    }
+
+    #[test]
+    fn should_respect_a_configured_threshold() {
+        // Raising the bar above the fixture's ratio must keep the page.
+        let permissive = OcrQualityThresholds {
+            max_ocr_output_fragmented_word_ratio: 0.99,
+            ..Default::default()
+        };
+        assert!(!is_ocr_recognition_noise(PLAT_DRAWING_NOISE, &permissive));
+
+        // Lowering it below prose must reject even prose — proving the knob is live and
+        // that the default, not the code path, is what protects real text.
+        let strict = OcrQualityThresholds {
+            max_ocr_output_fragmented_word_ratio: 0.01,
+            ..Default::default()
+        };
+        assert!(is_ocr_recognition_noise(ORDINANCE_PROSE, &strict));
+    }
+
+    #[test]
+    fn should_separate_the_two_fixtures_with_margin() {
+        // The default sits between them. If a future change narrows this gap, the veto is
+        // no longer safe to apply and this test should fail before anything ships.
+        let thresholds = OcrQualityThresholds::default();
+        let noise = NativeTextStats::compute(PLAT_DRAWING_NOISE, &thresholds).fragmented_word_ratio;
+        let prose = NativeTextStats::compute(ORDINANCE_PROSE, &thresholds).fragmented_word_ratio;
+
+        assert!(
+            noise - prose > 0.15,
+            "separation collapsed: noise {noise:.3} vs prose {prose:.3}"
+        );
+        assert!(prose < thresholds.max_ocr_output_fragmented_word_ratio);
+        assert!(noise >= thresholds.max_ocr_output_fragmented_word_ratio);
     }
 }

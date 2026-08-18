@@ -118,6 +118,50 @@ pub struct OcrQualityThresholds {
     #[serde(default = "default_critical_fragmented_word_ratio")]
     pub critical_fragmented_word_ratio: f64,
 
+    /// Maximum fraction of short (1-2 char) words an *OCR result* may carry before the page
+    /// is rejected as recognition noise rather than accepted as content.
+    ///
+    /// This is a different decision, and a different operating point, from
+    /// [`Self::max_fragmented_word_ratio`] / [`Self::critical_fragmented_word_ratio`]: those
+    /// ask "is the native text bad enough that we should OCR this page?", and are tuned to
+    /// only fire on text that is already definitively broken (0.6 / 0.8). Here we are judging
+    /// what OCR *produced*, where the failure mode is an engine run over line art — a scanned
+    /// plat, an engineering drawing, a signature flourish — returning confident-looking
+    /// strings that are not words.
+    ///
+    /// Measured over the 16 pages of a recorded municipal ordinance (13 prose pages, 3 scanned
+    /// survey drawings): prose ran 0.04-0.28, the drawings 0.42-0.47. The default sits in that
+    /// gap with margin on both sides. Raise it to keep more marginal text, lower it to be
+    /// stricter — but note the cost is asymmetric, since a false positive deletes real content
+    /// while a false negative only leaves noise in place.
+    #[serde(default = "default_max_ocr_output_fragmented_word_ratio")]
+    pub max_ocr_output_fragmented_word_ratio: f64,
+
+    /// Minimum mean OCR confidence (0-100) a page must reach for its text to be accepted.
+    ///
+    /// This is the engine's own uncertainty about what it read, and it is a far sharper
+    /// instrument than any statistic derived from the output text. Measured per page over a
+    /// recorded municipal ordinance (10 prose pages, 6 scanned survey/architectural drawings)
+    /// with Tesseract 5.5.3:
+    ///
+    ///     prose      86.3 - 95.3
+    ///     drawings   18.5 - 64.3
+    ///
+    /// The default sits in that gap with ~11 points of margin on each side. Compare the
+    /// short-word ratio, which separated the same two groups by 0.09 on a 0-1 scale.
+    ///
+    /// A backend that reports no confidence (no `mean_text_conf` in its result metadata)
+    /// skips this check entirely and falls back to
+    /// [`Self::max_ocr_output_fragmented_word_ratio`]. Set to 0.0 to disable.
+    #[serde(default = "default_min_ocr_mean_confidence")]
+    pub min_ocr_mean_confidence: f64,
+
+    /// Minimum word count before [`Self::max_ocr_output_fragmented_word_ratio`] may reject a
+    /// page. Short pages (a signature block, an exhibit title) are legitimately dominated by
+    /// short words, so the ratio is not meaningful on them and the veto stays disabled.
+    #[serde(default = "default_min_words_for_ocr_output_check")]
+    pub min_words_for_ocr_output_check: usize,
+
     /// Minimum average word length. Below this with enough words indicates garbled extraction.
     #[serde(default = "default_min_avg_word_length")]
     pub min_avg_word_length: f64,
@@ -190,6 +234,9 @@ impl Default for OcrQualityThresholds {
             min_garbage_chars: 5,
             max_fragmented_word_ratio: 0.6,
             critical_fragmented_word_ratio: 0.80,
+            min_ocr_mean_confidence: default_min_ocr_mean_confidence(),
+            max_ocr_output_fragmented_word_ratio: default_max_ocr_output_fragmented_word_ratio(),
+            min_words_for_ocr_output_check: default_min_words_for_ocr_output_check(),
             min_avg_word_length: 2.0,
             min_words_for_avg_length_check: 50,
             min_consecutive_repeat_ratio: 0.08,
@@ -228,6 +275,15 @@ fn default_max_fragmented_word_ratio() -> f64 {
 }
 fn default_critical_fragmented_word_ratio() -> f64 {
     0.80
+}
+fn default_min_ocr_mean_confidence() -> f64 {
+    75.0
+}
+fn default_max_ocr_output_fragmented_word_ratio() -> f64 {
+    0.35
+}
+fn default_min_words_for_ocr_output_check() -> usize {
+    20
 }
 fn default_min_avg_word_length() -> f64 {
     2.0
