@@ -12079,6 +12079,8 @@ dependencies = [
 [[package]]
 name = "xberg-pdf-oxide"
 version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed1e54f10d4e2593aa633196724fa11ac08e22dca52747c2de34ff77580185b7"
 dependencies = [
  "aes 0.9.2",
  "base64 0.23.1",

@@ -94,7 +94,7 @@ parking_lot = "0.12.5"
 # ~530 `use pdf_oxide::...` call sites are untouched. `icc` is the fork's own default
 # (pure-Rust qcms CMYK->RGB through the embedded profile); xberg builds with
 # default-features = false, so it has to be named explicitly.
-pdf_oxide = { package = "xberg-pdf-oxide", path = "../xberg-pdf-oxide", default-features = false, features = [
+pdf_oxide = { package = "xberg-pdf-oxide", version = "1.0.0", default-features = false, features = [
   "rendering",
   "legacy-crypto",
   "icc",
