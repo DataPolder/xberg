@@ -14,6 +14,10 @@
 //!   `Layout` suffix adds layout detection on top.
 //! - **Paddle***: explicitly pinned PaddleOCR model version and tier, with
 //!   optional layout detection; the label-to-model mapping is benchmark identity. ~keep
+//! - **Sceptre***: Sceptre OCR pinned to the ONNX Runtime inference engine
+//!   (`force_ocr`), with `Layout`/`AutoRotate` variants mirroring the Tesseract/Paddle
+//!   pattern. The tract engine is deliberately not exposed here — it is reserved for the
+//!   bounded diagnostic matrix reachable only from the separate `XbergPipeline` enum. ~keep
 //! - **Docling / PaddleOcrPython / RapidOcr**: vendored pipelines whose
 //!   outputs are pre-computed and read from disk (no live extraction).
 //! - **LayoutSlanet***: layout detection with explicit SLANeXT table model
@@ -56,6 +60,10 @@ const EXTRACTION_TIMEOUT_PER_PAGE_MS: u64 = 400;
 
 const PP_OCR_V5: &str = "pp-ocrv5";
 const PP_OCR_V6: &str = "pp-ocrv6";
+/// Sceptre's ONNX Runtime inference engine selector, passed via `OcrConfig::backend_options` as
+/// `{"model":{"backend":"ort"}}` — mirrors `SCEPTRE_ORT_OPTIONS_JSON` in `adapters/xberg.rs`,
+/// which drives the same selection for the separate `XbergPipeline` (CLI-subprocess) enum. ~keep
+const SCEPTRE_MODEL_BACKEND_ORT: &str = "ort";
 const PADDLE_DET_SIDE_1024: u32 = 1024;
 const PADDLE_DET_SIDE_1536: u32 = 1536;
 const PADDLE_DET_SIDE_2048: u32 = 2048;
@@ -146,6 +154,15 @@ pub enum Pipeline {
     PaddleAutoRotate,
     /// PaddleOCR without auto_rotate (for comparison)
     PaddleNoRotate,
+    /// Sceptre OCR pinned to the ONNX Runtime inference engine (force_ocr)
+    #[serde(rename = "sceptre-ort", alias = "sceptre")]
+    Sceptre,
+    /// Sceptre OCR (ONNX Runtime) + layout detection
+    #[serde(rename = "sceptre-ort+layout", alias = "sceptre-ort-layout", alias = "sceptre-layout")]
+    SceptreLayout,
+    /// Sceptre OCR (ONNX Runtime) with auto_rotate enabled
+    #[serde(rename = "sceptre-ort-autorotate", alias = "sceptre-autorotate")]
+    SceptreAutoRotate,
     /// Docling vendored extraction (read from file)
     Docling,
     /// PaddleOCR Python vendored extraction (read from file)
@@ -210,6 +227,9 @@ impl Pipeline {
             Pipeline::TesseractAutoRotate => "tesseract-autorotate",
             Pipeline::PaddleAutoRotate => "paddle-autorotate",
             Pipeline::PaddleNoRotate => "paddle-norotate",
+            Pipeline::Sceptre => "sceptre-ort",
+            Pipeline::SceptreLayout => "sceptre-ort+layout",
+            Pipeline::SceptreAutoRotate => "sceptre-ort-autorotate",
             Pipeline::Docling => "docling",
             Pipeline::PaddleOcrPython => "paddleocr-python",
             Pipeline::RapidOcr => "rapidocr",
@@ -266,6 +286,15 @@ impl Pipeline {
             "tesseract-autorotate" => Some(Pipeline::TesseractAutoRotate),
             "paddle-autorotate" => Some(Pipeline::PaddleAutoRotate),
             "paddle-norotate" => Some(Pipeline::PaddleNoRotate),
+            "sceptre" | "sceptre-ort" | "sceptre_ort" => Some(Pipeline::Sceptre),
+            "sceptre-ort+layout"
+            | "sceptre-ort-layout"
+            | "sceptre-layout"
+            | "sceptre+layout"
+            | "sceptre_ort_layout" => Some(Pipeline::SceptreLayout),
+            "sceptre-ort-autorotate" | "sceptre-autorotate" | "sceptre_ort_autorotate" | "sceptre_autorotate" => {
+                Some(Pipeline::SceptreAutoRotate)
+            }
             "docling" => Some(Pipeline::Docling),
             "paddleocr-python" => Some(Pipeline::PaddleOcrPython),
             "rapidocr" => Some(Pipeline::RapidOcr),
@@ -524,6 +553,31 @@ fn build_paddle_v6_small_layout_quality_config(profile: PaddleQualityProfile) ->
     )
 }
 
+/// Build a Sceptre extraction config pinned to the ONNX Runtime inference engine.
+///
+/// Mirrors `push_sceptre_args`/`SCEPTRE_ORT_OPTIONS_JSON` in `adapters/xberg.rs`: that CLI-subprocess
+/// adapter selects the ONNX Runtime engine by passing `--ocr-backend-options
+/// {"model":{"backend":"ort"}}`; this in-process config forces the same selection through
+/// `OcrConfig::backend_options`, which `crate::extract_xberg_file` reads unchanged. ~keep
+fn build_sceptre_extraction_config(
+    layout: Option<xberg::core::config::layout::LayoutDetectionConfig>,
+) -> xberg::ExtractionConfig {
+    xberg::ExtractionConfig {
+        output_format: xberg::core::config::OutputFormat::Markdown,
+        force_ocr: true,
+        ocr: Some(xberg::core::config::OcrConfig {
+            backend: "sceptre".to_string(),
+            language: vec!["eng".to_string()],
+            backend_options: Some(serde_json::json!({
+                "model": { "backend": SCEPTRE_MODEL_BACKEND_ORT }
+            })),
+            ..Default::default()
+        }),
+        layout,
+        ..Default::default()
+    }
+}
+
 fn build_tesseract_extraction_config(psm: i32) -> xberg::ExtractionConfig {
     xberg::ExtractionConfig {
         output_format: xberg::core::config::OutputFormat::Markdown,
@@ -735,6 +789,17 @@ pub fn build_extraction_config(pipeline: Pipeline) -> xberg::ExtractionConfig {
             config
         }
         Pipeline::PaddleNoRotate => build_paddle_extraction_config(PP_OCR_V6, "medium", None),
+        Pipeline::Sceptre => build_sceptre_extraction_config(None),
+        Pipeline::SceptreLayout => build_sceptre_extraction_config(Some(LayoutDetectionConfig::default())),
+        Pipeline::SceptreAutoRotate => {
+            let mut config = build_sceptre_extraction_config(None);
+            config
+                .ocr
+                .as_mut()
+                .expect("Sceptre benchmark config must include OCR")
+                .auto_rotate = true;
+            config
+        }
         Pipeline::LayoutSlanetAuto => xberg::ExtractionConfig {
             layout: Some(LayoutDetectionConfig {
                 table_model: xberg::core::config::layout::TableModel::SlanetAuto,
@@ -2344,6 +2409,78 @@ mod tests {
     }
 
     #[test]
+    fn sceptre_pipeline_aliases_parse_to_expected_variant() {
+        let aliases = [
+            ("sceptre", Pipeline::Sceptre),
+            ("sceptre-ort", Pipeline::Sceptre),
+            ("sceptre_ort", Pipeline::Sceptre),
+            ("sceptre-ort+layout", Pipeline::SceptreLayout),
+            ("sceptre-ort-layout", Pipeline::SceptreLayout),
+            ("sceptre-layout", Pipeline::SceptreLayout),
+            ("sceptre+layout", Pipeline::SceptreLayout),
+            ("sceptre-ort-autorotate", Pipeline::SceptreAutoRotate),
+            ("sceptre-autorotate", Pipeline::SceptreAutoRotate),
+        ];
+
+        for (alias, expected) in aliases {
+            assert_eq!(
+                Pipeline::parse(alias),
+                Some(expected),
+                "failed to parse sceptre alias '{alias}'"
+            );
+        }
+        assert_eq!(Pipeline::Sceptre.name(), "sceptre-ort");
+        assert_eq!(Pipeline::SceptreLayout.name(), "sceptre-ort+layout");
+        assert_eq!(Pipeline::SceptreAutoRotate.name(), "sceptre-ort-autorotate");
+    }
+
+    #[test]
+    fn unknown_pipeline_name_reports_the_requested_name() {
+        // Regression guard: adding the sceptre variants must not turn an unrelated typo into a
+        // match (e.g. via an overly broad alias), and the caller-supplied name must still surface
+        // verbatim so `main::parse_pipeline_names` can build its "unknown pipeline '<name>'" error.
+        assert_eq!(Pipeline::parse("sceptre-typo"), None);
+        assert_eq!(Pipeline::parse("sceptr"), None);
+    }
+
+    #[test]
+    fn sceptre_presets_pin_the_ort_inference_engine_and_backend() {
+        let cases = [
+            (Pipeline::Sceptre, false, false),
+            (Pipeline::SceptreLayout, true, false),
+            (Pipeline::SceptreAutoRotate, false, true),
+        ];
+
+        for (pipeline, expected_layout, expected_auto_rotate) in cases {
+            let config = build_extraction_config(pipeline);
+            let ocr = config.ocr.as_ref().expect("Sceptre preset must configure OCR");
+            let backend_options = ocr
+                .backend_options
+                .as_ref()
+                .expect("Sceptre preset must pin the inference engine");
+
+            assert!(config.force_ocr, "Sceptre preset {} must force OCR", pipeline.name());
+            assert_eq!(ocr.backend, "sceptre", "unexpected backend for {}", pipeline.name());
+            assert_eq!(
+                backend_options["model"]["backend"], SCEPTRE_MODEL_BACKEND_ORT,
+                "unexpected inference engine for {}",
+                pipeline.name()
+            );
+            assert_eq!(
+                config.layout.is_some(),
+                expected_layout,
+                "unexpected layout for {}",
+                pipeline.name()
+            );
+            assert_eq!(
+                ocr.auto_rotate, expected_auto_rotate,
+                "unexpected auto_rotate for {}",
+                pipeline.name()
+            );
+        }
+    }
+
+    #[test]
     fn paddle_quality_sweep_presets_are_opt_in() {
         let defaults = Pipeline::all_xberg();
         for pipeline in [
@@ -3113,6 +3250,9 @@ mod tests {
             "layout+slanet-auto",
             "pdf-oxide",
             "pdf-oxide+layout",
+            "sceptre-ort",
+            "sceptre-ort+layout",
+            "sceptre-ort-autorotate",
             "candle-trocr",
             "candle-paddleocr-vl",
             "candle-glm-ocr",

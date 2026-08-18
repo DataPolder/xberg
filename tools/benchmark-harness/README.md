@@ -173,6 +173,8 @@ The `compare` and `pipeline-benchmark` commands support these extraction paths:
 | `paddle-v6-small[+layout]` | PP-OCRv6 small tier, optionally with layout |
 | `paddle-v6-tiny[+layout]` | PP-OCRv6 tiny tier, optionally with layout |
 | `paddle-v5-server[+layout]` | Explicit legacy PP-OCRv5 server tier       |
+| `sceptre-ort[+layout]` | Sceptre OCR pinned to the ONNX Runtime inference engine |
+| `sceptre-ort-autorotate` | Sceptre OCR (ONNX Runtime) with auto_rotate enabled |
 | `docling`          | Vendored Docling reference extraction          |
 | `paddleocr-python` | Vendored PaddleOCR Python extraction           |
 | `rapidocr`         | Vendored RapidOCR extraction                   |

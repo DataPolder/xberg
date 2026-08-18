@@ -574,6 +574,8 @@ enum Commands {
         /// and paddle-v5-server[+layout], plus paddle-{auto,no}rotate. Opt-in Paddle quality sweeps use the
         /// paddle-v6-small+layout+{det-side-*,det-db-*,drop-score-*} prefix. Tesseract PSM presets are
         /// tesseract-{vertical-block,single-block,sparse-text} (PSM 5, 6, and 11), plus tesseract-autorotate.
+        /// Sceptre presets (pinned to the ONNX Runtime inference engine) are sceptre-ort[+layout]
+        /// and sceptre-ort-autorotate.
         #[arg(long, value_delimiter = ',')]
         pipelines: Option<Vec<String>>,
 
@@ -627,7 +629,9 @@ enum Commands {
 
         /// Pipeline paths to run. Paddle presets include paddle-v6-{medium,small,tiny}[+layout]
         /// and paddle-v5-server[+layout], plus paddle-{auto,no}rotate. Tesseract PSM presets are
-        /// tesseract-{vertical-block,single-block,sparse-text} (PSM 5, 6, and 11), plus tesseract-autorotate. ~keep
+        /// tesseract-{vertical-block,single-block,sparse-text} (PSM 5, 6, and 11), plus tesseract-autorotate.
+        /// Sceptre presets (pinned to the ONNX Runtime inference engine) are sceptre-ort[+layout]
+        /// and sceptre-ort-autorotate. ~keep
         #[arg(long, value_delimiter = ',')]
         paths: Option<Vec<String>>,
 
