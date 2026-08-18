@@ -56,6 +56,43 @@ fn raw_pdf_needs_lopdf_compatibility_pass(content: &[u8]) -> bool {
     contains_pdf_marker(content, PDF_PREVIOUS_XREF_MARKER) || contains_pdf_marker(content, PDF_OUTLINES_MARKER)
 }
 
+/// Reject a document whose page count exceeds `security_limits.max_pages` before any
+/// per-page work (layout detection, OCR, rendering) begins (#1451).
+///
+/// Parses `content` only far enough to read the page count — independent of the
+/// `OxideDocument` opened later for the real extraction, and of the document
+/// `layout_runner` opens for layout detection, both of which happen after this
+/// check runs. A document whose page count cannot be determined here (e.g. it
+/// needs a password this pass never supplies) is let through: the later full
+/// parse reports the real parsing failure instead of this check misreporting it
+/// as a page-limit violation.
+#[cfg(feature = "pdf")]
+fn enforce_page_limit(content: &[u8], config: &ExtractionConfig) -> Result<()> {
+    let max_pages = config
+        .security_limits
+        .as_ref()
+        .map_or(usize::MAX, |limits| limits.max_pages);
+    if max_pages == usize::MAX {
+        return Ok(());
+    }
+
+    let Ok(doc) = pdf_oxide::PdfDocument::from_bytes(content.to_vec()) else {
+        return Ok(());
+    };
+    let Ok(page_count) = doc.page_count() else {
+        return Ok(());
+    };
+
+    if page_count > max_pages {
+        return Err(crate::extractors::security::SecurityError::TooManyPages {
+            count: page_count,
+            max: max_pages,
+        }
+        .into());
+    }
+    Ok(())
+}
+
 #[cfg(feature = "pdf")]
 fn parsed_pdf_needs_lopdf_compatibility_pass(document: &crate::pdf::oxide::OxideDocument) -> bool {
     match document.doc.catalog() {
@@ -1292,6 +1329,8 @@ impl PdfExtractor {
         path: Option<&std::path::Path>,
     ) -> Result<InternalDocument> {
         let _ = &path;
+
+        enforce_page_limit(content, config)?;
 
         #[cfg(all(feature = "pdf", feature = "layout-detection"))]
         #[allow(unused_mut, unused_variables)]
@@ -3467,6 +3506,95 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// #1451: `max_pages` must reject a document once its page count is known, before
+    /// per-page work (OCR/layout/rendering) starts. Against the unfixed extractor there is
+    /// no `max_pages` field to set, so this test fails to compile; once the field exists but
+    /// enforcement is missing, `extract_content` would return `Ok` here instead of the
+    /// expected `SecurityError::TooManyPages`.
+    #[tokio::test]
+    #[cfg(feature = "pdf")]
+    async fn should_reject_document_exceeding_max_pages() {
+        let pdf_path = pdf_test_document("multi_page.pdf");
+        let Ok(content) = std::fs::read(&pdf_path) else {
+            return;
+        };
+        let real_page_count = pdf_oxide::PdfDocument::from_bytes(content.clone())
+            .expect("fixture must parse")
+            .page_count()
+            .expect("fixture must expose a page count");
+        assert!(real_page_count > 1, "fixture must have more than one page to exercise the limit");
+
+        let extractor = PdfExtractor::new();
+        let config = ExtractionConfig {
+            security_limits: Some(crate::extractors::security::SecurityLimits {
+                max_pages: real_page_count - 1,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let result = extractor.extract_content(&content, "application/pdf", &config).await;
+        let error = result.expect_err("a document over max_pages must be rejected");
+        let message = error.to_string();
+        assert!(
+            message.contains("too many pages") || message.contains("max_pages"),
+            "error must name the limit that was hit: {message}"
+        );
+    }
+
+    /// A document exactly at the configured `max_pages` ceiling must extract in full — a
+    /// limit that rejects the boundary case too is not the fix the issue asked for.
+    #[tokio::test]
+    #[cfg(feature = "pdf")]
+    async fn should_extract_fully_when_page_count_is_at_max_pages() {
+        let pdf_path = pdf_test_document("multi_page.pdf");
+        let Ok(content) = std::fs::read(&pdf_path) else {
+            return;
+        };
+        let real_page_count = pdf_oxide::PdfDocument::from_bytes(content.clone())
+            .expect("fixture must parse")
+            .page_count()
+            .expect("fixture must expose a page count");
+
+        let extractor = PdfExtractor::new();
+        let config = ExtractionConfig {
+            security_limits: Some(crate::extractors::security::SecurityLimits {
+                max_pages: real_page_count,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let result = extractor.extract_content(&content, "application/pdf", &config).await;
+        let doc = result.expect("a document exactly at max_pages must extract fully, not be rejected");
+        assert!(
+            !doc.elements.is_empty(),
+            "extraction at the boundary must still produce content, not an empty truncated result"
+        );
+    }
+
+    /// The default `SecurityLimits` (no override) must extract a multi-page document exactly
+    /// as before #1451: `max_pages` defaulting to anything less than `usize::MAX` would
+    /// silently start rejecting existing callers' documents.
+    #[tokio::test]
+    #[cfg(feature = "pdf")]
+    async fn should_extract_normally_with_default_security_limits() {
+        let pdf_path = pdf_test_document("multi_page.pdf");
+        let Ok(content) = std::fs::read(&pdf_path) else {
+            return;
+        };
+
+        let extractor = PdfExtractor::new();
+        let config = ExtractionConfig::default();
+
+        let result = extractor.extract_content(&content, "application/pdf", &config).await;
+        assert!(
+            result.is_ok(),
+            "default security limits must not reject a normal multi-page document: {:?}",
+            result.err()
+        );
     }
 
     #[tokio::test]

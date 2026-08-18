@@ -49,6 +49,17 @@ pub struct SecurityLimits {
 
     /// Maximum cells per table (100,000)
     pub max_table_cells: usize,
+
+    /// Maximum number of pages in a single document (`usize::MAX`, i.e. off).
+    ///
+    /// Checked once the page count is known and before any per-page work (OCR,
+    /// layout detection, rendering) starts. Byte-size limits do not bound page
+    /// count: a scanned page can compress to a few kilobytes, so a document well
+    /// under `max_content_size` or `max_archive_size` can still hold thousands of
+    /// pages of per-page work. Defaults to unlimited because a real ceiling here
+    /// is workload-specific and a low default would silently reject legitimate
+    /// large documents; callers that want a ceiling set this explicitly.
+    pub max_pages: usize,
 }
 
 impl Default for SecurityLimits {
@@ -63,6 +74,7 @@ impl Default for SecurityLimits {
             max_iterations: 10_000_000,
             max_xml_depth: 1024,
             max_table_cells: 100_000,
+            max_pages: usize::MAX,
         }
     }
 }
@@ -145,6 +157,14 @@ pub enum SecurityError {
         max: usize,
     },
 
+    /// Document has too many pages
+    TooManyPages {
+        /// Number of pages found in the document.
+        count: usize,
+        /// Configured maximum page count.
+        max: usize,
+    },
+
     /// An archive entry could not be read, so its declared sizes could not be
     /// counted towards the archive limits. Reported rather than skipped: an
     /// unaccounted entry makes every aggregate total untrustworthy.
@@ -193,6 +213,14 @@ impl std::fmt::Display for SecurityError {
             }
             SecurityError::TooManyCells { cells, max } => {
                 write!(f, "Too many table cells: {} (max: {})", cells, max)
+            }
+            SecurityError::TooManyPages { count, max } => {
+                write!(
+                    f,
+                    "Document has too many pages: {} (max: {}). Raise `security_limits.max_pages` \
+                     if this document is legitimate, or split it before extraction.",
+                    count, max
+                )
             }
             SecurityError::UnreadableEntry { index, reason } => {
                 write!(
@@ -647,6 +675,25 @@ mod tests {
         assert_eq!(limits.max_archive_size, 500 * 1024 * 1024);
         assert_eq!(limits.max_nesting_depth, 1024);
         assert_eq!(limits.max_entity_length, 1024 * 1024);
+    }
+
+    #[test]
+    fn test_default_max_pages_is_unlimited() {
+        // A default that rejects real documents would be worse than the risk it
+        // mitigates (issue #1451): the ceiling only applies once a caller opts in.
+        assert_eq!(SecurityLimits::default().max_pages, usize::MAX);
+    }
+
+    #[test]
+    fn test_too_many_pages_display_names_the_limit() {
+        let error = SecurityError::TooManyPages { count: 4_000, max: 1_000 };
+        let message = error.to_string();
+        assert!(message.contains("4000"), "message must name the observed count: {message}");
+        assert!(message.contains("1000"), "message must name the configured max: {message}");
+        assert!(
+            message.contains("max_pages"),
+            "message must name the limit that was hit: {message}"
+        );
     }
 
     #[test]
