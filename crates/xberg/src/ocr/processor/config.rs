@@ -144,6 +144,13 @@ pub(super) fn apply_tesseract_variables(api: &TesseractAPI, config: &TesseractCo
     api.set_variable("thresholding_method", &config.thresholding_method.to_string())
         .map_err(|e| OcrError::InvalidConfiguration(format!("Failed to set thresholding_method: {}", e)))?;
 
+    // Tesseract emits `x_fsize`/`x_font`/`x_bold`/`x_italic` on `ocrx_word` spans only when this
+    // variable is on, and it defaults to off. Without it the hOCR parser never sees a font size, so
+    // every OCR paragraph falls back to a single constant and heading clustering has no signal.
+    // Safe to enable unconditionally: it changes hOCR serialization only, never the recognized text.
+    api.set_variable("hocr_font_info", "1")
+        .map_err(|e| OcrError::InvalidConfiguration(format!("Failed to set hocr_font_info: {}", e)))?;
+
     Ok(())
 }
 
@@ -274,6 +281,39 @@ mod tests {
         config2.tessedit_char_blacklist = "bc".to_string();
 
         assert_ne!(hash_config(&config1), hash_config(&config2));
+    }
+
+    /// Regression test for the OCR structure defect: without `hocr_font_info`
+    /// enabled, Tesseract's hOCR output never carries `x_fsize` on any word, so
+    /// `resolve_ocr_font_size_pt` (`crate::pdf::structure::adapters`) can never
+    /// read a real per-block font size and every heading/body paragraph collapses
+    /// to the same fallback value.
+    ///
+    /// Uses a real (non-mocked) `TesseractAPI`, matching the pattern in
+    /// `crate::ocr::tesseract_backend`'s own `query_available_languages` test:
+    /// `init("", "eng")` resolves tessdata the same way production code does.
+    ///
+    /// Before the fix, `apply_tesseract_variables` never called
+    /// `set_variable("hocr_font_info", ...)`, so this reads back Tesseract's own
+    /// default (`false`) and the assertion fails.
+    #[test]
+    fn test_apply_tesseract_variables_enables_hocr_font_info() {
+        let api = match xberg_tesseract::TesseractAPI::new() {
+            Ok(api) => api,
+            Err(_) => return, // no Tesseract/Leptonica available in this environment
+        };
+        if api.init("", "eng").is_err() {
+            return; // no "eng" tessdata available in this environment
+        }
+
+        let config = create_test_config();
+        apply_tesseract_variables(&api, &config).expect("apply_tesseract_variables should succeed");
+
+        assert_eq!(
+            api.get_bool_variable("hocr_font_info").ok(),
+            Some(true),
+            "hocr_font_info must be enabled so hOCR word spans carry x_fsize/x_font"
+        );
     }
 
     #[test]
