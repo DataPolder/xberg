@@ -1,6 +1,5 @@
 [workspace]
 members = [
-    "crates/ttf-parser-compat",
     "crates/xberg",
     "crates/xberg-candle-ocr",
     "crates/xberg-cli",
@@ -26,7 +25,7 @@ resolver = "2"
 [workspace.package]
 version = "1.1.0"
 edition = "2024"
-rust-version = "1.91"
+rust-version = "1.92"
 authors = ["Na'aman Hirschfeld <naaman@xberg.io>"]
 license = "MIT"
 repository = "https://github.com/xberg-io/xberg"
@@ -91,7 +90,15 @@ once_cell = "1.21.4"
 
 ort = { version = "2.0.0-rc.13", default-features = false, features = ["std", "api-18"] }
 parking_lot = "0.12.5"
-pdf_oxide = { version = "0.3.77", default-features = false, features = ["rendering", "legacy-crypto"] }
+# Our fork of PDFOxide. `package =` keeps the extern crate name `pdf_oxide`, so the
+# ~530 `use pdf_oxide::...` call sites are untouched. `icc` is the fork's own default
+# (pure-Rust qcms CMYK->RGB through the embedded profile); xberg builds with
+# default-features = false, so it has to be named explicitly.
+pdf_oxide = { package = "xberg-pdf-oxide", path = "../xberg-pdf-oxide", default-features = false, features = [
+  "rendering",
+  "legacy-crypto",
+  "icc",
+] }
 rayon = "1.12.0"
 reqwest = { version = "0.13.4", default-features = false }
 # SVG rendering (resvg re-exports tiny_skia and usvg; default-features = false
@@ -157,35 +164,6 @@ xberg-gliner = { path = "crates/xberg-gliner" }
 xberg-tesseract = { path = "crates/xberg-tesseract" }
 xberg-paddle-ocr = { path = "crates/xberg-paddle-ocr" }
 xberg-candle-ocr = { path = "crates/xberg-candle-ocr" }
-# Redirects the transitive ttf-parser used by pdf_oxide and fontdb onto
-# xberg-ttf-parser, which carries the CFF dotsection fix and eight other fixes
-# unreleased upstream. Cargo matches patch entries on package name alone, so the
-# redirect goes through a name-compat shim; see crates/ttf-parser-compat.
-#
-# EXPOSURE: [patch] only rewrites resolution for builds going through this
-# workspace root. Anyone who depends on published `xberg` (crates.io, currently
-# 1.0.14) from their own Cargo.toml pulls pdf_oxide's and fontdb's real,
-# unpatched ttf-parser instead, with none of these nine fixes. The dotsection
-# one is user-visible: xberg's `pdf` feature silently drops the i, j, period,
-# colon, semicolon, exclamation, and question-mark glyphs of any CFF font that
-# uses the deprecated `dotsection` operator (e.g. distiller-produced Type 1C
-# subsets) when rendering a page to an image. There is no workaround for those
-# consumers short of this fix shipping from upstream ttf-parser itself.
-#
-# STATUS (checked 2026-08-06, re-verify before touching this entry):
-# harfbuzz/ttf-parser#228 (dotsection) is merged to upstream `main`, but
-# nothing is tagged or published — crates.io still serves 0.25.1, the same as
-# GitHub's newest tag (v0.25.1). The backport-to-0.25.2 proposal (#229) was
-# closed and folded into #228, so no 0.25.x patch release is in flight. The
-# fix now only ships via the next `main` release, tracked as 0.26.0 in
-# harfbuzz/ttf-parser#242 (also closed, blocked on crates.io publish access,
-# no tag cut). Even once 0.26.0 publishes, it will NOT satisfy pdf_oxide's and
-# fontdb's `ttf-parser = "^0.25"` requirement — 0.x caret ranges do not cross a
-# minor version — so this patch stays load-bearing until pdf_oxide and fontdb
-# themselves widen that requirement and re-publish. Do not drop this entry on
-# the assumption that a release landed; confirm crates.io serves >=0.25.2 (or
-# pdf_oxide/fontdb accept 0.26) first.
-ttf-parser = { path = "crates/ttf-parser-compat" }
 
 [profile.release]
 lto = "thin"
