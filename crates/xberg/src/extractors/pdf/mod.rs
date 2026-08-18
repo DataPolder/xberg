@@ -59,13 +59,27 @@ fn raw_pdf_needs_lopdf_compatibility_pass(content: &[u8]) -> bool {
 /// Reject a document whose page count exceeds `security_limits.max_pages` before any
 /// per-page work (layout detection, OCR, rendering) begins (#1451).
 ///
-/// Parses `content` only far enough to read the page count — independent of the
-/// `OxideDocument` opened later for the real extraction, and of the document
-/// `layout_runner` opens for layout detection, both of which happen after this
-/// check runs. A document whose page count cannot be determined here (e.g. it
-/// needs a password this pass never supplies) is let through: the later full
-/// parse reports the real parsing failure instead of this check misreporting it
-/// as a page-limit violation.
+/// Counts pages with `pdf_oxide` first and falls back to `lopdf` when that cannot
+/// open the document at all.
+///
+/// The fallback exists because the `pdf_oxide` open is the sole gate on this cap, and
+/// `raw_pdf_needs_lopdf_compatibility_pass` below documents that some structures only
+/// `lopdf` can walk — so without it, a document `pdf_oxide` rejects skips the cap
+/// entirely and is then handed to an extraction path that may still recover it. That
+/// is the shape a hostile input would take against a security limit.
+///
+/// Measured, so the comment does not outlive the fact: over the 488 PDFs in
+/// `test_documents/`, exactly one defeats the `pdf_oxide` count — `corrupt_truncated.pdf`,
+/// which `lopdf` also cannot read and which fails extraction anyway. Encrypted documents
+/// are *not* among the failures: a PDF's page tree is structure, not string or stream
+/// data, so `pdf_oxide` counts an AES-256 document's pages without ever authenticating.
+/// No password handling is needed here, and adding it would buy nothing.
+///
+/// A document neither parser can count is let through rather than rejected. `max_pages`
+/// is opt-in (`SecurityLimits` defaults it to `usize::MAX`, the fast path below), and
+/// failing closed on "cannot tell" would turn a parse failure into a spurious
+/// `TooManyPages`, masking the real error on documents the extraction path may still
+/// recover.
 #[cfg(feature = "pdf")]
 fn enforce_page_limit(content: &[u8], config: &ExtractionConfig) -> Result<()> {
     let max_pages = config
@@ -76,10 +90,7 @@ fn enforce_page_limit(content: &[u8], config: &ExtractionConfig) -> Result<()> {
         return Ok(());
     }
 
-    let Ok(doc) = pdf_oxide::PdfDocument::from_bytes(content.to_vec()) else {
-        return Ok(());
-    };
-    let Ok(page_count) = doc.page_count() else {
+    let Some(page_count) = oxide_page_count(content).or_else(|| lopdf_page_count(content)) else {
         return Ok(());
     };
 
@@ -91,6 +102,23 @@ fn enforce_page_limit(content: &[u8], config: &ExtractionConfig) -> Result<()> {
         .into());
     }
     Ok(())
+}
+
+/// Page count via `pdf_oxide`. `None` when it cannot open or count the document,
+/// in which case the caller falls back to [`lopdf_page_count`].
+#[cfg(feature = "pdf")]
+fn oxide_page_count(content: &[u8]) -> Option<usize> {
+    pdf_oxide::PdfDocument::from_bytes(content.to_vec())
+        .ok()?
+        .page_count()
+        .ok()
+}
+
+/// Page count via `lopdf`, for documents `pdf_oxide` could not open or count.
+#[cfg(feature = "pdf")]
+fn lopdf_page_count(content: &[u8]) -> Option<usize> {
+    let document = lopdf::Document::load_mem(content).ok()?;
+    Some(document.get_pages().len())
 }
 
 #[cfg(feature = "pdf")]
@@ -3537,6 +3565,102 @@ mod tests {
 
         let result = extractor.extract_content(&content, "application/pdf", &config).await;
         let error = result.expect_err("a document over max_pages must be rejected");
+        let message = error.to_string();
+        assert!(
+            message.contains("too many pages") || message.contains("max_pages"),
+            "error must name the limit that was hit: {message}"
+        );
+    }
+
+    /// A base64-encoded, 3-page, AES-256 (R6) encrypted PDF whose user password is the
+    /// obviously-fake literal `xberg-test-fake-password-1451`. No corpus fixture requires a
+    /// real user password to open: every encrypted PDF under `test_documents/pdf/` (including
+    /// `password_protected.pdf`, despite the name) authenticates with the empty password and
+    /// only restricts copy/edit permissions, so none of them exercise the password-required
+    /// path this test targets. Built with `qpdf --encrypt ... 256` from a minimal 3-page
+    /// document and verified with `qpdf --check` (fails with no password or the wrong one,
+    /// succeeds and reports 3 pages with the correct one) before being embedded here.
+    #[cfg(feature = "pdf")]
+    const ENCRYPTED_THREE_PAGE_PDF_BASE64: &str = concat!(
+        "JVBERi0xLjcKJb/3ov4KMSAwIG9iago8PCAvRXh0ZW5zaW9ucyA8PCAvQURCRSA8PCAvQmFzZVZlcnNpb24gLzEuNyAv",
+        "RXh0ZW5zaW9uTGV2ZWwgOCA+PiA+PiAvUGFnZXMgMiAwIFIgL1R5cGUgL0NhdGFsb2cgPj4KZW5kb2JqCjIgMCBvYmoK",
+        "PDwgL0NvdW50IDMgL0tpZHMgWyAzIDAgUiA0IDAgUiA1IDAgUiBdIC9UeXBlIC9QYWdlcyA+PgplbmRvYmoKMyAwIG9i",
+        "ago8PCAvQ29udGVudHMgNiAwIFIgL01lZGlhQm94IFsgMCAwIDIwMCAyMDAgXSAvUGFyZW50IDIgMCBSIC9SZXNvdXJj",
+        "ZXMgPDwgL0ZvbnQgPDwgL0YxIDcgMCBSID4+ID4+IC9UeXBlIC9QYWdlID4+CmVuZG9iago0IDAgb2JqCjw8IC9Db250",
+        "ZW50cyA4IDAgUiAvTWVkaWFCb3ggWyAwIDAgMjAwIDIwMCBdIC9QYXJlbnQgMiAwIFIgL1Jlc291cmNlcyA8PCAvRm9u",
+        "dCA8PCAvRjEgNyAwIFIgPj4gPj4gL1R5cGUgL1BhZ2UgPj4KZW5kb2JqCjUgMCBvYmoKPDwgL0NvbnRlbnRzIDkgMCBS",
+        "IC9NZWRpYUJveCBbIDAgMCAyMDAgMjAwIF0gL1BhcmVudCAyIDAgUiAvUmVzb3VyY2VzIDw8IC9Gb250IDw8IC9GMSA3",
+        "IDAgUiA+PiA+PiAvVHlwZSAvUGFnZSA+PgplbmRvYmoKNiAwIG9iago8PCAvRmlsdGVyIC9GbGF0ZURlY29kZSAvTGVu",
+        "Z3RoIDgwID4+CnN0cmVhbQq/uprLnpDr1L1WYuji7aoo8FC/AmNCG9HIRQLXttVpBBc7g+Wbs7gcxVkaZNEjLHKAT0E4",
+        "zK38JxdAJjfL7XkpkCbptuaCZCGvvfQ0dyrxlWVuZHN0cmVhbQplbmRvYmoKNyAwIG9iago8PCAvQmFzZUZvbnQgL0hl",
+        "bHZldGljYSAvU3VidHlwZSAvVHlwZTEgL1R5cGUgL0ZvbnQgPj4KZW5kb2JqCjggMCBvYmoKPDwgL0ZpbHRlciAvRmxh",
+        "dGVEZWNvZGUgL0xlbmd0aCA4MCA+PgpzdHJlYW0K4JE0iPOQNpJRjCvrfuVuZ8G+7e3bbkuci4qETQEnA0RfeOqEZe5q",
+        "L81EqqU/h7+KsfI+uoIT6tBO4uAdnj/i0054F0Q6VoQWb0PkpOiMLy1lbmRzdHJlYW0KZW5kb2JqCjkgMCBvYmoKPDwg",
+        "L0ZpbHRlciAvRmxhdGVEZWNvZGUgL0xlbmd0aCA4MCA+PgpzdHJlYW0KKqDRR85TmYv59t1N7OdBCttbZfgU8lsnHRFY",
+        "MueyVRSwbBDvnujXiRLztgcPFiS4XexkTW/ikEXnPHq9uFq1VDpPVQNpaRQlZKf9xlAUveVlbmRzdHJlYW0KZW5kb2Jq",
+        "CjEwIDAgb2JqCjw8IC9DRiA8PCAvU3RkQ0YgPDwgL0F1dGhFdmVudCAvRG9jT3BlbiAvQ0ZNIC9BRVNWMyAvTGVuZ3Ro",
+        "IDMyID4+ID4+IC9GaWx0ZXIgL1N0YW5kYXJkIC9MZW5ndGggMjU2IC9PIDw0ZmQzOTFhNjY0MzdlZjFkYzEwNDMxOGVj",
+        "OTZhNDY1OTM5OWNhMzY2YTY1MTBmZjhkNTI1N2FjMmJiOGRmMGNkMGRiZjkzYTc4MDgzYTkzOGRhYzBlMjcwMzliMTMw",
+        "ZmM+IC9PRSA8NDkwZTZlNzI0OGM2NmZkMjZjOTdjMzE3MWVlNjVlNjc0Yjk1YWM2ZWI1MTI1ZjVlZmVkMDBmOTI3NmQw",
+        "Y2YxMj4gL1AgLTQgL1Blcm1zIDw1NmI5YWRkMWJiMWI2YjUwZGYyMjg3NWM1Njc5YTJmMz4gL1IgNiAvU3RtRiAvU3Rk",
+        "Q0YgL1N0ckYgL1N0ZENGIC9VIDw0NTNlNjI2Y2JmZTI1MGE5N2FmNDllZWEzMmYwOWFmOWMyZDk4Y2MzMWM2ZGQ1NDdj",
+        "NjkwYzU1NTMwZDhjN2ViYjA2MzdlN2JjZmZmMDdkZThmYjc2NmFmNWQ4ZDM1NWY+IC9VRSA8MTA0YWEyZjAzNDBiMTEw",
+        "ZGEzZTFmMGQ0ODQ3NmQyOWMyZTExNmYxOTRlZTBjMjFmYWFiMzkzNDFiZmU2NjMyZT4gL1YgNSA+PgplbmRvYmoKeHJl",
+        "ZgowIDExCjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAxNSAwMDAwMCBuIAowMDAwMDAwMTMwIDAwMDAwIG4gCjAw",
+        "MDAwMDAyMDEgMDAwMDAgbiAKMDAwMDAwMDMyOSAwMDAwMCBuIAowMDAwMDAwNDU3IDAwMDAwIG4gCjAwMDAwMDA1ODUg",
+        "MDAwMDAgbiAKMDAwMDAwMDczNSAwMDAwMCBuIAowMDAwMDAwODA1IDAwMDAwIG4gCjAwMDAwMDA5NTUgMDAwMDAgbiAK",
+        "MDAwMDAwMTEwNSAwMDAwMCBuIAp0cmFpbGVyIDw8IC9Sb290IDEgMCBSIC9TaXplIDExIC9JRCBbPGU4ODhiODFiZjdj",
+        "YzRhODE3NzQ3YmM4ZDZlZTgxYzgxPjxmYzI0MzUwMTY1NzA4NjdhNDYzNTZiYTFiYWE5ZGVhND5dIC9FbmNyeXB0IDEw",
+        "IDAgUiA+PgpzdGFydHhyZWYKMTY1MwolJUVPRgo=",
+    );
+
+    #[cfg(feature = "pdf")]
+    const ENCRYPTED_THREE_PAGE_PDF_PASSWORD: &str = "xberg-test-fake-password-1451";
+
+    /// An encrypted document is subject to `max_pages` like any other. This is a
+    /// characterization test, NOT a regression test — it passes against the pre-fix code
+    /// too, and it is kept because the behaviour is worth pinning, not because it catches
+    /// anything.
+    ///
+    /// It was originally written believing `pdf_oxide` refuses to count an unauthenticated
+    /// document's pages, so an encrypted PDF would skip the cap. That is false, and measuring
+    /// it is what settled the design: a PDF's page tree is structure, not string or stream
+    /// data, so `pdf_oxide::PdfDocument::from_bytes(..).page_count()` returns 3 for this
+    /// AES-256/R6 fixture with no password at all. A sweep of all 488 PDFs in
+    /// `test_documents/` found exactly one document the unauthenticated count cannot handle
+    /// (`corrupt_truncated.pdf`), which `lopdf` also cannot read and which fails extraction
+    /// anyway. So `enforce_page_limit` needs no password handling.
+    ///
+    /// The fixture: 3 pages, AES-256/R6, built with `qpdf --encrypt ... 256` and verified
+    /// with `qpdf --check` before embedding. Its password is the obviously-fake literal
+    /// `xberg-test-fake-password-1451`. No corpus fixture requires a real user password —
+    /// every encrypted PDF under `test_documents/pdf/` (including `password_protected.pdf`,
+    /// despite the name) opens with the empty password and only restricts copy/edit.
+    #[tokio::test]
+    #[cfg(feature = "pdf")]
+    async fn encrypted_document_over_max_pages_is_rejected_like_any_other() {
+        use base64::Engine as _;
+        use crate::core::config::pdf::PdfConfig;
+
+        let content = base64::engine::general_purpose::STANDARD
+            .decode(ENCRYPTED_THREE_PAGE_PDF_BASE64)
+            .expect("fixture must be valid base64");
+
+        let extractor = PdfExtractor::new();
+        let config = ExtractionConfig {
+            security_limits: Some(crate::extractors::security::SecurityLimits {
+                max_pages: 2,
+                ..Default::default()
+            }),
+            pdf_options: Some(PdfConfig {
+                passwords: Some(vec![ENCRYPTED_THREE_PAGE_PDF_PASSWORD.to_string()]),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let result = extractor.extract_content(&content, "application/pdf", &config).await;
+        let error = result.expect_err("an encrypted document over max_pages must be rejected like any other");
         let message = error.to_string();
         assert!(
             message.contains("too many pages") || message.contains("max_pages"),
