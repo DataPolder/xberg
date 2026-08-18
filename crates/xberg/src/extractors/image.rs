@@ -1565,6 +1565,14 @@ impl ImageExtractor {
         let ocr_elements = ocr_result.ocr_elements;
         let ocr_formulas = ocr_result.formulas;
         let processing_warnings = ocr_result.processing_warnings;
+        // `ExtractedDocument::tables` (tables reconstructed by OCR table
+        // detection) used to be dropped here entirely: nothing on the
+        // standalone-image path ever read it, so a table found in a bare
+        // image never reached the output.
+        #[cfg(feature = "ocr")]
+        let ocr_tables = ocr_result.tables;
+        #[cfg(feature = "ocr")]
+        let ocr_internal_document = ocr_result.ocr_internal_document;
 
         #[cfg(feature = "ocr")]
         {
@@ -1575,13 +1583,46 @@ impl ImageExtractor {
                 config.pages.as_ref(),
             )?;
 
-            let mut doc = build_image_internal_document(Some(&ocr_extraction_result.content), None);
+            // The standalone-image path has no document-global structure pipeline
+            // behind it (unlike the PDF mixed route), so it is the one place that
+            // still needs to detect headings itself. Prefer the hOCR-derived
+            // element tree — which still carries per-paragraph `x_fsize` — so
+            // headings become real `Heading` elements the renderer understands,
+            // rather than a pre-escaped `## ` string baked into plain text (which
+            // produced `\#\#` under markdown escaping and leaked `## ` into
+            // `Plain` output). Only usable when OCR ran on the whole image in one
+            // pass: multi-frame TIFF page tracking slices `content` by byte
+            // offset and has no per-frame correspondence to hOCR elements, so it
+            // keeps the flat paragraph-split fallback.
+            let use_hocr_headings = ocr_extraction_result.page_contents.is_none();
+            let mut doc = match &ocr_internal_document {
+                Some(internal_doc) if use_hocr_headings && !internal_doc.elements.is_empty() => {
+                    build_image_internal_document_from_hocr_elements(&internal_doc.elements)
+                }
+                _ => build_image_internal_document(Some(&ocr_extraction_result.content), None),
+            };
             doc.metadata = ocr_metadata;
             doc.formulas = ocr_formulas;
             doc.processing_warnings = processing_warnings;
             Self::mark_ocr_extraction(&mut doc);
 
             doc.prebuilt_ocr_elements = ocr_elements;
+
+            let page_tables: Vec<std::sync::Arc<crate::types::Table>> = ocr_tables
+                .into_iter()
+                .map(|table| {
+                    let bbox = table.bounding_box;
+                    let table_index = doc.push_table(table.clone());
+                    let mut element = crate::types::internal::InternalElement::text(
+                        crate::types::internal::ElementKind::Table { table_index },
+                        "",
+                        0,
+                    );
+                    element.bbox = bbox;
+                    doc.push_element(element);
+                    std::sync::Arc::new(table)
+                })
+                .collect();
 
             if let Some(pages) = ocr_extraction_result.page_contents {
                 doc.prebuilt_pages = Some(pages);
@@ -1591,7 +1632,7 @@ impl ImageExtractor {
                     doc.prebuilt_pages = Some(vec![crate::types::PageContent {
                         page_number: 1,
                         content: text,
-                        tables: vec![],
+                        tables: page_tables,
                         image_indices: vec![],
                         hierarchy: None,
                         is_blank: None,
@@ -1800,6 +1841,103 @@ impl ImageExtractor {
     }
 }
 
+/// Minimum ratio of a paragraph's average hOCR font size (`x_fsize`) to the
+/// image's median paragraph font size before the paragraph is promoted to a
+/// heading (#185).
+///
+/// The standalone-image path is the last OCR route that still needs this
+/// heuristic locally: it has no document-global structure pipeline behind it
+/// (unlike the PDF mixed route, which classifies headings itself from the
+/// same `x_fsize` attribute across the whole document). See
+/// `ocr::processor::execution::flatten_hocr_elements_to_text` for why that
+/// function no longer bakes headings into its output string.
+#[cfg(feature = "ocr")]
+const STANDALONE_IMAGE_HEADING_FONT_SIZE_RATIO: f64 = 1.3;
+
+/// Maximum word count for a large-font paragraph to still be treated as a
+/// heading; see [`STANDALONE_IMAGE_HEADING_FONT_SIZE_RATIO`].
+#[cfg(feature = "ocr")]
+const STANDALONE_IMAGE_HEADING_MAX_WORD_COUNT: usize = 12;
+
+/// Read the paragraph-average hOCR font size stored by `hocr_parser`.
+#[cfg(feature = "ocr")]
+fn standalone_image_element_font_size(element: &crate::types::internal::InternalElement) -> Option<f64> {
+    element
+        .attributes
+        .as_ref()?
+        .get(crate::ocr::hocr_parser::HOCR_FONT_SIZE_ATTRIBUTE)?
+        .parse::<f64>()
+        .ok()
+}
+
+/// Build an `InternalDocument` from hOCR-derived paragraph elements.
+///
+/// Promotes large-font, short, single-line paragraphs to real `Heading`
+/// elements rather than baking `## ` into a plain-text string: a pre-escaped
+/// string is indistinguishable from literal user text once it reaches a
+/// renderer, so it either leaks markdown syntax into `Plain` output or gets
+/// escaped to `\#\#` by the markdown renderer. Always pushes the image
+/// itself as an `Image` node, matching `build_image_internal_document`.
+#[cfg(feature = "ocr")]
+fn build_image_internal_document_from_hocr_elements(
+    elements: &[crate::types::internal::InternalElement],
+) -> InternalDocument {
+    use crate::types::internal::ElementKind;
+
+    let mut font_sizes: Vec<f64> = elements.iter().filter_map(standalone_image_element_font_size).collect();
+    let median_font_size = if font_sizes.is_empty() {
+        None
+    } else {
+        font_sizes.sort_by(f64::total_cmp);
+        Some(font_sizes[font_sizes.len() / 2])
+    };
+
+    let mut builder = InternalDocumentBuilder::new("image");
+    for element in elements {
+        if matches!(element.kind, ElementKind::PageBreak) || element.text.is_empty() {
+            continue;
+        }
+        let is_heading = median_font_size.is_some_and(|median| {
+            standalone_image_element_font_size(element).is_some_and(|size| {
+                size >= median * STANDALONE_IMAGE_HEADING_FONT_SIZE_RATIO
+                    && !element.text.contains('\n')
+                    && element.text.split_whitespace().count() <= STANDALONE_IMAGE_HEADING_MAX_WORD_COUNT
+            })
+        });
+        if is_heading {
+            builder.push_heading(1, &element.text, None, None);
+        } else {
+            builder.push_paragraph(&element.text, vec![], None, None);
+        }
+    }
+    push_image_placeholder(&mut builder);
+    builder.build()
+}
+
+/// Push a placeholder `Image` element carrying no binary data.
+fn push_image_placeholder(builder: &mut InternalDocumentBuilder) {
+    use crate::types::document_structure::ContentLayer;
+    use crate::types::internal::{ElementKind, InternalElement, InternalElementId};
+
+    let kind = ElementKind::Image { image_index: 0 };
+    let id = InternalElementId::generate(kind.discriminant(), "", None, 0);
+    builder.push_element(InternalElement {
+        id,
+        kind,
+        text: String::new(),
+        depth: 0,
+        page: None,
+        bbox: None,
+        layer: ContentLayer::Body,
+        annotations: Vec::new(),
+        attributes: None,
+        anchor: None,
+        ocr_geometry: None,
+        ocr_confidence: None,
+        ocr_rotation: None,
+    });
+}
+
 /// Build a simple `InternalDocument` for an image extraction result.
 ///
 /// If OCR text is available, preserves its blank-line-delimited paragraphs. Always pushes
@@ -1821,26 +1959,7 @@ fn build_image_internal_document(
     if let Some(img) = image_data {
         builder.push_image(None, img, None, None);
     } else {
-        use crate::types::document_structure::ContentLayer;
-        use crate::types::internal::{ElementKind, InternalElement, InternalElementId};
-
-        let kind = ElementKind::Image { image_index: 0 };
-        let id = InternalElementId::generate(kind.discriminant(), "", None, 0);
-        builder.push_element(InternalElement {
-            id,
-            kind,
-            text: String::new(),
-            depth: 0,
-            page: None,
-            bbox: None,
-            layer: ContentLayer::Body,
-            annotations: Vec::new(),
-            attributes: None,
-            anchor: None,
-            ocr_geometry: None,
-            ocr_confidence: None,
-            ocr_rotation: None,
-        });
+        push_image_placeholder(&mut builder);
     }
     builder.build()
 }
@@ -2138,6 +2257,83 @@ mod tests {
         let tesseract_config = ocr_config.tesseract_config.expect("explicit config must remain");
         assert_eq!(tesseract_config.psm, 4);
         assert_eq!(tesseract_config.language, vec!["jpn_vert"]);
+    }
+
+    #[cfg(feature = "ocr")]
+    fn hocr_text_element_with_font_size(text: &str, font_size: Option<f64>) -> crate::types::internal::InternalElement {
+        let mut element = crate::types::internal::InternalElement::text(
+            crate::types::internal::ElementKind::OcrText {
+                level: crate::types::OcrElementLevel::Block,
+            },
+            text,
+            0,
+        );
+        if let Some(size) = font_size {
+            element
+                .attributes
+                .get_or_insert_with(Default::default)
+                .insert(crate::ocr::hocr_parser::HOCR_FONT_SIZE_ATTRIBUTE.to_string(), size.to_string());
+        }
+        element
+    }
+
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn standalone_image_plain_output_never_contains_markdown_heading_syntax() {
+        // Regression test: `Plain` is the default output format and must never
+        // contain markdown syntax. The standalone-image OCR path used to feed a
+        // pre-baked `## Nasdaq & AMEX` string (produced by the now-removed
+        // heading heuristic in `ocr::processor::execution`) straight into
+        // `build_image_internal_document`, which stored it as literal paragraph
+        // text. `render_plain` then emitted that text unchanged, leaking `## `
+        // into `Plain` output. This must fail against that behavior.
+        let elements = vec![
+            hocr_text_element_with_font_size("Nasdaq & AMEX", Some(28.0)),
+            hocr_text_element_with_font_size("Body text at normal size.", Some(12.0)),
+        ];
+
+        let doc = build_image_internal_document_from_hocr_elements(&elements);
+        let plain = crate::rendering::render_plain(&doc);
+
+        assert!(
+            !plain.contains('#'),
+            "Plain output must contain no markdown syntax: {plain:?}"
+        );
+        assert_eq!(plain, "Nasdaq & AMEX\n\nBody text at normal size.");
+    }
+
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn standalone_image_markdown_output_emits_unescaped_heading() {
+        // Regression test: feeding a pre-baked `## ` string into
+        // `build_image_internal_document` (the old behavior) made the markdown
+        // renderer treat it as literal paragraph text and escape it to
+        // `\#\# Nasdaq & AMEX`, instead of a real level-1 `# Nasdaq & AMEX`
+        // heading, because the renderer has no way to distinguish "this text
+        // happens to start with #" from "this is a heading" once it has been
+        // flattened to a string. Expressing the promotion as a real `Heading`
+        // element (this function) avoids that ambiguity. This must fail
+        // against the old flat-text path, which produces
+        // "\\#\\# Nasdaq & AMEX" instead.
+        // Three elements, not two: the promotion is median-based, so the body size must be the
+        // median. With a single body element the median IS the heading size and nothing can exceed it.
+        let elements = vec![
+            hocr_text_element_with_font_size("Nasdaq & AMEX", Some(28.0)),
+            hocr_text_element_with_font_size("Body text at normal size.", Some(12.0)),
+            hocr_text_element_with_font_size("More body text at normal size.", Some(12.0)),
+        ];
+
+        let doc = build_image_internal_document_from_hocr_elements(&elements);
+        let markdown = crate::rendering::render_markdown(&doc);
+
+        assert!(
+            markdown.contains("# Nasdaq & AMEX"),
+            "markdown output must contain an unescaped level-1 heading: {markdown:?}"
+        );
+        assert!(
+            !markdown.contains(r"\#"),
+            "markdown output must not escape the heading marker: {markdown:?}"
+        );
     }
 
     #[cfg(all(

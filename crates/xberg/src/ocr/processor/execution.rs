@@ -344,63 +344,30 @@ fn build_content_with_inline_tables(tsv_data: &str, tables: &[OcrTable], min_con
     output
 }
 
-/// Minimum ratio of a paragraph's average hOCR font size (`x_fsize`) to the
-/// page's median paragraph font size before the paragraph is promoted to a
-/// markdown heading (#185). Chosen so ordinary size variation between body
-/// paragraphs doesn't trigger false positives, while genuinely larger
-/// heading text (typically >=1.3x body size) does.
-const HEADING_FONT_SIZE_RATIO: f64 = 1.3;
-
-/// Maximum word count for a large-font paragraph to still be treated as a
-/// heading. Headings are short by convention; a large-font paragraph with
-/// many words is more likely emphasized body text or a pull-quote.
-const HEADING_MAX_WORD_COUNT: usize = 12;
-
-/// Read the paragraph-average hOCR font size stored by `hocr_parser` (#185).
-fn element_font_size(element: &crate::types::internal::InternalElement) -> Option<f64> {
-    element
-        .attributes
-        .as_ref()?
-        .get(HOCR_FONT_SIZE_ATTRIBUTE)?
-        .parse::<f64>()
-        .ok()
-}
-
-/// Render hOCR-derived paragraphs to markdown, promoting large-font, short,
-/// single-line paragraphs to `##` headings using the average `x_fsize`
-/// captured per paragraph by `hocr_parser::parse_hocr_to_internal_document`
-/// (#185). Paragraphs without a captured font size, or on a page where no
-/// paragraph reports one, render unchanged — matching the previous flat
-/// paragraph-join behavior.
-fn render_hocr_elements_as_markdown(elements: &[crate::types::internal::InternalElement]) -> String {
-    let mut font_sizes: Vec<f64> = elements.iter().filter_map(element_font_size).collect();
-    let median_font_size = if font_sizes.is_empty() {
-        None
-    } else {
-        font_sizes.sort_by(f64::total_cmp);
-        Some(font_sizes[font_sizes.len() / 2])
-    };
-
+/// Flatten hOCR-derived paragraph elements to unformatted text, joined by
+/// blank lines (#185).
+///
+/// This used to also promote large-font, short, single-line paragraphs to
+/// `## ` markdown headings using the average `x_fsize` captured per
+/// paragraph by `hocr_parser::parse_hocr_to_internal_document`. That baked
+/// markdown syntax directly into `OcrExtractionResult::content`, which is
+/// consumed unrendered by callers that expect `Plain` output (e.g. the
+/// `flat_ocr_page_document` fallback in `extractors/pdf/ocr.rs`), leaking
+/// `## ` into supposedly-plain text. It also duplicated the document-global
+/// structure pipeline, which classifies headings from the same `x_fsize`
+/// attribute across the whole document and is strictly better informed than
+/// a single page's local heuristic. That pipeline (driven by
+/// `hocr_document`/`internal_document`, not this string) is now the sole
+/// owner of heading detection for routes that have it; this function only
+/// flattens text. The standalone-image path, which has no structure
+/// pipeline behind it, keeps its own font-size-based heading promotion in
+/// `extractors/image.rs`, expressed as real `Heading` elements rather than
+/// pre-escaped markdown text.
+fn flatten_hocr_elements_to_text(elements: &[crate::types::internal::InternalElement]) -> String {
     elements
         .iter()
-        .filter_map(|e| match e.kind {
-            ElementKind::PageBreak => None,
-            _ if !e.text.is_empty() => {
-                let is_heading = median_font_size.is_some_and(|median| {
-                    element_font_size(e).is_some_and(|size| {
-                        size >= median * HEADING_FONT_SIZE_RATIO
-                            && !e.text.contains('\n')
-                            && e.text.split_whitespace().count() <= HEADING_MAX_WORD_COUNT
-                    })
-                });
-                Some(if is_heading {
-                    format!("## {}", e.text)
-                } else {
-                    e.text.clone()
-                })
-            }
-            _ => None,
-        })
+        .filter(|e| !matches!(e.kind, ElementKind::PageBreak) && !e.text.is_empty())
+        .map(|e| e.text.as_str())
         .collect::<Vec<_>>()
         .join("\n\n")
 }
@@ -1183,7 +1150,7 @@ pub(super) fn perform_ocr(
                 .map_err(|e| OcrError::ProcessingFailed(format!("Failed to extract hOCR: {}", e)))?;
 
             let internal_doc = parse_hocr_to_internal_document(&hocr);
-            let content = render_hocr_elements_as_markdown(&internal_doc.elements);
+            let content = flatten_hocr_elements_to_text(&internal_doc.elements);
             hocr_document = Some(internal_doc);
 
             let mime_type = extraction_config
@@ -1791,44 +1758,36 @@ mod tests {
     }
 
     #[test]
-    fn render_hocr_elements_as_markdown_promotes_large_font_short_paragraph_to_heading() {
+    fn flatten_hocr_elements_to_text_never_bakes_heading_syntax_regardless_of_font_size() {
+        // Regression test for the `Plain`-format markdown leak: a large-font,
+        // short, single-line paragraph used to be promoted to a `## ` heading
+        // right in this string, and `OcrExtractionResult::content` (built
+        // from this string) is consumed unrendered by some callers, so the
+        // markdown syntax leaked into `Plain` output. This must fail against
+        // the old behavior, which produced
+        // "## Chapter One\n\nBody text at normal size." instead.
         let elements = vec![
             text_element_with_font_size("Chapter One", Some(28.0)),
             text_element_with_font_size("Body text at normal size.", Some(12.0)),
-            text_element_with_font_size("More body text at normal size.", Some(12.0)),
         ];
 
-        let markdown = render_hocr_elements_as_markdown(&elements);
+        let flattened = flatten_hocr_elements_to_text(&elements);
 
-        assert_eq!(
-            markdown,
-            "## Chapter One\n\nBody text at normal size.\n\nMore body text at normal size."
+        assert_eq!(flattened, "Chapter One\n\nBody text at normal size.");
+        assert!(
+            !flattened.contains('#'),
+            "flattened OCR text must contain no markdown heading syntax: {flattened:?}"
         );
     }
 
     #[test]
-    fn render_hocr_elements_as_markdown_does_not_promote_long_large_font_paragraph() {
-        let long_text = std::iter::repeat_n("word", HEADING_MAX_WORD_COUNT + 1)
-            .collect::<Vec<_>>()
-            .join(" ");
-        let elements = vec![
-            text_element_with_font_size(&long_text, Some(28.0)),
-            text_element_with_font_size("Normal paragraph.", Some(12.0)),
-        ];
-
-        let markdown = render_hocr_elements_as_markdown(&elements);
-
-        assert_eq!(markdown, format!("{long_text}\n\nNormal paragraph."));
-    }
-
-    #[test]
-    fn render_hocr_elements_as_markdown_leaves_content_unchanged_without_font_sizes() {
+    fn flatten_hocr_elements_to_text_leaves_content_unchanged_without_font_sizes() {
         let elements = vec![
             text_element_with_font_size("First paragraph.", None),
             text_element_with_font_size("Second paragraph.", None),
         ];
 
-        let markdown = render_hocr_elements_as_markdown(&elements);
+        let markdown = flatten_hocr_elements_to_text(&elements);
 
         assert_eq!(markdown, "First paragraph.\n\nSecond paragraph.");
     }
