@@ -1438,8 +1438,18 @@ pub(crate) async fn extract_mixed_ocr_native(
                     let pipeline_clone = pipeline.clone();
                     let config_clone = config.clone();
                     let idx = *page_idx;
+                    // This page's own known `/Rotate` value, already resolved by
+                    // `open_pdf_for_page_ocr` above -- the sibling single-backend route
+                    // below reads the same `page_rotations` slice the same way. Passed
+                    // explicitly rather than via `content` because the pipeline call below
+                    // hands `run_ocr_pipeline` a single detached image (not the full page
+                    // list `extract_with_ocr`'s own content-based auto-detection expects
+                    // index-aligned to page 0), so an index-based content lookup there would
+                    // resolve the wrong page's rotation (or none at all) for anything but the
+                    // document's first OCR'd page (#651).
+                    let page_rotation_degrees = page_rotations.get(*page_idx).copied().unwrap_or(0);
                     join_set.spawn(async move {
-                        let result = Box::pin(run_ocr_pipeline(
+                        let result = Box::pin(run_ocr_pipeline_for_page(
                             None,
                             Some(std::slice::from_ref(image_arc.as_ref())),
                             #[cfg(feature = "layout-detection")]
@@ -1447,6 +1457,7 @@ pub(crate) async fn extract_mixed_ocr_native(
                             &config_clone,
                             &pipeline_clone,
                             None,
+                            page_rotation_degrees,
                         ))
                         .await;
                         (idx, result)
@@ -1507,8 +1518,10 @@ pub(crate) async fn extract_mixed_ocr_native(
             #[cfg(any(not(feature = "tokio-runtime"), target_arch = "wasm32"))]
             {
                 for (page_idx, image) in &page_images {
+                    // See the matching comment on the sibling `JoinSet` branch above (#651).
+                    let page_rotation_degrees = page_rotations.get(*page_idx).copied().unwrap_or(0);
                     let (text, tables, elements, doc, usage, page_texts, _rasters, formulas) =
-                        Box::pin(run_ocr_pipeline(
+                        Box::pin(run_ocr_pipeline_for_page(
                             None,
                             Some(std::slice::from_ref(image.as_ref())),
                             #[cfg(feature = "layout-detection")]
@@ -1516,6 +1529,7 @@ pub(crate) async fn extract_mixed_ocr_native(
                             config,
                             pipeline,
                             None,
+                            page_rotation_degrees,
                         ))
                         .await?;
                     accumulated_llm_usage.extend(usage);
@@ -2816,6 +2830,11 @@ fn recognized_table_to_public_table(
 /// # Returns
 ///
 /// Concatenated text from all pages, with markdown structure when layout is available
+///
+/// Thin, signature-preserving wrapper over [`extract_with_ocr_for_page`] with no page
+/// rotation override (`0`), so every pre-existing caller keeps today's behavior: content-based
+/// per-page auto-detection when `content` is available and index-aligned to `images`, or no
+/// rotation correction at all otherwise.
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 pub(crate) async fn extract_with_ocr(
     content: Option<&[u8]>,
@@ -2823,6 +2842,46 @@ pub(crate) async fn extract_with_ocr(
     #[cfg(feature = "layout-detection")] layout_detections: Option<&[crate::layout::DetectionResult]>,
     config: &ExtractionConfig,
     path: Option<&std::path::Path>,
+) -> crate::Result<(
+    String,
+    Option<f64>,
+    Vec<crate::types::Table>,
+    Vec<crate::types::OcrElement>,
+    Option<crate::types::internal::InternalDocument>,
+    Vec<crate::types::LlmUsage>,
+    Vec<String>,
+    Option<Vec<crate::types::ExtractedImage>>,
+    Vec<crate::types::Formula>,
+)> {
+    Box::pin(extract_with_ocr_for_page(
+        content,
+        images,
+        #[cfg(feature = "layout-detection")]
+        layout_detections,
+        config,
+        path,
+        0,
+    ))
+    .await
+}
+
+/// Same as [`extract_with_ocr`], but `page_rotation_override` -- when non-zero -- is used as
+/// the known `/Rotate` value for every image in `images` instead of this function's own
+/// content-based per-page lookup (`lazy_pdf_render_state` / `external_image_page_rotations`).
+///
+/// Needed by a caller that hands in a single image detached from its original page index
+/// (currently only [`run_ocr_pipeline_for_page`]'s per-stage runs), where an index-based
+/// content lookup would silently resolve the wrong page's rotation (or none at all) for any
+/// page but the document's first. `0` defers entirely to the existing per-page
+/// auto-detection -- see [`extract_with_ocr`], the public entry point every other caller uses.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+async fn extract_with_ocr_for_page(
+    content: Option<&[u8]>,
+    images: Option<&[image::DynamicImage]>,
+    #[cfg(feature = "layout-detection")] layout_detections: Option<&[crate::layout::DetectionResult]>,
+    config: &ExtractionConfig,
+    path: Option<&std::path::Path>,
+    page_rotation_override: u32,
 ) -> crate::Result<(
     String,
     Option<f64>,
@@ -3097,12 +3156,16 @@ pub(crate) async fn extract_with_ocr(
             for (page_idx, image_data, width, height) in &encoded_batch {
                 let backend_clone = std::sync::Arc::clone(&backend);
                 #[cfg(feature = "pdf")]
-                let page_rotation_degrees = lazy_pdf_render_state
-                    .as_ref()
-                    .and_then(|(_, _, rotations)| rotations.get(*page_idx))
-                    .or_else(|| external_image_page_rotations.as_ref().and_then(|r| r.get(*page_idx)))
-                    .copied()
-                    .unwrap_or(0);
+                let page_rotation_degrees = if page_rotation_override != 0 {
+                    page_rotation_override
+                } else {
+                    lazy_pdf_render_state
+                        .as_ref()
+                        .and_then(|(_, _, rotations)| rotations.get(*page_idx))
+                        .or_else(|| external_image_page_rotations.as_ref().and_then(|r| r.get(*page_idx)))
+                        .copied()
+                        .unwrap_or(0)
+                };
                 #[cfg(not(feature = "pdf"))]
                 let page_rotation_degrees: u32 = 0;
                 let config_clone = ocr_config_with_page_rotation_hint(&ocr_config_owned, page_rotation_degrees).into_owned();
@@ -3139,12 +3202,16 @@ pub(crate) async fn extract_with_ocr(
         {
             for (page_idx, image_data, width, height) in &encoded_batch {
                 #[cfg(feature = "pdf")]
-                let page_rotation_degrees = lazy_pdf_render_state
-                    .as_ref()
-                    .and_then(|(_, _, rotations)| rotations.get(*page_idx))
-                    .or_else(|| external_image_page_rotations.as_ref().and_then(|r| r.get(*page_idx)))
-                    .copied()
-                    .unwrap_or(0);
+                let page_rotation_degrees = if page_rotation_override != 0 {
+                    page_rotation_override
+                } else {
+                    lazy_pdf_render_state
+                        .as_ref()
+                        .and_then(|(_, _, rotations)| rotations.get(*page_idx))
+                        .or_else(|| external_image_page_rotations.as_ref().and_then(|r| r.get(*page_idx)))
+                        .copied()
+                        .unwrap_or(0)
+                };
                 #[cfg(not(feature = "pdf"))]
                 let page_rotation_degrees: u32 = 0;
                 let config_for_page = ocr_config_with_page_rotation_hint(&ocr_config_owned, page_rotation_degrees);
@@ -3722,6 +3789,10 @@ fn attach_ocr_fallback_warnings(
 /// produced non-empty text ([`OcrPipelineSelection::PreferLastNonEmpty`], used by
 /// `vlm_fallback`-synthesised pipelines -- see
 /// [`should_replace_best_effort_result`]).
+///
+/// Thin, signature-preserving wrapper over [`run_ocr_pipeline_for_page`] with no page
+/// rotation (`0`), so every pre-existing caller keeps today's behavior -- each stage's own
+/// [`extract_with_ocr`] call falls back to its content-based per-page auto-detection.
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 pub(crate) async fn run_ocr_pipeline(
     content: Option<&[u8]>,
@@ -3730,6 +3801,50 @@ pub(crate) async fn run_ocr_pipeline(
     config: &ExtractionConfig,
     pipeline: &crate::core::config::OcrPipelineConfig,
     path: Option<&std::path::Path>,
+) -> crate::Result<(
+    String,
+    Vec<crate::types::Table>,
+    Vec<crate::types::OcrElement>,
+    Option<crate::types::internal::InternalDocument>,
+    Vec<crate::types::LlmUsage>,
+    Vec<String>,
+    Option<Vec<crate::types::ExtractedImage>>,
+    Vec<crate::types::Formula>,
+)> {
+    Box::pin(run_ocr_pipeline_for_page(
+        content,
+        images,
+        #[cfg(feature = "layout-detection")]
+        layout_detections,
+        config,
+        pipeline,
+        path,
+        0,
+    ))
+    .await
+}
+
+/// Same as [`run_ocr_pipeline`], but `page_rotation_degrees` -- the page's known PDF
+/// `/Rotate` value, `0` if unrotated or genuinely unknown to the caller -- is forwarded to
+/// every stage's [`extract_with_ocr_for_page`] call as its `page_rotation_override`. Each
+/// stage backend still resolves its own [`crate::plugins::PageOrientationHandling`], so a
+/// `RequiresUpright` stage gets an upright raster via `upright_raster_for_backend` while a
+/// `SelfCorrecting` or `RecognisesRotatedText` stage's raster is left untouched (or only gets
+/// the `ocr_config_with_page_rotation_hint` block-order hint) -- see `extract_with_ocr_for_page`.
+///
+/// Needed by a caller that drives a single page's image through the pipeline detached from
+/// the rest of its document (currently only `extract_mixed_ocr_native`'s per-page pipeline
+/// route, see #651): that caller already knows the page's own `/Rotate` value, but the
+/// stage's own content-based auto-detection cannot recover it from a lone, index-0 image.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+async fn run_ocr_pipeline_for_page(
+    content: Option<&[u8]>,
+    images: Option<&[image::DynamicImage]>,
+    #[cfg(feature = "layout-detection")] layout_detections: Option<&[crate::layout::DetectionResult]>,
+    config: &ExtractionConfig,
+    pipeline: &crate::core::config::OcrPipelineConfig,
+    path: Option<&std::path::Path>,
+    page_rotation_degrees: u32,
 ) -> crate::Result<(
     String,
     Vec<crate::types::Table>,
@@ -3821,13 +3936,14 @@ pub(crate) async fn run_ocr_pipeline(
             "Pipeline: trying OCR backend"
         );
 
-        let result = Box::pin(extract_with_ocr(
+        let result = Box::pin(extract_with_ocr_for_page(
             content,
             images,
             #[cfg(feature = "layout-detection")]
             layout_detections,
             &stage_config,
             path,
+            page_rotation_degrees,
         ))
         .await;
 
@@ -8695,6 +8811,229 @@ Name: ___
             "a SelfCorrecting backend's raster must stay byte-for-byte identical to the raw \
              MediaBox raster this route has always sent it; this pins that a future orientation \
              fix cannot silently start rotating it"
+        );
+    }
+
+    /// Two-page PDF: page 1 an ordinary unrotated portrait page, page 2 a landscape MediaBox
+    /// with the given `/Rotate`. Lets a test target `ocr_page_numbers = &[2]` and prove the
+    /// rotation applied is page 2's own value, not page 0's/page 1's -- `rotated_landscape_pdf`
+    /// above only builds a single page, which cannot distinguish "the correct page's rotation"
+    /// from "whatever happens to be at index 0".
+    #[cfg(feature = "pdf")]
+    fn two_page_pdf_second_page_rotated(rotation: i64) -> Vec<u8> {
+        use lopdf::{Document, Object, Stream, dictionary};
+
+        let mut document = Document::with_version("1.5");
+        let pages_id = document.new_object_id();
+        let page1_id = document.new_object_id();
+        let page2_id = document.new_object_id();
+        let content1_id = document.add_object(Stream::new(dictionary! {}, Vec::new()));
+        let content2_id = document.add_object(Stream::new(dictionary! {}, Vec::new()));
+
+        let page1 = dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "MediaBox" => vec![0.into(), 0.into(), 100.into(), 200.into()],
+            "Resources" => dictionary! {},
+            "Contents" => content1_id,
+        };
+        document.objects.insert(page1_id, Object::Dictionary(page1));
+
+        let mut page2 = dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "MediaBox" => vec![0.into(), 0.into(), 200.into(), 100.into()],
+            "Resources" => dictionary! {},
+            "Contents" => content2_id,
+        };
+        page2.set("Rotate", rotation);
+        document.objects.insert(page2_id, Object::Dictionary(page2));
+
+        document.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![page1_id.into(), page2_id.into()],
+                "Count" => 2,
+            }),
+        );
+
+        let catalog_id = document.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
+        document.trailer.set("Root", catalog_id);
+
+        let mut bytes = Vec::new();
+        document.save_to(&mut bytes).expect("fixture PDF must serialize");
+        bytes
+    }
+
+    /// #651 — closes the gap in `extract_mixed_ocr_native`'s multi-stage pipeline route: its
+    /// two `run_ocr_pipeline` calls passed `content: None` and, before this fix, had no
+    /// parameter at all carrying the page's own `/Rotate` value, so neither the
+    /// `ocr_config_with_page_rotation_hint` block-order hint nor the
+    /// `upright_raster_for_backend` upright-raster correction ever reached a stage backend on
+    /// this route — unlike the sibling single-backend route (972d2269f7 / #643), which already
+    /// applies both.
+    ///
+    /// Targets page 2 of a 2-page document (not page 1) so the test cannot pass by accident:
+    /// a fix that always resolved page 0's/page 1's rotation instead of the actually-OCR'd
+    /// page's (e.g. from a naive index-based `content` lookup misaligned to a single detached
+    /// image, which is exactly what a `content: Some(content)` fix without the explicit
+    /// per-page override would have done) would still leave this backend on the wrong raster.
+    ///
+    /// Fails on unfixed code: without the rotation threaded from `extract_mixed_ocr_native`
+    /// through `run_ocr_pipeline` to the stage's OCR call, the `RequiresUpright` backend
+    /// receives the raw landscape MediaBox raster (width > height, per the #530 invariant) and
+    /// no `page_rotation_degrees` in `backend_options`, so both assertions below fail.
+    #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
+    #[tokio::test]
+    async fn mixed_ocr_pipeline_route_threads_page_rotation_to_a_requires_upright_backend() {
+        use crate::core::config::{OcrConfig, OcrPipelineConfig, OcrPipelineStage, OcrQualityThresholds};
+        use crate::plugins::{OcrBackend, OcrBackendType, PageOrientationHandling, Plugin};
+        use crate::types::{ExtractedDocument, PageBoundary};
+        use std::sync::{Arc, Mutex};
+
+        struct RequiresUprightCapturingPipelineBackend {
+            captured_dimensions: Mutex<Vec<(u32, u32)>>,
+            captured_backend_options: Mutex<Vec<Option<serde_json::Value>>>,
+        }
+
+        #[async_trait::async_trait]
+        impl OcrBackend for RequiresUprightCapturingPipelineBackend {
+            fn backend_type(&self) -> OcrBackendType {
+                OcrBackendType::Custom
+            }
+            fn supports_language(&self, _: &str) -> bool {
+                true
+            }
+            fn page_orientation_handling(&self) -> PageOrientationHandling {
+                PageOrientationHandling::RequiresUpright
+            }
+            async fn process_image(&self, image_bytes: &[u8], config: &OcrConfig) -> crate::Result<ExtractedDocument> {
+                let decoded = image::load_from_memory(image_bytes).expect("captured raster bytes must decode");
+                self.captured_dimensions
+                    .lock()
+                    .unwrap()
+                    .push((decoded.width(), decoded.height()));
+                self.captured_backend_options
+                    .lock()
+                    .unwrap()
+                    .push(config.backend_options.clone());
+                Ok(ExtractedDocument {
+                    content: "page two ocr text".to_string(),
+                    ..Default::default()
+                })
+            }
+        }
+
+        impl Plugin for RequiresUprightCapturingPipelineBackend {
+            fn name(&self) -> &str {
+                "pipeline-requires-upright-capturing-mock"
+            }
+            fn version(&self) -> String {
+                "1.0.0".to_string()
+            }
+            fn initialize(&self) -> crate::Result<()> {
+                Ok(())
+            }
+            fn shutdown(&self) -> crate::Result<()> {
+                Ok(())
+            }
+        }
+
+        let backend = Arc::new(RequiresUprightCapturingPipelineBackend {
+            captured_dimensions: Mutex::new(Vec::new()),
+            captured_backend_options: Mutex::new(Vec::new()),
+        });
+        crate::plugins::register_ocr_backend(backend.clone()).unwrap();
+
+        // Page 2 is landscape (200x100) with `/Rotate 270`; page 1 is an ordinary portrait
+        // page and is never OCR'd (`ocr_page_numbers = &[2]` below), so a fix that resolved
+        // page 1's (nonexistent) rotation instead of page 2's own would not accidentally
+        // satisfy this test.
+        let pdf = two_page_pdf_second_page_rotated(270);
+
+        let pipeline = OcrPipelineConfig {
+            stages: vec![OcrPipelineStage {
+                backend: "pipeline-requires-upright-capturing-mock".to_string(),
+                priority: 100,
+                language: None,
+                tesseract_config: None,
+                paddle_ocr_config: None,
+                vlm_config: None,
+                backend_options: None,
+            }],
+            // Accept the first (only) stage unconditionally: this test exercises rotation
+            // threading, not the quality-based selection policy.
+            quality_thresholds: OcrQualityThresholds {
+                pipeline_min_quality: 0.0,
+                ..Default::default()
+            },
+        };
+
+        let config = ExtractionConfig {
+            ocr: Some(OcrConfig {
+                pipeline: Some(pipeline),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        // `accepted_ocr_page_replacements` (which the returned map at index 1 reflects) only
+        // accepts an OCR'd page whose number has a matching, non-overlapping native-text
+        // boundary, so both pages need real boundaries even though only page 2 is OCR'd.
+        let page1_text = "page one native text";
+        let page2_text = "page two native text";
+        let native_text = format!("{page1_text}\n{page2_text}");
+        let boundaries = vec![
+            PageBoundary {
+                byte_start: 0,
+                byte_end: page1_text.len(),
+                page_number: 1,
+            },
+            PageBoundary {
+                byte_start: page1_text.len() + 1,
+                byte_end: native_text.len(),
+                page_number: 2,
+            },
+        ];
+
+        let result = extract_mixed_ocr_native(&native_text, &boundaries, &[2], &pdf, &config, None)
+            .await
+            .expect("extract_mixed_ocr_native must succeed");
+
+        crate::plugins::unregister_ocr_backend("pipeline-requires-upright-capturing-mock").unwrap();
+
+        assert!(
+            result.1.contains_key(&2),
+            "page 2's OCR text must have been accepted as a replacement: {:?}",
+            result.1
+        );
+
+        let captured_dims = backend.captured_dimensions.lock().unwrap();
+        assert_eq!(captured_dims.len(), 1, "backend should have been called exactly once");
+        let (width, height) = captured_dims[0];
+        assert!(
+            width < height,
+            "a RequiresUpright backend driven through the multi-stage pipeline route must \
+             receive an upright (portrait) raster for a /Rotate 270 page, not the raw \
+             landscape MediaBox raster every backend used to get; got {width}x{height}"
+        );
+
+        let captured_options = backend.captured_backend_options.lock().unwrap();
+        let rotation_hint = captured_options[0]
+            .as_ref()
+            .and_then(|opts| opts.get("page_rotation_degrees"))
+            .and_then(|v| v.as_u64());
+        assert_eq!(
+            rotation_hint,
+            Some(270),
+            "the multi-stage pipeline route must also carry the page's /Rotate value into \
+             backend_options, exactly as the single-backend route already does (972d2269f7); \
+             got backend_options = {:?}",
+            captured_options[0]
         );
     }
 }
