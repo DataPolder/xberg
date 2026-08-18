@@ -769,6 +769,40 @@ impl PaddleOcrBackend {
             .unwrap_or(0)
     }
 
+    /// Compose the PDF page's `/Rotate` hint (`page_rotation_degrees_from_backend_options`)
+    /// with any rotation `detect_and_rotate` already applied to the raster, yielding the
+    /// residual rotation `reorder_blocks_for_page_rotation` must correct for.
+    ///
+    /// `reorder_blocks_for_page_rotation`'s premise is that its blocks are in the *raw*
+    /// MediaBox raster frame the `/Rotate` hint describes. When `OcrConfig.auto_rotate` is
+    /// enabled, `process_image` may hand `do_ocr` an already-rotated raster instead — in
+    /// which case reordering by the raw `/Rotate` value alone double-corrects: once by the
+    /// pixel rotation `detect_and_rotate` performed, once by the reorder itself.
+    ///
+    /// `auto_rotate_applied_degrees` is `Some(orientation.degrees)` when auto-rotation
+    /// actually rotated the raster (`RotationOutcome::auto_rotated()` is `true`), or `None`
+    /// otherwise — whether because `auto_rotate` is disabled, orientation detection found
+    /// nothing to correct (`degrees == 0` or confidence below threshold), or detection
+    /// itself failed and fell back to `RotationOutcome::unrotated`. In every `None` case the
+    /// raster handed to OCR is still the raw MediaBox raster, so the residual rotation is
+    /// `page_rotation_degrees` unchanged — this is what keeps `auto_rotate: false` (and the
+    /// detection-failure fallback) byte-identical to the pre-existing behavior.
+    ///
+    /// When a rotation *was* applied, it was a pixel rotation of `(360 - degrees) % 360`
+    /// (see `rotate_for_detected_orientation`'s `rotate90`/`rotate180`/`rotate270` match),
+    /// composed onto the raw raster's own `page_rotation_degrees` rotation-away-from-upright.
+    /// The new raster's residual rotation-away-from-upright is therefore
+    /// `(page_rotation_degrees + (360 - degrees)) % 360`, which is `0` exactly when
+    /// orientation detection correctly identified the same rotation the `/Rotate` hint
+    /// already describes.
+    fn residual_rotation_for_reorder(page_rotation_degrees: u32, auto_rotate_applied_degrees: Option<u32>) -> u32 {
+        let page = page_rotation_degrees % 360;
+        match auto_rotate_applied_degrees {
+            Some(applied_degrees) => (page + 360 - applied_degrees % 360) % 360,
+            None => page,
+        }
+    }
+
     /// Map a point from the OCR raster's coordinate space back to true reading-order
     /// (display) coordinates, given the correction angle that produced that raster.
     ///
@@ -1007,6 +1041,16 @@ impl OcrBackend for PaddleOcrBackend {
 
         let effective_accel = self.resolve_acceleration(config.acceleration.as_ref());
         let page_rotation_degrees = Self::page_rotation_degrees_from_backend_options(config);
+        // `rotation_outcome` is only `Some` while `config.auto_rotate` is true (populated
+        // above); when it's `None`, `residual_rotation_for_reorder` falls back to
+        // `page_rotation_degrees` unchanged, keeping `auto_rotate: false` byte-identical.
+        let auto_rotate_applied_degrees = rotation_outcome
+            .as_ref()
+            .filter(|outcome| outcome.auto_rotated())
+            .and_then(|outcome| outcome.orientation)
+            .map(|orientation| orientation.degrees);
+        let residual_page_rotation_degrees =
+            Self::residual_rotation_for_reorder(page_rotation_degrees, auto_rotate_applied_degrees);
 
         let PaddlePageOcr {
             text,
@@ -1020,7 +1064,7 @@ impl OcrBackend for PaddleOcrBackend {
                 paddle_lang,
                 Arc::clone(&effective_config),
                 effective_accel.as_ref(),
-                page_rotation_degrees,
+                residual_page_rotation_degrees,
             )
             .await?;
         let rotation_outcome =
@@ -1546,6 +1590,71 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(PaddleOcrBackend::page_rotation_degrees_from_backend_options(&non_numeric), 0);
+    }
+
+    /// The defect this guards: `reorder_blocks_for_page_rotation`'s premise is that its
+    /// blocks live in the *raw* MediaBox raster the `/Rotate` hint describes. When
+    /// `auto_rotate` actually rotated the raster before OCR, reordering by the raw
+    /// `/Rotate` value alone double-corrects — once via the pixel rotation already
+    /// applied, once via the reorder itself.
+    ///
+    /// Exhaustive over all four quarter-turns of `page_rotation_degrees` crossed with
+    /// "not auto-rotated" and every quarter-turn `detect_and_rotate` could actually apply
+    /// (`auto_rotate_applied_degrees`). This fails against the unfixed code path, which
+    /// passes the raw `page_rotation_degrees` straight to `do_ocr` regardless of whether
+    /// auto-rotation ran — i.e. it never applies the `Some(_)` composition below at all.
+    #[test]
+    fn residual_rotation_composes_page_rotate_with_applied_auto_rotation() {
+        // Not auto-rotated (config off, low-confidence detection, or detection failure
+        // falling back to `RotationOutcome::unrotated`): the raster is still the raw
+        // MediaBox raster, so the residual must equal `page_rotation_degrees` unchanged.
+        for page_rotation_degrees in [0, 90, 180, 270] {
+            assert_eq!(
+                PaddleOcrBackend::residual_rotation_for_reorder(page_rotation_degrees, None),
+                page_rotation_degrees,
+                "page_rotation_degrees={page_rotation_degrees} must pass through unchanged when not auto-rotated"
+            );
+        }
+
+        // Auto-rotated: a detector reading `applied_degrees` on the raw raster caused a
+        // pixel rotation of `(360 - applied_degrees) % 360`. When the detector's estimate
+        // matches the page's own `/Rotate` value, the raster is now upright and the
+        // residual must be 0 — no further reordering.
+        for page_rotation_degrees in [0u32, 90, 180, 270] {
+            assert_eq!(
+                PaddleOcrBackend::residual_rotation_for_reorder(page_rotation_degrees, Some(page_rotation_degrees)),
+                0,
+                "page_rotation_degrees={page_rotation_degrees} must fully cancel when the detector agrees with it"
+            );
+        }
+
+        // General composition table: residual = (page_rotation_degrees + 360 -
+        // applied_degrees) % 360, for every quarter-turn combination.
+        let cases: [(u32, u32, u32); 16] = [
+            (0, 90, 270),
+            (0, 180, 180),
+            (0, 270, 90),
+            (90, 90, 0),
+            (90, 180, 270),
+            (90, 270, 180),
+            (180, 90, 90),
+            (180, 180, 0),
+            (180, 270, 270),
+            (270, 90, 180),
+            (270, 180, 90),
+            (270, 270, 0),
+            (0, 0, 0),
+            (90, 0, 90),
+            (180, 0, 180),
+            (270, 0, 270),
+        ];
+        for (page_rotation_degrees, applied_degrees, expected_residual) in cases {
+            assert_eq!(
+                PaddleOcrBackend::residual_rotation_for_reorder(page_rotation_degrees, Some(applied_degrees)),
+                expected_residual,
+                "page_rotation_degrees={page_rotation_degrees}, applied_degrees={applied_degrees}"
+            );
+        }
     }
 
     #[test]
