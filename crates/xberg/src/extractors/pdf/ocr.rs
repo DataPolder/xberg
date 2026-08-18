@@ -1577,6 +1577,7 @@ pub(crate) async fn extract_mixed_ocr_native(
         let backend = backend
             .as_ref()
             .expect("backend is resolved above whenever effective_pipeline is None");
+        let orientation_handling = backend.page_orientation_handling();
         let batch_slice = &page_images;
 
         #[cfg(all(feature = "tokio-runtime", not(target_arch = "wasm32")))]
@@ -1622,23 +1623,31 @@ pub(crate) async fn extract_mixed_ocr_native(
         #[cfg(all(feature = "tokio-runtime", not(target_arch = "wasm32")))]
         {
             let mut join_set = tokio::task::JoinSet::new();
-            for (page_idx, data, _width, _height) in &encoded {
+            for (page_idx, data, width, height) in &encoded {
                 let backend_clone = Arc::clone(backend);
                 let page_rotation_degrees = page_rotations.get(*page_idx).copied().unwrap_or(0);
                 let config_clone = ocr_config_with_page_rotation_hint(&ocr_config_owned, page_rotation_degrees).into_owned();
-                let data_clone = Arc::clone(data);
+                let (upright_data, upright_width, upright_height, correction_degrees) =
+                    upright_raster_for_backend(data, *width, *height, page_rotation_degrees, orientation_handling)?;
                 let idx = *page_idx;
                 join_set.spawn(async move {
-                    let result = backend_clone.process_image_owned(data_clone, &config_clone).await;
-                    (idx, result)
+                    let result = backend_clone.process_image_owned(upright_data, &config_clone).await;
+                    (idx, correction_degrees, upright_width, upright_height, result)
                 });
             }
             while let Some(join_result) = join_set.join_next().await {
-                let (page_idx, result) = join_result.map_err(|e| crate::XbergError::Plugin {
-                    message: format!("OCR task panicked: {}", e),
-                    plugin_name: "ocr".to_string(),
-                })?;
+                let (page_idx, correction_degrees, upright_width, upright_height, result) =
+                    join_result.map_err(|e| crate::XbergError::Plugin {
+                        message: format!("OCR task panicked: {}", e),
+                        plugin_name: "ocr".to_string(),
+                    })?;
                 let mut extraction_result = result?;
+                undo_upright_raster_correction(
+                    &mut extraction_result,
+                    correction_degrees,
+                    upright_width,
+                    upright_height,
+                );
                 if let Some(usage) = extraction_result.llm_usage.take() {
                     accumulated_llm_usage.extend(usage);
                 }
@@ -1695,7 +1704,17 @@ pub(crate) async fn extract_mixed_ocr_native(
             for (page_idx, data, width, height) in &encoded {
                 let page_rotation_degrees = page_rotations.get(*page_idx).copied().unwrap_or(0);
                 let config_for_page = ocr_config_with_page_rotation_hint(&ocr_config_owned, page_rotation_degrees);
-                let mut extraction_result = backend.process_image(data.as_slice(), config_for_page.as_ref()).await?;
+                let (upright_data, upright_width, upright_height, correction_degrees) =
+                    upright_raster_for_backend(data, *width, *height, page_rotation_degrees, orientation_handling)?;
+                let mut extraction_result = backend
+                    .process_image(upright_data.as_slice(), config_for_page.as_ref())
+                    .await?;
+                undo_upright_raster_correction(
+                    &mut extraction_result,
+                    correction_degrees,
+                    upright_width,
+                    upright_height,
+                );
                 if let Some(usage) = extraction_result.llm_usage.take() {
                     accumulated_llm_usage.extend(usage);
                 }
@@ -2848,6 +2867,10 @@ pub(crate) async fn extract_with_ocr(
         crate::plugins::ConfidenceSemantics::Legibility { scale_max } if scale_max > 0.0 => Some(scale_max),
         _ => None,
     };
+    // Only meaningful with the `pdf` feature: without it there is no `/Rotate` to correct for
+    // (`page_rotation_degrees` is always `0` below), so nothing reads this in that build.
+    #[cfg(feature = "pdf")]
+    let orientation_handling = backend.page_orientation_handling();
 
     let structured_ocr_config;
     let ocr_config = {
@@ -3061,12 +3084,17 @@ pub(crate) async fn extract_with_ocr(
 
         let batch_count = encoded_batch.len();
         let mut batch_ocr_results: Vec<Option<crate::types::ExtractedDocument>> = vec![None; batch_count];
+        // (correction_degrees, upright_width, upright_height) applied by
+        // `upright_raster_for_backend` before this page's backend call, so the matching
+        // `undo_upright_raster_correction` below maps the result back correctly (#643).
+        let mut batch_upright_correction: Vec<(u32, u32, u32)> = vec![(0, 0, 0); batch_count];
 
         // See the sibling JoinSet block above: `Send` futures aren't available on wasm32. ~keep
         #[cfg(all(feature = "tokio-runtime", not(target_arch = "wasm32")))]
         {
-            let mut join_set: JoinSet<(usize, crate::Result<crate::types::ExtractedDocument>)> = JoinSet::new();
-            for (page_idx, image_data, _width, _height) in &encoded_batch {
+            let mut join_set: JoinSet<(usize, u32, u32, u32, crate::Result<crate::types::ExtractedDocument>)> =
+                JoinSet::new();
+            for (page_idx, image_data, width, height) in &encoded_batch {
                 let backend_clone = std::sync::Arc::clone(&backend);
                 #[cfg(feature = "pdf")]
                 let page_rotation_degrees = lazy_pdf_render_state
@@ -3078,24 +3106,38 @@ pub(crate) async fn extract_with_ocr(
                 #[cfg(not(feature = "pdf"))]
                 let page_rotation_degrees: u32 = 0;
                 let config_clone = ocr_config_with_page_rotation_hint(&ocr_config_owned, page_rotation_degrees).into_owned();
-                let data_clone = Arc::clone(image_data);
+                // No PDF `/Rotate` is ever known without the `pdf` feature (`page_rotation_degrees`
+                // is always `0` above in that build), so there is nothing to correct upright.
+                #[cfg(feature = "pdf")]
+                let (upright_data, upright_width, upright_height, correction_degrees) = upright_raster_for_backend(
+                    image_data,
+                    *width,
+                    *height,
+                    page_rotation_degrees,
+                    orientation_handling,
+                )?;
+                #[cfg(not(feature = "pdf"))]
+                let (upright_data, upright_width, upright_height, correction_degrees) =
+                    (Arc::clone(image_data), *width, *height, 0u32);
                 let idx = *page_idx;
                 join_set.spawn(async move {
-                    let result = backend_clone.process_image_owned(data_clone, &config_clone).await;
-                    (idx, result)
+                    let result = backend_clone.process_image_owned(upright_data, &config_clone).await;
+                    (idx, correction_degrees, upright_width, upright_height, result)
                 });
             }
             while let Some(join_result) = join_set.join_next().await {
-                let (page_idx, ocr_result) = join_result.map_err(|e| crate::XbergError::Plugin {
-                    message: format!("OCR task panicked: {}", e),
-                    plugin_name: "ocr".to_string(),
-                })?;
+                let (page_idx, correction_degrees, upright_width, upright_height, ocr_result) =
+                    join_result.map_err(|e| crate::XbergError::Plugin {
+                        message: format!("OCR task panicked: {}", e),
+                        plugin_name: "ocr".to_string(),
+                    })?;
+                batch_upright_correction[page_idx - batch_start] = (correction_degrees, upright_width, upright_height);
                 batch_ocr_results[page_idx - batch_start] = Some(ocr_result?);
             }
         }
         #[cfg(any(not(feature = "tokio-runtime"), target_arch = "wasm32"))]
         {
-            for (page_idx, image_data, _width, _height) in &encoded_batch {
+            for (page_idx, image_data, width, height) in &encoded_batch {
                 #[cfg(feature = "pdf")]
                 let page_rotation_degrees = lazy_pdf_render_state
                     .as_ref()
@@ -3106,7 +3148,21 @@ pub(crate) async fn extract_with_ocr(
                 #[cfg(not(feature = "pdf"))]
                 let page_rotation_degrees: u32 = 0;
                 let config_for_page = ocr_config_with_page_rotation_hint(&ocr_config_owned, page_rotation_degrees);
-                let ocr_result = backend.process_image(image_data.as_slice(), config_for_page.as_ref()).await?;
+                #[cfg(feature = "pdf")]
+                let (upright_data, upright_width, upright_height, correction_degrees) = upright_raster_for_backend(
+                    image_data,
+                    *width,
+                    *height,
+                    page_rotation_degrees,
+                    orientation_handling,
+                )?;
+                #[cfg(not(feature = "pdf"))]
+                let (upright_data, upright_width, upright_height, correction_degrees) =
+                    (Arc::clone(image_data), *width, *height, 0u32);
+                let ocr_result = backend
+                    .process_image(upright_data.as_slice(), config_for_page.as_ref())
+                    .await?;
+                batch_upright_correction[page_idx - batch_start] = (correction_degrees, upright_width, upright_height);
                 batch_ocr_results[page_idx - batch_start] = Some(ocr_result);
             }
         }
@@ -3114,6 +3170,11 @@ pub(crate) async fn extract_with_ocr(
         for offset in 0..batch_count {
             let page_idx = batch_start + offset;
             let mut ocr_result = batch_ocr_results[offset].take().expect("OCR result missing for page");
+            #[cfg(feature = "pdf")]
+            {
+                let (correction_degrees, upright_width, upright_height) = batch_upright_correction[offset];
+                undo_upright_raster_correction(&mut ocr_result, correction_degrees, upright_width, upright_height);
+            }
             #[cfg(feature = "layout-detection")]
             let _height = encoded_batch[offset].3;
 
@@ -3996,6 +4057,91 @@ fn ocr_config_with_page_rotation_hint(
     }
     config.backend_options = Some(opts);
     Cow::Owned(config)
+}
+
+/// Rotate a page raster upright before handing it to a backend that cannot cope with a
+/// sideways page (`PageOrientationHandling::RequiresUpright`), returning the bytes/dimensions
+/// actually sent to the backend and the rotation (in `image`-crate terms: one of `0`, `90`,
+/// `180`, `270`) that must later be undone on any pixel-space geometry the backend returns.
+///
+/// `normalize_rendered_page_for_ocr` deliberately hands every backend a raster in the page's
+/// raw MediaBox orientation rather than its display orientation (#530), which Tesseract
+/// (`SelfCorrecting`) reads fine and PaddleOCR (`RecognisesRotatedText`) recognises correctly
+/// (only its block order needs fixing, see `ocr_config_with_page_rotation_hint`). A backend
+/// that declares `RequiresUpright` (currently sceptre) produces character garbage on that same
+/// sideways raster instead — measured this session on `/Rotate 270` scanned pages, and
+/// confirmed by feeding the same page through an upright render. This is the backend-local
+/// fix: re-apply the page's original `/Rotate` value on top of the already-corrected raster,
+/// undoing exactly what `normalize_rendered_page_for_ocr` undid, so only that backend's input
+/// changes (#643).
+///
+/// A no-op — returns `data` unchanged and a correction of `0` — when `page_rotation_degrees ==
+/// 0` or `orientation_handling` is not `RequiresUpright`. In particular, `SelfCorrecting` and
+/// `RecognisesRotatedText` backends never pay a re-encode and never see a different raster than
+/// they do today: Tesseract's input is untouched by this function under every input.
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+fn upright_raster_for_backend(
+    data: &std::sync::Arc<Vec<u8>>,
+    width: u32,
+    height: u32,
+    page_rotation_degrees: u32,
+    orientation_handling: crate::plugins::PageOrientationHandling,
+) -> crate::Result<(std::sync::Arc<Vec<u8>>, u32, u32, u32)> {
+    if page_rotation_degrees == 0 || orientation_handling != crate::plugins::PageOrientationHandling::RequiresUpright {
+        return Ok((std::sync::Arc::clone(data), width, height, 0));
+    }
+    let correction_degrees = page_rotation_degrees % 360;
+    let (rotated, new_width, new_height) =
+        crate::pdf::render::rotate_png_page_if_needed((**data).clone(), width, height, correction_degrees)?;
+    Ok((std::sync::Arc::new(rotated), new_width, new_height, correction_degrees))
+}
+
+/// Undo [`upright_raster_for_backend`]'s rotation on a backend result's pixel-space geometry,
+/// mapping bboxes from the upright raster the backend actually ran OCR on back to the raw
+/// MediaBox raster every downstream consumer (`build_mixed_ocr_page_document`,
+/// `rescale_ocr_bboxes_to_page_points`, the #530 regression test) expects.
+///
+/// A no-op when `correction_degrees == 0` (the overwhelmingly common case: no correction was
+/// applied at all). Reuses [`undo_auto_rotate_point`] — the same per-point inverse
+/// [`undo_auto_rotate_document_bboxes`] uses for a backend's own internal auto-rotation — since
+/// the geometry problem is identical: a point in a rotated raster mapped back to the unrotated
+/// one it will be rescaled against.
+///
+/// Only `ocr_internal_document` element bboxes and `tables` bboxes are corrected: those are the
+/// two pixel-space geometry sources `build_mixed_ocr_page_document` reads from a backend result
+/// before rescaling into page points.
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+fn undo_upright_raster_correction(
+    result: &mut crate::types::ExtractedDocument,
+    correction_degrees: u32,
+    upright_width: u32,
+    upright_height: u32,
+) {
+    if correction_degrees == 0 {
+        return;
+    }
+    let correction_degrees = correction_degrees as u16;
+    let (processed_width, processed_height) = (f64::from(upright_width), f64::from(upright_height));
+    let undo_bbox = |bbox: &mut crate::types::extraction::BoundingBox| {
+        let (x0, y0) = undo_auto_rotate_point(bbox.x0, bbox.y0, correction_degrees, processed_width, processed_height);
+        let (x1, y1) = undo_auto_rotate_point(bbox.x1, bbox.y1, correction_degrees, processed_width, processed_height);
+        bbox.x0 = x0.min(x1);
+        bbox.x1 = x0.max(x1);
+        bbox.y0 = y0.min(y1);
+        bbox.y1 = y0.max(y1);
+    };
+    if let Some(doc) = result.ocr_internal_document.as_mut() {
+        for element in &mut doc.elements {
+            if let Some(bbox) = element.bbox.as_mut() {
+                undo_bbox(bbox);
+            }
+        }
+    }
+    for table in &mut result.tables {
+        if let Some(bbox) = table.bounding_box.as_mut() {
+            undo_bbox(bbox);
+        }
+    }
 }
 
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
@@ -8340,6 +8486,215 @@ Name: ___
              /Rotate value into backend_options, exactly as the full-page and per-page routes \
              already do (972d2269f7); got backend_options = {:?}",
             captured[0]
+        );
+    }
+
+    /// #643 — a backend that declares `PageOrientationHandling::RequiresUpright` must receive
+    /// an upright raster on a rotated page, not the same MediaBox-oriented (sideways) raster
+    /// every other backend gets. `normalize_rendered_page_for_ocr` deliberately hands every
+    /// backend that raw-orientation raster (#530); Tesseract self-corrects it and PaddleOCR
+    /// recognises the rotated text correctly (only block order needs fixing), but a
+    /// `RequiresUpright` backend (sceptre in production) emits character garbage on it instead
+    /// — confirmed this session by feeding the same page through an upright render.
+    ///
+    /// Fails on unfixed code: without `upright_raster_for_backend` wired into the OCR call, the
+    /// backend receives the same landscape MediaBox raster as every other backend (width >
+    /// height, per the #530 invariant on this fixture) instead of the portrait upright raster
+    /// asserted below.
+    #[cfg(feature = "pdf")]
+    #[tokio::test]
+    async fn should_send_an_upright_raster_to_a_requires_upright_backend_on_a_rotated_page() {
+        use crate::core::config::OcrConfig;
+        use crate::plugins::{OcrBackend, OcrBackendType, PageOrientationHandling, Plugin};
+        use crate::types::ExtractedDocument;
+        use std::sync::Mutex;
+
+        struct RequiresUprightCapturingBackend {
+            captured_dimensions: Mutex<Vec<(u32, u32)>>,
+        }
+
+        #[async_trait::async_trait]
+        impl OcrBackend for RequiresUprightCapturingBackend {
+            fn backend_type(&self) -> OcrBackendType {
+                OcrBackendType::Custom
+            }
+            fn supports_language(&self, _: &str) -> bool {
+                true
+            }
+            fn page_orientation_handling(&self) -> PageOrientationHandling {
+                PageOrientationHandling::RequiresUpright
+            }
+            async fn process_image(&self, image_bytes: &[u8], _: &OcrConfig) -> crate::Result<ExtractedDocument> {
+                let decoded = image::load_from_memory(image_bytes).expect("captured raster bytes must decode");
+                self.captured_dimensions
+                    .lock()
+                    .unwrap()
+                    .push((decoded.width(), decoded.height()));
+                Ok(ExtractedDocument {
+                    content: "text".to_string(),
+                    ..Default::default()
+                })
+            }
+        }
+
+        impl Plugin for RequiresUprightCapturingBackend {
+            fn name(&self) -> &str {
+                "requires-upright-capturing-mock"
+            }
+            fn version(&self) -> String {
+                "1.0.0".to_string()
+            }
+            fn initialize(&self) -> crate::Result<()> {
+                Ok(())
+            }
+            fn shutdown(&self) -> crate::Result<()> {
+                Ok(())
+            }
+        }
+
+        let backend = std::sync::Arc::new(RequiresUprightCapturingBackend {
+            captured_dimensions: Mutex::new(Vec::new()),
+        });
+        crate::plugins::register_ocr_backend(backend.clone()).unwrap();
+
+        // Same fixture convention as the two tests above: a landscape MediaBox with
+        // `/Rotate 270`. The raw MediaBox raster (what every backend got before this fix) keeps
+        // that landscape shape (width > height, #530); the upright raster this backend needs is
+        // the display orientation instead, portrait (width < height).
+        let content = rotated_landscape_pdf(270);
+
+        let config = ExtractionConfig {
+            ocr: Some(OcrConfig {
+                backend: "requires-upright-capturing-mock".to_string(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let result = extract_with_ocr(
+            Some(&content),
+            None,
+            #[cfg(feature = "layout-detection")]
+            None,
+            &config,
+            None,
+        )
+        .await;
+
+        crate::plugins::unregister_ocr_backend("requires-upright-capturing-mock").unwrap();
+
+        assert!(result.is_ok(), "extract_with_ocr should succeed: {:?}", result.err());
+
+        let captured = backend.captured_dimensions.lock().unwrap();
+        assert_eq!(captured.len(), 1, "backend should have been called exactly once");
+        let (width, height) = captured[0];
+        assert!(
+            width < height,
+            "a RequiresUpright backend must receive an upright (portrait) raster on a \
+             /Rotate 270 page, not the raw landscape MediaBox raster every other backend gets; \
+             got {width}x{height}"
+        );
+    }
+
+    /// #643 pin — a backend that does NOT declare `RequiresUpright` (e.g. Tesseract's
+    /// `SelfCorrecting`) must keep receiving exactly the raster this route has always sent it:
+    /// the raw MediaBox-oriented raster `render_full_pdf_ocr_batch`/
+    /// `normalize_rendered_page_for_ocr` produce (#530), byte-for-byte. Tesseract's output is
+    /// the control for every OCR-rotation measurement this session; a future change that starts
+    /// rotating its input for the wrong backend would invalidate that measurement silently, and
+    /// this test exists so that cannot happen without failing here first.
+    #[cfg(feature = "pdf")]
+    #[tokio::test]
+    async fn should_leave_a_self_correcting_backends_raster_byte_for_byte_unchanged() {
+        use crate::core::config::OcrConfig;
+        use crate::plugins::{OcrBackend, OcrBackendType, PageOrientationHandling, Plugin};
+        use crate::types::ExtractedDocument;
+        use std::sync::Mutex;
+
+        struct SelfCorrectingCapturingBackend {
+            captured_bytes: Mutex<Vec<Vec<u8>>>,
+        }
+
+        #[async_trait::async_trait]
+        impl OcrBackend for SelfCorrectingCapturingBackend {
+            fn backend_type(&self) -> OcrBackendType {
+                OcrBackendType::Custom
+            }
+            fn supports_language(&self, _: &str) -> bool {
+                true
+            }
+            fn page_orientation_handling(&self) -> PageOrientationHandling {
+                PageOrientationHandling::SelfCorrecting
+            }
+            async fn process_image(&self, image_bytes: &[u8], _: &OcrConfig) -> crate::Result<ExtractedDocument> {
+                self.captured_bytes.lock().unwrap().push(image_bytes.to_vec());
+                Ok(ExtractedDocument {
+                    content: "text".to_string(),
+                    ..Default::default()
+                })
+            }
+        }
+
+        impl Plugin for SelfCorrectingCapturingBackend {
+            fn name(&self) -> &str {
+                "self-correcting-capturing-mock"
+            }
+            fn version(&self) -> String {
+                "1.0.0".to_string()
+            }
+            fn initialize(&self) -> crate::Result<()> {
+                Ok(())
+            }
+            fn shutdown(&self) -> crate::Result<()> {
+                Ok(())
+            }
+        }
+
+        let backend = std::sync::Arc::new(SelfCorrectingCapturingBackend {
+            captured_bytes: Mutex::new(Vec::new()),
+        });
+        crate::plugins::register_ocr_backend(backend.clone()).unwrap();
+
+        let content = rotated_landscape_pdf(270);
+
+        // Independently reproduce the exact raster this route sends every backend, via the
+        // same private helpers `extract_with_ocr` itself calls, so the comparison below is
+        // byte-for-byte against production behaviour rather than a re-derived approximation.
+        let (expected_doc, _page_count, expected_rotations) =
+            open_pdf_for_full_ocr(&content).expect("fixture PDF must open for OCR rendering");
+        let expected_encoded =
+            render_full_pdf_ocr_batch(&expected_doc, &expected_rotations, 0..1).expect("fixture page must render");
+        let (_, expected_bytes, _, _) = expected_encoded.into_iter().next().expect("page 0 must render");
+
+        let config = ExtractionConfig {
+            ocr: Some(OcrConfig {
+                backend: "self-correcting-capturing-mock".to_string(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let result = extract_with_ocr(
+            Some(&content),
+            None,
+            #[cfg(feature = "layout-detection")]
+            None,
+            &config,
+            None,
+        )
+        .await;
+
+        crate::plugins::unregister_ocr_backend("self-correcting-capturing-mock").unwrap();
+
+        assert!(result.is_ok(), "extract_with_ocr should succeed: {:?}", result.err());
+
+        let captured = backend.captured_bytes.lock().unwrap();
+        assert_eq!(captured.len(), 1, "backend should have been called exactly once");
+        assert_eq!(
+            captured[0], *expected_bytes,
+            "a SelfCorrecting backend's raster must stay byte-for-byte identical to the raw \
+             MediaBox raster this route has always sent it; this pins that a future orientation \
+             fix cannot silently start rotating it"
         );
     }
 }
