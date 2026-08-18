@@ -687,6 +687,45 @@ pub(crate) fn validate_csv_delimiter(delimiter: &str) -> Result<()> {
     }
 }
 
+/// Whether enabling layout detection while `output_format` stays [`crate::OutputFormat::Plain`]
+/// wastes the layout pass.
+///
+/// Layout detection exists to feed the structured-reconstruction pipeline that turns
+/// detected regions into headings, lists and tables. At [`crate::OutputFormat::Plain`] no renderer
+/// consumes that structure — the layout model still runs (measured: 20s on tesseract, 202s
+/// on paddle, for a 16-page scan) and every region it detects is discarded. This implements
+/// point 4 of the documented OCR/layout contract: "layout enabled implies output should be
+/// structured, never plain."
+///
+/// This is a pure predicate meant to back a *warning*, not a validation error and not a
+/// coercion: `Plain` stays the default output format and layout stays off by default, so a
+/// caller combining both deliberately is still free to do so. Pass the fully resolved values
+/// (after every override has been applied), not raw CLI flags.
+///
+/// # Arguments
+///
+/// * `layout_enabled` - Whether layout detection will run for this extraction.
+/// * `output_format` - The resolved output format the extraction will render.
+///
+/// # Returns
+///
+/// `true` when layout is enabled and the output format is [`crate::OutputFormat::Plain`] — the
+/// layout work will be computed and its structure discarded.
+///
+/// # Examples
+///
+/// ```
+/// use xberg::core::config_validation::layout_wastes_plain_output;
+/// use xberg::OutputFormat;
+///
+/// assert!(layout_wastes_plain_output(true, &OutputFormat::Plain));
+/// assert!(!layout_wastes_plain_output(true, &OutputFormat::Markdown));
+/// assert!(!layout_wastes_plain_output(false, &OutputFormat::Plain));
+/// ```
+pub fn layout_wastes_plain_output(layout_enabled: bool, output_format: &crate::OutputFormat) -> bool {
+    layout_enabled && *output_format == crate::OutputFormat::Plain
+}
+
 /// Validate that a VLM OCR backend has the required `vlm_config`.
 ///
 /// When the OCR backend is set to `"vlm"`, the `vlm_config` field must be present

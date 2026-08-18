@@ -612,6 +612,33 @@ impl ExtractionOverrides {
         if let Some(key) = resolved_api_key {
             apply_llm_api_key(config, &key);
         }
+        // Last: every prior `apply_*` that can touch `config.layout` (`apply_layout`) or
+        // `config.output_format` (`apply_output_format`, `apply_html_styled`) has already run,
+        // so this observes the fully resolved combination rather than an intermediate one.
+        #[cfg(feature = "layout-detection")]
+        self.warn_layout_wastes_plain_output(config);
+    }
+
+    /// Warn when the final resolved configuration enables layout detection while
+    /// `output_format` stays `Plain` (contract point 4 of the OCR/layout structure
+    /// contract — see `xberg::core::config_validation::layout_wastes_plain_output`).
+    ///
+    /// This is a warning, not a validation error and not a coercion: `Plain` remains the
+    /// default output format and layout remains off by default. A caller who set both
+    /// deliberately still gets exactly what they asked for; they are only told that the
+    /// layout pass (20s-202s depending on backend, per the WP-E measurements) will run and
+    /// its output will be discarded, since no renderer at `Plain` consumes structure.
+    #[cfg(feature = "layout-detection")]
+    fn warn_layout_wastes_plain_output(&self, config: &ExtractionConfig) {
+        if xberg::core::config_validation::layout_wastes_plain_output(config.layout.is_some(), &config.output_format) {
+            tracing::warn!(
+                "layout detection is enabled but the output format is 'plain'; the layout pass \
+                 will run and the headings/lists/tables it detects will be discarded because \
+                 plain output never renders structure. Pass --content-format markdown (or \
+                 html/djot/json) to use the detected structure, or omit --layout to skip the \
+                 extra work."
+            );
+        }
     }
 
     /// Apply the `--ocr*` flags onto `config.ocr`.
@@ -655,6 +682,17 @@ impl ExtractionOverrides {
                     .scanned_min_confidence
                     .unwrap_or(xberg::core::config::DEFAULT_SCANNED_MIN_CONFIDENCE),
             };
+            // The mixed OCR route (`extract_mixed_ocr_native`) needs per-page byte boundaries
+            // to locate a detected scan within the native text and splice OCR output back in.
+            // Boundaries are only tracked by the PDF backend when `config.pages` is
+            // materialised (`pdf::oxide::text::extract_text_from_oxide_document`'s
+            // `page_config` branch); without `--extract-pages`, `config.pages` stayed `None`,
+            // so this route always hit its "no page boundaries available" fallback and
+            // returned the native text untouched -- empty, for a scan, i.e. a zero-byte,
+            // exit-0 result (#656). `PageConfig::default()` keeps `extract_pages: false`, so
+            // this turns boundary tracking on without adding the `pages` array to the result
+            // unless the caller separately asked for it.
+            config.pages.get_or_insert_with(Default::default);
         }
     }
 
@@ -753,6 +791,15 @@ impl ExtractionOverrides {
         Ok(Some(value))
     }
 
+    /// Apply the `--chunk*` flags onto `config.chunking`.
+    ///
+    /// Naming any `--chunk-*` field flag (`--chunk-size`, `--chunk-overlap`,
+    /// `--chunk-breadcrumb-target`) is on its own enough to materialise `config.chunking`
+    /// when it is still `None`, matching the `has_*_flag` idiom `apply_ocr` uses for
+    /// `--ocr-*` field flags (fixed for OCR in `5921a7cc23`). Before this, a field flag given
+    /// without `--chunk true`, `--chunking-tokenizer`, or a config file that already set
+    /// `chunking` was silently dropped: `config.chunking` stayed `None`, so the early return
+    /// below skipped every field assignment with no warning and no error.
     #[cfg(any(feature = "core-cli", feature = "analysis"))]
     fn apply_chunking(&self, config: &mut ExtractionConfig) {
         let chunk = if self.chunking_tokenizer.is_some() && self.chunk.is_none() {
@@ -765,7 +812,7 @@ impl ExtractionOverrides {
             config.chunking = None;
             return;
         }
-        if chunk == Some(true) && config.chunking.is_none() {
+        if (chunk == Some(true) || self.has_chunk_field_flag()) && config.chunking.is_none() {
             config.chunking = Some(ChunkingConfig::default());
         }
 
@@ -795,6 +842,13 @@ impl ExtractionOverrides {
         if let Some(target) = self.chunk_breadcrumb_target {
             chunking.breadcrumb_target = target.into();
         }
+    }
+
+    /// Whether any `--chunk-*` field flag (size, overlap, breadcrumb target) was given,
+    /// independent of `--chunk`/`--chunk true` and `--chunking-tokenizer`.
+    #[cfg(any(feature = "core-cli", feature = "analysis"))]
+    fn has_chunk_field_flag(&self) -> bool {
+        self.chunk_size.is_some() || self.chunk_overlap.is_some() || self.chunk_breadcrumb_target.is_some()
     }
 
     #[cfg(feature = "analysis")]
@@ -1251,6 +1305,54 @@ mod tests {
                 min_confidence: xberg::core::config::DEFAULT_SCANNED_MIN_CONFIDENCE
             }
         );
+    }
+
+    /// Regression test for #656: `--ocr-scanned-pages` alone (no `--extract-pages`, no
+    /// `--ocr true`, no other `--ocr-*` field flag) previously left `config.pages` as `None`.
+    /// The PDF backend only tracks per-page byte boundaries when `config.pages` is `Some`
+    /// (`pdf::oxide::text::extract_text_from_oxide_document`'s `page_config` branch), and the
+    /// mixed OCR route needs those boundaries to splice OCR text back into the native text
+    /// (`extractors/pdf/mod.rs`). Without them, that route always fell back to "no page
+    /// boundaries available; using native text" -- an empty result for a scan, i.e. a
+    /// zero-byte, exit-0 extraction. Before the fix (i.e. removing the
+    /// `config.pages.get_or_insert_with(Default::default)` call), `config.pages` stays `None`
+    /// here and this assertion fails.
+    #[cfg(feature = "ocr-surface")]
+    #[test]
+    fn test_ocr_scanned_pages_alone_materialises_page_boundary_tracking() {
+        let mut config = ExtractionConfig::default();
+        let overrides = ExtractionOverrides {
+            ocr_scanned_pages: true,
+            ..default_overrides()
+        };
+
+        overrides.apply(&mut config);
+
+        let pages = config
+            .pages
+            .expect("--ocr-scanned-pages must materialise page-boundary tracking on its own");
+        assert!(
+            !pages.extract_pages,
+            "boundary tracking must not silently turn on the `pages` output array"
+        );
+    }
+
+    /// Companion guard: materialising `config.pages` for boundary tracking must not clobber an
+    /// explicit `--extract-pages true` given alongside `--ocr-scanned-pages`.
+    #[cfg(feature = "ocr-surface")]
+    #[test]
+    fn test_ocr_scanned_pages_does_not_override_explicit_extract_pages_flag() {
+        let mut config = ExtractionConfig::default();
+        let overrides = ExtractionOverrides {
+            ocr_scanned_pages: true,
+            extract_pages: Some(true),
+            ..default_overrides()
+        };
+
+        overrides.apply(&mut config);
+
+        let pages = config.pages.expect("pages config should be set");
+        assert!(pages.extract_pages, "--extract-pages true must still take effect");
     }
 
     #[cfg(feature = "ocr-surface")]
@@ -1847,6 +1949,67 @@ mod tests {
         assert_eq!(chunking.max_characters, 512);
     }
 
+    /// Regression test for the field-drop shape #654 describes, structurally identical to the
+    /// `--ocr-backend` defect fixed in `5921a7cc23`: `apply_chunking` only materialised
+    /// `config.chunking` on `--chunk true`, `--chunking-tokenizer`, or a config file that
+    /// already set it, so `--chunk-size 512` alone (no `--chunk true`) hit the `let Some(chunking)
+    /// = config.chunking.as_mut() else { return; }` early return and was silently dropped --
+    /// no warning, no error, just an unchanged config. Before the fix (i.e. reverting
+    /// `has_chunk_field_flag` back out of the materialisation condition), `config.chunking`
+    /// stays `None` here and this assertion fails on `.expect(..)`.
+    #[cfg(any(feature = "core-cli", feature = "analysis"))]
+    #[test]
+    fn test_chunk_size_flag_materialises_chunking_without_chunk_true_flag() {
+        let mut config = ExtractionConfig::default();
+        let overrides = ExtractionOverrides {
+            chunk_size: Some(512),
+            ..default_overrides()
+        };
+
+        overrides.apply(&mut config);
+
+        let chunking = config
+            .chunking
+            .expect("--chunk-size must materialise a chunking config even without --chunk true");
+        assert_eq!(chunking.max_characters, 512);
+    }
+
+    /// Same defect, `--chunk-overlap` alone.
+    #[cfg(any(feature = "core-cli", feature = "analysis"))]
+    #[test]
+    fn test_chunk_overlap_flag_materialises_chunking_without_chunk_true_flag() {
+        let mut config = ExtractionConfig::default();
+        let overrides = ExtractionOverrides {
+            chunk_overlap: Some(50),
+            ..default_overrides()
+        };
+
+        overrides.apply(&mut config);
+
+        let chunking = config
+            .chunking
+            .expect("--chunk-overlap must materialise a chunking config even without --chunk true");
+        assert_eq!(chunking.overlap, 50);
+    }
+
+    /// Same defect, `--chunk-breadcrumb-target` alone.
+    #[cfg(any(feature = "core-cli", feature = "analysis"))]
+    #[test]
+    fn test_chunk_breadcrumb_target_flag_materialises_chunking_without_chunk_true_flag() {
+        let mut config = ExtractionConfig::default();
+        let overrides = ExtractionOverrides {
+            chunk_breadcrumb_target: Some(BreadcrumbTargetArg::Metadata),
+            ..default_overrides()
+        };
+
+        overrides.apply(&mut config);
+
+        let chunking = config
+            .chunking
+            .expect("--chunk-breadcrumb-target must materialise a chunking config even without --chunk true");
+        assert_eq!(chunking.breadcrumb_target, BreadcrumbTarget::Metadata);
+    }
+
     #[cfg(feature = "analysis")]
     #[test]
     fn should_keep_config_json_language_detection_siblings_when_detect_language_flag_is_given() {
@@ -2086,6 +2249,147 @@ mod tests {
         overrides.apply(&mut config);
         let layout = config.layout.unwrap();
         assert_eq!(layout.confidence_threshold, Some(0.7));
+    }
+
+    /// Make every callsite in the process permanently interesting, once, so a
+    /// `tracing::warn!` reached on some other test's thread first isn't cached as
+    /// `Interest::never()` for the whole process and lost to `capture_logs` below.
+    /// Mirrors the pattern documented at `crates/xberg/src/cache/mod.rs` (#272/#301).
+    #[cfg(feature = "layout-detection")]
+    fn install_permissive_global_subscriber() {
+        struct AlwaysInterested;
+
+        impl tracing::Subscriber for AlwaysInterested {
+            fn register_callsite(&self, _: &'static tracing::Metadata<'static>) -> tracing::subscriber::Interest {
+                tracing::subscriber::Interest::always()
+            }
+
+            fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
+                true
+            }
+
+            fn max_level_hint(&self) -> Option<tracing::level_filters::LevelFilter> {
+                Some(tracing::level_filters::LevelFilter::TRACE)
+            }
+
+            fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::Id {
+                tracing::Id::from_u64(1)
+            }
+
+            fn record(&self, _: &tracing::Id, _: &tracing::span::Record<'_>) {}
+            fn record_follows_from(&self, _: &tracing::Id, _: &tracing::Id) {}
+            fn event(&self, _: &tracing::Event<'_>) {}
+            fn enter(&self, _: &tracing::Id) {}
+            fn exit(&self, _: &tracing::Id) {}
+        }
+
+        static INSTALLED: std::sync::Once = std::sync::Once::new();
+        INSTALLED.call_once(|| {
+            let _ = tracing::subscriber::set_global_default(AlwaysInterested);
+            tracing::callsite::rebuild_interest_cache();
+        });
+    }
+
+    /// Capture `tracing` output emitted on this thread while `body` runs.
+    #[cfg(feature = "layout-detection")]
+    fn capture_logs<T>(body: impl FnOnce() -> T) -> (T, String) {
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Clone)]
+        struct Capture(Arc<Mutex<Vec<u8>>>);
+
+        impl std::io::Write for Capture {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().expect("log buffer poisoned").write_all(buf)?;
+                Ok(buf.len())
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let buffer = Arc::new(Mutex::new(Vec::new()));
+        let capture = Capture(Arc::clone(&buffer));
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::WARN)
+            .with_writer(move || capture.clone())
+            .finish();
+
+        install_permissive_global_subscriber();
+
+        let value = tracing::subscriber::with_default(subscriber, body);
+        let logs =
+            String::from_utf8(buffer.lock().expect("log buffer poisoned").clone()).expect("log output must be UTF-8");
+        (value, logs)
+    }
+
+    /// Regression test for contract point 4: enabling layout detection while
+    /// `output_format` stays `Plain` (the default) wastes the layout pass -- the extraction
+    /// still pays the model's cost (20s-202s per the WP-E measurements) and `Plain` never
+    /// renders the headings/lists/tables it detects. Before this warning was wired in
+    /// (i.e. removing the `warn_layout_wastes_plain_output` call from `apply`), `apply_layout`
+    /// never read `output_format` at all, so no warning was logged and this assertion on the
+    /// captured log output fails.
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn test_warns_when_layout_enabled_with_plain_output_format() {
+        let mut config = ExtractionConfig::default();
+        let overrides = ExtractionOverrides {
+            layout: Some(true),
+            ..default_overrides()
+        };
+
+        let (_, logs) = capture_logs(|| overrides.apply(&mut config));
+
+        assert!(config.layout.is_some(), "--layout must still enable layout detection");
+        assert_eq!(
+            config.output_format,
+            xberg::OutputFormat::Plain,
+            "Plain must stay the default"
+        );
+        assert!(
+            logs.contains("layout detection is enabled but the output format is 'plain'"),
+            "expected a layout/Plain contract warning in the captured log, got: {logs}"
+        );
+    }
+
+    /// Companion guard: layout combined with a structured output format must not warn.
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn test_does_not_warn_when_layout_enabled_with_markdown_output_format() {
+        let mut config = ExtractionConfig::default();
+        let overrides = ExtractionOverrides {
+            layout: Some(true),
+            content_format: Some(ContentOutputFormatArg::Markdown),
+            ..default_overrides()
+        };
+
+        let (_, logs) = capture_logs(|| overrides.apply(&mut config));
+
+        assert!(config.layout.is_some());
+        assert!(
+            !logs.contains("layout detection is enabled but the output format is 'plain'"),
+            "no wasted-layout warning expected for markdown output, got: {logs}"
+        );
+    }
+
+    /// Companion guard: `Plain` output alone, with layout left off (the double default),
+    /// must not warn.
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn test_does_not_warn_when_layout_disabled_with_plain_output_format() {
+        let mut config = ExtractionConfig::default();
+        let overrides = default_overrides();
+
+        let (_, logs) = capture_logs(|| overrides.apply(&mut config));
+
+        assert!(config.layout.is_none(), "layout must stay off by default");
+        assert!(
+            !logs.contains("layout detection is enabled but the output format is 'plain'"),
+            "no warning expected when layout is off, got: {logs}"
+        );
     }
 
     #[test]
