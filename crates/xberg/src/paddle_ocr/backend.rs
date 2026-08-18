@@ -111,7 +111,30 @@ fn engine_pool_key(
     format!("{version}/{tier}/{model_key}/{accel_key}/{backend_key}")
 }
 
-const INFERENCE_THREAD_COUNT: usize = 1;
+/// Intra-op thread count for PaddleOCR's shared inference session.
+///
+/// PaddleOCR keeps one session per model per pool key, and `OrtBackend` guards it with a
+/// `Mutex` because `ort::Session::run` takes `&mut self` (ort 2.0.0-rc.13). Concurrent page
+/// OCR therefore serializes on that mutex, so the session is always exactly one worker and can
+/// safely claim the whole process budget — the same shape `layout/engine.rs::from_config` and
+/// `inference/ort_backend.rs` already use. The previous hardcoded `1` left it single-core.
+///
+/// If layout detection and PaddleOCR are ever made to run concurrently (today PaddleOCR's
+/// per-page `join_set` in `extractors/pdf/ocr.rs` only reaches this session after layout's own
+/// pass), this must go through `resolve_batch_execution_plan` instead, or two full-budget
+/// sessions could oversubscribe the process.
+///
+/// The `tract` backend takes the same `num_thread` parameter but ignores it (`TractBackend::load`).
+fn paddle_inference_thread_count() -> usize {
+    paddle_session_thread_budget(crate::core::config::concurrency::resolve_thread_budget(None))
+}
+
+/// Pure core of [`paddle_inference_thread_count`], split out so the policy is testable
+/// without a live ORT session or host-CPU detection.
+fn paddle_session_thread_budget(total_budget: usize) -> usize {
+    total_budget.max(1)
+}
+
 use crate::ocr_metadata_keys::OCR_ORIENTATION_CONFIDENCE_METADATA_KEY as ORIENTATION_CONFIDENCE_METADATA_KEY;
 const VERTICAL_TEXT_MIN_ASPECT_RATIO: f32 = 1.5;
 const VERTICAL_COLUMN_MIN_OVERLAP_RATIO: f32 = 0.5;
@@ -526,7 +549,7 @@ impl PaddleOcrBackend {
             cls_model_path,
             rec_model_path,
             dict_path,
-            INFERENCE_THREAD_COUNT,
+            paddle_inference_thread_count(),
             builder_fn,
         )
     }
@@ -570,7 +593,7 @@ impl PaddleOcrBackend {
             cls_model_path,
             rec_model_path,
             dict_path,
-            INFERENCE_THREAD_COUNT,
+            paddle_inference_thread_count(),
         )
     }
 
@@ -887,14 +910,21 @@ impl PaddleOcrBackend {
         ))
     }
 
-    /// Perform actual OCR inference (runs in blocking context).
-    /// PaddleOcrEngine::detect takes `&self`; no mutex is needed for parallel page OCR.
+    /// Clamp the configured recognition batch size to the supported range.
     fn effective_rec_batch_size(config: &PaddleOcrConfig) -> u32 {
         config
             .rec_batch_num
             .clamp(MIN_RECOGNITION_BATCH_SIZE, MAX_RECOGNITION_BATCH_SIZE)
     }
 
+    /// Perform actual OCR inference (runs in blocking context).
+    ///
+    /// `PaddleOcrEngine::detect` takes `&self`, but that does **not** mean pages OCR
+    /// concurrently: each underlying `ort::Session` is still wrapped in a `Mutex`
+    /// (`crates/xberg-paddle-ocr/src/inference/ort_backend.rs`) because `ort::Session::run`
+    /// requires `&mut self`. Concurrent calls into this function serialize on that mutex —
+    /// see `paddle_inference_thread_count` above for why that is handled by widening the
+    /// session's own intra-op thread budget instead.
     fn perform_ocr(
         image_bytes: &[u8],
         ocr_engine: &Arc<PaddleOcrEngine>,
@@ -1287,6 +1317,25 @@ mod tests {
     use std::sync::Barrier;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::thread;
+
+    /// The session must receive the *entire* resolved process budget, not the hardcoded `1`
+    /// this replaced. `workers * intra_threads <= budget` still holds because the mutex caps
+    /// PaddleOCR to one concurrent worker. Honest caveat: this is a new pure function, so there
+    /// is no unfixed version of it to fail against — the assertion's value is pinning the policy
+    /// so a future clamp back to `1` (or a multi-session pool) is forced to revisit it.
+    #[test]
+    fn paddle_session_thread_budget_grants_the_full_resolved_budget() {
+        assert_eq!(paddle_session_thread_budget(1), 1);
+        assert_eq!(paddle_session_thread_budget(4), 4);
+        assert_eq!(paddle_session_thread_budget(8), 8);
+    }
+
+    /// `resolve_thread_budget` never returns `0`, but the pure function must not assume it —
+    /// `with_intra_threads(0)` would be a session-construction footgun.
+    #[test]
+    fn paddle_session_thread_budget_floors_at_one() {
+        assert_eq!(paddle_session_thread_budget(0), 1);
+    }
 
     const CONCURRENT_INITIALIZER_COUNT: usize = 8;
 
