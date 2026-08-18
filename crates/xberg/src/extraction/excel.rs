@@ -20,7 +20,7 @@
 //! use xberg::extraction::excel::read_excel_file;
 //!
 //! # fn example() -> xberg::Result<()> {
-//! let (workbook, _warnings) = read_excel_file("data.xlsx")?;
+//! let (workbook, _warnings) = read_excel_file("data.xlsx", 10_000)?;
 //!
 //! println!("Sheet count: {}", workbook.sheets.len());
 //! for sheet in &workbook.sheets {
@@ -70,9 +70,53 @@ use serde_json::Value;
 /// `core::diagnostics` for the warning convention this follows.
 pub(crate) type ExcelReadResult = (ExcelWorkbook, Vec<ProcessingWarning>);
 
-pub(crate) fn read_excel_file(file_path: &str) -> Result<ExcelReadResult> {
+/// Reject a ZIP-backed spreadsheet (XLSX/XLSM/XLTM/XLAM/XLSB/ODS) whose ZIP central
+/// directory declares more entries than the caller's configured
+/// `SecurityLimits::max_files_in_archive`.
+///
+/// `calamine::Xlsx`/`Xlsb`/`Ods` own the `zip::ZipArchive` internally end-to-end
+/// (`Reader::new` opens it and immediately reads workbook/style/shared-string parts
+/// before returning) and never expose the archive or an entry count, so the limit
+/// cannot be enforced from inside calamine's read path. This reads the archive's
+/// central directory once, ahead of the calamine open, purely to enforce the count —
+/// parsing the central directory does not decompress any entry, so this is not "after
+/// the bomb has already been expanded." Errors out rather than truncating, matching the
+/// DOCX/PPTX top-level containers (`extraction::docx::parser::validate_archive_security`,
+/// `extraction::pptx::container::check_entry_count`): a workbook depends on specific
+/// named parts (`xl/workbook.xml`, `xl/_rels/workbook.xml.rels`, per-sheet XML) that
+/// cannot survive an arbitrary truncation of the ZIP's central directory.
+///
+/// Silently returns `Ok(())` when `reader` is not a readable ZIP at all (e.g. a legacy
+/// `.xls`/`.xla` OLE2 file misrouted here) — the subsequent calamine open then reports a
+/// format error with clearer context than this pre-check could.
+#[cfg(feature = "excel")]
+fn check_zip_entry_count<R: Read + Seek>(reader: R, max_entries: usize) -> Result<()> {
+    let archive = match zip::ZipArchive::new(reader) {
+        Ok(archive) => archive,
+        Err(_) => return Ok(()),
+    };
+    if archive.len() > max_entries {
+        return Err(XbergError::validation(format!(
+            "Spreadsheet ZIP archive declares {} entries, which exceeds the configured limit of {} \
+             (SecurityLimits::max_files_in_archive); reduce the archive's entry count or raise the limit",
+            archive.len(),
+            max_entries
+        )));
+    }
+    Ok(())
+}
+
+pub(crate) fn read_excel_file(file_path: &str, max_entries: usize) -> Result<ExcelReadResult> {
     let lower_path = file_path.to_lowercase();
     let mut warnings: Vec<ProcessingWarning> = Vec::new();
+
+    #[cfg(feature = "excel")]
+    {
+        let check_file = std::fs::File::open(file_path)?;
+        check_zip_entry_count(std::io::BufReader::new(check_file), max_entries)?;
+    }
+    #[cfg(not(feature = "excel"))]
+    let _ = max_entries;
 
     #[cfg(feature = "office")]
     let office_metadata = if lower_path.ends_with(".xlsx")
@@ -179,8 +223,13 @@ pub(crate) fn read_excel_file(file_path: &str) -> Result<ExcelReadResult> {
     Ok((result, warnings))
 }
 
-pub(crate) fn read_excel_bytes(data: &[u8], file_extension: &str) -> Result<ExcelReadResult> {
+pub(crate) fn read_excel_bytes(data: &[u8], file_extension: &str, max_entries: usize) -> Result<ExcelReadResult> {
     let mut warnings: Vec<ProcessingWarning> = Vec::new();
+
+    #[cfg(feature = "excel")]
+    check_zip_entry_count(Cursor::new(data), max_entries)?;
+    #[cfg(not(feature = "excel"))]
+    let _ = max_entries;
 
     #[cfg(feature = "office")]
     let office_metadata = match file_extension.to_lowercase().as_str() {
@@ -1466,7 +1515,7 @@ mod tests {
         }
         let bytes = std::fs::read(&path).expect("read fixture");
 
-        let (workbook, _warnings) = read_excel_bytes(&bytes, ".ods").expect("ODS extraction should succeed");
+        let (workbook, _warnings) = read_excel_bytes(&bytes, ".ods", 10_000).expect("ODS extraction should succeed");
 
         assert_eq!(
             workbook.metadata.get("creator").map(String::as_str),
@@ -2081,7 +2130,7 @@ mod tests {
             "2024-03-01T12:00:00Z",
         )]);
 
-        let (workbook, _warnings) = read_excel_bytes(&xlsx, ".xlsx").expect("should parse workbook");
+        let (workbook, _warnings) = read_excel_bytes(&xlsx, ".xlsx", 10_000).expect("should parse workbook");
         let revisions = workbook
             .revisions
             .as_ref()
@@ -2184,7 +2233,7 @@ mod tests {
         );
 
         let (workbook, warnings) =
-            read_excel_bytes(&bytes, ".xlsx").expect("a workbook with one missing sheet part must still parse");
+            read_excel_bytes(&bytes, ".xlsx", 10_000).expect("a workbook with one missing sheet part must still parse");
 
         assert_eq!(workbook.sheets.len(), 1, "only the readable sheet must be kept");
         assert_eq!(workbook.sheets[0].name, "Good");
@@ -2223,7 +2272,7 @@ mod tests {
             &[("xl/worksheets/sheet1.xml", sheet1_xml.to_vec())],
         );
 
-        let (workbook, warnings) = read_excel_bytes(&bytes, ".xlsx").expect("workbook must parse");
+        let (workbook, warnings) = read_excel_bytes(&bytes, ".xlsx", 10_000).expect("workbook must parse");
 
         assert_eq!(workbook.sheets.len(), 1);
         assert!(
@@ -2305,7 +2354,7 @@ mod tests {
             ],
         );
 
-        let (workbook, _warnings) = read_excel_bytes(&bytes, ".xlsx").expect("workbook must parse");
+        let (workbook, _warnings) = read_excel_bytes(&bytes, ".xlsx", 10_000).expect("workbook must parse");
 
         assert_eq!(workbook.sheets.len(), 2, "hidden sheet content must still be extracted");
         assert_eq!(
@@ -2338,7 +2387,7 @@ mod tests {
             &[("xl/worksheets/sheet1.xml", sheet1_xml.to_vec())],
         );
 
-        let (workbook, _warnings) = read_excel_bytes(&bytes, ".xlsx").expect("workbook must parse");
+        let (workbook, _warnings) = read_excel_bytes(&bytes, ".xlsx", 10_000).expect("workbook must parse");
 
         assert_eq!(
             workbook.metadata.get("formulas_Calc").map(String::as_str),
@@ -2374,7 +2423,7 @@ mod tests {
             ],
         );
 
-        let (workbook, _warnings) = read_excel_bytes(&bytes, ".xlsx").expect("workbook must parse");
+        let (workbook, _warnings) = read_excel_bytes(&bytes, ".xlsx", 10_000).expect("workbook must parse");
 
         assert_eq!(
             workbook.metadata.get("hyperlinks_Links").map(String::as_str),
@@ -2397,7 +2446,7 @@ mod tests {
             &[("xl/worksheets/sheet1.xml", sheet1_xml.to_vec())],
         );
 
-        let (workbook, _warnings) = read_excel_bytes(&bytes, ".xlsx").expect("workbook must parse");
+        let (workbook, _warnings) = read_excel_bytes(&bytes, ".xlsx", 10_000).expect("workbook must parse");
 
         assert_eq!(
             workbook.metadata.get("defined_names").map(String::as_str),
@@ -2447,7 +2496,7 @@ mod tests {
             ],
         );
 
-        let (workbook, _warnings) = read_excel_bytes(&bytes, ".xlsx").expect("workbook must parse");
+        let (workbook, _warnings) = read_excel_bytes(&bytes, ".xlsx", 10_000).expect("workbook must parse");
 
         assert_eq!(
             workbook.metadata.get("comments").map(String::as_str),
