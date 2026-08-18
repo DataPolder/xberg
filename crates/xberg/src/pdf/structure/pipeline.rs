@@ -25,6 +25,23 @@ use super::types::{LayoutHint, PdfParagraph};
 
 const SPARSE_REPEATED_TIER_MIN_PAGES: usize = 2;
 const SPARSE_FONT_TIER_CLUSTER_COUNT: usize = 2;
+/// Font-size "same tier" tolerance (absolute, in the unit `font_size` happens to carry —
+/// points for native PDFs, a render-DPI-dependent pixel measurement for OCR segments).
+///
+/// This IS scale-dependent, and a naive ratio-of-centroid conversion was tried and
+/// reverted: forcing `cluster_font_sizes(_, 2)` on a sparse (<5 block) document routinely
+/// produces two centroids that are themselves not tight (e.g. a genuine 22pt/21pt/12pt
+/// three-tier native document forced into k=2 merges 22 and 21 into one ~21.7 centroid).
+/// The tight 0.5pt absolute tolerance deliberately rejects that merge as "not narrow
+/// enough" via `has_only_two_narrow_font_tiers`, which is what keeps a non-repeated 21pt
+/// "Display prose" line (see `test_build_heading_map_sparse_multi_page_does_not_promote_
+/// non_repeated_intermediate_tier`) out of the repeated-heading cluster. A ratio tolerance
+/// wide enough to be useful for OCR pixel noise (e.g. 5% of a ~21px cluster) is also wide
+/// enough to swallow that native 0.667pt merge slop, which flips `find_heading_level` from
+/// `None` to `Some(2)` for the 21pt line and regresses that guard. No tolerance value is
+/// simultaneously tight enough to guard native merge slop and loose enough for OCR pixel
+/// noise, because both slop magnitudes scale with the *same* input (the forced-k=2
+/// centroid), so this stays absolute — see the report for the full trade-off. ~keep
 const SPARSE_FONT_TIER_TOLERANCE: f32 = 0.5;
 // A tier repeated at the top of multiple pages represents peer sections, not a
 // unique document title; reserve H1 for a title and emit these sections as H2. ~keep
@@ -202,7 +219,7 @@ fn build_heading_map(
         };
 
         let clusters = cluster_font_sizes(&all_blocks, effective_k)?;
-        let mut map = assign_heading_levels_smart(&clusters, MIN_HEADING_FONT_RATIO, MIN_HEADING_FONT_GAP);
+        let mut map = assign_heading_levels_smart(&clusters, MIN_HEADING_FONT_RATIO);
 
         let has_any_heading = map.iter().any(|(_, level)| level.is_some());
         if !has_any_heading && !heuristic_pages.is_empty() {
@@ -219,6 +236,8 @@ fn build_heading_map(
 
                 if median > 0.0
                     && first_font >= median * 1.2
+                    // Absolute-unit match tolerance; kept as-is for the same reason
+                    // `SPARSE_FONT_TIER_TOLERANCE` was kept absolute — see its doc comment.
                     && let Some(entry) = map.iter_mut().find(|(fs, _)| (*fs - first_font).abs() < 0.5)
                 {
                     entry.1 = Some(1);
@@ -1644,9 +1663,16 @@ fn finalize_paragraph(
 
     if heading_level.is_none() {
         let min_heading_threshold = body_font_size * super::constants::MIN_HEADING_FONT_RATIO;
+        // `first.font_size >= min_heading_threshold` already implies
+        // `first.font_size > body_font_size + 0.5` for every realistic body font size:
+        // `body * MIN_HEADING_FONT_RATIO > body + 0.5` reduces to `body > 0.5 / (RATIO - 1) ≈ 3.33`
+        // (in whatever unit `font_size` is — points or OCR render pixels), and no real body-text
+        // cluster is that small. An explicit `+ 0.5` absolute-unit check was previously required
+        // here too; it was redundant on point-scale input and, being absolute, would have been
+        // both too-permissive at pixel scale and too-strict on a hypothetically tiny render, so
+        // it has been removed rather than converted. ~keep
         if body_font_size > 0.0
             && first.font_size >= min_heading_threshold
-            && first.font_size > body_font_size + 0.5
             && word_count <= super::constants::MAX_BOLD_HEADING_WORD_COUNT
             && lines.len() <= 2
             && !trimmed.ends_with(':')
@@ -8274,6 +8300,67 @@ where new shares are issued;";
             title_entry.unwrap().1,
             Some(1),
             "14pt title in a 5-paragraph doc must get heading_level=1; got: {heading_map:?}"
+        );
+    }
+
+    /// Real Tesseract hOCR `x_fsize` values measured at 300 DPI against
+    /// `test_documents/images_extra/ocr_image.tiff`: a 21px body cluster and a 23px
+    /// secondary tier (ratio 23/21 = 1.095, which fails `MIN_HEADING_FONT_RATIO`, but
+    /// 23 >= 21 + 1.5 clears the old absolute `MIN_HEADING_FONT_GAP` floor). `font_size`
+    /// on OCR segments is a render-DPI-dependent pixel measurement, not points, so an
+    /// absolute-unit gap calibrated for typographic points misfires here.
+    ///
+    /// Fails without the fix: `assign_heading_levels_smart` used to compute
+    /// `heading_threshold = (21.0 * 1.15).min(21.0 + 1.5) = 22.5`, and 23.0 >= 22.5, so
+    /// the 23px cluster got `Some(1)` and this document ended up with a spurious
+    /// heading instead of the all-body map asserted here.
+    #[test]
+    fn test_build_heading_map_pixel_scale_ratio_gate_rejects_subhead_noise() {
+        let all_page_segments = vec![vec![
+            seg_with_font("Subhead-looking line", 23.0),
+            seg_with_font("Body paragraph one with real running text.", 21.0),
+            seg_with_font("Body paragraph two with real running text.", 21.0),
+            seg_with_font("Body paragraph three with real running text.", 21.0),
+            seg_with_font("Body paragraph four with real running text.", 21.0),
+        ]];
+        let struct_tree_results = vec![None];
+        let heuristic_pages = vec![0usize];
+
+        let (heading_map, _) = build_heading_map(&all_page_segments, &struct_tree_results, &heuristic_pages, 4)
+            .expect("build_heading_map must succeed");
+
+        assert!(
+            heading_map.iter().all(|(_, level)| level.is_none()),
+            "a 23px cluster over a 21px body (ratio 1.095) must not be promoted to a heading; got: {heading_map:?}"
+        );
+    }
+
+    /// Same shape as `test_build_heading_map_pixel_scale_ratio_gate_rejects_subhead_noise`
+    /// but at the native point-scale reference (body=10pt) that `MIN_HEADING_FONT_RATIO`'s
+    /// and the old `MIN_HEADING_FONT_GAP`'s doc comments both cite: `10 * 1.15 == 10 + 1.5
+    /// == 11.5`, so removing the gap term changes nothing here. Does not fail without the
+    /// fix (old and new formulas agree at this exact reference point) — it pins the native
+    /// crossover behavior the fix is designed to preserve.
+    #[test]
+    fn test_build_heading_map_native_reference_body_boundary_still_promotes() {
+        let all_page_segments = vec![vec![
+            seg_with_font("Boundary Heading", 11.5),
+            seg_with_font("Body paragraph one with real running text.", 10.0),
+            seg_with_font("Body paragraph two with real running text.", 10.0),
+            seg_with_font("Body paragraph three with real running text.", 10.0),
+            seg_with_font("Body paragraph four with real running text.", 10.0),
+        ]];
+        let struct_tree_results = vec![None];
+        let heuristic_pages = vec![0usize];
+
+        let (heading_map, _) = build_heading_map(&all_page_segments, &struct_tree_results, &heuristic_pages, 4)
+            .expect("build_heading_map must succeed");
+
+        let heading_entry = heading_map.iter().find(|(fs, _)| (*fs - 11.5).abs() < 0.01);
+        assert_eq!(
+            heading_entry.map(|(_, level)| *level),
+            Some(Some(1)),
+            "11.5pt over a 10pt body sits exactly on the ratio boundary and must still promote; got: {heading_map:?}"
         );
     }
 
