@@ -174,6 +174,22 @@ const MIN_BLOCK_HORIZONTAL_OVERLAP_RATIO: f64 = 0.3;
 #[cfg(paddle_ocr)]
 const MAX_BLOCK_LEFT_EDGE_OFFSET_IN_LINE_HEIGHTS: f64 = 0.5;
 
+/// Minimum left-edge offset of a line beyond the running left margin of its
+/// candidate block, expressed as a multiple of the running median line
+/// height, for that line to be treated as an indented first line of a new
+/// paragraph — overriding an otherwise-passing vertical-gap/overlap check.
+///
+/// Real single-column scanned prose usually signals a new paragraph purely
+/// through first-line indentation, not through extra vertical whitespace:
+/// the leading between the last line of one paragraph and the first line of
+/// the next is identical to the leading between two lines of the same
+/// paragraph. A purely vertical-gap-based check can therefore never split
+/// such a page into more than one block, which is exactly the observed
+/// defect (a 16-page scanned document producing exactly 16 paddle-ocr
+/// paragraphs, one full-page block per page).
+#[cfg(paddle_ocr)]
+const MIN_PARAGRAPH_INDENT_IN_LINE_HEIGHTS: f64 = 0.75;
+
 /// Axis-aligned bounds of one OCR line, derived from its (possibly
 /// quadrilateral) geometry, used only for block-grouping decisions.
 #[cfg(paddle_ocr)]
@@ -222,23 +238,47 @@ pub(crate) fn assign_line_block_ids(elements: &[OcrElement]) -> Vec<String> {
     let mut heights_seen: Vec<f64> = Vec::with_capacity(elements.len());
     let mut block_index: u32 = 0;
     let mut previous: Option<LineBounds> = None;
+    // Left margin established so far by the current block's lines, used to
+    // detect an indented paragraph start (see `starts_indented_paragraph`).
+    let mut block_left_margin: f64 = 0.0;
 
     for element in elements {
         let bounds = LineBounds::from_geometry(&element.geometry);
         insert_sorted(&mut heights_seen, bounds.height());
         let median_line_height = running_median(&heights_seen);
 
-        let continues_block = previous
-            .as_ref()
-            .is_some_and(|previous| lines_share_block(previous, &bounds, median_line_height));
-        if !continues_block {
+        let continues_block = previous.as_ref().is_some_and(|previous| {
+            lines_share_block(previous, &bounds, median_line_height)
+                && !starts_indented_paragraph(bounds.left, block_left_margin, median_line_height)
+        });
+
+        if continues_block {
+            block_left_margin = block_left_margin.min(bounds.left);
+        } else {
             block_index += 1;
+            block_left_margin = bounds.left;
         }
         block_ids.push(format!("paddle-block-{block_index}"));
         previous = Some(bounds);
     }
 
     block_ids
+}
+
+/// Whether `left` is indented far enough past `block_left_margin` — the
+/// flush-left margin established by the current block's lines so far — to be
+/// treated as a new paragraph's first line, in units of `median_line_height`.
+///
+/// This is independent of (and can override) the vertical-gap/overlap check
+/// in [`lines_share_block`], because real body text often marks a paragraph
+/// break with indentation alone and no extra vertical space (see
+/// [`MIN_PARAGRAPH_INDENT_IN_LINE_HEIGHTS`]).
+#[cfg(paddle_ocr)]
+fn starts_indented_paragraph(left: f64, block_left_margin: f64, median_line_height: f64) -> bool {
+    if median_line_height <= 0.0 {
+        return false;
+    }
+    left - block_left_margin > median_line_height * MIN_PARAGRAPH_INDENT_IN_LINE_HEIGHTS
 }
 
 #[cfg(paddle_ocr)]
@@ -1055,6 +1095,76 @@ mod tests {
         assert_eq!(
             base_pattern, scaled_pattern,
             "grouping must be identical under uniform DPI scaling"
+        );
+    }
+
+    /// Regression test for the "16 pages -> 16 paragraphs" defect: a realistic
+    /// 300 DPI scanned page of single-spaced body text where paragraph breaks
+    /// are marked ONLY by first-line indentation (left margin 200px, indent
+    /// 300px), never by extra vertical whitespace — every line, including the
+    /// first line of a new paragraph, sits exactly 16px below the previous
+    /// line's bottom edge (well under the 0.6x-line-height gap threshold).
+    ///
+    /// Before the indent check, `lines_share_block` only looks at vertical
+    /// gap and horizontal overlap, both of which pass for every consecutive
+    /// pair here, so the whole page collapses into ONE block — reproducing
+    /// paddle-ocr emitting a single fused paragraph per page. Against the
+    /// unfixed function this assertion fails: all eight entries come back as
+    /// `"paddle-block-1"` instead of splitting into three blocks.
+    #[cfg(paddle_ocr)]
+    #[test]
+    fn assign_line_block_ids_splits_indent_marked_paragraphs_with_uniform_leading() {
+        let elements = vec![
+            // Paragraph 1: indented first line, two flush continuation lines.
+            line_at(300.0, 200.0, 2200.0, 234.0),
+            line_at(200.0, 250.0, 2200.0, 284.0),
+            line_at(200.0, 300.0, 1000.0, 334.0),
+            // Paragraph 2: indented first line (same 16px gap as within para 1).
+            line_at(300.0, 350.0, 2200.0, 384.0),
+            line_at(200.0, 400.0, 2200.0, 434.0),
+            line_at(200.0, 450.0, 700.0, 484.0),
+            // Paragraph 3: indented first line (same 16px gap again).
+            line_at(300.0, 500.0, 2200.0, 534.0),
+            line_at(200.0, 550.0, 2200.0, 584.0),
+        ];
+
+        let block_ids = assign_line_block_ids(&elements);
+
+        assert_eq!(
+            block_ids,
+            vec![
+                "paddle-block-1",
+                "paddle-block-1",
+                "paddle-block-1",
+                "paddle-block-2",
+                "paddle-block-2",
+                "paddle-block-2",
+                "paddle-block-3",
+                "paddle-block-3",
+            ],
+            "indented first lines must start a new block even though the vertical gap never changes"
+        );
+    }
+
+    /// Companion to the indent-split test: continuation lines that are flush
+    /// with the block's established left margin must NOT be split apart just
+    /// because their left edge differs slightly from the immediately
+    /// preceding line (OCR boxes are never pixel-perfect).
+    #[cfg(paddle_ocr)]
+    #[test]
+    fn assign_line_block_ids_does_not_split_flush_continuation_lines() {
+        let elements = vec![
+            line_at(300.0, 200.0, 2200.0, 234.0),
+            line_at(201.0, 250.0, 2200.0, 284.0),
+            line_at(199.0, 300.0, 2200.0, 334.0),
+        ];
+
+        let block_ids = assign_line_block_ids(&elements);
+
+        assert_eq!(
+            block_ids,
+            vec!["paddle-block-1", "paddle-block-1", "paddle-block-1"],
+            "sub-pixel left-edge jitter on flush continuation lines must not start a new block"
         );
     }
 }
