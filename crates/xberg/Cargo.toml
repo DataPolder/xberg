@@ -966,6 +966,16 @@ windows-gnu-target = [
     "layout-types",
     "paddle-ocr-types",
     "embedding-presets",
+    # static-embeddings = [embedding-presets, tokio-runtime, dep:model2vec-rs,
+    # dep:tokenizers-model2vec, dep:tokenizers, dep:ndarray, dep:hf-hub, dep:reqwest,
+    # dep:sha2, dep:fs2]: no `dep:ort`/`onnx-runtime`, so unlike `reranker` /
+    # `sparse-embeddings` / `late-interaction` / `transcription` / `ner-onnx` it is not
+    # part of the ORT-prebuilt-unavailable-on-gnu exclusion above. Every dep here is
+    # already pulled by `embedding-presets` (this list) or is pure Rust with no build
+    # script — see the identical rationale on `windows-target` (GH#1443 follow-up: this
+    # -gnu list was not updated when that fix landed, breaking the "mirrors
+    # windows-target 1:1" comment above for this and the other GH#1443 entries below).
+    "static-embeddings",
     "reranker-presets",
     "sparse-embedding-presets",
     "late-interaction-presets",
@@ -974,6 +984,9 @@ windows-gnu-target = [
     "ner-llm-types",
     "presets",
     "redaction",
+    # redaction-rehydrate = [redaction, dep:aes-gcm, dep:scrypt, dep:zeroize]: RustCrypto,
+    # no native/system deps — same rationale as `windows-target` (GH#1443 follow-up).
+    "redaction-rehydrate",
     "diff",
     "qr-codes",
     "summarization",
@@ -982,14 +995,29 @@ windows-gnu-target = [
     "mcp",
     "liter-llm",
     "classification",
+    # captioning/ner-llm/redaction-ml/summarization-llm/translation each resolve entirely
+    # through liter-llm/tokio-runtime/ner/redaction/summarization, all already enabled
+    # above — no `dep:ort`, so none of these belongs in the ORT exclusion (GH#1443
+    # follow-up; see `windows-target`'s identical entries for the per-feature deps).
+    "captioning",
+    "ner-llm",
+    "redaction-ml",
+    "summarization-llm",
+    "translation",
     "structured",
     "quality",
     "heuristics",
+    # enrichment = [] — no dependencies at all (GH#1443 follow-up; see `windows-target`).
+    "enrichment",
     "xml",
     "svg",
     "chunking-tokenizers",
     "url-ingestion",
     "markdown-footnotes",
+    # otel = [dep:opentelemetry, dep:opentelemetry_sdk, dep:tracing-opentelemetry,
+    # crawlberg?/otel, liter-llm?/otel] — pure Rust, no `dep:ort` (GH#1443 follow-up;
+    # see `windows-target`'s identical entry for the full per-crate verification).
+    "otel",
     "wordperfect",
 ]
 # macos-intel-target: native Intel macOS (x86_64-apple-darwin). FULL feature
