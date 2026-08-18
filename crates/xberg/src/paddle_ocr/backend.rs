@@ -640,6 +640,7 @@ impl PaddleOcrBackend {
         language: &str,
         effective_config: Arc<PaddleOcrConfig>,
         accel: Option<&crate::core::config::acceleration::AccelerationConfig>,
+        page_rotation_degrees: u32,
     ) -> Result<PaddlePageOcr> {
         let family = language_to_script_family(language);
         let engine = self
@@ -664,6 +665,7 @@ impl PaddleOcrBackend {
             plugin_name: "paddle-ocr".to_string(),
         })??;
 
+        Self::reorder_blocks_for_page_rotation(&mut text_blocks, page_rotation_degrees, processed_width, processed_height);
         let vertical_cjk = Self::sort_vertical_cjk_blocks(&mut text_blocks, language);
 
         let mut line_elements = Vec::with_capacity(text_blocks.len());
@@ -747,6 +749,84 @@ impl PaddleOcrBackend {
             .saturating_sub(left_min)
             .min(right_max.saturating_sub(right_min));
         narrower_width > 0 && overlap as f32 / narrower_width as f32 >= VERTICAL_COLUMN_MIN_OVERLAP_RATIO
+    }
+
+    /// Read the page-rotation hint `extractors::pdf::ocr` injects into
+    /// `OcrConfig.backend_options` before dispatching a page to this backend (#640).
+    ///
+    /// This is the PDF page's own `/Rotate` value, not PaddleOCR's own `auto_rotate`
+    /// orientation-detection correction (a separate, independent axis handled by
+    /// `detect_and_rotate`/`rotate_for_detected_orientation`). Absent or malformed
+    /// values are treated as "no rotation" so callers that don't set the hint (direct
+    /// image OCR, other backends' tests reusing this config, etc.) are unaffected.
+    fn page_rotation_degrees_from_backend_options(config: &OcrConfig) -> u32 {
+        config
+            .backend_options
+            .as_ref()
+            .and_then(|opts| opts.get("page_rotation_degrees"))
+            .and_then(serde_json::Value::as_u64)
+            .map(|degrees| (degrees % 360) as u32)
+            .unwrap_or(0)
+    }
+
+    /// Map a point from the OCR raster's coordinate space back to true reading-order
+    /// (display) coordinates, given the correction angle that produced that raster.
+    ///
+    /// Mirrors `crate::pdf::render::ocr_page_correction_degrees`'s quarter-turn
+    /// convention (duplicated as plain arithmetic below so this module has no
+    /// dependency on the `pdf` feature): the raster this backend receives was
+    /// obtained by rotating the displayed page by `correction_degrees`, so this
+    /// applies the same inverse quarter-turn arithmetic used elsewhere in the OCR
+    /// pipeline (`extractors::pdf::ocr::inverse_rotate_ocr_point`) to undo it,
+    /// without touching any stored bbox — only used to compute a sort key.
+    fn reading_order_point(x: f32, y: f32, correction_degrees: u32, raster_width: f32, raster_height: f32) -> (f32, f32) {
+        match correction_degrees {
+            90 => (y, raster_height - x),
+            180 => (raster_width - x, raster_height - y),
+            270 => (raster_width - y, x),
+            _ => (x, y),
+        }
+    }
+
+    /// Reorder detector blocks into true reading order when the page they were
+    /// rendered from carries a `/Rotate` value (#640).
+    ///
+    /// `normalize_rendered_page_for_ocr` (`crate::pdf::render`) intentionally hands
+    /// OCR backends a raster in the PDF page's raw MediaBox orientation rather than
+    /// its display orientation, so bbox math elsewhere in the pipeline needs no axis
+    /// swap (see the #530 regression test in `crate::pdf::render`). PaddleOCR's
+    /// detector still finds and reads the text fine in that orientation — it warps
+    /// each detected quad upright before recognition — but its natural block order
+    /// is `(y, x)` in *raster* space, which is only true reading order when the page
+    /// isn't rotated. On a rotated page that raster-space order groups lines into
+    /// several descending runs instead of a single top-to-bottom pass.
+    ///
+    /// Only the block *order* changes here; every block's stored bbox stays in the
+    /// raster space the caller rescales from, matching Tesseract's convention on the
+    /// same route.
+    fn reorder_blocks_for_page_rotation(
+        blocks: &mut [xberg_paddle_ocr::DetailedTextBlock],
+        page_rotation_degrees: u32,
+        raster_width: u32,
+        raster_height: u32,
+    ) {
+        let correction_degrees = (360 - page_rotation_degrees % 360) % 360;
+        if correction_degrees == 0 || raster_width == 0 || raster_height == 0 || blocks.len() < 2 {
+            return;
+        }
+        let (width, height) = (raster_width as f32, raster_height as f32);
+        let key = |block: &xberg_paddle_ocr::DetailedTextBlock| {
+            Self::block_bounds(block)
+                .map(|(min_x, min_y, _, _)| {
+                    Self::reading_order_point(min_x as f32, min_y as f32, correction_degrees, width, height)
+                })
+                .unwrap_or((f32::MAX, f32::MAX))
+        };
+        blocks.sort_by(|a, b| {
+            let (ax, ay) = key(a);
+            let (bx, by) = key(b);
+            ay.total_cmp(&by).then_with(|| ax.total_cmp(&bx))
+        });
     }
 
     fn is_vertical_text_block(block: &xberg_paddle_ocr::DetailedTextBlock) -> bool {
@@ -926,6 +1006,7 @@ impl OcrBackend for PaddleOcrBackend {
         };
 
         let effective_accel = self.resolve_acceleration(config.acceleration.as_ref());
+        let page_rotation_degrees = Self::page_rotation_degrees_from_backend_options(config);
 
         let PaddlePageOcr {
             text,
@@ -939,6 +1020,7 @@ impl OcrBackend for PaddleOcrBackend {
                 paddle_lang,
                 Arc::clone(&effective_config),
                 effective_accel.as_ref(),
+                page_rotation_degrees,
             )
             .await?;
         let rotation_outcome =
@@ -951,8 +1033,15 @@ impl OcrBackend for PaddleOcrBackend {
             use crate::types::internal::{ElementKind, InternalDocument, InternalElement};
             use crate::types::ocr_elements::OcrElementLevel;
 
+            // PaddleOCR has no paragraph concept of its own (only per-line
+            // geometry), so lines are grouped into blocks here and tagged with
+            // the same `hocr_block_id` attribute Tesseract's hOCR parser writes,
+            // letting `pdf::structure::adapters::ocr_doc_to_paragraphs` merge
+            // them with zero changes to its merge logic (#631).
+            let block_ids = crate::ocr::conversion::assign_line_block_ids(&line_elements);
+
             let mut doc = InternalDocument::new("pdf");
-            for elem in &line_elements {
+            for (elem, block_id) in line_elements.iter().zip(block_ids) {
                 let (left, top, width, height) = elem.geometry.to_aabb();
                 let bbox = BoundingBox {
                     x0: left as f64,
@@ -971,6 +1060,14 @@ impl OcrBackend for PaddleOcrBackend {
                 ie.bbox = Some(bbox);
                 ie.ocr_confidence = Some(elem.confidence.clone());
                 ie.ocr_geometry = Some(elem.geometry.clone());
+                ie.attributes = Some(
+                    [(
+                        crate::ocr::hocr_parser::HOCR_BLOCK_ID_ATTRIBUTE.to_string(),
+                        block_id,
+                    )]
+                    .into_iter()
+                    .collect(),
+                );
                 doc.push_element(ie);
             }
             doc
@@ -1059,6 +1156,12 @@ impl OcrBackend for PaddleOcrBackend {
 
     fn backend_type(&self) -> OcrBackendType {
         OcrBackendType::PaddleOCR
+    }
+
+    /// PaddleOCR never derives a page-level aggregate confidence: per-element `text_score`
+    /// exists but no page-level number is written.
+    fn confidence_semantics(&self) -> crate::plugins::ConfidenceSemantics {
+        crate::plugins::ConfidenceSemantics::None
     }
 
     fn supported_languages(&self) -> Vec<String> {
@@ -1366,6 +1469,76 @@ mod tests {
             blocks.iter().map(|block| block.block.text.as_str()).collect::<Vec<_>>(),
             ["first", "second"]
         );
+    }
+
+    /// #640 — on a page rendered from a `/Rotate 270` PDF page, the OCR raster is in
+    /// the page's raw MediaBox orientation (`normalize_rendered_page_for_ocr`), so
+    /// text that reads top-to-bottom on the page appears as a column running along
+    /// the raster's X axis. The detector's own `(y, x)`-in-raster-space order groups
+    /// these lines into several descending runs instead of one top-to-bottom pass;
+    /// `reorder_blocks_for_page_rotation` must recover the true (monotonic) order.
+    ///
+    /// This fails against the unfixed code: without a `reorder_blocks_for_page_rotation`
+    /// call, blocks are left in the order the detector handed them — raw ascending
+    /// raster `min_y` (90, 100, 105, 110), i.e. `["line3", "line1", "line4", "line2"]`
+    /// — not the monotonic `["line1", "line2", "line3", "line4"]` asserted below.
+    #[test]
+    fn reorders_blocks_into_monotonic_order_on_a_rotated_page() {
+        // Detector order: ascending raster min_y (90, 100, 105, 110) — not true
+        // reading order, which runs by descending raster min_x instead (800, 600,
+        // 400, 200) on this /Rotate 270 page.
+        let mut blocks = vec![
+            detailed_block("line3", 400, 90, 20, 20),
+            detailed_block("line1", 800, 100, 20, 20),
+            detailed_block("line4", 200, 105, 20, 20),
+            detailed_block("line2", 600, 110, 20, 20),
+        ];
+
+        PaddleOcrBackend::reorder_blocks_for_page_rotation(&mut blocks, 270, 900, 1000);
+
+        let order: Vec<&str> = blocks.iter().map(|block| block.block.text.as_str()).collect();
+        assert_eq!(order, ["line1", "line2", "line3", "line4"], "reading order must be monotonic");
+    }
+
+    /// #640 — an unrotated page (`page_rotation_degrees == 0`, the overwhelmingly
+    /// common case) must not be touched at all: reordering by a no-op correction
+    /// would silently perturb pages that are already correct (guards against
+    /// introducing a *second* rotation bug while fixing this one).
+    #[test]
+    fn leaves_block_order_unchanged_when_page_is_not_rotated() {
+        let mut blocks = vec![
+            detailed_block("first", 10, 10, 20, 20),
+            detailed_block("second", 10, 40, 20, 20),
+            detailed_block("third", 10, 70, 20, 20),
+        ];
+        let original: Vec<String> = blocks.iter().map(|block| block.block.text.clone()).collect();
+
+        PaddleOcrBackend::reorder_blocks_for_page_rotation(&mut blocks, 0, 900, 1000);
+
+        let order: Vec<&str> = blocks.iter().map(|block| block.block.text.as_str()).collect();
+        assert_eq!(order, original.iter().map(String::as_str).collect::<Vec<_>>());
+    }
+
+    /// #640 — `extractors::pdf::ocr` threads the page's `/Rotate` value through
+    /// `OcrConfig.backend_options["page_rotation_degrees"]`; absent (or non-numeric)
+    /// values must resolve to "no rotation" so direct image OCR and other backends'
+    /// configs reusing this field are unaffected.
+    #[test]
+    fn reads_page_rotation_hint_from_backend_options() {
+        let with_hint = OcrConfig {
+            backend_options: Some(serde_json::json!({"page_rotation_degrees": 270})),
+            ..Default::default()
+        };
+        assert_eq!(PaddleOcrBackend::page_rotation_degrees_from_backend_options(&with_hint), 270);
+
+        let without_hint = OcrConfig::default();
+        assert_eq!(PaddleOcrBackend::page_rotation_degrees_from_backend_options(&without_hint), 0);
+
+        let non_numeric = OcrConfig {
+            backend_options: Some(serde_json::json!({"page_rotation_degrees": "sideways"})),
+            ..Default::default()
+        };
+        assert_eq!(PaddleOcrBackend::page_rotation_degrees_from_backend_options(&non_numeric), 0);
     }
 
     #[test]

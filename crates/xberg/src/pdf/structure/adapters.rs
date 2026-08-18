@@ -1131,6 +1131,59 @@ mod tests {
         }
     }
 
+    /// Regression test for #631: PaddleOCR emits one `InternalElement` per
+    /// detected line with `attributes == None`, so before block ids were
+    /// derived from line geometry (`ocr::conversion::assign_line_block_ids`),
+    /// `hocr_block_id` was always `None` and every line became its own
+    /// `PdfParagraph` here — fragmenting paragraphs and, on a real scanned
+    /// document, losing 33 of 39 list markers relative to Tesseract. With
+    /// geometry-derived block ids wired through (as `paddle_ocr::backend` now
+    /// does), consecutive close, x-overlapping lines merge into one paragraph
+    /// exactly like Tesseract's `ocr_par`-derived elements do.
+    #[cfg(paddle_ocr)]
+    #[test]
+    fn test_ocr_doc_to_paragraphs_merges_paddle_derived_lines_regression_631() {
+        let raw_elements = vec![
+            crate::types::OcrElement::new(
+                "First wrapped line",
+                crate::types::OcrBoundingGeometry::Rectangle {
+                    left: 100,
+                    top: 100,
+                    width: 400,
+                    height: 20,
+                },
+                crate::types::OcrConfidence::from_paddle(0.9, 0.9),
+            ),
+            crate::types::OcrElement::new(
+                "continues the same paragraph",
+                crate::types::OcrBoundingGeometry::Rectangle {
+                    left: 100,
+                    top: 124,
+                    width: 400,
+                    height: 20,
+                },
+                crate::types::OcrConfidence::from_paddle(0.9, 0.9),
+            ),
+        ];
+        let block_ids = crate::ocr::conversion::assign_line_block_ids(&raw_elements);
+        let block_id_refs = block_ids.iter().map(|id| Some(id.as_str())).collect::<Vec<_>>();
+
+        let mut doc = layout_line_document(&[
+            ("First wrapped line", 100.0, 100.0, 500.0, 120.0),
+            ("continues the same paragraph", 100.0, 124.0, 500.0, 144.0),
+        ]);
+        set_hocr_block_ids(&mut doc, &block_id_refs);
+
+        let paragraphs = ocr_doc_to_paragraphs(&doc, 1000);
+
+        assert_eq!(
+            paragraphs.len(),
+            1,
+            "geometry-adjacent PaddleOCR lines must merge into one paragraph, not fragment"
+        );
+        assert_eq!(paragraphs[0].text, "First wrapped line\ncontinues the same paragraph");
+    }
+
     #[cfg(feature = "layout-detection")]
     #[test]
     fn test_layout_merges_only_adjacent_lines_in_same_hocr_block() {

@@ -456,6 +456,74 @@ fn line_has_repairable_marker(line: &str) -> bool {
     }
 }
 
+/// Resolve a backend's confidence semantics from the object the registry holds for it,
+/// never from its name.
+///
+/// `min_ocr_mean_confidence` is an ABSOLUTE 0-100 floor, and a floor only means something
+/// against a known scale. Tesseract's `mean_text_conf` tracks legibility: on a recorded
+/// ordinance its prose pages scored 89-95 and its scanned drawings 36-62 — that backend
+/// reports [`ConfidenceSemantics::Legibility`].
+///
+/// Sceptre's does not. On the same document every page landed between 36 and 74 — the entire
+/// document below a floor calibrated for Tesseract — and the ordering is inverted: the real
+/// Plant List page scored 39 while a pure drawing scored 74. Applying the floor there
+/// discarded all 16 pages and produced an empty document. Sceptre reports
+/// [`ConfidenceSemantics::Uncalibrated`], so the gate never applies to it.
+///
+/// Prefers the backend object the single-backend route above already resolved. The
+/// multi-stage pipeline route resolves a backend per stage internally and never surfaces one
+/// to this call site, so when `backend` is `None` this falls back to a fresh registry lookup
+/// by the top-level configured name — the same lookup that resolved `backend` above — and
+/// asks the returned object directly. That fallback is a known approximation: a pipeline
+/// page's actual producing backend can differ per page (whichever stage succeeded for it),
+/// and nothing here tracks that per page.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn resolve_confidence_semantics(
+    backend: Option<&std::sync::Arc<dyn crate::plugins::OcrBackend>>,
+    backend_name: &str,
+) -> crate::plugins::ConfidenceSemantics {
+    if let Some(backend) = backend {
+        return backend.confidence_semantics();
+    }
+    let registry = crate::plugins::registry::get_ocr_backend_registry();
+    let registry = registry.read();
+    registry
+        .get(backend_name)
+        .map(|backend| backend.confidence_semantics())
+        .unwrap_or(crate::plugins::ConfidenceSemantics::Uncalibrated)
+}
+
+/// The backend-native-scale confidence floor a page's confidence must clear, or `false` if
+/// this backend's confidence cannot be used as an absolute gate at all.
+///
+/// Only [`ConfidenceSemantics::Legibility`] is normalized (by its `scale_max`) and compared
+/// against the ABSOLUTE 0-100 `min_ocr_mean_confidence` threshold. `Uncalibrated` and `None`
+/// never reject here — their number, if any, does not mean legibility — so callers must fall
+/// back to [`is_ocr_recognition_noise`] for those.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn confidence_gate_rejects(
+    semantics: crate::plugins::ConfidenceSemantics,
+    confidence: Option<f64>,
+    min_ocr_mean_confidence: f64,
+) -> bool {
+    let crate::plugins::ConfidenceSemantics::Legibility { scale_max } = semantics else {
+        return false;
+    };
+    if scale_max <= 0.0 || min_ocr_mean_confidence <= 0.0 {
+        return false;
+    }
+    confidence.is_some_and(|c| c / scale_max < min_ocr_mean_confidence / 100.0)
+}
+
+/// Whether the confidence gate is authoritative for this page at all — i.e. whether the
+/// backend's semantics are `Legibility` and it actually reported a confidence. When this is
+/// `false`, the text-shape heuristic decides instead of the (possibly meaningless) number.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn confidence_gate_applies(semantics: crate::plugins::ConfidenceSemantics, confidence: Option<f64>) -> bool {
+    matches!(semantics, crate::plugins::ConfidenceSemantics::Legibility { scale_max } if scale_max > 0.0)
+        && confidence.is_some()
+}
+
 /// Tesseract's mean confidence for a page, 0-100, if the backend reported one.
 ///
 /// Written by `perform_ocr` from `api.mean_text_conf()`. Backends that do not report it
@@ -600,6 +668,22 @@ pub(crate) fn compute_quality_score(text: &str, thresholds: &OcrQualityThreshold
         + meaningful_score * 0.15
         + garbage_score * 0.10)
         .clamp(0.0, 1.0)
+}
+
+/// Blend a pipeline stage's text-shape score with its reported confidence, when that
+/// confidence is on a known legibility scale.
+///
+/// `mean_conf`, if `Some`, is already normalized to 0-1 by `extract_with_ocr` — and it is
+/// only ever `Some` there when the reporting backend is `ConfidenceSemantics::Legibility`.
+/// For any other backend `extract_with_ocr` reports `None`, so this drops the confidence
+/// term entirely and blends nothing, rather than averaging in a number with no defined
+/// scale (see `resolve_confidence_semantics`).
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn pipeline_stage_score(text_score: f64, mean_conf: Option<f64>) -> f64 {
+    match mean_conf {
+        Some(conf) => text_score * 0.7 + conf * 0.3,
+        None => text_score,
+    }
 }
 
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
@@ -954,6 +1038,105 @@ fn rescale_ocr_bboxes_to_page_points(
     }
 }
 
+/// Undo a single quarter-turn on one point, mapping a backend's post-auto-rotate
+/// pixel space back to the pre-rotation raster it was actually given.
+///
+/// `processed_width`/`processed_height` are the dimensions of the space `(x, y)`
+/// is currently in (i.e. the auto-rotated image the backend ran detection on).
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+fn undo_auto_rotate_point(x: f64, y: f64, correction_degrees: u16, processed_width: f64, processed_height: f64) -> (f64, f64) {
+    match correction_degrees {
+        90 => (y, processed_height - x),
+        180 => (processed_width - x, processed_height - y),
+        270 => (processed_width - y, x),
+        _ => (x, y),
+    }
+}
+
+/// Undo an OCR backend's `auto_rotate` orientation correction on a structured
+/// document's element bboxes, mapping them back from the rotated image the
+/// backend actually OCR'd to the raster its caller rendered and will rescale
+/// (#633).
+///
+/// Some backends (currently PaddleOCR, see
+/// `paddle_ocr::backend::rotate_for_detected_orientation`) detect a scanned
+/// page's orientation and rotate their input image before OCR when
+/// `OcrConfig::auto_rotate` is set, recording that in the result metadata
+/// (`ocr_metadata_keys::OCR_AUTO_ROTATED_METADATA_KEY` /
+/// `OCR_ORIENTATION_DEGREES_METADATA_KEY` /
+/// `OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY` / `..._HEIGHT_...`). Their
+/// `ocr_internal_document` bboxes are built directly from that rotated raster
+/// and are never mapped back — every other caller of this document, including
+/// `rescale_ocr_bboxes_to_page_points` below, assumes bboxes are in the
+/// *original* `render_width`/`render_height` raster (the one the caller
+/// rendered and passed to the backend), which after a 90/270 correction has
+/// different — swapped — dimensions than the rotated one the bboxes are
+/// actually in. Left uncorrected, the pixel->point rescale divides by the wrong
+/// axis and both position and reading order come out wrong.
+///
+/// A no-op when the backend didn't auto-rotate (the metadata key is absent),
+/// which covers every backend and the overwhelmingly common `auto_rotate: false`
+/// default.
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+fn undo_auto_rotate_document_bboxes(
+    doc: &mut crate::types::internal::InternalDocument,
+    metadata: &crate::types::Metadata,
+    render_width: u32,
+    render_height: u32,
+) {
+    let auto_rotated = metadata
+        .additional
+        .get(crate::ocr_metadata_keys::OCR_AUTO_ROTATED_METADATA_KEY)
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    if !auto_rotated {
+        return;
+    }
+    let Some(orientation) = metadata
+        .additional
+        .get(crate::ocr_metadata_keys::OCR_ORIENTATION_DEGREES_METADATA_KEY)
+        .and_then(serde_json::Value::as_i64)
+    else {
+        return;
+    };
+    if !matches!(orientation, 0 | 90 | 180 | 270) {
+        return;
+    }
+    let correction_degrees = ((360 - orientation).rem_euclid(360)) as u16;
+    if correction_degrees == 0 {
+        return;
+    }
+    // Prefer the backend's own reported processed-image size; fall back to the
+    // swap a lossless quarter-turn of the original raster implies, in case a
+    // future backend sets `auto_rotated` without the paired width/height keys.
+    let reported_dimensions = metadata
+        .additional
+        .get(crate::ocr_metadata_keys::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY)
+        .and_then(serde_json::Value::as_u64)
+        .zip(
+            metadata
+                .additional
+                .get(crate::ocr_metadata_keys::OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY)
+                .and_then(serde_json::Value::as_u64),
+        );
+    let (processed_width, processed_height) = match reported_dimensions {
+        Some((width, height)) => (width as f64, height as f64),
+        None if matches!(correction_degrees, 90 | 270) => (f64::from(render_height), f64::from(render_width)),
+        None => (f64::from(render_width), f64::from(render_height)),
+    };
+    for element in &mut doc.elements {
+        let Some(bbox) = element.bbox.as_mut() else {
+            continue;
+        };
+        let (x0, y0) = undo_auto_rotate_point(bbox.x0, bbox.y0, correction_degrees, processed_width, processed_height);
+        let (x1, y1) = undo_auto_rotate_point(bbox.x1, bbox.y1, correction_degrees, processed_width, processed_height);
+        bbox.x0 = x0.min(x1);
+        bbox.x1 = x0.max(x1);
+        bbox.y0 = y0.min(y1);
+        bbox.y1 = y0.max(y1);
+    }
+}
+
 /// Build the per-page structured document for the single-backend mixed OCR route,
 /// carrying the backend's tables and OCR elements instead of dropping them (#60).
 ///
@@ -980,6 +1163,7 @@ fn build_mixed_ocr_page_document(
         None if backend_tables.is_empty() && backend_elements.is_empty() => return None,
         None => flat_ocr_page_document(&result.content),
     };
+    undo_auto_rotate_document_bboxes(&mut doc, &result.metadata, image_width_px, image_height_px);
     rescale_ocr_bboxes_to_page_points(
         Some(&mut doc),
         &mut backend_tables,
@@ -1440,7 +1624,8 @@ pub(crate) async fn extract_mixed_ocr_native(
             let mut join_set = tokio::task::JoinSet::new();
             for (page_idx, data, _width, _height) in &encoded {
                 let backend_clone = Arc::clone(backend);
-                let config_clone = ocr_config_owned.clone();
+                let page_rotation_degrees = page_rotations.get(*page_idx).copied().unwrap_or(0);
+                let config_clone = ocr_config_with_page_rotation_hint(&ocr_config_owned, page_rotation_degrees).into_owned();
                 let data_clone = Arc::clone(data);
                 let idx = *page_idx;
                 join_set.spawn(async move {
@@ -1508,7 +1693,9 @@ pub(crate) async fn extract_mixed_ocr_native(
         #[cfg(any(not(feature = "tokio-runtime"), target_arch = "wasm32"))]
         {
             for (page_idx, data, width, height) in &encoded {
-                let mut extraction_result = backend.process_image(data.as_slice(), &ocr_config_owned).await?;
+                let page_rotation_degrees = page_rotations.get(*page_idx).copied().unwrap_or(0);
+                let config_for_page = ocr_config_with_page_rotation_hint(&ocr_config_owned, page_rotation_degrees);
+                let mut extraction_result = backend.process_image(data.as_slice(), config_for_page.as_ref()).await?;
                 if let Some(usage) = extraction_result.llm_usage.take() {
                     accumulated_llm_usage.extend(usage);
                 }
@@ -1566,23 +1753,37 @@ pub(crate) async fn extract_mixed_ocr_native(
         .as_ref()
         .and_then(|ocr| ocr.quality_thresholds.clone())
         .unwrap_or_default();
+    let backend_name = config.ocr.as_ref().map(|ocr| ocr.backend.as_str()).unwrap_or_default();
+    let confidence_semantics = resolve_confidence_semantics(backend.as_ref(), backend_name);
     ocr_results.retain(|page_number, text| {
         let confidence = page_mean_confidence.get(page_number).copied();
         tracing::debug!(page = *page_number, ?confidence, "OCR page mean confidence");
 
-        // The engine's own confidence is the sharper instrument, so it decides when it is
-        // available; the text heuristic only covers backends that report none.
-        let rejected_by_confidence = ocr_output_thresholds.min_ocr_mean_confidence > 0.0
-            && confidence.is_some_and(|c| c < ocr_output_thresholds.min_ocr_mean_confidence);
-        if !rejected_by_confidence && (confidence.is_some() || !is_ocr_recognition_noise(text, &ocr_output_thresholds))
+        // The engine's own confidence is the sharper instrument, so it decides — but only
+        // where its scale is known to mean legibility (`ConfidenceSemantics::Legibility`).
+        // Elsewhere the text heuristic runs; an `Uncalibrated` or `None` backend must never
+        // have its (possibly meaningless, possibly inverted) number empty a document.
+        let rejected_by_confidence = confidence_gate_rejects(
+            confidence_semantics,
+            confidence,
+            ocr_output_thresholds.min_ocr_mean_confidence,
+        );
+        let judged_by_confidence = confidence_gate_applies(confidence_semantics, confidence);
+        if !rejected_by_confidence
+            && (judged_by_confidence || !is_ocr_recognition_noise(text, &ocr_output_thresholds))
         {
             return true;
         }
         if rejected_by_confidence {
             let conf = confidence.unwrap_or_default();
+            let scale_max = match confidence_semantics {
+                crate::plugins::ConfidenceSemantics::Legibility { scale_max } => scale_max,
+                _ => 100.0,
+            };
             tracing::warn!(
                 page = *page_number,
                 mean_confidence = conf,
+                scale_max,
                 threshold = ocr_output_thresholds.min_ocr_mean_confidence,
                 "rejecting OCR output as recognition noise; the page contributes no text"
             );
@@ -1590,8 +1791,9 @@ pub(crate) async fn extract_mixed_ocr_native(
                 source: std::borrow::Cow::Borrowed("ocr"),
                 message: std::borrow::Cow::Owned(format!(
                     "Page {page_number} produced OCR output the engine had little confidence in \
-                     (mean confidence {conf:.0} of 100, threshold {:.0}); the page is most likely \
+                     (mean confidence {:.0}% of scale, threshold {:.0}%); the page is most likely \
                      a drawing or diagram. Its text was discarded.",
+                    (conf / scale_max) * 100.0,
                     ocr_output_thresholds.min_ocr_mean_confidence
                 )),
             });
@@ -2638,6 +2840,14 @@ pub(crate) async fn extract_with_ocr(
         let registry = registry.read();
         registry.get(&base_ocr_config.backend)?
     };
+    // Only `ConfidenceSemantics::Legibility` backends report a `mean_text_conf` whose scale
+    // means legibility; anything else (`Uncalibrated`, `None`) must never be turned into a
+    // normalized confidence, or a page-rejection gate downstream would compare it against an
+    // absolute floor it was never calibrated against (see `resolve_confidence_semantics`).
+    let backend_confidence_scale = match backend.confidence_semantics() {
+        crate::plugins::ConfidenceSemantics::Legibility { scale_max } if scale_max > 0.0 => Some(scale_max),
+        _ => None,
+    };
 
     let structured_ocr_config;
     let ocr_config = {
@@ -2664,12 +2874,14 @@ pub(crate) async fn extract_with_ocr(
     {
         tracing::debug!(backend = %ocr_config.backend, "Using document-level OCR processing");
         let result = backend.process_document(doc_path, ocr_config).await?;
-        let mean_conf = result
-            .metadata
-            .additional
-            .get("mean_text_conf")
-            .and_then(|v| v.as_f64())
-            .map(|v| v / 100.0);
+        let mean_conf = backend_confidence_scale.and_then(|scale_max| {
+            result
+                .metadata
+                .additional
+                .get("mean_text_conf")
+                .and_then(|v| v.as_f64())
+                .map(|v| v / scale_max)
+        });
         let backend_elements = result.ocr_elements.unwrap_or_default();
         let ocr_elements = filter_public_ocr_elements(&backend_elements, base_ocr_config);
         let llm_usage = result.llm_usage.unwrap_or_default();
@@ -2841,7 +3053,15 @@ pub(crate) async fn extract_with_ocr(
             let mut join_set: JoinSet<(usize, crate::Result<crate::types::ExtractedDocument>)> = JoinSet::new();
             for (page_idx, image_data, _width, _height) in &encoded_batch {
                 let backend_clone = std::sync::Arc::clone(&backend);
-                let config_clone = ocr_config_owned.clone();
+                #[cfg(feature = "pdf")]
+                let page_rotation_degrees = lazy_pdf_render_state
+                    .as_ref()
+                    .and_then(|(_, _, rotations)| rotations.get(*page_idx))
+                    .copied()
+                    .unwrap_or(0);
+                #[cfg(not(feature = "pdf"))]
+                let page_rotation_degrees: u32 = 0;
+                let config_clone = ocr_config_with_page_rotation_hint(&ocr_config_owned, page_rotation_degrees).into_owned();
                 let data_clone = Arc::clone(image_data);
                 let idx = *page_idx;
                 join_set.spawn(async move {
@@ -2860,7 +3080,16 @@ pub(crate) async fn extract_with_ocr(
         #[cfg(any(not(feature = "tokio-runtime"), target_arch = "wasm32"))]
         {
             for (page_idx, image_data, _width, _height) in &encoded_batch {
-                let ocr_result = backend.process_image(image_data.as_slice(), &ocr_config_owned).await?;
+                #[cfg(feature = "pdf")]
+                let page_rotation_degrees = lazy_pdf_render_state
+                    .as_ref()
+                    .and_then(|(_, _, rotations)| rotations.get(*page_idx))
+                    .copied()
+                    .unwrap_or(0);
+                #[cfg(not(feature = "pdf"))]
+                let page_rotation_degrees: u32 = 0;
+                let config_for_page = ocr_config_with_page_rotation_hint(&ocr_config_owned, page_rotation_degrees);
+                let ocr_result = backend.process_image(image_data.as_slice(), config_for_page.as_ref()).await?;
                 batch_ocr_results[page_idx - batch_start] = Some(ocr_result);
             }
         }
@@ -3066,10 +3295,9 @@ pub(crate) async fn extract_with_ocr(
         crate::layout::return_tatr(model);
     }
 
-    let mean_text_conf = if conf_count > 0 {
-        Some((conf_sum / conf_count as f64) / 100.0)
-    } else {
-        None
+    let mean_text_conf = match (conf_count > 0, backend_confidence_scale) {
+        (true, Some(scale_max)) => Some((conf_sum / conf_count as f64) / scale_max),
+        _ => None,
     };
 
     let page_marker_cfg = config.pages.as_ref().filter(|p| p.insert_page_markers);
@@ -3538,11 +3766,7 @@ pub(crate) async fn run_ocr_pipeline(
                 stage_formulas,
             )) => {
                 let text_score = compute_quality_score(&text, &pipeline.quality_thresholds);
-
-                let score = match mean_conf {
-                    Some(conf) => text_score * 0.7 + conf * 0.3,
-                    None => text_score,
-                };
+                let score = pipeline_stage_score(text_score, mean_conf);
 
                 tracing::debug!(
                     backend = %stage.backend,
@@ -3717,6 +3941,44 @@ fn filter_public_ocr_elements(
         .filter(|element| ocr_element_level_rank(element.level) >= minimum_rank)
         .cloned()
         .collect()
+}
+
+/// Inject a page's PDF `/Rotate` value into `OcrConfig.backend_options` so a
+/// backend that can use it (currently PaddleOCR, see
+/// `paddle_ocr::backend::PaddleOcrBackend::reorder_blocks_for_page_rotation`) can
+/// correct its detector's raster-space block order into true reading order
+/// (#640). `normalize_rendered_page_for_ocr` deliberately hands every backend a
+/// raster in the page's raw MediaBox orientation rather than its display
+/// orientation (see the #530 regression test in `crate::pdf::render`), which
+/// Tesseract's own layout analysis already reads correctly; PaddleOCR's detector
+/// does not, so this hint is the minimal, backend-local fix rather than changing
+/// the shared raster every backend (including Tesseract) receives.
+///
+/// A no-op for `page_rotation_degrees == 0` (the overwhelmingly common case) so
+/// unrotated pages never pay a config clone. Backends that don't recognise the
+/// `page_rotation_degrees` key ignore it, per `OcrConfig.backend_options`'s
+/// documented contract.
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+fn ocr_config_with_page_rotation_hint(
+    config: &crate::core::config::ocr::OcrConfig,
+    page_rotation_degrees: u32,
+) -> Cow<'_, crate::core::config::ocr::OcrConfig> {
+    if page_rotation_degrees == 0 {
+        return Cow::Borrowed(config);
+    }
+    let mut config = config.clone();
+    let mut opts = config.backend_options.take().unwrap_or_else(|| serde_json::json!({}));
+    if !opts.is_object() {
+        opts = serde_json::json!({});
+    }
+    if let Some(obj) = opts.as_object_mut() {
+        obj.insert(
+            "page_rotation_degrees".to_string(),
+            serde_json::Value::Number(page_rotation_degrees.into()),
+        );
+    }
+    config.backend_options = Some(opts);
+    Cow::Owned(config)
 }
 
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
@@ -7408,6 +7670,111 @@ Name: ___
         assert!(build_mixed_ocr_page_document(&mut result, 3, 1000, 1000, 1000.0, 1000.0).is_none());
     }
 
+    /// #633 — a backend that auto-rotated its input image (`OcrConfig::auto_rotate`)
+    /// before OCR reports `ocr_internal_document` bboxes in that ROTATED image's pixel
+    /// space, not the original raster the caller rendered and will rescale from
+    /// (`render_width`/`render_height`). `undo_auto_rotate_document_bboxes` must map
+    /// them back before `rescale_ocr_bboxes_to_page_points` runs, or the pixel->point
+    /// scale divides the rotated-space bbox by the wrong (un-swapped) axis.
+    ///
+    /// This fails against the unfixed code (no call to
+    /// `undo_auto_rotate_document_bboxes`): skipping straight to the rescale leaves
+    /// the raw bbox {10, 20, 30, 60} scaled 1:1 and unchanged, not the
+    /// rotation-corrected {40, 10, 80, 30} asserted below.
+    #[cfg(feature = "pdf")]
+    #[test]
+    fn should_undo_auto_rotate_bboxes_before_rescaling_to_page_points() {
+        use crate::types::extraction::BoundingBox;
+        use crate::types::internal::{ElementKind, InternalDocument, InternalElement};
+        use crate::types::ocr_elements::OcrElementLevel;
+
+        // The backend rotated a 200x100 raster 90 degrees before OCR, producing a
+        // 100x200 processed image (`OCR_ORIENTATION_DEGREES_METADATA_KEY: 90`).
+        let mut doc = InternalDocument::new("pdf");
+        let mut element = InternalElement::text(
+            ElementKind::OcrText {
+                level: OcrElementLevel::Block,
+            },
+            "word",
+            0,
+        );
+        // Pixel-space bbox in the ROTATED 100x200 processed image.
+        element.bbox = Some(BoundingBox {
+            x0: 10.0,
+            y0: 20.0,
+            x1: 30.0,
+            y1: 60.0,
+        });
+        doc.push_element(element);
+
+        let mut metadata = crate::types::Metadata::default();
+        metadata.additional.insert(
+            std::borrow::Cow::Borrowed(crate::ocr_metadata_keys::OCR_AUTO_ROTATED_METADATA_KEY),
+            serde_json::Value::Bool(true),
+        );
+        metadata.additional.insert(
+            std::borrow::Cow::Borrowed(crate::ocr_metadata_keys::OCR_ORIENTATION_DEGREES_METADATA_KEY),
+            serde_json::json!(90),
+        );
+        metadata.additional.insert(
+            std::borrow::Cow::Borrowed(crate::ocr_metadata_keys::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY),
+            serde_json::json!(100),
+        );
+        metadata.additional.insert(
+            std::borrow::Cow::Borrowed(crate::ocr_metadata_keys::OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY),
+            serde_json::json!(200),
+        );
+
+        // Original (pre-rotation) 200x100 raster.
+        undo_auto_rotate_document_bboxes(&mut doc, &metadata, 200, 100);
+
+        // A 200x100pt page so the pixel->point rescale is 1:1 and does not obscure
+        // the rotation fix.
+        rescale_ocr_bboxes_to_page_points(Some(&mut doc), &mut [], 200, 100, 200.0, 100.0);
+
+        let bbox = doc.elements[0].bbox.expect("element must keep its bbox");
+        assert_eq!(bbox.x0, 40.0);
+        assert_eq!(bbox.y0, 10.0);
+        assert_eq!(bbox.x1, 80.0);
+        assert_eq!(bbox.y1, 30.0);
+    }
+
+    /// #633 — a backend that never auto-rotated (the overwhelmingly common case,
+    /// including every non-PaddleOCR backend and Paddle with `auto_rotate: false`)
+    /// must be left completely unaffected: no `auto_rotated` metadata key at all.
+    #[cfg(feature = "pdf")]
+    #[test]
+    fn should_leave_bboxes_unchanged_when_backend_did_not_auto_rotate() {
+        use crate::types::extraction::BoundingBox;
+        use crate::types::internal::{ElementKind, InternalDocument, InternalElement};
+        use crate::types::ocr_elements::OcrElementLevel;
+
+        let mut doc = InternalDocument::new("pdf");
+        let mut element = InternalElement::text(
+            ElementKind::OcrText {
+                level: OcrElementLevel::Block,
+            },
+            "word",
+            0,
+        );
+        element.bbox = Some(BoundingBox {
+            x0: 10.0,
+            y0: 20.0,
+            x1: 30.0,
+            y1: 60.0,
+        });
+        doc.push_element(element);
+
+        let metadata = crate::types::Metadata::default();
+        undo_auto_rotate_document_bboxes(&mut doc, &metadata, 200, 100);
+
+        let bbox = doc.elements[0].bbox.expect("element must keep its bbox");
+        assert_eq!(bbox.x0, 10.0);
+        assert_eq!(bbox.y0, 20.0);
+        assert_eq!(bbox.x1, 30.0);
+        assert_eq!(bbox.y1, 60.0);
+    }
+
     /// #1423 — element bboxes are rescaled pixel->point (still top-left) so the later
     /// `pdf_block_bbox` flip (which now receives the page height in points) lands on
     /// exact PDF coordinates instead of raw Tesseract raster pixels.
@@ -8078,6 +8445,151 @@ Each row of the preceding table records one measurement taken during the survey 
         assert_eq!(
             repair_ocr_list_markers(text).as_ref(),
             "Section 3. Regulations\n\n3. Maximum number of lots: 9\nunchanged tail\n"
+        );
+    }
+
+    #[test]
+    fn legibility_backend_still_rejects_a_page_below_the_floor() {
+        // Tesseract's own scale must keep working exactly as before: `Legibility { scale_max:
+        // 100.0 }` normalizes to the same fraction as the old unconditional `c < threshold`
+        // check did, so this must not regress.
+        use super::confidence_gate_rejects;
+        let thresholds = OcrQualityThresholds::default();
+        let semantics = crate::plugins::ConfidenceSemantics::Legibility { scale_max: 100.0 };
+
+        assert!(
+            confidence_gate_rejects(semantics, Some(39.0), thresholds.min_ocr_mean_confidence),
+            "a page at confidence 39 (the real ordinance's worst legible page) must still be \
+             rejected under Tesseract's own 100-point scale"
+        );
+        assert!(
+            !confidence_gate_rejects(semantics, Some(95.0), thresholds.min_ocr_mean_confidence),
+            "clean prose at confidence 95 must not be rejected"
+        );
+    }
+
+    #[test]
+    fn uncalibrated_backend_confidence_never_empties_a_document() {
+        // Regression for the sceptre bug: every page of a 16-page recorded ordinance scored
+        // between 36 and 74 on sceptre's rescaled `custom_mean` -- entirely below the 75.0
+        // default floor, which is tuned for Tesseract's scale -- and applying the floor
+        // discarded all 16 pages, emptying the document. An `Uncalibrated` backend's number
+        // must never be able to do that: the gate must not apply at all, and a legible page
+        // must survive on the text-shape heuristic instead.
+        use super::{confidence_gate_applies, confidence_gate_rejects};
+        let thresholds = OcrQualityThresholds::default();
+        let semantics = crate::plugins::ConfidenceSemantics::Uncalibrated;
+
+        for sceptre_like_confidence in [36.0, 39.0, 57.0, 62.0, 74.0] {
+            let confidence = Some(sceptre_like_confidence);
+            let rejected_by_confidence =
+                confidence_gate_rejects(semantics, confidence, thresholds.min_ocr_mean_confidence);
+            let judged_by_confidence = confidence_gate_applies(semantics, confidence);
+            assert!(
+                !rejected_by_confidence,
+                "confidence {sceptre_like_confidence} must never gate an Uncalibrated backend's page"
+            );
+            let kept = !rejected_by_confidence
+                && (judged_by_confidence || !is_ocr_recognition_noise(ORDINANCE_PROSE, &thresholds));
+            assert!(
+                kept,
+                "a legible page (confidence {sceptre_like_confidence}) must survive when the \
+                 reporting backend is Uncalibrated"
+            );
+        }
+    }
+
+    #[test]
+    fn confidence_gate_respects_scale_max_not_a_hardcoded_100() {
+        // scale_max = 10, confidence = 8 -> 80% of scale, above a 75%-of-100 threshold, so
+        // this must NOT be rejected. Comparing the raw value 8 directly against the
+        // (100-scaled) threshold of 75 -- the old hardcoded-100 assumption -- would wrongly
+        // reject it (8 < 75). Only normalizing by the backend's own `scale_max` gets this right.
+        use super::confidence_gate_rejects;
+        let thresholds = OcrQualityThresholds::default();
+        assert_eq!(thresholds.min_ocr_mean_confidence, 75.0, "test assumes the documented default");
+        let semantics = crate::plugins::ConfidenceSemantics::Legibility { scale_max: 10.0 };
+
+        assert!(
+            !confidence_gate_rejects(semantics, Some(8.0), thresholds.min_ocr_mean_confidence),
+            "8 of a 10-point scale (80%) must clear a 75%-of-scale floor"
+        );
+        assert!(
+            confidence_gate_rejects(semantics, Some(7.0), thresholds.min_ocr_mean_confidence),
+            "7 of a 10-point scale (70%) must not clear a 75%-of-scale floor"
+        );
+    }
+
+    #[test]
+    fn pipeline_blend_drops_mean_conf_term_for_non_legibility_stage() {
+        // `extract_with_ocr` only ever reports `Some(mean_conf)` when its backend is
+        // `Legibility`; for anything else it reports `None`. The blend must then fall back
+        // to the text-shape score alone rather than averaging in an incomparable number.
+        use super::pipeline_stage_score;
+        let text_score = 0.62;
+
+        assert_eq!(
+            pipeline_stage_score(text_score, None),
+            text_score,
+            "a non-Legibility stage's score must be the text score alone, unblended"
+        );
+        assert_ne!(
+            pipeline_stage_score(text_score, Some(0.1)),
+            text_score,
+            "a Legibility stage's reported confidence must still influence the score"
+        );
+    }
+
+    #[test]
+    fn resolve_confidence_semantics_reads_the_backend_object_not_its_name() {
+        // A backend named to look calibrated but whose `confidence_semantics()` says
+        // otherwise: the gate must trust the object, not a name-based guess. If this ever
+        // regresses to matching on the name, this backend would be wrongly treated as
+        // Legibility and could empty a document exactly like the sceptre bug did.
+        use crate::core::config::OcrConfig;
+        use crate::plugins::{ConfidenceSemantics, OcrBackend, OcrBackendType, Plugin};
+        use crate::types::ExtractedDocument;
+        use std::sync::Arc;
+
+        struct DeceptivelyNamedBackend;
+
+        #[async_trait::async_trait]
+        impl OcrBackend for DeceptivelyNamedBackend {
+            fn backend_type(&self) -> OcrBackendType {
+                OcrBackendType::Custom
+            }
+            fn supports_language(&self, _: &str) -> bool {
+                true
+            }
+            async fn process_image(&self, _: &[u8], _: &OcrConfig) -> crate::Result<ExtractedDocument> {
+                Ok(ExtractedDocument::default())
+            }
+            fn confidence_semantics(&self) -> ConfidenceSemantics {
+                ConfidenceSemantics::Uncalibrated
+            }
+        }
+
+        impl Plugin for DeceptivelyNamedBackend {
+            fn name(&self) -> &str {
+                "tesseract-lookalike"
+            }
+            fn version(&self) -> String {
+                "1.0.0".to_string()
+            }
+            fn initialize(&self) -> crate::Result<()> {
+                Ok(())
+            }
+            fn shutdown(&self) -> crate::Result<()> {
+                Ok(())
+            }
+        }
+
+        let backend: Arc<dyn OcrBackend> = Arc::new(DeceptivelyNamedBackend);
+        let semantics = super::resolve_confidence_semantics(Some(&backend), "tesseract-lookalike");
+        assert_eq!(
+            semantics,
+            ConfidenceSemantics::Uncalibrated,
+            "must read the backend's own confidence_semantics(), not its name"
         );
     }
 

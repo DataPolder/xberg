@@ -151,6 +151,143 @@ fn word_block_to_element(
     )
 }
 
+/// Maximum vertical gap between two consecutive PaddleOCR lines, expressed as a
+/// multiple of the running median line height seen so far on the page, for the
+/// lines to be grouped into the same paragraph block. Relative to line height
+/// (not an absolute pixel count) so the grouping is stable whether the page was
+/// rasterized at 150 DPI or 450 DPI — an absolute-pixel version of this same
+/// mistake is a known live defect elsewhere in this codebase
+/// (`crates/xberg-paddle-ocr/src/ocr_lite.rs:528-542`, `VISUAL_LINE_Y_TOLERANCE_PX`).
+#[cfg(paddle_ocr)]
+const MAX_BLOCK_VERTICAL_GAP_IN_LINE_HEIGHTS: f64 = 0.6;
+
+/// Minimum fraction of the narrower of two consecutive lines' horizontal extent
+/// that must overlap for them to be considered part of the same paragraph
+/// column.
+#[cfg(paddle_ocr)]
+const MIN_BLOCK_HORIZONTAL_OVERLAP_RATIO: f64 = 0.3;
+
+/// Maximum left-edge offset between two consecutive lines, expressed as a
+/// multiple of the running median line height, allowed as a fallback when the
+/// lines don't x-overlap enough on their own (covers short lines that still
+/// share a left margin with the paragraph they continue).
+#[cfg(paddle_ocr)]
+const MAX_BLOCK_LEFT_EDGE_OFFSET_IN_LINE_HEIGHTS: f64 = 0.5;
+
+/// Axis-aligned bounds of one OCR line, derived from its (possibly
+/// quadrilateral) geometry, used only for block-grouping decisions.
+#[cfg(paddle_ocr)]
+#[derive(Clone, Copy)]
+struct LineBounds {
+    left: f64,
+    top: f64,
+    right: f64,
+    bottom: f64,
+}
+
+#[cfg(paddle_ocr)]
+impl LineBounds {
+    fn from_geometry(geometry: &OcrBoundingGeometry) -> Self {
+        let (left, top, width, height) = geometry.to_aabb();
+        Self {
+            left: f64::from(left),
+            top: f64::from(top),
+            right: f64::from(left + width),
+            bottom: f64::from(top + height),
+        }
+    }
+
+    fn height(&self) -> f64 {
+        self.bottom - self.top
+    }
+}
+
+/// Group PaddleOCR's per-line elements into paragraph blocks using their own
+/// quadrilateral geometry, and return a stable block id per input element in
+/// the same order.
+///
+/// PaddleOCR detects text line-by-line with no paragraph concept, unlike
+/// Tesseract's hOCR which nests lines inside an `ocr_par`. Without this, every
+/// PaddleOCR line becomes its own `PdfParagraph` in
+/// `pdf::structure::adapters::ocr_doc_to_paragraphs`, which merges consecutive
+/// elements only when they share an equal, non-empty block id (#631).
+///
+/// Ids are assigned in encounter order (`paddle-block-1`, `paddle-block-2`,
+/// ...); consecutive lines join the running block when both their vertical gap
+/// and horizontal alignment, each measured relative to the running median line
+/// height, stay within tolerance.
+#[cfg(paddle_ocr)]
+pub(crate) fn assign_line_block_ids(elements: &[OcrElement]) -> Vec<String> {
+    let mut block_ids = Vec::with_capacity(elements.len());
+    let mut heights_seen: Vec<f64> = Vec::with_capacity(elements.len());
+    let mut block_index: u32 = 0;
+    let mut previous: Option<LineBounds> = None;
+
+    for element in elements {
+        let bounds = LineBounds::from_geometry(&element.geometry);
+        insert_sorted(&mut heights_seen, bounds.height());
+        let median_line_height = running_median(&heights_seen);
+
+        let continues_block = previous
+            .as_ref()
+            .is_some_and(|previous| lines_share_block(previous, &bounds, median_line_height));
+        if !continues_block {
+            block_index += 1;
+        }
+        block_ids.push(format!("paddle-block-{block_index}"));
+        previous = Some(bounds);
+    }
+
+    block_ids
+}
+
+#[cfg(paddle_ocr)]
+fn lines_share_block(previous: &LineBounds, current: &LineBounds, median_line_height: f64) -> bool {
+    if median_line_height <= 0.0 {
+        return false;
+    }
+
+    let vertical_gap = if current.top >= previous.bottom {
+        current.top - previous.bottom
+    } else if previous.top >= current.bottom {
+        previous.top - current.bottom
+    } else {
+        0.0
+    };
+    if vertical_gap > median_line_height * MAX_BLOCK_VERTICAL_GAP_IN_LINE_HEIGHTS {
+        return false;
+    }
+
+    let overlap = (previous.right.min(current.right) - previous.left.max(current.left)).max(0.0);
+    let narrower_width = (previous.right - previous.left).min(current.right - current.left);
+    let overlap_ratio = if narrower_width > 0.0 { overlap / narrower_width } else { 0.0 };
+    let left_edge_offset = (previous.left - current.left).abs();
+
+    overlap_ratio >= MIN_BLOCK_HORIZONTAL_OVERLAP_RATIO
+        || left_edge_offset <= median_line_height * MAX_BLOCK_LEFT_EDGE_OFFSET_IN_LINE_HEIGHTS
+}
+
+/// Insert `value` into `sorted` (ascending), keeping it sorted, so a running
+/// median can be read back after each insertion in O(log n) + O(n).
+#[cfg(paddle_ocr)]
+fn insert_sorted(sorted: &mut Vec<f64>, value: f64) {
+    let index = sorted.partition_point(|existing| *existing < value);
+    sorted.insert(index, value);
+}
+
+#[cfg(paddle_ocr)]
+fn running_median(sorted: &[f64]) -> f64 {
+    let len = sorted.len();
+    if len == 0 {
+        return 0.0;
+    }
+    if len % 2 == 1 {
+        sorted[len / 2]
+    } else {
+        (sorted[len / 2 - 1] + sorted[len / 2]) / 2.0
+    }
+}
+
 /// Tesseract TSV row data for conversion.
 ///
 /// This struct represents a single row from Tesseract's TSV output format.
@@ -846,5 +983,78 @@ mod tests {
 
         let error_msg = result.unwrap_err().to_string();
         assert!(error_msg.contains("angle_index"), "Error should mention angle_index");
+    }
+
+    #[cfg(paddle_ocr)]
+    fn line_at(left: f64, top: f64, right: f64, bottom: f64) -> OcrElement {
+        let geometry = OcrBoundingGeometry::Rectangle {
+            left: left as u32,
+            top: top as u32,
+            width: (right - left) as u32,
+            height: (bottom - top) as u32,
+        };
+        OcrElement::new("line", geometry, OcrConfidence::from_paddle(0.9, 0.9)).with_level(OcrElementLevel::Line)
+    }
+
+    #[cfg(paddle_ocr)]
+    #[test]
+    fn assign_line_block_ids_joins_close_overlapping_consecutive_lines() {
+        // Two 20px-tall lines stacked with a 4px gap (0.2x line height) and full
+        // x-overlap: well within tolerance, so they must share a block id (#631).
+        let elements = vec![line_at(100.0, 100.0, 500.0, 120.0), line_at(100.0, 124.0, 500.0, 144.0)];
+
+        let block_ids = assign_line_block_ids(&elements);
+
+        assert_eq!(block_ids.len(), 2);
+        assert_eq!(block_ids[0], block_ids[1], "close overlapping lines must share a block id");
+    }
+
+    #[cfg(paddle_ocr)]
+    #[test]
+    fn assign_line_block_ids_splits_on_large_vertical_gap() {
+        // Same lines as above, but separated by a 200px gap (10x line height):
+        // clearly a new paragraph, so the block id must change (#631).
+        let elements = vec![line_at(100.0, 100.0, 500.0, 120.0), line_at(100.0, 320.0, 500.0, 340.0)];
+
+        let block_ids = assign_line_block_ids(&elements);
+
+        assert_ne!(block_ids[0], block_ids[1], "a gap far exceeding line height must start a new block");
+    }
+
+    #[cfg(paddle_ocr)]
+    #[test]
+    fn assign_line_block_ids_grouping_is_scale_invariant_across_dpi() {
+        // The same page geometry rendered at 3x DPI (all coordinates scaled
+        // uniformly) must produce an identical grouping decision, because the
+        // gap/overlap tolerances are relative to the running median line height,
+        // never an absolute pixel count (#631).
+        let base = vec![
+            line_at(100.0, 100.0, 500.0, 120.0),
+            line_at(100.0, 124.0, 500.0, 144.0),
+            line_at(100.0, 400.0, 500.0, 420.0),
+        ];
+        let scaled = base
+            .iter()
+            .map(|element| {
+                let (left, top, width, height) = element.geometry.to_aabb();
+                const SCALE: u32 = 3;
+                line_at(
+                    f64::from(left * SCALE),
+                    f64::from(top * SCALE),
+                    f64::from((left + width) * SCALE),
+                    f64::from((top + height) * SCALE),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let base_ids = assign_line_block_ids(&base);
+        let scaled_ids = assign_line_block_ids(&scaled);
+
+        let base_pattern = [base_ids[0] == base_ids[1], base_ids[1] == base_ids[2]];
+        let scaled_pattern = [scaled_ids[0] == scaled_ids[1], scaled_ids[1] == scaled_ids[2]];
+        assert_eq!(
+            base_pattern, scaled_pattern,
+            "grouping must be identical under uniform DPI scaling"
+        );
     }
 }
