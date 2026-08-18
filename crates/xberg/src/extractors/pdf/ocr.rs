@@ -2951,6 +2951,21 @@ pub(crate) async fn extract_with_ocr(
         lazy_pdf_page_count
     };
 
+    // The layout-detection route hands in pre-rendered `images`, so `lazy_pdf_render_state`
+    // above is never populated (it's gated on `images.is_none()`) and the page-rotation
+    // lookups below would always fall back to their `unwrap_or(0)` default. When the
+    // original PDF bytes are still available via `content`, read the same lightweight
+    // `/Rotate` lookup the full-page and per-page routes use so this route's calls to
+    // `ocr_config_with_page_rotation_hint` get a real hint too (see #530 / 972d2269f7).
+    // `content` is `None` on some image-only callers (e.g. the image extractor's own OCR
+    // path with no source PDF); there is genuinely no rotation to read in that case.
+    #[cfg(feature = "pdf")]
+    let external_image_page_rotations: Option<Vec<u32>> = if images.is_some() {
+        content.map(|c| crate::pdf::render::get_page_rotations(c, total_pages))
+    } else {
+        None
+    };
+
     let mut page_texts = vec![String::new(); total_pages];
     let mut all_page_paragraphs: Vec<Option<Vec<crate::pdf::structure::types::PdfParagraph>>> = vec![None; total_pages];
     #[allow(unused_mut)]
@@ -3057,6 +3072,7 @@ pub(crate) async fn extract_with_ocr(
                 let page_rotation_degrees = lazy_pdf_render_state
                     .as_ref()
                     .and_then(|(_, _, rotations)| rotations.get(*page_idx))
+                    .or_else(|| external_image_page_rotations.as_ref().and_then(|r| r.get(*page_idx)))
                     .copied()
                     .unwrap_or(0);
                 #[cfg(not(feature = "pdf"))]
@@ -3084,6 +3100,7 @@ pub(crate) async fn extract_with_ocr(
                 let page_rotation_degrees = lazy_pdf_render_state
                     .as_ref()
                     .and_then(|(_, _, rotations)| rotations.get(*page_idx))
+                    .or_else(|| external_image_page_rotations.as_ref().and_then(|r| r.get(*page_idx)))
                     .copied()
                     .unwrap_or(0);
                 #[cfg(not(feature = "pdf"))]
@@ -8211,6 +8228,119 @@ Name: ___
                 "/Rotate {rotation}: converted bbox must fit within the page"
             );
         }
+    }
+
+    /// Closes the gap left by 972d2269f7: that commit threaded a `page_rotation_degrees`
+    /// hint into the full-page and per-page/mixed OCR routes via
+    /// `ocr_config_with_page_rotation_hint`, but `extract_with_ocr`'s images-driven branch
+    /// (the one the layout-detection route feeds pre-rendered pages through, see
+    /// `crates/xberg/src/extractors/pdf/mod.rs`) never computed a rotation at all: its only
+    /// rotation source, `lazy_pdf_render_state`, is only populated when `images.is_none()`
+    /// (see the `if !use_document_processing && images.is_none()` guard above), so every
+    /// lookup fell through to `unwrap_or(0)`.
+    ///
+    /// Fails on unfixed code: `ocr_config_with_page_rotation_hint` is documented as a no-op
+    /// for a rotation of 0, so an unfixed call leaves `OcrConfig.backend_options` at `None`
+    /// instead of carrying `{"page_rotation_degrees": 270}` for a `/Rotate 270` page.
+    #[cfg(feature = "pdf")]
+    #[tokio::test]
+    async fn should_thread_page_rotation_hint_through_the_images_driven_ocr_route() {
+        use crate::core::config::OcrConfig;
+        use crate::plugins::{OcrBackend, OcrBackendType, Plugin};
+        use crate::types::ExtractedDocument;
+        use std::sync::Mutex;
+
+        struct RotationCapturingBackend {
+            captured_backend_options: Mutex<Vec<Option<serde_json::Value>>>,
+        }
+
+        #[async_trait::async_trait]
+        impl OcrBackend for RotationCapturingBackend {
+            fn backend_type(&self) -> OcrBackendType {
+                OcrBackendType::Custom
+            }
+            fn supports_language(&self, _: &str) -> bool {
+                true
+            }
+            async fn process_image(&self, _: &[u8], config: &OcrConfig) -> crate::Result<ExtractedDocument> {
+                self.captured_backend_options
+                    .lock()
+                    .unwrap()
+                    .push(config.backend_options.clone());
+                Ok(ExtractedDocument {
+                    content: "text".to_string(),
+                    ..Default::default()
+                })
+            }
+        }
+
+        impl Plugin for RotationCapturingBackend {
+            fn name(&self) -> &str {
+                "rotation-capturing-mock"
+            }
+            fn version(&self) -> String {
+                "1.0.0".to_string()
+            }
+            fn initialize(&self) -> crate::Result<()> {
+                Ok(())
+            }
+            fn shutdown(&self) -> crate::Result<()> {
+                Ok(())
+            }
+        }
+
+        let backend = std::sync::Arc::new(RotationCapturingBackend {
+            captured_backend_options: Mutex::new(Vec::new()),
+        });
+        crate::plugins::register_ocr_backend(backend.clone()).unwrap();
+
+        // Same fixture convention as `should_convert_ocr_bboxes_within_page_bounds_on_rotated_pages`:
+        // a landscape MediaBox with `/Rotate 270`, mirroring the ordinance-scan case this
+        // session's fix (972d2269f7) targeted.
+        let content = rotated_landscape_pdf(270);
+        let rendered =
+            render_selected_pages_for_ocr(&content, &[0]).expect("rotated fixture page must render for OCR");
+        let images: Vec<image::DynamicImage> = rendered.into_iter().map(|(_, image)| image).collect();
+
+        let config = ExtractionConfig {
+            ocr: Some(OcrConfig {
+                backend: "rotation-capturing-mock".to_string(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        // `content` is passed alongside `images`, mirroring the real layout-detection call
+        // site (`crates/xberg/src/extractors/pdf/mod.rs`), which always has the original PDF
+        // bytes available even when it hands in pre-rendered images.
+        let result = extract_with_ocr(
+            Some(&content),
+            Some(&images),
+            #[cfg(feature = "layout-detection")]
+            None,
+            &config,
+            None,
+        )
+        .await;
+
+        crate::plugins::unregister_ocr_backend("rotation-capturing-mock").unwrap();
+
+        assert!(result.is_ok(), "extract_with_ocr should succeed: {:?}", result.err());
+
+        let captured = backend.captured_backend_options.lock().unwrap();
+        assert_eq!(captured.len(), 1, "backend should have been called exactly once");
+        let rotation_hint = captured[0]
+            .as_ref()
+            .and_then(|opts| opts.get("page_rotation_degrees"))
+            .and_then(|v| v.as_u64());
+        assert_eq!(
+            rotation_hint,
+            Some(270),
+            "the images-driven OCR route (used by layout detection) must carry the page's \
+             /Rotate value into backend_options, exactly as the full-page and per-page routes \
+             already do (972d2269f7); got backend_options = {:?}",
+            captured[0]
+        );
     }
 }
 
