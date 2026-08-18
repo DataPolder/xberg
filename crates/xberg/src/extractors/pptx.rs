@@ -414,6 +414,7 @@ impl InternalDocumentExtractor for PptxExtractor {
             .map(|img| img.inject_placeholders)
             .unwrap_or(true);
         let plain = matches!(config.output_format, crate::core::config::OutputFormat::Plain);
+        let max_files_in_archive = config.security_limits.clone().unwrap_or_default().max_files_in_archive;
 
         let mut pptx_warnings: Vec<crate::types::ProcessingWarning> = Vec::new();
 
@@ -431,6 +432,7 @@ impl InternalDocumentExtractor for PptxExtractor {
                         plain,
                         include_structure: false,
                         inject_placeholders,
+                        max_files_in_archive,
                     };
                     let span = tracing::Span::current();
                     let (result, warnings) = tokio::task::spawn_blocking(move || {
@@ -454,6 +456,7 @@ impl InternalDocumentExtractor for PptxExtractor {
                         plain,
                         include_structure: false,
                         inject_placeholders,
+                        max_files_in_archive,
                     };
                     crate::extraction::pptx::extract_pptx_from_bytes_with_slide_contents(
                         content,
@@ -471,6 +474,7 @@ impl InternalDocumentExtractor for PptxExtractor {
                     plain,
                     include_structure: false,
                     inject_placeholders,
+                    max_files_in_archive,
                 };
                 crate::extraction::pptx::extract_pptx_from_bytes_with_slide_contents(
                     content,
@@ -539,6 +543,7 @@ impl InternalDocumentExtractor for PptxExtractor {
             plain,
             include_structure: false,
             inject_placeholders,
+            max_files_in_archive: config.security_limits.clone().unwrap_or_default().max_files_in_archive,
         };
         let mut pptx_warnings: Vec<crate::types::ProcessingWarning> = Vec::new();
         let pptx_internal = crate::extraction::pptx::extract_pptx_from_path_with_slide_contents(
@@ -1093,5 +1098,103 @@ mod tests {
 
         assert!(pages[2].speaker_notes.is_none());
         assert_eq!(pages[2].section_name.as_deref(), Some("Chapter 2"));
+    }
+
+    /// GH#639: PPTX had no top-level archive entry-count check at all, so this fails
+    /// against the unfixed code regardless of the configured limit (it never raises).
+    #[tokio::test]
+    async fn test_pptx_extract_content_honours_configured_archive_entry_limit() {
+        use crate::core::config::ExtractionConfig;
+
+        let slide_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+       xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+    <p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>Hello</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld>
+</p:sld>"#;
+        let extra_parts: Vec<(String, Vec<u8>)> =
+            (0..5).map(|i| (format!("ppt/extra_{}.xml", i), b"<x/>".to_vec())).collect();
+        let extra_refs: Vec<(&str, &[u8])> = extra_parts.iter().map(|(p, d)| (p.as_str(), d.as_slice())).collect();
+        let pptx = crate::extraction::pptx::tests::build_single_slide_pptx(slide_xml, None, &extra_refs);
+
+        let extractor = PptxExtractor::new();
+        let mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+        let config = ExtractionConfig {
+            security_limits: Some(crate::extractors::security::SecurityLimits {
+                max_files_in_archive: 3,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let result = extractor.extract_content(&pptx, mime, &config).await;
+        assert!(
+            result.is_err(),
+            "an archive with more entries than the configured max_files_in_archive must be rejected"
+        );
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains('3'),
+            "error should mention the configured limit (3), got: {}",
+            err_msg
+        );
+    }
+
+    /// Sibling of the rejection test above: the same archive shape, but under a
+    /// configured limit that comfortably fits it, must still extract successfully.
+    #[tokio::test]
+    async fn test_pptx_extract_content_succeeds_under_configured_archive_entry_limit() {
+        use crate::core::config::ExtractionConfig;
+
+        let slide_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+       xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+    <p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>Hello</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld>
+</p:sld>"#;
+        let extra_parts: Vec<(String, Vec<u8>)> =
+            (0..5).map(|i| (format!("ppt/extra_{}.xml", i), b"<x/>".to_vec())).collect();
+        let extra_refs: Vec<(&str, &[u8])> = extra_parts.iter().map(|(p, d)| (p.as_str(), d.as_slice())).collect();
+        let pptx = crate::extraction::pptx::tests::build_single_slide_pptx(slide_xml, None, &extra_refs);
+
+        let extractor = PptxExtractor::new();
+        let mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+        let config = ExtractionConfig {
+            security_limits: Some(crate::extractors::security::SecurityLimits {
+                max_files_in_archive: 50,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let result = extractor.extract_content(&pptx, mime, &config).await;
+        assert!(
+            result.is_ok(),
+            "an archive within the configured max_files_in_archive must extract successfully: {:?}",
+            result.err()
+        );
+    }
+
+    /// A normal presentation with no `security_limits` override must still extract
+    /// successfully under the default `SecurityLimits::max_files_in_archive`.
+    #[tokio::test]
+    async fn test_pptx_extract_content_succeeds_under_default_archive_entry_limit() {
+        use crate::core::config::ExtractionConfig;
+
+        let slide_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+       xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+    <p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>Default</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld>
+</p:sld>"#;
+        let pptx = crate::extraction::pptx::tests::build_single_slide_pptx(slide_xml, None, &[]);
+
+        let extractor = PptxExtractor::new();
+        let mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+        let config = ExtractionConfig::default();
+
+        let result = extractor.extract_content(&pptx, mime, &config).await;
+        assert!(
+            result.is_ok(),
+            "a normal presentation must extract under the default archive entry limit: {:?}",
+            result.err()
+        );
     }
 }

@@ -20,7 +20,9 @@ pub(super) struct PptxContainer<R: Read + Seek> {
 }
 
 impl PptxContainer<std::fs::File> {
-    pub(super) fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
+    /// `max_entries` is the caller's configured `SecurityLimits::max_files_in_archive`
+    /// (see `PptxExtractionOptions::max_files_in_archive`), not a hardcoded ceiling.
+    pub(super) fn open<P: AsRef<Path>>(path: P, max_entries: usize) -> Result<Self> {
         // IO errors must bubble up unchanged - file access issues need user reports ~keep
         let file = std::fs::File::open(path)?;
 
@@ -34,6 +36,7 @@ impl PptxContainer<std::fs::File> {
                 )));
             }
         };
+        check_entry_count(&archive, max_entries)?;
 
         let slide_paths = Self::find_slide_paths(&mut archive)?;
 
@@ -42,7 +45,9 @@ impl PptxContainer<std::fs::File> {
 }
 
 impl PptxContainer<Cursor<Vec<u8>>> {
-    pub(super) fn from_bytes(data: &[u8]) -> Result<Self> {
+    /// `max_entries` is the caller's configured `SecurityLimits::max_files_in_archive`
+    /// (see `PptxExtractionOptions::max_files_in_archive`), not a hardcoded ceiling.
+    pub(super) fn from_bytes(data: &[u8], max_entries: usize) -> Result<Self> {
         let cursor = Cursor::new(data.to_vec());
 
         let mut archive = match ZipArchive::new(cursor) {
@@ -55,11 +60,31 @@ impl PptxContainer<Cursor<Vec<u8>>> {
                 )));
             }
         };
+        check_entry_count(&archive, max_entries)?;
 
         let slide_paths = Self::find_slide_paths(&mut archive)?;
 
         Ok(Self { archive, slide_paths })
     }
+}
+
+/// Reject an archive that declares more entries than the caller's configured limit.
+///
+/// Unlike the OOXML embedded-object path (`extraction::ooxml_embedded`), which can
+/// truncate a list of independent embedded files and preserve partial results, the
+/// top-level container cannot: slide/relationship resolution depends on specific named
+/// parts (`ppt/presentation.xml`, `ppt/_rels/...`) that may not survive an arbitrary
+/// truncation of the ZIP's central directory. Erroring out here matches the sibling
+/// DOCX container check (`extraction::docx::parser::validate_archive_security`).
+fn check_entry_count<R: Read + Seek>(archive: &ZipArchive<R>, max_entries: usize) -> Result<()> {
+    if archive.len() > max_entries {
+        return Err(XbergError::validation(format!(
+            "PPTX archive contains {} entries, exceeds configured limit of {}",
+            archive.len(),
+            max_entries
+        )));
+    }
+    Ok(())
 }
 
 impl<R: Read + Seek> PptxContainer<R> {
@@ -297,5 +322,56 @@ impl<R: Read + Seek> SlideIterator<R> {
         }
 
         Ok(image_data)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    /// Build a minimal ZIP with `entry_count` empty files, none of them PPTX parts.
+    /// The archive is invalid as a presentation, so these tests exercise only the
+    /// entry-count gate that runs before any slide/relationship lookup.
+    fn build_zip_with_entries(entry_count: usize) -> Vec<u8> {
+        let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        let options = zip::write::FileOptions::<()>::default().compression_method(zip::CompressionMethod::Stored);
+        for i in 0..entry_count {
+            zip.start_file(format!("file_{}.txt", i), options).unwrap();
+            zip.write_all(b"").unwrap();
+        }
+        zip.finish().unwrap().into_inner()
+    }
+
+    /// GH#639: PPTX had no entry-count check at all, so this fails against the
+    /// unfixed code (open() never returns an error here, regardless of `max_entries`).
+    #[test]
+    fn test_from_bytes_rejects_too_many_entries_under_configured_limit() {
+        let data = build_zip_with_entries(5);
+        let result = PptxContainer::from_bytes(&data, 3);
+        assert!(
+            result.is_err(),
+            "5 entries must be rejected against a configured limit of 3"
+        );
+        let err_msg = result.err().unwrap().to_string();
+        assert!(
+            err_msg.contains('5') && err_msg.contains('3'),
+            "error should mention actual and configured limit counts, got: {}",
+            err_msg
+        );
+    }
+
+    /// Sibling of the rejection test above: the same entry count under a limit
+    /// that comfortably fits it must pass the gate (and fail later, harmlessly,
+    /// on slide discovery since this fixture has no real PPTX parts).
+    #[test]
+    fn test_check_entry_count_allows_entries_within_configured_limit() {
+        let data = build_zip_with_entries(5);
+        let cursor = Cursor::new(data);
+        let archive = ZipArchive::new(cursor).unwrap();
+        assert!(
+            check_entry_count(&archive, 10).is_ok(),
+            "5 entries must pass against a configured limit of 10"
+        );
     }
 }

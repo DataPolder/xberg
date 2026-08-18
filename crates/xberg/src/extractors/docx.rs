@@ -661,8 +661,9 @@ fn parse_docx_core(
     output_format: crate::core::config::OutputFormat,
     inject_placeholders: bool,
     mut budget: SecurityBudget,
+    max_files_in_archive: usize,
 ) -> crate::error::Result<DocxParseResult> {
-    let mut doc = crate::extraction::docx::parser::parse_document(content, &mut budget)?;
+    let mut doc = crate::extraction::docx::parser::parse_document(content, &mut budget, max_files_in_archive)?;
     // `is_markdown` gates `to_markdown()` (which bakes `![desc](image_N)` placeholders into
     // the flat text) vs. `to_plain_text()`. That placeholder is what the image-to-page
     // association below (`text.find(&placeholder)`) relies on; without it every image
@@ -810,6 +811,7 @@ impl InternalDocumentExtractor for DocxExtractor {
 
         let inject_placeholders = config.images.as_ref().map(|i| i.inject_placeholders).unwrap_or(true);
         let budget = SecurityBudget::from_config(config);
+        let max_files_in_archive = config.security_limits.clone().unwrap_or_default().max_files_in_archive;
         let content_owned: Arc<[u8]> = Arc::from(content);
         let (text, tables, page_boundaries, drawings, image_rels, mut internal_doc) = {
             #[cfg(feature = "tokio-runtime")]
@@ -821,16 +823,34 @@ impl InternalDocumentExtractor for DocxExtractor {
                 let span = tracing::Span::current();
                 tokio::task::spawn_blocking(move || {
                     let _guard = span.entered();
-                    parse_docx_core(&parse_content, output_format, inject_placeholders, budget)
+                    parse_docx_core(
+                        &parse_content,
+                        output_format,
+                        inject_placeholders,
+                        budget,
+                        max_files_in_archive,
+                    )
                 })
                 .await
                 .map_err(|e| crate::error::XbergError::parsing(format!("DOCX extraction task failed: {}", e)))??
             } else {
-                parse_docx_core(&content_owned, output_format, inject_placeholders, budget)?
+                parse_docx_core(
+                    &content_owned,
+                    output_format,
+                    inject_placeholders,
+                    budget,
+                    max_files_in_archive,
+                )?
             }
 
             #[cfg(not(feature = "tokio-runtime"))]
-            parse_docx_core(&content_owned, output_format, inject_placeholders, budget)?
+            parse_docx_core(
+                &content_owned,
+                output_format,
+                inject_placeholders,
+                budget,
+                max_files_in_archive,
+            )?
         };
 
         let mut archive = {
@@ -3509,6 +3529,117 @@ mod tests {
                 .any(|w| w.source == "docx" && w.message.contains("ZZZZ")),
             "an unmappable w:sym char code should produce a ProcessingWarning: {:?}",
             internal_doc.processing_warnings
+        );
+    }
+
+    /// GH#639: the archive entry-count ceiling must come from
+    /// `config.security_limits.max_files_in_archive`, not a hardcoded constant. A limit
+    /// above 10,000 would pass under both the old and new code, so this uses a limit well
+    /// below the old hardcoded 10,000 default - only the fixed code reads it.
+    #[tokio::test]
+    async fn test_docx_extract_content_honours_configured_archive_entry_limit() {
+        let document_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body><w:p><w:r><w:t>Hello</w:t></w:r></w:p></w:body>
+</w:document>"#;
+        let extra_files: Vec<(String, String)> = (0..5)
+            .map(|i| (format!("word/extra_{}.xml", i), "<x/>".to_string()))
+            .collect();
+        let extra_refs: Vec<(&str, &str)> = extra_files.iter().map(|(p, x)| (p.as_str(), x.as_str())).collect();
+        let data = build_test_docx_with_files(document_xml, &extra_refs);
+
+        let extractor = DocxExtractor::new();
+        let config = ExtractionConfig {
+            security_limits: Some(crate::extractors::security::SecurityLimits {
+                max_files_in_archive: 3,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let result = extractor
+            .extract_content(
+                &data,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                &config,
+            )
+            .await;
+
+        assert!(
+            result.is_err(),
+            "an archive with more entries than the configured max_files_in_archive must be rejected"
+        );
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains('3'),
+            "error should mention the configured limit (3), got: {}",
+            err_msg
+        );
+    }
+
+    /// Sibling of the rejection test above: the same archive shape, but under a
+    /// configured limit that comfortably fits it, must still extract successfully.
+    #[tokio::test]
+    async fn test_docx_extract_content_succeeds_under_configured_archive_entry_limit() {
+        let document_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body><w:p><w:r><w:t>Hello</w:t></w:r></w:p></w:body>
+</w:document>"#;
+        let extra_files: Vec<(String, String)> = (0..5)
+            .map(|i| (format!("word/extra_{}.xml", i), "<x/>".to_string()))
+            .collect();
+        let extra_refs: Vec<(&str, &str)> = extra_files.iter().map(|(p, x)| (p.as_str(), x.as_str())).collect();
+        let data = build_test_docx_with_files(document_xml, &extra_refs);
+
+        let extractor = DocxExtractor::new();
+        let config = ExtractionConfig {
+            security_limits: Some(crate::extractors::security::SecurityLimits {
+                max_files_in_archive: 50,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let result = extractor
+            .extract_content(
+                &data,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                &config,
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "an archive within the configured max_files_in_archive must extract successfully: {:?}",
+            result.err()
+        );
+    }
+
+    /// A normal document with no `security_limits` override (the common case) must still
+    /// extract successfully under the default `SecurityLimits::max_files_in_archive`.
+    #[tokio::test]
+    async fn test_docx_extract_content_succeeds_under_default_archive_entry_limit() {
+        let document_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body><w:p><w:r><w:t>Hello, default limits.</w:t></w:r></w:p></w:body>
+</w:document>"#;
+        let data = build_test_docx(document_xml);
+
+        let extractor = DocxExtractor::new();
+        let config = ExtractionConfig::default();
+
+        let result = extractor
+            .extract_content(
+                &data,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                &config,
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "a normal document must extract under the default archive entry limit: {:?}",
+            result.err()
         );
     }
 }

@@ -76,6 +76,10 @@ pub struct PptxExtractionOptions {
     pub include_structure: bool,
     /// Whether to emit `![alt](target)` references in markdown output.
     pub inject_placeholders: bool,
+    /// Maximum number of ZIP entries the container may declare, from
+    /// `ExtractionConfig.security_limits.max_files_in_archive`. Defaults to
+    /// `SecurityLimits::default().max_files_in_archive` when unset.
+    pub max_files_in_archive: usize,
 }
 
 /// Crate-internal PPTX extraction output.
@@ -104,6 +108,7 @@ impl Default for PptxExtractionOptions {
             plain: false,
             include_structure: false,
             inject_placeholders: true,
+            max_files_in_archive: crate::extractors::security::SecurityLimits::default().max_files_in_archive,
         }
     }
 }
@@ -143,7 +148,7 @@ pub(crate) fn extract_pptx_from_path_with_slide_contents(
     options: &PptxExtractionOptions,
     warnings: &mut Vec<ProcessingWarning>,
 ) -> Result<PptxInternalExtraction> {
-    let container = PptxContainer::open(path)?;
+    let container = PptxContainer::open(path, options.max_files_in_archive)?;
     extract_pptx_from_container(container, options, warnings)
 }
 
@@ -171,7 +176,7 @@ pub(crate) fn extract_pptx_from_bytes_with_slide_contents(
     options: &PptxExtractionOptions,
     warnings: &mut Vec<ProcessingWarning>,
 ) -> Result<PptxInternalExtraction> {
-    let container = PptxContainer::from_bytes(data)?;
+    let container = PptxContainer::from_bytes(data, options.max_files_in_archive)?;
     extract_pptx_from_container(container, options, warnings)
 }
 

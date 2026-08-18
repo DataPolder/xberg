@@ -1581,16 +1581,21 @@ fn apply_symbol(e: &BytesStart, current_run: &mut Option<Run>, warnings: &mut Ve
 ///
 /// Checks:
 /// - Maximum uncompressed size per file (100 MB default)
-/// - Maximum total number of entries (10,000 default)
+/// - Maximum total number of entries (from `SecurityLimits::max_files_in_archive`,
+///   10,000 by default; see `SecurityBudget::from_config`/`from_limits` for how a
+///   caller-supplied `ExtractionConfig` overrides the default)
 /// - Maximum total uncompressed size (500 MB default)
-fn validate_archive_security(archive: &mut zip::ZipArchive<impl Read + Seek>) -> Result<(), DocxParseError> {
-    use super::{MAX_TOTAL_UNCOMPRESSED_SIZE, MAX_UNCOMPRESSED_FILE_SIZE, MAX_ZIP_ENTRIES};
+fn validate_archive_security(
+    archive: &mut zip::ZipArchive<impl Read + Seek>,
+    max_entries: usize,
+) -> Result<(), DocxParseError> {
+    use super::{MAX_TOTAL_UNCOMPRESSED_SIZE, MAX_UNCOMPRESSED_FILE_SIZE};
 
-    if archive.len() > MAX_ZIP_ENTRIES {
+    if archive.len() > max_entries {
         return Err(DocxParseError::SecurityLimit(format!(
             "Archive contains {} entries, exceeds limit of {}",
             archive.len(),
-            MAX_ZIP_ENTRIES
+            max_entries
         )));
     }
 
@@ -1645,9 +1650,11 @@ struct DocxParser<R: Read + Seek> {
 }
 
 impl<R: Read + Seek> DocxParser<R> {
-    fn new(reader: R) -> Result<Self, DocxParseError> {
+    /// `max_entries` is the caller's configured `SecurityLimits::max_files_in_archive`
+    /// (see `parse_document`), not a hardcoded ceiling.
+    fn new(reader: R, max_entries: usize) -> Result<Self, DocxParseError> {
         let mut archive = zip::ZipArchive::new(reader)?;
-        validate_archive_security(&mut archive)?;
+        validate_archive_security(&mut archive, max_entries)?;
 
         let styles = {
             let mut styles_result = None;
@@ -2881,9 +2888,18 @@ impl From<SecurityError> for DocxParseError {
 }
 
 /// Parse a DOCX document from bytes and return the structured document.
-pub(crate) fn parse_document(bytes: &[u8], budget: &mut SecurityBudget) -> crate::error::Result<Document> {
+///
+/// `max_entries` caps the number of ZIP entries the container may declare; callers
+/// read it from `ExtractionConfig.security_limits.max_files_in_archive` (falling back
+/// to `SecurityLimits::default()`) so the limit is configurable rather than a
+/// hardcoded ceiling baked into the parser.
+pub(crate) fn parse_document(
+    bytes: &[u8],
+    budget: &mut SecurityBudget,
+    max_entries: usize,
+) -> crate::error::Result<Document> {
     let cursor = Cursor::new(bytes);
-    let parser = DocxParser::new(cursor)
+    let parser = DocxParser::new(cursor, max_entries)
         .map_err(|e| crate::error::XbergError::parsing(format!("DOCX parsing failed: {}", e)))?;
     parser
         .parse(budget)
@@ -2894,7 +2910,8 @@ pub(crate) fn parse_document(bytes: &[u8], budget: &mut SecurityBudget) -> crate
 #[cfg(test)]
 pub(crate) fn extract_text_from_bytes(bytes: &[u8]) -> crate::error::Result<String> {
     let mut budget = SecurityBudget::with_defaults();
-    let doc = parse_document(bytes, &mut budget)?;
+    let max_entries = crate::extractors::security::SecurityLimits::default().max_files_in_archive;
+    let doc = parse_document(bytes, &mut budget, max_entries)?;
     Ok(doc.extract_text())
 }
 
@@ -2902,6 +2919,12 @@ pub(crate) fn extract_text_from_bytes(bytes: &[u8]) -> crate::error::Result<Stri
 mod tests {
     use super::*;
     use crate::extractors::security::SecurityBudget;
+
+    /// The configured entry-count ceiling `parse_document` enforces when a test has no
+    /// `ExtractionConfig` of its own to derive one from.
+    fn default_max_entries() -> usize {
+        crate::extractors::security::SecurityLimits::default().max_files_in_archive
+    }
 
     /// Runs are concatenated directly; whitespace comes from the XML text content.
     #[test]
@@ -3453,7 +3476,7 @@ mod tests {
             0x00, 0x00, 0x00, 0x00,
         ];
         let cursor = Cursor::new(zip_data);
-        let result = DocxParser::new(cursor);
+        let result = DocxParser::new(cursor, default_max_entries());
         assert!(
             result.is_ok(),
             "Empty valid ZIP should pass security checks: {:?}",
@@ -3463,10 +3486,13 @@ mod tests {
 
     #[test]
     fn test_security_constants_are_reasonable() {
-        use super::super::{MAX_TOTAL_UNCOMPRESSED_SIZE, MAX_UNCOMPRESSED_FILE_SIZE, MAX_ZIP_ENTRIES};
+        use super::super::{MAX_TOTAL_UNCOMPRESSED_SIZE, MAX_UNCOMPRESSED_FILE_SIZE};
 
+        assert!(
+            crate::extractors::security::SecurityLimits::default().max_files_in_archive >= 1_000,
+            "Entry limit must be at least 1,000"
+        );
         const {
-            assert!(MAX_ZIP_ENTRIES >= 1_000, "Entry limit must be at least 1,000");
             assert!(
                 MAX_UNCOMPRESSED_FILE_SIZE >= 10 * 1024 * 1024,
                 "Per-file size limit must be at least 10 MB"
@@ -3497,7 +3523,7 @@ mod tests {
         let data = cursor.into_inner();
 
         let mut archive = zip::ZipArchive::new(Cursor::new(data)).unwrap();
-        let result = validate_archive_security(&mut archive);
+        let result = validate_archive_security(&mut archive, default_max_entries());
         assert!(
             result.is_ok(),
             "A normal small archive must pass security validation: {:?}",
@@ -3523,7 +3549,7 @@ mod tests {
         let data = cursor.into_inner();
 
         let mut archive = zip::ZipArchive::new(Cursor::new(data)).unwrap();
-        let result = validate_archive_security(&mut archive);
+        let result = validate_archive_security(&mut archive, default_max_entries());
         assert!(result.is_err(), "Archive with >10,000 entries must be rejected");
 
         let err_msg = format!("{}", result.unwrap_err());
@@ -3531,6 +3557,69 @@ mod tests {
             err_msg.contains("10001") && err_msg.contains("10000"),
             "Error should mention actual and limit counts, got: {}",
             err_msg
+        );
+    }
+
+    /// GH#639: `validate_archive_security` must honour a caller-supplied limit rather
+    /// than a hardcoded ceiling. A limit above 10,000 would pass under the old hardcoded
+    /// constant too, so this stays well under it - only reading `max_entries` catches it.
+    #[test]
+    fn test_security_rejects_too_many_entries_under_configured_limit() {
+        use std::io::{Cursor, Write};
+
+        let buffer = Vec::new();
+        let cursor = Cursor::new(buffer);
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::<()>::default().compression_method(zip::CompressionMethod::Stored);
+
+        for i in 0..5 {
+            zip.start_file(format!("file_{}.txt", i), options).unwrap();
+            zip.write_all(b"").unwrap();
+        }
+
+        let cursor = zip.finish().unwrap();
+        let data = cursor.into_inner();
+
+        let mut archive = zip::ZipArchive::new(Cursor::new(data)).unwrap();
+        let result = validate_archive_security(&mut archive, 3);
+        assert!(
+            result.is_err(),
+            "5 entries must be rejected against a configured limit of 3"
+        );
+
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(
+            err_msg.contains('5') && err_msg.contains('3'),
+            "Error should mention actual and configured limit counts, got: {}",
+            err_msg
+        );
+    }
+
+    /// Sibling of the rejection test above: the same entry count under a configured
+    /// limit that comfortably fits it must pass.
+    #[test]
+    fn test_security_allows_entries_within_configured_limit() {
+        use std::io::{Cursor, Write};
+
+        let buffer = Vec::new();
+        let cursor = Cursor::new(buffer);
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::<()>::default().compression_method(zip::CompressionMethod::Stored);
+
+        for i in 0..5 {
+            zip.start_file(format!("file_{}.txt", i), options).unwrap();
+            zip.write_all(b"").unwrap();
+        }
+
+        let cursor = zip.finish().unwrap();
+        let data = cursor.into_inner();
+
+        let mut archive = zip::ZipArchive::new(Cursor::new(data)).unwrap();
+        let result = validate_archive_security(&mut archive, 10);
+        assert!(
+            result.is_ok(),
+            "5 entries must pass against a configured limit of 10: {:?}",
+            result.err()
         );
     }
 
@@ -3550,7 +3639,7 @@ mod tests {
         let data = cursor.into_inner();
 
         let mut archive = zip::ZipArchive::new(Cursor::new(data)).unwrap();
-        let result = validate_archive_security(&mut archive);
+        let result = validate_archive_security(&mut archive, default_max_entries());
         assert!(
             result.is_ok(),
             "A 1 KB file must pass size validation: {:?}",
@@ -3601,7 +3690,7 @@ mod tests {
 
         let bytes = create_test_docx(xml);
         let mut budget = SecurityBudget::with_defaults();
-        let doc = parse_document(&bytes, &mut budget).expect("parse_document should succeed");
+        let doc = parse_document(&bytes, &mut budget, default_max_entries()).expect("parse_document should succeed");
 
         assert_eq!(doc.tables.len(), 1, "Expected exactly 1 (outer) table");
 
@@ -3672,7 +3761,7 @@ mod tests {
         let bytes = cursor.into_inner();
 
         let mut budget = SecurityBudget::with_defaults();
-        let doc = parse_document(&bytes, &mut budget).expect("should parse");
+        let doc = parse_document(&bytes, &mut budget, default_max_entries()).expect("should parse");
 
         assert!(doc.style_catalog.is_some(), "Style catalog should be loaded");
         let catalog = doc.style_catalog.as_ref().unwrap();
@@ -3736,7 +3825,7 @@ mod tests {
 
         let bytes = create_test_docx(xml);
         let mut budget = SecurityBudget::with_defaults();
-        let doc = parse_document(&bytes, &mut budget).expect("parse should succeed");
+        let doc = parse_document(&bytes, &mut budget, default_max_entries()).expect("parse should succeed");
 
         assert_eq!(doc.tables.len(), 1);
         let table = &doc.tables[0];
@@ -3798,7 +3887,7 @@ mod tests {
 
         let bytes = create_test_docx(xml);
         let mut budget = SecurityBudget::with_defaults();
-        let doc = parse_document(&bytes, &mut budget).expect("parse should succeed");
+        let doc = parse_document(&bytes, &mut budget, default_max_entries()).expect("parse should succeed");
 
         assert_eq!(doc.tables.len(), 1);
         let table = &doc.tables[0];
@@ -3853,7 +3942,7 @@ mod tests {
 
         let bytes = create_test_docx(xml);
         let mut budget = SecurityBudget::with_defaults();
-        let doc = parse_document(&bytes, &mut budget).expect("parse should succeed");
+        let doc = parse_document(&bytes, &mut budget, default_max_entries()).expect("parse should succeed");
 
         assert_eq!(doc.tables.len(), 1);
         let table = &doc.tables[0];
@@ -5319,7 +5408,7 @@ mod tests {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test_documents/docx/textbox.docx");
         if let Ok(bytes) = std::fs::read(&path) {
             let mut budget = SecurityBudget::with_defaults();
-            let doc = super::parse_document(&bytes, &mut budget).unwrap();
+            let doc = super::parse_document(&bytes, &mut budget, default_max_entries()).unwrap();
             let md = doc.to_markdown(true);
             assert!(
                 !md.contains("****"),
