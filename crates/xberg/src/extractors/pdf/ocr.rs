@@ -906,7 +906,10 @@ fn assemble_mixed_ocr_page_document(
     page_number: u32,
     page_height: u32,
 ) -> crate::types::internal::InternalDocument {
-    let paragraphs = crate::pdf::structure::adapters::ocr_doc_to_paragraphs(&doc, page_height);
+    // Mixed-route (`--ocr-scanned-pages`) page assembly: out of WP-A's scope (see WP-G),
+    // so no page-to-point scale factor is threaded in here; `1.0` preserves this route's
+    // existing pixel-space paragraph geometry unchanged.
+    let paragraphs = crate::pdf::structure::adapters::ocr_doc_to_paragraphs(&doc, page_height, 1.0);
     if !paragraphs.is_empty() {
         let mut assembled =
             crate::pdf::structure::assemble_internal_document(vec![paragraphs], &doc.tables, Some(&doc.images), &[]);
@@ -2754,21 +2757,62 @@ fn transform_ocr_elements_to_render_space(
         .collect()
 }
 
+/// Scale factor from OCR raster pixels to PDF points for one page, used to convert
+/// pixel-derived font-size proxies into the same unit as the heading heuristic's
+/// absolute-point constants (see `pdf::structure::adapters::resolve_ocr_font_size_pt`).
+///
+/// Requires the PDF document this OCR pass rendered from (`lazy_pdf_render_state`);
+/// when that is unavailable — the caller supplied pre-rendered `images` directly, so
+/// there is no `pdf_oxide::PdfDocument` in hand to read a MediaBox from — falls back
+/// to `1.0` (pixels treated as points). That degrades the absolute-gap term of the
+/// heading heuristic back toward today's behavior for that call path only; the
+/// ratio-based term, which dominates in practice, is scale-invariant and unaffected.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn ocr_points_per_pixel(
+    #[cfg(feature = "pdf")] lazy_pdf_render_state: Option<&(pdf_oxide::PdfDocument, usize, Vec<u32>)>,
+    page_idx: usize,
+    page_height_px: u32,
+) -> f32 {
+    #[cfg(feature = "pdf")]
+    {
+        if page_height_px == 0 {
+            return 1.0;
+        }
+        return lazy_pdf_render_state
+            .map(|(doc, _, _)| page_dimensions_pt(doc, page_idx).1 / page_height_px as f32)
+            .filter(|scale| scale.is_finite() && *scale > 0.0)
+            .unwrap_or(1.0);
+    }
+    #[cfg(not(feature = "pdf"))]
+    {
+        let _ = (page_idx, page_height_px);
+        1.0
+    }
+}
+
 #[cfg(all(any(feature = "ocr", feature = "ocr-wasm"), feature = "layout-detection"))]
 fn assemble_ocr_page_paragraphs(
     doc: &crate::types::internal::InternalDocument,
     page_height: u32,
     detection: Option<&crate::layout::DetectionResult>,
+    points_per_pixel: f32,
 ) -> Vec<crate::pdf::structure::types::PdfParagraph> {
     #[cfg(feature = "ocr")]
     if let Some(detection) = detection {
         let hints = super::layout_hints::detection_to_layout_hints_pixel_space(detection, page_height as f32);
-        return crate::pdf::structure::adapters::ocr_doc_to_layout_paragraphs(doc, page_height, &hints, 0.5, 0.2);
+        return crate::pdf::structure::adapters::ocr_doc_to_layout_paragraphs(
+            doc,
+            page_height,
+            &hints,
+            0.5,
+            0.2,
+            points_per_pixel,
+        );
     }
     #[cfg(not(feature = "ocr"))]
     let _ = detection;
 
-    crate::pdf::structure::adapters::ocr_doc_to_paragraphs(doc, page_height)
+    crate::pdf::structure::adapters::ocr_doc_to_paragraphs(doc, page_height, points_per_pixel)
 }
 
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
@@ -2782,6 +2826,98 @@ fn fill_unstructured_ocr_pages(
             if !fallback.is_empty() {
                 *paragraphs = Some(fallback);
             }
+        }
+    }
+}
+
+/// Run the document-global heading/list heuristic
+/// (`pdf::structure::extract_document_structure_from_segments`, the same font-clustering
+/// pass the native pdf_oxide path uses) over already-built OCR paragraphs.
+///
+/// The heuristic is document-global: `build_heading_map` clusters font sizes across
+/// every page, and `sparse_multi_page_heading_map` needs at least two pages in hand.
+/// `ocr_doc_to_paragraphs` / `ocr_doc_to_layout_paragraphs` build paragraphs one OCR
+/// page at a time as OCR runs, so they cannot host this pass -- it can only run once
+/// every page's paragraphs exist, i.e. here, after the whole document has been OCR'd.
+///
+/// Returns `None` (leaving the caller's pre-existing, unstructured assembly in place)
+/// when:
+/// - `config.output_format` is [`OutputFormat::Plain`]: plain-text output must stay
+///   byte-identical to before this heuristic existed. The heuristic only ever changes
+///   `heading_level` / `is_list_item`, which downstream assembly turns into different
+///   `ElementKind`s -- never touched for `Plain`.
+/// - Any paragraph already carries a `heading_level` or `is_list_item` set by ML
+///   layout detection (`ocr_doc_to_layout_paragraphs`). That path already recovers
+///   structure (measured 13/12/13 headings on the reference fixture); re-deriving
+///   structure from bare segments would discard that classification, not add to it.
+/// - The heuristic itself returns no elements, or errors (logged, not propagated: the
+///   caller's existing unstructured assembly is always a safe fallback here).
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn heuristically_restructured_ocr_pages(
+    pages: &[Vec<crate::pdf::structure::types::PdfParagraph>],
+    collected_tables: &[crate::types::Table],
+    config: &ExtractionConfig,
+) -> Option<crate::types::internal::InternalDocument> {
+    if config.output_format == crate::core::config::OutputFormat::Plain {
+        return None;
+    }
+    let already_structured = pages
+        .iter()
+        .flatten()
+        .any(|paragraph| paragraph.heading_level.is_some() || paragraph.is_list_item);
+    if already_structured {
+        return None;
+    }
+
+    let all_page_segments = crate::pdf::structure::adapters::segments_from_ocr_pages(pages);
+    let k_clusters = config
+        .pdf_options
+        .as_ref()
+        .and_then(|opts| opts.hierarchy.as_ref())
+        .map(|hierarchy| hierarchy.k_clusters)
+        .unwrap_or(4);
+
+    let result = crate::pdf::structure::extract_document_structure_from_segments(
+        all_page_segments,
+        crate::pdf::structure::SegmentStructureConfig {
+            k_clusters,
+            tables: collected_tables,
+            outline_entries: &[],
+            strip_repeating_text: false,
+            include_headers: false,
+            include_footers: false,
+            include_footnotes: false,
+            used_structure_tree: false,
+            image_positions: &[],
+            images: None,
+            inject_placeholders: false,
+            layout_hints: None,
+            allow_single_column: true,
+            cancel_token: config.cancel_token.as_ref(),
+            #[cfg(feature = "layout-detection")]
+            layout_images: None,
+            #[cfg(feature = "layout-detection")]
+            layout_results: None,
+            #[cfg(feature = "layout-detection")]
+            table_model: crate::core::config::layout::TableModel::default(),
+            #[cfg(feature = "layout-detection")]
+            table_overlap_preference: crate::core::config::layout::TableOverlapPreference::default(),
+            #[cfg(feature = "layout-detection")]
+            acceleration: None,
+            #[cfg(feature = "layout-detection")]
+            session_thread_budget: 0,
+        },
+    );
+
+    match result {
+        Ok(doc) if !doc.elements.is_empty() => Some(doc),
+        Ok(_) => None,
+        Err(error) => {
+            tracing::warn!(
+                error = %error,
+                "OCR document-level heading/list heuristic failed; falling back to unstructured OCR paragraphs"
+            );
+            None
         }
     }
 }
@@ -2817,9 +2953,15 @@ fn recognized_table_to_public_table(
 
 /// Extract text from PDF using OCR on pre-rendered page images.
 ///
-/// When `layout_detections` are provided (pixel-space, from the same images),
-/// uses layout-aware markdown assembly for structured output. Otherwise falls
-/// back to plain OCR text concatenation.
+/// When `layout_detections` are provided (pixel-space, from the same images), uses
+/// layout-aware markdown assembly for structured output. Otherwise, when
+/// `config.output_format` is not [`OutputFormat::Plain`], structure (headings, list
+/// items) is instead recovered document-wide by the same font-clustering heuristic
+/// the native pdf_oxide path uses
+/// (`pdf::structure::pipeline::extract_document_structure_from_segments`), fed from
+/// segments harvested out of the per-page OCR paragraphs
+/// (`pdf::structure::adapters::segments_from_ocr_pages`). Under `Plain`, or when that
+/// heuristic yields nothing, falls back to plain OCR text concatenation.
 ///
 /// # Arguments
 ///
@@ -3339,6 +3481,12 @@ async fn extract_with_ocr_for_page(
                     detection.map(|det| scale_detection_to_dimensions(det, ocr_render_width, ocr_render_height));
                 let (_, ocr_layout_height) =
                     resolved_ocr_layout_dimensions(&ocr_result.metadata, ocr_render_width, ocr_render_height);
+                let points_per_pixel = ocr_points_per_pixel(
+                    #[cfg(feature = "pdf")]
+                    lazy_pdf_render_state.as_ref(),
+                    page_idx,
+                    ocr_layout_height,
+                );
                 let ocr_scaled_detection = detection.map(|det| {
                     scale_detection_to_ocr_coordinates(det, &ocr_result.metadata, ocr_render_width, ocr_render_height)
                 });
@@ -3383,8 +3531,12 @@ async fn extract_with_ocr_for_page(
                 }
 
                 if let Some(ref ocr_doc) = ocr_result.ocr_internal_document {
-                    let paragraphs =
-                        assemble_ocr_page_paragraphs(ocr_doc, ocr_layout_height, ocr_scaled_detection.as_ref());
+                    let paragraphs = assemble_ocr_page_paragraphs(
+                        ocr_doc,
+                        ocr_layout_height,
+                        ocr_scaled_detection.as_ref(),
+                        points_per_pixel,
+                    );
 
                     tracing::debug!(
                         page = page_idx + 1,
@@ -3416,7 +3568,14 @@ async fn extract_with_ocr_for_page(
                 let ocr_render_height = encoded_batch[offset].3;
                 let (_, ocr_layout_height) =
                     resolved_ocr_layout_dimensions(&ocr_result.metadata, ocr_render_width, ocr_render_height);
-                let paragraphs = crate::pdf::structure::adapters::ocr_doc_to_paragraphs(ocr_doc, ocr_layout_height);
+                let points_per_pixel = ocr_points_per_pixel(
+                    #[cfg(feature = "pdf")]
+                    lazy_pdf_render_state.as_ref(),
+                    page_idx,
+                    ocr_layout_height,
+                );
+                let paragraphs =
+                    crate::pdf::structure::adapters::ocr_doc_to_paragraphs(ocr_doc, ocr_layout_height, points_per_pixel);
                 all_page_paragraphs[page_idx] = Some(paragraphs);
             }
 
@@ -3474,12 +3633,21 @@ async fn extract_with_ocr_for_page(
                 crate::pdf::structure::adapters::promote_anchored_ordered_list_sequences(&mut pages);
                 pages
             };
-            Some(crate::pdf::structure::assemble_internal_document(
-                pages,
-                &collected_tables,
-                None,
-                &[],
-            ))
+            // Document-global heading/list heuristic: `ocr_doc_to_paragraphs` /
+            // `ocr_doc_to_layout_paragraphs` (above) build `pages` one OCR page at a
+            // time and never call it, which is why every non-layout OCR route has
+            // emitted zero headings and zero list items regardless of output format.
+            // `None` (Plain output, or pages ML layout already classified) falls
+            // through to the pre-existing assembly unchanged.
+            match heuristically_restructured_ocr_pages(&pages, &collected_tables, config) {
+                Some(doc) => Some(doc),
+                None => Some(crate::pdf::structure::assemble_internal_document(
+                    pages,
+                    &collected_tables,
+                    None,
+                    &[],
+                )),
+            }
         } else {
             None
         }
@@ -9036,6 +9204,155 @@ Name: ___
             captured_options[0]
         );
     }
+
+    /// Build a single-line OCR "block" element carrying an hOCR `x_fsize` (points)
+    /// attribute, mirroring what `ocr::hocr_parser` attaches for tesseract output.
+    #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+    fn ocr_font_block(text: &str, font_size_pt: &str, y0: f64, y1: f64) -> crate::types::internal::InternalElement {
+        use crate::types::extraction::BoundingBox;
+        use crate::types::internal::{ElementKind, InternalElement};
+        use crate::types::ocr_elements::OcrElementLevel;
+
+        let mut elem = InternalElement::text(
+            ElementKind::OcrText {
+                level: OcrElementLevel::Block,
+            },
+            text,
+            0,
+        );
+        elem.bbox = Some(BoundingBox {
+            x0: 10.0,
+            y0,
+            x1: 500.0,
+            y1,
+        });
+        elem.attributes = Some(
+            [("x_fsize".to_string(), font_size_pt.to_string())]
+                .into_iter()
+                .collect(),
+        );
+        elem
+    }
+
+    /// Two-page `Vec<Vec<PdfParagraph>>` with one large-font heading block, two
+    /// ordered-list-marker blocks, and enough body prose (all at the same font size)
+    /// to clear `MIN_BLOCKS_FOR_FONT_HEADING` and establish a reliable body-font
+    /// baseline for the k-means heading heuristic.
+    #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+    fn heading_and_list_ocr_pages() -> Vec<Vec<crate::pdf::structure::types::PdfParagraph>> {
+        let mut page1 = crate::types::internal::InternalDocument::new("test");
+        page1.push_element(ocr_font_block("ANNUAL REPORT OVERVIEW", "28", 10.0, 50.0));
+        page1.push_element(ocr_font_block(
+            "This document summarizes the annual results for the reporting period in detail.",
+            "11",
+            60.0,
+            90.0,
+        ));
+        page1.push_element(ocr_font_block(
+            "1. First item in the numbered list of findings",
+            "11",
+            100.0,
+            130.0,
+        ));
+        page1.push_element(ocr_font_block(
+            "2. Second item continuing the numbered list of findings",
+            "11",
+            140.0,
+            170.0,
+        ));
+        page1.push_element(ocr_font_block(
+            "Additional narrative text follows describing the broader context for readers.",
+            "11",
+            180.0,
+            210.0,
+        ));
+
+        let mut page2 = crate::types::internal::InternalDocument::new("test");
+        page2.push_element(ocr_font_block(
+            "Further discussion continues here with more explanatory prose for the reader.",
+            "11",
+            10.0,
+            40.0,
+        ));
+        page2.push_element(ocr_font_block(
+            "Another paragraph of body text appears on the second page of the document.",
+            "11",
+            50.0,
+            80.0,
+        ));
+
+        vec![
+            crate::pdf::structure::adapters::ocr_doc_to_paragraphs(&page1, 1000, 1.0),
+            crate::pdf::structure::adapters::ocr_doc_to_paragraphs(&page2, 1000, 1.0),
+        ]
+    }
+
+    /// Pins the WP-A fix: today (before wiring OCR paragraphs through
+    /// `extract_document_structure_from_segments`) `heuristically_restructured_ocr_pages`
+    /// does not exist and the OCR route never promotes anything, so a scanned-PDF
+    /// Markdown extraction shows zero headings and zero list items regardless of how
+    /// font sizes vary across the page (`dominant_font_size` was hardcoded to `12.0`
+    /// for every OCR paragraph). This must fail against that code: it asserts both a
+    /// `Heading` and a `ListItem` element are present.
+    #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+    #[test]
+    fn heuristically_restructured_ocr_pages_promotes_headings_and_lists_for_markdown() {
+        let pages = heading_and_list_ocr_pages();
+        let mut config = ExtractionConfig::default();
+        config.output_format = crate::core::config::OutputFormat::Markdown;
+
+        let doc = heuristically_restructured_ocr_pages(&pages, &[], &config)
+            .expect("font-size variation and list markers should produce a restructured document");
+
+        assert!(
+            doc.elements
+                .iter()
+                .any(|element| matches!(element.kind, crate::types::internal::ElementKind::Heading { .. })),
+            "expected at least one Heading element, got kinds: {:?}",
+            doc.elements.iter().map(|e| &e.kind).collect::<Vec<_>>()
+        );
+        assert!(
+            doc.elements
+                .iter()
+                .any(|element| matches!(element.kind, crate::types::internal::ElementKind::ListItem { .. })),
+            "expected at least one ListItem element, got kinds: {:?}",
+            doc.elements.iter().map(|e| &e.kind).collect::<Vec<_>>()
+        );
+    }
+
+    /// Pins the `Plain` gate: the exact same input that produces headings and list
+    /// items under `Markdown` (previous test) must be left untouched under `Plain` --
+    /// `heuristically_restructured_ocr_pages` must return `None` so the caller keeps
+    /// its pre-existing, unstructured assembly and Plain-format output stays
+    /// byte-identical to before WP-A. A version of the fix that forgot the
+    /// `output_format` gate (ran the heuristic unconditionally) would fail this.
+    #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+    #[test]
+    fn heuristically_restructured_ocr_pages_is_noop_for_plain_output() {
+        let pages = heading_and_list_ocr_pages();
+        let config = ExtractionConfig::default();
+        assert_eq!(config.output_format, crate::core::config::OutputFormat::Plain);
+
+        assert!(heuristically_restructured_ocr_pages(&pages, &[], &config).is_none());
+    }
+
+    /// Pins the ML-layout precedence: when `ocr_doc_to_layout_paragraphs` (or
+    /// `promote_anchored_ordered_list_sequences`) has already classified a paragraph
+    /// as a heading or list item, the segment heuristic must not run at all --
+    /// re-deriving structure from bare segments would discard that classification
+    /// instead of adding to it (the ML-layout OCR route already measures correct
+    /// headings on the reference fixture; this test only pins the *skip*, not that
+    /// route's own output).
+    #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+    #[test]
+    fn heuristically_restructured_ocr_pages_skips_when_already_layout_classified() {
+        let mut pages = heading_and_list_ocr_pages();
+        pages[0][0].heading_level = Some(1);
+        let mut config = ExtractionConfig::default();
+        config.output_format = crate::core::config::OutputFormat::Markdown;
+
+        assert!(heuristically_restructured_ocr_pages(&pages, &[], &config).is_none());
+    }
 }
 
 /// Coverage for the OCR recognition-noise veto.
@@ -9459,4 +9776,5 @@ Each row of the preceding table records one measurement taken during the survey 
         assert!(prose < thresholds.max_ocr_output_fragmented_word_ratio);
         assert!(noise >= thresholds.max_ocr_output_fragmented_word_ratio);
     }
+
 }
