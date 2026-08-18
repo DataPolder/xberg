@@ -1545,7 +1545,7 @@ mod tests {
         .await;
     }
 
-    #[cfg(any(feature = "office", feature = "hwpx", feature = "iwork", feature = "archives"))]
+    #[cfg(feature = "hwpx")]
     #[test]
     fn should_detect_hwpx_without_a_content_hpf_from_its_mimetype_entry() {
         // Real Hangul packages carry `version.xml` and `Contents/section0.xml`
@@ -1586,7 +1586,7 @@ mod tests {
         assert_eq!(detect_mime_type_from_bytes(content).unwrap(), "application/docbook+xml");
     }
 
-    #[cfg(any(feature = "office", feature = "hwpx", feature = "iwork", feature = "archives"))]
+    #[cfg(feature = "office")]
     #[test]
     fn should_detect_a_deck_whose_main_part_is_written_late_in_the_archive() {
         // A real 27-slide deck names `ppt/presentation.xml` 107 KB in, so a
@@ -1620,7 +1620,7 @@ mod tests {
         );
     }
 
-    #[cfg(any(feature = "office", feature = "hwpx", feature = "iwork", feature = "archives"))]
+    #[cfg(feature = "hwpx")]
     #[test]
     fn should_keep_zip_routing_for_an_hwpx_package_without_its_manifest() {
         // `unhwp` needs `Contents/content.hpf`. Without it the HWPX extractor
