@@ -619,6 +619,15 @@ impl ExtractionOverrides {
     /// Each flag mutates only the field it names. Fields with no CLI flag
     /// (`quality_thresholds`, `pipeline`, `tesseract_config`, `vlm_config`, …)
     /// keep whatever the config file or `--config-json` set for them.
+    ///
+    /// Naming any `--ocr-*` field flag (`--ocr-backend`, `--ocr-backend-options`,
+    /// `--ocr-auto-rotate`, `--ocr-language`) is on its own enough to materialise
+    /// `config.ocr` when it is still `None`, matching the `has_*_flag` pattern used
+    /// by the other `apply_*` methods below. This matters because the flags that
+    /// make OCR actually run (`--force-ocr`, `--ocr-scanned-pages`) do not require
+    /// `config.ocr` to exist first: without this, a named backend/option/language
+    /// was silently discarded while OCR still ran, using whatever backend the
+    /// default config carries instead of the one requested.
     #[cfg(feature = "ocr-surface")]
     fn apply_ocr(&self, config: &mut ExtractionConfig) {
         if self.ocr == Some(false) {
@@ -626,6 +635,8 @@ impl ExtractionOverrides {
         } else {
             if self.ocr == Some(true) {
                 config.ocr.get_or_insert_with(OcrConfig::default).enabled = true;
+            } else if self.has_ocr_field_flag() {
+                config.ocr.get_or_insert_with(OcrConfig::default);
             }
             if let Some(ocr) = config.ocr.as_mut() {
                 self.apply_ocr_fields(ocr);
@@ -645,6 +656,16 @@ impl ExtractionOverrides {
                     .unwrap_or(xberg::core::config::DEFAULT_SCANNED_MIN_CONFIDENCE),
             };
         }
+    }
+
+    /// Whether any `--ocr-*` field flag (backend, backend options, auto-rotate,
+    /// language) was given, independent of `--ocr`/`--ocr true`.
+    #[cfg(feature = "ocr-surface")]
+    fn has_ocr_field_flag(&self) -> bool {
+        self.ocr_backend.is_some()
+            || self.ocr_backend_options.is_some()
+            || self.ocr_auto_rotate.is_some()
+            || self.ocr_language.is_some()
     }
 
     /// Mutate the individual OCR fields that have a CLI flag, in place.
@@ -1198,6 +1219,40 @@ mod tests {
         assert_eq!(ocr.language, vec!["eng".to_string()]);
     }
 
+    /// Regression test for the empirically observed CLI defect: running
+    /// `xberg extract doc.pdf --ocr-scanned-pages --ocr-backend sceptre` (no
+    /// `--ocr true`) silently ran tesseract instead of sceptre, because
+    /// `apply_ocr` only materialised `config.ocr` on `--ocr true`, so
+    /// `apply_ocr_fields` — which assigns `backend` — never ran, while
+    /// `--ocr-scanned-pages` set `config.ocr_strategy` unconditionally and
+    /// triggered OCR to run anyway with the default backend. Before the fix
+    /// (i.e. reverting `has_ocr_field_flag` back to just `self.ocr ==
+    /// Some(true)`), `config.ocr` stays `None` here — `ocr.backend` is never
+    /// even reachable — so this assertion fails without the fix.
+    #[cfg(feature = "ocr-surface")]
+    #[test]
+    fn test_ocr_backend_flag_selects_backend_without_ocr_true_flag() {
+        let mut config = ExtractionConfig::default();
+        let overrides = ExtractionOverrides {
+            ocr_backend: Some("sceptre".to_string()),
+            ocr_scanned_pages: true,
+            ..default_overrides()
+        };
+
+        overrides.apply(&mut config);
+
+        let ocr = config
+            .ocr
+            .expect("--ocr-backend must materialise an OCR config even without --ocr true");
+        assert_eq!(ocr.backend, "sceptre");
+        assert_eq!(
+            config.ocr_strategy,
+            xberg::OcrStrategy::ScannedPages {
+                min_confidence: xberg::core::config::DEFAULT_SCANNED_MIN_CONFIDENCE
+            }
+        );
+    }
+
     #[cfg(feature = "ocr-surface")]
     #[test]
     fn test_validate_unknown_ocr_backend_rejected() {
@@ -1240,6 +1295,10 @@ mod tests {
         assert_eq!(ocr.language, vec!["ch".to_string()]);
     }
 
+    /// `--ocr-language` alone (no `--ocr true`, no pre-existing `config.ocr`) must
+    /// still materialise an OCR config carrying the requested language — naming a
+    /// field is enough to select it, exactly like `--ocr-backend`. Before the fix,
+    /// this flag was silently discarded whenever `config.ocr` was still `None`.
     #[cfg(feature = "ocr-surface")]
     #[test]
     fn test_ocr_language_without_ocr_flag_no_existing_config() {
@@ -1249,7 +1308,9 @@ mod tests {
             ..default_overrides()
         };
         overrides.apply(&mut config);
-        assert!(config.ocr.is_none());
+        let ocr = config.ocr.expect("--ocr-language alone must materialise an OCR config");
+        assert_eq!(ocr.language, vec!["deu".to_string()]);
+        assert_eq!(ocr.backend, "tesseract", "backend keeps its compiled-in default");
     }
 
     #[cfg(feature = "ocr-surface")]
