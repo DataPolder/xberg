@@ -29,9 +29,9 @@ const DEFAULT_DETECTION_LIMIT_SIDE_LEN: u32 = 1024;
 /// let config = PaddleOcrConfig::new("ch")
 ///     .with_cache_dir("/path/to/cache".into());
 ///
-/// // Enable table detection
+/// // Table detection is on by default; disable it explicitly if unwanted
 /// let config = PaddleOcrConfig::new("en")
-///     .with_table_detection(true);
+///     .with_table_detection(false);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -49,7 +49,12 @@ pub struct PaddleOcrConfig {
     /// Can misfire on short text regions, rotating crops incorrectly before recognition.
     pub use_angle_cls: bool,
 
-    /// Enable table structure detection (default: false)
+    /// Enable table structure detection (default: true, matching `TesseractConfig`).
+    ///
+    /// This only clusters and reconstructs a grid from word boxes PaddleOCR has already
+    /// produced (see `crate::paddle_ocr::backend::PaddleOcrBackend::process_image`) — it does
+    /// not run any additional model inference, so the added per-page cost is the CPU-only
+    /// clustering/reconstruction pass, not another ONNX call.
     pub enable_table_detection: bool,
 
     /// Database threshold for text detection (default: 0.3)
@@ -488,7 +493,10 @@ mod tests {
         let config = PaddleOcrConfig::new("en");
         assert_eq!(config.language, "en");
         assert!(!config.use_angle_cls);
-        assert!(!config.enable_table_detection);
+        assert!(
+            !config.enable_table_detection,
+            "paddle cannot tell a table from prose, so this stays off until it can -- see backend tests"
+        );
         assert_eq!(config.padding, 10);
         assert_eq!(config.model_tier, "mobile");
         assert_eq!(config.model_version, "pp-ocrv6");

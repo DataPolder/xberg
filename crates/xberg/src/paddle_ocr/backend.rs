@@ -1164,24 +1164,31 @@ impl OcrBackend for PaddleOcrBackend {
             let table_elements = line_elements.iter().chain(&word_elements).cloned().collect::<Vec<_>>();
             let words = elements_to_hocr_words(&table_elements, 0.3);
 
-            if !words.is_empty() {
-                let cells = reconstruct_table(&words, 20, 0.5);
+            for region_words in crate::table_core::cluster_words_into_table_regions(&words) {
+                if region_words.len() < crate::table_core::MIN_TABLE_CANDIDATE_WORDS {
+                    continue;
+                }
 
-                if !cells.is_empty() {
-                    table_count = 1;
+                let cells = reconstruct_table(&region_words, 20, 0.5);
+                if cells.is_empty() || cells[0].is_empty() {
+                    continue;
+                }
+
+                table_count += 1;
+                if table_rows.is_none() {
                     table_rows = Some(cells.len() as u32);
                     table_cols = cells.first().map(|row| row.len() as u32);
-
-                    let table_markdown = table_to_markdown(&cells);
-
-                    tables.push(Table {
-                        cells,
-                        markdown: table_markdown,
-                        page_number: 1,
-                        bounding_box: None,
-                        ..Default::default()
-                    });
                 }
+
+                let table_markdown = table_to_markdown(&cells);
+
+                tables.push(Table {
+                    cells,
+                    markdown: table_markdown,
+                    page_number: 1,
+                    bounding_box: None,
+                    ..Default::default()
+                });
             }
         }
 
@@ -1931,7 +1938,12 @@ mod tests {
     #[test]
     fn test_paddle_ocr_table_detection_disabled_by_default() {
         let backend = PaddleOcrBackend::new().unwrap();
-        assert!(!backend.supports_table_detection());
+        assert!(
+            !backend.supports_table_detection(),
+            "paddle has no table-vs-prose discriminator, so enabling it by default fabricates \
+             wide garbage tables out of ordinary prose -- measured 390 fabricated rows on a \
+             document containing no tables at all"
+        );
     }
 
     #[test]
@@ -2107,5 +2119,166 @@ mod tests {
         PADDLE_TL_ACCEL.with(|cell| {
             cell.replace(None);
         });
+    }
+
+    /// Builds a `HocrWord` at the given pixel geometry, purely for clustering/reconstruction
+    /// tests below — text content is irrelevant to region splitting.
+    fn hocr_word_at(text: &str, left: u32, top: u32, width: u32, height: u32) -> crate::table_core::HocrWord {
+        crate::table_core::HocrWord {
+            text: text.to_string(),
+            left,
+            top,
+            width,
+            height,
+            confidence: 90.0,
+        }
+    }
+
+    /// Two tables stacked vertically with a large blank gap between them must become two
+    /// separate regions, not one region spanning both.
+    ///
+    /// Without the fix, paddle's table path called `reconstruct_table` once over every
+    /// table-confidence word on the whole page (`table_count` hardcoded to at most 1), so the
+    /// words from both tables below would be reconstructed together, and this test's row-count
+    /// assertion on the *first* region would fail (it would see all 8 words merged into one
+    /// region with 4 rows instead of two 2-row regions).
+    #[test]
+    fn cluster_words_into_table_regions_splits_two_vertically_separated_tables() {
+        let words = vec![
+            // Table 1: 2 rows x 2 cols, rows at y=0 and y=20, height 15.
+            hocr_word_at("A1", 0, 0, 40, 15),
+            hocr_word_at("B1", 100, 0, 40, 15),
+            hocr_word_at("A2", 0, 20, 40, 15),
+            hocr_word_at("B2", 100, 20, 40, 15),
+            // Large vertical gap (well beyond 3x avg word height of 15).
+            hocr_word_at("C1", 0, 500, 40, 15),
+            hocr_word_at("D1", 100, 500, 40, 15),
+            hocr_word_at("C2", 0, 520, 40, 15),
+            hocr_word_at("D2", 100, 520, 40, 15),
+        ];
+
+        let regions = crate::table_core::cluster_words_into_table_regions(&words);
+
+        assert_eq!(regions.len(), 2, "a wide vertical gap must split into two regions");
+        assert_eq!(regions[0].len(), 4, "first region should contain only table 1's words");
+        assert_eq!(regions[1].len(), 4, "second region should contain only table 2's words");
+    }
+
+    /// Two sub-tables placed side by side, sharing the same row y-positions, must land in a
+    /// *single* region (and therefore a single reconstructed table spanning both), because
+    /// there is no vertical gap between them for the region split to key off of. This is the
+    /// newspaper-stock-table shape from `test_documents/images_extra/ocr_image.tiff`.
+    ///
+    /// Without the fix (whole-page `reconstruct_table` call, no clustering at all) this case
+    /// happened to already work by accident, since one big call also keeps them together — the
+    /// case that actually distinguishes "region clustering exists" is the vertically-separated
+    /// test above. This test guards against a *wrong* clustering fix that keys off horizontal
+    /// position (which would wrongly split side-by-side tables into two regions and defeat the
+    /// merged-shared-row reconstruction).
+    #[test]
+    fn cluster_words_into_table_regions_keeps_side_by_side_tables_in_one_region() {
+        let words = vec![
+            // Left sub-table columns at x=0, x=60. Right sub-table columns at x=300, x=360.
+            hocr_word_at("L1", 0, 0, 40, 15),
+            hocr_word_at("L2", 60, 0, 40, 15),
+            hocr_word_at("R1", 300, 0, 40, 15),
+            hocr_word_at("R2", 360, 0, 40, 15),
+            hocr_word_at("L3", 0, 20, 40, 15),
+            hocr_word_at("L4", 60, 20, 40, 15),
+            hocr_word_at("R3", 300, 20, 40, 15),
+            hocr_word_at("R4", 360, 20, 40, 15),
+        ];
+
+        let regions = crate::table_core::cluster_words_into_table_regions(&words);
+
+        assert_eq!(
+            regions.len(),
+            1,
+            "side-by-side sub-tables sharing rows must stay in one region"
+        );
+        assert_eq!(regions[0].len(), 8);
+    }
+
+    /// End-to-end reconstruction over the side-by-side case: `reconstruct_table` must detect
+    /// all four columns (two per sub-table) and both shared rows, producing one merged table
+    /// rather than dropping either sub-table's columns.
+    #[test]
+    fn reconstruct_table_merges_side_by_side_subtables_onto_shared_rows() {
+        let words = vec![
+            hocr_word_at("L1", 0, 0, 40, 15),
+            hocr_word_at("L2", 60, 0, 40, 15),
+            hocr_word_at("R1", 300, 0, 40, 15),
+            hocr_word_at("R2", 360, 0, 40, 15),
+            hocr_word_at("L3", 0, 20, 40, 15),
+            hocr_word_at("L4", 60, 20, 40, 15),
+            hocr_word_at("R3", 300, 20, 40, 15),
+            hocr_word_at("R4", 360, 20, 40, 15),
+        ];
+
+        let regions = crate::table_core::cluster_words_into_table_regions(&words);
+        assert_eq!(regions.len(), 1);
+
+        let cells = reconstruct_table(&regions[0], 20, 0.5);
+        assert_eq!(cells.len(), 2, "both shared rows should be reconstructed");
+        assert_eq!(cells[0].len(), 4, "all four columns from both sub-tables should be detected");
+    }
+
+    /// A page-scale defect test: two real tables of *differing* shapes (2 cols vs 3 cols), far
+    /// apart vertically, plus a small cluster of stray words below the noise threshold. This
+    /// exercises the whole loop the fix adds in `process_image` (region splitting + per-region
+    /// `MIN_TABLE_CANDIDATE_WORDS` filtering), not just the clustering helper in isolation.
+    ///
+    /// Without the fix, all three clusters' words would be fed through one whole-page
+    /// `reconstruct_table` call and reported as `table_count == 1` with row/col counts describing
+    /// a single nonsensical merged grid, rather than 2 real tables and the stray cluster dropped.
+    #[test]
+    fn table_region_pipeline_reports_two_tables_of_differing_shape_and_drops_noise() {
+        let mut words = vec![
+            // Table A: 3 rows x 2 cols (6 words, exactly at MIN_TABLE_CANDIDATE_WORDS so it
+            // survives the noise gate).
+            hocr_word_at("A11", 0, 0, 40, 15),
+            hocr_word_at("A12", 100, 0, 40, 15),
+            hocr_word_at("A21", 0, 20, 40, 15),
+            hocr_word_at("A22", 100, 20, 40, 15),
+            hocr_word_at("A31", 0, 40, 40, 15),
+            hocr_word_at("A32", 100, 40, 40, 15),
+        ];
+        // Table B: 2 rows x 3 cols, far below table A.
+        words.extend([
+            hocr_word_at("B11", 0, 500, 40, 15),
+            hocr_word_at("B12", 100, 500, 40, 15),
+            hocr_word_at("B13", 200, 500, 40, 15),
+            hocr_word_at("B21", 0, 520, 40, 15),
+            hocr_word_at("B22", 100, 520, 40, 15),
+            hocr_word_at("B23", 200, 520, 40, 15),
+        ]);
+        // Stray noise cluster: only 2 words, far below both tables, must be dropped by the
+        // MIN_TABLE_CANDIDATE_WORDS gate.
+        words.extend([
+            hocr_word_at("N1", 0, 1000, 40, 15),
+            hocr_word_at("N2", 100, 1000, 40, 15),
+        ]);
+
+        let mut reconstructed_tables: Vec<Vec<Vec<String>>> = Vec::new();
+        for region_words in crate::table_core::cluster_words_into_table_regions(&words) {
+            if region_words.len() < crate::table_core::MIN_TABLE_CANDIDATE_WORDS {
+                continue;
+            }
+            let cells = reconstruct_table(&region_words, 20, 0.5);
+            if cells.is_empty() || cells[0].is_empty() {
+                continue;
+            }
+            reconstructed_tables.push(cells);
+        }
+
+        assert_eq!(
+            reconstructed_tables.len(),
+            2,
+            "exactly two tables should survive: A and B, with the stray pair dropped"
+        );
+        assert_eq!(reconstructed_tables[0].len(), 3, "table A should have 3 rows");
+        assert_eq!(reconstructed_tables[0][0].len(), 2, "table A should have 2 columns");
+        assert_eq!(reconstructed_tables[1].len(), 2, "table B should have 2 rows");
+        assert_eq!(reconstructed_tables[1][0].len(), 3, "table B should have 3 columns");
     }
 }
