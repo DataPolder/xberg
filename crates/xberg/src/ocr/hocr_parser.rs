@@ -154,6 +154,16 @@ struct HocrProperties {
     x_font: Option<String>,
     /// Font size in points.
     x_fsize: Option<u32>,
+    /// x-height in pixels — the height of the line's lowercase letters
+    /// excluding ascenders/descenders. Emitted by Tesseract on `ocr_line`/
+    /// `ocrx_line` titles, not on individual words. A better heading signal
+    /// than raw bbox height because it is insensitive to how many ascenders
+    /// or descenders happen to appear in a given line.
+    x_size: Option<f64>,
+    /// Ascender height in pixels, from the line's `x_ascenders` property.
+    x_ascenders: Option<f64>,
+    /// Descender height in pixels, from the line's `x_descenders` property.
+    x_descenders: Option<f64>,
 }
 
 /// Parse all properties from an hOCR title attribute string.
@@ -214,6 +224,21 @@ fn parse_title_properties(title: &str) -> HocrProperties {
                     props.x_fsize = Some(val);
                 }
             }
+            "x_size" => {
+                if let Some(val) = tokens.next().and_then(|s| s.parse::<f64>().ok()) {
+                    props.x_size = Some(val);
+                }
+            }
+            "x_ascenders" => {
+                if let Some(val) = tokens.next().and_then(|s| s.parse::<f64>().ok()) {
+                    props.x_ascenders = Some(val);
+                }
+            }
+            "x_descenders" => {
+                if let Some(val) = tokens.next().and_then(|s| s.parse::<f64>().ok()) {
+                    props.x_descenders = Some(val);
+                }
+            }
             _ => {}
         }
     }
@@ -242,6 +267,26 @@ struct HocrWordInfo {
     text_angle: Option<f64>,
 }
 
+/// Per-`ocr_line`/`ocrx_line` metadata parsed from that tag's own `title`
+/// attribute, plus the words it contains.
+///
+/// Kept as one entry per physical hOCR line (rather than folded immediately
+/// into a paragraph-wide average) so a downstream consumer can recover a
+/// line-level font size — the paragraph mean alone hides variation between,
+/// say, a heading's first line and a wrapped continuation line at body size.
+#[derive(Default)]
+struct HocrLineInfo {
+    words: Vec<HocrWordInfo>,
+    /// x-height in pixels (`x_size`) — see [`HocrProperties::x_size`].
+    x_size: Option<f64>,
+    /// Ascender height in pixels (`x_ascenders`).
+    x_ascenders: Option<f64>,
+    /// Descender height in pixels (`x_descenders`).
+    x_descenders: Option<f64>,
+    /// Baseline (slope, constant), from the line's `baseline` property.
+    baseline: Option<(f64, i32)>,
+}
+
 /// Attribute key holding the paragraph's average word font size (points, as a
 /// decimal string). Consumed by markdown assembly to promote large-font
 /// paragraphs to headings (#185).
@@ -250,6 +295,60 @@ pub(crate) const HOCR_FONT_SIZE_ATTRIBUTE: &str = "x_fsize";
 /// Attribute key holding the paragraph's average word text-rotation angle in
 /// degrees (as a decimal string), when any word reported a non-zero angle.
 pub(crate) const HOCR_TEXT_ANGLE_ATTRIBUTE: &str = "textangle";
+
+/// Attribute key holding the paragraph's average line x-height in pixels (as
+/// a decimal string), averaged over lines that reported an `x_size` on their
+/// `ocr_line`/`ocrx_line` title. x-height is a better heading signal than raw
+/// bbox height because it is insensitive to ascender/descender mix.
+pub(crate) const HOCR_X_HEIGHT_ATTRIBUTE: &str = "x_size";
+
+/// Attribute key holding the paragraph's average line ascender height in
+/// pixels (as a decimal string).
+pub(crate) const HOCR_X_ASCENDERS_ATTRIBUTE: &str = "x_ascenders";
+
+/// Attribute key holding the paragraph's average line descender height in
+/// pixels (as a decimal string).
+pub(crate) const HOCR_X_DESCENDERS_ATTRIBUTE: &str = "x_descenders";
+
+/// Attribute key holding the paragraph's average line baseline slope (as a
+/// decimal string), averaged over lines that reported a `baseline` on their
+/// `ocr_line`/`ocrx_line` title.
+pub(crate) const HOCR_BASELINE_SLOPE_ATTRIBUTE: &str = "baseline_slope";
+
+/// Attribute key holding the paragraph's average line baseline constant
+/// (pixels, as a decimal string).
+pub(crate) const HOCR_BASELINE_CONST_ATTRIBUTE: &str = "baseline_const";
+
+/// Attribute key holding one average word font size (points) per physical
+/// text line, comma-separated in the same order as the `\n`-separated lines
+/// of the element's `text`. A line with no word reporting `x_fsize` is
+/// rendered as an empty field so field position still lines up with `text`.
+/// Lets a downstream consumer compute a line-level (not just paragraph-mean)
+/// font size without carrying every word's bounding box.
+pub(crate) const HOCR_LINE_FONT_SIZES_ATTRIBUTE: &str = "line_font_sizes";
+
+/// Attribute key holding one line x-height (pixels, from `x_size`) per
+/// physical text line, comma-separated in the same order as the
+/// `\n`-separated lines of the element's `text`, with the same empty-field
+/// alignment rule as [`HOCR_LINE_FONT_SIZES_ATTRIBUTE`].
+pub(crate) const HOCR_LINE_X_HEIGHTS_ATTRIBUTE: &str = "line_x_heights";
+
+/// Render one optional numeric value per line as a comma-joined string,
+/// preserving line position (a missing value becomes an empty field) so a
+/// downstream consumer can zip the result back up against `text.split('\n')`.
+fn join_per_line_values(values: &[Option<f64>]) -> String {
+    values
+        .iter()
+        .map(|value| value.map(format_decimal).unwrap_or_default())
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// Format a float without a trailing `.0` for whole numbers, matching the
+/// existing paragraph-average attribute formatting (`f64::to_string`).
+fn format_decimal(value: f64) -> String {
+    value.to_string()
+}
 
 /// Parse a single `<p class="ocr_par">` (or `<span class="ocr_par">`) and all nested
 /// content up to the matching closing tag.
@@ -271,8 +370,8 @@ fn parse_paragraph(
     let bytes = html.as_bytes();
     let mut pos = start;
 
-    let mut lines: Vec<Vec<HocrWordInfo>> = Vec::new();
-    let mut current_line: Vec<HocrWordInfo> = Vec::new();
+    let mut lines: Vec<HocrLineInfo> = Vec::new();
+    let mut current_line = HocrLineInfo::default();
     let mut in_line = false;
 
     let mut depth: u32 = 1;
@@ -292,7 +391,7 @@ fn parse_paragraph(
             if closing_name == par_tag {
                 depth = depth.saturating_sub(1);
                 if depth == 0 {
-                    if !current_line.is_empty() {
+                    if !current_line.words.is_empty() {
                         lines.push(std::mem::take(&mut current_line));
                     }
                     break;
@@ -308,10 +407,16 @@ fn parse_paragraph(
         let tag_name = tag_content.split_whitespace().next().unwrap_or("").to_ascii_lowercase();
 
         if has_class(tag_content, "ocr_line") || has_class(tag_content, "ocrx_line") {
-            if in_line && !current_line.is_empty() {
+            if in_line && !current_line.words.is_empty() {
                 lines.push(std::mem::take(&mut current_line));
             }
             in_line = true;
+            let title = extract_title_attr(tag_content);
+            let props = parse_title_properties(&title);
+            current_line.x_size = props.x_size;
+            current_line.x_ascenders = props.x_ascenders;
+            current_line.x_descenders = props.x_descenders;
+            current_line.baseline = props.baseline;
             if tag_name == par_tag {
                 depth += 1;
             }
@@ -330,7 +435,7 @@ fn parse_paragraph(
 
             if !trimmed.is_empty() {
                 let (x0, y0, x1, y1) = props.bbox.unwrap_or((0, 0, 0, 0));
-                current_line.push(HocrWordInfo {
+                current_line.words.push(HocrWordInfo {
                     text: trimmed.to_string(),
                     x0,
                     y0,
@@ -349,14 +454,14 @@ fn parse_paragraph(
         }
     }
 
-    let all_words: Vec<&HocrWordInfo> = lines.iter().flat_map(|l| l.iter()).collect();
+    let all_words: Vec<&HocrWordInfo> = lines.iter().flat_map(|l| l.words.iter()).collect();
     if all_words.is_empty() {
         return (None, pos);
     }
 
     let text: String = lines
         .iter()
-        .map(|line| line.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(" "))
+        .map(|line| line.words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(" "))
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -391,6 +496,54 @@ fn parse_paragraph(
             angle_count += 1;
         }
     }
+
+    let mut x_size_sum = 0.0f64;
+    let mut x_size_count = 0u32;
+    let mut x_ascenders_sum = 0.0f64;
+    let mut x_ascenders_count = 0u32;
+    let mut x_descenders_sum = 0.0f64;
+    let mut x_descenders_count = 0u32;
+    let mut baseline_slope_sum = 0.0f64;
+    let mut baseline_const_sum = 0.0f64;
+    let mut baseline_count = 0u32;
+
+    for line in &lines {
+        if let Some(x_size) = line.x_size {
+            x_size_sum += x_size;
+            x_size_count += 1;
+        }
+        if let Some(ascenders) = line.x_ascenders {
+            x_ascenders_sum += ascenders;
+            x_ascenders_count += 1;
+        }
+        if let Some(descenders) = line.x_descenders {
+            x_descenders_sum += descenders;
+            x_descenders_count += 1;
+        }
+        if let Some((slope, constant)) = line.baseline {
+            baseline_slope_sum += slope;
+            baseline_const_sum += f64::from(constant);
+            baseline_count += 1;
+        }
+    }
+
+    // Per-line font size / x-height, aligned to the `\n`-separated lines of
+    // `text` above, so a downstream consumer can recover line-level detail
+    // instead of only the paragraph mean (#667, #669).
+    let line_font_sizes: Vec<Option<f64>> = lines
+        .iter()
+        .map(|line| {
+            let sizes: Vec<f64> = line.words.iter().filter_map(|w| w.font_size).map(f64::from).collect();
+            if sizes.is_empty() {
+                None
+            } else {
+                Some(sizes.iter().sum::<f64>() / sizes.len() as f64)
+            }
+        })
+        .collect();
+    let line_x_heights: Vec<Option<f64>> = lines.iter().map(|line| line.x_size).collect();
+    let any_line_font_size = line_font_sizes.iter().any(Option::is_some);
+    let any_line_x_height = line_x_heights.iter().any(Option::is_some);
 
     let has_valid_bbox = max_x1 > 0 || max_y1 > 0;
 
@@ -457,6 +610,41 @@ fn parse_paragraph(
                 .get_or_insert_with(Default::default)
                 .insert(HOCR_TEXT_ANGLE_ATTRIBUTE.to_string(), avg_angle.to_string());
         }
+    }
+    if x_size_count > 0 {
+        let avg_x_size = x_size_sum / f64::from(x_size_count);
+        elem.attributes
+            .get_or_insert_with(Default::default)
+            .insert(HOCR_X_HEIGHT_ATTRIBUTE.to_string(), avg_x_size.to_string());
+    }
+    if x_ascenders_count > 0 {
+        let avg_ascenders = x_ascenders_sum / f64::from(x_ascenders_count);
+        elem.attributes
+            .get_or_insert_with(Default::default)
+            .insert(HOCR_X_ASCENDERS_ATTRIBUTE.to_string(), avg_ascenders.to_string());
+    }
+    if x_descenders_count > 0 {
+        let avg_descenders = x_descenders_sum / f64::from(x_descenders_count);
+        elem.attributes
+            .get_or_insert_with(Default::default)
+            .insert(HOCR_X_DESCENDERS_ATTRIBUTE.to_string(), avg_descenders.to_string());
+    }
+    if baseline_count > 0 {
+        let avg_slope = baseline_slope_sum / f64::from(baseline_count);
+        let avg_const = baseline_const_sum / f64::from(baseline_count);
+        let attrs = elem.attributes.get_or_insert_with(Default::default);
+        attrs.insert(HOCR_BASELINE_SLOPE_ATTRIBUTE.to_string(), avg_slope.to_string());
+        attrs.insert(HOCR_BASELINE_CONST_ATTRIBUTE.to_string(), avg_const.to_string());
+    }
+    if any_line_font_size {
+        elem.attributes
+            .get_or_insert_with(Default::default)
+            .insert(HOCR_LINE_FONT_SIZES_ATTRIBUTE.to_string(), join_per_line_values(&line_font_sizes));
+    }
+    if any_line_x_height {
+        elem.attributes
+            .get_or_insert_with(Default::default)
+            .insert(HOCR_LINE_X_HEIGHTS_ATTRIBUTE.to_string(), join_per_line_values(&line_x_heights));
     }
 
     (Some(elem), pos)
@@ -1348,5 +1536,93 @@ mod tests {
             2,
             "Should capture both paragraphs around separator"
         );
+    }
+
+    #[test]
+    fn test_property_parsing_recovers_x_size_ascenders_descenders() {
+        // Fails against unfixed code: `HocrProperties` had no `x_size` /
+        // `x_ascenders` / `x_descenders` fields at all, so these keys parsed
+        // to nothing regardless of what the title string contained.
+        let props =
+            parse_title_properties("bbox 100 40 900 150; baseline 0.015 -18; x_size 30; x_descenders 6; x_ascenders 8");
+        assert_eq!(props.x_size, Some(30.0));
+        assert_eq!(props.x_ascenders, Some(8.0));
+        assert_eq!(props.x_descenders, Some(6.0));
+        assert_eq!(props.baseline, Some((0.015, -18)));
+    }
+
+    #[test]
+    fn test_ocr_line_title_parsed_into_paragraph_x_height_and_baseline_attributes() {
+        // Fails against unfixed code: the `ocr_line`/`ocrx_line` branch only
+        // flipped `in_line` and never called `parse_title_properties` on that
+        // tag's own title, so `baseline`/`x_size`/`x_ascenders`/`x_descenders`
+        // were unreachable even though Tesseract emits them on the line tag
+        // (not the word tag).
+        let hocr = r#"<div class="ocr_page" title="ppageno 0">
+            <p class="ocr_par">
+                <span class="ocr_line"
+                    title="bbox 100 40 900 150; baseline 0.01 -18; x_size 30; x_ascenders 8; x_descenders 6">
+                    <span class="ocrx_word" title="bbox 100 40 300 150; x_wconf 95">Heading</span>
+                </span>
+            </p>
+        </div>"#;
+
+        let doc = parse_hocr_to_internal_document(hocr);
+        let attrs = doc.elements[0].attributes.as_ref().expect("attributes present");
+
+        assert_eq!(attrs.get(HOCR_X_HEIGHT_ATTRIBUTE), Some(&"30".to_string()));
+        assert_eq!(attrs.get(HOCR_X_ASCENDERS_ATTRIBUTE), Some(&"8".to_string()));
+        assert_eq!(attrs.get(HOCR_X_DESCENDERS_ATTRIBUTE), Some(&"6".to_string()));
+        assert_eq!(attrs.get(HOCR_BASELINE_SLOPE_ATTRIBUTE), Some(&"0.01".to_string()));
+        assert_eq!(attrs.get(HOCR_BASELINE_CONST_ATTRIBUTE), Some(&"-18".to_string()));
+    }
+
+    #[test]
+    fn test_paragraph_without_line_title_has_no_x_height_attributes() {
+        let hocr = r#"<div class="ocr_page" title="ppageno 0">
+            <p class="ocr_par">
+                <span class="ocr_line">
+                    <span class="ocrx_word" title="bbox 10 10 50 30; x_wconf 90">Plain</span>
+                </span>
+            </p>
+        </div>"#;
+
+        let doc = parse_hocr_to_internal_document(hocr);
+        let has_x_height = doc.elements[0]
+            .attributes
+            .as_ref()
+            .is_some_and(|attrs| attrs.contains_key(HOCR_X_HEIGHT_ATTRIBUTE));
+        assert!(!has_x_height, "should not synthesize x-height when hOCR provides none");
+    }
+
+    #[test]
+    fn test_multi_line_paragraph_preserves_per_line_font_size_and_x_height() {
+        // Fails against unfixed code in two ways: (1) `line_font_sizes` /
+        // `line_x_heights` attributes don't exist at all pre-fix, so both
+        // `get` calls return `None`; (2) even measuring only the paragraph
+        // mean (22 = (24+20)/2) would hide that line one is a 24pt heading
+        // and line two is 20pt body text, which is exactly the per-line
+        // detail #667/#669 ask to preserve.
+        let hocr = r#"<div class="ocr_page" title="ppageno 0">
+            <p class="ocr_par">
+                <span class="ocr_line" title="bbox 10 10 200 40; x_size 28">
+                    <span class="ocrx_word" title="bbox 10 10 100 40; x_wconf 90; x_fsize 24">BIG</span>
+                </span>
+                <span class="ocr_line" title="bbox 10 50 200 70">
+                    <span class="ocrx_word" title="bbox 10 50 100 70; x_wconf 90; x_fsize 20">small</span>
+                </span>
+            </p>
+        </div>"#;
+
+        let doc = parse_hocr_to_internal_document(hocr);
+        let attrs = doc.elements[0].attributes.as_ref().expect("attributes present");
+
+        // Paragraph mean still present for existing consumers (#185).
+        assert_eq!(attrs.get(HOCR_FONT_SIZE_ATTRIBUTE), Some(&"22".to_string()));
+
+        // Per-line detail: line one is 24pt/x_size 28, line two is 20pt with
+        // no line-level x_size (second field empty, position preserved).
+        assert_eq!(attrs.get(HOCR_LINE_FONT_SIZES_ATTRIBUTE), Some(&"24,20".to_string()));
+        assert_eq!(attrs.get(HOCR_LINE_X_HEIGHTS_ATTRIBUTE), Some(&"28,".to_string()));
     }
 }
