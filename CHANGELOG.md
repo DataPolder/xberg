@@ -11,6 +11,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- OCR-backed PDF extraction now reuses the same geometry-derived structure heuristic as native PDF
+  extraction (font-clustering headings, list-marker detection, document-wide refinement passes) when
+  `output_format` is not `Plain`, instead of only structuring output when optional ML layout
+  detection is enabled. Layout detection remains off by default and, when enabled, still adds its
+  own structure signal on top of the heuristic.
+
+- Tesseract OCR now enables `hocr_font_info`, so hOCR carries per-word font size. Without it no font
+  size reached the structure layer at all and heading detection, which clusters on font size, could
+  never promote anything.
+
+- Structure detected for OCR-backed pages is no longer discarded when a PDF has no native text
+  layer. Fully scanned documents took a branch that ignored the OCR structure entirely.
+
+- `Plain` output no longer contains markdown syntax. The OCR layer ran a second, independent heading
+  heuristic and wrote `## ` into the content string, which reached `Plain` verbatim and was escaped
+  to `\#\#` on the standalone-image path.
+
+- Sceptre OCR no longer collapses a page into a single paragraph: word fragments sharing a line
+  y-center are merged before block assignment, and font size is derived from the text quad's side
+  edges rather than its axis-aligned bounding box, whose height grew with line width on skewed scans.
+
+- Tables reconstructed from a standalone image are no longer dropped; they were never read.
+
 - A CLI flag no longer erases the sibling fields of the config section it touches. `--ocr`,
   `--ocr-backend` and `--ocr-language` replaced the whole `ocr` object, so `--config-json
   '{"ocr":{"quality_thresholds":{...}}}'` was silently discarded the moment any `--ocr*` flag was
@@ -799,9 +822,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- OCR-backed PDF extraction now preserves geometry-derived document structure without requiring
-  optional ML layout detection, including pages replaced by mixed native/OCR extraction, and keeps
-  consecutive Tesseract paragraphs in their shared hOCR text area.
+- OCR-backed PDF extraction now keeps consecutive Tesseract paragraphs grouped within their shared
+  hOCR text area instead of splitting them, including pages replaced by mixed native/OCR extraction.
+  This is paragraph/block grouping only; font-clustering headings and list-marker detection for
+  OCR-backed pages are tracked separately (see Unreleased).
 - PDF table reconstruction now rejects sparse, short-wide contact blocks that were previously
   misclassified as tables.
 - Standalone-image Tesseract OCR now defaults to sparse-text segmentation, while cropped layout

@@ -102,7 +102,7 @@ table_anchors = true
 
 ## Content Output Format
 
-`output_format` sets the format of the `content` field. It is independent of `result_format` (element-based / document structure) and applies to every extraction.
+`output_format` sets the format of the `content` field. It is independent of `result_format` (element-based / document structure). For OCR-backed scanned PDFs, non-`Plain` formats trigger the same geometry-derived structure heuristic (headings, lists) as native PDF extraction; set `output_format` to something other than `Plain` to get structured content instead of raw text.
 
 | `OutputFormat`    | Description                                                              |
 | ----------------- | ----------------------------------------------------------------------- |
@@ -631,7 +631,11 @@ Requires an OCR backend to be configured separately.
 
 ### Troubleshooting
 
-- **`hierarchy` is `None`** — Check `hierarchy.enabled` is `True`. If the PDF is image-only, enable OCR. If fewer text blocks than `k_clusters`, reduce `k_clusters`.
+- **`hierarchy` is `None`** — Check `hierarchy.enabled` is `True`. This field is only populated by the
+  native PDF text-tree pipeline; it stays `None` for OCR-backed (image-only) pages regardless of
+  whether OCR is enabled — enabling OCR does not populate `hierarchy`. If fewer text blocks than
+  `k_clusters`, reduce `k_clusters`. For structured output from a scanned PDF, use `output_format`
+  (e.g. `markdown`) instead of relying on `hierarchy`.
 - **Most blocks classified as `body`** — Document may use uniform font sizes. Reduce `k_clusters` (try 3–4).
 - **Heading levels don't match visual inspection** — Levels are assigned by font size rank, not absolute size. Filter on `block.font_size` directly for absolute thresholds.
 

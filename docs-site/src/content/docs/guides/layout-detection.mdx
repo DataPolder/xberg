@@ -143,6 +143,16 @@ See [LayoutDetectionConfig](/reference/configuration/#layoutdetectionconfig) for
 
 Enabling it improves structural F1 at the cost of inference latency (~150-300 ms/page CPU, ~20-50 ms/page GPU). Default: `false`. Requires the `layout-detection` feature and a set `layout` config; it is skipped when `force_ocr` is enabled. On the CLI, pass `--use-layout-for-markdown`.
 
+### Layout Detection and Output Format
+
+Layout detection is a *structure signal*, not an output format: it feeds the same heading, table,
+list, and figure classification that the font-clustering heuristic produces, and both are discarded
+when `output_format` is `Plain` (the default), because `Plain` emits raw text with no structural
+markup to carry the result. Pair layout detection with a structured `output_format` — `Markdown`,
+`Djot`, `Html`, or `DocTags` — or the inference cost of running the model is spent for no visible
+effect on `content`. `output_format` and `layout` are independent config fields; enabling one does
+not change the other's default.
+
 ## Page Selection Strategy
 
 `LayoutDetectionConfig.strategy` controls which pages the layout model runs on:
