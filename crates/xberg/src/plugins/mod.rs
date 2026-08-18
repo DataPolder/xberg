@@ -186,7 +186,8 @@ pub use extractor::{
     register_document_extractor, unregister_document_extractor,
 };
 pub use ocr::{
-    OcrBackend, OcrBackendType, clear_ocr_backends, list_ocr_backends, register_ocr_backend, unregister_ocr_backend,
+    ConfidenceSemantics, OcrBackend, OcrBackendType, clear_ocr_backends, list_ocr_backends, register_ocr_backend,
+    unregister_ocr_backend,
 };
 pub use processor::{
     PostProcessor, ProcessingStage, clear_post_processors, list_post_processors, register_post_processor,

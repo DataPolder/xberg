@@ -330,6 +330,11 @@ impl OcrBackend for PaddleOcrVlBackend {
     fn emits_structured_markdown(&self) -> bool {
         true
     }
+
+    /// PaddleOCR-VL reports no page-level confidence.
+    fn confidence_semantics(&self) -> crate::plugins::ConfidenceSemantics {
+        crate::plugins::ConfidenceSemantics::None
+    }
 }
 
 #[cfg(test)]

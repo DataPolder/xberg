@@ -261,6 +261,11 @@ impl OcrBackend for TrocrBackend {
     fn backend_type(&self) -> OcrBackendType {
         OcrBackendType::Candle
     }
+
+    /// TrOCR reports no page-level confidence.
+    fn confidence_semantics(&self) -> crate::plugins::ConfidenceSemantics {
+        crate::plugins::ConfidenceSemantics::None
+    }
 }
 
 #[cfg(test)]

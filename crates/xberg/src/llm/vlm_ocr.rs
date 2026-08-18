@@ -115,6 +115,11 @@ impl OcrBackend for VlmOcrBackend {
         OcrBackendType::Custom
     }
 
+    /// VLM OCR reports no page-level confidence.
+    fn confidence_semantics(&self) -> crate::plugins::ConfidenceSemantics {
+        crate::plugins::ConfidenceSemantics::None
+    }
+
     #[cfg_attr(alef, alef(skip))]
     fn probe(&self, config: &crate::OcrConfig) -> crate::doctor::DoctorCheck {
         use crate::doctor::DoctorCheck;

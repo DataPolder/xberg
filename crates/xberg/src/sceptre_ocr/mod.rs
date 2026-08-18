@@ -291,6 +291,14 @@ impl OcrBackend for SceptreOcrBackend {
     fn supported_languages(&self) -> Vec<String> {
         supported_language_aliases().into_iter().map(str::to_string).collect()
     }
+
+    /// Sceptre's page confidence is EasyOCR's length-penalised `custom_mean` rescaled to
+    /// 0-100. It is not comparable to Tesseract's scale: on one document a real text page
+    /// scored 39 while a pure line-art drawing scored 74, an inverted ordering relative to
+    /// legibility. Never gate on this value.
+    fn confidence_semantics(&self) -> crate::plugins::ConfidenceSemantics {
+        crate::plugins::ConfidenceSemantics::Uncalibrated
+    }
 }
 
 struct BlockingOutput {

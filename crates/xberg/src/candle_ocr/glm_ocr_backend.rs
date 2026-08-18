@@ -559,6 +559,11 @@ impl OcrBackend for GlmOcrBackend {
     fn emits_structured_markdown(&self) -> bool {
         true
     }
+
+    /// GLM-OCR reports no page-level confidence.
+    fn confidence_semantics(&self) -> crate::plugins::ConfidenceSemantics {
+        crate::plugins::ConfidenceSemantics::None
+    }
 }
 
 /// Paired-mode dispatch: run PP-DocLayout-V3, crop regions, dispatch per-region task.

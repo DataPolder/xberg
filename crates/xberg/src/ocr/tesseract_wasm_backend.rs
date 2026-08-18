@@ -222,6 +222,11 @@ impl OcrBackend for TesseractWasmBackend {
     fn backend_type(&self) -> OcrBackendType {
         OcrBackendType::Tesseract
     }
+
+    /// The WASM Tesseract backend reports no page-level confidence.
+    fn confidence_semantics(&self) -> crate::plugins::ConfidenceSemantics {
+        crate::plugins::ConfidenceSemantics::None
+    }
 }
 
 /// Returns the compile-time-bundled English tessdata when the

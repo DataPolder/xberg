@@ -418,6 +418,13 @@ impl OcrBackend for TesseractBackend {
         true
     }
 
+    /// Tesseract's mean per-word classifier confidence, 0-100, is validated to track
+    /// legibility: on a scanned ordinance, prose pages scored 89-95 and pure line-art
+    /// drawings scored 36-62. It is safe to use as an absolute quality gate.
+    fn confidence_semantics(&self) -> crate::plugins::ConfidenceSemantics {
+        crate::plugins::ConfidenceSemantics::Legibility { scale_max: 100.0 }
+    }
+
     #[cfg_attr(alef, alef(skip))]
     fn probe(&self, config: &OcrConfig) -> crate::doctor::DoctorCheck {
         #[cfg(target_arch = "wasm32")]

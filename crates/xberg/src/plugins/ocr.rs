@@ -27,6 +27,30 @@ pub enum OcrBackendType {
     Custom,
 }
 
+/// How a backend's reported page-level confidence must be interpreted.
+///
+/// Backend confidence scores are not interchangeable. Tesseract's mean word confidence is a
+/// classifier score validated to track legibility on a 0-100 scale. Sceptre (EasyOCR-based)
+/// reports a length-penalised `custom_mean` that is rescaled into the same 0-100 range but is
+/// *not* comparable — its ordering can be inverted relative to legibility (a dense prose page
+/// can score lower than a nearly-blank one). A page-rejection gate calibrated on Tesseract's
+/// scale was once applied unconditionally to sceptre's output and rejected every page of a
+/// 16-page document, emptying it. This descriptor exists so gating code can ask a backend what
+/// its number means instead of assuming.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ConfidenceSemantics {
+    /// Validated to track legibility on a known scale — usable as an absolute quality gate.
+    Legibility {
+        /// The upper bound of the reported confidence scale (e.g. `100.0` for Tesseract).
+        scale_max: f64,
+    },
+    /// A number is reported, but it is not validated to correlate with legibility.
+    /// Never gate on it.
+    Uncalibrated,
+    /// No page-level confidence is reported at all.
+    None,
+}
+
 /// Trait for OCR backend plugins.
 ///
 /// Implement this trait to add custom OCR capabilities. OCR backends can be:
@@ -312,6 +336,19 @@ pub trait OcrBackend: Plugin {
     /// emit markdown in one forward pass and should override this to `true`.
     fn emits_structured_markdown(&self) -> bool {
         false
+    }
+
+    /// Declare how this backend's reported page-level confidence must be interpreted.
+    ///
+    /// Defaults to [`ConfidenceSemantics::Uncalibrated`]. This default is deliberately the
+    /// least trusting option, not [`ConfidenceSemantics::Legibility`]: a new backend that
+    /// reports *some* confidence number is not thereby safe to gate on, and defaulting to
+    /// `Legibility` would let the next backend silently inherit a threshold calibrated for a
+    /// different backend's scale — exactly the failure this type exists to prevent (see the
+    /// type's doc comment). Override this only after validating that the reported number
+    /// tracks legibility on a known scale.
+    fn confidence_semantics(&self) -> ConfidenceSemantics {
+        ConfidenceSemantics::Uncalibrated
     }
 
     /// Process a document file directly via OCR.
@@ -676,6 +713,76 @@ mod tests {
             languages: vec!["eng".to_string()],
         };
         assert!(!backend.supports_table_detection());
+    }
+
+    /// Regression test for the sceptre confidence-gating failure: a backend that reports a
+    /// page-level confidence number without declaring `confidence_semantics` must default to
+    /// `Uncalibrated`, never to `Legibility`. Defaulting to `Legibility` would let the next
+    /// backend added to this codebase silently inherit Tesseract's gate threshold and repeat
+    /// the sceptre failure, which rejected all 16 pages of a document and emptied it.
+    #[test]
+    fn should_default_to_uncalibrated_for_a_backend_that_does_not_declare_semantics() {
+        let backend = MockOcrBackend {
+            languages: vec!["eng".to_string()],
+        };
+
+        assert_eq!(backend.confidence_semantics(), ConfidenceSemantics::Uncalibrated);
+    }
+
+    /// Gating code reaches a backend as `&dyn OcrBackend` out of the registry, never as a
+    /// concrete type, so the declared semantics must survive dynamic dispatch — including the
+    /// `scale_max` payload, which is what a caller divides by instead of a hardcoded 100.
+    #[test]
+    fn should_report_declared_semantics_through_a_trait_object() {
+        struct CalibratedBackend;
+
+        impl Plugin for CalibratedBackend {
+            fn name(&self) -> &str {
+                "calibrated"
+            }
+
+            fn version(&self) -> String {
+                "1.0.0".to_string()
+            }
+
+            fn initialize(&self) -> Result<()> {
+                Ok(())
+            }
+
+            fn shutdown(&self) -> Result<()> {
+                Ok(())
+            }
+        }
+
+        #[async_trait]
+        impl OcrBackend for CalibratedBackend {
+            async fn process_image(&self, _image_bytes: &[u8], _config: &OcrConfig) -> Result<ExtractedDocument> {
+                unreachable!("this backend exists only to declare confidence semantics")
+            }
+
+            fn backend_type(&self) -> OcrBackendType {
+                OcrBackendType::Custom
+            }
+
+            fn supports_language(&self, lang: &str) -> bool {
+                lang == "eng"
+            }
+
+            fn supported_languages(&self) -> Vec<String> {
+                vec!["eng".to_string()]
+            }
+
+            fn confidence_semantics(&self) -> ConfidenceSemantics {
+                ConfidenceSemantics::Legibility { scale_max: 255.0 }
+            }
+        }
+
+        let backend: &dyn OcrBackend = &CalibratedBackend;
+
+        match backend.confidence_semantics() {
+            ConfidenceSemantics::Legibility { scale_max } => assert_eq!(scale_max, 255.0),
+            other => panic!("expected the declared Legibility semantics, got {other:?}"),
+        }
     }
 
     #[tokio::test]
