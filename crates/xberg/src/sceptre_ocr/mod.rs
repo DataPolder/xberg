@@ -493,6 +493,29 @@ const BLOCK_MIN_HORIZONTAL_OVERLAP_RATIO: f64 = 0.3;
 /// lines don't x-overlap enough on their own. Mirrors
 /// `MAX_BLOCK_LEFT_EDGE_OFFSET_IN_LINE_HEIGHTS` in `ocr::conversion`.
 const BLOCK_MAX_LEFT_EDGE_OFFSET_IN_LINE_HEIGHTS: f64 = 0.5;
+/// Maximum y-center delta between two consecutive elements, expressed as a
+/// multiple of the running median line height, for them to be treated as
+/// fragments of the same physical text line rather than two different lines.
+///
+/// Sceptre's `width_ths` detection parameter under-merges letter-spaced or
+/// widely-kerned runs on some documents, splitting one physical line into
+/// several `TextLine` entries (see `sceptre::config::DetectionConfig::width_ths`,
+/// measured on this same 16-page ordinance: 339 detected lines, 85 of them
+/// single words, at the current default). Verified against Sceptre's own
+/// output for `test_documents/pdf_scanned/ordinance_2197_scanned.pdf`: a line
+/// split into 9 word fragments (e.g. "In" / "accordance" / "with" / "Section"
+/// / "2-133," / "the" / "PD" / "must" / "be") has consecutive y-center deltas
+/// of ~1-3px against line heights of ~32-45px (ratio < 0.1), while genuinely
+/// distinct lines on the same page have deltas of at least ~38px (ratio ≥ 0.5
+/// even where their AABBs happen to vertically overlap). Fragments have a
+/// near-zero vertical gap already, so the vertical-gap check below would let
+/// them through regardless, but their narrow, non-overlapping x-extents fail
+/// the horizontal overlap/left-edge check meant for paragraph continuation --
+/// which produced one spurious block per word. This constant lets same-line
+/// fragments skip that horizontal test entirely, mirroring the `ycenter_ths`
+/// test `sceptre::detect::group::combine_into_lines` already uses internally
+/// to decide the same "is this the same physical line" question.
+const LINE_YCENTER_THS: f64 = 0.5;
 
 /// Group sceptre's per-line elements into paragraph blocks using their own
 /// AABB geometry, returning a stable block id per input element in the same
@@ -536,6 +559,12 @@ fn assign_sceptre_block_ids(elements: &[OcrElement]) -> Vec<String> {
 fn lines_share_block(previous: &BoundingBox, current: &BoundingBox, median_line_height: f64) -> bool {
     if median_line_height <= 0.0 {
         return false;
+    }
+
+    let previous_ycenter = (previous.y0 + previous.y1) / 2.0;
+    let current_ycenter = (current.y0 + current.y1) / 2.0;
+    if (current_ycenter - previous_ycenter).abs() < LINE_YCENTER_THS * median_line_height {
+        return true;
     }
 
     let vertical_gap = if current.y0 >= previous.y1 {
@@ -1443,5 +1472,66 @@ mod tests {
 
         assert_eq!(first, second, "vertically adjacent lines must share a block id");
         assert_ne!(second, third, "a large vertical gap must start a new block");
+    }
+
+    /// Regression for a structural defect in `lines_share_block`, found by feeding it
+    /// Sceptre's own detected geometry (not a Tesseract proxy) for
+    /// `test_documents/pdf_scanned/ordinance_2197_scanned.pdf`: Sceptre's `width_ths`
+    /// detection parameter under-merges this line, so one physical line surfaces as 9
+    /// separate `TextLine` entries ("In" / "accordance" / "with" / "Section" / "2-133,"
+    /// / "the" / "PD" / "must" / "be"), reproduced here with their real detected
+    /// coordinates.
+    ///
+    /// Each fragment's vertical gap against its predecessor is already 0 (their y-ranges
+    /// overlap), so the vertical-gap check alone never rejected them. The bug was the
+    /// horizontal overlap/left-edge fallback that follows it: consecutive word fragments
+    /// don't x-overlap and their left edges march rightward across the line, so
+    /// `overlap_ratio` stays 0 and `left_edge_offset` (~47-260px) blows past the ~16-23px
+    /// threshold derived from the line's own ~32-36px height -- producing one spurious
+    /// block per word instead of one block for the whole line.
+    ///
+    /// Against unfixed code (no y-center short-circuit in `lines_share_block`), each
+    /// fragment after the first starts a new block, so `block_id(1)` (`"accordance"`)
+    /// differs from `block_id(0)` (`"In"`) and the first `assert_eq!` below fails.
+    #[test]
+    fn should_merge_word_fragments_of_one_sceptre_line_sharing_a_ycenter() {
+        let elements = vec![
+            line_to_element(&word_line("In", 718.0, 752.0, 906.0, 938.0, 0.9)),
+            line_to_element(&word_line("accordance", 765.0, 923.0, 905.0, 941.0, 0.9)),
+            line_to_element(&word_line("with", 936.0, 1002.0, 908.0, 940.0, 0.9)),
+            line_to_element(&word_line("Section", 1015.0, 1123.0, 905.0, 941.0, 0.9)),
+            line_to_element(&word_line("2-133,", 1135.0, 1223.0, 905.0, 941.0, 0.9)),
+            line_to_element(&word_line("the", 1244.0, 1292.0, 908.0, 940.0, 0.9)),
+            line_to_element(&word_line("PD", 1306.0, 1354.0, 908.0, 940.0, 0.9)),
+            line_to_element(&word_line("must", 1368.0, 1444.0, 910.0, 942.0, 0.9)),
+            line_to_element(&word_line("be", 1458.0, 1496.0, 908.0, 940.0, 0.9)),
+            // A genuinely new paragraph, far below: must still start a new block.
+            line_to_element(&word_line("2_", 285.0, 305.0, 1059.0, 1087.0, 0.9)),
+        ];
+
+        let document = build_internal_document(&elements);
+
+        let block_id = |index: usize| {
+            document.elements[index]
+                .attributes
+                .as_ref()
+                .and_then(|attributes| attributes.get(HOCR_BLOCK_ID_ATTRIBUTE))
+                .cloned()
+                .expect("every line must carry a block id")
+        };
+
+        let line_block_ids: Vec<String> = (0..9).map(block_id).collect();
+        for (index, id) in line_block_ids.iter().enumerate().skip(1) {
+            assert_eq!(
+                *id, line_block_ids[0],
+                "word fragment {index} must share the same-line block id as the first fragment"
+            );
+        }
+
+        assert_ne!(
+            block_id(9),
+            line_block_ids[0],
+            "a distant, unrelated line must still start a new block"
+        );
     }
 }
