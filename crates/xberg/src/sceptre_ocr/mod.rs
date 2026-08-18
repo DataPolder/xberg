@@ -4,6 +4,10 @@
 //! Runtime, the pure-Rust tract engine, or hand-written networks over candle
 //! (CPU, Metal, or CUDA). Readers are initialized lazily and cached by their
 //! effective model and inference configuration.
+//!
+//! [`build_document`] applies a document-assembly pass sceptre itself has no
+//! concept of: [`assign_sceptre_block_ids`] groups recognized lines into
+//! paragraph blocks by geometry, mirroring PaddleOCR's `assign_line_block_ids`.
 
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
@@ -468,11 +472,115 @@ fn pixel_coordinate(value: f32) -> u32 {
     value.round().min(u32::MAX as f32) as u32
 }
 
+/// Attribute key `pdf::structure::adapters::hocr_block_id` reads to merge
+/// consecutive OCR lines into one `PdfParagraph`. Duplicated as a literal
+/// (rather than imported) because it is also defined locally in
+/// `ocr::hocr_parser` behind `feature = "ocr"`, which a sceptre-only build
+/// does not enable.
+const HOCR_BLOCK_ID_ATTRIBUTE: &str = "hocr_block_id";
+
+/// Maximum vertical gap between two consecutive sceptre lines, expressed as a
+/// multiple of the running median line height seen so far, for the lines to
+/// be grouped into the same paragraph block. Mirrors
+/// `MAX_BLOCK_VERTICAL_GAP_IN_LINE_HEIGHTS` in `ocr::conversion`.
+const BLOCK_MAX_VERTICAL_GAP_IN_LINE_HEIGHTS: f64 = 0.6;
+/// Minimum fraction of the narrower of two consecutive lines' horizontal
+/// extent that must overlap for them to be considered the same paragraph
+/// column. Mirrors `MIN_BLOCK_HORIZONTAL_OVERLAP_RATIO` in `ocr::conversion`.
+const BLOCK_MIN_HORIZONTAL_OVERLAP_RATIO: f64 = 0.3;
+/// Maximum left-edge offset between two consecutive lines, expressed as a
+/// multiple of the running median line height, allowed as a fallback when the
+/// lines don't x-overlap enough on their own. Mirrors
+/// `MAX_BLOCK_LEFT_EDGE_OFFSET_IN_LINE_HEIGHTS` in `ocr::conversion`.
+const BLOCK_MAX_LEFT_EDGE_OFFSET_IN_LINE_HEIGHTS: f64 = 0.5;
+
+/// Group sceptre's per-line elements into paragraph blocks using their own
+/// AABB geometry, returning a stable block id per input element in the same
+/// order, so `pdf::structure::adapters::ocr_doc_to_paragraphs` can merge
+/// consecutive sceptre lines into one `PdfParagraph` instead of treating every
+/// line as its own paragraph.
+///
+/// This is a deliberate, intentionally-flagged duplicate of
+/// `crate::ocr::conversion::assign_line_block_ids`, which already gives
+/// PaddleOCR the same paragraph grouping it otherwise lacks (#631). That
+/// function is `#[cfg(paddle_ocr)]` inside a module gated on `feature =
+/// "ocr"`; sceptre-ocr builds (`sceptre-ocr-ort` / `sceptre-ocr-tract`) enable
+/// neither, so it cannot be called from here without pulling `feature = "ocr"`
+/// into every sceptre-ocr build. Reconcile by extracting a shared, ungated
+/// helper once both call sites are stable, rather than letting these two
+/// copies drift apart silently.
+fn assign_sceptre_block_ids(elements: &[OcrElement]) -> Vec<String> {
+    let mut block_ids = Vec::with_capacity(elements.len());
+    let mut heights_seen: Vec<f64> = Vec::with_capacity(elements.len());
+    let mut block_index: u32 = 0;
+    let mut previous: Option<BoundingBox> = None;
+
+    for element in elements {
+        let bounds = geometry_bounds(&element.geometry).unwrap_or_default();
+        insert_sorted(&mut heights_seen, bounds.y1 - bounds.y0);
+        let median_line_height = running_median(&heights_seen);
+
+        let continues_block = previous
+            .as_ref()
+            .is_some_and(|previous| lines_share_block(previous, &bounds, median_line_height));
+        if !continues_block {
+            block_index += 1;
+        }
+        block_ids.push(format!("sceptre-block-{block_index}"));
+        previous = Some(bounds);
+    }
+
+    block_ids
+}
+
+fn lines_share_block(previous: &BoundingBox, current: &BoundingBox, median_line_height: f64) -> bool {
+    if median_line_height <= 0.0 {
+        return false;
+    }
+
+    let vertical_gap = if current.y0 >= previous.y1 {
+        current.y0 - previous.y1
+    } else if previous.y0 >= current.y1 {
+        previous.y0 - current.y1
+    } else {
+        0.0
+    };
+    if vertical_gap > median_line_height * BLOCK_MAX_VERTICAL_GAP_IN_LINE_HEIGHTS {
+        return false;
+    }
+
+    let overlap = (previous.x1.min(current.x1) - previous.x0.max(current.x0)).max(0.0);
+    let narrower_width = (previous.x1 - previous.x0).min(current.x1 - current.x0);
+    let overlap_ratio = if narrower_width > 0.0 { overlap / narrower_width } else { 0.0 };
+    let left_edge_offset = (previous.x0 - current.x0).abs();
+
+    overlap_ratio >= BLOCK_MIN_HORIZONTAL_OVERLAP_RATIO
+        || left_edge_offset <= median_line_height * BLOCK_MAX_LEFT_EDGE_OFFSET_IN_LINE_HEIGHTS
+}
+
+fn insert_sorted(sorted: &mut Vec<f64>, value: f64) {
+    let index = sorted.partition_point(|existing| *existing < value);
+    sorted.insert(index, value);
+}
+
+fn running_median(sorted: &[f64]) -> f64 {
+    let len = sorted.len();
+    if len == 0 {
+        return 0.0;
+    }
+    if len % 2 == 1 {
+        sorted[len / 2]
+    } else {
+        (sorted[len / 2 - 1] + sorted[len / 2]) / 2.0
+    }
+}
+
 fn build_internal_document(elements: &[OcrElement]) -> InternalDocument {
     let mut document = InternalDocument::new("ocr");
     document.mime_type = "text/plain".to_string();
     document.prebuilt_ocr_elements = Some(elements.to_vec());
-    for element in elements {
+    let block_ids = assign_sceptre_block_ids(elements);
+    for (element, block_id) in elements.iter().zip(block_ids) {
         let mut internal = InternalElement::text(
             ElementKind::OcrText {
                 level: OcrElementLevel::Line,
@@ -484,6 +592,11 @@ fn build_internal_document(elements: &[OcrElement]) -> InternalDocument {
         internal.bbox = geometry_bounds(&element.geometry);
         internal.ocr_geometry = Some(element.geometry.clone());
         internal.ocr_confidence = Some(element.confidence.clone());
+        internal.attributes = Some(
+            [(HOCR_BLOCK_ID_ATTRIBUTE.to_string(), block_id)]
+                .into_iter()
+                .collect(),
+        );
         document.push_element(internal);
     }
     document
@@ -1276,5 +1389,59 @@ mod tests {
     fn plugin_version_matches_sceptre_crate() {
         let backend = SceptreOcrBackend::new().expect("backend should construct");
         assert_eq!(backend.version(), sceptre::VERSION);
+    }
+
+    /// Axis-aligned `TextLine` at the given extent, for block-grouping tests.
+    fn word_line(text: &str, x0: f32, x1: f32, y0: f32, y1: f32, confidence: f32) -> TextLine {
+        TextLine {
+            quad: Quad {
+                points: [
+                    Point::new(x0, y0),
+                    Point::new(x1, y0),
+                    Point::new(x1, y1),
+                    Point::new(x0, y1),
+                ],
+            },
+            text: text.to_string(),
+            confidence,
+        }
+    }
+
+    /// Regression for the "no block/paragraph grouping" WP-D defect (#668):
+    /// `build_internal_document` never set `attributes`, so
+    /// `pdf::structure::adapters::hocr_block_id` always returned `None` and
+    /// every sceptre line became its own paragraph. This mirrors the
+    /// geometric grouping already applied to PaddleOCR
+    /// (`ocr::conversion::assign_line_block_ids`, #631) via the intentionally
+    /// duplicated `assign_sceptre_block_ids` (see its doc comment for why it
+    /// is not a shared call).
+    ///
+    /// Against unfixed code (`internal.attributes` left `None`, as it was
+    /// before this change), `block_id(0)` and `block_id(1)` both return `None`
+    /// and the `.expect(...)` calls below panic.
+    #[test]
+    fn should_assign_shared_block_id_to_close_lines_and_a_new_id_after_a_gap() {
+        let elements = vec![
+            line_to_element(&word_line("First line", 10.0, 200.0, 100.0, 120.0, 0.9)),
+            line_to_element(&word_line("Second line", 10.0, 200.0, 124.0, 144.0, 0.9)),
+            line_to_element(&word_line("Far below", 10.0, 200.0, 400.0, 420.0, 0.9)),
+        ];
+
+        let document = build_internal_document(&elements);
+
+        let block_id = |index: usize| {
+            document.elements[index]
+                .attributes
+                .as_ref()
+                .and_then(|attributes| attributes.get(HOCR_BLOCK_ID_ATTRIBUTE))
+                .cloned()
+        };
+
+        let first = block_id(0).expect("first line must carry a block id");
+        let second = block_id(1).expect("second line must carry a block id");
+        let third = block_id(2).expect("third line must carry a block id");
+
+        assert_eq!(first, second, "vertically adjacent lines must share a block id");
+        assert_ne!(second, third, "a large vertical gap must start a new block");
     }
 }
