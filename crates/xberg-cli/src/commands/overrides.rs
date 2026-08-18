@@ -53,6 +53,18 @@ const VALID_OCR_BACKENDS: &[&str] = &[
     "candle-deepseek-ocr",
 ];
 
+/// Language code used when neither the config nor `--ocr-language` names one.
+#[cfg(feature = "ocr-surface")]
+const DEFAULT_OCR_LANGUAGE: &str = "eng";
+
+/// Language code the PaddleOCR-family backends expect instead of [`DEFAULT_OCR_LANGUAGE`].
+#[cfg(feature = "ocr-surface")]
+const DEFAULT_PADDLE_OCR_LANGUAGE: &str = "en";
+
+/// Backends that use short ISO 639-1 style language codes rather than ISO 639-3.
+#[cfg(feature = "ocr-surface")]
+const PADDLE_LANGUAGE_BACKENDS: &[&str] = &["paddle-ocr", "candle-paddleocr-vl", "candle-glm-ocr"];
+
 /// Hardware acceleration provider for ONNX Runtime models.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
 pub enum AccelerationArg {
@@ -602,73 +614,22 @@ impl ExtractionOverrides {
         }
     }
 
+    /// Apply the `--ocr*` flags onto `config.ocr`.
+    ///
+    /// Each flag mutates only the field it names. Fields with no CLI flag
+    /// (`quality_thresholds`, `pipeline`, `tesseract_config`, `vlm_config`, …)
+    /// keep whatever the config file or `--config-json` set for them.
     #[cfg(feature = "ocr-surface")]
     fn apply_ocr(&self, config: &mut ExtractionConfig) {
-        if let Some(ocr_flag) = self.ocr {
-            if ocr_flag {
-                let backend = self.ocr_backend.as_deref().unwrap_or("tesseract");
-                let language = match &self.ocr_language {
-                    Some(lang) => vec![lang.clone()],
-                    None => match backend {
-                        "paddle-ocr" | "candle-paddleocr-vl" | "candle-glm-ocr" => vec!["en".to_string()],
-                        _ => vec!["eng".to_string()],
-                    },
-                };
-                let existing_paddle_config = config.ocr.as_ref().and_then(|o| o.paddle_ocr_config.clone());
-                let existing_element_config = config.ocr.as_ref().and_then(|o| o.element_config.clone());
-                let auto_rotate = self.ocr_auto_rotate.unwrap_or(false);
-                let backend_options = self.parsed_backend_options().ok().flatten();
-                config.ocr = Some(OcrConfig {
-                    enabled: true,
-                    backend: backend.to_string(),
-                    language,
-                    tesseract_config: None,
-                    output_format: None,
-                    paddle_ocr_config: existing_paddle_config,
-                    element_config: existing_element_config,
-                    quality_thresholds: None,
-                    pipeline: None,
-                    auto_rotate,
-                    vlm_config: None,
-                    vlm_fallback: Default::default(),
-                    vlm_prompt: None,
-                    acceleration: None,
-                    tessdata_bytes: None,
-                    tessdata_path: None,
-                    backend_options,
-                });
-            } else {
-                config.ocr = None;
+        if self.ocr == Some(false) {
+            config.ocr = None;
+        } else {
+            if self.ocr == Some(true) {
+                config.ocr.get_or_insert_with(OcrConfig::default).enabled = true;
             }
-        }
-
-        if self.ocr.is_none()
-            && let Some(ref lang) = self.ocr_language
-            && let Some(ref mut existing_ocr) = config.ocr
-        {
-            let language = vec![lang.clone()];
-            existing_ocr.language = language.clone();
-            if let Some(tesseract_config) = existing_ocr.tesseract_config.as_mut() {
-                tesseract_config.language = language.clone();
+            if let Some(ocr) = config.ocr.as_mut() {
+                self.apply_ocr_fields(ocr);
             }
-            if let Some(pipeline) = existing_ocr.pipeline.as_mut() {
-                for stage in &mut pipeline.stages {
-                    if stage.backend != "tesseract" {
-                        continue;
-                    }
-                    stage.language = Some(language.clone());
-                    if let Some(tesseract_config) = stage.tesseract_config.as_mut() {
-                        tesseract_config.language = language.clone();
-                    }
-                }
-            }
-        }
-
-        if self.ocr.is_none()
-            && let Some(rotate) = self.ocr_auto_rotate
-            && let Some(ref mut existing_ocr) = config.ocr
-        {
-            existing_ocr.auto_rotate = rotate;
         }
 
         if let Some(force_ocr_flag) = self.force_ocr {
@@ -683,6 +644,38 @@ impl ExtractionOverrides {
                     .scanned_min_confidence
                     .unwrap_or(xberg::core::config::DEFAULT_SCANNED_MIN_CONFIDENCE),
             };
+        }
+    }
+
+    /// Mutate the individual OCR fields that have a CLI flag, in place.
+    ///
+    /// Every assignment is guarded by the presence of its own flag, so sibling
+    /// fields on `ocr` survive untouched.
+    #[cfg(feature = "ocr-surface")]
+    fn apply_ocr_fields(&self, ocr: &mut OcrConfig) {
+        if let Some(ref backend) = self.ocr_backend {
+            ocr.backend = backend.clone();
+        }
+        if let Some(options) = self.parsed_backend_options().ok().flatten() {
+            ocr.backend_options = Some(options);
+        }
+        if let Some(rotate) = self.ocr_auto_rotate {
+            ocr.auto_rotate = rotate;
+        }
+
+        if let Some(ref language) = self.ocr_language {
+            set_ocr_language(ocr, vec![language.clone()]);
+            return;
+        }
+
+        // No `--ocr-language`. When the caller selected a backend (via `--ocr true` or
+        // `--ocr-backend`) and the config still carries the untouched default language,
+        // substitute the code that backend expects. An explicitly configured language is
+        // never rewritten, and a run with no OCR flags at all is a no-op.
+        let backend_selected = self.ocr == Some(true) || self.ocr_backend.is_some();
+        let backend_default = default_language_for_backend(&ocr.backend);
+        if backend_selected && backend_default != DEFAULT_OCR_LANGUAGE && is_default_ocr_language(&ocr.language) {
+            ocr.language = vec![backend_default.to_string()];
         }
     }
 
@@ -747,67 +740,39 @@ impl ExtractionOverrides {
             self.chunk
         };
 
-        if let Some(chunk_flag) = chunk {
-            if chunk_flag {
-                let max_characters = self.chunk_size.unwrap_or(1000);
-                let overlap = self.chunk_overlap.unwrap_or(200);
-                let chunking_config = ChunkingConfig {
-                    max_characters,
-                    overlap,
-                    trim: true,
-                    chunker_type: xberg::ChunkerType::Text,
-                    ..Default::default()
-                };
+        if chunk == Some(false) {
+            config.chunking = None;
+            return;
+        }
+        if chunk == Some(true) && config.chunking.is_none() {
+            config.chunking = Some(ChunkingConfig::default());
+        }
 
-                #[cfg(feature = "chunking-tokenizers")]
-                let chunking_config = if let Some(ref model) = self.chunking_tokenizer {
-                    ChunkingConfig {
-                        sizing: xberg::ChunkSizing::Tokenizer {
-                            model: model.clone(),
-                            cache_dir: None,
-                        },
-                        ..chunking_config
-                    }
-                } else {
-                    chunking_config
-                };
+        let Some(chunking) = config.chunking.as_mut() else {
+            return;
+        };
 
-                let chunking_config = if let Some(target) = self.chunk_breadcrumb_target {
-                    ChunkingConfig {
-                        breadcrumb_target: target.into(),
-                        ..chunking_config
-                    }
-                } else {
-                    chunking_config
-                };
+        if let Some(max_characters) = self.chunk_size {
+            chunking.max_characters = max_characters;
+        }
+        if let Some(overlap) = self.chunk_overlap {
+            chunking.overlap = overlap;
+        }
 
-                config.chunking = Some(chunking_config);
-            } else {
-                config.chunking = None;
-            }
-        } else if let Some(ref mut chunking) = config.chunking {
-            if let Some(max_characters) = self.chunk_size {
-                chunking.max_characters = max_characters;
-            }
-            if let Some(overlap) = self.chunk_overlap {
-                chunking.overlap = overlap;
-            }
+        if chunking.overlap >= chunking.max_characters {
+            chunking.overlap = chunking.max_characters / 4;
+        }
 
-            if chunking.overlap >= chunking.max_characters {
-                chunking.overlap = chunking.max_characters / 4;
-            }
+        #[cfg(feature = "chunking-tokenizers")]
+        if let Some(ref model) = self.chunking_tokenizer {
+            chunking.sizing = xberg::ChunkSizing::Tokenizer {
+                model: model.clone(),
+                cache_dir: None,
+            };
+        }
 
-            #[cfg(feature = "chunking-tokenizers")]
-            if let Some(ref model) = self.chunking_tokenizer {
-                chunking.sizing = xberg::ChunkSizing::Tokenizer {
-                    model: model.clone(),
-                    cache_dir: None,
-                };
-            }
-
-            if let Some(target) = self.chunk_breadcrumb_target {
-                chunking.breadcrumb_target = target.into();
-            }
+        if let Some(target) = self.chunk_breadcrumb_target {
+            chunking.breadcrumb_target = target.into();
         }
     }
 
@@ -818,11 +783,10 @@ impl ExtractionOverrides {
         }
         if let Some(detect_language_flag) = self.detect_language {
             if detect_language_flag {
-                config.language_detection = Some(LanguageDetectionConfig {
-                    enabled: true,
-                    min_confidence: 0.8,
-                    detect_multiple: false,
-                });
+                config
+                    .language_detection
+                    .get_or_insert_with(LanguageDetectionConfig::default)
+                    .enabled = true;
             } else {
                 config.language_detection = None;
             }
@@ -977,10 +941,10 @@ impl ExtractionOverrides {
     #[cfg(feature = "analysis")]
     fn apply_token_reduction(&self, config: &mut ExtractionConfig) {
         if let Some(level) = self.token_reduction {
-            config.token_reduction = Some(xberg::TokenReductionOptions {
-                mode: level.as_mode_str().to_string(),
-                preserve_important_words: true,
-            });
+            config
+                .token_reduction
+                .get_or_insert_with(xberg::TokenReductionOptions::default)
+                .mode = level.as_mode_str().to_string();
         }
     }
 
@@ -1060,6 +1024,43 @@ impl ExtractionOverrides {
                 csv_cfg.comment_prefixes = self.csv_comment_prefix.clone();
             }
             config.csv = Some(csv_cfg);
+        }
+    }
+}
+
+/// The default OCR language code for `backend`.
+#[cfg(feature = "ocr-surface")]
+fn default_language_for_backend(backend: &str) -> &'static str {
+    if PADDLE_LANGUAGE_BACKENDS.contains(&backend) {
+        DEFAULT_PADDLE_OCR_LANGUAGE
+    } else {
+        DEFAULT_OCR_LANGUAGE
+    }
+}
+
+/// Whether `language` is still the untouched compiled-in default.
+#[cfg(feature = "ocr-surface")]
+fn is_default_ocr_language(language: &[String]) -> bool {
+    matches!(language, [only] if only == DEFAULT_OCR_LANGUAGE)
+}
+
+/// Set `language` on an OCR config and on every nested Tesseract-flavoured
+/// config that carries its own copy of it.
+#[cfg(feature = "ocr-surface")]
+fn set_ocr_language(ocr: &mut OcrConfig, language: Vec<String>) {
+    ocr.language = language.clone();
+    if let Some(tesseract_config) = ocr.tesseract_config.as_mut() {
+        tesseract_config.language = language.clone();
+    }
+    if let Some(pipeline) = ocr.pipeline.as_mut() {
+        for stage in &mut pipeline.stages {
+            if stage.backend != "tesseract" {
+                continue;
+            }
+            stage.language = Some(language.clone());
+            if let Some(tesseract_config) = stage.tesseract_config.as_mut() {
+                tesseract_config.language = language.clone();
+            }
         }
     }
 }
@@ -1446,6 +1447,212 @@ mod tests {
         assert!(overrides.validate().is_err());
     }
 
+    /// Mirrors `main.rs`: config file/defaults -> `--config-json` -> individual CLI flags.
+    #[cfg(any(feature = "ocr-surface", feature = "core-cli", feature = "analysis"))]
+    fn config_from_json(json: &str) -> ExtractionConfig {
+        let mut config = ExtractionConfig::default();
+        crate::input::apply_json_overrides(&mut config, Some(json.to_string()), None)
+            .expect("--config-json should merge into the base config");
+        config
+    }
+
+    #[cfg(feature = "ocr-surface")]
+    #[test]
+    fn should_keep_config_json_quality_thresholds_when_ocr_flags_are_also_given() {
+        let mut config =
+            config_from_json(r#"{"ocr":{"quality_thresholds":{"max_ocr_output_fragmented_word_ratio":0.99}}}"#);
+        let overrides = ExtractionOverrides {
+            ocr: Some(true),
+            ocr_backend: Some("tesseract".to_string()),
+            ocr_language: Some("eng".to_string()),
+            ..default_overrides()
+        };
+
+        overrides.apply(&mut config);
+
+        let ocr = config.ocr.expect("--ocr true must leave an OCR config in place");
+        assert_eq!(ocr.backend, "tesseract");
+        assert_eq!(ocr.language, vec!["eng".to_string()]);
+        let thresholds = ocr
+            .quality_thresholds
+            .expect("quality_thresholds has no CLI flag, so --config-json must remain its only source");
+        assert_eq!(thresholds.max_ocr_output_fragmented_word_ratio, 0.99);
+    }
+
+    #[cfg(feature = "ocr-surface")]
+    #[test]
+    fn should_keep_config_json_tessdata_path_when_ocr_flags_are_also_given() {
+        let mut config = config_from_json(r#"{"ocr":{"tessdata_path":"/opt/tessdata"}}"#);
+        let overrides = ExtractionOverrides {
+            ocr: Some(true),
+            ocr_backend: Some("tesseract".to_string()),
+            ..default_overrides()
+        };
+
+        overrides.apply(&mut config);
+
+        let ocr = config.ocr.expect("--ocr true must leave an OCR config in place");
+        assert_eq!(
+            ocr.tessdata_path,
+            Some(std::path::PathBuf::from("/opt/tessdata")),
+            "tessdata_path has no CLI flag and must survive --ocr/--ocr-backend"
+        );
+    }
+
+    #[cfg(feature = "ocr-surface")]
+    #[test]
+    fn should_keep_every_non_flag_ocr_field_when_ocr_flags_are_also_given() {
+        let mut config = ExtractionConfig {
+            ocr: Some(OcrConfig {
+                backend: "tesseract".to_string(),
+                tesseract_config: Some(xberg::TesseractConfig {
+                    language: vec!["eng".to_string()],
+                    use_cache: false,
+                    ..Default::default()
+                }),
+                quality_thresholds: Some(xberg::OcrQualityThresholds {
+                    max_ocr_output_fragmented_word_ratio: 0.99,
+                    ..Default::default()
+                }),
+                pipeline: Some(xberg::OcrPipelineConfig {
+                    stages: vec![xberg::OcrPipelineStage {
+                        backend: "tesseract".to_string(),
+                        priority: 100,
+                        language: Some(vec!["eng".to_string()]),
+                        tesseract_config: None,
+                        paddle_ocr_config: None,
+                        vlm_config: None,
+                        backend_options: None,
+                    }],
+                    quality_thresholds: Default::default(),
+                }),
+                vlm_config: Some(LlmConfig {
+                    model: "openai/gpt-4o".to_string(),
+                    ..Default::default()
+                }),
+                vlm_fallback: xberg::VlmFallbackPolicy::OnLowQuality { quality_threshold: 0.5 },
+                vlm_prompt: Some("custom prompt".to_string()),
+                paddle_ocr_config: Some(serde_json::json!({"model_version": "pp-ocrv5"})),
+                backend_options: Some(serde_json::json!({"mode": "fast"})),
+                tessdata_path: Some(std::path::PathBuf::from("/opt/tessdata")),
+                ..OcrConfig::default()
+            }),
+            ..Default::default()
+        };
+        let overrides = ExtractionOverrides {
+            ocr: Some(true),
+            ocr_backend: Some("tesseract".to_string()),
+            ocr_language: Some("deu".to_string()),
+            ..default_overrides()
+        };
+
+        overrides.apply(&mut config);
+
+        let ocr = config.ocr.expect("--ocr true must leave an OCR config in place");
+        assert_eq!(ocr.language, vec!["deu".to_string()]);
+
+        let tesseract = ocr.tesseract_config.clone().expect("tesseract_config must survive");
+        assert_eq!(
+            tesseract.language,
+            vec!["deu".to_string()],
+            "--ocr-language must propagate into the preserved nested Tesseract config"
+        );
+        assert!(
+            !tesseract.use_cache,
+            "fields no CLI flag names must stay exactly as configured"
+        );
+
+        let thresholds = ocr.quality_thresholds.clone().expect("quality_thresholds must survive");
+        assert_eq!(thresholds.max_ocr_output_fragmented_word_ratio, 0.99);
+
+        let pipeline = ocr.pipeline.clone().expect("pipeline must survive");
+        assert_eq!(pipeline.stages.len(), 1);
+        assert_eq!(pipeline.stages[0].language, Some(vec!["deu".to_string()]));
+
+        let vlm = ocr.vlm_config.clone().expect("vlm_config must survive");
+        assert_eq!(vlm.model, "openai/gpt-4o");
+        assert_eq!(
+            ocr.vlm_fallback,
+            xberg::VlmFallbackPolicy::OnLowQuality { quality_threshold: 0.5 }
+        );
+        assert_eq!(ocr.vlm_prompt.as_deref(), Some("custom prompt"));
+        assert_eq!(
+            ocr.paddle_ocr_config,
+            Some(serde_json::json!({"model_version": "pp-ocrv5"}))
+        );
+        assert_eq!(ocr.backend_options, Some(serde_json::json!({"mode": "fast"})));
+        assert_eq!(ocr.tessdata_path, Some(std::path::PathBuf::from("/opt/tessdata")));
+    }
+
+    /// Guards the other half of the precedence rule: the fix must not make
+    /// `--config-json` win over the flag. Passes before and after the fix.
+    #[cfg(feature = "ocr-surface")]
+    #[test]
+    fn should_let_ocr_backend_flag_win_over_config_json_backend() {
+        let mut config = config_from_json(r#"{"ocr":{"backend":"sceptre"}}"#);
+        let overrides = ExtractionOverrides {
+            ocr: Some(true),
+            ocr_backend: Some("tesseract".to_string()),
+            ..default_overrides()
+        };
+
+        overrides.apply(&mut config);
+
+        let ocr = config.ocr.expect("--ocr true must leave an OCR config in place");
+        assert_eq!(ocr.backend, "tesseract");
+    }
+
+    /// Same guard for `--ocr-language`. Passes before and after the fix.
+    #[cfg(feature = "ocr-surface")]
+    #[test]
+    fn should_let_ocr_language_flag_win_over_config_json_language() {
+        let mut config = config_from_json(r#"{"ocr":{"language":["fra"]}}"#);
+        let overrides = ExtractionOverrides {
+            ocr: Some(true),
+            ocr_language: Some("deu".to_string()),
+            ..default_overrides()
+        };
+
+        overrides.apply(&mut config);
+
+        let ocr = config.ocr.expect("--ocr true must leave an OCR config in place");
+        assert_eq!(ocr.language, vec!["deu".to_string()]);
+    }
+
+    #[cfg(feature = "ocr-surface")]
+    #[test]
+    fn should_keep_config_json_auto_rotate_when_no_auto_rotate_flag_is_given() {
+        let mut config = config_from_json(r#"{"ocr":{"auto_rotate":true}}"#);
+        let overrides = ExtractionOverrides {
+            ocr: Some(true),
+            ocr_backend: Some("tesseract".to_string()),
+            ..default_overrides()
+        };
+
+        overrides.apply(&mut config);
+
+        let ocr = config.ocr.expect("--ocr true must leave an OCR config in place");
+        assert!(
+            ocr.auto_rotate,
+            "auto_rotate came from --config-json, and no --ocr-auto-rotate flag was given"
+        );
+    }
+
+    #[cfg(feature = "ocr-surface")]
+    #[test]
+    fn should_keep_config_json_language_when_only_the_ocr_flag_is_given() {
+        let mut config = config_from_json(r#"{"ocr":{"language":["deu","fra"]}}"#);
+        let overrides = ExtractionOverrides {
+            ocr: Some(true),
+            ..default_overrides()
+        };
+
+        overrides.apply(&mut config);
+
+        let ocr = config.ocr.expect("--ocr true must leave an OCR config in place");
+        assert_eq!(ocr.language, vec!["deu".to_string(), "fra".to_string()]);
+    }
+
     #[cfg(any(feature = "core-cli", feature = "analysis"))]
     #[test]
     fn test_chunking_enabled_defaults() {
@@ -1532,6 +1739,92 @@ mod tests {
         };
         overrides.apply(&mut config);
         assert!(config.chunking.is_none());
+    }
+
+    #[cfg(any(feature = "core-cli", feature = "analysis"))]
+    #[test]
+    fn should_keep_config_json_chunking_siblings_when_chunk_flags_are_also_given() {
+        let mut config =
+            config_from_json(r#"{"chunking":{"chunker_type":"markdown","table_chunking":"repeat_header"}}"#);
+        let overrides = ExtractionOverrides {
+            chunk: Some(true),
+            chunk_size: Some(512),
+            ..default_overrides()
+        };
+
+        overrides.apply(&mut config);
+
+        let chunking = config
+            .chunking
+            .expect("--chunk true must leave a chunking config in place");
+        assert_eq!(chunking.max_characters, 512);
+        assert_eq!(
+            chunking.chunker_type,
+            xberg::ChunkerType::Markdown,
+            "chunker_type has no CLI flag and must survive --chunk/--chunk-size"
+        );
+        assert_eq!(chunking.table_chunking, xberg::TableChunkingMode::RepeatHeader);
+    }
+
+    /// Guards the other half of the precedence rule for chunking. Passes before
+    /// and after the fix.
+    #[cfg(any(feature = "core-cli", feature = "analysis"))]
+    #[test]
+    fn should_let_chunk_size_flag_win_over_config_json_max_chars() {
+        let mut config = config_from_json(r#"{"chunking":{"max_chars":4000}}"#);
+        let overrides = ExtractionOverrides {
+            chunk: Some(true),
+            chunk_size: Some(512),
+            ..default_overrides()
+        };
+
+        overrides.apply(&mut config);
+
+        let chunking = config
+            .chunking
+            .expect("--chunk true must leave a chunking config in place");
+        assert_eq!(chunking.max_characters, 512);
+    }
+
+    #[cfg(feature = "analysis")]
+    #[test]
+    fn should_keep_config_json_language_detection_siblings_when_detect_language_flag_is_given() {
+        let mut config = config_from_json(r#"{"language_detection":{"min_confidence":0.5,"detect_multiple":true}}"#);
+        let overrides = ExtractionOverrides {
+            detect_language: Some(true),
+            ..default_overrides()
+        };
+
+        overrides.apply(&mut config);
+
+        let detection = config
+            .language_detection
+            .expect("--detect-language true must leave a language-detection config in place");
+        assert!(detection.enabled);
+        assert_eq!(
+            detection.min_confidence, 0.5,
+            "min_confidence has no CLI flag of its own and must survive --detect-language"
+        );
+        assert!(detection.detect_multiple);
+    }
+
+    #[cfg(feature = "analysis")]
+    #[test]
+    fn should_keep_config_json_token_reduction_siblings_when_token_reduction_flag_is_given() {
+        let mut config = config_from_json(r#"{"token_reduction":{"preserve_important_words":false}}"#);
+        let overrides = ExtractionOverrides {
+            token_reduction: Some(ReductionLevelArg::Aggressive),
+            ..default_overrides()
+        };
+
+        overrides.apply(&mut config);
+
+        let reduction = config.token_reduction.expect("--token-reduction must set a config");
+        assert_eq!(reduction.mode, "aggressive");
+        assert!(
+            !reduction.preserve_important_words,
+            "preserve_important_words has no CLI flag and must survive --token-reduction"
+        );
     }
 
     #[cfg(any(feature = "core-cli", feature = "analysis"))]

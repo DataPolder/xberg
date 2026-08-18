@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A CLI flag no longer erases the sibling fields of the config section it touches. `--ocr`,
+  `--ocr-backend` and `--ocr-language` replaced the whole `ocr` object, so `--config-json
+  '{"ocr":{"quality_thresholds":{...}}}'` was silently discarded the moment any `--ocr*` flag was
+  present — and `quality_thresholds` has no flag of its own, leaving no way to set it at all. The
+  same construct-then-replace pattern dropped `tesseract_config`, `pipeline`, `vlm_config`,
+  `vlm_prompt`, `vlm_fallback`, `output_format`, `tessdata_path` and `backend_options`, and hit
+  `chunking` (`--chunk` reset `chunker_type` and dropped `embedding`), `language_detection`
+  (`--detect-language` reset `min_confidence`) and `token_reduction` (`--token-reduction` reset
+  `preserve_important_words`). Each flag now mutates only the field it names.
+
 - The generated C header now guards its feature-gated exports. Every `[defines]` key in
   `cbindgen.toml` was written with escaped quotes, which cbindgen never matches, so the header
   declared hundreds of `#[cfg(feature = "...")]` symbols with no `#if defined(XBERG_FEATURE_*)`
