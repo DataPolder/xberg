@@ -300,29 +300,50 @@ fn select_pdf_document(
     ocr_results: Option<&ahash::AHashMap<u32, String>>,
     structured_ocr_pages: Option<&ahash::AHashMap<u32, InternalDocument>>,
     boundaries: Option<&[crate::types::PageBoundary]>,
+    output_format: &crate::core::config::OutputFormat,
 ) -> (InternalDocument, PdfDocumentOrigin, bool) {
     let (mut doc, origin, structured) = match extraction_method {
         ExtractionMethod::Native => {
             let (document, structured) = select_native_pdf_document(text, mime_type, pre_rendered_doc, boundaries);
             (document, PdfDocumentOrigin::Native, structured)
         }
-        ExtractionMethod::Mixed => match pre_rendered_doc {
-            Some(mut doc) => {
-                if let Some(results) = ocr_results {
-                    if let Some(structured_pages) = structured_ocr_pages {
-                        ocr::merge_structured_ocr_pages_into_internal_document(&mut doc, results, structured_pages);
-                    } else {
-                        ocr::merge_ocr_pages_into_internal_document(&mut doc, results);
-                    }
+        ExtractionMethod::Mixed => {
+            // A native document with no text layer at all (a fully scanned PDF) makes
+            // `pre_rendered_doc` `None`: `extract_document_structure_from_segments` ran
+            // over zero segments and its caller (`extraction.rs`) collapses an empty
+            // result to `None` rather than an empty `InternalDocument`. That used to fall
+            // straight through to `flat_pdf_document`, which only ever emits `Paragraph`
+            // elements from `text` -- discarding every heading/list-item the document-global
+            // OCR heuristic (`ocr::heuristically_restructured_ocr_pages`) recovered into
+            // `structured_ocr_pages`, because nothing here ever looked at that map. `text`
+            // has already had the OCR replacements applied (see `apply_ocr_page_replacements`
+            // upstream) so `flat_pdf_document` still seeds the right per-page paragraphs for
+            // every page, OCR'd or not; the merge below then replaces the OCR'd pages'
+            // flattened paragraphs with their structured elements, exactly like the
+            // `Some(pre_rendered_doc)` branch already does for a native document.
+            //
+            // Gated on `output_format != Plain`: `render_plain` renders straight off
+            // `doc.elements`, so merging in `structured_ocr_pages` (paragraph-segmented
+            // per-page OCR documents, not the raw line-broken text `flat_pdf_document`
+            // splits on) would change Plain-format bytes for a document that previously
+            // never took this branch's merge path. Plain output for this `None` case
+            // must stay exactly what `flat_pdf_document(text, ..)` alone produced before
+            // this fix.
+            let had_native_document = pre_rendered_doc.is_some();
+            let mut doc = pre_rendered_doc.unwrap_or_else(|| flat_pdf_document(text, mime_type, boundaries));
+            let should_merge = had_native_document || *output_format != crate::core::config::OutputFormat::Plain;
+            let merged_ocr_content = if should_merge && let Some(results) = ocr_results {
+                if let Some(structured_pages) = structured_ocr_pages {
+                    ocr::merge_structured_ocr_pages_into_internal_document(&mut doc, results, structured_pages);
+                } else {
+                    ocr::merge_ocr_pages_into_internal_document(&mut doc, results);
                 }
-                (doc, PdfDocumentOrigin::Mixed, true)
-            }
-            None => (
-                flat_pdf_document(text, mime_type, boundaries),
-                PdfDocumentOrigin::Mixed,
-                false,
-            ),
-        },
+                true
+            } else {
+                false
+            };
+            (doc, PdfDocumentOrigin::Mixed, had_native_document || merged_ocr_content)
+        }
         ExtractionMethod::Ocr => match ocr_internal_doc {
             Some(doc) => (doc, PdfDocumentOrigin::Ocr, true),
             None => (
@@ -1978,6 +1999,7 @@ impl PdfExtractor {
             ocr_results_map.as_ref(),
             structured_ocr_pages.as_ref(),
             selector_boundaries.as_deref(),
+            &config.output_format,
         );
         #[cfg(not(any(feature = "ocr", feature = "ocr-pipeline")))]
         let (mut doc, document_is_structured) =
@@ -2929,6 +2951,7 @@ mod tests {
             None,
             None,
             None,
+            &crate::core::config::OutputFormat::Markdown,
         );
 
         assert_eq!(origin, PdfDocumentOrigin::Ocr);
@@ -2973,6 +2996,7 @@ mod tests {
             Some(&results),
             None,
             None,
+            &crate::core::config::OutputFormat::Markdown,
         );
 
         assert_eq!(origin, PdfDocumentOrigin::Mixed);
@@ -2988,6 +3012,73 @@ mod tests {
                 .iter()
                 .any(|element| matches!(element.kind, ElementKind::Table { .. })),
             "target-page table markup must not be re-injected after OCR replacement"
+        );
+    }
+
+    /// A fully scanned PDF has no native text layer at all, so
+    /// `extract_document_structure_from_segments` (native pipeline) runs over zero
+    /// segments, produces zero elements, and its caller collapses that to
+    /// `pre_rendered_doc: None` (see `extraction.rs`'s `Ok(_) => None` arm). Before this
+    /// fix, `ExtractionMethod::Mixed`'s `None` branch ignored `structured_ocr_pages`
+    /// entirely and returned `flat_pdf_document`, which only ever emits `Paragraph`
+    /// elements -- discarding every heading the document-global OCR heuristic recovered
+    /// (matches the `ordinance_2197_scanned.pdf` field observation: `blocks_to_paragraphs`
+    /// found ~71 headings, but the returned document, and its rendered markdown, had zero).
+    /// Fails on unfixed code: `doc.elements` has no `Heading` (only the flat `Paragraph`
+    /// from `text`), and the rendered markdown has no `#` line.
+    #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+    #[test]
+    fn mixed_without_native_document_still_renders_ocr_structure_as_markdown() {
+        let mut results = ahash::AHashMap::new();
+        results.insert(1u32, "ANNUAL REPORT OVERVIEW\n\nReport body text.".to_string());
+
+        let mut structured_page = InternalDocument::new("pdf");
+        structured_page.push_element(
+            InternalElement::text(ElementKind::Heading { level: 1 }, "ANNUAL REPORT OVERVIEW", 0).with_page(1),
+        );
+        structured_page
+            .push_element(InternalElement::text(ElementKind::Paragraph, "Report body text.", 0).with_page(1));
+        let mut structured_pages = ahash::AHashMap::new();
+        structured_pages.insert(1u32, structured_page);
+
+        let text = "ANNUAL REPORT OVERVIEW\n\nReport body text.";
+        let boundaries = vec![crate::types::PageBoundary {
+            byte_start: 0,
+            byte_end: text.len(),
+            page_number: 1,
+        }];
+
+        let (doc, origin, structured) = select_pdf_document(
+            ExtractionMethod::Mixed,
+            text,
+            "application/pdf",
+            None, // no native document -- the fully-scanned-PDF case
+            None,
+            Some(&results),
+            Some(&structured_pages),
+            Some(&boundaries),
+            &crate::core::config::OutputFormat::Markdown,
+        );
+
+        assert_eq!(origin, PdfDocumentOrigin::Mixed);
+        assert!(
+            structured,
+            "a document assembled from OCR-recovered structure must be reported as structured"
+        );
+        assert!(
+            doc.elements
+                .iter()
+                .any(|element| matches!(element.kind, ElementKind::Heading { .. })),
+            "expected a Heading element to survive the merge when there is no native document; \
+             got element kinds: {:?}",
+            doc.elements.iter().map(|element| &element.kind).collect::<Vec<_>>()
+        );
+
+        let markdown = crate::rendering::render_markdown(&doc);
+        assert!(
+            markdown.contains("# ANNUAL REPORT OVERVIEW"),
+            "OCR document-global heading structure must reach the rendered markdown even when \
+             native pdf_oxide extraction produced no structured document: {markdown:?}"
         );
     }
 
@@ -3011,6 +3102,7 @@ mod tests {
             None,
             None,
             None,
+            &crate::core::config::OutputFormat::Markdown,
         );
         let allow_injection = !structured || (origin == PdfDocumentOrigin::Ocr && doc.tables.is_empty());
 
