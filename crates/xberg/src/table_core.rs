@@ -273,6 +273,70 @@ pub(crate) fn table_to_markdown(table: &[Vec<String>]) -> String {
     crate::rendering::common::render_table_markdown(table)
 }
 
+/// Multiple of the page's average word height used as the vertical-gap
+/// threshold for splitting table candidate words into separate regions
+/// (#177). Normal row spacing inside one table rarely exceeds ~1.5x the
+/// average word height, so a wider multiple avoids splitting a single
+/// table's own row gaps while still separating genuinely distinct tables
+/// (or a table from surrounding prose) on the same page.
+pub(crate) const TABLE_REGION_GAP_HEIGHT_MULTIPLIER: u32 = 3;
+
+/// Minimum number of words for a spatial region to be treated as a table
+/// candidate. Mirrors the previous whole-page threshold so a single small
+/// table on an otherwise text-only page is not over-fabricated.
+pub(crate) const MIN_TABLE_CANDIDATE_WORDS: usize = 6;
+
+/// Split table-candidate words into vertically separated regions.
+///
+/// Tesseract's TSV output has no notion of "this is a separate table from
+/// that one" — [`reconstruct_table`] previously ran once over every
+/// table-confidence word on the page, producing at most one table whose
+/// bounding box spanned the union of all such words, even when the page had
+/// several independent tables separated by paragraphs of prose (#177).
+///
+/// This groups words by contiguous vertical extent: a gap between one row's
+/// bottom edge and the next word's top edge wider than
+/// `TABLE_REGION_GAP_HEIGHT_MULTIPLIER` times the average word height starts
+/// a new region. Each region is reconstructed independently, giving each
+/// table its own bounding box.
+pub(crate) fn cluster_words_into_table_regions(words: &[HocrWord]) -> Vec<Vec<HocrWord>> {
+    if words.is_empty() {
+        return Vec::new();
+    }
+
+    let mut sorted: Vec<&HocrWord> = words.iter().collect();
+    sorted.sort_by(|a, b| a.top.cmp(&b.top).then(a.left.cmp(&b.left)));
+
+    let avg_height: u32 = {
+        let total: u32 = sorted.iter().map(|w| w.height).sum();
+        (total / sorted.len() as u32).max(1)
+    };
+    let region_gap_threshold = avg_height * TABLE_REGION_GAP_HEIGHT_MULTIPLIER;
+
+    let mut regions: Vec<Vec<HocrWord>> = Vec::new();
+    let mut current_region: Vec<HocrWord> = Vec::new();
+    let mut current_bottom: u32 = 0;
+
+    for word in sorted {
+        let word_bottom = word.top + word.height;
+        let is_new_region =
+            !current_region.is_empty() && word.top.saturating_sub(current_bottom) > region_gap_threshold;
+
+        if is_new_region {
+            regions.push(std::mem::take(&mut current_region));
+            current_bottom = 0;
+        }
+
+        current_bottom = current_bottom.max(word_bottom);
+        current_region.push(word.clone());
+    }
+    if !current_region.is_empty() {
+        regions.push(current_region);
+    }
+
+    regions
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
