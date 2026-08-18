@@ -159,6 +159,10 @@ xberg = { path = "./crates/xberg", version = "1.1.0", default-features = false }
 xberg-gliner = { path = "./crates/xberg-gliner", version = "1.1.0", default-features = false }
 
 [patch.crates-io]
+# TEMPORARY: local sceptre carries the width_ths=1.0 detection fix. Remove once
+# sceptre publishes the patch release and the `sceptre` requirement above is bumped.
+# `cargo publish` ignores [patch], so xberg MUST NOT be released while this is here.
+sceptre = { path = "../sceptre/crates/sceptre" }
 xberg = { path = "crates/xberg" }
 xberg-gliner = { path = "crates/xberg-gliner" }
 xberg-tesseract = { path = "crates/xberg-tesseract" }
