@@ -174,6 +174,36 @@ pub(crate) fn unavailable_gpu_ep_error_message(provider_name: &str, suggestion: 
     )
 }
 
+/// Resolve the execution provider a session build will attempt for `accel`: the `XBERG_ORT_EP`
+/// env override first, then `accel`'s configured provider, then
+/// [`crate::core::config::acceleration::ExecutionProviderType::Auto`].
+/// Mirrors the resolution `apply_execution_providers` performs internally; factored out so
+/// callers that need this decision *before* invoking `apply_execution_providers` — e.g. deciding
+/// whether a failed session build may retry CPU-only, see `OrtBackend::build_session` in
+/// `inference::ort_backend` — do not re-derive it independently and risk it drifting out of sync.
+// See the `#[allow(dead_code)]` rationale on `execution_provider_override` above.
+#[allow(dead_code)]
+pub(crate) fn resolve_execution_provider(
+    accel: Option<&crate::core::config::acceleration::AccelerationConfig>,
+) -> crate::core::config::acceleration::ExecutionProviderType {
+    use crate::core::config::acceleration::ExecutionProviderType;
+
+    execution_provider_override()
+        .unwrap_or_else(|| accel.map(|a| a.provider.clone()).unwrap_or(ExecutionProviderType::Auto))
+}
+
+/// Whether `accel` (plus any `XBERG_ORT_EP` override) resolves to an explicitly-requested
+/// execution provider, as opposed to
+/// [`crate::core::config::acceleration::ExecutionProviderType::Auto`]. `apply_execution_providers`
+/// hard-errors on an explicit request it cannot satisfy rather than falling back to CPU — callers
+/// that build a session must not swallow that error into a silent CPU retry.
+#[allow(dead_code)]
+pub(crate) fn is_explicit_provider_request(
+    accel: Option<&crate::core::config::acceleration::AccelerationConfig>,
+) -> bool {
+    resolve_execution_provider(accel) != crate::core::config::acceleration::ExecutionProviderType::Auto
+}
+
 /// Apply execution providers to an ORT session builder based on [`AccelerationConfig`].
 ///
 /// Shared by all ORT consumers (layout detection, embeddings, PaddleOCR, doc orientation).
@@ -203,8 +233,7 @@ pub(crate) fn apply_execution_providers(
     #[cfg(any(target_os = "macos", feature = "cuda", feature = "tensorrt"))]
     use ort::ep::ExecutionProvider;
 
-    let provider = execution_provider_override()
-        .unwrap_or_else(|| accel.map(|a| a.provider.clone()).unwrap_or(ExecutionProviderType::Auto));
+    let provider = resolve_execution_provider(accel);
     // Only read by the CUDA/TensorRT EP arms, which are cfg-gated behind their respective
     // Cargo features; unused without at least one of them enabled.
     #[cfg_attr(not(any(feature = "cuda", feature = "tensorrt")), allow(unused_variables))]
@@ -374,9 +403,10 @@ pub(crate) fn apply_execution_providers(
 #[cfg(test)]
 mod tests {
     use super::{
-        GpuEpOutcome, decide_gpu_ep_outcome, parse_execution_provider_override, unavailable_gpu_ep_error_message,
+        GpuEpOutcome, decide_gpu_ep_outcome, is_explicit_provider_request, parse_execution_provider_override,
+        resolve_execution_provider, unavailable_gpu_ep_error_message,
     };
-    use crate::core::config::acceleration::ExecutionProviderType;
+    use crate::core::config::acceleration::{AccelerationConfig, ExecutionProviderType};
 
     // These tests exercise `decide_gpu_ep_outcome` with an injected `is_available` bool rather
     // than a real `ort::ep::ExecutionProvider::is_available()` call. Real EP availability
@@ -452,6 +482,33 @@ mod tests {
         for value in ["invalid", "gpu", "core-ml", "cpu,cuda"] {
             assert_eq!(parse_execution_provider_override(value), None, "value: {value:?}");
         }
+    }
+
+    #[test]
+    fn explicit_gpu_providers_resolve_to_explicit_request() {
+        for provider in [ExecutionProviderType::CoreMl, ExecutionProviderType::Cuda, ExecutionProviderType::TensorRt] {
+            let accel = AccelerationConfig { provider, device_id: 0 };
+            assert_eq!(resolve_execution_provider(Some(&accel)), accel.provider);
+            assert!(
+                is_explicit_provider_request(Some(&accel)),
+                "provider {:?} must resolve as explicit",
+                accel.provider
+            );
+        }
+    }
+
+    #[test]
+    fn auto_provider_and_absent_config_resolve_to_not_explicit() {
+        // Fails against the unfixed code: prior to this fix there was no way to distinguish an
+        // auto-detected provider from an explicitly-requested one outside of
+        // `apply_execution_providers` itself, which is exactly why `OrtBackend::build_session`
+        // retried CPU-only on ANY session-build error, including an explicit request that
+        // `apply_execution_providers` deliberately hard-errored on (commit b0444fffdd).
+        let auto = AccelerationConfig { provider: ExecutionProviderType::Auto, device_id: 0 };
+        assert_eq!(resolve_execution_provider(Some(&auto)), ExecutionProviderType::Auto);
+        assert!(!is_explicit_provider_request(Some(&auto)));
+        assert_eq!(resolve_execution_provider(None), ExecutionProviderType::Auto);
+        assert!(!is_explicit_provider_request(None));
     }
 
     #[test]
