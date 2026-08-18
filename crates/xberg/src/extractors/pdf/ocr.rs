@@ -390,6 +390,72 @@ fn normalize_markdown_for_scoring(text: &str) -> String {
 /// Used by the pipeline to decide whether to accept a result or try the next backend.
 /// Higher is better. Combines multiple signal dimensions into a single score.
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+/// Repair ordered-list markers the OCR engine mis-read at the start of a line.
+///
+/// A list marker is one or two characters carrying all of the structure: `3.` makes a list
+/// item, `3,` makes a paragraph that happens to begin with a digit. Tesseract confuses the
+/// period with a comma and the digit one with a lowercase L often enough that a document can
+/// lose a quarter of its list structure while every word in it is correct — measured on a
+/// recorded ordinance, 4 of 19 markers were destroyed this way and the markdown had 18 list
+/// items against the source's 31.
+///
+/// Deliberately narrow, because rewriting text the engine got right is worse than leaving a
+/// marker broken. A line is only repaired when it looks like nothing but a list item:
+///
+/// * the marker is at the very start of the line,
+/// * the number is 1-2 digits (a real list; `2024, the year ...` is not),
+/// * it is followed by exactly one space and then an uppercase letter, and
+/// * for the `l.` case the character is a bare lowercase L, which is never a valid marker.
+///
+/// Sentences beginning "3, and the remainder ..." keep their comma because of the uppercase
+/// requirement; prose beginning "l. " does not occur.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+pub(crate) fn repair_ocr_list_markers(text: &str) -> std::borrow::Cow<'_, str> {
+    if !text.lines().any(line_has_repairable_marker) {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    let mut out = String::with_capacity(text.len());
+    for (index, line) in text.lines().enumerate() {
+        if index > 0 {
+            out.push('\n');
+        }
+        if line_has_repairable_marker(line) {
+            let (marker, rest) = line.split_at(line.find(' ').unwrap_or(0));
+            if marker.starts_with('l') {
+                out.push('1');
+            } else {
+                out.push_str(&marker[..marker.len() - 1]);
+            }
+            out.push('.');
+            out.push_str(rest);
+        } else {
+            out.push_str(line);
+        }
+    }
+    if text.ends_with('\n') {
+        out.push('\n');
+    }
+    std::borrow::Cow::Owned(out)
+}
+
+/// Does this line begin with an ordered-list marker the engine mis-read?
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn line_has_repairable_marker(line: &str) -> bool {
+    let Some((marker, rest)) = line.split_once(' ') else {
+        return false;
+    };
+    // Exactly one space, then an uppercase letter: the shape of a list item, not of prose.
+    if !rest.chars().next().is_some_and(char::is_uppercase) {
+        return false;
+    }
+    match marker.strip_suffix(',') {
+        // `3,` / `12,` -> the period was read as a comma.
+        Some(digits) => !digits.is_empty() && digits.len() <= 2 && digits.bytes().all(|b| b.is_ascii_digit()),
+        // `l.` -> the digit one was read as a lowercase L. Never a valid marker otherwise.
+        None => marker == "l.",
+    }
+}
+
 /// Tesseract's mean confidence for a page, 0-100, if the backend reported one.
 ///
 /// Written by `perform_ocr` from `api.mean_text_conf()`. Backends that do not report it
@@ -1553,6 +1619,12 @@ pub(crate) async fn extract_mixed_ocr_native(
         });
         false
     });
+
+    for text in ocr_results.values_mut() {
+        if let std::borrow::Cow::Owned(repaired) = repair_ocr_list_markers(text) {
+            *text = repaired;
+        }
+    }
 
     let accepted_replacements = accepted_ocr_page_replacements(native_text, boundaries, &ocr_results);
     structured_ocr_pages.retain(|page, _| accepted_replacements.contains_key(page));
@@ -7782,7 +7854,7 @@ Name: ___
 /// must survive — carry more weight than the positive ones.
 #[cfg(all(test, any(feature = "ocr", feature = "ocr-pipeline")))]
 mod recognition_noise_tests {
-    use super::{NativeTextStats, is_ocr_recognition_noise, ocr_output_stats};
+    use super::{NativeTextStats, is_ocr_recognition_noise, ocr_output_stats, repair_ocr_list_markers};
     use crate::core::config::OcrQualityThresholds;
 
     /// Verbatim from page 4 of a recorded municipal ordinance: Tesseract run over a scanned
@@ -7946,6 +8018,66 @@ Each row of the preceding table records one measurement taken during the survey 
             thresholds.min_ocr_mean_confidence < worst_prose,
             "prose at {worst_prose} would be rejected by the {} floor",
             thresholds.min_ocr_mean_confidence
+        );
+    }
+
+    #[test]
+    fn should_repair_a_comma_read_for_a_list_period() {
+        // Verbatim from the ordinance: `3.` and `4.` came back as `3,` and `4,`, so neither
+        // line was a list item any more.
+        let text = "3, Maximum number of lots: 9\n4, Minimum lot area: 2,842 sf";
+        assert_eq!(
+            repair_ocr_list_markers(text).as_ref(),
+            "3. Maximum number of lots: 9\n4. Minimum lot area: 2,842 sf"
+        );
+    }
+
+    #[test]
+    fn should_repair_a_lowercase_l_read_for_a_digit_one() {
+        let text = "l. A six-foot (6') pedestrian sidewalk towards Creek Bend Drive";
+        assert_eq!(
+            repair_ocr_list_markers(text).as_ref(),
+            "1. A six-foot (6') pedestrian sidewalk towards Creek Bend Drive"
+        );
+    }
+
+    #[test]
+    fn should_not_touch_prose_that_merely_starts_with_a_number() {
+        // The uppercase requirement is what separates these from list items. Rewriting them
+        // would corrupt text the engine read correctly.
+        for line in [
+            "3, and the remainder of the tract is unrestricted",
+            "2024, the year the plat was recorded",
+            "1985, when the ordinance was adopted",
+        ] {
+            assert_eq!(repair_ocr_list_markers(line).as_ref(), line, "rewrote prose: {line}");
+        }
+    }
+
+    #[test]
+    fn should_not_touch_a_year_or_long_number_before_a_capital() {
+        // Four digits is not a list marker; the 2-digit cap is what stops this.
+        let line = "2019, November of that year saw the plat recorded";
+        assert_eq!(repair_ocr_list_markers(line).as_ref(), line);
+    }
+
+    #[test]
+    fn should_leave_correct_markers_alone_and_avoid_allocating() {
+        let text = "1. Land Use: Live/Work Townhomes\n2. Building finishes: Siding";
+        let out = repair_ocr_list_markers(text);
+        assert!(
+            matches!(out, std::borrow::Cow::Borrowed(_)),
+            "must not allocate when nothing is broken"
+        );
+        assert_eq!(out.as_ref(), text);
+    }
+
+    #[test]
+    fn should_preserve_surrounding_lines_and_trailing_newline() {
+        let text = "Section 3. Regulations\n\n3, Maximum number of lots: 9\nunchanged tail\n";
+        assert_eq!(
+            repair_ocr_list_markers(text).as_ref(),
+            "Section 3. Regulations\n\n3. Maximum number of lots: 9\nunchanged tail\n"
         );
     }
 
