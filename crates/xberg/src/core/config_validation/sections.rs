@@ -13,7 +13,23 @@ const VALID_BINARIZATION_METHODS: &[&str] = &["otsu", "adaptive", "sauvola"];
 const VALID_TOKEN_REDUCTION_LEVELS: &[&str] = &["off", "light", "moderate", "aggressive", "maximum"];
 
 /// Valid OCR backends.
-const VALID_OCR_BACKENDS: &[&str] = &["tesseract", "paddleocr", "paddle-ocr", "sceptre", "vlm"];
+///
+/// Every name a backend registers under must appear here, or config validation rejects a backend
+/// the registry is perfectly capable of serving. The list is deliberately not feature-gated: the
+/// entries already present (`sceptre`, `vlm`, `paddle-ocr`) are feature-gated backends too, and a
+/// name that is valid-but-not-compiled-in is reported by backend resolution with a message about
+/// the missing feature, which is more useful than "invalid OCR backend".
+const VALID_OCR_BACKENDS: &[&str] = &[
+    "tesseract",
+    "paddleocr",
+    "paddle-ocr",
+    "sceptre",
+    "vlm",
+    "candle-trocr",
+    "candle-paddleocr-vl",
+    "candle-glm-ocr",
+    "candle-deepseek-ocr",
+];
 
 /// Common ISO 639-1 language codes (extended list).
 /// Covers most major languages and variants used in document processing.

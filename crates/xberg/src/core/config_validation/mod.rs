@@ -110,6 +110,18 @@ mod tests {
         assert!(validate_ocr_backend("SCEPTRE").is_ok());
     }
 
+    /// The four candle backends are registered by `OcrRegistry::register_builtin_backends`
+    /// (plugins/registry/ocr.rs) under their own feature gates, but were absent from
+    /// `VALID_OCR_BACKENDS` — so config validation rejected a backend the registry was
+    /// perfectly capable of serving, before resolution ever ran.
+    #[test]
+    fn should_accept_every_name_a_builtin_candle_backend_registers_under() {
+        assert!(validate_ocr_backend("candle-trocr").is_ok());
+        assert!(validate_ocr_backend("candle-paddleocr-vl").is_ok());
+        assert!(validate_ocr_backend("candle-glm-ocr").is_ok());
+        assert!(validate_ocr_backend("candle-deepseek-ocr").is_ok());
+    }
+
     #[test]
     fn test_validate_ocr_backend_rejects_unknown_backend() {
         let result = validate_ocr_backend("unsupported-ocr");
