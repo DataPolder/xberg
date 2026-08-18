@@ -62,9 +62,10 @@ const DEFAULT_OCR_FONT_SIZE_PT: f32 = 12.0;
 /// points by the backend that populated it (tesseract's per-block average, set by
 /// `ocr::hocr_parser`), so it needs no unit conversion.
 ///
-/// Otherwise falls back to a proxy derived from the element's own bbox height,
-/// scaled from OCR raster pixels to PDF points via `points_per_pixel`. The scaling
-/// matters: the document-level heading heuristic
+/// Otherwise falls back to a proxy derived from the element's own line-height
+/// (`quad_edge_height_px` when the backend reports a quadrilateral, else the raw
+/// bbox height), scaled from OCR raster pixels to PDF points via `points_per_pixel`.
+/// The scaling matters: the document-level heading heuristic
 /// (`pdf::structure::pipeline::extract_document_structure_from_segments`) compares
 /// font sizes against `MIN_HEADING_FONT_GAP`, an **absolute-points** constant: a
 /// pixel-space value would either swamp that constant into irrelevance (high-DPI
@@ -87,10 +88,60 @@ fn resolve_ocr_font_size_pt(
         return font_size;
     }
 
-    block_bbox
-        .map(|(_, bottom, _, top)| (top - bottom) / line_count.max(1) as f32 * points_per_pixel)
+    let height_px = element
+        .ocr_geometry
+        .as_ref()
+        .and_then(quad_edge_height_px)
+        .or_else(|| block_bbox.map(|(_, bottom, _, top)| top - bottom));
+
+    height_px
+        .map(|height| height / line_count.max(1) as f32 * points_per_pixel)
         .filter(|value| value.is_finite() && *value > 0.0)
         .unwrap_or(DEFAULT_OCR_FONT_SIZE_PT)
+}
+
+/// Rotation-robust line-height proxy for a 4-point OCR quadrilateral, in raster
+/// pixels.
+///
+/// `resolve_ocr_font_size_pt`'s previous fallback took the axis-aligned bounding
+/// box height (`top - bottom` of `block_bbox`) as a font-size proxy. For a
+/// perfectly horizontal quad that is the line height; for a quad with *any* skew
+/// -- unavoidable on real scanned pages -- the AABB height also picks up
+/// `line_width * sin(skew_angle)`, a term that grows with how much *text* is on
+/// the line rather than with its *point size*. Measured on
+/// `test_documents/pdf_scanned/ordinance_2197_scanned.pdf` (sceptre backend,
+/// non-layout-detection route): resolved font sizes for `blocks_to_paragraphs`
+/// ranged from 8.6 to 472.3 and tracked word count (13-word title: 470.4;
+/// 2-word "EXHIBIT B-3": 74.9; 1-word "H.": 13.4) rather than the two visibly
+/// different type sizes actually on the page, so the heading/body clusters
+/// were inseparable and every page logged `headings=0`.
+///
+/// This computes the two side-edge lengths of the quad (`top_left`-`bottom_left`
+/// and `top_right`-`bottom_right`) and averages them instead. A side edge runs
+/// *across* the line, not *along* it, so it measures the true glyph-height band
+/// regardless of the line's length or skew.
+///
+/// Returns `None` for `OcrBoundingGeometry::Rectangle` (already axis-aligned by
+/// construction; Tesseract's proxy path already used `block_bbox` directly and is
+/// unaffected) so callers fall back to the existing `block_bbox`-height proxy.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn quad_edge_height_px(geometry: &crate::types::OcrBoundingGeometry) -> Option<f32> {
+    let crate::types::OcrBoundingGeometry::Quadrilateral { points } = geometry else {
+        return None;
+    };
+    // Clockwise from top-left: [top_left, top_right, bottom_right, bottom_left].
+    let [top_left, top_right, bottom_right, bottom_left] = *points;
+    let left_edge = point_distance(top_left, bottom_left);
+    let right_edge = point_distance(top_right, bottom_right);
+    let height = (left_edge + right_edge) / 2.0;
+    (height.is_finite() && height > 0.0).then_some(height)
+}
+
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn point_distance(a: (u32, u32), b: (u32, u32)) -> f32 {
+    let dx = a.0 as f32 - b.0 as f32;
+    let dy = a.1 as f32 - b.1 as f32;
+    dx.hypot(dy)
 }
 
 /// Harvest [`crate::pdf::hierarchy::SegmentData`] out of already-built OCR paragraphs,
@@ -893,6 +944,51 @@ mod tests {
             "First soft-wrapped body line\ncontinues on the next visual line"
         );
         assert_eq!(paragraphs[0].lines.len(), 2);
+    }
+
+    /// Regression for the sceptre/paddle heading-detection defect: the bbox-height
+    /// font-size proxy used the axis-aligned bounding box's `top - bottom`, which
+    /// for a *skewed* quadrilateral also picks up `line_width * sin(skew_angle)` --
+    /// a term proportional to how much text is on the line, not to its point size.
+    /// On `test_documents/pdf_scanned/ordinance_2197_scanned.pdf` this made resolved
+    /// font sizes track word count (13-word title: 470.4pt; 2-word "EXHIBIT B-3":
+    /// 74.9pt) instead of the page's two actual type sizes, so every page logged
+    /// `headings=0` even though the same document OCR'd with tesseract found 61.
+    ///
+    /// This quad has a deliberate skew (top edge rises 70px over an 800px run,
+    /// left/right edges both 35px tall): the naive AABB height is `205 - 100 =
+    /// 105`, three times the quad's true edge-based height of `35`. Against
+    /// unfixed code (`resolve_ocr_font_size_pt` reading only `block_bbox`), this
+    /// asserts `105.0` and fails.
+    #[test]
+    fn test_ocr_doc_uses_quad_edge_height_not_skewed_aabb_height_for_font_size() {
+        let mut doc = InternalDocument::new("test");
+        let mut elem = InternalElement::text(
+            ElementKind::OcrText {
+                level: OcrElementLevel::Line,
+            },
+            "AN ORDINANCE OF THE CITY COUNCIL OF THE CITY OF SUGAR LAND",
+            0,
+        );
+        elem.bbox = Some(BoundingBox {
+            x0: 100.0,
+            y0: 100.0,
+            x1: 900.0,
+            y1: 205.0,
+        });
+        elem.ocr_geometry = Some(crate::types::OcrBoundingGeometry::Quadrilateral {
+            points: [(100, 100), (900, 170), (900, 205), (100, 135)],
+        });
+        doc.push_element(elem);
+
+        let paragraphs = ocr_doc_to_paragraphs(&doc, 1000, 1.0);
+
+        assert_eq!(paragraphs.len(), 1);
+        assert!(
+            (paragraphs[0].dominant_font_size - 35.0).abs() < 0.01,
+            "expected the skew-robust quad edge height (35.0), got {}",
+            paragraphs[0].dominant_font_size
+        );
     }
 
     #[test]
