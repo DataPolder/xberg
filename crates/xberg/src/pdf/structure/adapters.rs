@@ -84,6 +84,7 @@ pub(crate) fn ocr_doc_to_paragraphs(
     let page_h = page_height_px as f32;
     let mut result = Vec::new();
     let mut previous_block_id = None;
+    let block_font_sizes = ocr_block_median_font_sizes(doc, page_h, font_size_scale);
 
     for element in &doc.elements {
         if !matches!(element.kind, ElementKind::OcrText { .. }) || element.text.trim().is_empty() {
@@ -91,13 +92,14 @@ pub(crate) fn ocr_doc_to_paragraphs(
             continue;
         }
         let block_id = hocr_block_id(element);
+        let block_median_pt = block_id.and_then(|block_id| block_font_sizes.get(block_id).copied());
         // A block that split into several list-item paragraphs (see
         // `make_ocr_block_paragraphs`'s doc comment, #713) only offers its *first*
         // segment for the same-block-id merge below: that segment carries the block's
         // leading edge and is what a continuing block would have merged into before
         // this split existed. Later segments are already-separated list items and must
         // not be re-merged into the block that precedes them.
-        for (segment_index, paragraph) in make_ocr_block_paragraphs(element, page_h, font_size_scale)
+        for (segment_index, paragraph) in make_ocr_block_paragraphs(element, page_h, font_size_scale, block_median_pt)
             .into_iter()
             .enumerate()
         {
@@ -169,13 +171,167 @@ fn resolve_ocr_style_flags(element: &crate::types::internal::InternalElement) ->
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 const DEFAULT_OCR_FONT_SIZE_PT: f32 = 12.0;
 
+/// A/B switch for the block-median font-size resolution described on
+/// [`ocr_block_median_font_sizes`] (#712).
+///
+/// **This is the single edit that neutralises the whole feature**: flip it to
+/// `false` and [`ocr_block_median_font_sizes`] returns an empty map, so every
+/// element falls back to the exact per-fragment resolution that shipped before --
+/// no other line of this module needs to change, and no call site does either.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+const RESOLVE_OCR_FONT_SIZE_PER_BLOCK: bool = true;
+
+/// A block needs at least this many measurable fragments before a median is worth
+/// taking. At one sample the median is the sample, so the entry would be an exact
+/// identity; requiring two keeps "nothing to stabilise" structurally distinct from
+/// "stabilised" instead of relying on that identity holding.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+const MIN_BLOCK_FRAGMENTS_FOR_MEDIAN: usize = 2;
+
+/// The hOCR `x_fsize` font size (points) an element carries, if any.
+///
+/// Only `ocr::hocr_parser` (the Tesseract path) ever writes this attribute, and it
+/// writes one value per `ocr_par`, so every fragment of a Tesseract block already
+/// reports the *same* number. That is exactly the within-block stability the median
+/// below manufactures for the geometric backends.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn hocr_font_size_pt(element: &crate::types::internal::InternalElement) -> Option<f32> {
+    element
+        .attributes
+        .as_ref()
+        .and_then(|attrs| attrs.get(HOCR_FONT_SIZE_ATTRIBUTE))
+        .and_then(|value| value.parse::<f32>().ok())
+        .filter(|value| value.is_finite() && *value > 0.0)
+}
+
+/// The geometric font-size proxy (PDF points) for a single OCR fragment, or `None`
+/// when the element carries neither usable quadrilateral geometry nor a usable bbox.
+///
+/// Split out of [`resolve_ocr_font_size_pt`] unchanged so that
+/// [`ocr_block_median_font_sizes`] can sample exactly the same quantity the
+/// per-fragment path would have produced -- the median is taken over resolved point
+/// sizes, not over raw pixel heights, so the two are directly comparable and the
+/// `None` case is excluded from the sample set rather than entering it as
+/// [`DEFAULT_OCR_FONT_SIZE_PT`].
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn geometric_ocr_font_size_pt(
+    element: &crate::types::internal::InternalElement,
+    block_bbox: Option<(f32, f32, f32, f32)>,
+    line_count: usize,
+    font_size_scale: OcrFontSizeScale,
+) -> Option<f32> {
+    element
+        .ocr_geometry
+        .as_ref()
+        .and_then(quad_edge_height_px)
+        .map(|height_px| height_px * font_size_scale.geometry_points_per_pixel)
+        .or_else(|| block_bbox.map(|(_, bottom, _, top)| (top - bottom) * font_size_scale.bbox_points_per_pixel))
+        .map(|height| height / line_count.max(1) as f32)
+        .filter(|value| value.is_finite() && *value > 0.0)
+}
+
+/// One font size (PDF points) per hOCR block id, taken as the **median** over every
+/// measurable fragment of that block (#712).
+///
+/// `SegmentData::font_size` carries two incompatible physical quantities depending
+/// on backend. Tesseract's `x_fsize` is a typographic point size and is a per-
+/// `ocr_par` constant. Sceptre and PaddleOCR write no `x_fsize`, so their font size
+/// is the *height of a detection box* -- a geometric quantity that varies with the
+/// glyph mix (ascenders, descenders, punctuation) *within one physical line*.
+/// Measured on the sceptre regression fixture, six fragments of a single body line
+/// resolved to 15.4-17.3pt: a 1.12 ratio inside one line, against
+/// `MIN_HEADING_FONT_RATIO = 1.15`, and a 1.9pt spread against the 1.5pt absolute
+/// `font_change` paragraph break -- so paragraphs split mid-line, between two words
+/// of the same sentence, and the heading heuristic had ~80% of its headroom eaten
+/// before any real size difference was considered.
+///
+/// **Median, not mean.** The samples are detection-box heights, and OCR detection
+/// routinely emits a badly fragmented box: a single stray character, a piece of a
+/// rule mis-detected as text, a box that swallowed part of the line above. Those are
+/// outliers of arbitrary magnitude in *both* directions, and a mean moves with them
+/// proportionally to how extreme they are -- one 4x-too-tall fragment in a five-
+/// fragment block drags the mean 60% above the true line height. The median ignores
+/// magnitude entirely and only asks how many fragments fall on each side, so it
+/// still reports the type size the majority of the block actually has.
+///
+/// Blocks whose fragments carry `x_fsize` are skipped entirely (never sampled, never
+/// keyed), so the Tesseract path cannot be perturbed even in principle -- see
+/// [`resolve_ocr_font_size_pt`], which returns on `x_fsize` before it ever consults
+/// this map. Elements with no `hocr_block_id` (and blocks under
+/// [`MIN_BLOCK_FRAGMENTS_FOR_MEDIAN`] measurable fragments) produce no entry, and
+/// their callers fall back to the unchanged per-fragment resolution.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn ocr_block_median_font_sizes(
+    doc: &crate::types::internal::InternalDocument,
+    page_height: f32,
+    font_size_scale: OcrFontSizeScale,
+) -> ahash::AHashMap<String, f32> {
+    use crate::types::internal::ElementKind;
+
+    if !RESOLVE_OCR_FONT_SIZE_PER_BLOCK {
+        return ahash::AHashMap::new();
+    }
+
+    let mut samples: ahash::AHashMap<String, Vec<f32>> = ahash::AHashMap::new();
+    for element in &doc.elements {
+        if !matches!(element.kind, ElementKind::OcrText { .. }) || element.text.trim().is_empty() {
+            continue;
+        }
+        if hocr_font_size_pt(element).is_some() {
+            continue;
+        }
+        let Some(block_id) = hocr_block_id(element) else {
+            continue;
+        };
+        let line_count = element.text.split('\n').count().max(1);
+        let block_bbox = pdf_block_bbox(element, page_height);
+        let Some(font_size) = geometric_ocr_font_size_pt(element, block_bbox, line_count, font_size_scale) else {
+            continue;
+        };
+        samples.entry(block_id.to_owned()).or_default().push(font_size);
+    }
+
+    samples
+        .into_iter()
+        .filter(|(_, values)| values.len() >= MIN_BLOCK_FRAGMENTS_FOR_MEDIAN)
+        .filter_map(|(block_id, mut values)| median_font_size_pt(&mut values).map(|median| (block_id, median)))
+        .collect()
+}
+
+/// Median of a non-empty slice of font sizes, averaging the two central values for
+/// an even count. Sorted with `f32::total_cmp` rather than `partial_cmp`: the input
+/// is already filtered to finite positives, and `total_cmp` is a total order, so
+/// this cannot panic on a stray NaN reaching it through a future edit.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn median_font_size_pt(values: &mut [f32]) -> Option<f32> {
+    if values.is_empty() {
+        return None;
+    }
+    values.sort_unstable_by(f32::total_cmp);
+    let middle = values.len() / 2;
+    let median = if values.len().is_multiple_of(2) {
+        (values[middle - 1] + values[middle]) / 2.0
+    } else {
+        values[middle]
+    };
+    (median.is_finite() && median > 0.0).then_some(median)
+}
+
 /// Resolve a font size in PDF points for an OCR-produced text element.
 ///
 /// Prefers the hOCR `x_fsize` attribute when present: it is already reported in
 /// points by the backend that populated it (tesseract's per-block average, set by
-/// `ocr::hocr_parser`), so it needs no unit conversion.
+/// `ocr::hocr_parser`), so it needs no unit conversion. That branch returns
+/// *before* `block_median_pt` is consulted, so the Tesseract path is bit-identical
+/// to what it was before #712 -- not "provably a no-op through the median", but
+/// never routed through it at all, which is a stronger and cheaper guarantee.
 ///
-/// Otherwise falls back to a proxy derived from the element's own line-height
+/// Otherwise prefers `block_median_pt`, the median over every measurable fragment
+/// of this element's hOCR block (see [`ocr_block_median_font_sizes`]), which is what
+/// removes the intra-line detection-box variance that sceptre and PaddleOCR would
+/// otherwise feed into the heading and paragraph-break thresholds.
+///
+/// Falls back last to a proxy derived from the element's own line-height
 /// (`quad_edge_height_px` when the backend reports a quadrilateral, else the raw
 /// bbox height), scaled from OCR raster pixels to PDF points via `font_size_scale`.
 /// Each branch is scaled by the factor appropriate to *its own* unit space -- see
@@ -193,28 +349,15 @@ fn resolve_ocr_font_size_pt(
     block_bbox: Option<(f32, f32, f32, f32)>,
     line_count: usize,
     font_size_scale: OcrFontSizeScale,
+    block_median_pt: Option<f32>,
 ) -> f32 {
-    if let Some(font_size) = element
-        .attributes
-        .as_ref()
-        .and_then(|attrs| attrs.get(HOCR_FONT_SIZE_ATTRIBUTE))
-        .and_then(|value| value.parse::<f32>().ok())
-        .filter(|value| value.is_finite() && *value > 0.0)
-    {
+    if let Some(font_size) = hocr_font_size_pt(element) {
         return font_size;
     }
-
-    let height_pt = element
-        .ocr_geometry
-        .as_ref()
-        .and_then(quad_edge_height_px)
-        .map(|height_px| height_px * font_size_scale.geometry_points_per_pixel)
-        .or_else(|| block_bbox.map(|(_, bottom, _, top)| (top - bottom) * font_size_scale.bbox_points_per_pixel));
-
-    height_pt
-        .map(|height| height / line_count.max(1) as f32)
-        .filter(|value| value.is_finite() && *value > 0.0)
-        .unwrap_or(DEFAULT_OCR_FONT_SIZE_PT)
+    if let Some(median) = block_median_pt {
+        return median;
+    }
+    geometric_ocr_font_size_pt(element, block_bbox, line_count, font_size_scale).unwrap_or(DEFAULT_OCR_FONT_SIZE_PT)
 }
 
 /// Rotation-robust line-height proxy for a 4-point OCR quadrilateral, in raster
@@ -347,6 +490,7 @@ pub(crate) fn ocr_doc_to_layout_paragraphs(
     let mut all_hint_indices = Vec::new();
     let mut element_indices = Vec::new();
     let mut block_ids = Vec::new();
+    let block_font_sizes = ocr_block_median_font_sizes(doc, page_height, font_size_scale);
     let elements = doc
         .elements
         .iter()
@@ -363,7 +507,8 @@ pub(crate) fn ocr_doc_to_layout_paragraphs(
                 hints,
                 min_confidence,
             );
-        let mut lines = make_ocr_line_paragraphs(element, page_height, font_size_scale);
+        let block_median_pt = hocr_block_id(element).and_then(|block_id| block_font_sizes.get(block_id).copied());
+        let mut lines = make_ocr_line_paragraphs(element, page_height, font_size_scale, block_median_pt);
         let selected = super::layout_classify::apply_layout_overrides_with_matches(
             &mut lines,
             hints,
@@ -651,9 +796,10 @@ fn make_ocr_block_paragraphs(
     element: &crate::types::internal::InternalElement,
     page_height: f32,
     font_size_scale: OcrFontSizeScale,
+    block_median_pt: Option<f32>,
 ) -> Vec<types::PdfParagraph> {
     let block_bbox = pdf_block_bbox(element, page_height);
-    let line_paragraphs = make_ocr_line_paragraphs(element, page_height, font_size_scale);
+    let line_paragraphs = make_ocr_line_paragraphs(element, page_height, font_size_scale, block_median_pt);
 
     let marker_line_count = line_paragraphs
         .iter()
@@ -665,7 +811,8 @@ fn make_ocr_block_paragraphs(
             .flat_map(|paragraph| paragraph.lines)
             .collect();
         let text_line_count = element.text.split('\n').count().max(1);
-        let font_size = resolve_ocr_font_size_pt(element, block_bbox, text_line_count, font_size_scale);
+        let font_size =
+            resolve_ocr_font_size_pt(element, block_bbox, text_line_count, font_size_scale, block_median_pt);
         return vec![make_ocr_paragraph(element.text.clone(), lines, block_bbox, font_size)];
     }
 
@@ -680,6 +827,7 @@ fn make_ocr_line_paragraphs(
     element: &crate::types::internal::InternalElement,
     page_height: f32,
     font_size_scale: OcrFontSizeScale,
+    block_median_pt: Option<f32>,
 ) -> Vec<types::PdfParagraph> {
     let block_bbox = pdf_block_bbox(element, page_height);
     let text_lines = element.text.split('\n').collect::<Vec<_>>();
@@ -688,7 +836,11 @@ fn make_ocr_line_paragraphs(
     // backends that emit line-level elements): `x_fsize` when the backend
     // provides one is itself a block/element-level average, so re-deriving a
     // per-line value would add false precision without a real per-line signal.
-    let font_size = resolve_ocr_font_size_pt(element, block_bbox, line_count, font_size_scale);
+    // For the geometric backends, `block_median_pt` widens that "once" from the
+    // element to the whole hOCR block -- an element there is a single detection
+    // box, so per-element resolution is precisely the per-fragment variance #712
+    // is about.
+    let font_size = resolve_ocr_font_size_pt(element, block_bbox, line_count, font_size_scale, block_median_pt);
     // Same reasoning applies to bold/italic: `x_bold_fraction`/`x_italic_fraction`
     // are block-level averages, resolved once and applied uniformly to every line.
     let (is_bold, is_italic) = resolve_ocr_style_flags(element);
@@ -1407,6 +1559,183 @@ mod tests {
              (200px * 0.36 = 72.0pt), got {}",
             paragraphs[0].dominant_font_size
         );
+    }
+
+    /// Build a document of single-line OCR elements that all belong to one hOCR
+    /// block, each carrying a `Quadrilateral` geometry of the given raster-pixel
+    /// height and no `x_fsize` -- the exact shape sceptre and PaddleOCR emit (one
+    /// element per *detection box*, several boxes per physical line).
+    ///
+    /// The quads are unskewed, so `quad_edge_height_px` returns the height verbatim
+    /// and, at `OcrFontSizeScale::uniform(1.0)`, each fragment's per-element font
+    /// size is exactly its pixel height. That keeps the expected values in the tests
+    /// below arithmetic rather than approximate.
+    fn quad_fragment_document(block_id: Option<&str>, heights_px: &[u32], x_fsize: Option<&str>) -> InternalDocument {
+        let mut doc = InternalDocument::new("test");
+        let mut top = 100_u32;
+        for (index, &height) in heights_px.iter().enumerate() {
+            let mut element = InternalElement::text(
+                ElementKind::OcrText {
+                    level: OcrElementLevel::Line,
+                },
+                format!("word{index}"),
+                0,
+            );
+            element.bbox = Some(BoundingBox {
+                x0: 100.0,
+                y0: f64::from(top),
+                x1: 500.0,
+                y1: f64::from(top + height),
+            });
+            element.ocr_geometry = Some(crate::types::OcrBoundingGeometry::Quadrilateral {
+                points: [(100, top), (500, top), (500, top + height), (100, top + height)],
+            });
+            let attributes = block_id
+                .map(|block_id| ("hocr_block_id".to_string(), block_id.to_string()))
+                .into_iter()
+                .chain(x_fsize.map(|value| (HOCR_FONT_SIZE_ATTRIBUTE.to_string(), value.to_string())))
+                .collect::<ahash::AHashMap<_, _>>();
+            element.attributes = (!attributes.is_empty()).then_some(attributes);
+            doc.push_element(element);
+            top += height;
+        }
+        doc
+    }
+
+    fn ocr_segment_font_sizes(paragraphs: Vec<types::PdfParagraph>) -> Vec<f32> {
+        segments_from_ocr_pages(&[paragraphs])
+            .into_iter()
+            .flatten()
+            .map(|segment| segment.font_size)
+            .collect()
+    }
+
+    /// #712: `SegmentData::font_size` is a *detection-box height* for sceptre and
+    /// PaddleOCR, and detection-box height varies with the glyph mix (ascenders,
+    /// descenders, punctuation) *inside one physical line*. The heights here are the
+    /// real recorded sceptre values for one body line of the regression fixture --
+    /// 32/36/32/36/32/32px -- which per-fragment resolution turns into six different
+    /// font sizes spanning 4.0pt.
+    ///
+    /// That spread is doubly destructive: 36/32 = 1.12 against
+    /// `MIN_HEADING_FONT_RATIO = 1.15` eats ~80% of the heading heuristic's headroom
+    /// before any real size difference is considered, and 4.0 > the 1.5-absolute-point
+    /// `font_change` paragraph break in `pdf::structure::pipeline`, so a paragraph
+    /// breaks *between two words of one sentence*.
+    ///
+    /// Against unfixed code (or with `RESOLVE_OCR_FONT_SIZE_PER_BLOCK = false`) the
+    /// first assertion fails: the font sizes come back
+    /// `[32.0, 36.0, 32.0, 36.0, 32.0, 32.0]` instead of six copies of `32.0`, and
+    /// the spread assertion reports `4.0` instead of `0.0`.
+    #[test]
+    fn test_ocr_block_median_font_size_removes_intra_line_detection_box_variance() {
+        let doc = quad_fragment_document(Some("block_1_1"), &[32, 36, 32, 36, 32, 32], None);
+
+        let paragraphs = ocr_doc_to_paragraphs(&doc, 1000, OcrFontSizeScale::uniform(1.0));
+        let font_sizes = ocr_segment_font_sizes(paragraphs);
+
+        assert_eq!(
+            font_sizes,
+            vec![32.0_f32; 6],
+            "every fragment of one hOCR block must resolve to the block median (32.0)"
+        );
+        let spread = font_sizes.iter().copied().fold(f32::MIN, f32::max)
+            - font_sizes.iter().copied().fold(f32::MAX, f32::min);
+        assert_eq!(
+            spread, 0.0,
+            "intra-block font-size spread must be 0.0, well under the 1.5pt paragraph-break threshold"
+        );
+    }
+
+    /// The aggregate must be the median, not the mean. OCR detection routinely emits
+    /// one badly fragmented box per block -- a stray character, a piece of a rule read
+    /// as text, a box that swallowed part of the line above -- and its magnitude is
+    /// arbitrary. Four true 30px fragments plus one 120px outlier have median `30.0`
+    /// but mean `48.0`: a mean would move the whole block 60% above its real type
+    /// size, which is exactly the kind of shift the 1.15 heading ratio reacts to.
+    ///
+    /// Against unfixed code this fails on the outlier fragment, which resolves to its
+    /// own `120.0`; the assertion then reports the full
+    /// `[30.0, 30.0, 30.0, 30.0, 120.0]`.
+    #[test]
+    fn test_ocr_block_font_size_uses_median_so_a_fragmented_outlier_does_not_move_it() {
+        let doc = quad_fragment_document(Some("block_1_1"), &[30, 30, 30, 30, 120], None);
+
+        let paragraphs = ocr_doc_to_paragraphs(&doc, 1000, OcrFontSizeScale::uniform(1.0));
+        let font_sizes = ocr_segment_font_sizes(paragraphs);
+
+        assert_eq!(
+            font_sizes,
+            vec![30.0_f32; 5],
+            "the median (30.0) must survive a 4x outlier; the mean would be 48.0"
+        );
+    }
+
+    /// The same block-median wiring must reach the ML-layout route, which builds its
+    /// lines through `make_ocr_line_paragraphs` rather than `make_ocr_block_paragraphs`
+    /// and would otherwise keep the per-fragment variance.
+    ///
+    /// Against unfixed code this fails with `[32.0, 36.0, 32.0, 36.0, 32.0, 32.0]`.
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn test_layout_route_also_resolves_font_size_as_a_block_median() {
+        let doc = quad_fragment_document(Some("block_1_1"), &[32, 36, 32, 36, 32, 32], None);
+
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &[], 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
+        let font_sizes = ocr_segment_font_sizes(paragraphs);
+
+        assert_eq!(font_sizes, vec![32.0_f32; 6], "the layout route must apply the same block median");
+    }
+
+    /// Tesseract's `x_fsize` is a per-`ocr_par` constant and a genuine typographic
+    /// point size, so it must not be routed through the median at all: the fragments
+    /// here report `x_fsize = 14` while their detection boxes are 32px and 300px tall,
+    /// and both must still resolve to `14.0`. A median over the geometry would give
+    /// `166.0`; a median over the `x_fsize` values themselves would give `14.0` too,
+    /// so only the geometry mismatch can distinguish "skipped" from "no-op", which is
+    /// why the two heights are so far apart.
+    ///
+    /// This passes on both fixed and unfixed code -- it is a behaviour-preservation
+    /// pin, not a proof of the fix, and cannot be otherwise: the guarantee it states
+    /// is that nothing changed.
+    #[test]
+    fn test_tesseract_x_fsize_font_size_is_never_routed_through_the_block_median() {
+        let doc = quad_fragment_document(Some("block_1_1"), &[32, 300], Some("14"));
+
+        let paragraphs = ocr_doc_to_paragraphs(&doc, 1000, OcrFontSizeScale::uniform(1.0));
+
+        assert_eq!(
+            ocr_segment_font_sizes(paragraphs),
+            vec![14.0_f32; 2],
+            "x_fsize must win outright; a geometry median would give 166.0"
+        );
+    }
+
+    /// Fragments with no `hocr_block_id` cannot be grouped, so they keep the exact
+    /// per-fragment geometric resolution that shipped before #712 -- `32.0` and
+    /// `36.0`, not a median of `34.0`. Blocks with fewer than
+    /// `MIN_BLOCK_FRAGMENTS_FOR_MEDIAN` measurable fragments take the same path.
+    ///
+    /// Passes on both fixed and unfixed code: it documents the fallback.
+    #[test]
+    fn test_ocr_font_size_falls_back_to_per_fragment_geometry_without_a_block_id() {
+        let doc = quad_fragment_document(None, &[32, 36], None);
+
+        let paragraphs = ocr_doc_to_paragraphs(&doc, 1000, OcrFontSizeScale::uniform(1.0));
+
+        assert_eq!(
+            ocr_segment_font_sizes(paragraphs),
+            vec![32.0_f32, 36.0_f32],
+            "without a block id each fragment must keep its own geometric font size"
+        );
+    }
+
+    #[test]
+    fn test_median_font_size_pt_handles_even_odd_and_degenerate_inputs() {
+        assert_eq!(median_font_size_pt(&mut [36.0, 32.0, 32.0]), Some(32.0));
+        assert_eq!(median_font_size_pt(&mut [36.0, 32.0, 34.0, 30.0]), Some(33.0));
+        assert_eq!(median_font_size_pt(&mut [17.0]), Some(17.0));
+        assert_eq!(median_font_size_pt(&mut []), None);
     }
 
     #[test]
@@ -2264,7 +2593,7 @@ mod tests {
     #[test]
     fn test_unassociated_structural_line_does_not_capture_adjacent_body_lines() {
         let doc = layout_test_document("Promoted line\nBody one\nBody two", 3);
-        let mut lines = make_ocr_line_paragraphs(&doc.elements[0], 1000.0, OcrFontSizeScale::uniform(1.0));
+        let mut lines = make_ocr_line_paragraphs(&doc.elements[0], 1000.0, OcrFontSizeScale::uniform(1.0), None);
         lines[0].heading_level = Some(1);
 
         let paragraphs = regroup_layout_lines(lines, vec![None, None, None]);

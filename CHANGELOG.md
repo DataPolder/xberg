@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- OCR font sizes for the Sceptre and PaddleOCR backends are now resolved as a median per detected
+  text block rather than per fragment. Those backends report no typographic font size, so the
+  structure layer falls back to the height of each detection box — which varies with glyph mix
+  within a single physical line. Recorded values for one body line spanned 15.4 to 17.3 points,
+  enough to trip the absolute paragraph-break threshold between two words of the same line and to
+  consume most of the heading-size margin. Tesseract, which reports a real font size, is excluded
+  from this path entirely and is unaffected.
+
 - Text that resumes in a list item after a nested list is no longer emitted as a paragraph in
   DOCX, ODT, EPUB and email documents. Only one flag tracked whether a list item was open, and
   descending into a sublist cleared it, so the parent item's trailing content fell through to the
