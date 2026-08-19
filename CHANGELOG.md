@@ -217,6 +217,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- The unwired `region_has_repeating_columns` table-candidate filter, together with its three
+  tuning constants and its unit tests. It was added to reduce table over-fabrication and never
+  given a caller; measured against the repository's own fixtures it accepts a 355-word page of
+  ordinary prose containing no tables at all, and no threshold separates prose from tables across
+  both OCR backends. Table over-fabrication is a region-isolation problem, not a region-scoring
+  one, so nothing replaces it.
+
 - The `cancellation`, `config_builder` and `config` modules in `xberg-ffi` (34 `extern "C"`
   functions). No `mod` statement ever declared them, so they were never compiled and never
   exported — none of their symbols appear among the 2525 declarations in the published C header,
