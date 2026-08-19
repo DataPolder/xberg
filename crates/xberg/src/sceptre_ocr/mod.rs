@@ -791,6 +791,40 @@ fn build_metadata(languages: &[String], output: &BlockingOutput) -> Metadata {
     metadata
 }
 
+/// `object.get("detection")` is how `sceptre::DetectionConfig::detect_orientation` reaches
+/// this backend: any caller can already flip it on today with
+/// `backend_options: {"detection": {"detect_orientation": true}}`. Nothing here defaults it
+/// to `true`, and that is a deliberate decision (#662), not an oversight to "finish wiring".
+///
+/// `detect_orientation` is sceptre's own opt-in whole-page rotation guesser: it probes CRAFT
+/// at 0/90/180/270 degrees on a reduced canvas, rotates internally for the winning angle, and
+/// unrotates the output quads back onto the frame of the `Image` this backend passed in
+/// (`sceptre::engine::sceptre_engine`, `detect::orientation::unrotate_corners`) before
+/// `TextLine`s are ever returned here. So enabling it introduces no coordinate-frame bug for
+/// this crate's `line_to_element` / `build_internal_document` / table geometry — that risk was
+/// checked and ruled out, not assumed away.
+///
+/// The reason to leave it off is that xberg already has two better-targeted fixes for exactly
+/// the defect it targets, and stacking a third, weaker one on top adds cost without adding
+/// coverage:
+///   - For PDF-sourced pages, `extractors::pdf::ocr::upright_raster_for_backend` (#643) rotates
+///     the raster to upright using the page's own `/Rotate` value — a known fact, not a guess —
+///     whenever this backend's `page_orientation_handling()` reports `RequiresUpright`, and
+///     `undo_upright_raster_correction` maps the returned geometry back deterministically. Zero
+///     false-positive risk, because there is nothing to infer.
+///   - For raw images with no `/Rotate` to consult, `crate::doc_orientation` (a PP-LCNet
+///     classifier) already runs ahead of this backend, cross-backend, behind `config.auto_rotate`
+///     (`decode_and_rotate` below), with its own coordinate-frame correction in
+///     `extractors::pdf::ocr::undo_auto_rotate_document_bboxes`.
+///
+/// That leaves only images with unknown rotation and `auto_rotate` left off as a case
+/// `detect_orientation` could add coverage for — and sceptre's own ADR 0038 keeps the flag
+/// `false` by default even after fixing its false-positive rate to 0/23 on its labeled corpus,
+/// because it costs four extra CRAFT forward passes on every page (rotated or not) and the
+/// validation set is 23 images. Defaulting it on in xberg would pay that unconditional cost
+/// for every Sceptre page to cover a narrower gap than it looks like, and inherit a heuristic
+/// xberg has not independently validated. Revisit if `crate::doc_orientation` is ever removed,
+/// or if a corpus-backed measurement on xberg's own fixtures justifies the cost.
 fn parse_sceptre_options(config: &OcrConfig) -> Result<sceptre::OcrConfig> {
     let Some(options) = config.backend_options.as_ref() else {
         return Ok(sceptre::OcrConfig::default());
