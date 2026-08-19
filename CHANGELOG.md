@@ -124,6 +124,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A PDF backend can now be selected explicitly: `PdfConfig.backend` (`pdf_oxide` by default) and
+  the matching `--pdf-backend` CLI flag, which until now was accepted and then ignored. Only
+  `pdf_oxide` has an extraction implementation; `pdfium` is accepted by the parser but rejected at
+  validation time unless the build enables the `pdf-pdfium` feature, so it can never silently fall
+  back to a different engine than the one asked for. The `pdf` Cargo feature is now an umbrella
+  that forwards to the new `pdf-oxide` leaf, so existing feature selections are unaffected (#1448).
+
 - Opt-in `formula-recognition` feature: layout-detected formula regions on rasterized pages (image inputs and PDF pages) are
   recognized as LaTeX by the RapidLaTeXOCR model set (MIT, pix2tex-derived; resizer + encoder +
   autoregressive decoder ONNX, ~180 MB, downloaded on demand and SHA256-verified). Enable with

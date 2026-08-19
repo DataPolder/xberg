@@ -56,9 +56,12 @@ simd-utf8 = ["dep:simdutf8"]
 
 tokio-runtime = ["dep:tokio"]
 
-# PDF extraction is currently backed by pdf_oxide. Keep this as the canonical
-# `pdf` feature until/unless a second PDF backend is introduced.
-pdf = [
+# PDF backend selection (#700). `pdf` is the umbrella feature every existing
+# build profile already lists; it now forwards to `pdf-oxide` so none of them
+# need to change. `pdf-oxide` carries the actual pdf_oxide dependency set,
+# unchanged from before this split.
+pdf = ["pdf-oxide"]
+pdf-oxide = [
     "dep:pdf_oxide",
     "dep:lopdf",
     "dep:image",
@@ -66,6 +69,12 @@ pdf = [
     "html",
     "image-encode",
 ]
+# Selection-only leaf: PdfConfig::backend and PdfBackend (core/config/pdf.rs)
+# always compile under `pdf`, but no pdfium extraction implementation exists
+# yet, so this feature pulls no dependency of its own. It exists purely so
+# `xberg-cli`'s `pdf-pdfium-surface` has something to gate `--pdf-backend
+# pdfium` on -- enabling it does not make pdfium extraction work.
+pdf-pdfium = []
 # `zip` and `quick-xml` are not optional extras here: an .xlsx *is* a zip, and the
 # parts calamine does not model — revision headers, cell comments — are read out of
 # it directly. Without them a bare `--features excel` build did not compile at all.

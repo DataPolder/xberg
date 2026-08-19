@@ -55,6 +55,11 @@ default = [
     "tree-sitter",
 ]
 pdf-surface = ["xberg/pdf"]
+# Gates `--pdf-backend pdfium` (#700): PdfBackend::Pdfium always exists once
+# `pdf-surface` is on, but selecting it without this feature is rejected at
+# validation time with an actionable rebuild hint -- no pdfium extraction
+# implementation exists yet, so there is no silent fallback to pdf-oxide.
+pdf-pdfium-surface = ["pdf-surface", "xberg/pdf-pdfium"]
 pdf-heuristic = ["pdf-surface"]
 pdf-ocr = ["pdf-heuristic", "ocr-surface", "xberg/ocr"]
 formula-recognition = ["layout-detection", "xberg/formula-recognition"]

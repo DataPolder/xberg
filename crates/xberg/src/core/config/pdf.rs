@@ -3,7 +3,50 @@
 //! Defines PDF extraction options including metadata handling, image extraction,
 //! password management, and hierarchy extraction for document structure analysis.
 
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
+
+/// PDF extraction backend selection.
+///
+/// Controls which engine parses and renders PDF documents. Wire format is
+/// snake_case in all serializers (JSON, TOML, YAML). Defaults to
+/// [`PdfBackend::PdfOxide`] -- selecting anything else never changes behavior
+/// for a caller who does not opt in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PdfBackend {
+    /// pdf_oxide (default) -- the pure-Rust PDF engine xberg ships today.
+    #[default]
+    PdfOxide,
+    /// pdfium -- Google's PDFium engine, gated behind the `pdf-pdfium` Cargo
+    /// feature. Selection only: no extraction implementation exists yet
+    /// (issue #700 adds the selection level, not the engine). A build
+    /// without the `pdf-pdfium` feature must reject this at the CLI
+    /// validation layer rather than silently falling back to `PdfOxide`.
+    Pdfium,
+}
+
+impl std::str::FromStr for PdfBackend {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().replace('-', "_").as_str() {
+            "pdf_oxide" => Ok(Self::PdfOxide),
+            "pdfium" => Ok(Self::Pdfium),
+            other => Err(format!("unknown PDF backend '{other}'; expected: pdf-oxide, pdfium")),
+        }
+    }
+}
+
+impl fmt::Display for PdfBackend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PdfBackend::PdfOxide => write!(f, "pdf_oxide"),
+            PdfBackend::Pdfium => write!(f, "pdfium"),
+        }
+    }
+}
 
 /// PDF-specific configuration.
 #[cfg(feature = "pdf")]
@@ -94,6 +137,15 @@ pub struct PdfConfig {
     /// `Auto` alone does not turn reordering on. Defaults to `false`.
     #[serde(default)]
     pub reading_order: bool,
+
+    /// Which engine parses and renders this PDF.
+    ///
+    /// Defaults to [`PdfBackend::PdfOxide`] -- the only backend with an
+    /// extraction implementation today. Selecting [`PdfBackend::Pdfium`]
+    /// requires the `pdf-pdfium` feature and is rejected otherwise; see
+    /// [`PdfBackend`].
+    #[serde(default)]
+    pub backend: PdfBackend,
 }
 
 /// Hierarchy extraction configuration for PDF text structure analysis.
@@ -135,6 +187,7 @@ impl Default for PdfConfig {
             ocr_inline_images: false,
             extract_form_fields: true,
             reading_order: false,
+            backend: PdfBackend::default(),
         }
     }
 }
@@ -200,6 +253,7 @@ mod tests {
             ocr_inline_images: false,
             extract_form_fields: true,
             reading_order: false,
+            backend: PdfBackend::PdfOxide,
         };
         assert_eq!(config.top_margin_fraction, Some(0.10));
         assert_eq!(config.bottom_margin_fraction, Some(0.08));
@@ -240,5 +294,77 @@ mod tests {
         let deserialized: PdfConfig = serde_json::from_str(&json).unwrap();
         assert!(!deserialized.extract_form_fields);
         assert!(deserialized.reading_order);
+    }
+
+    #[test]
+    #[cfg(feature = "pdf")]
+    fn pdf_config_omitting_backend_defaults_to_pdf_oxide() {
+        use super::*;
+        let json = r#"{"extract_tables": true, "extract_metadata": true}"#;
+        let config: PdfConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            config.backend,
+            PdfBackend::PdfOxide,
+            "omitted backend must default to pdf_oxide -- no build's behavior may change unless a caller opts in"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "pdf")]
+    fn pdf_backend_round_trips_through_json_as_snake_case() {
+        use super::*;
+        let config = PdfConfig {
+            backend: PdfBackend::Pdfium,
+            ..PdfConfig::default()
+        };
+        let json = serde_json::to_value(&config).unwrap();
+        assert_eq!(
+            json.get("backend").and_then(|v| v.as_str()),
+            Some("pdfium"),
+            "wire format must be snake_case, got {json}"
+        );
+        let deserialized: PdfConfig = serde_json::from_value(json).unwrap();
+        assert_eq!(deserialized.backend, PdfBackend::Pdfium);
+    }
+
+    #[test]
+    fn pdf_backend_from_str_accepts_hyphen_and_underscore_forms() {
+        use super::*;
+        assert_eq!("pdf-oxide".parse::<PdfBackend>().unwrap(), PdfBackend::PdfOxide);
+        assert_eq!("pdf_oxide".parse::<PdfBackend>().unwrap(), PdfBackend::PdfOxide);
+        assert_eq!("PDF-OXIDE".parse::<PdfBackend>().unwrap(), PdfBackend::PdfOxide);
+        assert_eq!("pdfium".parse::<PdfBackend>().unwrap(), PdfBackend::Pdfium);
+        assert_eq!("PDFium".parse::<PdfBackend>().unwrap(), PdfBackend::Pdfium);
+    }
+
+    #[test]
+    fn pdf_backend_from_str_rejects_unknown_value_and_lists_valid_ones() {
+        use super::*;
+        let error = "xyz".parse::<PdfBackend>().unwrap_err();
+        assert!(error.contains("pdf-oxide"), "error must list pdf-oxide, got: {error}");
+        assert!(error.contains("pdfium"), "error must list pdfium, got: {error}");
+    }
+
+    /// Documents the known gap from `fixture_config_round_trip.rs`: `PdfConfig` does not
+    /// carry `#[serde(deny_unknown_fields)]` (only `ExtractionConfig` and
+    /// `UrlExtractionConfig` do, repo-wide), so a plausible-but-wrong nested key --
+    /// someone reasonably guessing the field is called `pdf_backend`, mirroring the
+    /// top-level CLI flag and JSON key, rather than the actual wire name `backend` --
+    /// silently parses and the setting never applies; `backend` quietly stays at its
+    /// default (`PdfOxide`) with no warning. This test is a regression net: if `PdfConfig`
+    /// ever gains `deny_unknown_fields`, this assertion starts failing (the typo becomes a
+    /// hard parse error) and should be deleted in the same change.
+    #[test]
+    #[cfg(feature = "pdf")]
+    fn pdf_config_typod_backend_key_is_silently_dropped() {
+        use super::*;
+        let json = serde_json::json!({"extract_tables": true, "pdf_backend": "pdfium"});
+        let config: PdfConfig = serde_json::from_value(json).expect("an unknown key must not be a parse error today");
+        assert_eq!(
+            config.backend,
+            PdfBackend::PdfOxide,
+            "the wrong key 'pdf_backend' (the correct wire name is 'backend') must be silently \
+             ignored, leaving backend at its default"
+        );
     }
 }

@@ -11,6 +11,8 @@ use anyhow::{Result, bail};
 use xberg::LanguageDetectionConfig;
 #[cfg(feature = "ocr-surface")]
 use xberg::OcrConfig;
+#[cfg(feature = "pdf-surface")]
+use xberg::PdfBackend;
 #[cfg(any(feature = "core-cli", feature = "analysis"))]
 use xberg::{BreadcrumbTarget, ChunkingConfig};
 use xberg::{ExecutionProviderType, ExtractionConfig, LlmConfig};
@@ -410,11 +412,13 @@ pub struct ExtractionOverrides {
     #[arg(long)]
     pub pdf_extract_metadata: Option<bool>,
 
-    /// PDF extraction backend to use (currently only "pdf-oxide" is supported).
+    /// PDF extraction backend to use: "pdf-oxide" (default, the only
+    /// implemented backend) or "pdfium".
     ///
-    /// This flag is accepted for forward-compatibility with future backends.
-    /// At present, any value other than "pdf-oxide" is rejected with an error.
-    // NOTE: no effect on ExtractionConfig today; reserved for future backend selection.
+    /// "pdfium" requires the CLI to be built with the `pdf-pdfium-surface`
+    /// feature; no pdfium extraction implementation exists yet, so selecting
+    /// it on a build without that feature is rejected with an error rather
+    /// than silently falling back to pdf-oxide.
     #[cfg(feature = "pdf-surface")]
     #[arg(long, value_name = "BACKEND")]
     pub pdf_backend: Option<String>,
@@ -582,13 +586,23 @@ impl ExtractionOverrides {
         }
 
         #[cfg(feature = "pdf-surface")]
-        if let Some(ref backend) = self.pdf_backend
-            && backend.as_str() != "pdf-oxide"
-        {
-            bail!(
-                "Invalid PDF backend '{}'. Only 'pdf-oxide' is currently supported.",
-                backend
-            );
+        if let Some(ref backend) = self.pdf_backend {
+            match backend.parse::<PdfBackend>() {
+                Ok(PdfBackend::PdfOxide) => {}
+                #[cfg(feature = "pdf-pdfium-surface")]
+                Ok(PdfBackend::Pdfium) => {}
+                #[cfg(not(feature = "pdf-pdfium-surface"))]
+                Ok(PdfBackend::Pdfium) => {
+                    bail!(
+                        "--pdf-backend pdfium requires the pdf-pdfium-surface feature \
+                         (no pdfium extraction implementation exists yet). \
+                         Rebuild with --features pdf-pdfium-surface"
+                    );
+                }
+                Err(_) => {
+                    bail!("Invalid PDF backend '{}'. Valid values: pdf-oxide, pdfium.", backend);
+                }
+            }
         }
 
         if let Some(ref delimiter) = self.csv_delimiter
@@ -1025,7 +1039,8 @@ impl ExtractionOverrides {
         let has_pdf_flag = self.pdf_extract_images.is_some()
             || self.pdf_extract_tables.is_some()
             || self.pdf_extract_metadata.is_some()
-            || !self.pdf_password.is_empty();
+            || !self.pdf_password.is_empty()
+            || self.pdf_backend.is_some();
         #[cfg(feature = "ocr-surface")]
         let has_pdf_flag = has_pdf_flag || self.pdf_ocr_inline_images.is_some();
         if has_pdf_flag {
@@ -1045,6 +1060,13 @@ impl ExtractionOverrides {
             }
             if !self.pdf_password.is_empty() {
                 pdf_opts.passwords = Some(self.pdf_password.clone());
+            }
+            // `validate()` runs before `apply()` (see main.rs) and already rejected any
+            // value that fails to parse, so `unwrap_or_default()` here mirrors the
+            // established --layout-strategy / --layout-table-model pattern: it is
+            // unreachable in practice, never a silent behavior change.
+            if let Some(ref backend) = self.pdf_backend {
+                pdf_opts.backend = backend.parse().unwrap_or_default();
             }
         }
     }
@@ -3206,5 +3228,103 @@ mod tests {
         assert!(ocr.vlm_config.is_some());
         let vlm = ocr.vlm_config.unwrap();
         assert_eq!(vlm.model, "openai/gpt-4o");
+    }
+
+    // -- --pdf-backend (#700) ------------------------------------------------------
+
+    /// Before this change, `apply_pdf`'s `has_pdf_flag` disjunction never checked
+    /// `pdf_backend`, so a bare `--pdf-backend pdf-oxide` with no other PDF flag left
+    /// `config.pdf_options` at `None` -- the flag was applied to nothing. This does not
+    /// need `xberg::PdfBackend` to compile, so it exercises today's actual bug directly:
+    /// this assertion fails against unfixed code (`pdf_options` stays `None`).
+    #[cfg(feature = "pdf-surface")]
+    #[test]
+    fn test_pdf_backend_flag_alone_populates_pdf_options() {
+        let mut config = ExtractionConfig::default();
+        let overrides = ExtractionOverrides {
+            pdf_backend: Some("pdf-oxide".to_string()),
+            ..default_overrides()
+        };
+        overrides.apply(&mut config);
+        assert!(
+            config.pdf_options.is_some(),
+            "a bare --pdf-backend flag must populate pdf_options even with no other PDF flag set"
+        );
+    }
+
+    /// New surface: `xberg::PdfBackend` does not exist before this change, so this test
+    /// cannot even compile against unfixed code -- it is new-surface-only, not a
+    /// fails-today regression test.
+    #[cfg(feature = "pdf-surface")]
+    #[test]
+    fn test_pdf_backend_pdfium_applied() {
+        let mut config = ExtractionConfig::default();
+        let overrides = ExtractionOverrides {
+            pdf_backend: Some("pdfium".to_string()),
+            ..default_overrides()
+        };
+        overrides.apply(&mut config);
+        let pdf = config.pdf_options.expect("pdf_options must be populated");
+        assert_eq!(pdf.backend, xberg::PdfBackend::Pdfium);
+    }
+
+    /// New surface, same reason as above -- `xberg::PdfBackend` does not exist today.
+    #[cfg(feature = "pdf-surface")]
+    #[test]
+    fn test_pdf_backend_default_applied_is_pdf_oxide() {
+        let mut config = ExtractionConfig::default();
+        let overrides = ExtractionOverrides {
+            pdf_backend: Some("pdf-oxide".to_string()),
+            ..default_overrides()
+        };
+        overrides.apply(&mut config);
+        let pdf = config.pdf_options.expect("pdf_options must be populated");
+        assert_eq!(pdf.backend, xberg::PdfBackend::PdfOxide);
+    }
+
+    #[cfg(feature = "pdf-surface")]
+    #[test]
+    fn test_pdf_backend_rejects_unknown_value() {
+        let overrides = ExtractionOverrides {
+            pdf_backend: Some("xyz".to_string()),
+            ..default_overrides()
+        };
+        let error = overrides.validate().expect_err("unknown backend must fail");
+        assert!(
+            error.to_string().contains("pdf-oxide"),
+            "error should mention 'pdf-oxide', got: {error}"
+        );
+    }
+
+    /// Fails today: the old validator's message is "Invalid PDF backend '<x>'. Only
+    /// 'pdf-oxide' is currently supported." for *any* value other than "pdf-oxide",
+    /// including "pdfium" -- it does not name a rebuild feature, so
+    /// `contains("pdf-pdfium-surface")` is false against unfixed code. It becomes true
+    /// only once the validator gains the feature-gated actionable-error branch this
+    /// change adds.
+    #[cfg(all(feature = "pdf-surface", not(feature = "pdf-pdfium-surface")))]
+    #[test]
+    fn test_pdf_backend_pdfium_rejected_without_feature_names_rebuild_hint() {
+        let overrides = ExtractionOverrides {
+            pdf_backend: Some("pdfium".to_string()),
+            ..default_overrides()
+        };
+        let error = overrides
+            .validate()
+            .expect_err("pdfium must be rejected without the feature");
+        assert!(
+            error.to_string().contains("pdf-pdfium-surface"),
+            "error should name the feature to rebuild with, got: {error}"
+        );
+    }
+
+    #[cfg(feature = "pdf-pdfium-surface")]
+    #[test]
+    fn test_pdf_backend_pdfium_accepted_with_feature() {
+        let overrides = ExtractionOverrides {
+            pdf_backend: Some("pdfium".to_string()),
+            ..default_overrides()
+        };
+        assert!(overrides.validate().is_ok());
     }
 }
