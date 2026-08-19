@@ -15,10 +15,20 @@
 //! - The token wraps an `Arc<AtomicBool>` and can be stored in
 //!   `ExtractionConfig` without layout surprises.
 //!
-//! # FFI
+//! # FFI and bindings
 //!
-//! The FFI crate wraps this type in an opaque `*mut CancellationToken` handle
-//! (see `crates/xberg-ffi/src/cancellation.rs`).
+//! No binding exposes cancellation today. `crates/xberg-ffi` emits no
+//! cancellation handle and no `xberg_cancel*` symbol, and neither do the
+//! Python, Node, JNI, PHP or WASM crates. Both this type and the
+//! `ExtractionConfig::cancel_token` field carry `#[cfg_attr(alef, alef(skip))]`,
+//! so codegen can never emit one — any binding surface would have to be
+//! hand-written and hand-maintained.
+//!
+//! The token is driven entirely in-process: `cancel` and `is_cancelled` are
+//! `pub(crate)`, so even a downstream Rust crate can construct a token but
+//! cannot fire or observe it. The only live consumer is the REST job store
+//! (`crate::api::jobs::JobStore`), which registers a token per job and fires it
+//! from `DELETE /jobs/{job_id}`.
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::sync::Arc;
