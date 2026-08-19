@@ -678,6 +678,19 @@ const FIELD_SEPARATOR: char = '\x14';
 /// Word field END marker.
 const FIELD_END: char = '\x15';
 
+/// Word non-breaking hyphen (`0x1E` in the binary text stream).
+///
+/// This is a *visible* character — the reader sees a hyphen; the only thing
+/// "non-breaking" suppresses is a line break at that position. Dropping it
+/// welds the two halves of a compound together (`twenty-one` → `twentyone`),
+/// which corrupts the word rather than merely losing formatting.
+///
+/// Emitted as U+2011 NON-BREAKING HYPHEN rather than ASCII `-` to match the
+/// DOCX parser, which maps `w:noBreakHyphen` — the same character in the modern
+/// serialization of the same Word document model — to U+2011 (#224). The same
+/// document saved as `.doc` and as `.docx` must extract to the same text.
+const NON_BREAKING_HYPHEN: char = '\u{2011}';
+
 /// Record, for each [`FIELD_BEGIN`] in `text` (in order of occurrence), whether it
 /// has a matching [`FIELD_END`].
 ///
@@ -775,6 +788,10 @@ fn normalize_doc_text(text: &str) -> String {
             '\x0B' => result.push('\n'),
             '\x0C' => result.push('\n'),
             '\x01' | '\x08' => {}
+            '\x1E' => result.push(NON_BREAKING_HYPHEN),
+            // `0x1F` is the *optional* (soft) hyphen: invisible unless the line
+            // happens to break there, so discarding it is correct and must stay
+            // that way — emitting it would insert a hyphen the reader never saw.
             c if c < '\x20' && c != '\n' && c != '\t' => {}
             _ => result.push(c),
         }
@@ -1076,6 +1093,38 @@ mod tests {
             normalize_doc_text("A\x13 SEQ Figure \\* MERGEFORMAT \x15B"),
             "AB",
             "a resultless field must contribute no text"
+        );
+    }
+
+    #[test]
+    fn should_keep_non_breaking_hyphen_as_a_visible_character() {
+        // 0x1E is a hyphen the reader SEES; dropping it welds the compound together.
+        assert_eq!(
+            normalize_doc_text("Section twenty\x1Eone of the sub\x1Esection"),
+            "Section twenty\u{2011}one of the sub\u{2011}section",
+            "the non-breaking hyphen is visible text and must not be discarded"
+        );
+    }
+
+    #[test]
+    fn should_keep_non_breaking_hyphen_but_drop_optional_hyphen() {
+        // The two are one byte apart and must stay on opposite sides of the line:
+        // 0x1E is always rendered, 0x1F only when the line breaks there.
+        assert_eq!(
+            normalize_doc_text("self\x1Econtained extra\x1Fordinary"),
+            "self\u{2011}contained extraordinary",
+            "0x1E must survive as U+2011 while 0x1F stays discarded"
+        );
+    }
+
+    #[test]
+    fn should_keep_non_breaking_hyphen_inside_a_field_result() {
+        // Field-code stripping runs before character mapping; a cross-reference
+        // result such as a clause number must keep its hyphen.
+        assert_eq!(
+            normalize_doc_text("See \x13 REF _Ref1 \\h \x14clause 3\x1E4\x15."),
+            "See clause 3\u{2011}4.",
+            "hyphen mapping must apply to text kept from a field result"
         );
     }
 

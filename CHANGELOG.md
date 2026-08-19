@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Legacy `.doc` extraction no longer deletes non-breaking hyphens. The character Word writes for
+  Ctrl+Shift+hyphen was discarded along with the genuinely invisible control codes, so hyphenated
+  compounds came out fused: "twenty-one" extracted as "twentyone", and clause numbers like "3-4"
+  as "34". It is now preserved as U+2011, matching what the DOCX path already emits for the same
+  character so the same document extracts identically in either format. Optional (soft) hyphens
+  are still discarded, which is correct — they are invisible unless a line breaks there.
+
 - A single page whose OCR backend fails no longer aborts the whole document (#1444). The per-page
   error propagated immediately, so the recovery path that re-runs OCR against the page's embedded
   image XObjects — ten lines further down — could never be reached, and a scanned PDF came back
