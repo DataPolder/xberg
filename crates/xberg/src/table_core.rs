@@ -438,6 +438,112 @@ pub(crate) const TABLE_REGION_GAP_HEIGHT_MULTIPLIER: u32 = 3;
 /// table on an otherwise text-only page is not over-fabricated.
 pub(crate) const MIN_TABLE_CANDIDATE_WORDS: usize = 6;
 
+/// Minimum number of detected rows before [`region_has_repeating_columns`]
+/// treats a region's column layout as judgeable (#696). Below this there is
+/// too little evidence to distinguish "this column recurs" from "this column
+/// happens to appear twice" — `MIN_TABLE_CANDIDATE_WORDS` and
+/// `post_process_table`'s own row/column minimums already gate regions this
+/// small, so this filter only ever narrows candidates it has enough rows to
+/// judge.
+const MIN_ROWS_FOR_GUTTER_CHECK: usize = 3;
+
+/// Row threshold used only by [`region_has_repeating_columns`]'s internal
+/// row grouping. Matches the 0.5 * median-word-height default most OCR/PDF
+/// callers already pass to [`detect_rows`] for the actual table
+/// reconstruction that follows — this filter is a pre-check ahead of that
+/// same reconstruction, not a second independent row model.
+const GUTTER_CHECK_ROW_THRESHOLD_RATIO: f64 = 0.5;
+
+/// Fraction of a candidate region's detected rows that must place a cell
+/// token in a given non-first column for that column to count as a real,
+/// recurring table column rather than a coincidental alignment of unrelated
+/// line-wrap points (#696).
+///
+/// Ordinary prose reconstructed as a grid places at most a handful of
+/// coincidentally-aligned words in most non-label columns —
+/// `pdf::table_reconstruct::post_process_table_inner`'s own
+/// `column_sparsity` and `content_asymmetry_sparse_column` guards already
+/// tolerate up to 75%/50% column emptiness respectively for exactly this
+/// reason, because by the time a grid reaches that validator it has no
+/// cheaper way to tell "genuinely tabular" from "text that happened to
+/// column-align" apart. A genuine table column, by contrast, is populated by
+/// essentially every row. 0.6 sits well above what those downstream checks
+/// tolerate, so this filter only removes candidates those checks would not
+/// already catch on their own.
+const MIN_COLUMN_ROW_COVERAGE_RATIO: f64 = 0.6;
+
+/// Whether a candidate table region has at least one column whose position
+/// recurs across most of the region's detected rows, as opposed to being an
+/// artifact of coincidentally-aligned line-wrap points in ordinary prose
+/// (#696).
+///
+/// [`cluster_words_into_table_regions`] groups words purely by vertical
+/// whitespace gaps — it has no notion of column structure at all, so it
+/// treats every gap-delimited block of text (including an ordinary
+/// paragraph with normal line spacing) as an equally valid table candidate.
+/// This adds the one signal that is genuinely diagnostic and was not
+/// previously used anywhere on the OCR table path: a real table's column
+/// boundaries are stable from row to row, because they are drawn from the
+/// same underlying grid; prose's are not, because each line wraps at a
+/// different point.
+///
+/// The first detected column is deliberately excluded from consideration:
+/// a shared left margin (indentation, a paragraph's own start-of-line
+/// column) recurs in ordinary prose just as reliably as in a real table's
+/// first column, so on its own it is not diagnostic.
+///
+/// Returns `true` (i.e. "let the caller keep treating this as a candidate")
+/// whenever there are too few rows to judge
+/// (`< MIN_ROWS_FOR_GUTTER_CHECK`), so short/ambiguous regions still fall
+/// through to the existing `post_process_table` validation unchanged. This
+/// function is rejection-only: it never lets through a region that
+/// [`cluster_words_into_table_regions`] would not already have produced, so
+/// it can only raise precision, never fabricate additional table cells.
+///
+/// Not yet called from production code (xberg-io/xberg#696): wiring it into
+/// the OCR (`ocr::processor::execution`) and PaddleOCR (`paddle_ocr::backend`)
+/// table-detection loops is out of this change's scope — those call sites
+/// need their own review of the `regions.retain(...)` composition shown in
+/// `test_region_has_repeating_columns_filters_cluster_output_to_the_table`
+/// against each backend's real fixtures before landing. `#[allow(dead_code)]`
+/// keeps this buildable/lint-clean in the meantime; remove it once a caller
+/// exists.
+#[allow(dead_code)]
+pub(crate) fn region_has_repeating_columns(words: &[HocrWord]) -> bool {
+    if words.len() < MIN_TABLE_CANDIDATE_WORDS {
+        return true;
+    }
+
+    let row_positions = detect_rows(words, GUTTER_CHECK_ROW_THRESHOLD_RATIO);
+    if row_positions.len() < MIN_ROWS_FOR_GUTTER_CHECK {
+        return true;
+    }
+
+    let cell_tokens = merge_words_into_cell_tokens(words, &row_positions);
+
+    // Reuse the same gap scale as the cell-merge step above (rather than
+    // inventing a second magic number) so "distinct column" here means the
+    // same thing it will mean once `reconstruct_table` runs for real.
+    let column_threshold = ((median_word_height(&cell_tokens) as f64 * CELL_MERGE_GAP_HEIGHT_RATIO) as u32).max(1);
+    let col_positions = detect_columns(&cell_tokens, column_threshold);
+    if col_positions.len() < 2 {
+        return false;
+    }
+
+    let num_rows = row_positions.len();
+    col_positions.iter().enumerate().skip(1).any(|(col_idx, _)| {
+        let mut rows_with_token = std::collections::HashSet::new();
+        for token in &cell_tokens {
+            if find_column_index(&col_positions, token) == Some(col_idx)
+                && let Some(row_idx) = find_row_index(&row_positions, token)
+            {
+                rows_with_token.insert(row_idx);
+            }
+        }
+        rows_with_token.len() as f64 / num_rows as f64 >= MIN_COLUMN_ROW_COVERAGE_RATIO
+    })
+}
+
 /// Split table-candidate words into vertically separated regions.
 ///
 /// Tesseract's TSV output has no notion of "this is a separate table from
@@ -451,6 +557,17 @@ pub(crate) const MIN_TABLE_CANDIDATE_WORDS: usize = 6;
 /// `TABLE_REGION_GAP_HEIGHT_MULTIPLIER` times the average word height starts
 /// a new region. Each region is reconstructed independently, giving each
 /// table its own bounding box.
+///
+/// Vertical-gap clustering alone cannot tell a real table from an ordinary
+/// paragraph with consistent line spacing (#696) — this function is purely a
+/// text-block splitter, not a table detector, and deliberately returns every
+/// gap-delimited region unfiltered (callers and tests rely on that: see
+/// `table_discriminator_rejects_real_prose_page` in `paddle_ocr::backend`,
+/// which asserts on the raw, pre-discriminator region count). Callers that
+/// want to cheaply drop regions with no recurring column structure before
+/// spending a `reconstruct_table` + `post_process_table` call on them should
+/// filter this function's output through [`region_has_repeating_columns`]
+/// themselves, e.g. `regions.retain(|r| region_has_repeating_columns(r))`.
 pub(crate) fn cluster_words_into_table_regions(words: &[HocrWord]) -> Vec<Vec<HocrWord>> {
     if words.is_empty() {
         return Vec::new();
@@ -1107,5 +1224,117 @@ mod tests {
         assert_eq!(positions, vec![0, 300]);
         assert_eq!(grid[0], vec!["Left".to_string(), "Right".to_string()]);
         assert_eq!(grid[1], vec!["L2".to_string(), "R2".to_string()]);
+    }
+
+    /// A genuine 4-row x 2-col table (consistent column starts every row)
+    /// must be recognized as having a repeating column (#696).
+    #[test]
+    fn test_region_has_repeating_columns_true_for_genuine_table() {
+        let words = vec![
+            word("Name", 0, 0, 20, 20),
+            word("Value", 100, 0, 20, 20),
+            word("Alice", 0, 30, 20, 20),
+            word("1", 100, 30, 20, 20),
+            word("Bob", 0, 60, 20, 20),
+            word("2", 100, 60, 20, 20),
+            word("Carol", 0, 90, 20, 20),
+            word("3", 100, 90, 20, 20),
+        ];
+        assert!(region_has_repeating_columns(&words));
+    }
+
+    /// A 4-line prose block where only the shared left margin lines up and
+    /// every other word start is a coincidental, non-recurring line-wrap
+    /// point must NOT be recognized as having a repeating column (#696).
+    ///
+    /// TEST HONESTY: `region_has_repeating_columns` did not exist before
+    /// this change, so there is no pre-fix behavior to regress against here
+    /// directly; this test pins the function's own discrimination on a
+    /// prose-shaped fixture. The end-to-end composition — a caller using
+    /// this function to actually drop such a region from
+    /// `cluster_words_into_table_regions`'s output — is exercised by
+    /// `test_region_has_repeating_columns_filters_cluster_output_to_the_table`
+    /// below.
+    #[test]
+    fn test_region_has_repeating_columns_false_for_prose_paragraph() {
+        let words = vec![
+            word("The", 0, 0, 20, 15),
+            word("quick", 60, 0, 30, 15),
+            word("fox", 0, 20, 20, 15),
+            word("jumps", 40, 20, 30, 15),
+            word("over", 0, 40, 20, 15),
+            word("the", 90, 40, 20, 15),
+            word("lazy", 130, 40, 20, 15),
+            word("today", 0, 60, 30, 15),
+            word("quickly", 30, 60, 40, 15),
+        ];
+        assert!(
+            !region_has_repeating_columns(&words),
+            "no column beyond the shared left margin recurs across most rows"
+        );
+    }
+
+    /// Below `MIN_ROWS_FOR_GUTTER_CHECK` there isn't enough evidence to
+    /// judge column recurrence, so the filter must not reject — it defers
+    /// entirely to the existing `post_process_table` validation downstream.
+    #[test]
+    fn test_region_has_repeating_columns_true_when_too_few_rows_to_judge() {
+        let words = vec![
+            word("A", 0, 0, 20, 20),
+            word("B", 200, 0, 20, 20),
+            word("C", 0, 30, 20, 20),
+            word("D", 400, 30, 20, 20),
+        ];
+        assert!(region_has_repeating_columns(&words));
+    }
+
+    /// `cluster_words_into_table_regions` itself must keep returning both
+    /// regions unfiltered — it stays a pure text-block splitter (existing
+    /// callers, e.g. `paddle_ocr::backend::table_discriminator_rejects_real_prose_page`,
+    /// assert on its raw output). A caller that wants the recurring-column
+    /// filter applies it explicitly by retaining through
+    /// `region_has_repeating_columns`, which is the composition this test
+    /// demonstrates end-to-end: a real table and an unrelated prose
+    /// paragraph, far enough apart vertically to form two distinct regions,
+    /// filter down to exactly one candidate — the table.
+    ///
+    /// TEST HONESTY: this composition (`cluster_words_into_table_regions`
+    /// followed by a `region_has_repeating_columns` retain) has no
+    /// pre-existing behavior to regress against; it fails only if
+    /// `region_has_repeating_columns` itself is wrong, which
+    /// `test_region_has_repeating_columns_false_for_prose_paragraph` already
+    /// covers directly. This test exists to prove the two functions compose
+    /// correctly on the same fixture shape a caller would see.
+    #[test]
+    fn test_region_has_repeating_columns_filters_cluster_output_to_the_table() {
+        let mut words = vec![
+            word("Name", 0, 0, 20, 20),
+            word("Value", 100, 0, 20, 20),
+            word("Alice", 0, 30, 20, 20),
+            word("1", 100, 30, 20, 20),
+            word("Bob", 0, 60, 20, 20),
+            word("2", 100, 60, 20, 20),
+            word("Carol", 0, 90, 20, 20),
+            word("3", 100, 90, 20, 20),
+        ];
+        words.extend(vec![
+            word("The", 0, 1000, 20, 15),
+            word("quick", 60, 1000, 30, 15),
+            word("fox", 0, 1020, 20, 15),
+            word("jumps", 40, 1020, 30, 15),
+            word("over", 0, 1040, 20, 15),
+            word("the", 90, 1040, 20, 15),
+            word("lazy", 130, 1040, 20, 15),
+            word("today", 0, 1060, 30, 15),
+            word("quickly", 30, 1060, 40, 15),
+        ]);
+
+        let mut regions = cluster_words_into_table_regions(&words);
+        assert_eq!(regions.len(), 2, "the table and the prose paragraph form two distinct regions");
+
+        regions.retain(|region| region_has_repeating_columns(region));
+
+        assert_eq!(regions.len(), 1, "the prose paragraph region must be filtered out by the caller");
+        assert_eq!(regions[0].len(), 8, "the surviving region must be the genuine table, unchanged");
     }
 }
