@@ -361,11 +361,16 @@ impl<'a, 'b> HtmlWalker<'a, 'b> {
             }
             "ul" => {
                 self.flush_paragraph();
+                // Flush any pending parent `<li>` text against the still-current (outer)
+                // list before descending, so it doesn't get misattributed to the list
+                // we're about to push (see task #719).
+                self.flush_list_item();
                 let idx = self.builder.push_list(false, None);
                 self.list_stack.push(ListContext { node_idx: idx });
             }
             "ol" => {
                 self.flush_paragraph();
+                self.flush_list_item();
                 let idx = self.builder.push_list(true, None);
                 if let Some(start_val) = extract_attr(attrs_str, "start") {
                     let mut attrs = AHashMap::new();
@@ -1034,7 +1039,7 @@ fn normalize_whitespace(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::document_structure::{AnnotationKind, NodeContent};
+    use crate::types::document_structure::{AnnotationKind, NodeContent, NodeIndex};
 
     #[test]
     fn test_headings() {
@@ -1149,6 +1154,50 @@ mod tests {
             other => panic!("Expected List, got {:?}", other),
         }
         assert_eq!(doc.nodes[0].children.len(), 3);
+    }
+
+    /// Regression test for task #719: a `<ul>`/`<ol>` start tag only flushes the pending
+    /// paragraph buffer, not the pending list-item buffer. When a nested list opens while
+    /// the parent `<li>` still has unflushed text, that text is later flushed against
+    /// `list_stack.last()`, which by then points at the freshly-pushed *inner* list — so the
+    /// parent item is misattributed one level too deep, shifting every intermediate item down
+    /// and leaving the outermost list empty.
+    #[test]
+    fn test_nested_list_item_attaches_to_correct_list_level() {
+        let html = "<ul><li>L1<ul><li>L2<ul><li>L3</li></ul></li></ul></li></ul>";
+        let doc = build_document_structure(html);
+        assert!(doc.validate().is_ok());
+
+        // Three List nodes and three ListItem nodes, six total.
+        assert_eq!(doc.len(), 6);
+
+        let lists: Vec<usize> = doc
+            .nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| matches!(n.content, NodeContent::List { .. }))
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(lists.len(), 3, "expected exactly 3 List nodes, got {lists:?}");
+
+        let item_text = |idx: NodeIndex| match &doc.nodes[idx.0 as usize].content {
+            NodeContent::ListItem { text } => text.clone(),
+            other => panic!("Expected ListItem at {idx:?}, got {other:?}"),
+        };
+
+        // Each of the three list levels must hold exactly one item, and that item's text
+        // must match its own nesting depth (L1 in the outermost list, L2 in the middle
+        // list, L3 in the innermost list).
+        for (list_idx, expected_text) in lists.iter().zip(["L1", "L2", "L3"]) {
+            let list_node = &doc.nodes[*list_idx];
+            assert_eq!(
+                list_node.children.len(),
+                1,
+                "list node {list_idx} should have exactly 1 item, got {:?}",
+                list_node.children
+            );
+            assert_eq!(item_text(list_node.children[0]), expected_text);
+        }
     }
 
     #[test]

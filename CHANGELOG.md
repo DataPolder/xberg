@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Nested lists in DOCX, ODT and email documents no longer attach their items to the wrong level.
+  Starting a `<ul>` or `<ol>` inside an open list item did not close that item first, so the
+  parent's text was appended to the inner list instead of the outer one. Only nesting is affected;
+  flat lists were already correct.
+
 - List recovery on OCR-backed PDFs no longer depends on optional ML layout detection. The
   list-marker splitter and the text-marker fallback were both gated on the `layout-detection`
   feature even though neither reads any layout input — `looks_like_list_item` is pure text. A
