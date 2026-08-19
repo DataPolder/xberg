@@ -1754,7 +1754,11 @@ fn is_bare_list_marker(text: &str) -> bool {
 }
 
 /// Check if text starts with a common list marker.
-fn looks_like_list_item(text: &str) -> bool {
+///
+/// Also consulted by the OCR+layout paragraph route (`extractors::pdf::ocr`), which has
+/// no list classification of its own: reusing this predicate keeps the two routes from
+/// drifting into two different notions of what a list marker is.
+pub(crate) fn looks_like_list_item(text: &str) -> bool {
     let t = text.trim_start();
 
     if t.starts_with('•') || t.starts_with('·') || t.starts_with('◦') || t.starts_with('▪') {

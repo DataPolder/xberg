@@ -14,7 +14,7 @@ mod lines;
 mod list_marker;
 pub(crate) mod page_number;
 mod paragraphs;
-mod pipeline;
+pub(crate) mod pipeline;
 pub(crate) mod regions;
 mod text_repair;
 pub(crate) mod types;

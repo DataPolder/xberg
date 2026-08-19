@@ -2919,7 +2919,7 @@ fn assemble_ocr_page_paragraphs(
     #[cfg(feature = "ocr")]
     if let Some(detection) = detection {
         let hints = super::layout_hints::detection_to_layout_hints_pixel_space(detection, page_height as f32);
-        return crate::pdf::structure::adapters::ocr_doc_to_layout_paragraphs(
+        let mut paragraphs = crate::pdf::structure::adapters::ocr_doc_to_layout_paragraphs(
             doc,
             page_height,
             &hints,
@@ -2927,6 +2927,8 @@ fn assemble_ocr_page_paragraphs(
             0.2,
             points_per_pixel,
         );
+        apply_ocr_text_list_fallback(&mut paragraphs);
+        return paragraphs;
     }
     #[cfg(not(feature = "ocr"))]
     let _ = detection;
@@ -2934,6 +2936,46 @@ fn assemble_ocr_page_paragraphs(
     crate::pdf::structure::adapters::ocr_doc_to_paragraphs(doc, page_height, points_per_pixel)
 }
 
+/// Fill in `is_list_item` for paragraphs the OCR layout route left unclassified.
+///
+/// `ocr_doc_to_layout_paragraphs` (`crate::pdf::structure::adapters`) -- the OCR
+/// counterpart of the native-PDF `finalize_paragraph`
+/// (`crate::pdf::structure::pipeline`) -- derives `is_list_item` *exclusively* from
+/// a layout-detection `ListItem` hint at >= 0.8 confidence
+/// (`crate::pdf::structure::layout_classify::apply_hint_to_paragraph`). It never
+/// falls back to a text-level marker check the way the native-PDF assembler always
+/// does (`looks_like_list_item` runs unconditionally in `finalize_paragraph`,
+/// independent of any layout hint). RT-DETR-style layout models commonly detect a
+/// run of bulleted/numbered lines as one "Text" region rather than per-item
+/// `ListItem` boxes, or miss/mislabel individual items outright; when that happens
+/// every item in the run silently loses its list classification, and
+/// `heuristically_restructured_ocr_pages`'s document-wide "already structured" gate
+/// then refuses to re-derive it from segments, because that gate exists precisely
+/// to protect a *correct* layout classification found elsewhere in the document
+/// (see its doc comment). See #695.
+///
+/// This adds a conservative text-marker fallback directly onto the paragraphs the
+/// layout route already built, so layout ADDS structure instead of silently
+/// dropping what the text alone would have shown. It never touches a paragraph the
+/// layout path already classified (heading, list, code, formula, furniture) -- only
+/// a paragraph left with no classification at all can be turned into a list item,
+/// and only when its own text unambiguously opens with a list marker.
+#[cfg(all(feature = "ocr", feature = "layout-detection"))]
+fn apply_ocr_text_list_fallback(paragraphs: &mut [crate::pdf::structure::types::PdfParagraph]) {
+    for paragraph in paragraphs.iter_mut() {
+        if paragraph.is_list_item
+            || paragraph.heading_level.is_some()
+            || paragraph.is_code_block
+            || paragraph.is_formula
+            || paragraph.is_page_furniture
+        {
+            continue;
+        }
+        if crate::pdf::structure::pipeline::looks_like_list_item(paragraph.text.trim()) {
+            paragraph.is_list_item = true;
+        }
+    }
+}
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 fn fill_unstructured_ocr_pages(
     page_paragraphs: &mut [Option<Vec<crate::pdf::structure::types::PdfParagraph>>],
@@ -4886,6 +4928,126 @@ mod tests {
         assert_eq!(bbox.y0, 20.0);
         assert_eq!(bbox.x1, 110.0);
         assert_eq!(bbox.y1, 220.0);
+    }
+
+    /// Minimal `PdfParagraph` fixture: same shape `ocr_doc_to_layout_paragraphs`
+    /// produces (empty `lines`, no layout region/caption), just enough for
+    /// `apply_ocr_text_list_fallback`.
+    #[cfg(all(feature = "ocr", feature = "layout-detection"))]
+    fn ocr_paragraph(text: &str) -> crate::pdf::structure::types::PdfParagraph {
+        crate::pdf::structure::types::PdfParagraph {
+            text: text.to_string(),
+            lines: Vec::new(),
+            dominant_font_size: 12.0,
+            heading_level: None,
+            is_bold: false,
+            is_list_item: false,
+            is_code_block: false,
+            is_formula: false,
+            is_page_furniture: false,
+            layout_class: None,
+            layout_region_path: None,
+            caption_for: None,
+            block_bbox: None,
+            word_count: text.split_whitespace().count(),
+        }
+    }
+
+    /// Issue #695: on the OCR + `--layout` route, `ocr_doc_to_layout_paragraphs`
+    /// only sets `is_list_item` from a high-confidence `ListItem` layout hint and
+    /// never from the paragraph's own text, unlike the native-PDF assembler's
+    /// `looks_like_list_item`. When the layout model fails to emit (or mislabels)
+    /// a `ListItem` box for a numbered/bulleted line, the paragraph is built with
+    /// `is_list_item: false` and stays that way -- exactly what a plain
+    /// `ocr_doc_to_layout_paragraphs` call (without the fallback this test
+    /// exercises) would leave behind.
+    ///
+    /// Without `apply_ocr_text_list_fallback`, every assertion below except the
+    /// first (heading is left alone, which was already true before this change)
+    /// fails: a fresh paragraph carries `is_list_item: false` by construction, and
+    /// nothing in this call path would ever flip it.
+    #[cfg(all(feature = "ocr", feature = "layout-detection"))]
+    #[test]
+    fn apply_ocr_text_list_fallback_classifies_unclassified_numbered_and_bulleted_paragraphs() {
+        let mut paragraphs = vec![
+            ocr_paragraph("1. As shown on Exhibit B-1, the PD encompasses 0.7906 acre."),
+            ocr_paragraph("2. Land Use: Live/Work Townhomes"),
+            ocr_paragraph("- a dash-bulleted item"),
+            ocr_paragraph("• a bullet-marked item"),
+        ];
+
+        apply_ocr_text_list_fallback(&mut paragraphs);
+
+        assert!(paragraphs[0].is_list_item, "numbered marker '1.' must be recovered");
+        assert!(paragraphs[1].is_list_item, "numbered marker '2.' must be recovered");
+        assert!(paragraphs[2].is_list_item, "dash marker '- ' must be recovered");
+        assert!(paragraphs[3].is_list_item, "bullet marker must be recovered");
+    }
+
+    /// The fallback must be strictly additive: a paragraph the layout route
+    /// already classified (as a heading here) is never touched, even though its
+    /// text also happens to start with a marker-shaped prefix. This assertion
+    /// passes with or without the fix -- it documents the "never clears an
+    /// existing classification" half of the contract that the next test exercises
+    /// from the other direction.
+    #[cfg(all(feature = "ocr", feature = "layout-detection"))]
+    #[test]
+    fn apply_ocr_text_list_fallback_never_overrides_an_existing_heading() {
+        let mut paragraph = ocr_paragraph("1. INTRODUCTION");
+        paragraph.heading_level = Some(2);
+
+        apply_ocr_text_list_fallback(std::slice::from_mut(&mut paragraph));
+
+        assert_eq!(paragraph.heading_level, Some(2), "an existing heading must survive untouched");
+        assert!(
+            !paragraph.is_list_item,
+            "a paragraph already classified as a heading must not also become a list item"
+        );
+    }
+
+    /// A paragraph already marked as a list item by a high-confidence layout hint
+    /// must be left exactly as-is: the fallback only fills gaps, it never
+    /// re-derives a classification the layout path already made.
+    #[cfg(all(feature = "ocr", feature = "layout-detection"))]
+    #[test]
+    fn apply_ocr_text_list_fallback_leaves_already_classified_list_items_untouched() {
+        let mut paragraph = ocr_paragraph("plain prose with no marker at all");
+        paragraph.is_list_item = true;
+
+        apply_ocr_text_list_fallback(std::slice::from_mut(&mut paragraph));
+
+        assert!(paragraph.is_list_item, "an existing list classification must survive untouched");
+    }
+
+    /// Plain prose -- the overwhelming majority of any document's paragraphs --
+    /// must never be swept into the list classification. Without this guard the
+    /// fallback would be a net regression, not a fix.
+    ///
+    /// Asserted through `apply_ocr_text_list_fallback` rather than the marker
+    /// predicate directly: the predicate is now
+    /// `pdf::structure::pipeline::looks_like_list_item`, which owns its own tests,
+    /// and what matters here is that the OCR route consults it and acts on the
+    /// answer. The author-byline case ("A. Smith, B. Jones") is included because
+    /// it is exactly what an OCR-route-local re-implementation of the marker rules
+    /// would get wrong -- it only passes because the shared predicate is used.
+    #[cfg(all(feature = "ocr", feature = "layout-detection"))]
+    #[test]
+    fn apply_ocr_text_list_fallback_leaves_ordinary_prose_and_non_list_shapes_unclassified() {
+        let texts = [
+            "This is an ordinary sentence with no marker.",
+            "1000. Four-digit identifiers are not list markers.",
+            "2024. A total of 3 trucks were used.",
+            "1. INTRODUCTION",
+            "A. Smith, B. Jones, Journal of Irreproducible Results",
+            "",
+        ];
+        let mut paragraphs: Vec<_> = texts.iter().map(|text| ocr_paragraph(text)).collect();
+
+        apply_ocr_text_list_fallback(&mut paragraphs);
+
+        for (paragraph, text) in paragraphs.iter().zip(texts) {
+            assert!(!paragraph.is_list_item, "must not classify as a list item: {text:?}");
+        }
     }
 
     #[cfg(feature = "ocr")]
