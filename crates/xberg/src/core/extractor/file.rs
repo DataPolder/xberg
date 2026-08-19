@@ -336,22 +336,78 @@ pub(crate) async fn extract_with_candidates(
     Err(last_error.unwrap_or_else(|| XbergError::UnsupportedFormat(mime_type.to_string())))
 }
 
+/// Clear the cache-control field on an `LlmConfig` before it is folded into the
+/// extraction-cache key.
+///
+/// `LlmConfig::cache` configures liter-llm's own response cache — whether *it* caches,
+/// not what the extraction produces — so it must be excluded from the key exactly like
+/// `ocr.tesseract_config.use_cache` (see [`hash_extraction_config`]). `LlmConfig` is
+/// embedded in `ExtractionConfig` at ten separate places (VLM OCR direct and pipeline-stage
+/// configs, structured extraction, NER, summarization, translation, page classification,
+/// chunk classification, captioning, and chunking's LLM-routed embedding model), so this is
+/// centralized here rather than repeated at each call site.
+fn normalize_llm_config_for_cache_key(llm: &mut crate::core::config::LlmConfig) {
+    llm.cache = None;
+}
+
 /// Hash ExtractionConfig fields that affect extraction output.
 ///
 /// Excludes cache-control fields (use_cache, cache_namespace, cache_ttl_secs,
-/// and the nested `ocr.tesseract_config.use_cache`) since they don't affect
-/// the extraction result. Uses a clone-and-normalize approach to ensure
-/// determinism: cache fields are zeroed, then the struct is serialized to
-/// canonical JSON via serde_json's sorted-keys representation.
+/// the nested `ocr.tesseract_config.use_cache`, and every embedded `LlmConfig::cache` —
+/// see [`normalize_llm_config_for_cache_key`]) since they don't affect the extraction
+/// result. Uses a clone-and-normalize approach to ensure determinism: cache fields are
+/// zeroed, then the struct is serialized to canonical JSON via serde_json's sorted-keys
+/// representation.
 fn hash_extraction_config(config: &ExtractionConfig, mime_type: &str) -> String {
     let mut normalized = config.clone();
     normalized.use_cache = true;
     normalized.cache_namespace = None;
     normalized.cache_ttl_secs = None;
-    if let Some(ocr) = normalized.ocr.as_mut()
-        && let Some(tesseract_config) = ocr.tesseract_config.as_mut()
+    if let Some(ocr) = normalized.ocr.as_mut() {
+        if let Some(tesseract_config) = ocr.tesseract_config.as_mut() {
+            tesseract_config.use_cache = true;
+        }
+        if let Some(vlm_config) = ocr.vlm_config.as_mut() {
+            normalize_llm_config_for_cache_key(vlm_config);
+        }
+        if let Some(pipeline) = ocr.pipeline.as_mut() {
+            for stage in &mut pipeline.stages {
+                if let Some(vlm_config) = stage.vlm_config.as_mut() {
+                    normalize_llm_config_for_cache_key(vlm_config);
+                }
+            }
+        }
+    }
+    if let Some(structured_extraction) = normalized.structured_extraction.as_mut() {
+        normalize_llm_config_for_cache_key(&mut structured_extraction.llm);
+    }
+    if let Some(ner) = normalized.ner.as_mut()
+        && let Some(llm) = ner.llm.as_mut()
     {
-        tesseract_config.use_cache = true;
+        normalize_llm_config_for_cache_key(llm);
+    }
+    if let Some(summarization) = normalized.summarization.as_mut()
+        && let Some(llm) = summarization.llm.as_mut()
+    {
+        normalize_llm_config_for_cache_key(llm);
+    }
+    if let Some(translation) = normalized.translation.as_mut() {
+        normalize_llm_config_for_cache_key(&mut translation.llm);
+    }
+    if let Some(page_classification) = normalized.page_classification.as_mut() {
+        normalize_llm_config_for_cache_key(&mut page_classification.llm);
+    }
+    if let Some(chunk_classification) = normalized.chunk_classification.as_mut() {
+        normalize_llm_config_for_cache_key(&mut chunk_classification.llm);
+    }
+    if let Some(captioning) = normalized.captioning.as_mut() {
+        normalize_llm_config_for_cache_key(&mut captioning.llm);
+    }
+    if let Some(chunking) = normalized.chunking.as_mut()
+        && let Some(embedding) = chunking.embedding.as_mut()
+        && let crate::core::config::EmbeddingModelType::Llm { llm } = &mut embedding.model
+    {
+        normalize_llm_config_for_cache_key(llm);
     }
 
     let mut hasher = blake3::Hasher::new();
@@ -574,6 +630,349 @@ mod cache_key_tests {
             hash_extraction_config(&lenient, "application/pdf"),
             hash_extraction_config(&strict, "application/pdf"),
             "min_confidence selects different pages for OCR and must be part of the cache key"
+        );
+    }
+
+    /// Build two `LlmConfig`s that are identical except for `cache`: one with a populated
+    /// `LlmCacheConfig`, one with `None`. Shared by every `*_llm_cache_does_not_change_the_cache_key`
+    /// test below, one per struct in which `LlmConfig` is embedded.
+    fn llm_configs_differing_only_in_cache() -> (crate::core::config::LlmConfig, crate::core::config::LlmConfig) {
+        use crate::core::config::{LlmCacheConfig, LlmConfig};
+
+        let cache_on = LlmConfig {
+            model: "openai/gpt-4o".to_string(),
+            cache: Some(Box::new(LlmCacheConfig {
+                backend: Some("memory".to_string()),
+                max_entries: Some(512),
+                ..LlmCacheConfig::default()
+            })),
+            ..LlmConfig::default()
+        };
+        let cache_off = LlmConfig {
+            model: "openai/gpt-4o".to_string(),
+            cache: None,
+            ..LlmConfig::default()
+        };
+        (cache_on, cache_off)
+    }
+
+    #[test]
+    #[cfg(feature = "ocr")]
+    fn ocr_vlm_config_llm_cache_does_not_change_the_cache_key() {
+        use crate::core::config::OcrConfig;
+
+        let (cache_on, cache_off) = llm_configs_differing_only_in_cache();
+        let a = ExtractionConfig {
+            ocr: Some(OcrConfig {
+                vlm_config: Some(cache_on),
+                ..OcrConfig::default()
+            }),
+            ..Default::default()
+        };
+        let b = ExtractionConfig {
+            ocr: Some(OcrConfig {
+                vlm_config: Some(cache_off),
+                ..OcrConfig::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            hash_extraction_config(&a, "application/pdf"),
+            hash_extraction_config(&b, "application/pdf"),
+            "ocr.vlm_config.cache is a cache-control field and must not affect the extraction-cache key"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "ocr")]
+    fn ocr_pipeline_stage_vlm_config_llm_cache_does_not_change_the_cache_key() {
+        use crate::core::config::{OcrConfig, OcrPipelineConfig, OcrPipelineStage, OcrQualityThresholds};
+
+        fn stage(vlm_config: crate::core::config::LlmConfig) -> OcrPipelineStage {
+            OcrPipelineStage {
+                backend: "vlm".to_string(),
+                priority: 100,
+                language: None,
+                tesseract_config: None,
+                paddle_ocr_config: None,
+                vlm_config: Some(vlm_config),
+                backend_options: None,
+            }
+        }
+
+        let (cache_on, cache_off) = llm_configs_differing_only_in_cache();
+        let a = ExtractionConfig {
+            ocr: Some(OcrConfig {
+                pipeline: Some(OcrPipelineConfig {
+                    stages: vec![stage(cache_on)],
+                    quality_thresholds: OcrQualityThresholds::default(),
+                }),
+                ..OcrConfig::default()
+            }),
+            ..Default::default()
+        };
+        let b = ExtractionConfig {
+            ocr: Some(OcrConfig {
+                pipeline: Some(OcrPipelineConfig {
+                    stages: vec![stage(cache_off)],
+                    quality_thresholds: OcrQualityThresholds::default(),
+                }),
+                ..OcrConfig::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            hash_extraction_config(&a, "application/pdf"),
+            hash_extraction_config(&b, "application/pdf"),
+            "ocr.pipeline.stages[].vlm_config.cache is a cache-control field and must not \
+             affect the extraction-cache key"
+        );
+    }
+
+    #[test]
+    fn structured_extraction_llm_cache_does_not_change_the_cache_key() {
+        use crate::core::config::StructuredExtractionConfig;
+
+        let (cache_on, cache_off) = llm_configs_differing_only_in_cache();
+        let build = |llm| StructuredExtractionConfig {
+            schema: serde_json::json!({"type": "object"}),
+            schema_name: StructuredExtractionConfig::default_schema_name(),
+            schema_description: None,
+            strict: false,
+            prompt: None,
+            llm,
+        };
+        let a = ExtractionConfig {
+            structured_extraction: Some(build(cache_on)),
+            ..Default::default()
+        };
+        let b = ExtractionConfig {
+            structured_extraction: Some(build(cache_off)),
+            ..Default::default()
+        };
+        assert_eq!(
+            hash_extraction_config(&a, "text/plain"),
+            hash_extraction_config(&b, "text/plain"),
+            "structured_extraction.llm.cache is a cache-control field and must not affect the \
+             extraction-cache key"
+        );
+    }
+
+    #[test]
+    fn ner_llm_cache_does_not_change_the_cache_key() {
+        use crate::core::config::NerConfig;
+
+        let (cache_on, cache_off) = llm_configs_differing_only_in_cache();
+        let a = ExtractionConfig {
+            ner: Some(NerConfig {
+                llm: Some(cache_on),
+                ..NerConfig::default()
+            }),
+            ..Default::default()
+        };
+        let b = ExtractionConfig {
+            ner: Some(NerConfig {
+                llm: Some(cache_off),
+                ..NerConfig::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            hash_extraction_config(&a, "text/plain"),
+            hash_extraction_config(&b, "text/plain"),
+            "ner.llm.cache is a cache-control field and must not affect the extraction-cache key"
+        );
+    }
+
+    #[test]
+    fn summarization_llm_cache_does_not_change_the_cache_key() {
+        use crate::core::config::SummarizationConfig;
+
+        let (cache_on, cache_off) = llm_configs_differing_only_in_cache();
+        let a = ExtractionConfig {
+            summarization: Some(SummarizationConfig {
+                llm: Some(cache_on),
+                ..SummarizationConfig::default()
+            }),
+            ..Default::default()
+        };
+        let b = ExtractionConfig {
+            summarization: Some(SummarizationConfig {
+                llm: Some(cache_off),
+                ..SummarizationConfig::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            hash_extraction_config(&a, "text/plain"),
+            hash_extraction_config(&b, "text/plain"),
+            "summarization.llm.cache is a cache-control field and must not affect the extraction-cache key"
+        );
+    }
+
+    #[test]
+    fn translation_llm_cache_does_not_change_the_cache_key() {
+        use crate::core::config::TranslationConfig;
+
+        let (cache_on, cache_off) = llm_configs_differing_only_in_cache();
+        let build = |llm| TranslationConfig {
+            target_lang: "de".to_string(),
+            source_lang: None,
+            preserve_markup: false,
+            llm,
+        };
+        let a = ExtractionConfig {
+            translation: Some(build(cache_on)),
+            ..Default::default()
+        };
+        let b = ExtractionConfig {
+            translation: Some(build(cache_off)),
+            ..Default::default()
+        };
+        assert_eq!(
+            hash_extraction_config(&a, "text/plain"),
+            hash_extraction_config(&b, "text/plain"),
+            "translation.llm.cache is a cache-control field and must not affect the extraction-cache key"
+        );
+    }
+
+    #[test]
+    fn page_classification_llm_cache_does_not_change_the_cache_key() {
+        use crate::core::config::PageClassificationConfig;
+
+        let (cache_on, cache_off) = llm_configs_differing_only_in_cache();
+        let build = |llm| PageClassificationConfig {
+            prompt_template: None,
+            labels: vec!["invoice".to_string(), "receipt".to_string()],
+            multi_label: false,
+            llm,
+        };
+        let a = ExtractionConfig {
+            page_classification: Some(build(cache_on)),
+            ..Default::default()
+        };
+        let b = ExtractionConfig {
+            page_classification: Some(build(cache_off)),
+            ..Default::default()
+        };
+        assert_eq!(
+            hash_extraction_config(&a, "text/plain"),
+            hash_extraction_config(&b, "text/plain"),
+            "page_classification.llm.cache is a cache-control field and must not affect the \
+             extraction-cache key"
+        );
+    }
+
+    #[test]
+    fn chunk_classification_llm_cache_does_not_change_the_cache_key() {
+        use crate::core::config::{ChunkClassificationConfig, ChunkClassificationDefinition};
+
+        let (cache_on, cache_off) = llm_configs_differing_only_in_cache();
+        let build = |llm| ChunkClassificationConfig {
+            prompt_template: None,
+            definitions: vec![ChunkClassificationDefinition {
+                label: "topic".to_string(),
+                description: "the chunk's topic".to_string(),
+            }],
+            llm,
+            batch_size: ChunkClassificationConfig::default_batch_size(),
+            max_concurrency: ChunkClassificationConfig::default_max_concurrency(),
+        };
+        let a = ExtractionConfig {
+            chunk_classification: Some(build(cache_on)),
+            ..Default::default()
+        };
+        let b = ExtractionConfig {
+            chunk_classification: Some(build(cache_off)),
+            ..Default::default()
+        };
+        assert_eq!(
+            hash_extraction_config(&a, "text/plain"),
+            hash_extraction_config(&b, "text/plain"),
+            "chunk_classification.llm.cache is a cache-control field and must not affect the \
+             extraction-cache key"
+        );
+    }
+
+    #[test]
+    fn captioning_llm_cache_does_not_change_the_cache_key() {
+        use crate::core::config::CaptioningConfig;
+
+        let (cache_on, cache_off) = llm_configs_differing_only_in_cache();
+        let build = |llm| CaptioningConfig {
+            llm,
+            prompt: None,
+            min_image_area: CaptioningConfig::default_min_image_area(),
+        };
+        let a = ExtractionConfig {
+            captioning: Some(build(cache_on)),
+            ..Default::default()
+        };
+        let b = ExtractionConfig {
+            captioning: Some(build(cache_off)),
+            ..Default::default()
+        };
+        assert_eq!(
+            hash_extraction_config(&a, "image/png"),
+            hash_extraction_config(&b, "image/png"),
+            "captioning.llm.cache is a cache-control field and must not affect the extraction-cache key"
+        );
+    }
+
+    #[test]
+    fn chunking_embedding_llm_cache_does_not_change_the_cache_key() {
+        use crate::core::config::{ChunkingConfig, EmbeddingConfig, EmbeddingModelType};
+
+        let (cache_on, cache_off) = llm_configs_differing_only_in_cache();
+        let build = |llm| ExtractionConfig {
+            chunking: Some(ChunkingConfig {
+                embedding: Some(EmbeddingConfig {
+                    model: EmbeddingModelType::Llm { llm: Box::new(llm) },
+                    ..EmbeddingConfig::default()
+                }),
+                ..ChunkingConfig::default()
+            }),
+            ..Default::default()
+        };
+        let a = build(cache_on);
+        let b = build(cache_off);
+        assert_eq!(
+            hash_extraction_config(&a, "text/plain"),
+            hash_extraction_config(&b, "text/plain"),
+            "chunking.embedding.model (EmbeddingModelType::Llm).cache is a cache-control field \
+             and must not affect the extraction-cache key"
+        );
+    }
+
+    /// Pinning test, not proof of the fix: an `LlmConfig` field that genuinely changes
+    /// extraction output (the model routed to) must still change the cache key.
+    #[test]
+    fn structured_extraction_llm_model_changes_the_cache_key() {
+        use crate::core::config::{LlmConfig, StructuredExtractionConfig};
+
+        let build = |model: &str| StructuredExtractionConfig {
+            schema: serde_json::json!({"type": "object"}),
+            schema_name: StructuredExtractionConfig::default_schema_name(),
+            schema_description: None,
+            strict: false,
+            prompt: None,
+            llm: LlmConfig {
+                model: model.to_string(),
+                ..LlmConfig::default()
+            },
+        };
+        let a = ExtractionConfig {
+            structured_extraction: Some(build("openai/gpt-4o-mini")),
+            ..Default::default()
+        };
+        let b = ExtractionConfig {
+            structured_extraction: Some(build("openai/gpt-4o")),
+            ..Default::default()
+        };
+        assert_ne!(
+            hash_extraction_config(&a, "text/plain"),
+            hash_extraction_config(&b, "text/plain"),
+            "the routed model changes the LLM output and must be part of the extraction-cache key"
         );
     }
 }
