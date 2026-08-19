@@ -431,15 +431,17 @@ pub struct ExtractionConfig {
     #[cfg_attr(feature = "alef-meta", alef(since = "1.0.0"))]
     pub qr_codes: Option<bool>,
 
-    /// Cancellation token for this extraction (None = no external cancellation).
+    /// Internal cancellation handle (None = no external cancellation).
     ///
-    /// Pass a [`crate::cancellation::CancellationToken`] clone here and call its `cancel()`
-    /// from another thread / task to abort the extraction in progress. The extractor
-    /// checks the token at safe checkpoints (before lock acquisition, between pages,
-    /// between batch items) and returns [`crate::error::XbergError::Cancelled`] when set.
+    /// Set from two places, neither of them user-facing. The REST async-jobs code path
+    /// (`crate::api::jobs::JobStore`) registers a token per job and fires it from
+    /// `DELETE /jobs/{job_id}`. Otherwise [`Self::ensure_cancel_token`] installs an
+    /// internal one whenever `extraction_timeout_secs` is set, so the `token.cancel()`
+    /// call that accompanies every timeout has something to signal. There is no public
+    /// API, in any language binding, to construct or fire this token; it is not a
+    /// user-facing configuration value.
     ///
-    /// The field is excluded from serialization because `CancellationToken` is a
-    /// runtime handle, not a configuration value.
+    /// The field is excluded from serialization for the same reason.
     #[serde(skip)]
     #[cfg_attr(alef, alef(skip))]
     pub cancel_token: Option<crate::cancellation::CancellationToken>,
@@ -589,6 +591,33 @@ impl ExtractionConfig {
         let mut resolved = layout.clone();
         resolved.acceleration = acceleration.cloned();
         Some(std::borrow::Cow::Owned(resolved))
+    }
+
+    /// Install an internal cancellation token when a timeout is configured but no
+    /// caller supplied one.
+    ///
+    /// `extraction_timeout_secs` fires `token.cancel()` at every timeout call site
+    /// (`core/extractor/{file,bytes,batch}.rs`, `engine/extract_impl.rs`), but every
+    /// binding-driven and CLI-driven call leaves `cancel_token` `None` — only the
+    /// REST job store (`crate::api::jobs::JobStore`, wired in `api/handlers.rs`)
+    /// ever supplies one. Without this, `token.cancel()` has nothing to signal: the
+    /// timeout stops *waiting* and returns `XbergError::Timeout`, but the spawned
+    /// extraction work keeps running to completion, burning a thread.
+    ///
+    /// A caller-supplied token (the REST cancel path, `DELETE /jobs/{id}`) is
+    /// always left untouched, so it keeps working exactly as before.
+    ///
+    /// No-op when `extraction_timeout_secs` is `None`: without a timeout nothing
+    /// can ever call `cancel()`, so installing a token would be dead weight.
+    ///
+    /// Unconditional on target/feature: [`crate::cancellation::CancellationToken`]'s
+    /// `Default` impl and this field are compiled on every target including
+    /// wasm32 — only [`crate::cancellation::CancellationToken::cancel`] itself is
+    /// gated to `not(wasm32)`, at the call sites that invoke it.
+    pub(crate) fn ensure_cancel_token(&mut self) {
+        if self.extraction_timeout_secs.is_some() && self.cancel_token.is_none() {
+            self.cancel_token = Some(crate::cancellation::CancellationToken::default());
+        }
     }
 
     /// Create a new `ExtractionConfig` by applying per-file overrides from a
@@ -946,6 +975,62 @@ mod tests {
         let json = r#"{"ocr_strategy": {"mode": "scanned_pages", "min_confidence": 0.7}}"#;
         let config: ExtractionConfig = serde_json::from_str(json).expect("payload variant must deserialize");
         assert_eq!(config.ocr_strategy, OcrStrategy::ScannedPages { min_confidence: 0.7 });
+    }
+
+    /// Regression test for task #709: without an internal fallback token, the
+    /// `token.cancel()` calls at every `extraction_timeout_secs` call site
+    /// (`core/extractor/{file,bytes,batch}.rs`, `engine/extract_impl.rs`) have nothing
+    /// to signal on any binding-driven or CLI-driven call, because `cancel_token` is
+    /// `None` there — only the REST job store ever supplies one.
+    #[test]
+    fn ensure_cancel_token_installs_a_token_when_a_timeout_is_configured_and_none_was_supplied() {
+        let mut config = ExtractionConfig {
+            extraction_timeout_secs: Some(30),
+            cancel_token: None,
+            ..Default::default()
+        };
+        config.ensure_cancel_token();
+        assert!(
+            config.cancel_token.is_some(),
+            "a timeout without a caller-supplied token must get an internal fallback"
+        );
+    }
+
+    /// A caller-supplied token (the REST cancel path, `DELETE /jobs/{id}`) must survive
+    /// unchanged — `ensure_cancel_token` must never replace it with a different token,
+    /// or the REST cancel handle would stop being the token extractors observe.
+    #[test]
+    fn ensure_cancel_token_preserves_a_caller_supplied_token() {
+        let supplied = crate::cancellation::CancellationToken::new();
+        let mut config = ExtractionConfig {
+            extraction_timeout_secs: Some(30),
+            cancel_token: Some(supplied.clone()),
+            ..Default::default()
+        };
+        config.ensure_cancel_token();
+
+        supplied.cancel();
+        assert!(
+            config.cancel_token.expect("token must still be present").is_cancelled(),
+            "ensure_cancel_token must keep the SAME token (a clone of the same Arc), not \
+             install an unrelated one that never observes the caller's cancel() call"
+        );
+    }
+
+    /// No timeout means nothing can ever call `cancel()`, so installing a token would be
+    /// dead weight; `cancel_token` must stay `None`.
+    #[test]
+    fn ensure_cancel_token_is_a_noop_without_a_configured_timeout() {
+        let mut config = ExtractionConfig {
+            extraction_timeout_secs: None,
+            cancel_token: None,
+            ..Default::default()
+        };
+        config.ensure_cancel_token();
+        assert!(
+            config.cancel_token.is_none(),
+            "no timeout means no token is ever needed"
+        );
     }
 
     use super::*;

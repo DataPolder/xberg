@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `extraction_timeout_secs` now actually stops the work, not just the waiting. Every timeout call
+  site already signalled a cancellation token when it fired, but that token was only ever supplied
+  by the REST async-jobs API — for every CLI and language-binding caller it was `None`, so the
+  timeout returned while the extraction it timed out on carried on to completion in the
+  background, holding a thread. A token is now installed internally whenever a timeout is
+  configured, and multi-page image and recursive archive extraction check it between units of work
+  so they stop early. A caller-supplied token is left untouched.
+
 - Nested markdown and djot lists no longer lose their parent items' text (#1459). Starting a
   sublist pushed the nested list without flushing the accumulated item buffer, and the next item
   start cleared it, so `- L1` / `- L2` / `- L3` extracted as `L3` alone. Text after a sublist is

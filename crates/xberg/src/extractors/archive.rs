@@ -196,6 +196,20 @@ async fn build_archive_doc(
 
     if config.max_archive_depth > current_depth && !file_bytes.is_empty() {
         for (path, bytes) in &file_bytes {
+            // A timed-out extraction cancels this token (see
+            // `ExtractionConfig::ensure_cancel_token`); each entry launches its own
+            // recursive extraction, so stop starting new ones once cancelled rather
+            // than working through every remaining entry.
+            if config
+                .cancel_token
+                .as_ref()
+                .is_some_and(crate::cancellation::CancellationToken::is_cancelled)
+            {
+                let message = "Extraction cancelled; remaining archive entries were not processed".to_string();
+                crate::core::diagnostics::push_warning(&mut processing_warnings, ARCHIVE_WARNING_SOURCE, message);
+                break;
+            }
+
             if is_archive_metadata_path(path) {
                 filtered_paths.push(path.clone());
                 continue;
@@ -820,6 +834,73 @@ mod tests {
             warning.message.contains("Filtered"),
             "warning message should mention filtering: {}",
             warning.message
+        );
+    }
+
+    /// Regression test for task #709: the per-entry recursive-extraction loop in
+    /// `build_archive_doc` must stop starting new entries once cancellation is
+    /// signalled, instead of working through every remaining entry regardless.
+    ///
+    /// Proves the checkpoint actually stops work (not merely that an error comes
+    /// back elsewhere): the token is cancelled *before* extraction starts, so the
+    /// loop's first-iteration check must break before any of the 3 entries is
+    /// recursively extracted, leaving zero children — against code with the
+    /// checkpoint removed, all 3 entries are still recursed into regardless of
+    /// cancellation, so `children` would be `Some` with 3 entries, not `None`.
+    #[tokio::test]
+    async fn test_zip_extraction_stops_recursing_once_cancelled() {
+        let extractor = ZipExtractor::new();
+
+        let mut cursor = Cursor::new(Vec::new());
+        {
+            let mut zip = ZipWriter::new(&mut cursor);
+            let options = FileOptions::<'_, ()>::default();
+            for (name, content) in [("a.txt", "alpha"), ("b.txt", "bravo"), ("c.txt", "charlie")] {
+                zip.start_file(name, options).unwrap();
+                zip.write_all(content.as_bytes()).unwrap();
+            }
+            zip.finish().unwrap();
+        }
+        let bytes = cursor.into_inner();
+
+        let token = crate::cancellation::CancellationToken::new();
+        token.cancel();
+        let cancelled_config = ExtractionConfig {
+            cancel_token: Some(token),
+            ..ExtractionConfig::default()
+        };
+
+        let cancelled_result = extractor
+            .extract_content(&bytes, "application/zip", &cancelled_config)
+            .await
+            .expect("extraction must not error when cancelled, only skip recursive children");
+
+        assert!(
+            cancelled_result.children.is_none(),
+            "no archive entry should be recursively extracted once the token is already \
+             cancelled, got {:?}",
+            cancelled_result.children
+        );
+        assert!(
+            cancelled_result
+                .processing_warnings
+                .iter()
+                .any(|warning| warning.source == "archive" && warning.message.contains("cancelled")),
+            "a cancelled run should explain why entries were skipped: {:?}",
+            cancelled_result.processing_warnings
+        );
+
+        // Sanity check: the same 3 entries, uncancelled, all recurse normally — this
+        // rules out the empty result above being an unrelated bug (e.g. MIME
+        // detection rejecting `.txt`) rather than the cancellation checkpoint.
+        let uncancelled_result = extractor
+            .extract_content(&bytes, "application/zip", &ExtractionConfig::default())
+            .await
+            .unwrap();
+        assert_eq!(
+            uncancelled_result.children.map(|c| c.len()).unwrap_or(0),
+            3,
+            "all 3 entries should be recursively extracted when nothing is cancelled"
         );
     }
 

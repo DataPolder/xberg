@@ -243,6 +243,10 @@ pub(crate) async fn batch_extract_files(
             let item = &items[index];
             let mut resolved = resolve_config(&cfg, &item.config);
             apply_batch_thread_budget(&mut resolved, thread_budget);
+            // See `ExtractionConfig::ensure_cancel_token`: install a token before
+            // `run_timed_extraction`'s own timeout wrapper races `extract_file`'s inner
+            // one, so `token.cancel()` below has something connected to signal.
+            resolved.ensure_cancel_token();
             let timeout = resolved.extraction_timeout_secs;
             let cancel_token = resolved.cancel_token.clone();
             run_timed_extraction(index, sem, timeout, cancel_token, || {
@@ -354,6 +358,10 @@ pub(crate) async fn batch_extract_bytes(
             let item = slots[index].lock().take().expect("batch item already consumed");
             let mut resolved = resolve_config(&cfg, &item.config);
             apply_batch_thread_budget(&mut resolved, thread_budget);
+            // See `ExtractionConfig::ensure_cancel_token`: install a token before
+            // `run_timed_extraction`'s own timeout wrapper races `extract_bytes`'s inner
+            // one, so `token.cancel()` below has something connected to signal.
+            resolved.ensure_cancel_token();
             let timeout = resolved.extraction_timeout_secs;
             let cancel_token = resolved.cancel_token.clone();
             run_timed_extraction(index, sem, timeout, cancel_token, || async move {

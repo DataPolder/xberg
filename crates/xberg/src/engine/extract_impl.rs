@@ -944,11 +944,18 @@ async fn extract_one(input: ExtractInput, base_config: &ExtractionConfig, index:
 }
 
 fn resolve_input_config(input: &ExtractInput, base_config: &ExtractionConfig) -> ExtractionConfig {
-    input
+    let mut resolved = input
         .config
         .as_ref()
         .map(|overrides| base_config.with_file_overrides(overrides))
-        .unwrap_or_else(|| base_config.clone())
+        .unwrap_or_else(|| base_config.clone());
+    // Install a token here, before this item's own timeout wrapper (`run_batch_item`,
+    // `finalize_shared_item`) races against `extract_file`/`extract_bytes`'s inner
+    // timeout — the outer wrapper starts first and has the same duration, so it always
+    // wins that race, and its `token.cancel()` needs the SAME token this config's
+    // extractor checkpoints observe. See `ExtractionConfig::ensure_cancel_token`.
+    resolved.ensure_cancel_token();
+    resolved
 }
 
 /// Resolve config for batch items, taking Arc<ExtractionConfig> to avoid unnecessary clones.
@@ -969,14 +976,23 @@ fn resolve_batch_input_config(
     thread_budget: usize,
 ) -> Arc<ExtractionConfig> {
     let resolved = resolve_input_config_arc(input, base_config);
-    if crate::core::config::concurrency::resolve_thread_budget(resolved.concurrency.as_ref()) == thread_budget {
+    let needs_thread_budget =
+        crate::core::config::concurrency::resolve_thread_budget(resolved.concurrency.as_ref()) != thread_budget;
+    // See `ExtractionConfig::ensure_cancel_token` and `resolve_input_config`: this
+    // item's `run_batch_item` timeout wrapper needs the same token its extractor
+    // checkpoints observe, installed before that wrapper races `extract_one_resolved`.
+    let needs_cancel_token = resolved.extraction_timeout_secs.is_some() && resolved.cancel_token.is_none();
+    if !needs_thread_budget && !needs_cancel_token {
         return resolved;
     }
 
     let mut resolved = Arc::unwrap_or_clone(resolved);
-    resolved.concurrency = Some(crate::core::config::ConcurrencyConfig {
-        max_threads: Some(thread_budget),
-    });
+    if needs_thread_budget {
+        resolved.concurrency = Some(crate::core::config::ConcurrencyConfig {
+            max_threads: Some(thread_budget),
+        });
+    }
+    resolved.ensure_cancel_token();
     Arc::new(resolved)
 }
 

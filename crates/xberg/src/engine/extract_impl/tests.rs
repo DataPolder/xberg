@@ -462,6 +462,94 @@ fn engine_batch_base_config_applies_plan_budget_once() {
     assert!(Arc::ptr_eq(&adjusted, &reused));
 }
 
+/// Regression test for task #709: `resolve_input_config` is the single choke point
+/// both `extract_one` (the single-input `extract`/`extract_batch_sequential` path) and
+/// the shared-URL-group construction in `extract_batch_concurrent` go through.
+/// Installing the internal cancellation token here — before either `run_batch_item`'s
+/// or `finalize_shared_item`'s own timeout wrapper races the extraction — guarantees
+/// `token.cancel()` at those call sites has the SAME token this config's extractor
+/// checkpoints observe, not a disconnected one.
+#[test]
+fn resolve_input_config_installs_a_cancel_token_when_a_timeout_is_configured() {
+    let base = ExtractionConfig {
+        extraction_timeout_secs: Some(30),
+        cancel_token: None,
+        ..Default::default()
+    };
+    let input = ExtractInput::from_bytes(b"hello".to_vec(), "text/plain", None);
+
+    let resolved = resolve_input_config(&input, &base);
+
+    assert!(
+        resolved.cancel_token.is_some(),
+        "resolve_input_config must install an internal token when a timeout is configured"
+    );
+}
+
+/// A caller-supplied token (the REST cancel path, `DELETE /jobs/{id}`) must survive
+/// `resolve_input_config` unchanged, so it keeps working exactly as before.
+#[test]
+fn resolve_input_config_preserves_a_caller_supplied_cancel_token() {
+    let supplied = crate::cancellation::CancellationToken::new();
+    let base = ExtractionConfig {
+        extraction_timeout_secs: Some(30),
+        cancel_token: Some(supplied.clone()),
+        ..Default::default()
+    };
+    let input = ExtractInput::from_bytes(b"hello".to_vec(), "text/plain", None);
+
+    let resolved = resolve_input_config(&input, &base);
+
+    supplied.cancel();
+    assert!(
+        resolved.cancel_token.expect("token must survive").is_cancelled(),
+        "resolve_input_config must keep the caller's own token (a clone of the same Arc), \
+         not swap in an unrelated one that never observes the caller's cancel() call"
+    );
+}
+
+/// Companion to `resolve_input_config`'s tests above, for the concurrent-batch path:
+/// `resolve_batch_input_config` feeds both `run_batch_item`'s cancel_token argument and
+/// the `resolved_config` passed to `extract_one_resolved`, so it must install the same
+/// guarantee without breaking the existing Arc-reuse fast path when nothing changed.
+#[test]
+fn resolve_batch_input_config_shares_the_arc_when_nothing_needs_installing() {
+    let base = Arc::new(ExtractionConfig {
+        extraction_timeout_secs: None,
+        cancel_token: None,
+        ..Default::default()
+    });
+    let input = ExtractInput::from_bytes(b"hello".to_vec(), "text/plain", None);
+    let thread_budget = crate::core::config::concurrency::resolve_thread_budget(base.concurrency.as_ref());
+
+    let resolved = resolve_batch_input_config(&input, &base, thread_budget);
+
+    assert!(
+        Arc::ptr_eq(&resolved, &base),
+        "no timeout, no cancel_token need, and no thread-budget change must reuse the \
+         SAME Arc, not clone the config"
+    );
+}
+
+#[test]
+fn resolve_batch_input_config_installs_a_cancel_token_when_a_timeout_is_configured() {
+    let base = Arc::new(ExtractionConfig {
+        extraction_timeout_secs: Some(30),
+        cancel_token: None,
+        ..Default::default()
+    });
+    let input = ExtractInput::from_bytes(b"hello".to_vec(), "text/plain", None);
+    let thread_budget = crate::core::config::concurrency::resolve_thread_budget(base.concurrency.as_ref());
+
+    let resolved = resolve_batch_input_config(&input, &base, thread_budget);
+
+    assert!(
+        resolved.cancel_token.is_some(),
+        "resolve_batch_input_config must install an internal token when a timeout is \
+         configured, even though nothing else forced a clone"
+    );
+}
+
 #[test]
 fn engine_batch_execution_plan_clamps_explicit_zero_to_one() {
     let config = ExtractionConfig {

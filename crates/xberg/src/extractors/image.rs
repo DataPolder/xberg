@@ -1037,6 +1037,7 @@ async fn extract_layout_regions(
     detections: &[crate::layout::LayoutDetection],
     ocr_config: &crate::core::config::OcrConfig,
     layout_config: Option<&crate::core::config::LayoutDetectionConfig>,
+    cancel_token: Option<&crate::cancellation::CancellationToken>,
 ) -> Result<InternalDocument> {
     let mut builder = InternalDocumentBuilder::new("image");
     let mut formulas = Vec::new();
@@ -1044,6 +1045,17 @@ async fn extract_layout_regions(
     #[cfg(not(feature = "formula-recognition"))]
     let _ = layout_config;
     for detection in detections {
+        // A timed-out extraction cancels this token (see
+        // `ExtractionConfig::ensure_cancel_token`); each region can involve a
+        // formula-recognition or OCR call, so stop dispatching further regions
+        // once cancelled rather than continuing until the last one finishes.
+        if cancel_token.is_some_and(crate::cancellation::CancellationToken::is_cancelled) {
+            processing_warnings.push(crate::core::diagnostics::warning(
+                "layout-ocr",
+                "extraction cancelled; remaining layout regions were not OCR'd".to_string(),
+            ));
+            break;
+        }
         // A configured formula model takes the region crop directly; the
         // plain OCR text is the fallback when recognition yields nothing.
         #[cfg(feature = "formula-recognition")]
@@ -1831,6 +1843,7 @@ impl ImageExtractor {
             &detections,
             &region_ocr_config,
             config.layout.as_ref(),
+            config.cancel_token.as_ref(),
         )
         .await
         {
@@ -3889,6 +3902,115 @@ mod tests {
             result.images.unwrap().len(),
             1,
             "image count must survive the derive.rs conversion"
+        );
+    }
+
+    /// Regression test for task #709: `extract_layout_regions` must stop dispatching
+    /// OCR calls for further layout regions once cancellation is signalled, instead of
+    /// working through every remaining region regardless.
+    ///
+    /// Proves the checkpoint actually stops work (not merely that an error comes back):
+    /// a counting backend records how many regions it was actually asked to OCR. With a
+    /// token cancelled *before* the call, the loop's first-iteration check must break
+    /// before the backend is invoked for *any* region, so the counter stays at 0 out of
+    /// 3 regions — against code with the checkpoint removed, this backend is invoked for
+    /// all 3 regions regardless of cancellation, so the counter would be 3, not 0.
+    #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+    #[tokio::test]
+    async fn extract_layout_regions_stops_dispatching_once_cancelled() {
+        use crate::cancellation::CancellationToken;
+        use crate::core::config::OcrConfig;
+        use crate::layout::{BBox, LayoutClass, LayoutDetection};
+        use crate::plugins::{OcrBackend, OcrBackendType, Plugin};
+        use crate::types::ExtractedDocument;
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        /// A backend that counts how many regions it was actually asked to OCR,
+        /// standing in for a real (slow) OCR call so the test stays fast and
+        /// deterministic while still proving the loop-level checkpoint's effect.
+        struct CountingOcrBackend(Arc<AtomicUsize>);
+
+        #[async_trait::async_trait]
+        impl OcrBackend for CountingOcrBackend {
+            fn backend_type(&self) -> OcrBackendType {
+                OcrBackendType::Custom
+            }
+            fn supports_language(&self, _: &str) -> bool {
+                true
+            }
+            async fn process_image(&self, _: &[u8], _: &OcrConfig) -> crate::Result<ExtractedDocument> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Ok(ExtractedDocument {
+                    content: "region text".to_string(),
+                    ..Default::default()
+                })
+            }
+        }
+
+        impl Plugin for CountingOcrBackend {
+            fn name(&self) -> &str {
+                "counting-ocr-test-709"
+            }
+            fn version(&self) -> String {
+                "0.0.0".to_string()
+            }
+            fn initialize(&self) -> crate::Result<()> {
+                Ok(())
+            }
+            fn shutdown(&self) -> crate::Result<()> {
+                Ok(())
+            }
+        }
+
+        let rgb = image::RgbImage::from_pixel(100, 100, image::Rgb([255u8, 255, 255]));
+        let detections = vec![
+            LayoutDetection::new(LayoutClass::Text, 0.9, BBox::new(0.0, 0.0, 20.0, 20.0)),
+            LayoutDetection::new(LayoutClass::Text, 0.9, BBox::new(30.0, 0.0, 50.0, 20.0)),
+            LayoutDetection::new(LayoutClass::Text, 0.9, BBox::new(60.0, 0.0, 80.0, 20.0)),
+        ];
+        let ocr_config = OcrConfig::default();
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let backend: Arc<dyn OcrBackend> = Arc::new(CountingOcrBackend(Arc::clone(&calls)));
+        let cancelled_token = CancellationToken::new();
+        cancelled_token.cancel();
+
+        let doc = extract_layout_regions(
+            Arc::clone(&backend),
+            &rgb,
+            &detections,
+            &ocr_config,
+            None,
+            Some(&cancelled_token),
+        )
+        .await
+        .expect("extract_layout_regions must not error when cancelled, only skip remaining work");
+
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            0,
+            "no region should be OCR'd once the token is already cancelled"
+        );
+        assert!(
+            doc.processing_warnings
+                .iter()
+                .any(|warning| warning.message.contains("cancelled")),
+            "a cancelled run should explain why regions were skipped, got {:?}",
+            doc.processing_warnings
+        );
+
+        // Sanity check: the same 3 regions, uncancelled, all reach the backend — this
+        // rules out the zero count above being an unrelated bug (e.g. a bbox rejected
+        // by `encode_layout_region`) rather than the cancellation checkpoint.
+        calls.store(0, Ordering::SeqCst);
+        let _ = extract_layout_regions(Arc::clone(&backend), &rgb, &detections, &ocr_config, None, None)
+            .await
+            .expect("uncancelled extract_layout_regions must succeed");
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            3,
+            "all 3 regions should be OCR'd when nothing is cancelled"
         );
     }
 }
