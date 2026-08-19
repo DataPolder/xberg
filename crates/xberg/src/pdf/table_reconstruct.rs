@@ -208,8 +208,18 @@ fn post_process_table_inner(
 ) -> Option<Vec<Vec<String>>> {
     table.retain(|row| row.iter().any(|cell| !cell.trim().is_empty()));
     if table.is_empty() {
+        tracing::debug!(
+            target: "xberg::table_reconstruct",
+            reason = "empty_after_retain",
+            rows = 0,
+            cols = 0,
+            "post_process_table_inner: rejected table"
+        );
         return None;
     }
+
+    let rejection_rows = table.len();
+    let rejection_cols = table.first().map_or(0, Vec::len);
 
     let mut non_empty = 0usize;
     let mut long_cells = 0usize;
@@ -241,17 +251,55 @@ fn post_process_table_inner(
                     })
                     .count();
                 if long_cells_100 * 10 > non_empty * 7 {
+                    tracing::debug!(
+                        target: "xberg::table_reconstruct",
+                        reason = "prose_long_cells_100_ratio",
+                        long_cells_100,
+                        non_empty,
+                        limit_numerator = 7,
+                        limit_denominator = 10,
+                        rows = rejection_rows,
+                        cols = rejection_cols,
+                        "post_process_table_inner: rejected table"
+                    );
                     return None;
                 }
             }
             if total_chars / non_empty > 80 {
+                tracing::debug!(
+                    target: "xberg::table_reconstruct",
+                    reason = "prose_avg_chars_layout_guided",
+                    avg_chars = total_chars / non_empty,
+                    limit = 80,
+                    rows = rejection_rows,
+                    cols = rejection_cols,
+                    "post_process_table_inner: rejected table"
+                );
                 return None;
             }
         } else {
             if long_cells * 2 > non_empty {
+                tracing::debug!(
+                    target: "xberg::table_reconstruct",
+                    reason = "prose_long_cells_ratio",
+                    long_cells,
+                    non_empty,
+                    rows = rejection_rows,
+                    cols = rejection_cols,
+                    "post_process_table_inner: rejected table"
+                );
                 return None;
             }
             if total_chars / non_empty > 50 {
+                tracing::debug!(
+                    target: "xberg::table_reconstruct",
+                    reason = "prose_avg_chars",
+                    avg_chars = total_chars / non_empty,
+                    limit = 50,
+                    rows = rejection_rows,
+                    cols = rejection_cols,
+                    "post_process_table_inner: rejected table"
+                );
                 return None;
             }
         }
@@ -259,6 +307,15 @@ fn post_process_table_inner(
 
     let col_count = table.first().map_or(0, Vec::len);
     if col_count < min_columns {
+        tracing::debug!(
+            target: "xberg::table_reconstruct",
+            reason = "min_columns",
+            col_count,
+            min_columns,
+            rows = rejection_rows,
+            cols = col_count,
+            "post_process_table_inner: rejected table"
+        );
         return None;
     }
 
@@ -277,6 +334,15 @@ fn post_process_table_inner(
 
     if header_rows.is_empty() {
         if data_rows.len() < 2 {
+            tracing::debug!(
+                target: "xberg::table_reconstruct",
+                reason = "insufficient_data_rows_no_header",
+                data_row_count = data_rows.len(),
+                min_required = 2,
+                rows = data_rows.len(),
+                cols = col_count,
+                "post_process_table_inner: rejected table"
+            );
             return None;
         }
         header_rows.push(data_rows[0].clone());
@@ -286,6 +352,13 @@ fn post_process_table_inner(
     let column_count = header_rows.first().or_else(|| data_rows.first()).map_or(0, Vec::len);
 
     if column_count == 0 {
+        tracing::debug!(
+            target: "xberg::table_reconstruct",
+            reason = "zero_column_count",
+            rows = header_rows.len() + data_rows.len(),
+            cols = column_count,
+            "post_process_table_inner: rejected table"
+        );
         return None;
     }
 
@@ -296,6 +369,14 @@ fn post_process_table_inner(
     processed.extend(data_rows);
 
     if processed.len() <= 1 {
+        tracing::debug!(
+            target: "xberg::table_reconstruct",
+            reason = "processed_too_short",
+            rows = processed.len(),
+            cols = processed.first().map_or(0, Vec::len),
+            min_required_rows = 2,
+            "post_process_table_inner: rejected table"
+        );
         return None;
     }
 
@@ -313,11 +394,25 @@ fn post_process_table_inner(
         }
 
         if processed.is_empty() || processed[0].is_empty() {
+            tracing::debug!(
+                target: "xberg::table_reconstruct",
+                reason = "processed_emptied_during_merge",
+                rows = processed.len(),
+                cols = processed.first().map_or(0, Vec::len),
+                "post_process_table_inner: rejected table"
+            );
             return None;
         }
     }
 
     if processed[0].len() < 2 || processed.len() <= 1 {
+        tracing::debug!(
+            target: "xberg::table_reconstruct",
+            reason = "insufficient_columns_or_rows_after_merge",
+            rows = processed.len(),
+            cols = processed[0].len(),
+            "post_process_table_inner: rejected table"
+        );
         return None;
     }
 
@@ -336,6 +431,18 @@ fn post_process_table_inner(
                 empty_count * 4 > data_row_count * 3
             };
             if too_sparse {
+                tracing::debug!(
+                    target: "xberg::table_reconstruct",
+                    reason = "column_sparsity",
+                    col = c,
+                    empty_count,
+                    data_row_count,
+                    empty_ratio = empty_count as f64 / data_row_count as f64,
+                    limit = if layout_guided { 19.0 / 20.0 } else { 3.0 / 4.0 },
+                    rows = processed.len(),
+                    cols = processed[0].len(),
+                    "post_process_table_inner: rejected table"
+                );
                 return None;
             }
         }
@@ -355,6 +462,17 @@ fn post_process_table_inner(
                 filled * 5 < total_data_cells * 2
             };
             if too_sparse {
+                tracing::debug!(
+                    target: "xberg::table_reconstruct",
+                    reason = "overall_density",
+                    filled,
+                    total_data_cells,
+                    density = filled as f64 / total_data_cells as f64,
+                    limit = if layout_guided { 3.0 / 20.0 } else { 2.0 / 5.0 },
+                    rows = processed.len(),
+                    cols = processed[0].len(),
+                    "post_process_table_inner: rejected table"
+                );
                 return None;
             }
         }
@@ -386,6 +504,17 @@ fn post_process_table_inner(
             && non_empty_cells >= 6
             && single_word_cells * 100 > non_empty_cells * threshold
         {
+            tracing::debug!(
+                target: "xberg::table_reconstruct",
+                reason = "single_word_cell_ratio",
+                single_word_cells,
+                non_empty_cells,
+                ratio = single_word_cells as f64 / non_empty_cells as f64,
+                threshold,
+                rows = processed.len(),
+                cols = processed[0].len(),
+                "post_process_table_inner: rejected table"
+            );
             return None;
         }
     }
@@ -408,6 +537,17 @@ fn post_process_table_inner(
             }
         }
         if eligible_rows >= 3 && flow_rows * 10 > eligible_rows * 6 {
+            tracing::debug!(
+                target: "xberg::table_reconstruct",
+                reason = "column_text_flow",
+                flow_rows,
+                eligible_rows,
+                ratio = flow_rows as f64 / eligible_rows as f64,
+                limit = 0.6,
+                rows = processed.len(),
+                cols = processed[0].len(),
+                "post_process_table_inner: rejected table"
+            );
             return None;
         }
     }
@@ -431,6 +571,15 @@ fn post_process_table_inner(
                 .fold(0.0_f64, f64::max);
             let dominant_threshold = if layout_guided { 0.92 } else { 0.85 };
             if max_col_share > dominant_threshold {
+                tracing::debug!(
+                    target: "xberg::table_reconstruct",
+                    reason = "content_asymmetry_dominant_column",
+                    max_col_share,
+                    dominant_threshold,
+                    rows = processed.len(),
+                    cols = processed[0].len(),
+                    "post_process_table_inner: rejected table"
+                );
                 return None;
             }
 
@@ -444,6 +593,18 @@ fn post_process_table_inner(
                     let empty_ratio = empty_in_col as f64 / data_row_count as f64;
 
                     if char_share < 0.15 && empty_ratio > 0.5 {
+                        tracing::debug!(
+                            target: "xberg::table_reconstruct",
+                            reason = "content_asymmetry_sparse_column",
+                            col = c,
+                            char_share,
+                            empty_ratio,
+                            char_share_limit = 0.15,
+                            empty_ratio_limit = 0.5,
+                            rows = processed.len(),
+                            cols = processed[0].len(),
+                            "post_process_table_inner: rejected table"
+                        );
                         return None;
                     }
                 }
@@ -473,6 +634,17 @@ fn post_process_table_inner(
             }
         }
         if eligible_transitions >= 3 && continuation_count * 10 > eligible_transitions * 4 {
+            tracing::debug!(
+                target: "xberg::table_reconstruct",
+                reason = "row_continuation_flow",
+                continuation_count,
+                eligible_transitions,
+                ratio = continuation_count as f64 / eligible_transitions as f64,
+                limit = 0.4,
+                rows = processed.len(),
+                cols = processed[0].len(),
+                "post_process_table_inner: rejected table"
+            );
             return None;
         }
     }
@@ -491,6 +663,17 @@ fn post_process_table_inner(
                 && filled_cells * 100 > total_data_cells * 80
                 && looks_like_prose_in_columns(&processed[1..], num_cols)
             {
+                tracing::debug!(
+                    target: "xberg::table_reconstruct",
+                    reason = "prose_in_columns_dense",
+                    filled_cells,
+                    total_data_cells,
+                    fill_ratio = filled_cells as f64 / total_data_cells as f64,
+                    limit = 0.8,
+                    rows = processed.len(),
+                    cols = num_cols,
+                    "post_process_table_inner: rejected table"
+                );
                 return None;
             }
         }
@@ -534,6 +717,17 @@ fn post_process_table_inner(
                         .count();
                     let fill_rate = filled_cells as f64 / total_data_cells as f64;
                     if fill_rate > 0.75 {
+                        tracing::debug!(
+                            target: "xberg::table_reconstruct",
+                            reason = "uniform_column_prose",
+                            min_avg,
+                            max_avg,
+                            fill_rate,
+                            fill_rate_limit = 0.75,
+                            rows = processed.len(),
+                            cols = num_cols,
+                            "post_process_table_inner: rejected table"
+                        );
                         return None;
                     }
                 }
@@ -551,6 +745,13 @@ fn post_process_table_inner(
             normalize_data_cell(cell);
         }
     }
+
+    tracing::debug!(
+        target: "xberg::table_reconstruct",
+        rows = processed.len(),
+        cols = processed[0].len(),
+        "post_process_table_inner: accepted table"
+    );
 
     Some(processed)
 }

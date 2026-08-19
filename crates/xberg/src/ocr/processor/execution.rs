@@ -13,7 +13,7 @@ use crate::image::normalize_image_dpi_owned;
 use crate::ocr::cache::OcrCache;
 use crate::ocr::conversion::{TsvRow, iterator_word_to_element, tsv_row_to_element};
 use crate::ocr::error::OcrError;
-use crate::ocr::hocr_parser::{HOCR_FONT_SIZE_ATTRIBUTE, parse_hocr_to_internal_document};
+use crate::ocr::hocr_parser::parse_hocr_to_internal_document;
 #[cfg(feature = "pdf")]
 use crate::ocr::table::post_process_table;
 use crate::ocr::table::{extract_words_from_tsv, reconstruct_table, table_to_markdown};
@@ -1268,16 +1268,52 @@ pub(super) fn perform_ocr(
         let words = extract_words_from_tsv(tsv_data, config.table_min_confidence)?;
         let regions = cluster_words_into_table_regions(&words);
 
-        for region_words in regions {
+        for (region_index, region_words) in regions.into_iter().enumerate() {
             if region_words.len() < MIN_TABLE_CANDIDATE_WORDS {
+                tracing::debug!(
+                    target: "xberg::ocr::tables",
+                    region_index,
+                    word_count = region_words.len(),
+                    min_required = MIN_TABLE_CANDIDATE_WORDS,
+                    "OCR table region skipped: below MIN_TABLE_CANDIDATE_WORDS"
+                );
                 continue;
             }
+
+            let region_left = region_words.iter().map(|w| w.left).min().unwrap_or(0);
+            let region_top = region_words.iter().map(|w| w.top).min().unwrap_or(0);
+            let region_right = region_words.iter().map(|w| w.left + w.width).max().unwrap_or(0);
+            let region_bottom = region_words.iter().map(|w| w.top + w.height).max().unwrap_or(0);
+            let word_preview: String = region_words
+                .iter()
+                .take(12)
+                .map(|w| w.text.as_str())
+                .collect::<Vec<_>>()
+                .join(" ")
+                .chars()
+                .take(200)
+                .collect();
 
             let table = reconstruct_table(
                 &region_words,
                 config.table_column_threshold,
                 config.table_row_threshold_ratio,
             );
+
+            tracing::debug!(
+                target: "xberg::ocr::tables",
+                region_index,
+                word_count = region_words.len(),
+                left = region_left,
+                top = region_top,
+                right = region_right,
+                bottom = region_bottom,
+                word_preview = %word_preview,
+                raw_rows = table.len(),
+                raw_cols = table.first().map_or(0, Vec::len),
+                "OCR table region reconstructed"
+            );
+
             if table.is_empty() || table[0].is_empty() {
                 continue;
             }
@@ -1631,6 +1667,7 @@ pub(super) fn process_image_files_batch(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ocr::hocr_parser::HOCR_FONT_SIZE_ATTRIBUTE;
     use tempfile::tempdir;
 
     /// Exact count: a known number of skipped words must produce exactly the
