@@ -289,6 +289,71 @@ pub struct PaddleOcrBackend {
     acceleration: Option<crate::core::config::acceleration::AccelerationConfig>,
 }
 
+/// Number of buckets in `DropScoreDiscardStats::histogram`, spanning the score range
+/// `[0.0, 1.0]` in equal-width steps (bucket 0 is `[0.0, 0.2)`, ..., bucket 4 is `[0.8, 1.0]`).
+const DROP_SCORE_HISTOGRAM_BUCKETS: usize = 5;
+
+/// Instrumentation-only summary of what the `drop_score` filter in `PaddleOcrBackend::perform_ocr`
+/// discards.
+///
+/// This exists to answer a question the removed-gate measurement documented on
+/// `PaddleOcrBackend::process_image` (#675) could not: the surviving detections' mean
+/// recognition confidence cannot see what `drop_score` (default 0.5) already discarded before
+/// those detections ever became elements. Recording it does not change which detections
+/// survive `perform_ocr`'s filter — `record` is only ever called for blocks the filter has
+/// already decided to drop.
+#[derive(Debug, Default, Clone, Copy)]
+struct DropScoreDiscardStats {
+    discarded_count: usize,
+    /// Subset of `discarded_count` whose `text_score` was NaN (excluded from
+    /// sum/min/max/histogram since NaN has no ordering).
+    nan_count: usize,
+    sum: f64,
+    min: f32,
+    max: f32,
+    histogram: [u32; DROP_SCORE_HISTOGRAM_BUCKETS],
+}
+
+impl DropScoreDiscardStats {
+    /// Record one discarded detection's `text_score`. Must only be called for scores the live
+    /// filter has already excluded, and must not itself decide inclusion/exclusion.
+    fn record(&mut self, score: f32) {
+        self.discarded_count += 1;
+        if score.is_nan() {
+            self.nan_count += 1;
+            return;
+        }
+        let scored_before = self.discarded_count - self.nan_count == 1;
+        self.min = if scored_before { score } else { self.min.min(score) };
+        self.max = if scored_before { score } else { self.max.max(score) };
+        self.sum += f64::from(score);
+
+        let bucket = ((score.clamp(0.0, 1.0) * DROP_SCORE_HISTOGRAM_BUCKETS as f32) as usize)
+            .min(DROP_SCORE_HISTOGRAM_BUCKETS - 1);
+        self.histogram[bucket] += 1;
+    }
+
+    /// Count of discarded, non-NaN scores the mean/min/max/histogram are computed over.
+    fn scored_count(&self) -> usize {
+        self.discarded_count - self.nan_count
+    }
+
+    /// Mean of discarded, non-NaN scores; `0.0` when there is nothing to average (this is a
+    /// "no discards to report" reading, not a measured score of zero).
+    fn mean(&self) -> f64 {
+        let scored_count = self.scored_count();
+        if scored_count == 0 { 0.0 } else { self.sum / scored_count as f64 }
+    }
+}
+
+/// The exact `drop_score` filter predicate from `PaddleOcrBackend::perform_ocr`, factored out
+/// so the boundary case (`text_score == drop_score`) is unit-testable without exercising the
+/// full detection pipeline. `perform_ocr`'s filter calls this and only this to decide
+/// inclusion; `DropScoreDiscardStats::record` never does.
+fn passes_drop_score(text_score: f32, drop_score: f32) -> bool {
+    text_score >= drop_score && !text_score.is_nan()
+}
+
 impl PaddleOcrBackend {
     /// Create a new PaddleOCR backend with default configuration.
     pub fn new() -> Result<Self> {
@@ -980,11 +1045,46 @@ impl PaddleOcrBackend {
             })?;
 
         let drop_score = config.drop_score;
+        let total_detected = result.text_blocks.len();
+        let mut discarded = DropScoreDiscardStats::default();
         let text_blocks: Vec<_> = result
             .text_blocks
             .into_iter()
-            .filter(|block| block.block.text_score >= drop_score && !block.block.text_score.is_nan())
+            .filter(|block| {
+                // `passes_drop_score` is the same predicate this replaced (`text_score >=
+                // drop_score && !text_score.is_nan()`), factored out so its boundary case is
+                // unit-testable. `discarded.record` is a side effect only, called exclusively
+                // for blocks this predicate rejects, and never influences the boolean returned.
+                let keep = passes_drop_score(block.block.text_score, drop_score);
+                if !keep {
+                    discarded.record(block.block.text_score);
+                }
+                keep
+            })
             .collect();
+
+        // What `drop_score` (default 0.5) discards above, before any of it becomes an element
+        // or contributes text — the population the confidence-gate measurement on
+        // `process_image` (#675) explicitly could not see, since the surviving detections' mean
+        // cannot see what never survived. No page number or path reaches this function
+        // (`perform_ocr` takes only `image_bytes`, `ocr_engine`, `config`), so pages are
+        // identified by a content hash of the exact bytes OCR'd here; compute the same hash
+        // offline over a known page image to line these numbers up against it.
+        let page_hash = blake3::hash(image_bytes).to_hex()[..16].to_string();
+        tracing::debug!(
+            target: "xberg::paddle::confidence",
+            page_hash,
+            drop_score,
+            total_detected,
+            kept = text_blocks.len(),
+            discarded_count = discarded.discarded_count,
+            discarded_nan_count = discarded.nan_count,
+            discarded_mean_score = discarded.mean(),
+            discarded_min_score = discarded.min,
+            discarded_max_score = discarded.max,
+            discarded_histogram = ?discarded.histogram,
+            "PaddleOCR drop_score discard stats"
+        );
 
         tracing::debug!(text_block_count = text_blocks.len(), "PaddleOCR detection completed");
 
@@ -1050,7 +1150,7 @@ impl OcrBackend for PaddleOcrBackend {
         };
 
         let languages = config.effective_languages();
-        let (paddle_lang, mut language_warnings) = super::select_paddle_language(&languages);
+        let (paddle_lang, language_warnings) = super::select_paddle_language(&languages);
 
         let mut rotation_outcome = None;
         let ocr_image_bytes: Cow<'_, [u8]> = if config.auto_rotate {
@@ -1097,7 +1197,7 @@ impl OcrBackend for PaddleOcrBackend {
             Self::residual_rotation_for_reorder(page_rotation_degrees, auto_rotate_applied_degrees);
 
         let PaddlePageOcr {
-            mut text,
+            text,
             line_elements,
             word_elements,
             processed_width,
@@ -1392,6 +1492,83 @@ mod tests {
     use std::sync::Barrier;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::thread;
+
+    /// `passes_drop_score` is the live predicate `perform_ocr`'s filter calls; this pins its
+    /// current boundary behaviour: `text_score == drop_score` is `>=`, so it survives (is kept,
+    /// not discarded). This test would fail if that boundary were ever flipped to strict `>`,
+    /// which is the only way it can discriminate — the predicate is a one-line direct copy of
+    /// the pre-instrumentation filter condition, so there is no separate "old" behaviour to
+    /// diverge from today.
+    #[test]
+    fn passes_drop_score_keeps_the_exact_threshold_score() {
+        let drop_score = 0.5_f32;
+        assert!(passes_drop_score(drop_score, drop_score));
+        assert!(passes_drop_score(drop_score + 0.01, drop_score));
+        assert!(!passes_drop_score(drop_score - 0.01, drop_score));
+    }
+
+    /// NaN scores are excluded regardless of `drop_score`, matching the pre-instrumentation
+    /// `&& !text_score.is_nan()` clause verbatim.
+    #[test]
+    fn passes_drop_score_rejects_nan_scores() {
+        assert!(!passes_drop_score(f32::NAN, 0.5));
+        assert!(!passes_drop_score(f32::NAN, 0.0));
+    }
+
+    /// Drives `DropScoreDiscardStats::record` with a synthetic set of discarded scores whose
+    /// count, mean, min, max, and histogram bucketing are all known by hand, and asserts every
+    /// field against the hand-computed value rather than a re-derived formula. This is a new
+    /// struct built for this task, so there is no pre-instrumentation behaviour to diverge
+    /// from — the test pins the arithmetic (mean = sum/count over non-NaN scores; NaN counted
+    /// separately and excluded from sum/min/max/histogram; 5 equal-width buckets over
+    /// `[0.0, 1.0]`) rather than catching a regression.
+    #[test]
+    fn drop_score_discard_stats_computes_exact_summary_from_synthetic_scores() {
+        let mut stats = DropScoreDiscardStats::default();
+        // Non-NaN discarded scores: 0.05, 0.15, 0.35, 0.49, plus two NaNs.
+        for score in [0.05_f32, 0.15, 0.35, 0.49] {
+            stats.record(score);
+        }
+        stats.record(f32::NAN);
+        stats.record(f32::NAN);
+
+        assert_eq!(stats.discarded_count, 6);
+        assert_eq!(stats.nan_count, 2);
+        assert_eq!(stats.scored_count(), 4);
+        assert!((stats.mean() - (0.05 + 0.15 + 0.35 + 0.49) / 4.0).abs() < 1e-6);
+        assert!((stats.min - 0.05).abs() < 1e-6);
+        assert!((stats.max - 0.49).abs() < 1e-6);
+        // Bucket width 0.2: [0.0,0.2) gets 0.05 and 0.15; [0.2,0.4) gets 0.35; [0.4,0.6) gets
+        // 0.49; the top two buckets stay empty since nothing discarded here reaches 0.6.
+        assert_eq!(stats.histogram, [2, 1, 1, 0, 0]);
+    }
+
+    /// An empty (no discards) summary reports zeroed fields rather than NaN/undefined values,
+    /// so a "nothing discarded" page reads as `discarded_count = 0` with a well-defined mean of
+    /// `0.0`, not a division-by-zero artifact.
+    #[test]
+    fn drop_score_discard_stats_defaults_to_zero_with_no_discards() {
+        let stats = DropScoreDiscardStats::default();
+        assert_eq!(stats.discarded_count, 0);
+        assert_eq!(stats.nan_count, 0);
+        assert_eq!(stats.mean(), 0.0);
+        assert_eq!(stats.min, 0.0);
+        assert_eq!(stats.max, 0.0);
+        assert_eq!(stats.histogram, [0, 0, 0, 0, 0]);
+    }
+
+    /// A score exactly at a bucket boundary (0.2, 0.4, 0.6, 0.8) must round into the bucket
+    /// starting there, not the one below — confirms `(score * buckets) as usize` truncates
+    /// rather than rounding-to-nearest, and that a score of exactly `1.0` clamps into the last
+    /// bucket instead of indexing one past the end.
+    #[test]
+    fn drop_score_discard_stats_histogram_boundaries_land_in_the_upper_bucket() {
+        let mut stats = DropScoreDiscardStats::default();
+        for score in [0.0_f32, 0.2, 0.4, 0.6, 0.8, 1.0] {
+            stats.record(score);
+        }
+        assert_eq!(stats.histogram, [1, 1, 1, 1, 2]);
+    }
 
     /// The session must receive the *entire* resolved process budget, not the hardcoded `1`
     /// this replaced. `workers * intra_threads <= budget` still holds because the mutex caps
