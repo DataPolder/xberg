@@ -1418,9 +1418,13 @@ fn reconstruct_region_table_with_column_gap(
     // separate `detect_columns(region, col_gap)` no longer agrees with the grid's column
     // count — and `repair_split_numeric_track` fails safe on a count mismatch, which would
     // have silently switched the repair off rather than reporting anything (#688).
-    let (mut grid, column_positions) =
+    let (mut grid, mut column_positions) =
         crate::table_core::reconstruct_table_with_columns(region, col_gap, 0.5);
-    repair_split_numeric_track(&mut grid, region, &column_positions);
+    // Takes `column_positions` by &mut so a successful repair drops the merged boundary from
+    // BOTH: the repair collapses two grid columns into one, and a stale extra position would
+    // leave `grid` one column narrower than `column_positions` for every consumer below —
+    // including `is_well_formed_borderless_table`, which is handed both.
+    repair_split_numeric_track(&mut grid, region, &mut column_positions);
     if grid.is_empty() || grid[0].is_empty() {
         return Err(HeuristicTableRejection::EmptyGrid);
     }
@@ -1574,7 +1578,7 @@ fn heuristic_column_gap(region: &[crate::pdf::table_reconstruct::HocrWord], regi
 fn repair_split_numeric_track(
     grid: &mut [Vec<String>],
     region: &[crate::pdf::table_reconstruct::HocrWord],
-    column_positions: &[u32],
+    column_positions: &mut Vec<u32>,
 ) -> bool {
     if grid.first().map_or(0, Vec::len) != column_positions.len() {
         return false;
@@ -1596,6 +1600,10 @@ fn repair_split_numeric_track(
             row[*column] = right;
         }
     }
+    // The two tracks were nearly coincident by construction — that is what made this a split
+    // rather than two real columns — so the surviving cluster keeps the left anchor and the
+    // spurious boundary is dropped, mirroring the `row.remove(column + 1)` above exactly.
+    column_positions.remove(column + 1);
     true
 }
 
@@ -3120,17 +3128,55 @@ mod tests {
     fn repairs_overlapping_mutually_exclusive_numeric_tracks() {
         let (mut grid, words) = alternating_numeric_tracks(["Polarization resistance", ""], 20);
 
-        assert!(repair_split_numeric_track(&mut grid, &words, &[20, 100, 104]));
+        assert!(repair_split_numeric_track(&mut grid, &words, &mut vec![20, 100, 104]));
         assert!(grid.iter().all(|row| row.len() == 2));
         assert_eq!(grid[0][1], "Polarization resistance");
         assert!(grid[1..].iter().all(|row| !row[1].is_empty()));
+    }
+
+    /// A successful repair collapses two grid columns into one, so it must drop the merged
+    /// boundary from `column_positions` as well. Callers hand BOTH to
+    /// `is_well_formed_borderless_table`, so a stale extra position leaves the grid one column
+    /// narrower than the positions describing it.
+    ///
+    /// Before this was fixed the function took `column_positions` as an immutable slice and
+    /// could not shrink it: this asserted length would be 3 against a 2-column grid, and the
+    /// surviving boundary set would still contain the spurious 104 track.
+    #[test]
+    fn repair_drops_the_merged_boundary_from_the_column_positions() {
+        let (mut grid, words) = alternating_numeric_tracks(["Polarization resistance", ""], 20);
+        let mut column_positions = vec![20, 100, 104];
+
+        assert!(repair_split_numeric_track(&mut grid, &words, &mut column_positions));
+
+        assert_eq!(
+            column_positions.len(),
+            grid[0].len(),
+            "grid width and column_positions must stay in lockstep through a repair"
+        );
+        assert_eq!(
+            column_positions,
+            vec![20, 100],
+            "the surviving cluster keeps the left anchor; the coincident 104 track is spurious"
+        );
+    }
+
+    /// A REJECTED repair must leave `column_positions` untouched — the early returns must not
+    /// half-apply the merge.
+    #[test]
+    fn rejected_repair_leaves_the_column_positions_unchanged() {
+        let (mut grid, words) = alternating_numeric_tracks(["Debit", "Credit"], 20);
+        let mut column_positions = vec![20, 100, 104];
+
+        assert!(!repair_split_numeric_track(&mut grid, &words, &mut column_positions));
+        assert_eq!(column_positions, vec![20, 100, 104]);
     }
 
     #[test]
     fn preserves_named_adjacent_sparse_numeric_columns() {
         let (mut grid, words) = alternating_numeric_tracks(["Debit", "Credit"], 20);
 
-        assert!(!repair_split_numeric_track(&mut grid, &words, &[20, 100, 104]));
+        assert!(!repair_split_numeric_track(&mut grid, &words, &mut vec![20, 100, 104]));
         assert!(grid.iter().all(|row| row.len() == 3));
     }
 
@@ -3138,7 +3184,7 @@ mod tests {
     fn preserves_unnamed_adjacent_sparse_numeric_columns() {
         let (mut grid, words) = alternating_numeric_tracks(["", ""], 20);
 
-        assert!(!repair_split_numeric_track(&mut grid, &words, &[20, 100, 104]));
+        assert!(!repair_split_numeric_track(&mut grid, &words, &mut vec![20, 100, 104]));
         assert!(grid.iter().all(|row| row.len() == 3));
     }
 
@@ -3146,7 +3192,7 @@ mod tests {
     fn preserves_geometrically_distinct_alternating_numeric_tracks() {
         let (mut grid, words) = alternating_numeric_tracks(["Combined amount", ""], 4);
 
-        assert!(!repair_split_numeric_track(&mut grid, &words, &[20, 100, 104]));
+        assert!(!repair_split_numeric_track(&mut grid, &words, &mut vec![20, 100, 104]));
         assert!(grid.iter().all(|row| row.len() == 3));
     }
 
@@ -3155,7 +3201,7 @@ mod tests {
         let (mut grid, words) = alternating_numeric_tracks(["", ""], 20);
         grid.push(vec!["7".to_string(), "N/A footnote".to_string(), String::new()]);
 
-        assert!(!repair_split_numeric_track(&mut grid, &words, &[20, 100, 104]));
+        assert!(!repair_split_numeric_track(&mut grid, &words, &mut vec![20, 100, 104]));
         assert!(grid.iter().all(|row| row.len() == 3));
     }
 
