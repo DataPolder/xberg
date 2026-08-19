@@ -135,6 +135,12 @@ struct ListContext {
     /// flag while the enclosing item is still open. This one survives the descent,
     /// so closing the sublist can resume buffering into the enclosing item.
     item_open: bool,
+    /// The `ListItem` node most recently emitted at this level, if the currently open
+    /// `<li>` has already produced one.
+    ///
+    /// Reset when an `<li>` opens, so it never names a previous sibling's item. A sublist
+    /// opening while `item_open` is set is parented under this node (task #728).
+    last_item_idx: Option<NodeIndex>,
 }
 
 /// Definition list context.
@@ -367,21 +373,27 @@ impl<'a, 'b> HtmlWalker<'a, 'b> {
                 }
             }
             "ul" => {
-                self.flush_paragraph();
                 // Flush any pending parent `<li>` text against the still-current (outer)
                 // list before descending, so it doesn't get misattributed to the list
                 // we're about to push (see task #719).
+                //
+                // The item is flushed *before* the paragraph: while an `<li>` is open
+                // `handle_text` buffers into `list_item_text`, so the item is the live
+                // context and owns the pending annotations, which `flush_paragraph` would
+                // otherwise discard on its way past an empty paragraph buffer (task #727).
                 self.flush_list_item();
-                let idx = self.builder.push_list(false, None);
+                self.flush_paragraph();
+                let idx = self.push_list_node(false);
                 self.list_stack.push(ListContext {
                     node_idx: idx,
                     item_open: false,
+                    last_item_idx: None,
                 });
             }
             "ol" => {
-                self.flush_paragraph();
                 self.flush_list_item();
-                let idx = self.builder.push_list(true, None);
+                self.flush_paragraph();
+                let idx = self.push_list_node(true);
                 if let Some(start_val) = extract_attr(attrs_str, "start") {
                     let mut attrs = AHashMap::new();
                     attrs.insert("start".to_string(), start_val.to_string());
@@ -390,6 +402,7 @@ impl<'a, 'b> HtmlWalker<'a, 'b> {
                 self.list_stack.push(ListContext {
                     node_idx: idx,
                     item_open: false,
+                    last_item_idx: None,
                 });
             }
             "li" => {
@@ -398,6 +411,7 @@ impl<'a, 'b> HtmlWalker<'a, 'b> {
                 self.list_item_text.clear();
                 if let Some(ctx) = self.list_stack.last_mut() {
                     ctx.item_open = true;
+                    ctx.last_item_idx = None;
                 }
             }
             "table" => {
@@ -822,18 +836,58 @@ impl<'a, 'b> HtmlWalker<'a, 'b> {
         self.inline_stack.clear();
     }
 
+    /// Create the `List` node for a `<ul>`/`<ol>` start tag, parented at the level the
+    /// markup actually nests it at.
+    ///
+    /// A sublist is a child of the `<li>` it is written inside, so that a consumer walking
+    /// the tree renders it before the item's trailing text rather than after the whole
+    /// outer list. Going through `push_list` instead parents under the section/container
+    /// stack, which makes every sublist a root-level sibling (task #728).
+    ///
+    /// Two shapes have no item node to hang the sublist on: `<li><ul>…` (the item has no
+    /// text of its own, so no `ListItem` was emitted) and a `<ul>` sitting directly inside
+    /// another `<ul>` with no `<li>` open. Both fall back to the enclosing `List` node,
+    /// which keeps the sublist inside the list subtree without minting an empty item.
+    fn push_list_node(&mut self, ordered: bool) -> NodeIndex {
+        let parent = self.list_stack.last().map(|ctx| {
+            if ctx.item_open {
+                ctx.last_item_idx.unwrap_or(ctx.node_idx)
+            } else {
+                ctx.node_idx
+            }
+        });
+        match parent {
+            Some(parent_idx) => self.builder.push_nested_list(parent_idx, ordered, None),
+            None => self.builder.push_list(ordered, None),
+        }
+    }
+
+    /// Emit the buffered `<li>` text as a `ListItem` and reset the inline state that
+    /// belonged to it.
+    ///
+    /// The annotation buffer is taken (not just read) and the inline stack is cleared, for
+    /// the same reason `flush_paragraph` does both: `pop_inline` measures spans against
+    /// `list_item_text`, which this method empties. Anything still referring to it after
+    /// the flush — a completed annotation left behind, or a span whose closing tag has not
+    /// arrived yet — would resolve against whatever text is buffered next and annotate an
+    /// unrelated node at meaningless offsets (task #727).
     fn flush_list_item(&mut self) {
         if !self.in_list_item {
             return;
         }
         self.in_list_item = false;
         let text = normalize_whitespace(&self.list_item_text);
+        let annotations = std::mem::take(&mut self.annotations);
         if !text.is_empty()
-            && let Some(ctx) = self.list_stack.last()
+            && let Some(list_idx) = self.list_stack.last().map(|ctx| ctx.node_idx)
         {
-            self.builder.push_list_item(ctx.node_idx, &text, None);
+            let item_idx = self.builder.push_list_item(list_idx, &text, annotations, None);
+            if let Some(ctx) = self.list_stack.last_mut() {
+                ctx.last_item_idx = Some(item_idx);
+            }
         }
         self.list_item_text.clear();
+        self.inline_stack.clear();
     }
 
     fn flush_definition_item(&mut self) {
@@ -1376,6 +1430,143 @@ mod tests {
             8,
             "whitespace-only content between </ul> and </li> must not mint an empty ListItem"
         );
+    }
+
+    /// Regression test for task #727: `flush_list_item` dropped `self.annotations` on the
+    /// floor, so inline formatting inside an `<li>` never reached the `ListItem` node.
+    ///
+    /// Against the unfixed code the item's `annotations` is empty.
+    #[test]
+    fn test_list_item_keeps_its_inline_annotations() {
+        let html = "<ul><li>alpha <strong>bold</strong></li></ul>";
+        let doc = build_document_structure(html);
+        assert!(doc.validate().is_ok());
+
+        let item = doc
+            .nodes
+            .iter()
+            .find(|node| matches!(node.content, NodeContent::ListItem { .. }))
+            .expect("expected a ListItem node");
+        assert!(
+            matches!(&item.content, NodeContent::ListItem { text } if text == "alpha bold"),
+            "unexpected item text: {:?}",
+            item.content
+        );
+        assert_eq!(
+            item.annotations.len(),
+            1,
+            "the item's <strong> must survive the flush, got {:?}",
+            item.annotations
+        );
+        assert_eq!(item.annotations[0].kind, AnnotationKind::Bold);
+        assert_eq!(item.annotations[0].start, 6);
+        assert_eq!(item.annotations[0].end, 10);
+    }
+
+    /// Task #727, the worse half: because the annotation buffer was never cleared either,
+    /// a list item's annotations stayed pending and were claimed by the next node that
+    /// flushed, landing on unrelated text at offsets that mean nothing there.
+    ///
+    /// Against the unfixed code the trailing paragraph carries `Bold { start: 6, end: 10 }`
+    /// — the offsets of "bold" inside the list item, which in "Trailing sentence text."
+    /// mark "ng s".
+    #[test]
+    fn test_list_item_annotations_do_not_leak_into_the_next_paragraph() {
+        let html = "<ul><li>alpha <strong>bold</strong></li></ul>Trailing sentence text.";
+        let doc = build_document_structure(html);
+        assert!(doc.validate().is_ok());
+
+        let para = doc
+            .nodes
+            .iter()
+            .find(|node| matches!(&node.content, NodeContent::Paragraph { text } if text == "Trailing sentence text."))
+            .expect("expected the trailing text to become a Paragraph");
+        assert!(
+            para.annotations.is_empty(),
+            "list-item formatting must not be re-attributed to the following paragraph, got {:?}",
+            para.annotations
+        );
+    }
+
+    /// Task #727, half-open spans: `pop_inline` measures against whichever buffer is live,
+    /// so an inline element left unclosed when the item flushed would close against the
+    /// *next* buffer. Clearing the inline stack alongside the annotation buffer (what
+    /// `flush_paragraph` already does) is what stops it.
+    ///
+    /// Against the unfixed code the trailing paragraph carries `Bold { start: 6, end: 17 }`,
+    /// i.e. "ng sentence" of "Trailing sentence" rendered bold.
+    #[test]
+    fn test_unclosed_inline_in_a_list_item_does_not_annotate_later_text() {
+        let html = "<ul><li>alpha <strong>bold</li></ul>Trailing sentence</strong>";
+        let doc = build_document_structure(html);
+        assert!(doc.validate().is_ok());
+
+        let para = doc
+            .nodes
+            .iter()
+            .find(|node| matches!(&node.content, NodeContent::Paragraph { text } if text == "Trailing sentence"))
+            .expect("expected the trailing text to become a Paragraph");
+        assert!(
+            para.annotations.is_empty(),
+            "an inline span left open in a list item must not close against later text, got {:?}",
+            para.annotations
+        );
+    }
+
+    /// Regression test for task #728: `push_list` parents through the section/container
+    /// stack, so a `<ul>` nested inside an `<li>` became a root-level sibling of the outer
+    /// list instead of a child of the item containing it.
+    ///
+    /// Against the unfixed code the inner list's `parent` is `None` and
+    /// `body_roots().count()` is 2.
+    #[test]
+    fn test_sublist_becomes_a_child_of_its_list_item() {
+        let html = "<ul><li>parent<ul><li>child</li></ul>tail</li></ul>";
+        let doc = build_document_structure(html);
+        assert!(doc.validate().is_ok());
+
+        let lists = list_node_indices(&doc);
+        assert_eq!(lists.len(), 2, "expected exactly 2 List nodes, got {lists:?}");
+        assert_eq!(
+            list_item_texts(&doc, lists[0]),
+            vec!["parent".to_string(), "tail".to_string()]
+        );
+        assert_eq!(list_item_texts(&doc, lists[1]), vec!["child".to_string()]);
+
+        let parent_item = doc.nodes[lists[0]].children[0];
+        assert_eq!(
+            doc.nodes[lists[1]].parent,
+            Some(parent_item),
+            "the sublist must hang off the <li> it is written inside, not off the document root"
+        );
+        assert_eq!(
+            doc.nodes[parent_item.0 as usize].children,
+            vec![NodeIndex(lists[1] as u32)],
+            "the containing item must own the sublist"
+        );
+        assert_eq!(doc.body_roots().count(), 1, "only the outer list may be a root node");
+    }
+
+    /// Task #728 with no text before the sublist: there is no `ListItem` to parent under,
+    /// and minting an empty one is explicitly unwanted (see
+    /// `test_pretty_printed_sublist_keeps_trailing_text_without_empty_items`). The sublist
+    /// falls back to the enclosing `List` so it still stays inside the list subtree.
+    ///
+    /// Against the unfixed code the inner list's `parent` is `None`.
+    #[test]
+    fn test_textless_item_sublist_stays_inside_the_outer_list() {
+        let html = "<ul><li>first</li><li><ul><li>child</li></ul></li></ul>";
+        let doc = build_document_structure(html);
+        assert!(doc.validate().is_ok());
+
+        let lists = list_node_indices(&doc);
+        assert_eq!(lists.len(), 2, "expected exactly 2 List nodes, got {lists:?}");
+        assert_eq!(
+            doc.nodes[lists[1]].parent,
+            Some(NodeIndex(lists[0] as u32)),
+            "a sublist in a text-less item must not become a root-level sibling"
+        );
+        assert_eq!(doc.body_roots().count(), 1, "only the outer list may be a root node");
     }
 
     #[test]

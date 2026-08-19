@@ -562,7 +562,7 @@ fn build_slide_structure(
                             doc_builder.push_formula(formula, None);
                         }
                         if !item_text.trim().is_empty() {
-                            doc_builder.push_list_item(list_node, item_text.trim(), None);
+                            doc_builder.push_list_item(list_node, item_text.trim(), Vec::new(), None);
                         }
                     }
                 }

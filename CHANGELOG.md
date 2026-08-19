@@ -11,6 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Inline formatting inside a list item now survives, and stops corrupting the text after it
+  (#727). Bold, italic and link spans inside an `<li>` were discarded when the item was flushed,
+  and because the buffer holding them was never cleared they were re-applied to the next paragraph
+  — at the same character offsets, so they marked arbitrary words in unrelated text. Email and
+  DOCX-derived list items now render their formatting instead of losing it.
+
+- A `<ul>` or `<ol>` nested inside an `<li>` is now a child of that item rather than a root-level
+  sibling of the enclosing list (#728). Consumers that walk the document tree — email rendering
+  among them — emitted the parent item's trailing text before the sublist's items, and reported
+  every item at the same depth. Consumers that walk flat creation order, such as EPUB, are
+  unaffected and their output is unchanged.
+
 - Legacy `.doc` extraction no longer deletes non-breaking hyphens. The character Word writes for
   Ctrl+Shift+hyphen was discarded along with the genuinely invisible control codes, so hyphenated
   compounds came out fused: "twenty-one" extracted as "twentyone", and clause numbers like "3-4"

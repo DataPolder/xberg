@@ -141,10 +141,33 @@ impl DocumentStructureBuilder {
         self.push_body_node(content, page, None, vec![])
     }
 
-    /// Push a list item as a child of the given list node.
-    pub(crate) fn push_list_item(&mut self, list: NodeIndex, text: &str, page: Option<u32>) -> NodeIndex {
-        let content = NodeContent::ListItem { text: text.to_string() };
+    /// Push a list container as a child of an existing node.
+    ///
+    /// Unlike [`push_list`](Self::push_list) this bypasses the section and container
+    /// stacks and parents explicitly, which is what a sublist needs: a `<ul>` written
+    /// inside an `<li>` belongs to that item, not to the enclosing section. Returns the
+    /// `NodeIndex` to use with [`push_list_item`](Self::push_list_item).
+    #[cfg(any(feature = "office", feature = "email"))]
+    pub(crate) fn push_nested_list(&mut self, parent: NodeIndex, ordered: bool, page: Option<u32>) -> NodeIndex {
+        let content = NodeContent::List { ordered };
         let idx = self.push_node_raw(content, page, None, ContentLayer::Body, vec![]);
+        self.doc.add_child(parent, idx);
+        idx
+    }
+
+    /// Push a list item as a child of the given list node.
+    ///
+    /// `annotations` carries the item's inline formatting (bold, italic, links) with
+    /// offsets relative to `text`, mirroring [`push_paragraph`](Self::push_paragraph).
+    pub(crate) fn push_list_item(
+        &mut self,
+        list: NodeIndex,
+        text: &str,
+        annotations: Vec<TextAnnotation>,
+        page: Option<u32>,
+    ) -> NodeIndex {
+        let content = NodeContent::ListItem { text: text.to_string() };
+        let idx = self.push_node_raw(content, page, None, ContentLayer::Body, annotations);
         self.doc.add_child(list, idx);
         idx
     }
@@ -624,9 +647,9 @@ mod tests {
     fn test_list_construction() {
         let mut b = DocumentStructureBuilder::new();
         let list = b.push_list(false, Some(1));
-        b.push_list_item(list, "Item 1", Some(1));
-        b.push_list_item(list, "Item 2", Some(1));
-        b.push_list_item(list, "Item 3", Some(1));
+        b.push_list_item(list, "Item 1", vec![], Some(1));
+        b.push_list_item(list, "Item 2", vec![], Some(1));
+        b.push_list_item(list, "Item 3", vec![], Some(1));
         let doc = b.build();
 
         assert!(doc.validate().is_ok());
@@ -751,8 +774,8 @@ mod tests {
         b.push_heading(1, "Title", Some(1), None);
         b.push_paragraph("Content", vec![bold(0, 7)], Some(1), None);
         let list = b.push_list(true, Some(1));
-        b.push_list_item(list, "One", Some(1));
-        b.push_list_item(list, "Two", Some(1));
+        b.push_list_item(list, "One", vec![], Some(1));
+        b.push_list_item(list, "Two", vec![], Some(1));
         b.push_code("fn main() {}", Some("rust"), Some(1));
         let doc = b.build();
 
