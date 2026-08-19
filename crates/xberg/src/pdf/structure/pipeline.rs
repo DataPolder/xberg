@@ -829,9 +829,233 @@ fn segments_to_paragraphs(
     let segments = order_segments_in_reading_frames(segments);
     let mut paragraphs = blocks_to_paragraphs(segments, heading_map, paragraph_gap_ys);
     apply_text_repair_to_structure_tree_paragraphs(&mut paragraphs, true);
+    reattach_detached_list_markers(&mut paragraphs);
     merge_continuation_paragraphs(&mut paragraphs);
     synchronize_paragraph_text_metadata(&mut paragraphs);
     paragraphs
+}
+
+/// Master switch for [`reattach_detached_list_markers`].
+///
+/// Flip this single constant to `false` to build a control binary that differs
+/// from the shipped one only in this behaviour; nothing else guards the pass.
+const REATTACH_DETACHED_LIST_MARKERS: bool = true;
+
+/// How closely a detached marker's baseline must agree with the baseline of the
+/// body line it is claimed to belong to, as a multiple of the larger of the two
+/// font sizes. Scale-free by construction, so it behaves identically on
+/// point-scale native input and on OCR font sizes of a different magnitude.
+const DETACHED_MARKER_BASELINE_TOLERANCE_FONT_FACTOR: f32 = 0.6;
+
+/// Largest hanging indent, measured from the marker's right edge to the body
+/// line's left edge, as a multiple of the body font size. Real hanging indents
+/// run a quarter to half an inch; this admits those while refusing to pair a
+/// marker in one column with a body in another.
+const DETACHED_MARKER_MAX_INDENT_FONT_FACTOR: f32 = 6.0;
+
+/// Largest overlap tolerated in the other direction, as a multiple of the body
+/// font size, so a marker whose measured width slightly overruns the body's
+/// left edge still pairs.
+const DETACHED_MARKER_MAX_OVERLAP_FONT_FACTOR: f32 = 0.5;
+
+/// How many paragraphs ahead of a detached marker its body may sit. A marker
+/// *column* emits every marker before any body ("(a)", "(b)", "(c)", then three
+/// bodies), so the body is not necessarily the next paragraph.
+const DETACHED_MARKER_MAX_LOOKAHEAD: usize = 8;
+
+/// Minimum word count of the body paragraph. Excludes single-token neighbours,
+/// which is what a marker-shaped table column looks like.
+const DETACHED_MARKER_MIN_BODY_WORDS: usize = 2;
+
+/// Reattach a list marker that was emitted as a paragraph of its own to the
+/// body line it belongs to.
+///
+/// A hanging-indent list puts its markers in a narrow left column and its item
+/// text in a wide right column. Both OCR block segmentation and some native
+/// producers treat those columns as separate blocks, so the markers arrive as
+/// isolated single-segment paragraphs — sometimes the whole marker column
+/// ahead of the whole text column — and every item loses the only evidence that
+/// it is an item. `finalize_paragraph`'s `starts_with_split_list_marker` already
+/// handles the case where the marker and the body ended up in the *same*
+/// paragraph; this handles the case where they did not.
+///
+/// Pairing is by *baseline*, not by adjacency, which is what makes a marker
+/// column recoverable: "(a)", "(b)", "(c)" each match the body line they share a
+/// baseline with regardless of how many paragraphs sit between them.
+///
+/// Deliberately narrow, because this pass is shared with native extraction:
+/// - The marker paragraph must be exactly one line holding exactly one segment
+///   whose whole text is a bare marker ([`is_bare_list_marker`]) — prose can
+///   never produce that, so flowing text has nothing here to match.
+/// - The body must not already be a heading or a list item, and its first line
+///   must not already start with a marker.
+/// - The body must be strictly to the right of the marker, within one hanging
+///   indent, on the same baseline, in the same rotation frame.
+/// - The body must carry at least [`DETACHED_MARKER_MIN_BODY_WORDS`] words.
+///
+/// Everything is expressed relative to font size, so the OCR route (whose
+/// geometry may be in a different unit space) and the native route (points) get
+/// the same behaviour.
+fn reattach_detached_list_markers(paragraphs: &mut Vec<PdfParagraph>) {
+    if !REATTACH_DETACHED_LIST_MARKERS || paragraphs.len() < 2 {
+        return;
+    }
+
+    let mut consumed = vec![false; paragraphs.len()];
+    let mut pairs: Vec<(usize, usize)> = Vec::new();
+
+    for marker_index in 0..paragraphs.len() {
+        if consumed[marker_index] {
+            continue;
+        }
+        let Some(marker) = detached_list_marker(&paragraphs[marker_index]) else {
+            continue;
+        };
+        let limit = (marker_index + 1 + DETACHED_MARKER_MAX_LOOKAHEAD).min(paragraphs.len());
+        let body_index = (marker_index + 1..limit)
+            .find(|&candidate| !consumed[candidate] && accepts_detached_list_marker(&paragraphs[candidate], &marker));
+        let Some(body_index) = body_index else {
+            continue;
+        };
+        consumed[marker_index] = true;
+        consumed[body_index] = true;
+        pairs.push((marker_index, body_index));
+    }
+
+    if pairs.is_empty() {
+        return;
+    }
+
+    for (marker_index, body_index) in &pairs {
+        let Some(marker_segment) = paragraphs[*marker_index]
+            .lines
+            .first()
+            .and_then(|line| line.segments.first())
+            .cloned()
+        else {
+            continue;
+        };
+        let marker_bbox = paragraphs[*marker_index].block_bbox;
+        let body = &mut paragraphs[*body_index];
+        if let Some(line) = body.lines.first_mut() {
+            line.segments.insert(0, marker_segment);
+        }
+        body.is_list_item = true;
+        body.block_bbox = match (body.block_bbox, marker_bbox) {
+            (Some(body_bbox), Some(marker_bbox)) => Some((
+                body_bbox.0.min(marker_bbox.0),
+                body_bbox.1.min(marker_bbox.1),
+                body_bbox.2.max(marker_bbox.2),
+                body_bbox.3.max(marker_bbox.3),
+            )),
+            (bbox @ Some(_), None) | (None, bbox @ Some(_)) => bbox,
+            (None, None) => None,
+        };
+        // Text is rebuilt from `lines` downstream (see
+        // `synchronize_paragraph_text_metadata`); a stale cached string here
+        // would silently win over the segment we just spliced in.
+        body.text.clear();
+        body.word_count = PdfParagraph::compute_word_count("", &body.lines);
+    }
+
+    let mut index = 0usize;
+    paragraphs.retain(|_| {
+        let keep = !pairs.iter().any(|(marker_index, _)| *marker_index == index);
+        index += 1;
+        keep
+    });
+}
+
+/// The lone segment of a paragraph that is nothing but a list marker.
+fn detached_list_marker(paragraph: &PdfParagraph) -> Option<SegmentData> {
+    if paragraph.heading_level.is_some() || paragraph.is_list_item || paragraph.is_code_block || paragraph.is_formula {
+        return None;
+    }
+    let [line] = paragraph.lines.as_slice() else {
+        return None;
+    };
+    let [segment] = line.segments.as_slice() else {
+        return None;
+    };
+    if !is_bare_list_marker(&segment.text) {
+        return None;
+    }
+    let geometry_is_usable = segment.x.is_finite()
+        && segment.width.is_finite()
+        && segment.width >= 0.0
+        && segment.font_size.is_finite()
+        && segment.font_size > 0.0
+        && segment.upright_baseline().is_finite();
+    geometry_is_usable.then(|| segment.clone())
+}
+
+/// Whether `paragraph` is the body line the detached `marker` belongs to.
+fn accepts_detached_list_marker(paragraph: &PdfParagraph, marker: &SegmentData) -> bool {
+    if paragraph.heading_level.is_some()
+        || paragraph.is_list_item
+        || paragraph.is_code_block
+        || paragraph.is_formula
+        || paragraph.is_page_furniture
+    {
+        return false;
+    }
+    let Some(first_line) = paragraph.lines.first() else {
+        return false;
+    };
+    if first_line.segments.is_empty() {
+        return false;
+    }
+    let first_line_text = first_line
+        .segments
+        .iter()
+        .map(|segment| segment.text.trim())
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if looks_like_list_item(&first_line_text) || is_bare_list_marker(&first_line_text) {
+        return false;
+    }
+
+    let body_words = paragraph
+        .lines
+        .iter()
+        .flat_map(|line| line.segments.iter())
+        .flat_map(|segment| segment.text.split_whitespace())
+        .count();
+    if body_words < DETACHED_MARKER_MIN_BODY_WORDS {
+        return false;
+    }
+
+    let Some(anchor) = first_line.segments.first() else {
+        return false;
+    };
+    if !anchor.has_same_rotation(marker) {
+        return false;
+    }
+    let font_size = anchor.font_size.max(marker.font_size);
+    if !font_size.is_finite() || font_size <= 0.0 {
+        return false;
+    }
+
+    let baseline_delta = (anchor.upright_baseline() - marker.upright_baseline()).abs();
+    if !baseline_delta.is_finite() || baseline_delta > font_size * DETACHED_MARKER_BASELINE_TOLERANCE_FONT_FACTOR {
+        return false;
+    }
+
+    let body_left = first_line
+        .segments
+        .iter()
+        .map(|segment| segment.upright_advance_extent().0)
+        .fold(f32::INFINITY, f32::min);
+    let marker_start = marker.upright_advance_extent().0;
+    let marker_end = marker.upright_advance_extent().1;
+    if !body_left.is_finite() || !marker_start.is_finite() || !marker_end.is_finite() {
+        return false;
+    }
+    let indent = body_left - marker_end;
+    body_left > marker_start
+        && indent >= -(font_size * DETACHED_MARKER_MAX_OVERLAP_FONT_FACTOR)
+        && indent <= font_size * DETACHED_MARKER_MAX_INDENT_FONT_FACTOR
 }
 
 /// Repair reading order inside maximal rotated runs without touching upright
@@ -6326,6 +6550,104 @@ mod tests {
         assert_eq!(
             paragraph_segment_text(&paragraphs[0]),
             "Het bestuur meldt 2024 was een druk jaar"
+        );
+    }
+
+    /// Helper: one segment of a hanging-indent column, 11pt on an 11pt line.
+    fn column_seg(text: &str, x: f32, width: f32, baseline_y: f32) -> SegmentData {
+        SegmentData {
+            text: text.to_string(),
+            x,
+            y: baseline_y - 11.0,
+            width,
+            height: 11.0,
+            font_size: 11.0,
+            is_bold: false,
+            is_italic: false,
+            is_monospace: false,
+            baseline_y,
+            rotation_degrees: 0.0,
+            assigned_role: None,
+        }
+    }
+
+    /// The shape measured on `test_documents/pdf_scanned/ordinance_2197_scanned.pdf`
+    /// (tesseract): the marker column is a separate block from the text column, so
+    /// every marker arrives as its own paragraph and the whole marker run precedes
+    /// the whole text run. Pairing must therefore be by baseline, not adjacency.
+    #[test]
+    fn detached_marker_column_is_reattached_to_the_body_sharing_its_baseline() {
+        let segments = vec![
+            column_seg("(a)", 72.0, 14.0, 700.0),
+            column_seg("(b)", 72.0, 14.0, 660.0),
+            column_seg("(c)", 72.0, 14.0, 620.0),
+            column_seg("A ten foot wide minimum buffer along the lot line", 110.0, 300.0, 700.0),
+            column_seg("Ten foot wide minimum buffers along Lake Pointe Parkway", 110.0, 300.0, 660.0),
+            column_seg("Required buffers may include the pedestrian walkway", 110.0, 300.0, 620.0),
+        ];
+        let gap_ys = compute_paragraph_gap_ys(&segments);
+
+        let paragraphs = segments_to_paragraphs(segments, &[(11.0, None)], &gap_ys);
+
+        assert_eq!(
+            paragraphs.len(),
+            3,
+            "each detached marker must be folded into the body line it shares a baseline with"
+        );
+        assert_eq!(
+            paragraph_segment_text(&paragraphs[0]),
+            "(a) A ten foot wide minimum buffer along the lot line"
+        );
+        assert_eq!(
+            paragraph_segment_text(&paragraphs[1]),
+            "(b) Ten foot wide minimum buffers along Lake Pointe Parkway"
+        );
+        assert_eq!(
+            paragraph_segment_text(&paragraphs[2]),
+            "(c) Required buffers may include the pedestrian walkway"
+        );
+    }
+
+    /// Reattachment is only worth anything if the body is then *classified* as a
+    /// list item; the marker text alone changes no downstream element kind.
+    #[test]
+    fn bodies_that_absorb_a_detached_marker_become_list_items() {
+        let segments = vec![
+            column_seg("(a)", 72.0, 14.0, 700.0),
+            column_seg("(b)", 72.0, 14.0, 660.0),
+            column_seg("(c)", 72.0, 14.0, 620.0),
+            column_seg("A ten foot wide minimum buffer along the lot line", 110.0, 300.0, 700.0),
+            column_seg("Ten foot wide minimum buffers along Lake Pointe Parkway", 110.0, 300.0, 660.0),
+            column_seg("Required buffers may include the pedestrian walkway", 110.0, 300.0, 620.0),
+        ];
+        let gap_ys = compute_paragraph_gap_ys(&segments);
+
+        let paragraphs = segments_to_paragraphs(segments, &[(11.0, None)], &gap_ys);
+
+        assert_eq!(
+            paragraphs.iter().filter(|paragraph| paragraph.is_list_item).count(),
+            3,
+            "a body that absorbed its marker must classify as a list item"
+        );
+    }
+
+    /// Precision guard (passes with and without the reattachment pass). A bare
+    /// marker must not adopt an indented block on a *different* baseline: that is
+    /// an ordinary following paragraph, not the marker's own item text.
+    #[test]
+    fn a_bare_marker_does_not_adopt_a_block_on_another_baseline() {
+        let segments = vec![
+            column_seg("(a)", 72.0, 14.0, 700.0),
+            column_seg("An indented block that begins on the next line entirely", 110.0, 300.0, 660.0),
+        ];
+        let gap_ys = compute_paragraph_gap_ys(&segments);
+
+        let paragraphs = segments_to_paragraphs(segments, &[(11.0, None)], &gap_ys);
+
+        assert_eq!(paragraphs.len(), 2, "baseline agreement is what licenses reattachment");
+        assert!(
+            !paragraphs[1].is_list_item,
+            "a block on its own baseline must not be turned into a list item"
         );
     }
 

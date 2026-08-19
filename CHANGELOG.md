@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- List markers that OCR emits as their own block — common on scanned documents, where the marker
+  column is recognised separately from the text column — are now reattached to the body text they
+  belong to. Pairing is by shared baseline rather than adjacency, so a whole column of markers
+  preceding a whole column of bodies is recovered rather than only the first pair. The marker must
+  be the entire content of its own single-segment paragraph, which flowing prose never produces.
+
 - OCR font sizes for the Sceptre and PaddleOCR backends are now resolved as a median per detected
   text block rather than per fragment. Those backends report no typographic font size, so the
   structure layer falls back to the height of each detection box — which varies with glyph mix
