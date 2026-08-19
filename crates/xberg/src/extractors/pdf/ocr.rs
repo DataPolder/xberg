@@ -2155,28 +2155,51 @@ pub(crate) async fn extract_mixed_ocr_native(
             .values()
             .flat_map(|doc| doc.tables.iter().cloned())
             .collect();
-        if let Some(combined_doc) =
-            heuristically_restructured_ocr_pages(&pages_for_heuristic, &tables_for_heuristic, config)
-        {
-            let mut ocr_page_numbers: Vec<u32> = structured_ocr_pages.keys().copied().collect();
-            ocr_page_numbers.sort_unstable();
-            let mut split_pages = split_document_global_ocr_structure_by_page(combined_doc, &ocr_page_numbers);
-            for page_number in &ocr_page_numbers {
-                let Some(mut new_page_doc) = split_pages.remove(page_number) else {
-                    continue;
-                };
-                let Some(existing) = structured_ocr_pages.get(page_number) else {
-                    continue;
-                };
+        let mut ocr_page_numbers: Vec<u32> = structured_ocr_pages.keys().copied().collect();
+        ocr_page_numbers.sort_unstable();
+        let mut split_pages = heuristically_restructured_ocr_pages(&pages_for_heuristic, &tables_for_heuristic, config)
+            .map(|combined_doc| split_document_global_ocr_structure_by_page(combined_doc, &ocr_page_numbers))
+            .unwrap_or_default();
+        for page_number in &ocr_page_numbers {
+            let Some(existing) = structured_ocr_pages.get(page_number) else {
+                continue;
+            };
+            let new_page_doc = match split_pages.remove(page_number) {
                 // The heuristic's combined document has no notion of the backend's raw
                 // per-word OCR elements or this page's earlier warnings -- both come
                 // from the fallback per-page document already built above; only the
                 // *structural* elements (headings/paragraphs/list items/tables) come
                 // from the document-global pass.
-                new_page_doc.prebuilt_ocr_elements = existing.prebuilt_ocr_elements.clone();
-                new_page_doc.processing_warnings = existing.processing_warnings.clone();
-                structured_ocr_pages.insert(*page_number, new_page_doc);
-            }
+                Some(mut new_page_doc) => {
+                    new_page_doc.prebuilt_ocr_elements = existing.prebuilt_ocr_elements.clone();
+                    new_page_doc.processing_warnings = existing.processing_warnings.clone();
+                    new_page_doc
+                }
+                // The heuristic either didn't run at all for this document (Plain output, or
+                // some other page was already ML-layout-classified -- `already_structured` is
+                // document-wide) or dropped this specific page. Either way this page's
+                // paragraphs never got ANY list-item classification (#713): apply a
+                // text-marker-only fallback pass, which never touches `heading_level`, so it
+                // cannot regress heading detection the way pre-classifying before the
+                // heuristic call would.
+                None => {
+                    let mut paragraphs = pages_for_heuristic
+                        .get((*page_number - 1) as usize)
+                        .cloned()
+                        .unwrap_or_default();
+                    apply_ocr_text_list_fallback(&mut paragraphs);
+                    let mut new_page_doc = crate::pdf::structure::assemble_internal_document(
+                        vec![paragraphs],
+                        &existing.tables,
+                        Some(&existing.images),
+                        &[],
+                    );
+                    new_page_doc.prebuilt_ocr_elements = existing.prebuilt_ocr_elements.clone();
+                    new_page_doc.processing_warnings = existing.processing_warnings.clone();
+                    new_page_doc
+                }
+            };
+            structured_ocr_pages.insert(*page_number, new_page_doc);
         }
     }
 
@@ -3180,7 +3203,19 @@ fn assemble_ocr_page_paragraphs(
 ///   coincidental marker-shaped prefix (a numbered code line, an OCR'd page-footer
 ///   digit) must not flip them.
 /// - A paragraph the layout route already classified as a list item is left as-is.
-#[cfg(all(feature = "ocr", feature = "layout-detection"))]
+///
+/// Also reused, unmodified, as a *post-heuristic* fallback on the non-layout OCR
+/// routes (`extract_mixed_ocr_native`, `run_ocr_pipeline`) for pages the document-global
+/// heading/list heuristic (`heuristically_restructured_ocr_pages`) never classified --
+/// either because it declined to run at all (`Plain` output, or another page in the same
+/// document already carried an ML layout classification) or because it dropped a page
+/// during the page split. Applying it there too (instead of only after ML layout hints)
+/// closes the gap where a non-layout OCR document got zero list-item recovery of any kind
+/// (#713). It is applied strictly *after* the heuristic has had its chance, never before:
+/// pre-setting `is_list_item` earlier would itself flip `heuristically_restructured_ocr_pages`'s
+/// "already structured" gate and skip heading detection for the whole document, trading a
+/// list-item win for a heading-detection regression -- see that function's own doc comment.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 fn apply_ocr_text_list_fallback(paragraphs: &mut [crate::pdf::structure::types::PdfParagraph]) {
     for paragraph in paragraphs.iter_mut() {
         if paragraph.is_list_item || paragraph.is_code_block || paragraph.is_formula || paragraph.is_page_furniture {
@@ -4160,12 +4195,27 @@ async fn extract_with_ocr_for_page(
             } else {
                 match heuristically_restructured_ocr_pages(&pages, &collected_tables, config) {
                     Some(doc) => Some(doc),
-                    None => Some(crate::pdf::structure::assemble_internal_document(
-                        pages.clone(),
-                        &collected_tables,
-                        None,
-                        &[],
-                    )),
+                    None => {
+                        // The document-global heading/list heuristic declined to run (Plain
+                        // output, or a paragraph was already ML-layout-classified) or found
+                        // nothing. Apply a text-marker-only list pass to the bare pages before
+                        // falling back to plain assembly, so a non-layout OCR document that
+                        // never reaches the heuristic still gets *some* list-item recovery
+                        // (#713) -- this never touches `heading_level`, so it cannot regress
+                        // heading detection the way pre-classifying before the heuristic call
+                        // would (see `apply_ocr_text_list_fallback`'s own doc comment on the
+                        // "already structured" gate this must not trip).
+                        let mut fallback_pages = pages.clone();
+                        for page in &mut fallback_pages {
+                            apply_ocr_text_list_fallback(page);
+                        }
+                        Some(crate::pdf::structure::assemble_internal_document(
+                            fallback_pages,
+                            &collected_tables,
+                            None,
+                            &[],
+                        ))
+                    }
                 }
             };
             (doc, pages)
@@ -5152,8 +5202,10 @@ mod tests {
 
     /// Minimal `PdfParagraph` fixture: same shape `ocr_doc_to_layout_paragraphs`
     /// produces (empty `lines`, no layout region/caption), just enough for
-    /// `apply_ocr_text_list_fallback`.
-    #[cfg(all(feature = "ocr", feature = "layout-detection"))]
+    /// `apply_ocr_text_list_fallback`. Not layout-gated: `apply_ocr_text_list_fallback`
+    /// itself no longer requires `layout-detection` (#713), and this fixture is reused
+    /// by the non-layout-route tests below.
+    #[cfg(feature = "ocr")]
     fn ocr_paragraph(text: &str) -> crate::pdf::structure::types::PdfParagraph {
         crate::pdf::structure::types::PdfParagraph {
             text: text.to_string(),
@@ -5324,6 +5376,66 @@ mod tests {
         for (paragraph, text) in paragraphs.iter().zip(texts) {
             assert!(!paragraph.is_list_item, "must not classify as a list item: {text:?}");
         }
+    }
+
+    /// #713: on the non-layout OCR route, `apply_ocr_text_list_fallback` was gated on
+    /// `feature = "layout-detection"` even though it does no layout classification at
+    /// all -- it is a pure text-marker pass. This is deliberately compiled and run
+    /// under `feature = "ocr"` alone (no `layout-detection` in this test's own `cfg`)
+    /// to prove it no longer requires that feature.
+    ///
+    /// Against unfixed code this does not compile in an `ocr`-only build (the function
+    /// itself carries `#[cfg(all(feature = "ocr", feature = "layout-detection"))]`); in
+    /// a build where `layout-detection` happens to be on too (the common CI default),
+    /// it still documents the intended availability contract this fix changes.
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn apply_ocr_text_list_fallback_is_available_without_layout_detection() {
+        let mut paragraphs = vec![ocr_paragraph("1. Item without any ML layout classification")];
+
+        apply_ocr_text_list_fallback(&mut paragraphs);
+
+        assert!(paragraphs[0].is_list_item);
+    }
+
+    /// #713 end-to-end for the non-layout OCR route: a single hOCR block spanning
+    /// three numbered items must, after both fixes (`ocr_doc_to_paragraphs`'s
+    /// marker-splitting and `apply_ocr_text_list_fallback`'s text-marker
+    /// classification), come out as three separately classified list items -- the
+    /// same outcome the ML-layout route already got via `push_body_group` +
+    /// `apply_ocr_text_list_fallback`.
+    ///
+    /// Against unfixed code this asserts `paragraphs.len() == 3` and
+    /// `paragraphs[i].is_list_item` for each; today `ocr_doc_to_paragraphs` returns a
+    /// single unsplit, unclassified paragraph (`len() == 1`, `is_list_item == false`).
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn non_layout_route_recovers_list_items_from_a_multi_marker_ocr_block() {
+        let mut doc = crate::types::internal::InternalDocument::new("test");
+        let mut elem = crate::types::internal::InternalElement::text(
+            crate::types::internal::ElementKind::OcrText {
+                level: crate::types::ocr_elements::OcrElementLevel::Block,
+            },
+            "1. First item\n2. Second item\n3. Third item",
+            0,
+        );
+        elem.bbox = Some(crate::types::extraction::BoundingBox {
+            x0: 10.0,
+            y0: 10.0,
+            x1: 200.0,
+            y1: 100.0,
+        });
+        doc.push_element(elem);
+
+        let mut paragraphs = crate::pdf::structure::adapters::ocr_doc_to_paragraphs(
+            &doc,
+            1000,
+            crate::pdf::structure::adapters::OcrFontSizeScale::uniform(1.0),
+        );
+        apply_ocr_text_list_fallback(&mut paragraphs);
+
+        assert_eq!(paragraphs.len(), 3, "each marker-opening line must become its own paragraph");
+        assert!(paragraphs.iter().all(|paragraph| paragraph.is_list_item), "every split item must be classified");
     }
 
     #[cfg(feature = "ocr")]

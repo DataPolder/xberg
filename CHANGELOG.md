@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- List recovery on OCR-backed PDFs no longer depends on optional ML layout detection. The
+  list-marker splitter and the text-marker fallback were both gated on the `layout-detection`
+  feature even though neither reads any layout input — `looks_like_list_item` is pure text. A
+  multi-line OCR block containing several markers is now split into one paragraph per item on
+  every build, and the fallback runs when the structure heuristic declines to classify a page.
+
 - `extraction_timeout_secs` now actually stops the work, not just the waiting. Every timeout call
   site already signalled a cancellation token when it fired, but that token was only ever supplied
   by the REST async-jobs API — for every CLI and language-binding caller it was `None`, so the

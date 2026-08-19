@@ -91,15 +91,25 @@ pub(crate) fn ocr_doc_to_paragraphs(
             continue;
         }
         let block_id = hocr_block_id(element);
-        let paragraph = make_ocr_block_paragraph(element, page_h, font_size_scale);
-        if block_id.is_some() && block_id == previous_block_id {
-            if let Some(current) = result.last_mut() {
-                merge_ocr_block_paragraph(current, paragraph);
+        // A block that split into several list-item paragraphs (see
+        // `make_ocr_block_paragraphs`'s doc comment, #713) only offers its *first*
+        // segment for the same-block-id merge below: that segment carries the block's
+        // leading edge and is what a continuing block would have merged into before
+        // this split existed. Later segments are already-separated list items and must
+        // not be re-merged into the block that precedes them.
+        for (segment_index, paragraph) in make_ocr_block_paragraphs(element, page_h, font_size_scale)
+            .into_iter()
+            .enumerate()
+        {
+            if segment_index == 0 && block_id.is_some() && block_id == previous_block_id {
+                if let Some(current) = result.last_mut() {
+                    merge_ocr_block_paragraph(current, paragraph);
+                } else {
+                    result.push(paragraph);
+                }
             } else {
                 result.push(paragraph);
             }
-        } else {
-            result.push(paragraph);
         }
         previous_block_id = block_id;
     }
@@ -617,21 +627,52 @@ fn trace_conversion(doc: &crate::types::internal::InternalDocument, result: &[ty
     );
 }
 
+/// Build one paragraph per hOCR block -- or several, when the block's own OCR lines
+/// contain at least [`MIN_LIST_MARKERS_TO_SPLIT`] independent list-marker openings.
+///
+/// Tesseract (and other backends) group physically adjacent lines into one hOCR
+/// block by layout proximity alone, with no notion of "list item" -- a tightly
+/// spaced list can end up as a single block spanning every item. Before this, the
+/// non-layout OCR route (`ocr_doc_to_paragraphs`) turned that whole block into one
+/// paragraph unconditionally, so only the block's first line was ever visible to a
+/// downstream text-marker classifier; items 2..N were swallowed into item 1's body
+/// (#713 -- the same problem `push_body_group`/`split_body_group_at_list_markers`
+/// already solve for the ML-layout route, reused here rather than re-implemented).
+///
+/// Below the threshold this returns exactly the single paragraph the old
+/// `make_ocr_block_paragraph` built, byte-for-byte: same `text` (the raw
+/// `element.text`, not a rejoin), same block-level (not per-segment) font size. Only
+/// once a real split happens do segments switch to the `split_body_group_at_list_markers`
+/// / `build_body_paragraph` construction already used by the layout route (including its
+/// marker-led space-join -- see `join_body_segment_text`'s doc comment for why that
+/// matters for rendering).
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
-fn make_ocr_block_paragraph(
+fn make_ocr_block_paragraphs(
     element: &crate::types::internal::InternalElement,
     page_height: f32,
     font_size_scale: OcrFontSizeScale,
-) -> types::PdfParagraph {
+) -> Vec<types::PdfParagraph> {
     let block_bbox = pdf_block_bbox(element, page_height);
     let line_paragraphs = make_ocr_line_paragraphs(element, page_height, font_size_scale);
-    let lines = line_paragraphs
+
+    let marker_line_count = line_paragraphs
         .iter()
-        .flat_map(|paragraph| paragraph.lines.iter().cloned())
-        .collect();
-    let text_line_count = element.text.split('\n').count().max(1);
-    let font_size = resolve_ocr_font_size_pt(element, block_bbox, text_line_count, font_size_scale);
-    make_ocr_paragraph(element.text.clone(), lines, block_bbox, font_size)
+        .filter(|paragraph| super::pipeline::looks_like_list_item(&paragraph.text))
+        .count();
+    if marker_line_count < MIN_LIST_MARKERS_TO_SPLIT {
+        let lines = line_paragraphs
+            .into_iter()
+            .flat_map(|paragraph| paragraph.lines)
+            .collect();
+        let text_line_count = element.text.split('\n').count().max(1);
+        let font_size = resolve_ocr_font_size_pt(element, block_bbox, text_line_count, font_size_scale);
+        return vec![make_ocr_paragraph(element.text.clone(), lines, block_bbox, font_size)];
+    }
+
+    split_body_group_at_list_markers(line_paragraphs)
+        .into_iter()
+        .filter_map(build_body_paragraph)
+        .collect()
 }
 
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
@@ -908,7 +949,12 @@ fn has_structural_override(paragraph: &types::PdfParagraph) -> bool {
 /// on that alone would carve one such paragraph into a spurious empty lead segment
 /// plus itself. Two or more independent marker openings in the same merged group
 /// is the point where "this is a list" stops being a guess.
-#[cfg(all(feature = "ocr", feature = "layout-detection"))]
+///
+/// Shared by both the layout route (`push_body_group`, below) and the non-layout
+/// route (`make_ocr_block_paragraphs`): the layout-detection feature requirement was
+/// incidental, not deliberate -- this predicate is pure text, needs no layout input,
+/// and #713 found the non-layout OCR routes had no marker-splitting at all.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 const MIN_LIST_MARKERS_TO_SPLIT: usize = 2;
 
 /// Flush an accumulated run of OCR-line paragraphs from the same layout region.
@@ -944,7 +990,7 @@ fn push_body_group(result: &mut Vec<types::PdfParagraph>, lines: Vec<types::PdfP
 /// belongs to. Below the threshold, `lines` is returned unsplit as the sole
 /// segment. Segments are built forward into a `Vec<Vec<_>>` in original order --
 /// no reversal, no `split_off`.
-#[cfg(all(feature = "ocr", feature = "layout-detection"))]
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 fn split_body_group_at_list_markers(lines: Vec<types::PdfParagraph>) -> Vec<Vec<types::PdfParagraph>> {
     let marker_indices = lines
         .iter()
@@ -990,7 +1036,7 @@ fn split_body_group_at_list_markers(lines: Vec<types::PdfParagraph>) -> Vec<Vec<
 /// Each line is trimmed before joining, and empty lines are dropped, so a line
 /// with trailing/leading whitespace (or a rare interior blank line) can't turn
 /// into a double space.
-#[cfg(all(feature = "ocr", feature = "layout-detection"))]
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 fn join_body_segment_text(lines: &[types::PdfParagraph]) -> String {
     let marker_led = lines
         .first()
@@ -1017,7 +1063,7 @@ fn join_body_segment_text(lines: &[types::PdfParagraph]) -> String {
 /// produces: `pdf_lines` is collected only from this segment's lines, `block_bbox`
 /// unions only this segment's boxes, and `layout_class` takes the first non-`None`
 /// value within this segment (not the whole original group).
-#[cfg(all(feature = "ocr", feature = "layout-detection"))]
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 fn build_body_paragraph(lines: Vec<types::PdfParagraph>) -> Option<types::PdfParagraph> {
     let text = join_body_segment_text(&lines);
     if text.trim().is_empty() {
@@ -1055,7 +1101,7 @@ fn merge_structural_group(lines: Vec<types::PdfParagraph>) -> Option<types::PdfP
     Some(merged)
 }
 
-#[cfg(all(feature = "ocr", feature = "layout-detection"))]
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 fn trim_blank_boundaries(mut lines: Vec<types::PdfParagraph>) -> Vec<types::PdfParagraph> {
     let first_content = lines
         .iter()
@@ -1070,7 +1116,7 @@ fn trim_blank_boundaries(mut lines: Vec<types::PdfParagraph>) -> Vec<types::PdfP
     lines
 }
 
-#[cfg(all(feature = "ocr", feature = "layout-detection"))]
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 fn union_bboxes(lines: &[types::PdfParagraph]) -> Option<(f32, f32, f32, f32)> {
     lines
         .iter()
@@ -1187,6 +1233,77 @@ mod tests {
             "First soft-wrapped body line\ncontinues on the next visual line"
         );
         assert_eq!(paragraphs[0].lines.len(), 2);
+    }
+
+    /// #713: the non-layout OCR route (`ocr_doc_to_paragraphs`, used whenever
+    /// `--layout` is off) had no marker-splitting logic at all, unlike the ML-layout
+    /// route's `push_body_group`/`split_body_group_at_list_markers`. A single hOCR
+    /// block spanning three numbered items -- exactly what Tesseract emits for a
+    /// tightly spaced list -- became ONE paragraph, so only the first marker was ever
+    /// visible to any downstream classifier and items 2-3 were swallowed into item 1's
+    /// body.
+    ///
+    /// Against unfixed code this asserts `paragraphs.len() == 3` and gets `1`: the
+    /// whole block comes back as a single paragraph whose `text` is
+    /// `"1. First item\n2. Second item\n3. Third item"`.
+    #[test]
+    fn test_ocr_doc_to_paragraphs_splits_multi_marker_block_into_separate_list_items() {
+        let mut doc = InternalDocument::new("test");
+        let mut elem = InternalElement::text(
+            ElementKind::OcrText {
+                level: OcrElementLevel::Block,
+            },
+            "1. First item\n2. Second item\n3. Third item",
+            0,
+        );
+        elem.bbox = Some(BoundingBox {
+            x0: 10.0,
+            y0: 10.0,
+            x1: 200.0,
+            y1: 100.0,
+        });
+        doc.push_element(elem);
+
+        let paragraphs = ocr_doc_to_paragraphs(&doc, 1000, OcrFontSizeScale::uniform(1.0));
+
+        assert_eq!(paragraphs.len(), 3, "each marker-opening line must become its own paragraph");
+        assert_eq!(paragraphs[0].text, "1. First item");
+        assert_eq!(paragraphs[1].text, "2. Second item");
+        assert_eq!(paragraphs[2].text, "3. Third item");
+    }
+
+    /// A single marker-opening line is not enough signal to split (an ordinary
+    /// lead-in sentence like "1. Overview covers..." also matches the marker shape) --
+    /// mirrors `push_body_group`'s own "unchanged from before" guarantee for the
+    /// ML-layout route. This passes both before and after the #713 fix; it exists to
+    /// pin the below-threshold behavior so a future change to
+    /// `MIN_LIST_MARKERS_TO_SPLIT` (or the splitting wiring) cannot silently start
+    /// splitting on a lone marker.
+    #[test]
+    fn test_ocr_doc_to_paragraphs_does_not_split_a_lone_marker_opening_line() {
+        let mut doc = InternalDocument::new("test");
+        let mut elem = InternalElement::text(
+            ElementKind::OcrText {
+                level: OcrElementLevel::Block,
+            },
+            "1. Overview covers the whole exhibit\nand continues describing it here",
+            0,
+        );
+        elem.bbox = Some(BoundingBox {
+            x0: 10.0,
+            y0: 10.0,
+            x1: 200.0,
+            y1: 100.0,
+        });
+        doc.push_element(elem);
+
+        let paragraphs = ocr_doc_to_paragraphs(&doc, 1000, OcrFontSizeScale::uniform(1.0));
+
+        assert_eq!(paragraphs.len(), 1);
+        assert_eq!(
+            paragraphs[0].text,
+            "1. Overview covers the whole exhibit\nand continues describing it here"
+        );
     }
 
     /// Regression for the sceptre/paddle heading-detection defect: the bbox-height
