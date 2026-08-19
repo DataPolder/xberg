@@ -11,6 +11,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Nested markdown and djot lists no longer lose their parent items' text (#1459). Starting a
+  sublist pushed the nested list without flushing the accumulated item buffer, and the next item
+  start cleared it, so `- L1` / `- L2` / `- L3` extracted as `L3` alone. Text after a sublist is
+  also no longer emitted as a paragraph: list nesting is now tracked by depth rather than a
+  boolean, which the inner item's end cleared while the outer item was still open. MDX and
+  Jupyter markdown cells inherit the fix; HTML has a separate, milder variant that is unchanged.
+
+- Element metadata now carries element-level attributes instead of an always-empty map (#1452).
+  Every extractor producing an internal document took a code path that hardcoded no attributes,
+  while the legacy path populated them, so the two disagreed. DOCX additionally resolves
+  `w:pStyle` to its canonical style name and reports it as `style_name`. Table-of-contents
+  extraction is not included.
+
+- Windows artifacts no longer import `DirectML.dll` without shipping it (#1456). The Python, PHP
+  and Elixir builds linked ONNX Runtime in a way that added a DirectML import to the binary's
+  import table, which the Windows loader resolves before any code runs — so `import xberg` failed
+  outright on a clean machine, with no opportunity to fall back. Those builds now use the same
+  strategy as the other targets, which never adds the import, and the ONNX Runtime libraries are
+  shipped alongside the binary. The CLI and C FFI archives were also missing `onnxruntime.dll`
+  and now include it. A CI check inspects the import table so this cannot silently return.
+
+- OCR-backed PDFs recover more list structure, and font sizes on the mixed OCR route are no longer
+  computed in raster pixels while every threshold compared against them is in points — which broke
+  paragraphs apart mid-line for the Sceptre and PaddleOCR backends. Layout detection now also
+  reaches the mixed route, where it previously had no effect at all.
+
+- The LLM client's own response-cache setting no longer changes the extraction cache key, so
+  toggling it stops causing spurious cache misses.
+
 - OCR-backed PDF extraction now runs the same geometry-derived structure heuristic as native PDF
   extraction (font-clustering headings, list-marker detection, document-wide refinement passes) when
   `output_format` is not `Plain`, instead of never structuring OCR output at all. How much structure
@@ -62,6 +91,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   same variant for a validation failure and an I/O failure. The codes cross the FFI boundary and
   are append-only — a new variant takes the next free number in its block rather than one
   inserted in declaration order.
+
+### Documentation
+
+- The Docker guide and README now state that the published images are CPU-only and that GPU
+  support requires a source build against a CUDA-enabled ONNX Runtime (#1455).
 
 ### Removed
 
