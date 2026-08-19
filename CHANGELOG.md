@@ -11,6 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A single page whose OCR backend fails no longer aborts the whole document (#1444). The per-page
+  error propagated immediately, so the recovery path that re-runs OCR against the page's embedded
+  image XObjects — ten lines further down — could never be reached, and a scanned PDF came back
+  only as `OCR error: VLM OCR returned no content`. Failing pages now degrade to that recovery and
+  the document is returned, with a warning naming the page and whether its text was recovered.
+  Only if every page fails and nothing is recovered anywhere does extraction still error, now
+  reporting the page count and root cause rather than a bare backend message. Three further gaps
+  in the same path are closed: the recovery now also runs when ML layout detection is enabled and
+  on the OCR pipeline route, where it was previously unreachable, and a page is judged blank by
+  inspecting the rendered image for ink rather than only its text length — so a backend that
+  answers "the image is entirely blank" no longer counts as a successful transcription. Recovered
+  images record which of the three recovery modes produced them.
+
 - DOCX table-of-contents entries are now identified and linked (#1452). Entries carry a
   `toc_entry` attribute in their element metadata, and each navigable entry produces a
   table-of-contents relationship in the document structure pointing at the section its bookmark

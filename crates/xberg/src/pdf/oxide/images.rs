@@ -133,6 +133,50 @@ fn unencodable_image_warning(image_index: u32, page_number: u32, error: &PdfErro
     }
 }
 
+/// How one image XObject's OCR-ready bytes were recovered by
+/// [`page_ocr_fallback_image_bytes`].
+///
+/// The three arms are the three recovery modes that function already distinguishes
+/// internally; carrying them out lets the caller record provenance on the
+/// [`crate::types::ExtractedImage`] it builds for the recovered page (issue #1444)
+/// instead of throwing the distinction away.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum XObjectRecovery {
+    /// `decode()` handed back an embedded JPEG stream; passed through untouched.
+    EmbeddedJpeg,
+    /// `decode()` handed back raw pixel data; re-encoded here to PNG.
+    ReencodedPixels,
+    /// `decode()` failed on a DCTDecode/JPXDecode stream, so the raw compressed
+    /// stream — itself a valid standalone JPEG/JP2 file — is handed back instead.
+    RawCompressedStream,
+}
+
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+impl XObjectRecovery {
+    /// Stable, human-readable tag recorded on the recovered image's `description`.
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::EmbeddedJpeg => "embedded_jpeg",
+            Self::ReencodedPixels => "reencoded_pixels",
+            Self::RawCompressedStream => "raw_compressed_stream",
+        }
+    }
+}
+
+/// One OCR-ready image recovered from a page's image XObjects, with the provenance
+/// needed to tag it in the extraction output.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+#[derive(Debug, Clone)]
+pub(crate) struct PageFallbackImage {
+    /// Standalone image file bytes an OCR backend can decode directly.
+    pub bytes: Bytes,
+    /// Image format of `bytes`, as reported by [`detect_image_format_from_bytes`].
+    pub format: &'static str,
+    /// Which recovery mode produced `bytes`.
+    pub recovery: XObjectRecovery,
+}
+
 /// Collect OCR-ready image bytes for every image XObject on `page_idx`, for use as a
 /// `force_ocr` fallback when whole-page rasterization silently dropped an undecodable
 /// image (issue #1355).
@@ -149,11 +193,14 @@ fn unencodable_image_warning(image_index: u32, page_number: u32, error: &PdfErro
 /// Returned in content-stream paint order; empty when the page has no image XObjects or
 /// none of them yielded usable bytes.
 ///
-// Available under `ocr-pipeline` too (not just `ocr`): `extract_with_ocr` — the sole
-// caller — is gated `any(ocr, ocr-pipeline)`, and the `binstall` CLI profile pulls
-// `ocr-pipeline` (via `liter-llm`) without `ocr`. ~keep
+// Available under `ocr-pipeline` too (not just `ocr`): its callers in
+// `crate::extractors::pdf::ocr` are gated `any(ocr, ocr-pipeline)`, and the `binstall`
+// CLI profile pulls `ocr-pipeline` (via `liter-llm`) without `ocr`. ~keep
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
-pub(crate) fn page_ocr_fallback_image_bytes(doc: &pdf_oxide::PdfDocument, page_idx: usize) -> Vec<Bytes> {
+pub(crate) fn page_ocr_fallback_image_bytes(
+    doc: &pdf_oxide::PdfDocument,
+    page_idx: usize,
+) -> Vec<PageFallbackImage> {
     let handles = match doc.page_image_handles(page_idx) {
         Ok(h) => h,
         Err(error) => {
@@ -169,10 +216,18 @@ pub(crate) fn page_ocr_fallback_image_bytes(doc: &pdf_oxide::PdfDocument, page_i
     for handle in &handles {
         match handle.decode() {
             Ok(img) => match img.data() {
-                pdf_oxide::extractors::ImageData::Jpeg(jpeg_bytes) => out.push(Bytes::copy_from_slice(jpeg_bytes)),
+                pdf_oxide::extractors::ImageData::Jpeg(jpeg_bytes) => out.push(PageFallbackImage {
+                    bytes: Bytes::copy_from_slice(jpeg_bytes),
+                    format: "jpeg",
+                    recovery: XObjectRecovery::EmbeddedJpeg,
+                }),
                 pdf_oxide::extractors::ImageData::Raw { pixels, format } => {
                     match raw_pixels_to_png(img.width(), img.height(), format, pixels) {
-                        Ok(bytes) => out.push(bytes),
+                        Ok(bytes) => out.push(PageFallbackImage {
+                            bytes,
+                            format: "png",
+                            recovery: XObjectRecovery::ReencodedPixels,
+                        }),
                         Err(error) => {
                             tracing::debug!(page = page_idx, "force_ocr fallback: raw re-encode failed: {error}");
                         }
@@ -187,7 +242,12 @@ pub(crate) fn page_ocr_fallback_image_bytes(doc: &pdf_oxide::PdfDocument, page_i
                 if passthrough {
                     match handle.raw_compressed_bytes() {
                         Ok(raw) if matches!(detect_image_format_from_bytes(&raw), "jpeg" | "jpeg2000") => {
-                            out.push(Bytes::from(raw));
+                            let format = detect_image_format_from_bytes(&raw);
+                            out.push(PageFallbackImage {
+                                bytes: Bytes::from(raw),
+                                format,
+                                recovery: XObjectRecovery::RawCompressedStream,
+                            });
                         }
                         Ok(_) => {
                             tracing::debug!(
@@ -694,14 +754,40 @@ mod tests {
             !fallback_images.is_empty(),
             "fixture page 0 must contain at least one recoverable image XObject"
         );
-        for image_bytes in &fallback_images {
-            let format = detect_image_format_from_bytes(image_bytes);
+        for fallback in &fallback_images {
+            let format = detect_image_format_from_bytes(&fallback.bytes);
             assert!(
                 matches!(format, "jpeg" | "png" | "jpeg2000"),
                 "fallback image bytes must carry a recognizable magic (jpeg/png/jpeg2000); got {:02x?}",
-                &image_bytes[..8.min(image_bytes.len())]
+                &fallback.bytes[..8.min(fallback.bytes.len())]
+            );
+            assert_eq!(
+                fallback.format, format,
+                "reported format must match the recovered bytes' actual magic"
             );
         }
+    }
+
+    /// #1444: the recovery mode each image XObject took must survive the call, so the
+    /// OCR fallback can record provenance on the recovered page's `ExtractedImage`
+    /// instead of throwing the distinction away. The fixture's page 0 image is a
+    /// DCTDecode stream pdf_oxide decodes successfully, so it must come back tagged
+    /// `EmbeddedJpeg` with format `jpeg`.
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn should_report_recovery_mode_for_each_recovered_xobject() {
+        let pdf_path = test_documents_dir().join("pdf/embedded_images_tables.pdf");
+        let bytes = std::fs::read(&pdf_path).expect("failed to read test PDF");
+        let doc = crate::pdf::oxide::OxideDocument::open_bytes(&bytes).expect("failed to open PDF");
+
+        let fallback_images = page_ocr_fallback_image_bytes(&doc.doc, 0);
+        let first = fallback_images
+            .first()
+            .expect("fixture page 0 must contain at least one recoverable image XObject");
+
+        assert_eq!(first.recovery, XObjectRecovery::EmbeddedJpeg);
+        assert_eq!(first.recovery.as_str(), "embedded_jpeg");
+        assert_eq!(first.format, "jpeg");
     }
 
     /// A page index past the end of the document must not panic; `page_image_handles`
