@@ -62,6 +62,22 @@ static PDF_OXIDE_CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
 /// into a `ProcessingWarning`. The actual *decision* about which glyph gets
 /// dropped and why remains entirely inside `pdf_oxide`/`ttf-parser` — that
 /// part is upstream and is not touched here.
+/// Whether a `log` target belongs to the PDF engine whose warnings this module captures.
+///
+/// The engine is our fork of PDFOxide. Its records carry the target `module_path!()` produced
+/// inside the fork itself, which derives from its own `[lib] name = "xberg_pdf_oxide"`. The
+/// `package = "xberg-pdf-oxide"` alias in Cargo.toml renames the extern crate to `pdf_oxide`
+/// for this crate's ~530 `use` sites but does NOT change what the fork compiles as, so it does
+/// not change the target.
+///
+/// Both names are accepted on purpose. Matching only the current one would leave the next
+/// rename failing exactly the way the last one did (#697): silently, with warnings simply never
+/// arriving, the one test that asserts warnings ARE captured going red, and its sibling that
+/// asserts NO warnings still passing vacuously.
+fn is_pdf_engine_target(target: &str) -> bool {
+    target.starts_with("xberg_pdf_oxide") || target.starts_with("pdf_oxide")
+}
+
 struct PdfOxideWarningCapture;
 
 impl log::Log for PdfOxideWarningCapture {
@@ -69,7 +85,15 @@ impl log::Log for PdfOxideWarningCapture {
         metadata.level() <= log::Level::Warn
     }
 
-    /// Records outside `pdf_oxide` are dropped rather than re-emitted.
+    /// Records outside the PDF engine are dropped rather than re-emitted.
+    ///
+    /// The engine's log target comes from `module_path!()` in the *emitting* crate, i.e. its
+    /// own `[lib] name`, which is `xberg_pdf_oxide`. Our `package = "xberg-pdf-oxide"` alias
+    /// in Cargo.toml renames the extern crate to `pdf_oxide` for this crate's ~530 `use`
+    /// sites, but it does NOT change what the fork itself compiles as, so it does not change
+    /// the target. Both prefixes are accepted deliberately: matching only the current name
+    /// would leave the next rename failing exactly the way this one did -- silently, with the
+    /// warnings simply never arriving and only an assert-zero test still passing (#697).
     ///
     /// Forwarding them to `tracing` is the obvious instinct — this sink owns the
     /// process's only `log` backend, so anything it drops is gone — but it does not
@@ -85,7 +109,7 @@ impl log::Log for PdfOxideWarningCapture {
     /// and these records already go nowhere, so an application that opts in is
     /// choosing this trade knowingly rather than having it imposed.
     fn log(&self, record: &log::Record<'_>) {
-        if !self.enabled(record.metadata()) || !record.target().starts_with("pdf_oxide") {
+        if !self.enabled(record.metadata()) || !is_pdf_engine_target(record.target()) {
             return;
         }
         let message = record.args().to_string();
@@ -141,6 +165,23 @@ pub fn install_pdf_render_diagnostics() -> bool {
 /// Turn one captured `pdf_oxide` log line into a `(page, message)`
 /// [`ProcessingWarning`], naming the page so a multi-page document does not
 /// read as "somewhere in this PDF, something happened".
+/// Whether a captured engine warning actually means glyph ink went missing.
+///
+/// Everything this sink captures used to be wrapped as a glyph drop unconditionally. That was
+/// invisible while the capture was broken (#697) because nothing was ever wrapped, but the
+/// engine also emits warnings about situations it handled correctly, and telling a user that
+/// "glyph ink is missing" when the text rendered fine is worse than saying nothing.
+///
+/// The engine hands us a formatted string and no structured kind, so this has to match on the
+/// message. It is deliberately an EXCLUDE-list, not an include-list: an unrecognised warning is
+/// still reported as a glyph drop, so a new failure mode is over-reported rather than silently
+/// swallowed -- the failure direction #697 already cost us once.
+fn indicates_dropped_glyph_ink(cause: &str) -> bool {
+    // "No font provided for N bytes, using Latin-1 fallback (PDF spec compliant)" -- the text
+    // is rendered via the fallback, so there is no missing ink to warn about.
+    !cause.contains("PDF spec compliant")
+}
+
 fn glyph_drop_warning(page_index: usize, cause: &str) -> ProcessingWarning {
     warning(
         PDF_RENDER_WARNING_SOURCE,
@@ -172,7 +213,7 @@ fn render_page_capturing_glyph_drops(
     if !captured.is_empty() {
         PDF_OXIDE_PENDING_WARNINGS.with(|pending| {
             let mut pending = pending.borrow_mut();
-            for cause in &captured {
+            for cause in captured.iter().filter(|cause| indicates_dropped_glyph_ink(cause)) {
                 push_warning_deduped(&mut pending, glyph_drop_warning(page_index, cause));
             }
         });
@@ -1128,5 +1169,37 @@ mod tests {
         let pdf = build_minimal_pdf_with_mediabox(612.0, 792.0);
         let doc = pdf_oxide::PdfDocument::from_bytes(pdf).expect("fixture PDF must open");
         assert_eq!(get_page_rotations(&doc, 3), vec![0, 0, 0]);
+    }
+
+    /// #697: the PDF engine's `log` target follows the fork's own `[lib] name`, so when it was
+    /// republished as `xberg-pdf-oxide` every glyph-drop warning silently stopped being captured
+    /// -- for twelve days, in production, not just in tests. The prefix this filter matches is
+    /// therefore load-bearing and easy to break invisibly, so it is pinned directly here rather
+    /// than only through the render-path tests that depend on it.
+    #[test]
+    fn engine_log_targets_are_captured_under_both_the_current_and_former_crate_names() {
+        assert!(
+            is_pdf_engine_target("xberg_pdf_oxide::rendering::page_renderer"),
+            "the CURRENT engine crate name must be captured -- this is the assertion that was \
+             failing in production"
+        );
+        assert!(
+            is_pdf_engine_target("xberg_pdf_oxide::fonts"),
+            "explicit-target sites inside the engine must be captured too"
+        );
+        assert!(
+            is_pdf_engine_target("pdf_oxide::rendering::page_renderer"),
+            "the FORMER crate name must stay accepted so a revert or a rename back is not a \
+             silent regression"
+        );
+        assert!(
+            !is_pdf_engine_target("tower::buffer::worker"),
+            "unrelated crates must not be captured: this sink owns the process's only log \
+             backend, so anything it accepts is diverted from every other consumer"
+        );
+        assert!(
+            !is_pdf_engine_target("xberg::extractors::pdf"),
+            "xberg's own records must not be captured"
+        );
     }
 }
