@@ -237,6 +237,8 @@ impl Plugin for PaddleOcrVlBackend {
     }
 }
 
+/// Inherits the `RequiresUpright` default for `page_orientation_handling` — unmeasured, not validated (#657).
+/// It also never reads the `backend_options["page_rotation_degrees"]` hint that `crate::paddle_ocr` acts on.
 #[async_trait]
 impl OcrBackend for PaddleOcrVlBackend {
     /// Process an image using the PaddleOCR-VL engine.

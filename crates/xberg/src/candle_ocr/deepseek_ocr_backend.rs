@@ -174,6 +174,7 @@ impl Plugin for DeepseekOcrBackend {
     }
 }
 
+/// Inherits the `RequiresUpright` default for `page_orientation_handling` — unmeasured, not validated (#657).
 #[async_trait]
 impl OcrBackend for DeepseekOcrBackend {
     /// Process an image using the DeepSeek-OCR engine.

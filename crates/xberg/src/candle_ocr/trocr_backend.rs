@@ -195,6 +195,7 @@ impl Plugin for TrocrBackend {
     }
 }
 
+/// Inherits the `RequiresUpright` default for `page_orientation_handling` — unmeasured, not validated (#657).
 #[async_trait]
 impl OcrBackend for TrocrBackend {
     /// Recognize text in `image_bytes` via the configured TrOCR variant and device.

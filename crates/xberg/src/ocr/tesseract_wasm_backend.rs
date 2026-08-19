@@ -118,6 +118,8 @@ impl Plugin for TesseractWasmBackend {
     }
 }
 
+/// Inherits the `RequiresUpright` default for `page_orientation_handling` — unmeasured, not validated (#657).
+/// The native `TesseractBackend` declares `SelfCorrecting`, but that was measured on the native build, not this one.
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl OcrBackend for TesseractWasmBackend {

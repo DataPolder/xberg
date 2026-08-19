@@ -465,6 +465,7 @@ impl Plugin for GlmOcrBackend {
     }
 }
 
+/// Inherits the `RequiresUpright` default for `page_orientation_handling` — unmeasured, not validated (#657).
 #[async_trait]
 impl OcrBackend for GlmOcrBackend {
     async fn process_image(&self, image_bytes: &[u8], config: &OcrConfig) -> Result<ExtractedDocument> {
