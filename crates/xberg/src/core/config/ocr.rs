@@ -650,10 +650,16 @@ pub struct OcrConfig {
 
     /// Enable automatic page rotation based on orientation detection.
     ///
-    /// When enabled, uses Tesseract's `DetectOrientationScript()` to detect
-    /// page orientation (0/90/180/270 degrees) before OCR. If the page is
-    /// rotated with high confidence, the image is corrected before recognition.
-    /// This is critical for handling rotated scanned documents.
+    /// When enabled, page orientation (0/90/180/270 degrees) is detected with an
+    /// ONNX PP-LCNet document-orientation classifier — NOT Tesseract's own
+    /// `DetectOrientationScript()`/OSD, which this crate does not call. If the
+    /// page is rotated with high confidence, the image is corrected before
+    /// recognition. Applies to every OCR backend; the tesseract-only
+    /// `TesseractConfig::preprocessing` field of the same name is OR'd in on
+    /// top of this one and affects tesseract alone.
+    ///
+    /// Independent of a page's PDF `/Rotate` entry, which is handled separately
+    /// on every OCR route regardless of this setting.
     #[serde(default)]
     pub auto_rotate: bool,
 
