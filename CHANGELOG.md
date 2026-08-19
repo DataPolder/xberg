@@ -11,6 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Legacy `.doc` extraction no longer emits field instructions as document text (#1460). Word field
+  codes are delimited in the text stream by three control characters, and the extractor dropped
+  the delimiters while keeping everything between them — so the machinery of a field leaked into
+  the output verbatim: `HYPERLINK "https://…" \o "tooltip"` at every link, `PAGEREF _Toc… \h`
+  before every table-of-contents page number, `SEQ Figure \* ARABIC` before every figure number.
+  Only the field result, which is what a reader sees, is kept now. Fields nest, so a table of
+  contents containing per-entry page references is tracked by depth rather than a flag. A field
+  that begins and never ends leaves the following text intact rather than swallowing the rest of
+  the document. Hyperlink target URLs are discarded along with the rest of the instruction; the
+  `.doc` path has no link structure to carry them.
+
 - Tables on rotated PDF pages are no longer discarded or scrambled (#1358). Heuristic table
   reconstruction clustered cells into rows and columns using raw page-space coordinates while
   ignoring the rotation each span already carried, so on a 90-degree rotated page the row and
