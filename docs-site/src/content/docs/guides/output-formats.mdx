@@ -102,7 +102,14 @@ table_anchors = true
 
 ## Content Output Format
 
-`output_format` sets the format of the `content` field. It is independent of `result_format` (element-based / document structure). For OCR-backed scanned PDFs, non-`Plain` formats trigger the same geometry-derived structure heuristic (headings, lists) as native PDF extraction; set `output_format` to something other than `Plain` to get structured content instead of raw text.
+`output_format` sets the format of the `content` field. It is independent of `result_format` (element-based / document structure). For OCR-backed scanned PDFs, non-`Plain` formats invoke the same geometry-derived structure heuristic (headings, lists) as native PDF extraction — but invoking it is not the same as it succeeding, and how much it recovers depends on the OCR backend. Measured on a 16-page scanned reference fixture with no layout detection, Tesseract promoted both headings and list items, Sceptre promoted few, and PaddleOCR promoted no headings at all. Enabling optional ML layout detection raises heading counts on every backend, but lowers list-item accuracy against ground truth. `output_format != Plain` is necessary but not always sufficient for structured OCR output.
+
+**Structure contract.** `output_format = Plain` skips the structure heuristic entirely and returns raw
+text. Any other `output_format` always runs the heuristic; when layout detection is also enabled, its
+detections are layered on top. Layout detection is off by default, and `Plain` is the default
+`output_format`. The two are not currently linked: enabling layout detection while `output_format`
+stays `Plain` still runs the layout model, but its result is computed and then discarded rather than
+forcing a non-`Plain` output.
 
 | `OutputFormat`    | Description                                                              |
 | ----------------- | ----------------------------------------------------------------------- |

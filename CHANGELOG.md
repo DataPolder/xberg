@@ -11,11 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- OCR-backed PDF extraction now reuses the same geometry-derived structure heuristic as native PDF
+- OCR-backed PDF extraction now runs the same geometry-derived structure heuristic as native PDF
   extraction (font-clustering headings, list-marker detection, document-wide refinement passes) when
-  `output_format` is not `Plain`, instead of only structuring output when optional ML layout
-  detection is enabled. Layout detection remains off by default and, when enabled, still adds its
-  own structure signal on top of the heuristic.
+  `output_format` is not `Plain`, instead of never structuring OCR output at all. How much structure
+  this recovers is backend-dependent: on a 16-page scanned reference fixture with
+  `--content-format markdown` and no layout detection, Tesseract promoted headings and list items,
+  Sceptre promoted few, and PaddleOCR promoted no headings at all. Enabling optional ML layout
+  detection raises heading counts on every backend but lowers list-item accuracy — scored against
+  ground truth rather than by raw count, Tesseract list F1 falls from 0.552 to 0.261. Layout
+  detection remains off by default.
 
 - Tesseract OCR now enables `hocr_font_info`, so hOCR carries per-word font size. Without it no font
   size reached the structure layer at all and heading detection, which clusters on font size, could
