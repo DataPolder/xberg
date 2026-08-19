@@ -228,7 +228,9 @@ pub enum XbergError {
         limit_ms: u64,
     },
 
-    /// The extraction was cancelled via a [`crate::cancellation::CancellationToken`].
+    /// The extraction was cancelled. Reachable today only via the REST async-jobs API
+    /// (`DELETE /jobs/{id}`); no binding exposes an in-process way to cancel an
+    /// extraction.
     #[error("Extraction cancelled")]
     #[cfg_attr(alef, alef(error_code = 1015))]
     Cancelled,

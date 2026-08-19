@@ -102,6 +102,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- The `Cancelled` error variants no longer document a cancellation API that callers cannot reach.
+  Nothing in any language binding can construct or fire a cancellation token; the only way to
+  cancel an extraction in progress is the REST async-jobs API (`DELETE /jobs/{id}`).
+
 - The Docker guide and README now state that the published images are CPU-only and that GPU
   support requires a source build against a CUDA-enabled ONNX Runtime (#1455).
 
