@@ -487,6 +487,17 @@ impl InternalDocumentBuilder {
         }
     }
 
+    /// Insert a single attribute on an already-pushed element, merging into any
+    /// attributes already set instead of replacing them wholesale.
+    ///
+    /// Use this (rather than `set_attributes`) when other code may have already
+    /// attached attributes to the same element index.
+    pub fn merge_attribute(&mut self, index: u32, key: impl Into<String>, value: impl Into<String>) {
+        if let Some(elem) = self.doc.elements.get_mut(index as usize) {
+            elem.attributes.get_or_insert_with(AHashMap::new).insert(key.into(), value.into());
+        }
+    }
+
     /// Set annotations on an already-pushed element.
     pub fn set_annotations(&mut self, index: u32, annotations: Vec<TextAnnotation>) {
         if let Some(elem) = self.doc.elements.get_mut(index as usize) {

@@ -416,6 +416,30 @@ impl Document {
         heading_level_from_style_name(style_id)
     }
 
+    /// Resolve the human-readable style name for a paragraph style using the StyleCatalog.
+    ///
+    /// Walks the style inheritance chain (via `w:basedOn`) until it finds a `w:name`,
+    /// so styles that only set `w:basedOn` without their own name still resolve to the
+    /// ancestor's canonical name. Returns `None` if no `StyleCatalog` is available or no
+    /// style in the chain has a name.
+    pub(crate) fn resolve_style_name(&self, style_id: &str) -> Option<String> {
+        let catalog = self.style_catalog.as_ref()?;
+        let mut current_id = Some(style_id);
+        let mut visited = 0;
+        while let Some(id) = current_id {
+            if visited > 20 {
+                break;
+            }
+            visited += 1;
+            let style_def = catalog.styles.get(id)?;
+            if let Some(ref name) = style_def.name {
+                return Some(name.clone());
+            }
+            current_id = style_def.based_on.as_deref();
+        }
+        None
+    }
+
     #[cfg(test)]
     pub(crate) fn extract_text(&self) -> String {
         let mut text = String::new();

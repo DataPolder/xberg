@@ -114,7 +114,7 @@ pub fn convert_internal_elements_to_elements(doc: &InternalDocument, filename: &
                 filename: filename.clone(),
                 coordinates,
                 element_index: Some(elements.len()),
-                additional: std::collections::HashMap::new(),
+                additional: internal_elem.public_attributes().unwrap_or_default(),
             },
         });
     }
@@ -266,6 +266,35 @@ mod tests {
         assert_eq!(elements[0].element_type, crate::types::ElementType::Formula);
         assert_eq!(elements[0].text, "\\frac{a}{b}");
         assert_eq!(elements[0].metadata.page_number, Some(2));
+    }
+
+    #[test]
+    fn test_internal_element_attributes_reach_metadata_additional() {
+        use crate::types::internal::InternalElement;
+        use ahash::AHashMap;
+
+        // Must match the private `SUPPRESS_IMAGE_OCR_RENDER_ATTRIBUTE` constant in
+        // `types/internal.rs`, which is not visible from this module.
+        const SUPPRESS_KEY: &str = "xberg:internal:suppress-image-ocr-render";
+
+        let mut doc = InternalDocument::new("text/markdown");
+        let mut elem = InternalElement::text(ElementKind::Title, "Heading text", 0);
+        let mut attrs = AHashMap::new();
+        attrs.insert("style_name".to_string(), "Heading 1".to_string());
+        attrs.insert(SUPPRESS_KEY.to_string(), "true".to_string());
+        elem.attributes = Some(attrs);
+        doc.elements.push(elem);
+
+        let elements = convert_internal_elements_to_elements(&doc, &None);
+        assert_eq!(elements.len(), 1);
+        // Unfixed code hardcodes `additional: HashMap::new()`, so this would be empty and
+        // the assertion below would fail with a missing key.
+        assert_eq!(
+            elements[0].metadata.additional.get("style_name"),
+            Some(&"Heading 1".to_string())
+        );
+        // The internal suppression marker must never leak through `public_attributes()`.
+        assert!(!elements[0].metadata.additional.contains_key(SUPPRESS_KEY));
     }
 
     #[test]

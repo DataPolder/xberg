@@ -40,6 +40,10 @@ impl Default for DocxExtractor {
     }
 }
 
+/// Attribute key under which the resolved DOCX paragraph style name (`w:pStyle` ->
+/// `styles.xml` `w:name`, walking `w:basedOn`) is exposed on `Element.metadata.additional`.
+const STYLE_NAME_ATTRIBUTE: &str = "style_name";
+
 /// Resolve a drawing's alt text: `wp:docPr/@descr`, falling back to `@name` (#81).
 ///
 /// Word writes `@descr` only when the author fills in the description field, but always
@@ -203,6 +207,10 @@ fn build_internal_document(
                 };
 
                 if let Some(elem_idx) = element_idx {
+                    if let Some(style_name) = paragraph.style.as_deref().and_then(|s| doc.resolve_style_name(s)) {
+                        builder.merge_attribute(elem_idx, STYLE_NAME_ATTRIBUTE, style_name);
+                    }
+
                     for run in &paragraph.runs {
                         if run.math_latex.is_some() || run.text.is_empty() {
                             continue;
@@ -1962,6 +1970,52 @@ mod tests {
         assert!(
             !h1_nodes.is_empty(),
             "Should have h1 heading node from style-based heading"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_paragraph_style_name_reaches_element_metadata() {
+        let document_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:pPr><w:pStyle w:val="Quote1"/></w:pPr><w:r><w:t>A quoted paragraph.</w:t></w:r></w:p>
+  </w:body>
+</w:document>"#;
+
+        let styles_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:style w:type="paragraph" w:styleId="Quote1">
+    <w:name w:val="Intense Quote"/>
+  </w:style>
+</w:styles>"#;
+
+        let data = build_test_docx_with_parts(document_xml, Some(styles_xml), None, None, None, None, None);
+        let extractor = DocxExtractor::new();
+        let config = ExtractionConfig {
+            output_format: crate::core::config::OutputFormat::Markdown,
+            ..Default::default()
+        };
+        let internal_doc = extractor
+            .extract_content(
+                &data,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                &config,
+            )
+            .await
+            .unwrap();
+
+        let elements = crate::extraction::transform::convert_internal_elements_to_elements(&internal_doc, &None);
+        let quoted = elements
+            .iter()
+            .find(|e| e.text.contains("A quoted paragraph."))
+            .expect("quoted paragraph element should be present");
+        // Unfixed code never calls `resolve_style_name` / `merge_attribute`, so
+        // `metadata.additional` has no "style_name" key here (empty map).
+        assert_eq!(
+            quoted.metadata.additional.get(STYLE_NAME_ATTRIBUTE),
+            Some(&"Intense Quote".to_string()),
+            "resolved w:pStyle name should surface as element metadata: {:?}",
+            quoted.metadata.additional
         );
     }
 
