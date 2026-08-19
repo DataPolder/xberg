@@ -1,15 +1,23 @@
-//! Build fingerprint folded into every on-disk cache key.
+//! Cache-key version tag folded into every on-disk cache key.
 //!
-//! A cached extraction result is only valid for the build that produced it.
-//! Neither the content hash (bytes of the input) nor the config hash (the
-//! `ExtractionConfig`) changes when *extraction behaviour* changes — a fixed
-//! extractor, a reordered pipeline stage, a new post-processor — so without a
-//! build fingerprint an entry written by an older build is served forever, and
-//! the bug it encodes outlives its own fix.
+//! A cached extraction result is only valid for the crate version and cache
+//! schema that produced it. Neither the content hash (bytes of the input) nor
+//! the config hash (the `ExtractionConfig`) changes when *extraction
+//! behaviour* changes — a fixed extractor, a reordered pipeline stage, a new
+//! post-processor — so without this tag an entry written before the fix is
+//! served forever, and the bug it encodes outlives its own fix.
 //!
-//! Every cache key is therefore prefixed with a short tag derived from the crate
-//! version and [`CACHE_SCHEMA_VERSION`]. Changing either makes all previously
-//! written entries unreachable; they age out through the normal cleanup pass.
+//! This is NOT a build fingerprint: it is derived only from `CARGO_PKG_VERSION`
+//! and [`CACHE_SCHEMA_VERSION`], with no git SHA, build id, or compile
+//! timestamp. Two separately built binaries that share a crate version and
+//! schema version produce the identical tag and therefore share cache
+//! entries, even when the code between them differs. A behaviour change that
+//! isn't paired with a crate version bump MUST bump [`CACHE_SCHEMA_VERSION`]
+//! to invalidate the entries it would otherwise silently share.
+//!
+//! Every cache key is therefore prefixed with this tag. Changing either the
+//! crate version or [`CACHE_SCHEMA_VERSION`] makes all previously written
+//! entries unreachable; they age out through the normal cleanup pass.
 
 /// Generation counter for cached extraction results.
 ///
@@ -28,11 +36,15 @@ pub(crate) const CACHE_SCHEMA_VERSION: u32 = 3;
 /// Number of hex characters in the cache version tag.
 const VERSION_TAG_HEX_LEN: usize = 8;
 
-/// Return the process-wide cache version tag as 8 hex characters.
+/// Return the process-wide cache-key version tag as 8 hex characters.
 ///
-/// Stable for the lifetime of a build: the same binary always produces the same
-/// tag, and two builds that differ in crate version or [`CACHE_SCHEMA_VERSION`]
-/// always produce different tags.
+/// Stable for the lifetime of a process: the same binary always produces the
+/// same tag. Two builds that differ in crate version or [`CACHE_SCHEMA_VERSION`]
+/// always produce different tags — but this is NOT a build fingerprint. It
+/// distinguishes crate-version/schema-version pairs only; it does not
+/// distinguish two separately built binaries that share both (no git SHA, no
+/// build id, no compile timestamp folded in), so such builds share cache
+/// entries.
 pub(crate) fn cache_version_tag() -> &'static str {
     static TAG: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
@@ -46,7 +58,7 @@ pub(crate) fn cache_version_tag() -> &'static str {
     .as_str()
 }
 
-/// Prefix `cache_key` with the build fingerprint.
+/// Prefix `cache_key` with the cache-key version tag (see [`cache_version_tag`]).
 ///
 /// The result stays a single safe filename component: the tag is hex, and the
 /// separator is `-`, so `Path::file_stem` on `<tag>-<key>.msgpack` round-trips

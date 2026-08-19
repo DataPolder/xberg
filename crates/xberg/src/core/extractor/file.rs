@@ -338,15 +338,21 @@ pub(crate) async fn extract_with_candidates(
 
 /// Hash ExtractionConfig fields that affect extraction output.
 ///
-/// Excludes cache-control fields (use_cache, cache_namespace, cache_ttl_secs)
-/// since they don't affect the extraction result. Uses a clone-and-normalize
-/// approach to ensure determinism: cache fields are zeroed, then the struct
-/// is serialized to canonical JSON via serde_json's sorted-keys representation.
+/// Excludes cache-control fields (use_cache, cache_namespace, cache_ttl_secs,
+/// and the nested `ocr.tesseract_config.use_cache`) since they don't affect
+/// the extraction result. Uses a clone-and-normalize approach to ensure
+/// determinism: cache fields are zeroed, then the struct is serialized to
+/// canonical JSON via serde_json's sorted-keys representation.
 fn hash_extraction_config(config: &ExtractionConfig, mime_type: &str) -> String {
     let mut normalized = config.clone();
     normalized.use_cache = true;
     normalized.cache_namespace = None;
     normalized.cache_ttl_secs = None;
+    if let Some(ocr) = normalized.ocr.as_mut()
+        && let Some(tesseract_config) = ocr.tesseract_config.as_mut()
+    {
+        tesseract_config.use_cache = true;
+    }
 
     let mut hasher = blake3::Hasher::new();
     hasher.update(mime_type.as_bytes());
@@ -466,6 +472,73 @@ mod cache_key_tests {
             hash_extraction_config(&a, "image/png"),
             hash_extraction_config(&b, "image/png"),
             "tessdata_bytes (serde-skipped) must be part of the cache key"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "ocr")]
+    fn tesseract_use_cache_does_not_change_the_cache_key() {
+        use crate::core::config::OcrConfig;
+        use crate::types::TesseractConfig;
+
+        let cache_on = ExtractionConfig {
+            ocr: Some(OcrConfig {
+                tesseract_config: Some(TesseractConfig {
+                    use_cache: true,
+                    ..TesseractConfig::default()
+                }),
+                ..OcrConfig::default()
+            }),
+            ..Default::default()
+        };
+        let cache_off = ExtractionConfig {
+            ocr: Some(OcrConfig {
+                tesseract_config: Some(TesseractConfig {
+                    use_cache: false,
+                    ..TesseractConfig::default()
+                }),
+                ..OcrConfig::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            hash_extraction_config(&cache_on, "image/png"),
+            hash_extraction_config(&cache_off, "image/png"),
+            "ocr.tesseract_config.use_cache is a cache-control field and must not affect the \
+             extraction-cache key (#693)"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "ocr")]
+    fn tesseract_psm_changes_the_cache_key() {
+        use crate::core::config::OcrConfig;
+        use crate::types::TesseractConfig;
+
+        let psm_auto = ExtractionConfig {
+            ocr: Some(OcrConfig {
+                tesseract_config: Some(TesseractConfig {
+                    psm: 3,
+                    ..TesseractConfig::default()
+                }),
+                ..OcrConfig::default()
+            }),
+            ..Default::default()
+        };
+        let psm_sparse = ExtractionConfig {
+            ocr: Some(OcrConfig {
+                tesseract_config: Some(TesseractConfig {
+                    psm: 11,
+                    ..TesseractConfig::default()
+                }),
+                ..OcrConfig::default()
+            }),
+            ..Default::default()
+        };
+        assert_ne!(
+            hash_extraction_config(&psm_auto, "image/png"),
+            hash_extraction_config(&psm_sparse, "image/png"),
+            "psm changes Tesseract's recognized output and must be part of the cache key"
         );
     }
 
