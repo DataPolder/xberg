@@ -1917,6 +1917,82 @@ mod tests {
         assert!(result.is_err());
     }
 
+    /// Builds a tiny valid PNG so `process_image_with_cache` runs Tesseract on real
+    /// (if content-free) image bytes instead of erroring out on invalid data.
+    fn tiny_test_png_bytes() -> Vec<u8> {
+        use image::{ImageBuffer, ImageFormat, Rgb, RgbImage};
+        use std::io::Cursor;
+
+        let img: RgbImage = ImageBuffer::from_pixel(32, 32, Rgb([255, 255, 255]));
+        let mut bytes: Vec<u8> = Vec::new();
+        img.write_to(&mut Cursor::new(&mut bytes), ImageFormat::Png).unwrap();
+        bytes
+    }
+
+    /// Regression test for #687 PART 2: `TesseractConfig::use_cache = false` must be an
+    /// end-to-end bypass, not just a lookup skip — it must neither read a pre-existing
+    /// entry nor write a new one. Uses a real (non-mocked) `TesseractAPI`, matching the
+    /// pattern of `config::tests::test_apply_tesseract_variables_enables_hocr_font_info`:
+    /// gracefully skips when no Tesseract/tessdata is available in this environment.
+    ///
+    /// This exercises a genuinely new code path (an explicit cache pre-seed followed by a
+    /// `use_cache: false` call) that has no equivalent before this change, so there is
+    /// nothing "unfixed" to run it against — the bypass plumbing this proves either exists
+    /// or the test cannot be written.
+    #[test]
+    fn process_image_with_cache_does_not_read_or_write_the_cache_when_use_cache_is_false() {
+        let api = match xberg_tesseract::TesseractAPI::new() {
+            Ok(api) => api,
+            Err(_) => return, // no Tesseract/Leptonica available in this environment
+        };
+        if api.init("", "eng").is_err() {
+            return; // no "eng" tessdata available in this environment
+        }
+
+        let temp_dir = tempdir().unwrap();
+        let cache = OcrCache::new(Some(temp_dir.path().to_path_buf())).unwrap();
+
+        let image_bytes = tiny_test_png_bytes();
+        let config = TesseractConfig {
+            output_format: "text".to_string(),
+            enable_table_detection: false,
+            use_cache: false,
+            ..TesseractConfig::default()
+        };
+
+        // Pre-seed the exact entry `process_image_resolved` would look up if caching were
+        // enabled, carrying an obviously-wrong marker. If the bypass ever regresses into a
+        // read, this is what would come back instead of a fresh OCR result.
+        let image_hash = crate::cache::blake3_hash_bytes(&image_bytes);
+        let config_str = hash_config(&config);
+        let marker = OcrExtractionResult {
+            content: "STALE MARKER: use_cache=false must never return this".to_string(),
+            mime_type: "text/plain".to_string(),
+            metadata: HashMap::new(),
+            tables: Vec::new(),
+            ocr_elements: None,
+            internal_document: None,
+        };
+        cache
+            .set_cached_result(&image_hash, "tesseract", &config_str, None, &marker)
+            .unwrap();
+
+        let api_pool = TesseractApiPool::new();
+        let result = process_image_with_cache(&image_bytes, &config, &cache, &api_pool, None)
+            .expect("OCR on a valid image must succeed");
+
+        assert_ne!(
+            result.content, marker.content,
+            "use_cache=false must not read the pre-seeded cache entry"
+        );
+
+        let stats = cache.get_stats().unwrap();
+        assert_eq!(
+            stats.total_files, 1,
+            "use_cache=false must not write a new cache entry (only the pre-seeded marker file may exist)"
+        );
+    }
+
     #[test]
     fn test_preprocess_pix_produces_grayscale_with_valid_resolution() {
         let width = 32;

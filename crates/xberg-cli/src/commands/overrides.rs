@@ -205,6 +205,17 @@ pub struct ExtractionOverrides {
     #[arg(long)]
     pub ocr_auto_rotate: Option<bool>,
 
+    /// Bypass the on-disk OCR result cache for this run: neither read nor write it.
+    ///
+    /// Unlike `--no-cache` (which controls the whole-extraction-result cache), this
+    /// only affects the Tesseract OCR cache keyed by image + engine config
+    /// (`TesseractConfig::use_cache`, `crates/xberg/src/ocr/processor/execution.rs`).
+    /// Use it to force a fresh OCR pass while iterating on OCR settings, without
+    /// clearing the cache directory by hand.
+    #[cfg(feature = "ocr-surface")]
+    #[arg(long)]
+    pub ocr_no_cache: Option<bool>,
+
     /// JSON object of per-backend OCR options (e.g. `{"layout_mode":"whole_page"}`).
     #[cfg(feature = "ocr-surface")]
     #[arg(long, value_name = "JSON")]
@@ -704,6 +715,7 @@ impl ExtractionOverrides {
             || self.ocr_backend_options.is_some()
             || self.ocr_auto_rotate.is_some()
             || self.ocr_language.is_some()
+            || self.ocr_no_cache.is_some()
     }
 
     /// Mutate the individual OCR fields that have a CLI flag, in place.
@@ -720,6 +732,9 @@ impl ExtractionOverrides {
         }
         if let Some(rotate) = self.ocr_auto_rotate {
             ocr.auto_rotate = rotate;
+        }
+        if let Some(no_cache) = self.ocr_no_cache {
+            apply_ocr_no_cache(ocr, no_cache);
         }
 
         if let Some(ref language) = self.ocr_language {
@@ -1119,6 +1134,30 @@ fn is_default_ocr_language(language: &[String]) -> bool {
     matches!(language, [only] if only == DEFAULT_OCR_LANGUAGE)
 }
 
+/// Force the Tesseract OCR result cache on or off for this run.
+///
+/// `TesseractConfig::use_cache` (`xberg::TesseractConfig`) already exists and already
+/// gates the OCR cache end to end (`process_image_resolved` in
+/// `crates/xberg/src/ocr/processor/execution.rs`) — the CLI simply had no flag wired
+/// to it before `--ocr-no-cache`. When `ocr.tesseract_config` is still `None`, the
+/// language Tesseract actually uses comes from `OcrConfig::language` via
+/// `OcrConfig::effective_languages()`, not from `TesseractConfig::default()`'s own
+/// `language` field, so materialising `tesseract_config` here must seed it with
+/// `ocr.language` explicitly — otherwise naming `--ocr-no-cache` alone would silently
+/// reset the language back to Tesseract's compiled-in default (`eng`), exactly the
+/// class of bug `set_ocr_language` exists to prevent for `--ocr-language`.
+#[cfg(feature = "ocr-surface")]
+fn apply_ocr_no_cache(ocr: &mut OcrConfig, no_cache: bool) {
+    let language = ocr.language.clone();
+    let tesseract_config = ocr
+        .tesseract_config
+        .get_or_insert_with(|| xberg::TesseractConfig {
+            language,
+            ..Default::default()
+        });
+    tesseract_config.use_cache = !no_cache;
+}
+
 /// Set `language` on an OCR config and on every nested Tesseract-flavoured
 /// config that carries its own copy of it.
 #[cfg(feature = "ocr-surface")]
@@ -1491,6 +1530,114 @@ mod tests {
         let tesseract = ocr.tesseract_config.unwrap();
         assert_eq!(tesseract.language, vec!["deu".to_string()]);
         assert!(!tesseract.use_cache);
+    }
+
+    /// `--ocr-no-cache` alone (no `--ocr true`, no pre-existing `config.ocr`) must still
+    /// materialise an OCR config with the Tesseract cache disabled — mirroring
+    /// `test_ocr_language_without_ocr_flag_no_existing_config` for `--ocr-language`, and
+    /// regression coverage for `has_ocr_field_flag`/`apply_ocr_no_cache` (#687 PART 2).
+    #[cfg(feature = "ocr-surface")]
+    #[test]
+    fn test_ocr_no_cache_without_ocr_flag_no_existing_config() {
+        let mut config = ExtractionConfig::default();
+        let overrides = ExtractionOverrides {
+            ocr_no_cache: Some(true),
+            ..default_overrides()
+        };
+        overrides.apply(&mut config);
+
+        let ocr = config.ocr.expect("--ocr-no-cache alone must materialise an OCR config");
+        let tesseract = ocr
+            .tesseract_config
+            .expect("--ocr-no-cache must materialise tesseract_config to carry use_cache");
+        assert!(!tesseract.use_cache);
+        assert_eq!(
+            tesseract.language, ocr.language,
+            "materialising tesseract_config must not silently reset the effective language"
+        );
+    }
+
+    /// `--ocr-no-cache` must preserve an already-configured language instead of resetting it
+    /// to Tesseract's compiled-in default when it materialises `tesseract_config` for the
+    /// first time — the exact class of silent-drop bug `set_ocr_language` exists to prevent
+    /// for `--ocr-language` (#687 PART 2).
+    #[cfg(feature = "ocr-surface")]
+    #[test]
+    fn test_ocr_no_cache_preserves_configured_language_when_materialising_tesseract_config() {
+        let mut config = ExtractionConfig {
+            ocr: Some(OcrConfig {
+                enabled: true,
+                backend: "tesseract".to_string(),
+                language: vec!["fra".to_string()],
+                tesseract_config: None,
+                output_format: None,
+                paddle_ocr_config: None,
+                element_config: None,
+                quality_thresholds: None,
+                pipeline: None,
+                auto_rotate: false,
+                vlm_config: None,
+                vlm_fallback: Default::default(),
+                vlm_prompt: None,
+                acceleration: None,
+                tessdata_bytes: None,
+                tessdata_path: None,
+                backend_options: None,
+            }),
+            ..Default::default()
+        };
+        let overrides = ExtractionOverrides {
+            ocr_no_cache: Some(true),
+            ..default_overrides()
+        };
+        overrides.apply(&mut config);
+
+        let ocr = config.ocr.unwrap();
+        assert_eq!(ocr.language, vec!["fra".to_string()]);
+        let tesseract = ocr.tesseract_config.unwrap();
+        assert_eq!(tesseract.language, vec!["fra".to_string()]);
+        assert!(!tesseract.use_cache);
+    }
+
+    /// `--ocr-no-cache false` (explicitly re-enabling) must flip an already-disabled
+    /// `tesseract_config.use_cache` back to `true` rather than being a one-way switch.
+    #[cfg(feature = "ocr-surface")]
+    #[test]
+    fn test_ocr_no_cache_false_re_enables_an_already_disabled_cache() {
+        let mut config = ExtractionConfig {
+            ocr: Some(OcrConfig {
+                enabled: true,
+                backend: "tesseract".to_string(),
+                language: vec!["eng".to_string()],
+                tesseract_config: Some(xberg::TesseractConfig {
+                    language: vec!["eng".to_string()],
+                    use_cache: false,
+                    ..Default::default()
+                }),
+                output_format: None,
+                paddle_ocr_config: None,
+                element_config: None,
+                quality_thresholds: None,
+                pipeline: None,
+                auto_rotate: false,
+                vlm_config: None,
+                vlm_fallback: Default::default(),
+                vlm_prompt: None,
+                acceleration: None,
+                tessdata_bytes: None,
+                tessdata_path: None,
+                backend_options: None,
+            }),
+            ..Default::default()
+        };
+        let overrides = ExtractionOverrides {
+            ocr_no_cache: Some(false),
+            ..default_overrides()
+        };
+        overrides.apply(&mut config);
+
+        let ocr = config.ocr.unwrap();
+        assert!(ocr.tesseract_config.unwrap().use_cache);
     }
 
     #[cfg(feature = "ocr-surface")]

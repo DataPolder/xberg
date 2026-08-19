@@ -17,7 +17,13 @@
 /// an unchanged `ExtractionConfig` — that is, whenever a fix or a behaviour
 /// change would otherwise be masked by an entry written before it landed.
 /// Bumping it invalidates every existing cache entry process-wide.
-pub(crate) const CACHE_SCHEMA_VERSION: u32 = 2;
+/// Bumped for #687: the OCR cache key did not cover the Tesseract engine variables
+/// `apply_tesseract_variables` applies (`crates/xberg/src/ocr/processor/config.rs`), so
+/// entries written before `hocr_font_info` was enabled in 57e414a6db kept being served
+/// after it landed, serving stale font-size data. `hash_config` now folds those variables
+/// into its own hash, but this bump is still needed to invalidate the entries that were
+/// already on disk before that fix.
+pub(crate) const CACHE_SCHEMA_VERSION: u32 = 3;
 
 /// Number of hex characters in the cache version tag.
 const VERSION_TAG_HEX_LEN: usize = 8;
