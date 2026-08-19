@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A DOCX `Heading1` paragraph is now reported as heading level 1, not 2.** The style catalog
+  resolves `w:outlineLvl`, which ISO 29500 defines as zero-based, so it correctly adds one. The
+  name-based fallback used when a document ships no `styles.xml`, or whose style omits
+  `w:outlineLvl`, parsed the trailing digit of `Heading1` -- already the level the author meant --
+  and added one to that as well. Every heading in such a document came out a level too deep.
+
 - Inline formatting inside a list item now survives, and stops corrupting the text after it
   (#727). Bold, italic and link spans inside an `<li>` were discarded when the item was flushed,
   and because the buffer holding them was never cleared they were re-applied to the next paragraph

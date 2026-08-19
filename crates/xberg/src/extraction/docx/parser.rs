@@ -318,7 +318,11 @@ fn heading_level_from_style_name(style: &str) -> Option<u8> {
             if let Ok(n) = num_part.parse::<u8>()
                 && (1..=6).contains(&n)
             {
-                return Some((n + 1).min(6));
+                // The trailing digit of a Word style ID is already the 1-indexed heading
+                // level: `Heading1` IS level 1. The `+ 1` that the StyleCatalog branch
+                // applies belongs to `w:outlineLvl`, which is 0-indexed; applying it here
+                // too reported every H1 as an H2 (#732).
+                return Some(n);
             }
             None
         }
@@ -3420,9 +3424,9 @@ mod tests {
     #[test]
     fn test_heading_level_from_style_name() {
         assert_eq!(heading_level_from_style_name("Title"), Some(1));
-        assert_eq!(heading_level_from_style_name("Heading1"), Some(2));
-        assert_eq!(heading_level_from_style_name("Heading2"), Some(3));
-        assert_eq!(heading_level_from_style_name("Heading3"), Some(4));
+        assert_eq!(heading_level_from_style_name("Heading1"), Some(1));
+        assert_eq!(heading_level_from_style_name("Heading2"), Some(2));
+        assert_eq!(heading_level_from_style_name("Heading3"), Some(3));
         assert_eq!(heading_level_from_style_name("Heading6"), Some(6));
         assert_eq!(heading_level_from_style_name("Normal"), None);
     }
