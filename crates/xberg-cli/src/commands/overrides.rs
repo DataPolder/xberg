@@ -212,6 +212,19 @@ pub struct ExtractionOverrides {
     /// (`TesseractConfig::use_cache`, `crates/xberg/src/ocr/processor/execution.rs`).
     /// Use it to force a fresh OCR pass while iterating on OCR settings, without
     /// clearing the cache directory by hand.
+    ///
+    /// Only takes effect when `ocr.tesseract_config` is already set (e.g. by a loaded
+    /// config file). When it is still unset, this flag currently has no effect and logs
+    /// a warning instead of running: materialising `tesseract_config` here — even just to
+    /// carry `use_cache: false` — would flip it from `None` to `Some(..)`, and several
+    /// call sites in `crates/xberg/src/extractors/image.rs`
+    /// (`apply_default_tesseract_psm`, `is_implicit_horizontal_tesseract`,
+    /// `should_retry_sparse_image_ocr`) treat `tesseract_config.is_none()` as "no explicit
+    /// Tesseract config yet" and use it to decide whether to install their own PSM/element
+    /// defaults (e.g. `WHOLE_IMAGE_TESSERACT_PSM = 11` for whole-page image OCR, vs.
+    /// `TesseractConfig::default()`'s `psm = 3`). Materialising a default-valued
+    /// `TesseractConfig` here would silently disarm all of that and change what Tesseract
+    /// actually recognises, which this flag's contract forbids (issue #693).
     #[cfg(feature = "ocr-surface")]
     #[arg(long)]
     pub ocr_no_cache: Option<bool>,
@@ -709,13 +722,21 @@ impl ExtractionOverrides {
 
     /// Whether any `--ocr-*` field flag (backend, backend options, auto-rotate,
     /// language) was given, independent of `--ocr`/`--ocr true`.
+    ///
+    /// Deliberately excludes `--ocr-no-cache`: `apply_ocr_no_cache` only ever mutates an
+    /// already-materialised `tesseract_config` (see its doc comment), so naming
+    /// `--ocr-no-cache` alone has nothing to do once `config.ocr` exists, and must not be
+    /// the thing that materialises `config.ocr` in the first place. Doing so would flip
+    /// `config.ocr` from `None` to `Some(OcrConfig::default())` purely as a side effect of
+    /// a caching flag, which can itself change behaviour downstream (e.g.
+    /// `should_use_layout_ocr` in `crates/xberg/src/extractors/image.rs` branches on
+    /// `config.ocr.is_some()`).
     #[cfg(feature = "ocr-surface")]
     fn has_ocr_field_flag(&self) -> bool {
         self.ocr_backend.is_some()
             || self.ocr_backend_options.is_some()
             || self.ocr_auto_rotate.is_some()
             || self.ocr_language.is_some()
-            || self.ocr_no_cache.is_some()
     }
 
     /// Mutate the individual OCR fields that have a CLI flag, in place.
@@ -1134,27 +1155,49 @@ fn is_default_ocr_language(language: &[String]) -> bool {
     matches!(language, [only] if only == DEFAULT_OCR_LANGUAGE)
 }
 
-/// Force the Tesseract OCR result cache on or off for this run.
+/// Force the Tesseract OCR result cache on or off for this run, without perturbing any
+/// other Tesseract setting.
 ///
 /// `TesseractConfig::use_cache` (`xberg::TesseractConfig`) already exists and already
 /// gates the OCR cache end to end (`process_image_resolved` in
 /// `crates/xberg/src/ocr/processor/execution.rs`) — the CLI simply had no flag wired
-/// to it before `--ocr-no-cache`. When `ocr.tesseract_config` is still `None`, the
-/// language Tesseract actually uses comes from `OcrConfig::language` via
-/// `OcrConfig::effective_languages()`, not from `TesseractConfig::default()`'s own
-/// `language` field, so materialising `tesseract_config` here must seed it with
-/// `ocr.language` explicitly — otherwise naming `--ocr-no-cache` alone would silently
-/// reset the language back to Tesseract's compiled-in default (`eng`), exactly the
-/// class of bug `set_ocr_language` exists to prevent for `--ocr-language`.
+/// to it before `--ocr-no-cache`.
+///
+/// This only mutates an *already-materialised* `tesseract_config` (e.g. one set by a
+/// loaded config file). It deliberately does **not** call `get_or_insert_with` to create
+/// one when `ocr.tesseract_config` is still `None` (as a first version of this function
+/// did — see #693): `tesseract_config.is_none()` is a load-bearing sentinel downstream.
+/// `crates/xberg/src/extractors/image.rs::apply_default_tesseract_psm` (and its siblings
+/// `is_implicit_horizontal_tesseract`, `should_retry_sparse_image_ocr`) only install their
+/// own whole-image/vertical/sparse-retry PSM and element defaults when `tesseract_config`
+/// is still `None` by the time OCR runs; once it is `Some(..)`, those call sites treat it
+/// as "the caller already made an explicit choice" and skip their own defaulting,
+/// leaving `TesseractConfig::default()`'s `psm = 3` in place instead of e.g.
+/// `WHOLE_IMAGE_TESSERACT_PSM = 11`. Measured effect on a real scan: 217 recognised words
+/// without the flag vs. 194 with it, from a changed PSM alone — a caching flag must never
+/// change what Tesseract recognises.
+///
+/// Closing this properly for the "no `tesseract_config` yet" case needs a cache-bypass
+/// signal that lives outside `TesseractConfig`'s `Option` sentinel — for example a new
+/// `OcrConfig::bypass_ocr_cache: bool` field (in `crates/xberg/src/core/config/ocr.rs`)
+/// that `TesseractBackend::config_to_tesseract`
+/// (`crates/xberg/src/ocr/tesseract_backend.rs`) ORs into the internal
+/// `TesseractConfig::use_cache` it builds, independent of whether `tesseract_config` was
+/// supplied. That change is outside this file's scope; until it lands, this flag is a
+/// no-op (with a warning) unless `tesseract_config` is already set.
 #[cfg(feature = "ocr-surface")]
 fn apply_ocr_no_cache(ocr: &mut OcrConfig, no_cache: bool) {
-    let language = ocr.language.clone();
-    let tesseract_config = ocr
-        .tesseract_config
-        .get_or_insert_with(|| xberg::TesseractConfig {
-            language,
-            ..Default::default()
-        });
+    let Some(tesseract_config) = ocr.tesseract_config.as_mut() else {
+        tracing::warn!(
+            "--ocr-no-cache has no effect: no `tesseract_config` is set yet (e.g. via a \
+             config file's `ocr.tesseract_config`). Materialising one just to carry \
+             `use_cache: false` would also silently change Tesseract's PSM and other \
+             defaults for this run (see issue #693), so this flag is a no-op here instead \
+             of risking that. Clear the on-disk OCR cache directory instead, or set \
+             `ocr.tesseract_config` explicitly before using --ocr-no-cache."
+        );
+        return;
+    };
     tesseract_config.use_cache = !no_cache;
 }
 
@@ -1532,13 +1575,28 @@ mod tests {
         assert!(!tesseract.use_cache);
     }
 
-    /// `--ocr-no-cache` alone (no `--ocr true`, no pre-existing `config.ocr`) must still
-    /// materialise an OCR config with the Tesseract cache disabled — mirroring
-    /// `test_ocr_language_without_ocr_flag_no_existing_config` for `--ocr-language`, and
-    /// regression coverage for `has_ocr_field_flag`/`apply_ocr_no_cache` (#687 PART 2).
+    /// `--ocr-no-cache` alone (no `--ocr true`, no pre-existing `config.ocr`) must be a
+    /// no-op: `config.ocr` must stay `None`.
+    ///
+    /// Regression test for #693. The flag's entire contract is "bypass the Tesseract OCR
+    /// cache, and nothing else" (see its doc comment), but a prior version of
+    /// `apply_ocr_no_cache` materialised `tesseract_config` from `TesseractConfig::default()`
+    /// whenever it was still `None`, purely to have somewhere to write `use_cache: false`.
+    /// That flipped `tesseract_config` from `None` to `Some(..)`, which
+    /// `crates/xberg/src/extractors/image.rs::apply_default_tesseract_psm` (and its siblings)
+    /// treat as "the caller already made an explicit PSM choice" — disarming the
+    /// `WHOLE_IMAGE_TESSERACT_PSM = 11` default for whole-page image OCR and leaving
+    /// `TesseractConfig::default()`'s `psm = 3` instead. Measured on a real scan: 217
+    /// recognised words without `--ocr-no-cache` vs. 194 with it, from that PSM change alone.
+    ///
+    /// Against the code before this fix (i.e. `apply_ocr_no_cache` using
+    /// `ocr.tesseract_config.get_or_insert_with(|| TesseractConfig { language, ..Default::default() })`
+    /// and `has_ocr_field_flag` including `self.ocr_no_cache.is_some()`), this assertion
+    /// fails: `config.ocr` is `Some(..)` with `tesseract_config` also `Some(TesseractConfig {
+    /// psm: 3, use_cache: false, .. })` instead of `None`.
     #[cfg(feature = "ocr-surface")]
     #[test]
-    fn test_ocr_no_cache_without_ocr_flag_no_existing_config() {
+    fn test_ocr_no_cache_alone_is_a_no_op_without_existing_tesseract_config() {
         let mut config = ExtractionConfig::default();
         let overrides = ExtractionOverrides {
             ocr_no_cache: Some(true),
@@ -1546,30 +1604,89 @@ mod tests {
         };
         overrides.apply(&mut config);
 
-        let ocr = config.ocr.expect("--ocr-no-cache alone must materialise an OCR config");
-        let tesseract = ocr
-            .tesseract_config
-            .expect("--ocr-no-cache must materialise tesseract_config to carry use_cache");
-        assert!(!tesseract.use_cache);
-        assert_eq!(
-            tesseract.language, ocr.language,
-            "materialising tesseract_config must not silently reset the effective language"
+        assert!(
+            config.ocr.is_none(),
+            "--ocr-no-cache alone must not materialise config.ocr: doing so (even just to \
+             carry use_cache) would disarm the whole-image PSM default in \
+             extractors/image.rs::apply_default_tesseract_psm and silently change what \
+             Tesseract recognises"
         );
     }
 
-    /// `--ocr-no-cache` must preserve an already-configured language instead of resetting it
-    /// to Tesseract's compiled-in default when it materialises `tesseract_config` for the
-    /// first time — the exact class of silent-drop bug `set_ocr_language` exists to prevent
-    /// for `--ocr-language` (#687 PART 2).
+    /// Companion to the no-op test above for the case where `config.ocr` already exists
+    /// (e.g. set by `--ocr true`) but `tesseract_config` itself does not. `--ocr-no-cache`
+    /// must still leave `tesseract_config` as `None` rather than materialising it.
     #[cfg(feature = "ocr-surface")]
     #[test]
-    fn test_ocr_no_cache_preserves_configured_language_when_materialising_tesseract_config() {
+    fn test_ocr_no_cache_leaves_tesseract_config_none_when_ocr_config_exists_without_it() {
+        let mut config = ExtractionConfig::default();
+        let overrides = ExtractionOverrides {
+            ocr: Some(true),
+            ocr_no_cache: Some(true),
+            ..default_overrides()
+        };
+        overrides.apply(&mut config);
+
+        let ocr = config.ocr.expect("--ocr true must materialise config.ocr");
+        assert!(
+            ocr.tesseract_config.is_none(),
+            "--ocr-no-cache must not materialise tesseract_config on its own, even when \
+             config.ocr already exists from --ocr true"
+        );
+    }
+
+    /// When `tesseract_config` is already set (e.g. by a loaded config file),
+    /// `--ocr-no-cache` must flip `use_cache` and change *nothing else*: every other field
+    /// of `TesseractConfig` that reaches the OCR engine must come out identical.
+    ///
+    /// Regression test for #693's core claim ("a flag whose entire contract is caching must
+    /// not move recognition output"), and for the class of bug a `use_cache`-only assertion
+    /// would miss. Against the code before this fix, this assertion still happens to pass
+    /// for this particular case (tesseract_config already `Some`, so the old
+    /// `get_or_insert_with` was a no-op and only `use_cache` changed) — the failure mode
+    /// this fix targets is exercised by
+    /// `test_ocr_no_cache_alone_is_a_no_op_without_existing_tesseract_config` above, which
+    /// covers the case this test cannot: `tesseract_config` starting out `None`.
+    #[cfg(feature = "ocr-surface")]
+    #[test]
+    fn test_ocr_no_cache_changes_only_use_cache_when_tesseract_config_already_set() {
+        let non_default_tesseract_config = xberg::TesseractConfig {
+            language: vec!["fra".to_string(), "deu".to_string()],
+            psm: 11,
+            output_format: "hocr".to_string(),
+            oem: 1,
+            min_confidence: 42.5,
+            preprocessing: Some(xberg::ImagePreprocessingConfig {
+                target_dpi: 600,
+                auto_rotate: true,
+                deskew: false,
+                denoise: true,
+                contrast_enhance: true,
+                binarization_method: "sauvola".to_string(),
+                invert_colors: true,
+            }),
+            enable_table_detection: false,
+            table_min_confidence: 0.75,
+            table_column_threshold: 12,
+            table_row_threshold_ratio: 0.9,
+            use_cache: true,
+            classify_use_pre_adapted_templates: false,
+            language_model_ngram_on: true,
+            tessedit_dont_blkrej_good_wds: false,
+            tessedit_dont_rowrej_good_wds: false,
+            tessedit_enable_dict_correction: false,
+            tessedit_char_whitelist: "0123456789".to_string(),
+            tessedit_char_blacklist: "@#".to_string(),
+            tessedit_use_primary_params_model: false,
+            textord_space_size_is_variable: false,
+            thresholding_method: true,
+        };
         let mut config = ExtractionConfig {
             ocr: Some(OcrConfig {
                 enabled: true,
                 backend: "tesseract".to_string(),
-                language: vec!["fra".to_string()],
-                tesseract_config: None,
+                language: vec!["fra".to_string(), "deu".to_string()],
+                tesseract_config: Some(non_default_tesseract_config.clone()),
                 output_format: None,
                 paddle_ocr_config: None,
                 element_config: None,
@@ -1592,11 +1709,94 @@ mod tests {
         };
         overrides.apply(&mut config);
 
-        let ocr = config.ocr.unwrap();
-        assert_eq!(ocr.language, vec!["fra".to_string()]);
-        let tesseract = ocr.tesseract_config.unwrap();
-        assert_eq!(tesseract.language, vec!["fra".to_string()]);
-        assert!(!tesseract.use_cache);
+        let tesseract = config.ocr.unwrap().tesseract_config.unwrap();
+        assert!(!tesseract.use_cache, "--ocr-no-cache true must disable use_cache");
+        assert_eq!(tesseract.language, non_default_tesseract_config.language);
+        assert_eq!(tesseract.psm, non_default_tesseract_config.psm);
+        assert_eq!(tesseract.output_format, non_default_tesseract_config.output_format);
+        assert_eq!(tesseract.oem, non_default_tesseract_config.oem);
+        assert_eq!(tesseract.min_confidence, non_default_tesseract_config.min_confidence);
+        assert_eq!(
+            tesseract.preprocessing.as_ref().map(|p| p.target_dpi),
+            non_default_tesseract_config.preprocessing.as_ref().map(|p| p.target_dpi)
+        );
+        assert_eq!(
+            tesseract.preprocessing.as_ref().map(|p| p.auto_rotate),
+            non_default_tesseract_config.preprocessing.as_ref().map(|p| p.auto_rotate)
+        );
+        assert_eq!(
+            tesseract.preprocessing.as_ref().map(|p| p.deskew),
+            non_default_tesseract_config.preprocessing.as_ref().map(|p| p.deskew)
+        );
+        assert_eq!(
+            tesseract.preprocessing.as_ref().map(|p| p.denoise),
+            non_default_tesseract_config.preprocessing.as_ref().map(|p| p.denoise)
+        );
+        assert_eq!(
+            tesseract.preprocessing.as_ref().map(|p| p.contrast_enhance),
+            non_default_tesseract_config.preprocessing.as_ref().map(|p| p.contrast_enhance)
+        );
+        assert_eq!(
+            tesseract.preprocessing.as_ref().map(|p| p.binarization_method.clone()),
+            non_default_tesseract_config
+                .preprocessing
+                .as_ref()
+                .map(|p| p.binarization_method.clone())
+        );
+        assert_eq!(
+            tesseract.preprocessing.as_ref().map(|p| p.invert_colors),
+            non_default_tesseract_config.preprocessing.as_ref().map(|p| p.invert_colors)
+        );
+        assert_eq!(
+            tesseract.enable_table_detection,
+            non_default_tesseract_config.enable_table_detection
+        );
+        assert_eq!(tesseract.table_min_confidence, non_default_tesseract_config.table_min_confidence);
+        assert_eq!(
+            tesseract.table_column_threshold,
+            non_default_tesseract_config.table_column_threshold
+        );
+        assert_eq!(
+            tesseract.table_row_threshold_ratio,
+            non_default_tesseract_config.table_row_threshold_ratio
+        );
+        assert_eq!(
+            tesseract.classify_use_pre_adapted_templates,
+            non_default_tesseract_config.classify_use_pre_adapted_templates
+        );
+        assert_eq!(
+            tesseract.language_model_ngram_on,
+            non_default_tesseract_config.language_model_ngram_on
+        );
+        assert_eq!(
+            tesseract.tessedit_dont_blkrej_good_wds,
+            non_default_tesseract_config.tessedit_dont_blkrej_good_wds
+        );
+        assert_eq!(
+            tesseract.tessedit_dont_rowrej_good_wds,
+            non_default_tesseract_config.tessedit_dont_rowrej_good_wds
+        );
+        assert_eq!(
+            tesseract.tessedit_enable_dict_correction,
+            non_default_tesseract_config.tessedit_enable_dict_correction
+        );
+        assert_eq!(
+            tesseract.tessedit_char_whitelist,
+            non_default_tesseract_config.tessedit_char_whitelist
+        );
+        assert_eq!(
+            tesseract.tessedit_char_blacklist,
+            non_default_tesseract_config.tessedit_char_blacklist
+        );
+        assert_eq!(
+            tesseract.tessedit_use_primary_params_model,
+            non_default_tesseract_config.tessedit_use_primary_params_model
+        );
+        assert_eq!(
+            tesseract.textord_space_size_is_variable,
+            non_default_tesseract_config.textord_space_size_is_variable
+        );
+        assert_eq!(tesseract.thresholding_method, non_default_tesseract_config.thresholding_method);
     }
 
     /// `--ocr-no-cache false` (explicitly re-enabling) must flip an already-disabled
