@@ -1050,7 +1050,7 @@ impl OcrBackend for PaddleOcrBackend {
         };
 
         let languages = config.effective_languages();
-        let (paddle_lang, language_warnings) = super::select_paddle_language(&languages);
+        let (paddle_lang, mut language_warnings) = super::select_paddle_language(&languages);
 
         let mut rotation_outcome = None;
         let ocr_image_bytes: Cow<'_, [u8]> = if config.auto_rotate {
@@ -1097,9 +1097,9 @@ impl OcrBackend for PaddleOcrBackend {
             Self::residual_rotation_for_reorder(page_rotation_degrees, auto_rotate_applied_degrees);
 
         let PaddlePageOcr {
-            text,
-            line_elements,
-            word_elements,
+            mut text,
+            mut line_elements,
+            mut word_elements,
             processed_width,
             processed_height,
         } = self
@@ -1113,6 +1113,36 @@ impl OcrBackend for PaddleOcrBackend {
             .await?;
         let rotation_outcome =
             rotation_outcome.unwrap_or_else(|| RotationOutcome::unrotated(processed_width, processed_height));
+
+        // PaddleOCR pages are deliberately NOT gated on recognition confidence. This logging
+        // records the measurement that ruled it out, so the absence does not read as an
+        // oversight and the next attempt does not repeat it (#675).
+        //
+        // Measured on ordinance_2197_scanned.pdf, whose 16 pages include 5 plat/drawing pages
+        // that Tesseract drops at mean confidence 36-62 against its threshold of 75: every one
+        // of the 16 PaddleOCR pages reports a mean recognition confidence between 0.7909 and
+        // 0.9898. The engine is 79-99% confident on pages whose text reads
+        // "e, n h me nd me n ae c que by l an pable re, a". The five lowest means are 0.7909,
+        // 0.8220, 0.8678, 0.8684 and 0.9298 while the sixth is 0.9393 — a gap of 0.0095 — so no
+        // threshold separates the drawings from legitimate text. Minimum confidence is no
+        // better: the highest per-page minimum, 0.9546, belongs to a page in the bad set.
+        //
+        // A different signal is needed. The most promising is what `drop_score` (default 0.5)
+        // DISCARDS above, since the surviving detections' mean cannot see it.
+        let recognition_confidences: Vec<f64> =
+            line_elements.iter().map(|element| element.confidence.recognition).collect();
+        if !recognition_confidences.is_empty() {
+            let observed =
+                recognition_confidences.iter().sum::<f64>() / recognition_confidences.len() as f64;
+            let min = recognition_confidences.iter().copied().fold(f64::INFINITY, f64::min);
+            tracing::debug!(
+                target: "xberg::paddle::confidence",
+                detections = recognition_confidences.len(),
+                mean_recognition_confidence = observed,
+                min_recognition_confidence = min,
+                "PaddleOCR page recognition confidence"
+            );
+        }
 
         let text_blocks_count = line_elements.len();
 
@@ -2604,10 +2634,22 @@ mod tests {
     /// detected as a table once the discriminator is in place.
     #[test]
     #[cfg(feature = "pdf")]
-    #[ignore = "post_process_table also rejects this table for tesseract, the default backend: \
-               measured 0 pipe rows against 17 in ground truth. This test is a correct \
-               specification of the desired behaviour and must be un-ignored once the \
-               validator (or the clustering that feeds it masthead text) is fixed."]
+    // Still ignored after the #688 cell-merge fix, but for a NARROWER reason than before.
+    // That fix (merging horizontally-adjacent words into cell tokens before column detection)
+    // did unblock the tesseract path on this same document: 0 -> 24 pipe rows end to end, and
+    // native-corpus table cell recall rose 19.3% -> 30.0% with precision 46.2% -> 49.5%.
+    // It does NOT rescue this fixture, because these are paddle word boxes scored at
+    // TABLE_COLUMN_ALIGNMENT_THRESHOLD_PX = 20, where tesseract's path uses
+    // `table_column_threshold` = 50 and merges more aggressively.
+    //
+    // The remaining blocker is REGION ISOLATION, not the validator: all 215 words land in one
+    // region (largest vertical gap on the page is 0, against a 3 x average-word-height
+    // threshold), so the newspaper masthead and a prose sentence are reconstructed together
+    // with the table. Measured separately on docling_scanned.pdf, where every region is a
+    // whole page of prose and tables only appear once `--layout` supplies real table regions.
+    #[ignore = "blocked on table-region isolation, not on the validator: all 215 words cluster \
+               into one region so the masthead is reconstructed with the table. Un-ignore when \
+               regions are isolated structurally (see #694) rather than by vertical gap."]
     fn table_discriminator_accepts_real_dense_numeric_table() {
         let words = hocr_words_from(DENSE_TABLE_WORDS);
 
