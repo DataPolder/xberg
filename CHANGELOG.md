@@ -11,6 +11,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Tables on rotated PDF pages are no longer discarded or scrambled (#1358). Heuristic table
+  reconstruction clustered cells into rows and columns using raw page-space coordinates while
+  ignoring the rotation each span already carried, so on a 90-degree rotated page the row and
+  column axes were swapped: cells from different rows fell into one bucket, a real row's cells
+  scattered across single-row regions, and a guard requiring at least three rows then dropped the
+  table entirely. Clustering now runs on the table's own axes. Unrotated tables are bit-identical.
+  Border-detected tables on rotated pages are still affected by a separate upstream limitation.
+
+- An explicitly requested execution provider that cannot load is now an error instead of a silent
+  downgrade to CPU (#1450). `is_available()` only reports compile-time support and sessions were
+  built with `error_on_failure` unset, so an explicit CUDA, TensorRT or CoreML request could pass
+  the availability gate, fail at session creation, and run on CPU with no signal at all — the
+  caller saw only unexplained slowness. A second path did the same thing independently: the
+  CPU-only retry in `OrtBackend::build_session` swallowed any error whatsoever, which defeated the
+  first fix on the default native path used by layout and orientation detection. Automatically
+  detected providers keep their silent fallback, which is the point of asking for auto.
+
+- Embedded-object extraction in OOXML documents now honours `security_limits.max_files_in_archive`
+  (#1449). It already honoured `max_archive_depth` and `max_embedded_file_bytes`, but walked
+  `word/embeddings` and `ppt/embeddings` with no cap on entry count. Entries beyond the limit are
+  now skipped with a warning reporting how many, rather than an error, because the function
+  returns partial results by design. Accounting is per container, matching how archive extraction
+  validates each archive independently.
+
 - Nested lists in DOCX, ODT and email documents no longer attach their items to the wrong level.
   Starting a `<ul>` or `<ol>` inside an open list item did not close that item first, so the
   parent's text was appended to the inner list instead of the outer one. Only nesting is affected;
@@ -146,6 +170,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   automatically for very large pages), not the previously claimed 300 DPI (#1385).
 
 ### Added
+
+- `SecurityLimits.max_pages` caps how many pages a single document may have (#1451). It defaults to
+  unlimited, so no existing caller changes behaviour, and the check runs before layout detection,
+  OCR, or opening the full document — an oversized PDF is rejected rather than truncated, matching
+  every other primary-document limit. Language bindings need a regeneration to expose the field.
 
 - A PDF backend can now be selected explicitly: `PdfConfig.backend` (`pdf_oxide` by default) and
   the matching `--pdf-backend` CLI flag, which until now was accepted and then ignored. Only
