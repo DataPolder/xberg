@@ -2276,7 +2276,10 @@ mod tests {
     fn write_ordered_cohort(temp: &Path, file_types: &[&str]) -> PathBuf {
         let fixtures = ["d.json", "b.json", "a.json", "c.json"];
         for (fixture_name, file_type) in fixtures.iter().zip(file_types) {
-            let document_name = fixture_name.replace(".json", ".pdf");
+            // The document extension must agree with the declared file_type: Fixture::validate
+            // rejects a fixture whose file_type names a different format than its document's
+            // own extension resolves to.
+            let document_name = fixture_name.replace(".json", &format!(".{file_type}"));
             std::fs::write(temp.join(&document_name), b"x").unwrap();
             std::fs::write(
                 temp.join(fixture_name),
@@ -2478,7 +2481,7 @@ mod tests {
 
         runner.run(&["recording".to_string()]).await.unwrap();
 
-        // The adapter supports only pdf, so the txt fixture (b.pdf) is filtered out before the
+        // The adapter supports only pdf, so the txt fixture (b.txt) is filtered out before the
         // native batch call. The 3 eligible pdfs partition into a full batch of 2 and a smaller
         // final batch of 1 (manifest fixture order d, a, c) rather than aborting the run.
         assert_eq!(
