@@ -1410,12 +1410,16 @@ fn reconstruct_region_table_with_column_gap(
     horizontal_rules: usize,
 ) -> std::result::Result<Table, HeuristicTableRejection> {
     use crate::pdf::table_reconstruct::{
-        is_well_formed_borderless_table, looks_like_code_listing, post_process_table, reconstruct_table,
-        table_to_markdown,
+        is_well_formed_borderless_table, looks_like_code_listing, post_process_table, table_to_markdown,
     };
 
-    let column_positions = crate::table_core::detect_columns(region, col_gap);
-    let mut grid = reconstruct_table(region, col_gap, 0.5);
+    // Take the column positions from the same call that built the grid. `reconstruct_table`
+    // now detects columns from post-merge cell tokens, not from `region` directly, so a
+    // separate `detect_columns(region, col_gap)` no longer agrees with the grid's column
+    // count — and `repair_split_numeric_track` fails safe on a count mismatch, which would
+    // have silently switched the repair off rather than reporting anything (#688).
+    let (mut grid, column_positions) =
+        crate::table_core::reconstruct_table_with_columns(region, col_gap, 0.5);
     repair_split_numeric_track(&mut grid, region, &column_positions);
     if grid.is_empty() || grid[0].is_empty() {
         return Err(HeuristicTableRejection::EmptyGrid);
