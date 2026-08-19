@@ -1098,8 +1098,8 @@ impl OcrBackend for PaddleOcrBackend {
 
         let PaddlePageOcr {
             mut text,
-            mut line_elements,
-            mut word_elements,
+            line_elements,
+            word_elements,
             processed_width,
             processed_height,
         } = self
