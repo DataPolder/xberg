@@ -354,6 +354,49 @@ fn passes_drop_score(text_score: f32, drop_score: f32) -> bool {
     text_score >= drop_score && !text_score.is_nan()
 }
 
+/// Mean/min/max summary of a `box_score` population (DBNet's detection-region confidence),
+/// computed alongside `DropScoreDiscardStats` in `perform_ocr` so it can be compared against
+/// `text_score` (CRNN's recognition confidence) page by page.
+///
+/// This distinction matters because `drop_score` (#675) filters on `text_score`, and
+/// `text_score` is the exact signal `PaddleOcrBackend::process_image`'s doc comment already
+/// measured as unable to separate plat/drawing noise from real text: on
+/// `ordinance_2197_scanned.pdf` every one of the 16 pages' surviving `text_score`-derived mean
+/// recognition confidence landed between 0.79 and 0.99, good and bad pages alike, and the
+/// worst-case page-level minimum for a *bad* page (0.9546) exceeds several *good* pages' means.
+/// `box_score` is a different signal — the detection region's own confidence, gated separately
+/// by `det_db_box_thresh` before recognition ever runs — and has never been measured this way.
+/// Recording it here changes nothing about which blocks survive; see the identical caveat on
+/// `DropScoreDiscardStats`.
+#[derive(Debug, Default, Clone, Copy)]
+struct BoxScoreSummary {
+    count: usize,
+    sum: f64,
+    min: f32,
+    max: f32,
+}
+
+impl BoxScoreSummary {
+    /// Record one block's `box_score`. NaN scores are counted separately and excluded from
+    /// sum/min/max, matching `DropScoreDiscardStats`'s treatment of NaN `text_score`.
+    fn record(&mut self, score: f32) {
+        if score.is_nan() {
+            return;
+        }
+        let first = self.count == 0;
+        self.count += 1;
+        self.min = if first { score } else { self.min.min(score) };
+        self.max = if first { score } else { self.max.max(score) };
+        self.sum += f64::from(score);
+    }
+
+    /// Mean of recorded, non-NaN scores; `0.0` when nothing has been recorded (a "no data"
+    /// reading, not a measured score of zero).
+    fn mean(&self) -> f64 {
+        if self.count == 0 { 0.0 } else { self.sum / self.count as f64 }
+    }
+}
+
 impl PaddleOcrBackend {
     /// Create a new PaddleOCR backend with default configuration.
     pub fn new() -> Result<Self> {
@@ -1047,6 +1090,8 @@ impl PaddleOcrBackend {
         let drop_score = config.drop_score;
         let total_detected = result.text_blocks.len();
         let mut discarded = DropScoreDiscardStats::default();
+        let mut kept_box_scores = BoxScoreSummary::default();
+        let mut discarded_box_scores = BoxScoreSummary::default();
         let text_blocks: Vec<_> = result
             .text_blocks
             .into_iter()
@@ -1056,8 +1101,11 @@ impl PaddleOcrBackend {
                 // unit-testable. `discarded.record` is a side effect only, called exclusively
                 // for blocks this predicate rejects, and never influences the boolean returned.
                 let keep = passes_drop_score(block.block.text_score, drop_score);
-                if !keep {
+                if keep {
+                    kept_box_scores.record(block.block.box_score);
+                } else {
                     discarded.record(block.block.text_score);
+                    discarded_box_scores.record(block.block.box_score);
                 }
                 keep
             })
@@ -1083,6 +1131,15 @@ impl PaddleOcrBackend {
             discarded_min_score = discarded.min,
             discarded_max_score = discarded.max,
             discarded_histogram = ?discarded.histogram,
+            // `box_score` is DBNet's detection-region confidence, independent of the `text_score`
+            // recognition confidence above — see `BoxScoreSummary`'s doc comment for why this is
+            // the untested signal worth sweeping instead of `drop_score` itself.
+            kept_box_score_mean = kept_box_scores.mean(),
+            kept_box_score_min = kept_box_scores.min,
+            kept_box_score_max = kept_box_scores.max,
+            discarded_box_score_mean = discarded_box_scores.mean(),
+            discarded_box_score_min = discarded_box_scores.min,
+            discarded_box_score_max = discarded_box_scores.max,
             "PaddleOCR drop_score discard stats"
         );
 
@@ -1568,6 +1625,35 @@ mod tests {
             stats.record(score);
         }
         assert_eq!(stats.histogram, [1, 1, 1, 1, 2]);
+    }
+
+    /// Drives `BoxScoreSummary::record` with a synthetic set of scores whose count, mean, min,
+    /// and max are known by hand. This is a new struct built for this task, so there is no
+    /// pre-instrumentation behaviour to diverge from — the test pins the arithmetic (mean =
+    /// sum/count over non-NaN scores) rather than catching a regression.
+    #[test]
+    fn box_score_summary_computes_exact_summary_from_synthetic_scores() {
+        let mut stats = BoxScoreSummary::default();
+        for score in [0.62_f32, 0.71, 0.88, 0.93] {
+            stats.record(score);
+        }
+        stats.record(f32::NAN);
+
+        assert_eq!(stats.count, 4);
+        assert!((stats.mean() - (0.62 + 0.71 + 0.88 + 0.93) / 4.0).abs() < 1e-6);
+        assert!((stats.min - 0.62).abs() < 1e-6);
+        assert!((stats.max - 0.93).abs() < 1e-6);
+    }
+
+    /// An empty (no recorded scores) summary reports zeroed fields rather than NaN/undefined
+    /// values, matching `DropScoreDiscardStats::mean`'s "no data" convention.
+    #[test]
+    fn box_score_summary_defaults_to_zero_with_no_scores() {
+        let stats = BoxScoreSummary::default();
+        assert_eq!(stats.count, 0);
+        assert_eq!(stats.mean(), 0.0);
+        assert_eq!(stats.min, 0.0);
+        assert_eq!(stats.max, 0.0);
     }
 
     /// The session must receive the *entire* resolved process budget, not the hardcoded `1`
