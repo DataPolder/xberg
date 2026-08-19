@@ -4,8 +4,6 @@ use crate::Result;
 use crate::core::diagnostics::{push_warning_deduped, warning};
 use crate::error::XbergError;
 use crate::types::ProcessingWarning;
-#[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
-use lopdf::{Document, ObjectId};
 use std::cell::RefCell;
 use std::sync::Once;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -339,50 +337,82 @@ mod pixel_bbox_tests {
     }
 }
 
-/// Maximum /Parent hops when resolving an inherited /Rotate attribute.
-/// Bounds the walk so a malformed PDF with a parent cycle cannot loop forever.
+/// Read per-page /Rotate values for a whole document, normalized to
+/// 0/90/180/270.
+///
+/// Delegates to `pdf_oxide::PdfDocument::get_page_rotation`, which walks the
+/// page tree's `/Parent`-inheritance chain per ISO 32000-1 §7.7.3.4 (a page
+/// without its own `/Rotate` inherits from its `/Pages` ancestors) — the
+/// same resolution this function used to hand-roll via a second, separate
+/// `lopdf::Document::load_mem` parse of the same bytes. Every current caller
+/// already holds the `pdf_oxide::PdfDocument` passed in here open for
+/// rendering, so taking `&pdf_oxide::PdfDocument` instead of raw bytes
+/// removes that second parse entirely.
+///
+/// A per-page lookup that errors (e.g. an encrypted document whose page tree
+/// could not be decrypted, or a corrupt page-tree node that neither the tree
+/// walk nor its scanning fallback can resolve) defaults that page's rotation
+/// to `0`, matching this function's previous contract of defaulting to `0`
+/// on any parse failure — the difference is this now happens per page
+/// instead of for the whole document at once, since a `pdf_oxide::PdfDocument`
+/// reaching this function has by definition already opened successfully.
+///
+/// # Deliberate choice: non-multiple-of-90 `/Rotate` values are folded to 0
+///
+/// ISO 32000-1 §7.7.3.3 requires `/Rotate` to be a multiple of 90; a PDF that
+/// sets a non-multiple (e.g. `135`) is out of spec. The previous hand-rolled
+/// implementation stored such a value verbatim (after only a
+/// `rem_euclid(360)` fold for sign), which mattered only as a *value*:
+/// [`rotate_dynamic_image`] below only rotates on an exact 90/180/270 match
+/// and no-ops everything else, so a stored `135` never rotated a single
+/// pixel. Its one live effect was being forwarded unchanged into
+/// `ocr_config_with_page_rotation_hint`'s `page_rotation_degrees` backend
+/// hint (see `extractors::pdf::ocr`), telling an OCR backend the page is
+/// rotated by a degree count nothing in this pipeline can ever act on.
+/// `pdf_oxide::PdfDocument::get_page_rotation` instead folds any
+/// non-multiple-of-90 value to `0` at the source, treating an out-of-spec
+/// `/Rotate` exactly like a *missing* one. That is the behaviour kept here:
+/// it is strictly more correct (spec-conformant) than the old
+/// preserve-and-forward-garbage behaviour, and no test anywhere in this
+/// crate asserted the old value was ever used for anything, so nothing
+/// relies on it. See `get_page_rotations`' test module for the pinning test.
+///
+/// See [`get_page_rotations_from_bytes`] for callers that hold only the raw bytes.
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
-const MAX_ROTATE_INHERITANCE_DEPTH: usize = 32;
-
-/// Resolve a page's effective /Rotate value, following /Parent inheritance
-/// per the PDF spec (a page without its own /Rotate inherits from its Pages
-/// ancestors). Returns `None` when no ancestor defines it.
-#[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
-fn resolve_inherited_rotation(doc: &Document, page_id: ObjectId) -> Option<i64> {
-    let mut dict = doc.get_object(page_id).ok()?.as_dict().ok()?;
-    for _ in 0..MAX_ROTATE_INHERITANCE_DEPTH {
-        if let Ok(rotate_obj) = dict.get(b"Rotate") {
-            return rotate_obj.as_i64().ok();
-        }
-        let parent_id = dict.get(b"Parent").ok()?.as_reference().ok()?;
-        dict = doc.get_object(parent_id).ok()?.as_dict().ok()?;
-    }
-    None
+pub(crate) fn get_page_rotations(doc: &pdf_oxide::PdfDocument, page_count: usize) -> Vec<u32> {
+    (0..page_count)
+        .map(|page_index| match doc.get_page_rotation(page_index) {
+            // `get_page_rotation`'s own contract guarantees a value in
+            // {0, 90, 180, 270}, always non-negative.
+            Ok(degrees) => degrees as u32,
+            Err(error) => {
+                tracing::warn!(
+                    page = page_index + 1,
+                    %error,
+                    "could not resolve /Rotate for page; defaulting to 0 (no rotation)"
+                );
+                0
+            }
+        })
+        .collect()
 }
 
-/// Read per-page /Rotate values for a whole document, normalized to
-/// 0/90/180/270 (negative multiples of 90 are folded via `rem_euclid`).
+/// Prefer the document-taking form wherever a `PdfDocument` is already open — three call
+/// sites were re-parsing the same bytes a second time purely to read `/Rotate`. This exists
+/// for the two routes that genuinely have no document in scope, and it opens one so the
+/// extra parse is at least explicit at the call site rather than hidden inside the lookup.
 ///
-/// Parses the PDF once with lopdf; a parse failure or missing attribute
-/// yields 0 (no rotation) for the affected pages. lopdf's `get_pages()`
-/// map is keyed by 1-based page number, which is the authoritative page
-/// order (object IDs are not ordered by page).
+/// Returns all-zero rotations if the document cannot be opened: this is a rendering hint,
+/// and a document that will not open fails for better reasons elsewhere.
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
-pub(crate) fn get_page_rotations(pdf_bytes: &[u8], page_count: usize) -> Vec<u32> {
-    let mut rotations = vec![0u32; page_count];
-    let Ok(doc) = Document::load_mem(pdf_bytes) else {
-        return rotations;
-    };
-    for (page_number, page_id) in doc.get_pages() {
-        let index = (page_number as usize).saturating_sub(1);
-        if index >= page_count {
-            continue;
-        }
-        if let Some(rotate_int) = resolve_inherited_rotation(&doc, page_id) {
-            rotations[index] = rotate_int.rem_euclid(360) as u32;
+pub(crate) fn get_page_rotations_from_bytes(content: &[u8], page_count: usize) -> Vec<u32> {
+    match pdf_oxide::PdfDocument::from_bytes(content.to_vec()) {
+        Ok(doc) => get_page_rotations(&doc, page_count),
+        Err(error) => {
+            tracing::warn!(%error, "failed to open PDF to read page rotations; assuming none");
+            vec![0; page_count]
         }
     }
-    rotations
 }
 
 /// Rotate a decoded page image per the page's normalized /Rotate value.
@@ -974,13 +1004,129 @@ mod tests {
     #[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
     #[test]
     fn test_get_page_rotations_no_rotate_attribute_yields_zeroes() {
+        // Behavior-preserving: passes against both the old lopdf-based
+        // implementation and the new pdf_oxide-delegating one (a missing
+        // /Rotate defaults to 0 either way). Only the call mechanics changed
+        // (an already-open `PdfDocument` instead of raw bytes), to match the
+        // new `get_page_rotations` signature.
         let pdf = build_minimal_pdf_with_mediabox(612.0, 792.0);
-        assert_eq!(get_page_rotations(&pdf, 1), vec![0]);
+        let doc = pdf_oxide::PdfDocument::from_bytes(pdf).expect("fixture PDF must open");
+        assert_eq!(get_page_rotations(&doc, 1), vec![0]);
+    }
+
+    /// Build a single-page PDF whose `/Rotate` is set either on the page
+    /// itself (`inherited = false`) or on its parent `/Pages` node
+    /// (`inherited = true`), for pinning [`get_page_rotations`]' inheritance
+    /// and value-normalization contract. Mirrors the equivalent fixture
+    /// builder in `extractors::pdf::layout_runner`'s test module, which is
+    /// private to that module and out of scope to reuse from here.
+    #[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
+    fn build_pdf_with_rotate(rotation: i64, inherited: bool) -> Vec<u8> {
+        use lopdf::{Document, Object, Stream, dictionary};
+
+        let mut document = Document::with_version("1.5");
+        let pages_id = document.new_object_id();
+        let page_id = document.new_object_id();
+        let content_id = document.add_object(Stream::new(dictionary! {}, Vec::new()));
+
+        let mut page = dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "MediaBox" => vec![0.into(), 0.into(), 200.into(), 100.into()],
+            "Resources" => dictionary! {},
+            "Contents" => content_id,
+        };
+        if !inherited {
+            page.set("Rotate", rotation);
+        }
+        document.objects.insert(page_id, Object::Dictionary(page));
+
+        let mut pages = dictionary! {
+            "Type" => "Pages",
+            "Kids" => vec![page_id.into()],
+            "Count" => 1,
+        };
+        if inherited {
+            pages.set("Rotate", rotation);
+        }
+        document.objects.insert(pages_id, Object::Dictionary(pages));
+
+        let catalog_id = document.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
+        document.trailer.set("Root", catalog_id);
+
+        let mut bytes = Vec::new();
+        document.save_to(&mut bytes).expect("fixture PDF must serialize");
+        bytes
     }
 
     #[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
     #[test]
-    fn test_get_page_rotations_unparsable_bytes_yield_zeroes() {
-        assert_eq!(get_page_rotations(b"not a pdf", 3), vec![0, 0, 0]);
+    fn test_get_page_rotations_own_rotate_is_read() {
+        // Behavior-preserving for a normal, in-spec /Rotate: both the old
+        // and new implementations resolve a page's own /Rotate to itself.
+        let pdf = build_pdf_with_rotate(90, false);
+        let doc = pdf_oxide::PdfDocument::from_bytes(pdf).expect("fixture PDF must open");
+        assert_eq!(get_page_rotations(&doc, 1), vec![90]);
+    }
+
+    #[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
+    #[test]
+    fn test_get_page_rotations_inherited_rotate_is_resolved_from_parent() {
+        // Behavior-preserving: both the old /Parent-walking implementation
+        // and the new pdf_oxide delegate correctly resolve a /Rotate set
+        // only on the ancestor /Pages node (ISO 32000-1 SS7.7.3.4).
+        let pdf = build_pdf_with_rotate(90, true);
+        let doc = pdf_oxide::PdfDocument::from_bytes(pdf).expect("fixture PDF must open");
+        assert_eq!(get_page_rotations(&doc, 1), vec![90]);
+    }
+
+    #[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
+    #[test]
+    fn test_get_page_rotations_negative_rotate_normalizes_to_positive_equivalent() {
+        // Behavior-preserving: the old `rem_euclid(360)` fold and the new
+        // `((raw % 360) + 360) % 360` fold both normalize -90 to 270.
+        let pdf = build_pdf_with_rotate(-90, false);
+        let doc = pdf_oxide::PdfDocument::from_bytes(pdf).expect("fixture PDF must open");
+        assert_eq!(get_page_rotations(&doc, 1), vec![270]);
+    }
+
+    #[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
+    #[test]
+    fn test_get_page_rotations_non_multiple_of_90_folds_to_zero() {
+        // Pins the deliberate behavior CHANGE documented on `get_page_rotations`:
+        // ISO 32000-1 SS7.7.3.3 requires /Rotate to be a multiple of 90, so 135 is
+        // out-of-spec. The old lopdf-based code stored it verbatim as 135 (only
+        // `rem_euclid`-folded for sign), which this test would NOT have caught
+        // under the old signature since 135 % 360 == 135 either way -- had that
+        // code been adapted to this fixture it would assert `vec![135]`, not
+        // `vec![0]`. This test only compiles and passes against the new,
+        // pdf_oxide-delegating implementation, which folds any non-multiple of 90
+        // to 0 (treating it the same as a missing /Rotate) rather than forwarding
+        // a degree value nothing downstream can act on.
+        let pdf = build_pdf_with_rotate(135, false);
+        let doc = pdf_oxide::PdfDocument::from_bytes(pdf).expect("fixture PDF must open");
+        assert_eq!(get_page_rotations(&doc, 1), vec![0]);
+    }
+
+    #[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
+    #[test]
+    fn test_get_page_rotations_page_index_beyond_tree_defaults_to_zero() {
+        // Replaces the old `test_get_page_rotations_unparsable_bytes_yield_zeroes`:
+        // that test fed raw unparsable bytes straight into `get_page_rotations`,
+        // which no longer accepts raw bytes at all -- a document that fails to
+        // open now errors at `pdf_oxide::PdfDocument::from_bytes` (already
+        // covered by `test_pdf_page_count_invalid_pdf_errors`), before this
+        // function is ever reached. What this function itself can still fail to
+        // resolve, per page, is a page index the tree (and its scanning
+        // fallback) cannot find -- exercised here by asking for 3 pages from a
+        // document that only has 1. Each failing lookup must default to 0,
+        // matching this function's previous contract of defaulting to 0 on any
+        // per-page resolution failure.
+        let pdf = build_minimal_pdf_with_mediabox(612.0, 792.0);
+        let doc = pdf_oxide::PdfDocument::from_bytes(pdf).expect("fixture PDF must open");
+        assert_eq!(get_page_rotations(&doc, 3), vec![0, 0, 0]);
     }
 }

@@ -764,7 +764,7 @@ fn open_pdf_for_page_ocr(content: &[u8]) -> crate::Result<(pdf_oxide::PdfDocumen
         source: None,
     })?;
 
-    let page_rotations = crate::pdf::render::get_page_rotations(content, page_count);
+    let page_rotations = crate::pdf::render::get_page_rotations(&doc, page_count);
     Ok((doc, page_count, page_rotations))
 }
 
@@ -793,7 +793,7 @@ fn open_pdf_for_full_ocr(content: &[u8]) -> crate::Result<(pdf_oxide::PdfDocumen
         message: format!("Failed to get document page count: {:?}", e),
         source: None,
     })?;
-    let page_rotations = crate::pdf::render::get_page_rotations(content, page_count);
+    let page_rotations = crate::pdf::render::get_page_rotations(&doc, page_count);
     Ok((doc, page_count, page_rotations))
 }
 
@@ -3425,7 +3425,7 @@ async fn extract_with_ocr_for_page(
     // path with no source PDF); there is genuinely no rotation to read in that case.
     #[cfg(feature = "pdf")]
     let external_image_page_rotations: Option<Vec<u32>> = if images.is_some() {
-        content.map(|c| crate::pdf::render::get_page_rotations(c, total_pages))
+        content.map(|c| crate::pdf::render::get_page_rotations_from_bytes(c, total_pages))
     } else {
         None
     };

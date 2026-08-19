@@ -1539,7 +1539,7 @@ impl PdfExtractor {
             // These values exist only with layout detection; keep the reuse gate in the same cfg block. ~keep
             let markdown_page_rotations = markdown_layout_images
                 .as_ref()
-                .map(|images| crate::pdf::render::get_page_rotations(content, images.len()))
+                .map(|images| crate::pdf::render::get_page_rotations_from_bytes(content, images.len()))
                 .unwrap_or_default();
             if !markdown_layout_reusable_for_ocr(markdown_layout_gate_decisions.as_deref(), &markdown_page_rotations) {
                 markdown_layout_images = None;

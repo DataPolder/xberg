@@ -631,7 +631,7 @@ pub(super) fn run_layout_for_pdf_pages(
     let mut engine = crate::layout::take_or_create_engine(layout_config, thread_budget)
         .map_err(|e| XbergError::Other(format!("layout runner: engine init failed: {e}")))?;
 
-    let page_rotations = crate::pdf::render::get_page_rotations(content, page_count);
+    let page_rotations = crate::pdf::render::get_page_rotations(&doc, page_count);
 
     let mut all_images: Vec<image::RgbImage> = Vec::with_capacity(page_count);
     let mut all_layout_results: Vec<PageLayoutResult> = Vec::with_capacity(page_count);
@@ -1204,7 +1204,7 @@ mod tests {
         let document = pdf_oxide::PdfDocument::from_bytes(bytes.clone()).expect("fixture PDF must open");
         let rendered =
             crate::pdf::render::render_page_with_safeguards(&document, 0, 72).expect("rotated fixture must render");
-        let rotations = crate::pdf::render::get_page_rotations(&bytes, 1);
+        let rotations = crate::pdf::render::get_page_rotations(&document, 1);
         let (media_width, media_height) = document
             .get_page_media_box(0)
             .map(|(llx, lly, urx, ury)| ((urx - llx).abs(), (ury - lly).abs()))
