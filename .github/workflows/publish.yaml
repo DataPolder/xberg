@@ -476,6 +476,22 @@ jobs:
       - name: Install system dependencies
         uses: ./.github/actions/install-system-deps
 
+      # pyke's default download strategy links a Windows ORT build that always
+      # imports DirectML.dll (ort-sys's static_link_prerequisites is
+      # unconditional on windows targets), which this repo never ships and
+      # which no arm of ort_discovery.rs ever selects -- so `import xberg`
+      # fails on a clean Windows host before any Rust code runs
+      # (xberg-io/xberg#1456). This step forces ORT_STRATEGY=system (the same
+      # strategy every other Windows leg in this workflow already uses),
+      # which hits an early return in ort-sys before static_link_prerequisites
+      # runs, so the DirectML import is never introduced in the first place.
+      - name: Setup ONNX Runtime (Windows)
+        if: runner.os == 'Windows'
+        uses: ./.github/actions/setup-onnx-runtime
+        with:
+          ort-version: "1.24.2"
+          dest-dir: crates/xberg-py
+
       - name: Build wheels
         uses: xberg-io/actions/build-python-wheels@v1
         with:
@@ -524,6 +540,27 @@ jobs:
           # (#1284 follow-up). Vendor explicitly, same as every other native
           # target in this workflow, instead of depending on auditwheel alone.
           for w in wheelhouse/*.whl; do bash scripts/ci/vendor-native-closure.sh "$w"; done
+
+      - name: Vendor ONNX Runtime into wheel (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # System-strategy dynamic linking (switched above) no longer bakes ORT
+          # into the .pyd the way the pyke static-link strategy did, so it must
+          # be vendored explicitly -- same rationale as the Linux step above.
+          Get-ChildItem -Path wheelhouse -Filter "*.whl" | ForEach-Object {
+            & "${{ github.workspace }}\scripts\ci\vendor-windows-wheel-closure.ps1" -Wheel $_.FullName -DllSourceDir "$env:ORT_LIB_LOCATION" -NativeGlob "*.pyd"
+            if ($LASTEXITCODE -ne 0) { throw "vendor-windows-wheel-closure failed for $($_.FullName)" }
+          }
+
+      - name: Verify wheel has no DirectML import and ships ONNX Runtime (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path wheelhouse -Filter "*.whl" | ForEach-Object {
+            & "${{ github.workspace }}\scripts\ci\verify-windows-dll-closure.ps1" -Artifact $_.FullName -NativeGlob "*.pyd"
+            if ($LASTEXITCODE -ne 0) { throw "verify-windows-dll-closure failed for $($_.FullName)" }
+          }
 
       - name: Verify wheel glibc floor + bundled ONNX Runtime
         if: runner.os == 'Linux'
@@ -1107,6 +1144,16 @@ jobs:
       - name: Install system dependencies
         uses: ./.github/actions/install-system-deps
 
+      # See the equivalent step on python-wheels for the DirectML root cause
+      # (xberg-io/xberg#1456). This leg had no ORT setup step at all on
+      # Windows, so it defaulted to the pyke download strategy every time.
+      - name: Setup ONNX Runtime (Windows)
+        if: contains(matrix.platform.target, 'windows')
+        uses: ./.github/actions/setup-onnx-runtime
+        with:
+          ort-version: "1.24.2"
+          dest-dir: crates/xberg-php
+
       - uses: xberg-io/actions/build-php-extension@v1
         with:
           crate-name: xberg-php
@@ -1129,6 +1176,34 @@ jobs:
           windows-compiler: ${{ contains(matrix.platform.target, 'windows') && 'vs17' || '' }}
           version: ${{ needs.prepare.outputs.version }}
           output-dir: dist/php-package
+
+      # package-php-pie@v1 is an external action (xberg-io/actions); its
+      # internal file selection was not auditable from this repo, so vendor
+      # onto its OUTPUT archives (control we do have) rather than assume it
+      # bundles a co-located onnxruntime.dll from the build directory.
+      - name: Vendor ONNX Runtime into PHP package (Windows)
+        if: contains(matrix.platform.target, 'windows')
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path dist/php-package -Include "php_*.zip", "php_*.tgz" -Recurse | ForEach-Object {
+            & "${{ github.workspace }}\scripts\ci\vendor-windows-native-closure.ps1" -Archive $_.FullName -DllSourceDir "$env:ORT_LIB_LOCATION" -NativeGlob "php_xberg.dll"
+            if ($LASTEXITCODE -ne 0) { throw "vendor-windows-native-closure failed for $($_.FullName)" }
+            # Vendoring rewrites the archive bytes, so the .sha256 sidecar
+            # package-php-pie already wrote is now stale -- regenerate it.
+            $sha256Path = "$($_.FullName).sha256"
+            if (Test-Path $sha256Path) {
+              (Get-FileHash -Path $_.FullName -Algorithm SHA256).Hash.ToLower() + "  " + $_.Name | Set-Content -Path $sha256Path -NoNewline:$false
+            }
+          }
+
+      - name: Verify PHP package has no DirectML import and ships ONNX Runtime (Windows)
+        if: contains(matrix.platform.target, 'windows')
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path dist/php-package -Include "php_*.zip", "php_*.tgz" -Recurse | ForEach-Object {
+            & "${{ github.workspace }}\scripts\ci\verify-windows-dll-closure.ps1" -Artifact $_.FullName -NativeGlob "php_xberg.dll"
+            if ($LASTEXITCODE -ne 0) { throw "verify-windows-dll-closure failed for $($_.FullName)" }
+          }
 
       - uses: actions/upload-artifact@v7
         with:
@@ -1229,18 +1304,24 @@ jobs:
           cp LICENSE THIRD_PARTY_LICENSES.md "$STAGE/"
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             cp "$BINARY_PATH" "$STAGE/xberg.exe"
+            # The `Setup ONNX Runtime` step above runs with its default `system`
+            # strategy (ORT_STRATEGY=system), which links ONNX Runtime
+            # dynamically rather than statically baking it in -- so, unlike the
+            # Linux/macOS branches which either vendor a shared-object closure
+            # or need nothing extra, this zip must ship the DLL closure itself
+            # (xberg-io/xberg#1456 sibling bug: this leg shipped no DLLs at
+            # all). Mirror the Dart leg's vendoring exactly.
+            cp "${ORT_LIB_LOCATION:?}"/*.dll "$STAGE/"
+            [ -f "$STAGE/onnxruntime.dll" ] || { echo "::error::onnxruntime.dll not staged"; exit 1; }
             # Smoke-test the staged tree exactly as a user would unzip it, the
             # Windows counterpart of the `--version` runs on the macOS and
-            # linux-gnu branches below. The `Setup ONNX Runtime` step above runs
-            # with its default `system` strategy, which exports ORT_STRATEGY=system
-            # and links ONNX Runtime dynamically, while this branch vendors no DLL
-            # into the zip (contrast the Intel-macOS dylib vendoring below). So
-            # this is what decides whether the shipped zip can start at all.
-            # The `Setup ONNX Runtime` step prepends its staged DLL directory
-            # (under the workspace) to PATH; leaving it there would let the
-            # loader satisfy the import from the build tree and pass no matter
-            # what the zip contains, so strip it first — the analogue of
-            # `env -u LD_LIBRARY_PATH` on the linux-gnu branch.
+            # linux-gnu branches below. The `Setup ONNX Runtime` step prepends
+            # its staged DLL directory (under the workspace) to PATH; leaving it
+            # there would let the loader satisfy the import from the build tree
+            # and pass no matter what the zip contains, so strip it first — the
+            # analogue of `env -u LD_LIBRARY_PATH` on the linux-gnu branch. This
+            # now proves the DLLs just copied into $STAGE are what satisfy the
+            # load, not an ambient workspace path.
             WORKSPACE_POSIX="$(pwd)"
             CLEAN_PATH=""
             while IFS= read -r path_entry; do
@@ -1264,6 +1345,13 @@ jobs:
             fi
             PATH="$CLEAN_PATH" "$STAGE/xberg.exe" --version
             echo "Windows CLI smoke test passed: $STAGE/xberg.exe --version ran without a workspace-provided onnxruntime.dll"
+            # `--version` alone does not prove the loader is happy: a hard PE
+            # import (like DirectML.dll before this fix) is resolved before
+            # main() runs either way, but a *delay-loaded* import only breaks
+            # once the code path that touches it executes, which `--version`
+            # never does. Inspect the import table directly instead of trusting
+            # the smoke test's exit code for that class of defect.
+            pwsh -NoProfile -File "$GITHUB_WORKSPACE/scripts/ci/verify-windows-dll-closure.ps1" -Artifact "$STAGE" -NativeGlob "xberg.exe"
             7z a "${STAGE}.zip" "$STAGE" >/dev/null
           else
             cp "$BINARY_PATH" "$STAGE/xberg"
@@ -1542,8 +1630,24 @@ jobs:
             -exec cp {} "$STAGE/lib/" \;
           cp crates/xberg-ffi/include/xberg.h "$STAGE/include/"
           cp LICENSE "$STAGE/" 2>/dev/null || true
+          # Windows links ONNX Runtime dynamically (`Setup ONNX Runtime` above
+          # runs with its default `system` strategy); this leg had no
+          # equivalent of the glibc-Linux step below and shipped no ONNX
+          # Runtime DLL at all (xberg-io/xberg#1456 sibling bug). Mirror the
+          # Dart leg's vendoring.
+          if [[ "$TARGET" == *-pc-windows-msvc ]]; then
+            cp "${ORT_LIB_LOCATION:?}"/*.dll "$STAGE/lib/"
+            [ -f "$STAGE/lib/onnxruntime.dll" ] || { echo "::error::onnxruntime.dll not staged"; exit 1; }
+          fi
           mkdir -p dist/c-ffi
           tar -czf "dist/c-ffi/${STAGE}.tar.gz" "$STAGE"
+
+      - name: Verify C FFI distribution has no DirectML import and ships ONNX Runtime (Windows)
+        if: contains(matrix.target, '-pc-windows-msvc')
+        shell: pwsh
+        run: |
+          & "${{ github.workspace }}\scripts\ci\verify-windows-dll-closure.ps1" -Artifact "dist/c-ffi/xberg-ffi-${{ matrix.platform }}.tar.gz" -NativeGlob "xberg_ffi.dll"
+          if ($LASTEXITCODE -ne 0) { throw "verify-windows-dll-closure failed" }
 
       - name: Ship + verify ONNX Runtime (glibc Linux)
         if: contains(matrix.target, '-linux-gnu')
@@ -1886,8 +1990,12 @@ jobs:
         shell: bash
         run: echo "RUSTC_WRAPPER=" >> "$GITHUB_ENV"
 
+      # Was gated to `-linux-gnu` only, so Windows fell through to pyke's
+      # default download strategy, which always imports DirectML.dll on
+      # Windows (xberg-io/xberg#1456). Widen the gate to also run on Windows,
+      # forcing ORT_STRATEGY=system so that import is never introduced.
       - name: Setup ONNX Runtime
-        if: contains(matrix.target, '-linux-gnu')
+        if: contains(matrix.target, '-linux-gnu') || contains(matrix.target, 'windows')
         uses: ./.github/actions/setup-onnx-runtime
         with:
           ort-version: "1.24.2"
@@ -1916,6 +2024,24 @@ jobs:
             bash scripts/ci/verify-glibc-floor.sh "$t" "$GLIBC_FLOOR"
           done
           [ "$shipped" = 1 ] || echo "::notice::no artifact produced (dry-run stub); skipping ship+verify"
+
+      # build-elixir-natives@v1 is an external action; vendor onto its OUTPUT
+      # tarball rather than assume it bundles a co-located onnxruntime.dll,
+      # same reasoning as the PHP PIE package step above.
+      - name: Ship + verify ONNX Runtime (Windows)
+        if: contains(matrix.target, 'windows')
+        shell: pwsh
+        run: |
+          $tarballs = @(Get-ChildItem -Path dist/elixir-natives -Filter "*.tar.gz" -File -ErrorAction SilentlyContinue)
+          if ($tarballs.Count -eq 0) {
+            Write-Host "::notice::no artifact produced (dry-run stub); skipping ship+verify"
+          }
+          foreach ($t in $tarballs) {
+            & "${{ github.workspace }}\scripts\ci\vendor-windows-native-closure.ps1" -Archive $t.FullName -DllSourceDir "$env:ORT_LIB_LOCATION" -NativeGlob "xberg_nif.dll"
+            if ($LASTEXITCODE -ne 0) { throw "vendor-windows-native-closure failed for $($t.FullName)" }
+            & "${{ github.workspace }}\scripts\ci\verify-windows-dll-closure.ps1" -Artifact $t.FullName -NativeGlob "xberg_nif.dll"
+            if ($LASTEXITCODE -ne 0) { throw "verify-windows-dll-closure failed for $($t.FullName)" }
+          }
 
       # `build-elixir-natives` returns before creating the tarball on a dry run
       # (scripts/build.py writes its outputs and skips the cargo build), so the

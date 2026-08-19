@@ -770,6 +770,19 @@ android-target = [
 # `ort-bundled` (downloaded at build time — no system ORT required), matching
 # the ML surface every other native (non-WASM/Android) target carries. `heic`
 # is the only capability still excluded, for the libheif runner reason above.
+# CAUTION (xberg-io/xberg#1456): "no system ORT required" describes what this
+# feature set alone controls, not the whole story. pyke's Windows download
+# strategy (the one this comment says needs no system ORT) always links
+# DirectML.dll unconditionally on every Windows build, regardless of which
+# execution provider is actually selected at runtime (ort_discovery.rs has no
+# DirectML arm at all -- nothing here ever uses it). That import is resolved
+# by the Windows loader before any code runs, so any release leg that takes
+# this default pyke strategy without shipping DirectML.dll fails to import on
+# a clean Windows host. The fix is CI-side (switch the affected legs in
+# .github/workflows/publish.yaml to ORT_STRATEGY=system via
+# ./.github/actions/setup-onnx-runtime, which skips DirectML entirely), not a
+# change to this feature set, but do not read the line above as "Windows
+# needs nothing extra" when reasoning about Windows release builds.
 # Mirrors the explicit Windows list that the xberg-ffi crate uses; binding
 # crates reach it via per-crate `[[crates.<x>.target_dep_overrides]]` blocks
 # in `alef.toml`.
