@@ -51,6 +51,47 @@ pub(crate) fn ocr_doc_to_paragraphs(
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 const HOCR_FONT_SIZE_ATTRIBUTE: &str = "x_fsize";
 
+/// hOCR bold/italic fraction attribute keys, mirroring
+/// `ocr::hocr_parser::HOCR_BOLD_FRACTION_ATTRIBUTE` / `HOCR_ITALIC_FRACTION_ATTRIBUTE`
+/// (not imported directly, for the same self-containment reason as
+/// [`HOCR_FONT_SIZE_ATTRIBUTE`]). Only `ocr::hocr_parser::parse_hocr_to_internal_document`
+/// (the Tesseract hOCR block-parsing path) ever writes these; sceptre and paddle elements
+/// never carry them, so [`resolve_ocr_style_flags`] falls back to `(false, false)` for both.
+///
+/// Each value is the fraction (0.0-1.0) of words in the hOCR block that Tesseract
+/// reported as bold/italic, not a boolean -- a block is a mix of words, not a single
+/// style.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+const HOCR_BOLD_FRACTION_ATTRIBUTE: &str = "x_bold_fraction";
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+const HOCR_ITALIC_FRACTION_ATTRIBUTE: &str = "x_italic_fraction";
+
+/// A block counts as bold/italic once more than half its words carry that style,
+/// mirroring the majority-vote convention already used for native-PDF segments
+/// (`pdf::structure::pipeline`'s `is_bold = ... .count() > segments.len() / 2`).
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+const STYLE_MAJORITY_FRACTION: f32 = 0.5;
+
+/// Resolve block-level bold/italic flags for an OCR-produced text element from its
+/// hOCR fraction attributes, defaulting to `(false, false)` when the attribute is
+/// absent (sceptre, paddle) or unparseable (defensive: never panics on a malformed
+/// value).
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn resolve_ocr_style_flags(element: &crate::types::internal::InternalElement) -> (bool, bool) {
+    let attrs = element.attributes.as_ref();
+    let is_majority = |attribute: &str| {
+        attrs
+            .and_then(|attrs| attrs.get(attribute))
+            .and_then(|value| value.parse::<f32>().ok())
+            .filter(|value| value.is_finite() && (0.0..=1.0).contains(value))
+            .is_some_and(|fraction| fraction > STYLE_MAJORITY_FRACTION)
+    };
+    (
+        is_majority(HOCR_BOLD_FRACTION_ATTRIBUTE),
+        is_majority(HOCR_ITALIC_FRACTION_ATTRIBUTE),
+    )
+}
+
 /// Fallback font size (points) when neither an `x_fsize` attribute nor a usable
 /// bbox height is available. Matches the constant every call site hardcoded before.
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
@@ -541,11 +582,16 @@ fn make_ocr_line_paragraphs(
     // provides one is itself a block/element-level average, so re-deriving a
     // per-line value would add false precision without a real per-line signal.
     let font_size = resolve_ocr_font_size_pt(element, block_bbox, line_count, points_per_pixel);
+    // Same reasoning applies to bold/italic: `x_bold_fraction`/`x_italic_fraction`
+    // are block-level averages, resolved once and applied uniformly to every line.
+    let (is_bold, is_italic) = resolve_ocr_style_flags(element);
 
     text_lines
         .into_iter()
         .enumerate()
-        .map(|(line_index, text)| make_ocr_line_paragraph(text, line_index, line_count, block_bbox, font_size))
+        .map(|(line_index, text)| {
+            make_ocr_line_paragraph(text, line_index, line_count, block_bbox, font_size, is_bold, is_italic)
+        })
         .collect()
 }
 
@@ -568,6 +614,8 @@ fn make_ocr_line_paragraph(
     line_count: usize,
     block_bbox: Option<(f32, f32, f32, f32)>,
     font_size: f32,
+    is_bold: bool,
+    is_italic: bool,
 ) -> types::PdfParagraph {
     const DEFAULT_LINE_WIDTH: f32 = 100.0;
 
@@ -584,7 +632,9 @@ fn make_ocr_line_paragraph(
     let lines = if text.trim().is_empty() {
         Vec::new()
     } else {
-        vec![make_ocr_pdf_line(text, x, baseline_y, width, line_height, font_size)]
+        vec![make_ocr_pdf_line(
+            text, x, baseline_y, width, line_height, font_size, is_bold, is_italic,
+        )]
     };
     make_ocr_paragraph(text.to_string(), lines, line_bbox, font_size)
 }
@@ -887,6 +937,8 @@ fn make_ocr_pdf_line(
     width: f32,
     line_height: f32,
     font_size: f32,
+    is_bold: bool,
+    is_italic: bool,
 ) -> types::PdfLine {
     let segment = crate::pdf::hierarchy::SegmentData {
         text: text.to_string(),
@@ -895,8 +947,8 @@ fn make_ocr_pdf_line(
         width,
         height: line_height,
         font_size,
-        is_bold: false,
-        is_italic: false,
+        is_bold,
+        is_italic,
         is_monospace: false,
         baseline_y,
         rotation_degrees: 0.0,
@@ -906,7 +958,7 @@ fn make_ocr_pdf_line(
         segments: vec![segment],
         baseline_y,
         dominant_font_size: font_size,
-        is_bold: false,
+        is_bold,
         is_monospace: false,
     }
 }
@@ -917,6 +969,23 @@ mod tests {
     use crate::types::extraction::BoundingBox;
     use crate::types::internal::{ElementKind, InternalDocument, InternalElement};
     use crate::types::ocr_elements::OcrElementLevel;
+
+    /// The three hOCR attribute keys this module reads are declared here as literals
+    /// rather than imported, because `ocr::hocr_parser` is behind `feature = "ocr"`
+    /// while this module is not. That duplication can silently drift: if the parser
+    /// renamed a key, every lookup here would simply miss and fall back to its
+    /// default, and no fallback test would fail. This pins the two copies together.
+    #[test]
+    fn test_hocr_attribute_keys_match_the_parser_that_writes_them() {
+        use crate::ocr::hocr_parser::{
+            HOCR_BOLD_FRACTION_ATTRIBUTE as PARSER_BOLD, HOCR_FONT_SIZE_ATTRIBUTE as PARSER_FONT_SIZE,
+            HOCR_ITALIC_FRACTION_ATTRIBUTE as PARSER_ITALIC,
+        };
+
+        assert_eq!(HOCR_FONT_SIZE_ATTRIBUTE, PARSER_FONT_SIZE, "font-size attribute key drifted from the parser");
+        assert_eq!(HOCR_BOLD_FRACTION_ATTRIBUTE, PARSER_BOLD, "bold-fraction attribute key drifted from the parser");
+        assert_eq!(HOCR_ITALIC_FRACTION_ATTRIBUTE, PARSER_ITALIC, "italic-fraction attribute key drifted from the parser");
+    }
 
     #[test]
     fn test_ocr_doc_soft_wrapped_body_stays_one_paragraph() {
@@ -1202,6 +1271,115 @@ mod tests {
             1,
             "Only the non-blank line should be in lines array"
         );
+    }
+
+    /// An element whose hOCR `x_bold_fraction` attribute reports a clear majority
+    /// of bold words must produce a bold `SegmentData`. Against unfixed code
+    /// (`make_ocr_pdf_line` hardcoding `is_bold: false`), this assertion fails:
+    /// the segment comes back `is_bold == false` regardless of the attribute.
+    #[test]
+    fn test_ocr_doc_segment_is_bold_when_element_reports_majority_bold_fraction() {
+        use ahash::AHashMap;
+
+        let mut doc = InternalDocument::new("test");
+        let mut elem = InternalElement::text(
+            ElementKind::OcrText {
+                level: OcrElementLevel::Line,
+            },
+            "Bold Heading",
+            0,
+        );
+        elem.bbox = Some(BoundingBox {
+            x0: 10.0,
+            y0: 10.0,
+            x1: 200.0,
+            y1: 50.0,
+        });
+        let mut attrs = AHashMap::new();
+        attrs.insert("x_bold_fraction".to_string(), "1".to_string());
+        // `InternalElement::with_attributes` is gated on the xml/hwpx features, which the
+        // OCR test set does not enable; assign the public field directly instead.
+        elem.attributes = Some(attrs);
+        doc.push_element(elem);
+
+        let paragraphs = ocr_doc_to_paragraphs(&doc, 1000, 1.0);
+
+        assert_eq!(paragraphs[0].lines.len(), 1);
+        assert!(
+            paragraphs[0].lines[0].segments[0].is_bold,
+            "expected the majority-bold fraction to mark the segment bold"
+        );
+    }
+
+    /// An element carrying no style attributes at all (the sceptre/paddle case,
+    /// since only Tesseract's hOCR block parser ever writes `x_bold_fraction` /
+    /// `x_italic_fraction`) must keep the previous default of `is_bold == false`
+    /// and `is_italic == false`. This is the behavior-preservation guarantee for
+    /// non-Tesseract backends and passes on both fixed and unfixed code -- it
+    /// documents the fallback rather than proving the fix.
+    #[test]
+    fn test_ocr_doc_segment_style_defaults_to_false_when_attribute_absent() {
+        let mut doc = InternalDocument::new("test");
+        let mut elem = InternalElement::text(
+            ElementKind::OcrText {
+                level: OcrElementLevel::Line,
+            },
+            "Plain text",
+            0,
+        );
+        elem.bbox = Some(BoundingBox {
+            x0: 10.0,
+            y0: 10.0,
+            x1: 200.0,
+            y1: 50.0,
+        });
+        doc.push_element(elem);
+
+        let paragraphs = ocr_doc_to_paragraphs(&doc, 1000, 1.0);
+
+        assert_eq!(paragraphs[0].lines.len(), 1);
+        assert!(!paragraphs[0].lines[0].segments[0].is_bold);
+        assert!(!paragraphs[0].lines[0].segments[0].is_italic);
+    }
+
+    /// A malformed (non-numeric) or out-of-range `x_bold_fraction` /
+    /// `x_italic_fraction` value must not panic and must fall back to `false`.
+    /// Against unfixed code this assertion trivially passes too (both are
+    /// hardcoded `false`), so this test's job is to prove `.parse::<f32>()`
+    /// never panics on garbage input and that out-of-range fractions
+    /// (negative, or > 1.0, which cannot be legitimate word-fractions) are
+    /// rejected rather than misread as "bold".
+    #[test]
+    fn test_ocr_doc_segment_style_falls_back_on_malformed_fraction_without_panicking() {
+        use ahash::AHashMap;
+
+        let mut doc = InternalDocument::new("test");
+        let mut elem = InternalElement::text(
+            ElementKind::OcrText {
+                level: OcrElementLevel::Line,
+            },
+            "Garbled attrs",
+            0,
+        );
+        elem.bbox = Some(BoundingBox {
+            x0: 10.0,
+            y0: 10.0,
+            x1: 200.0,
+            y1: 50.0,
+        });
+        let mut attrs = AHashMap::new();
+        attrs.insert("x_bold_fraction".to_string(), "not-a-number".to_string());
+        attrs.insert("x_italic_fraction".to_string(), "5.0".to_string());
+        // `InternalElement::with_attributes` is gated on the xml/hwpx features, which the
+        // OCR test set does not enable; assign the public field directly instead.
+        elem.attributes = Some(attrs);
+        doc.push_element(elem);
+
+        let paragraphs = ocr_doc_to_paragraphs(&doc, 1000, 1.0);
+
+        assert_eq!(paragraphs[0].lines.len(), 1);
+        assert!(!paragraphs[0].lines[0].segments[0].is_bold);
+        assert!(!paragraphs[0].lines[0].segments[0].is_italic);
     }
 
     #[cfg(feature = "layout-detection")]
