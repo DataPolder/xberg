@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Text that resumes in a list item after a nested list is no longer emitted as a paragraph in
+  DOCX, ODT, EPUB and email documents. Only one flag tracked whether a list item was open, and
+  descending into a sublist cleared it, so the parent item's trailing content fell through to the
+  paragraph path — breaking the list with a stray block of prose. Nesting state is now tracked per
+  list level, so the trailing text rejoins its own level as a further item of the outer list,
+  matching what the markdown extractor already does for the same shape.
+
 - Legacy `.doc` extraction no longer emits field instructions as document text (#1460). Word field
   codes are delimited in the text stream by three control characters, and the extractor dropped
   the delimiters while keeping everything between them — so the machinery of a field leaked into
