@@ -6,6 +6,68 @@
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 use super::types;
 
+/// Separate points-per-pixel scale factors for [`resolve_ocr_font_size_pt`]'s two
+/// geometric fallback branches.
+///
+/// `element.bbox` and `element.ocr_geometry` can be in different units by the time
+/// font-size resolution runs, depending on the caller's route:
+///
+/// - On the mixed OCR route (`extractors::pdf::ocr::assemble_mixed_ocr_page_document`),
+///   `element.bbox` has already been rescaled into PDF points by that route's own
+///   `rescale_ocr_bboxes_to_page_points` before this runs, so the `block_bbox`-height
+///   fallback needs no further scaling. `element.ocr_geometry` is untouched by that
+///   rescale -- it stays raster-pixel space, because
+///   `extraction::derive::OcrElement::geometry` documents that field as public,
+///   raster-pixel-space API and rescaling it in place would both corrupt that contract
+///   and, since its point type is `(u32, u32)`, round away sub-pixel precision. The
+///   quad-edge fallback (sceptre/paddle's `Quadrilateral` geometry) therefore still
+///   needs the real points-per-pixel ratio.
+/// - On the pure-OCR route (`extract_with_ocr_for_page`), both fields are still in raw
+///   OCR raster pixels when font-size resolution runs, so both branches need the same
+///   real points-per-pixel ratio.
+///
+/// A single scalar cannot express this: collapsing to one number either corrupts the
+/// mixed route's bbox branch (multiplying an already-in-points value again) or leaves
+/// its geometry branch unconverted -- inflating sceptre/paddle font sizes by the raster
+/// DPI's points-per-pixel ratio (~2.08x at 150 DPI) and pushing ordinary intra-line
+/// ascender/descender variance over the heading heuristic's `MIN_HEADING_FONT_GAP`,
+/// breaking paragraphs mid physical line.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct OcrFontSizeScale {
+    bbox_points_per_pixel: f32,
+    geometry_points_per_pixel: f32,
+}
+
+/// Scale to apply to a value that is already in the target unit (PDF points): a
+/// genuine no-op, not a magic number picked for effect.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+const NO_OP_POINTS_PER_PIXEL: f32 = 1.0;
+
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+impl OcrFontSizeScale {
+    /// `element.bbox` and `element.ocr_geometry` are both still in the same unit
+    /// space (raw OCR raster pixels on the pure-OCR route, or already-uniform test
+    /// fixtures): apply one real points-per-pixel ratio to both branches.
+    pub(crate) fn uniform(points_per_pixel: f32) -> Self {
+        Self {
+            bbox_points_per_pixel: points_per_pixel,
+            geometry_points_per_pixel: points_per_pixel,
+        }
+    }
+
+    /// The mixed OCR route's shape: `element.bbox` was already rescaled into PDF
+    /// points by the caller, so the bbox-height fallback is a no-op scale, while
+    /// `element.ocr_geometry` is still raw raster pixels and needs the real
+    /// points-per-pixel ratio for this page.
+    pub(crate) fn bbox_already_in_points(geometry_points_per_pixel: f32) -> Self {
+        Self {
+            bbox_points_per_pixel: NO_OP_POINTS_PER_PIXEL,
+            geometry_points_per_pixel,
+        }
+    }
+}
+
 /// Convert an OCR-produced [`crate::types::internal::InternalDocument`] into a vec of [`types::PdfParagraph`]s
 /// for the structure assembly pipeline.
 ///
@@ -16,7 +78,7 @@ use super::types;
 pub(crate) fn ocr_doc_to_paragraphs(
     doc: &crate::types::internal::InternalDocument,
     page_height_px: u32,
-    points_per_pixel: f32,
+    font_size_scale: OcrFontSizeScale,
 ) -> Vec<types::PdfParagraph> {
     use crate::types::internal::ElementKind;
     let page_h = page_height_px as f32;
@@ -29,7 +91,7 @@ pub(crate) fn ocr_doc_to_paragraphs(
             continue;
         }
         let block_id = hocr_block_id(element);
-        let paragraph = make_ocr_block_paragraph(element, page_h, points_per_pixel);
+        let paragraph = make_ocr_block_paragraph(element, page_h, font_size_scale);
         if block_id.is_some() && block_id == previous_block_id {
             if let Some(current) = result.last_mut() {
                 merge_ocr_block_paragraph(current, paragraph);
@@ -105,8 +167,11 @@ const DEFAULT_OCR_FONT_SIZE_PT: f32 = 12.0;
 ///
 /// Otherwise falls back to a proxy derived from the element's own line-height
 /// (`quad_edge_height_px` when the backend reports a quadrilateral, else the raw
-/// bbox height), scaled from OCR raster pixels to PDF points via `points_per_pixel`.
-/// The scaling matters: the document-level heading heuristic
+/// bbox height), scaled from OCR raster pixels to PDF points via `font_size_scale`.
+/// Each branch is scaled by the factor appropriate to *its own* unit space -- see
+/// [`OcrFontSizeScale`] -- because `element.bbox` and `element.ocr_geometry` are not
+/// always in the same unit space by the time this runs. The scaling matters either
+/// way: the document-level heading heuristic
 /// (`pdf::structure::pipeline::extract_document_structure_from_segments`) compares
 /// font sizes against `MIN_HEADING_FONT_GAP`, an **absolute-points** constant: a
 /// pixel-space value would either swamp that constant into irrelevance (high-DPI
@@ -117,7 +182,7 @@ fn resolve_ocr_font_size_pt(
     element: &crate::types::internal::InternalElement,
     block_bbox: Option<(f32, f32, f32, f32)>,
     line_count: usize,
-    points_per_pixel: f32,
+    font_size_scale: OcrFontSizeScale,
 ) -> f32 {
     if let Some(font_size) = element
         .attributes
@@ -129,14 +194,15 @@ fn resolve_ocr_font_size_pt(
         return font_size;
     }
 
-    let height_px = element
+    let height_pt = element
         .ocr_geometry
         .as_ref()
         .and_then(quad_edge_height_px)
-        .or_else(|| block_bbox.map(|(_, bottom, _, top)| top - bottom));
+        .map(|height_px| height_px * font_size_scale.geometry_points_per_pixel)
+        .or_else(|| block_bbox.map(|(_, bottom, _, top)| (top - bottom) * font_size_scale.bbox_points_per_pixel));
 
-    height_px
-        .map(|height| height / line_count.max(1) as f32 * points_per_pixel)
+    height_pt
+        .map(|height| height / line_count.max(1) as f32)
         .filter(|value| value.is_finite() && *value > 0.0)
         .unwrap_or(DEFAULT_OCR_FONT_SIZE_PT)
 }
@@ -263,7 +329,7 @@ pub(crate) fn ocr_doc_to_layout_paragraphs(
     hints: &[types::LayoutHint],
     min_confidence: f32,
     min_containment: f32,
-    points_per_pixel: f32,
+    font_size_scale: OcrFontSizeScale,
 ) -> Vec<types::PdfParagraph> {
     use crate::types::internal::ElementKind;
     let page_height = page_height_px as f32;
@@ -287,7 +353,7 @@ pub(crate) fn ocr_doc_to_layout_paragraphs(
                 hints,
                 min_confidence,
             );
-        let mut lines = make_ocr_line_paragraphs(element, page_height, points_per_pixel);
+        let mut lines = make_ocr_line_paragraphs(element, page_height, font_size_scale);
         let selected = super::layout_classify::apply_layout_overrides_with_matches(
             &mut lines,
             hints,
@@ -555,16 +621,16 @@ fn trace_conversion(doc: &crate::types::internal::InternalDocument, result: &[ty
 fn make_ocr_block_paragraph(
     element: &crate::types::internal::InternalElement,
     page_height: f32,
-    points_per_pixel: f32,
+    font_size_scale: OcrFontSizeScale,
 ) -> types::PdfParagraph {
     let block_bbox = pdf_block_bbox(element, page_height);
-    let line_paragraphs = make_ocr_line_paragraphs(element, page_height, points_per_pixel);
+    let line_paragraphs = make_ocr_line_paragraphs(element, page_height, font_size_scale);
     let lines = line_paragraphs
         .iter()
         .flat_map(|paragraph| paragraph.lines.iter().cloned())
         .collect();
     let text_line_count = element.text.split('\n').count().max(1);
-    let font_size = resolve_ocr_font_size_pt(element, block_bbox, text_line_count, points_per_pixel);
+    let font_size = resolve_ocr_font_size_pt(element, block_bbox, text_line_count, font_size_scale);
     make_ocr_paragraph(element.text.clone(), lines, block_bbox, font_size)
 }
 
@@ -572,7 +638,7 @@ fn make_ocr_block_paragraph(
 fn make_ocr_line_paragraphs(
     element: &crate::types::internal::InternalElement,
     page_height: f32,
-    points_per_pixel: f32,
+    font_size_scale: OcrFontSizeScale,
 ) -> Vec<types::PdfParagraph> {
     let block_bbox = pdf_block_bbox(element, page_height);
     let text_lines = element.text.split('\n').collect::<Vec<_>>();
@@ -581,7 +647,7 @@ fn make_ocr_line_paragraphs(
     // backends that emit line-level elements): `x_fsize` when the backend
     // provides one is itself a block/element-level average, so re-deriving a
     // per-line value would add false precision without a real per-line signal.
-    let font_size = resolve_ocr_font_size_pt(element, block_bbox, line_count, points_per_pixel);
+    let font_size = resolve_ocr_font_size_pt(element, block_bbox, line_count, font_size_scale);
     // Same reasoning applies to bold/italic: `x_bold_fraction`/`x_italic_fraction`
     // are block-level averages, resolved once and applied uniformly to every line.
     let (is_bold, is_italic) = resolve_ocr_style_flags(element);
@@ -835,19 +901,127 @@ fn has_structural_override(paragraph: &types::PdfParagraph) -> bool {
             ))
 }
 
+/// A merged body group is only split into separate paragraphs once it contains at
+/// least this many marker-opening lines. A single marker-opening line is not
+/// enough signal: ordinary prose regularly *starts* with something that parses as
+/// a list marker (e.g. a lead-in sentence "1. Overview covers..."), and splitting
+/// on that alone would carve one such paragraph into a spurious empty lead segment
+/// plus itself. Two or more independent marker openings in the same merged group
+/// is the point where "this is a list" stops being a guess.
+#[cfg(all(feature = "ocr", feature = "layout-detection"))]
+const MIN_LIST_MARKERS_TO_SPLIT: usize = 2;
+
+/// Flush an accumulated run of OCR-line paragraphs from the same layout region.
+///
+/// A layout element spanning a whole list (see `regroup_layout_lines_by_element`'s
+/// `same_region` test, which never flushes mid-element because its middle OR-arm
+/// is true for every line of the same hOCR element) previously became ONE
+/// paragraph regardless of how many list markers it contained, so only the first
+/// marker in the run was ever visible to the downstream `looks_like_list_item`
+/// classifier -- items 2..N were swallowed into item 1's body. This splits the run
+/// at each marker-opening line once there are at least [`MIN_LIST_MARKERS_TO_SPLIT`]
+/// of them, so every item gets its own paragraph; a lone marker-opening line (the
+/// common false-positive case) still produces exactly one paragraph, unchanged
+/// from before.
 #[cfg(all(feature = "ocr", feature = "layout-detection"))]
 fn push_body_group(result: &mut Vec<types::PdfParagraph>, lines: Vec<types::PdfParagraph>) {
     let lines = trim_blank_boundaries(lines);
     if lines.is_empty() {
         return;
     }
-    let text = lines
+    for segment in split_body_group_at_list_markers(lines) {
+        if let Some(paragraph) = build_body_paragraph(segment) {
+            result.push(paragraph);
+        }
+    }
+}
+
+/// Split `lines` into segments at each line for which `looks_like_list_item` is
+/// true, provided there are at least [`MIN_LIST_MARKERS_TO_SPLIT`] such lines.
+/// Lines before the first marker (e.g. a lead-in sentence) form their own leading
+/// segment rather than being absorbed into the first item; a wrapped continuation
+/// line carries no marker of its own and so stays in the segment it already
+/// belongs to. Below the threshold, `lines` is returned unsplit as the sole
+/// segment. Segments are built forward into a `Vec<Vec<_>>` in original order --
+/// no reversal, no `split_off`.
+#[cfg(all(feature = "ocr", feature = "layout-detection"))]
+fn split_body_group_at_list_markers(lines: Vec<types::PdfParagraph>) -> Vec<Vec<types::PdfParagraph>> {
+    let marker_indices = lines
         .iter()
-        .map(|line| line.text.as_str())
-        .collect::<Vec<_>>()
-        .join("\n");
+        .enumerate()
+        .filter(|(_, line)| super::pipeline::looks_like_list_item(&line.text))
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+
+    if marker_indices.len() < MIN_LIST_MARKERS_TO_SPLIT {
+        return vec![lines];
+    }
+
+    let mut boundaries = marker_indices;
+    if boundaries.first() != Some(&0) {
+        boundaries.insert(0, 0);
+    }
+
+    let mut slots = lines.into_iter().map(Some).collect::<Vec<_>>();
+    boundaries
+        .iter()
+        .enumerate()
+        .map(|(window_index, &start)| {
+            let end = boundaries.get(window_index + 1).copied().unwrap_or(slots.len());
+            slots[start..end].iter_mut().filter_map(Option::take).collect::<Vec<_>>()
+        })
+        .filter(|segment| !segment.is_empty())
+        .collect()
+}
+
+/// Join a body segment's lines into paragraph text.
+///
+/// A segment whose first line satisfies `looks_like_list_item` is marker-led: its
+/// remaining lines are wrapped continuations of one logical item, so they join
+/// with a single space, not a newline. Newline-joining a marker-led segment looks
+/// harmless in isolation, but `apply_ocr_text_list_fallback`
+/// (`extractors::pdf::ocr`) flags any paragraph whose text starts with a list
+/// marker as `is_list_item = true` regardless of how many lines it has, and the
+/// markdown renderer then treats an embedded `"\n"` inside a list-item paragraph
+/// as a block break -- so a wrapped continuation line came out as its own
+/// standalone paragraph in production markdown. Non-marker-led segments (plain
+/// prose) keep the long-standing `"\n"` join, unchanged.
+///
+/// Each line is trimmed before joining, and empty lines are dropped, so a line
+/// with trailing/leading whitespace (or a rare interior blank line) can't turn
+/// into a double space.
+#[cfg(all(feature = "ocr", feature = "layout-detection"))]
+fn join_body_segment_text(lines: &[types::PdfParagraph]) -> String {
+    let marker_led = lines
+        .first()
+        .is_some_and(|line| super::pipeline::looks_like_list_item(&line.text));
+    if marker_led {
+        lines
+            .iter()
+            .map(|line| line.text.trim())
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ")
+    } else {
+        lines
+            .iter()
+            .map(|line| line.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
+/// Build one merged body paragraph from a (possibly split) run of OCR-line
+/// paragraphs -- the construction `push_body_group` always used, extracted so it
+/// applies identically to every segment `split_body_group_at_list_markers`
+/// produces: `pdf_lines` is collected only from this segment's lines, `block_bbox`
+/// unions only this segment's boxes, and `layout_class` takes the first non-`None`
+/// value within this segment (not the whole original group).
+#[cfg(all(feature = "ocr", feature = "layout-detection"))]
+fn build_body_paragraph(lines: Vec<types::PdfParagraph>) -> Option<types::PdfParagraph> {
+    let text = join_body_segment_text(&lines);
     if text.trim().is_empty() {
-        return;
+        return None;
     }
     let bbox = union_bboxes(&lines);
     let layout_class = lines.iter().find_map(|line| line.layout_class);
@@ -859,7 +1033,7 @@ fn push_body_group(result: &mut Vec<types::PdfParagraph>, lines: Vec<types::PdfP
     let pdf_lines = lines.into_iter().flat_map(|line| line.lines).collect();
     let mut paragraph = make_ocr_paragraph(text, pdf_lines, bbox, font_size);
     paragraph.layout_class = layout_class;
-    result.push(paragraph);
+    Some(paragraph)
 }
 
 #[cfg(all(feature = "ocr", feature = "layout-detection"))]
@@ -1005,7 +1179,7 @@ mod tests {
         });
         doc.push_element(elem);
 
-        let paragraphs = ocr_doc_to_paragraphs(&doc, 1000, 1.0);
+        let paragraphs = ocr_doc_to_paragraphs(&doc, 1000, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 1);
         assert_eq!(
@@ -1050,12 +1224,70 @@ mod tests {
         });
         doc.push_element(elem);
 
-        let paragraphs = ocr_doc_to_paragraphs(&doc, 1000, 1.0);
+        let paragraphs = ocr_doc_to_paragraphs(&doc, 1000, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 1);
         assert!(
             (paragraphs[0].dominant_font_size - 35.0).abs() < 0.01,
             "expected the skew-robust quad edge height (35.0), got {}",
+            paragraphs[0].dominant_font_size
+        );
+    }
+
+    /// Unit-mismatch regression: `element.bbox` and `element.ocr_geometry` are not
+    /// always in the same coordinate unit by the time `resolve_ocr_font_size_pt` runs
+    /// (see [`OcrFontSizeScale`]'s doc comment) -- on the mixed OCR route,
+    /// `element.bbox` has already been rescaled into PDF points by the caller
+    /// (`extractors::pdf::ocr::rescale_ocr_bboxes_to_page_points`) while
+    /// `element.ocr_geometry` is still raw OCR raster pixels. A `Quadrilateral`
+    /// element (the only geometry shape `quad_edge_height_px` reads) must therefore
+    /// have its font size scaled by `OcrFontSizeScale::bbox_already_in_points`'s
+    /// `geometry_points_per_pixel`, not left in raw pixels or treated as a no-op.
+    ///
+    /// The quad here is a straight (unskewed) 200px-tall band -- `quad_edge_height_px`
+    /// averages the two side edges, both exactly 200px -- so the correctly-scaled font
+    /// size at a 0.36 points-per-pixel ratio (matching the 1700x2200px-over-612x792pt
+    /// fixture used elsewhere in this crate) is `200.0 * 0.36 = 72.0`pt.
+    ///
+    /// Against a caller that collapses `OcrFontSizeScale` back to one flat scale for
+    /// both branches (the pre-fix shape of `assemble_mixed_ocr_page_document`, which
+    /// called `ocr_doc_to_paragraphs(&doc, page_height, 1.0)` unconditionally), this
+    /// asserts `72.0` and fails: the actual value is `200.0`, the raw unscaled
+    /// raster-pixel quad-edge height.
+    #[test]
+    fn test_ocr_doc_scales_quad_geometry_by_its_own_ratio_when_bbox_is_already_in_points() {
+        let mut doc = InternalDocument::new("test");
+        let mut elem = InternalElement::text(
+            ElementKind::OcrText {
+                level: OcrElementLevel::Line,
+            },
+            "SCEPTRE HEADING",
+            0,
+        );
+        // `block_bbox` is deliberately a different height (300pt) from the quad's raw
+        // pixel height (200px) below, so a result of `300.0` (or `300.0 * 0.36 =
+        // 108.0`) would indicate the bbox-height fallback fired instead of the
+        // quad-edge one -- it must not, since `resolve_ocr_font_size_pt` always
+        // prefers `ocr_geometry` when present.
+        elem.bbox = Some(BoundingBox {
+            x0: 100.0,
+            y0: 100.0,
+            x1: 900.0,
+            y1: 400.0,
+        });
+        elem.ocr_geometry = Some(crate::types::OcrBoundingGeometry::Quadrilateral {
+            points: [(100, 100), (900, 100), (900, 300), (100, 300)],
+        });
+        doc.push_element(elem);
+
+        let font_size_scale = OcrFontSizeScale::bbox_already_in_points(0.36);
+        let paragraphs = ocr_doc_to_paragraphs(&doc, 1000, font_size_scale);
+
+        assert_eq!(paragraphs.len(), 1);
+        assert!(
+            (paragraphs[0].dominant_font_size - 72.0).abs() < 0.01,
+            "expected the quad-edge height rescaled by its own points-per-pixel ratio \
+             (200px * 0.36 = 72.0pt), got {}",
             paragraphs[0].dominant_font_size
         );
     }
@@ -1067,19 +1299,19 @@ mod tests {
             ("Second", 100.0, 120.0, 500.0, 140.0),
         ]);
         set_hocr_block_ids(&mut same_block, &[Some("block_1_1"), Some("block_1_1")]);
-        let merged = ocr_doc_to_paragraphs(&same_block, 1000, 1.0);
+        let merged = ocr_doc_to_paragraphs(&same_block, 1000, OcrFontSizeScale::uniform(1.0));
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].text, "First\nSecond");
 
         let mut different_blocks = same_block.clone();
         set_hocr_block_ids(&mut different_blocks, &[Some("block_1_1"), Some("block_1_2")]);
-        assert_eq!(ocr_doc_to_paragraphs(&different_blocks, 1000, 1.0).len(), 2);
+        assert_eq!(ocr_doc_to_paragraphs(&different_blocks, 1000, OcrFontSizeScale::uniform(1.0)).len(), 2);
 
         let no_blocks = layout_line_document(&[
             ("First", 100.0, 100.0, 500.0, 120.0),
             ("Second", 100.0, 120.0, 500.0, 140.0),
         ]);
-        assert_eq!(ocr_doc_to_paragraphs(&no_blocks, 1000, 1.0).len(), 2);
+        assert_eq!(ocr_doc_to_paragraphs(&no_blocks, 1000, OcrFontSizeScale::uniform(1.0)).len(), 2);
 
         let mut long_paragraphs = layout_line_document(&[
             ("One\nTwo\nThree\nFour\nFive\nSix\nSeven", 100.0, 100.0, 500.0, 240.0),
@@ -1092,7 +1324,7 @@ mod tests {
             ),
         ]);
         set_hocr_block_ids(&mut long_paragraphs, &[Some("block_1_1"), Some("block_1_1")]);
-        assert_eq!(ocr_doc_to_paragraphs(&long_paragraphs, 1000, 1.0).len(), 2);
+        assert_eq!(ocr_doc_to_paragraphs(&long_paragraphs, 1000, OcrFontSizeScale::uniform(1.0)).len(), 2);
     }
 
     /// Test that OCR elements with mixed content and blank lines preserve all text.
@@ -1114,7 +1346,7 @@ mod tests {
         });
         doc.push_element(elem);
 
-        let paragraphs = ocr_doc_to_paragraphs(&doc, 1000, 1.0);
+        let paragraphs = ocr_doc_to_paragraphs(&doc, 1000, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 1);
         assert_eq!(paragraphs[0].text, "line1\n\nline3");
@@ -1156,7 +1388,7 @@ mod tests {
         });
         doc.push_element(elem2);
 
-        let paragraphs = ocr_doc_to_paragraphs(&doc, 1000, 1.0);
+        let paragraphs = ocr_doc_to_paragraphs(&doc, 1000, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 1, "Should filter out whitespace-only element");
         assert_eq!(paragraphs[0].text, "real content");
@@ -1181,7 +1413,7 @@ mod tests {
         });
         doc.push_element(elem);
 
-        let paragraphs = ocr_doc_to_paragraphs(&doc, 1000, 1.0);
+        let paragraphs = ocr_doc_to_paragraphs(&doc, 1000, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 1);
         assert_eq!(paragraphs[0].text, "Para1\n   \nPara2");
@@ -1221,7 +1453,7 @@ mod tests {
         });
         doc.push_element(elem);
 
-        let paragraphs = ocr_doc_to_paragraphs(&doc, 1000, 1.0);
+        let paragraphs = ocr_doc_to_paragraphs(&doc, 1000, OcrFontSizeScale::uniform(1.0));
         assert_eq!(paragraphs.len(), 1);
         assert_eq!(paragraphs[0].text, "Line1\n\nLine3");
         assert_eq!(paragraphs[0].lines.len(), 2);
@@ -1261,7 +1493,7 @@ mod tests {
         });
         doc.push_element(elem);
 
-        let paragraphs = ocr_doc_to_paragraphs(&doc, 1000, 1.0);
+        let paragraphs = ocr_doc_to_paragraphs(&doc, 1000, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 1);
         assert_eq!(paragraphs[0].text, "important\n\n");
@@ -1302,7 +1534,7 @@ mod tests {
         elem.attributes = Some(attrs);
         doc.push_element(elem);
 
-        let paragraphs = ocr_doc_to_paragraphs(&doc, 1000, 1.0);
+        let paragraphs = ocr_doc_to_paragraphs(&doc, 1000, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs[0].lines.len(), 1);
         assert!(
@@ -1335,7 +1567,7 @@ mod tests {
         });
         doc.push_element(elem);
 
-        let paragraphs = ocr_doc_to_paragraphs(&doc, 1000, 1.0);
+        let paragraphs = ocr_doc_to_paragraphs(&doc, 1000, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs[0].lines.len(), 1);
         assert!(!paragraphs[0].lines[0].segments[0].is_bold);
@@ -1375,7 +1607,7 @@ mod tests {
         elem.attributes = Some(attrs);
         doc.push_element(elem);
 
-        let paragraphs = ocr_doc_to_paragraphs(&doc, 1000, 1.0);
+        let paragraphs = ocr_doc_to_paragraphs(&doc, 1000, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs[0].lines.len(), 1);
         assert!(!paragraphs[0].lines[0].segments[0].is_bold);
@@ -1411,7 +1643,7 @@ mod tests {
             right: 500.0,
             top: 900.0,
         }];
-        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, 1.0);
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 2);
         assert_eq!(paragraphs[0].text, "Document title");
@@ -1529,7 +1761,7 @@ mod tests {
         ]);
         set_hocr_block_ids(&mut doc, &block_id_refs);
 
-        let paragraphs = ocr_doc_to_paragraphs(&doc, 1000, 1.0);
+        let paragraphs = ocr_doc_to_paragraphs(&doc, 1000, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(
             paragraphs.len(),
@@ -1547,14 +1779,14 @@ mod tests {
             ("Second", 100.0, 120.0, 500.0, 140.0),
         ]);
         set_hocr_block_ids(&mut same_block, &[Some("block_1_1"), Some("block_1_1")]);
-        let merged = ocr_doc_to_layout_paragraphs(&same_block, 1000, &[], 0.5, 0.2, 1.0);
+        let merged = ocr_doc_to_layout_paragraphs(&same_block, 1000, &[], 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].text, "First\nSecond");
 
         let mut different_blocks = same_block.clone();
         set_hocr_block_ids(&mut different_blocks, &[Some("block_1_1"), Some("block_1_2")]);
         assert_eq!(
-            ocr_doc_to_layout_paragraphs(&different_blocks, 1000, &[], 0.5, 0.2, 1.0).len(),
+            ocr_doc_to_layout_paragraphs(&different_blocks, 1000, &[], 0.5, 0.2, OcrFontSizeScale::uniform(1.0)).len(),
             2
         );
 
@@ -1562,7 +1794,10 @@ mod tests {
             ("First", 100.0, 100.0, 500.0, 120.0),
             ("Second", 100.0, 120.0, 500.0, 140.0),
         ]);
-        assert_eq!(ocr_doc_to_layout_paragraphs(&no_blocks, 1000, &[], 0.5, 0.2, 1.0).len(), 2);
+        assert_eq!(
+            ocr_doc_to_layout_paragraphs(&no_blocks, 1000, &[], 0.5, 0.2, OcrFontSizeScale::uniform(1.0)).len(),
+            2
+        );
 
         let mut long_paragraphs = layout_line_document(&[
             ("One\nTwo\nThree\nFour\nFive\nSix\nSeven", 100.0, 100.0, 500.0, 240.0),
@@ -1576,7 +1811,7 @@ mod tests {
         ]);
         set_hocr_block_ids(&mut long_paragraphs, &[Some("block_1_1"), Some("block_1_1")]);
         assert_eq!(
-            ocr_doc_to_layout_paragraphs(&long_paragraphs, 1000, &[], 0.5, 0.2, 1.0).len(),
+            ocr_doc_to_layout_paragraphs(&long_paragraphs, 1000, &[], 0.5, 0.2, OcrFontSizeScale::uniform(1.0)).len(),
             2
         );
     }
@@ -1590,7 +1825,7 @@ mod tests {
         ]);
         let hints = [layout_test_hint(types::LayoutHintClass::Text, 860.0, 900.0)];
 
-        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, 1.0);
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 1);
         assert_eq!(
@@ -1613,7 +1848,7 @@ mod tests {
             layout_test_hint(types::LayoutHintClass::SectionHeader, 860.0, 880.0),
         ];
 
-        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, 1.0);
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 3);
         assert_eq!(paragraphs[0].text, "Body before");
@@ -1648,7 +1883,7 @@ mod tests {
             },
         ];
 
-        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, 1.0);
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 2);
         assert_eq!(paragraphs[0].text, "Left column");
@@ -1664,7 +1899,7 @@ mod tests {
         ]);
         let hints = [layout_test_hint(types::LayoutHintClass::Text, 680.0, 900.0)];
 
-        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, 1.0);
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 2);
         assert_eq!(paragraphs[0].text, "First paragraph");
@@ -1722,7 +1957,7 @@ mod tests {
             top: 920.0,
         }];
 
-        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, 1.0);
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 3);
         assert_eq!(paragraphs[0].text, "IDRH");
@@ -1739,7 +1974,7 @@ mod tests {
     fn test_logo_title_fallback_requires_following_prose() {
         let doc = logo_title_test_document("IDRH\nNon-text-searchable PDF", None);
 
-        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &[], 0.5, 0.2, 1.0);
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &[], 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 1);
         assert_eq!(paragraphs[0].text, "IDRH\nNon-text-searchable PDF");
@@ -1758,7 +1993,7 @@ mod tests {
         ] {
             let doc = logo_title_test_document(first_block, Some(prose));
 
-            let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &[], 0.5, 0.2, 1.0);
+            let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &[], 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
             assert_eq!(paragraphs[0].text, first_block);
             assert_eq!(paragraphs[0].heading_level, None);
@@ -1779,7 +2014,7 @@ mod tests {
             top: 750.0,
         }];
 
-        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, 1.0);
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs[0].text, "IDRH\nNon-text-searchable PDF");
         assert_eq!(paragraphs[0].heading_level, None);
@@ -1799,7 +2034,7 @@ mod tests {
             top: 860.0,
         }];
 
-        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, 1.0);
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs[0].text, "IDRH");
         assert_eq!(paragraphs[0].heading_level, None);
@@ -1814,7 +2049,7 @@ mod tests {
         let doc = layout_test_document("A long document\nsubtitle line\nBody text", 3);
         let hints = [layout_test_hint(types::LayoutHintClass::Title, 860.0, 900.0)];
 
-        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, 1.0);
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 2);
         assert_eq!(paragraphs[0].text, "A long document\nsubtitle line");
@@ -1829,7 +2064,7 @@ mod tests {
         let doc = layout_test_document("fn main() {\nprintln!(\"hello\");\nBody text", 3);
         let hints = [layout_test_hint(types::LayoutHintClass::Code, 860.0, 900.0)];
 
-        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, 1.0);
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 2);
         assert_eq!(paragraphs[0].text, "fn main() {\nprintln!(\"hello\");");
@@ -1845,7 +2080,7 @@ mod tests {
         let doc = layout_test_document(&format!("Document title\n{prose}"), 2);
         let hints = [layout_test_hint(types::LayoutHintClass::Title, 860.0, 900.0)];
 
-        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, 1.0);
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 2);
         assert_eq!(paragraphs[0].text, "Document title");
@@ -1861,7 +2096,7 @@ mod tests {
         let doc = layout_test_document(&format!("fn main() {{\n{prose}"), 2);
         let hints = [layout_test_hint(types::LayoutHintClass::Code, 860.0, 900.0)];
 
-        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, 1.0);
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 2);
         assert_eq!(paragraphs[0].text, "fn main() {");
@@ -1879,7 +2114,7 @@ mod tests {
         );
         let hints = [layout_test_hint(types::LayoutHintClass::ListItem, 840.0, 900.0)];
 
-        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, 1.0);
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 2);
         assert_eq!(
@@ -1895,7 +2130,7 @@ mod tests {
     fn test_title_split_trims_boundary_blank_before_assembled_body() {
         let doc = layout_test_document("Document title\n\nBody text", 3);
         let hints = [layout_test_hint(types::LayoutHintClass::Title, 880.0, 900.0)];
-        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, 1.0);
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 2);
         assert_eq!(paragraphs[0].text, "Document title");
@@ -1912,7 +2147,7 @@ mod tests {
     #[test]
     fn test_unassociated_structural_line_does_not_capture_adjacent_body_lines() {
         let doc = layout_test_document("Promoted line\nBody one\nBody two", 3);
-        let mut lines = make_ocr_line_paragraphs(&doc.elements[0], 1000.0, 1.0);
+        let mut lines = make_ocr_line_paragraphs(&doc.elements[0], 1000.0, OcrFontSizeScale::uniform(1.0));
         lines[0].heading_level = Some(1);
 
         let paragraphs = regroup_layout_lines(lines, vec![None, None, None]);
@@ -1930,7 +2165,7 @@ mod tests {
         let doc = layout_test_document("Detected picture region", 1);
         let hints = [layout_test_hint(types::LayoutHintClass::Picture, 880.0, 900.0)];
 
-        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, 1.0);
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 1);
         assert_eq!(paragraphs[0].layout_class, Some(types::LayoutHintClass::Picture));
@@ -2077,4 +2312,218 @@ mod tests {
         assert!(!pages[1][0].is_list_item);
         assert!(!pages[1][8].is_list_item);
     }
+
+    /// Builds a test paragraph with a real `PdfLine`/segment whose x/width match
+    /// `bbox` exactly (via `make_ocr_pdf_line`, the same constructor production
+    /// code uses) rather than an empty `.lines`, so geometry-sensitive grouping
+    /// logic sees the same shape it would in production.
+    #[cfg(feature = "layout-detection")]
+    fn list_test_paragraph(text: &str, bbox: (f32, f32, f32, f32)) -> types::PdfParagraph {
+        let (left, bottom, right, top) = bbox;
+        let line = make_ocr_pdf_line(
+            text,
+            left,
+            bottom,
+            right - left,
+            top - bottom,
+            DEFAULT_OCR_FONT_SIZE_PT,
+            false,
+            false,
+        );
+        make_ocr_paragraph(text.to_string(), vec![line], Some(bbox), DEFAULT_OCR_FONT_SIZE_PT)
+    }
+
+    /// Regression for the layout-route list collapse: `regroup_layout_lines_by_element`'s
+    /// `same_region` test never flushes mid hOCR-element, so a whole run of list items
+    /// inside one element used to reach `push_body_group` as a single accumulated run and
+    /// come out as ONE paragraph. Against unfixed code (`push_body_group` always joining
+    /// every line with no split) this asserts `result.len() == 3` and fails with
+    /// `result.len() == 1`, text "1. First item\n2. Second item\n3. Third item".
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn test_push_body_group_splits_pure_list_run_into_one_paragraph_per_item() {
+        let lines = vec![
+            list_test_paragraph("1. First item", (10.0, 780.0, 500.0, 800.0)),
+            list_test_paragraph("2. Second item", (10.0, 760.0, 500.0, 780.0)),
+            list_test_paragraph("3. Third item", (10.0, 740.0, 500.0, 760.0)),
+        ];
+
+        let mut result = Vec::new();
+        push_body_group(&mut result, lines);
+
+        assert_eq!(result.len(), 3, "each list item must become its own paragraph");
+        assert_eq!(result[0].text, "1. First item");
+        assert_eq!(result[0].block_bbox, Some((10.0, 780.0, 500.0, 800.0)));
+        assert_eq!(result[1].text, "2. Second item");
+        assert_eq!(result[2].text, "3. Third item");
+    }
+
+    /// A lead-in sentence before a list run must stay its own paragraph, not be
+    /// absorbed into the first list item. Against unfixed code this asserts
+    /// `result.len() == 3` and fails with `result.len() == 1`, text
+    /// "Please review the following items:\n1. First item\n2. Second item".
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn test_push_body_group_keeps_lead_in_prose_separate_from_following_list_run() {
+        let lines = vec![
+            list_test_paragraph("Please review the following items:", (10.0, 820.0, 500.0, 840.0)),
+            list_test_paragraph("1. First item", (10.0, 780.0, 500.0, 800.0)),
+            list_test_paragraph("2. Second item", (10.0, 760.0, 500.0, 780.0)),
+        ];
+
+        let mut result = Vec::new();
+        push_body_group(&mut result, lines);
+
+        assert_eq!(result.len(), 3, "lead-in prose and each list item must be separate paragraphs");
+        assert_eq!(result[0].text, "Please review the following items:");
+        assert_eq!(result[1].text, "1. First item");
+        assert_eq!(result[2].text, "2. Second item");
+    }
+
+    /// A single marker-opening line is not enough signal to SPLIT -- e.g. a plain
+    /// paragraph that happens to start "1. Overview covers...". This is the guard for
+    /// `MIN_LIST_MARKERS_TO_SPLIT`: the segment count assertion (`result.len() == 1`)
+    /// passes on both unfixed and fixed code, since unfixed code always merges into one
+    /// paragraph regardless of marker count and the guard keeps fixed code doing the
+    /// same below the two-marker threshold.
+    ///
+    /// The TEXT assertion is not guard-neutral, though: this segment's first line still
+    /// satisfies `looks_like_list_item` (it is a real, if lone, marker), so
+    /// `join_body_segment_text` treats it as marker-led and space-joins it -- because
+    /// `apply_ocr_text_list_fallback` downstream flags any paragraph starting with a
+    /// marker as `is_list_item = true` regardless of segment count, so a lone-marker
+    /// paragraph is just as exposed to the embedded-newline-becomes-block-break bug as a
+    /// split one. Against the code as it stood before `join_body_segment_text` (plain
+    /// `"\n"`-join in `build_body_paragraph`, still the current in-tree state before this
+    /// fix), this assert fails: the actual value is
+    /// "1. Overview covers the whole document.\nIt spans several themes." (embedded
+    /// newline), not the space-joined text asserted below.
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn test_push_body_group_does_not_split_on_a_single_marker_opening_line() {
+        let lines = vec![
+            list_test_paragraph("1. Overview covers the whole document.", (10.0, 780.0, 500.0, 800.0)),
+            list_test_paragraph("It spans several themes.", (10.0, 760.0, 500.0, 780.0)),
+        ];
+
+        let mut result = Vec::new();
+        push_body_group(&mut result, lines);
+
+        assert_eq!(result.len(), 1, "a lone marker-opening line must not trigger a split");
+        assert_eq!(
+            result[0].text,
+            "1. Overview covers the whole document. It spans several themes.",
+            "a marker-led paragraph must space-join, even when push_body_group did not split it, \
+             because the downstream is_list_item fallback keys off the leading marker alone"
+        );
+    }
+
+    /// A wrapped continuation line carries no marker of its own and must stay glued to
+    /// the item above it, AND the join between it and its marker line must be a space,
+    /// not a newline -- an embedded newline inside a paragraph the downstream
+    /// `is_list_item` fallback flags as a list item gets rendered as a block break,
+    /// which turned the continuation into its own standalone markdown paragraph in
+    /// production (`multi_page_scanned.pdf`, `--ocr-scanned-pages --layout`, tesseract).
+    ///
+    /// Segment count: against code with no split logic at all, `result.len() == 2`
+    /// fails with `result.len() == 1`. Join style: against the code as it stood right
+    /// after splitting was added (correct segments, but `build_body_paragraph` still
+    /// joined every segment with `"\n"`, the current in-tree state before this fix),
+    /// `result[0].text` fails -- the actual value is
+    /// "1. First item\ncontinues on wrapped line" (embedded newline), not the
+    /// space-joined text asserted below.
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn test_push_body_group_keeps_wrapped_continuation_lines_with_their_item() {
+        let lines = vec![
+            list_test_paragraph("1. First item", (10.0, 780.0, 500.0, 800.0)),
+            list_test_paragraph("continues on wrapped line", (10.0, 760.0, 500.0, 780.0)),
+            list_test_paragraph("2. Second item", (10.0, 740.0, 500.0, 760.0)),
+        ];
+
+        let mut result = Vec::new();
+        push_body_group(&mut result, lines);
+
+        assert_eq!(
+            result.len(),
+            2,
+            "the wrapped line must stay with item 1, not start a new paragraph"
+        );
+        assert_eq!(
+            result[0].text,
+            "1. First item continues on wrapped line",
+            "a marker-led segment's wrapped continuation must space-join, not newline-join, \
+             or the renderer emits it as a separate block"
+        );
+        assert_eq!(
+            result[0].block_bbox,
+            Some((10.0, 760.0, 500.0, 800.0)),
+            "item 1's bbox must union only its own two lines, not the whole original group"
+        );
+        assert_eq!(result[1].text, "2. Second item");
+        assert_eq!(result[1].block_bbox, Some((10.0, 740.0, 500.0, 760.0)));
+    }
+
+    /// Production shape: a marker-led segment with TWO wrapped continuation lines (not
+    /// just one), each of which must glue onto the item with a single space, in order,
+    /// while the second list item stays a separate paragraph. Against the code as it
+    /// stood right after splitting was added (segments correct, `"\n"`-join still in
+    /// `build_body_paragraph`, the current in-tree state before this fix), `result[0].text`
+    /// fails: the actual value is
+    /// "1. Undo/Redo: introduced in the 1980s\nmade experimentation easier\nand remains \
+    /// popular today" (two embedded newlines), not the single-line space-joined text
+    /// asserted below.
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn test_push_body_group_space_joins_marker_led_segment_with_two_continuation_lines() {
+        let lines = vec![
+            list_test_paragraph(
+                "1. Undo/Redo: introduced in the 1980s",
+                (10.0, 800.0, 500.0, 820.0),
+            ),
+            list_test_paragraph("made experimentation easier", (10.0, 780.0, 500.0, 800.0)),
+            list_test_paragraph("and remains popular today", (10.0, 760.0, 500.0, 780.0)),
+            list_test_paragraph("2. Spell Check: became standard in the 1990s", (10.0, 740.0, 500.0, 760.0)),
+        ];
+
+        let mut result = Vec::new();
+        push_body_group(&mut result, lines);
+
+        assert_eq!(result.len(), 2, "each list item, including its continuations, is one paragraph");
+        assert_eq!(
+            result[0].text,
+            "1. Undo/Redo: introduced in the 1980s made experimentation easier and remains popular today",
+            "both continuation lines must space-join onto item 1, in order"
+        );
+        assert_eq!(result[1].text, "2. Spell Check: became standard in the 1990s");
+    }
+
+    /// A continuation line with stray leading/trailing whitespace must not produce a
+    /// double space when space-joined onto its marker line. Against the code as it stood
+    /// right after splitting was added (segments correct, `"\n"`-join still in
+    /// `build_body_paragraph`, the current in-tree state before this fix),
+    /// `result[0].text` fails: the actual value is
+    /// "1. First item \n  continues with extra spacing  " (original whitespace and a
+    /// newline preserved verbatim), not the single-space-normalized text asserted below.
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn test_push_body_group_marker_led_join_avoids_double_spaces_from_stray_whitespace() {
+        let lines = vec![
+            list_test_paragraph("1. First item ", (10.0, 780.0, 500.0, 800.0)),
+            list_test_paragraph("  continues with extra spacing  ", (10.0, 760.0, 500.0, 780.0)),
+            list_test_paragraph("2. Second item", (10.0, 740.0, 500.0, 760.0)),
+        ];
+
+        let mut result = Vec::new();
+        push_body_group(&mut result, lines);
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(
+            result[0].text,
+            "1. First item continues with extra spacing",
+            "trailing/leading whitespace on either line must not survive as a double space"
+        );
+        assert_eq!(result[1].text, "2. Second item");
+    }
+
 }

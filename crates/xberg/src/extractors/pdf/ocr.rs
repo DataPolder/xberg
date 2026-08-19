@@ -900,6 +900,28 @@ fn normalize_mixed_ocr_document_page(doc: &mut crate::types::internal::InternalD
     }
 }
 
+/// Height-axis points-per-pixel ratio for one page's raster, used to scale
+/// `element.ocr_geometry`'s pixel-space quad-edge height into the font-size
+/// resolver's PDF-points unit (see
+/// [`crate::pdf::structure::adapters::OcrFontSizeScale`]). Falls back to a no-op
+/// scale of `1.0` when there is no raster height to divide by, or the computed
+/// ratio is not a finite positive number -- mirrors `ocr_points_per_pixel`'s same
+/// guard, for the same reason: leave the pixel value unconverted rather than
+/// fabricate a scale or divide by zero.
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+fn mixed_route_geometry_points_per_pixel(page_height_pt: f32, image_height_px: u32) -> f32 {
+    const NO_OP_POINTS_PER_PIXEL: f32 = 1.0;
+    if image_height_px == 0 {
+        return NO_OP_POINTS_PER_PIXEL;
+    }
+    let scale = page_height_pt / image_height_px as f32;
+    if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        NO_OP_POINTS_PER_PIXEL
+    }
+}
+
 /// Returns the assembled per-page document alongside the bare, unclassified paragraphs
 /// used to build it -- the latter feeds [`extract_mixed_ocr_native`]'s document-global
 /// heading/list heuristic pass, which needs every OCR'd page's paragraphs in hand at
@@ -911,15 +933,24 @@ fn assemble_mixed_ocr_page_document(
     mut doc: crate::types::internal::InternalDocument,
     page_number: u32,
     page_height: u32,
+    geometry_points_per_pixel: f32,
 ) -> (
     crate::types::internal::InternalDocument,
     Vec<crate::pdf::structure::types::PdfParagraph>,
 ) {
-    // `doc`'s bboxes are already in PDF points by the time this runs (the caller rescales
-    // them via `rescale_ocr_bboxes_to_page_points` before calling this), and `page_height`
-    // is the page's own height in points, so `1.0` here is a genuine no-op scale, not a
-    // pixel-space shortcut.
-    let paragraphs = crate::pdf::structure::adapters::ocr_doc_to_paragraphs(&doc, page_height, 1.0);
+    // `doc.elements[].bbox` is already in PDF points by the time this runs (the caller
+    // rescales it via `rescale_ocr_bboxes_to_page_points` before calling this), and
+    // `page_height` is the page's own height in points, so the bbox-height font-size
+    // fallback needs no further scaling. `doc.elements[].ocr_geometry`, in contrast, is
+    // NOT touched by that rescale -- it stays raw OCR raster pixels (see
+    // `extraction::derive::OcrElement::geometry`'s documented raster-pixel-space
+    // contract) -- so the quad-edge fallback (sceptre/paddle) still needs the real
+    // points-per-pixel ratio for this page, `geometry_points_per_pixel`. See
+    // `pdf::structure::adapters::OcrFontSizeScale` for why these can't share one scalar.
+    let font_size_scale = crate::pdf::structure::adapters::OcrFontSizeScale::bbox_already_in_points(
+        geometry_points_per_pixel,
+    );
+    let paragraphs = crate::pdf::structure::adapters::ocr_doc_to_paragraphs(&doc, page_height, font_size_scale);
     if !paragraphs.is_empty() {
         let mut assembled = crate::pdf::structure::assemble_internal_document(
             vec![paragraphs.clone()],
@@ -1201,7 +1232,9 @@ fn build_mixed_ocr_page_document(
     // nearest point loses at most ~0.5pt, negligible next to the pixel-vs-point unit
     // bug this rescale fixes.
     let page_height_rounded_pt = page_height_pt.max(0.0).round() as u32;
-    let (mut assembled, paragraphs) = assemble_mixed_ocr_page_document(doc, page_number, page_height_rounded_pt);
+    let geometry_points_per_pixel = mixed_route_geometry_points_per_pixel(page_height_pt, image_height_px);
+    let (mut assembled, paragraphs) =
+        assemble_mixed_ocr_page_document(doc, page_number, page_height_rounded_pt, geometry_points_per_pixel);
     attach_page_ocr_payload(&mut assembled, Vec::new(), backend_elements, page_number);
     Some((assembled, paragraphs))
 }
@@ -1315,6 +1348,61 @@ fn build_pipeline_ocr_page_document(
     Some(doc)
 }
 
+/// Wraps a single OCR backend in a one-stage [`crate::core::config::OcrPipelineConfig`] so
+/// [`extract_mixed_ocr_native`] can route it through [`run_ocr_pipeline_for_page`] --
+/// the only per-page entry point that threads `layout_detections` down into
+/// [`extract_with_ocr_for_page`]'s pixel-space layout classification -- instead of this
+/// route's own raw `backend.process_image_owned` fast path, which never accepted layout
+/// detections at all (#665: `--layout` alone produced byte-identical mixed-route output).
+/// Mirrors the `classical_stage` construction in [`crate::core::config::ocr::OcrConfig::effective_pipeline`].
+///
+/// Only used when this call actually has layout detections to offer (see
+/// `layout_detections_for_mixed` in [`extract_mixed_ocr_native`]); the plain single-backend
+/// fast path is untouched when layout is off, so non-layout mixed-route output stays
+/// byte-identical.
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf", feature = "layout-detection"))]
+fn single_stage_pipeline_for_layout(
+    ocr_config: &crate::core::config::OcrConfig,
+) -> crate::core::config::OcrPipelineConfig {
+    crate::core::config::OcrPipelineConfig {
+        stages: vec![crate::core::config::OcrPipelineStage {
+            backend: ocr_config.backend.clone(),
+            priority: 100,
+            language: if ocr_config.language.len() == 1 && ocr_config.language[0] == "eng" {
+                None
+            } else {
+                Some(ocr_config.language.clone())
+            },
+            tesseract_config: ocr_config.tesseract_config.clone(),
+            paddle_ocr_config: None,
+            vlm_config: None,
+            backend_options: ocr_config.backend_options.clone(),
+        }],
+        quality_thresholds: ocr_config.effective_thresholds(),
+    }
+}
+
+/// Looks up one document-wide 0-based page's own layout detection out of the whole-document
+/// pass [`extract_mixed_ocr_native`] runs (#665).
+///
+/// Performs no coordinate transform: `detections` is exactly what
+/// `layout_runner::run_layout_for_ocr` produced (pixel space, at the resolution its own
+/// per-page render used), and this function returns that same value unchanged for whichever
+/// page it belongs to. The rescale to this page's *own* OCR raster
+/// (`scale_detection_to_dimensions` / `scale_detection_to_ocr_coordinates`) and, later, to PDF
+/// points (`rescale_ocr_bboxes_to_page_points` inside `build_pipeline_ocr_page_document`) both
+/// happen downstream, inside `extract_with_ocr_for_page` -- not here. Keeping this lookup a
+/// pure index (rather than folding a rescale into it) means a page-alignment bug here shows up
+/// as a wrong page's detection landing on the wrong page, not as a subtly-wrong coordinate on
+/// the right one.
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf", feature = "layout-detection"))]
+fn detection_for_mixed_route_page(
+    detections: Option<&[crate::layout::DetectionResult]>,
+    page_idx: usize,
+) -> Option<&crate::layout::DetectionResult> {
+    detections.and_then(|detections| detections.get(page_idx))
+}
+
 /// Build mixed text from native extraction and per-page OCR results.
 ///
 /// For each page boundary, if the page is in `ocr_page_numbers` (1-indexed),
@@ -1380,6 +1468,71 @@ pub(crate) async fn extract_mixed_ocr_native(
         ));
     }
 
+    // Layout detection for this mixed OCR route (#665). The full-document OCR routes
+    // (`force_ocr`, the OCR-gate fallback) already run layout via `run_ocr_with_layout` ->
+    // `layout_runner::run_layout_for_ocr`, keyed on `config.resolved_layout_config()` (i.e.
+    // `config.layout` being set, which `--layout` alone does). This route never called that:
+    // it built `structured_ocr_pages` straight from raw backend OCR output, so `--layout`
+    // alone produced byte-identical text with zero layout log lines even though layout
+    // detection is what should be classifying headings/lists/tables here. Runs the exact
+    // same whole-document pass (`RenderWithoutInference`: every page renders, gated pages
+    // skip inference, CPU-retry-on-accelerated-failure) the full-document routes use; only
+    // the pages this call actually OCRs read from the result below. `page_idx` throughout
+    // this function is the same document-wide 0-based index `run_layout_for_ocr`'s per-page
+    // `Vec` is indexed by, so `detections.get(page_idx)` needs no extra alignment step.
+    #[cfg(feature = "layout-detection")]
+    let (layout_detections_for_mixed, layout_pass_warning, layout_pass_glyph_drop_warnings): (
+        Option<Vec<crate::layout::DetectionResult>>,
+        Option<crate::types::ProcessingWarning>,
+        Vec<crate::types::ProcessingWarning>,
+    ) = if let Some(layout_config) = config.resolved_layout_config() {
+        let layout_thread_budget = crate::core::config::concurrency::resolve_thread_budget(config.concurrency.as_ref());
+        match super::layout_runner::run_layout_for_ocr(content, layout_config.as_ref(), layout_thread_budget).await {
+            Ok((
+                super::layout_runner::LayoutAttempt {
+                    output:
+                        super::layout_runner::LayoutRunOutput {
+                            data: Some((_, _, _, detections)),
+                            ..
+                        },
+                    warning,
+                    ..
+                },
+                glyph_drop_warnings,
+            )) => (Some(detections), warning, glyph_drop_warnings),
+            Ok((
+                super::layout_runner::LayoutAttempt {
+                    output: super::layout_runner::LayoutRunOutput { data: None, .. },
+                    warning,
+                    ..
+                },
+                glyph_drop_warnings,
+            )) => {
+                tracing::info!(
+                    "OCR layout (mixed route): auto gate skipped every page, continuing without layout assembly"
+                );
+                (None, warning, glyph_drop_warnings)
+            }
+            Err(error) => {
+                tracing::warn!(
+                    error = %error,
+                    "OCR layout detection failed for mixed OCR route; continuing without layout assembly"
+                );
+                (
+                    None,
+                    Some(super::layout_runner::layout_failure_warning(&error)),
+                    Vec::new(),
+                )
+            }
+        }
+    } else {
+        (None, None, Vec::new())
+    };
+    #[cfg(feature = "layout-detection")]
+    let mixed_route_layout_active = layout_detections_for_mixed.is_some();
+    #[cfg(not(feature = "layout-detection"))]
+    let mixed_route_layout_active = false;
+
     use image::ImageEncoder;
     use image::codecs::png::PngEncoder;
     // rayon's work-stealing pool needs OS threads; wasm32 has none, so the parallel encode
@@ -1405,10 +1558,27 @@ pub(crate) async fn extract_mixed_ocr_native(
     // configured backend ran here, silently ignoring `vlm_fallback` on the
     // `scanned_pages` / `force_ocr_pages` / per-page-fallback routes (#1341). The
     // default (no fallback, no explicit pipeline) keeps the fast single-backend path.
+    //
+    // Layout detections (#665, `mixed_route_layout_active`) are threaded the same way: the
+    // pipeline route is the only one that hands `layout_detections` down to
+    // `extract_with_ocr_for_page`'s classification. Wrapping the single configured backend
+    // in a one-stage pipeline (`single_stage_pipeline_for_layout`) reuses that exact,
+    // already-tested code path instead of duplicating pixel-space layout assembly here. This
+    // only fires when a real detection is available for this call, so `--layout` producing
+    // nothing (gate skipped every page, or no `config.layout`) leaves the fast path untouched.
     let effective_pipeline = if ocr_config_owned.vlm_fallback != crate::core::config::VlmFallbackPolicy::Disabled
         || ocr_config_owned.pipeline.is_some()
     {
         ocr_config_owned.effective_pipeline()
+    } else if mixed_route_layout_active {
+        #[cfg(feature = "layout-detection")]
+        {
+            Some(single_stage_pipeline_for_layout(&ocr_config_owned))
+        }
+        #[cfg(not(feature = "layout-detection"))]
+        {
+            None
+        }
     } else {
         None
     };
@@ -1447,6 +1617,15 @@ pub(crate) async fn extract_mixed_ocr_native(
     let mut accumulated_llm_usage: Vec<crate::types::LlmUsage> = Vec::new();
     let mut accumulated_formulas: Vec<crate::types::Formula> = Vec::new();
     let mut accumulated_warnings: Vec<crate::types::ProcessingWarning> = Vec::new();
+    #[cfg(feature = "layout-detection")]
+    {
+        if let Some(warning) = layout_pass_warning {
+            crate::core::diagnostics::push_warning_deduped(&mut accumulated_warnings, warning);
+        }
+        for warning in layout_pass_glyph_drop_warnings {
+            crate::core::diagnostics::push_warning_deduped(&mut accumulated_warnings, warning);
+        }
+    }
     let mut captured_rasters: Vec<crate::types::ExtractedImage> = Vec::new();
 
     for batch_start in (0..total).step_by(batch_size) {
@@ -1493,12 +1672,24 @@ pub(crate) async fn extract_mixed_ocr_native(
                         let image_height_px = image_arc.height();
                         (image_height_px > 0).then(|| page_height_pt / image_height_px as f32)
                     };
+                    // This page's own pixel-space detection from the whole-document layout
+                    // pass above (#665), cloned out here because the spawned task below must
+                    // own everything it captures. `extract_with_ocr_for_page` (reached through
+                    // `run_ocr_pipeline_for_page`) rescales it to match this exact raster via
+                    // `scale_detection_to_dimensions`/`scale_detection_to_ocr_coordinates`, so
+                    // a DPI mismatch between the layout pass's own render and this page's OCR
+                    // render is handled there, not here.
+                    #[cfg(feature = "layout-detection")]
+                    let page_detection: Option<crate::layout::DetectionResult> =
+                        detection_for_mixed_route_page(layout_detections_for_mixed.as_deref(), *page_idx).cloned();
                     join_set.spawn(async move {
+                        #[cfg(feature = "layout-detection")]
+                        let page_detection_slice = page_detection.as_ref().map(std::slice::from_ref);
                         let result = Box::pin(run_ocr_pipeline_for_page(
                             None,
                             Some(std::slice::from_ref(image_arc.as_ref())),
                             #[cfg(feature = "layout-detection")]
-                            None,
+                            page_detection_slice,
                             &config_clone,
                             &pipeline_clone,
                             None,
@@ -1582,12 +1773,16 @@ pub(crate) async fn extract_mixed_ocr_native(
                         let image_height_px = image.height();
                         (image_height_px > 0).then(|| page_height_pt / image_height_px as f32)
                     };
+                    // See the matching comment on the sibling `JoinSet` branch above (#665).
+                    #[cfg(feature = "layout-detection")]
+                    let page_detection: Option<&crate::layout::DetectionResult> =
+                        detection_for_mixed_route_page(layout_detections_for_mixed.as_deref(), *page_idx);
                     let (text, tables, elements, doc, usage, page_texts, _rasters, formulas, mut page_raw_paragraphs) =
                         Box::pin(run_ocr_pipeline_for_page(
                             None,
                             Some(std::slice::from_ref(image.as_ref())),
                             #[cfg(feature = "layout-detection")]
-                            None,
+                            page_detection.map(std::slice::from_ref),
                             config,
                             pipeline,
                             None,
@@ -2916,6 +3111,13 @@ fn assemble_ocr_page_paragraphs(
     detection: Option<&crate::layout::DetectionResult>,
     points_per_pixel: f32,
 ) -> Vec<crate::pdf::structure::types::PdfParagraph> {
+    // `doc`'s bbox AND ocr_geometry are still both raw OCR raster pixels at this point in
+    // the pure-OCR route (the pixel -> point rescale runs later, in
+    // `build_pipeline_ocr_page_document`), so one real points-per-pixel ratio scales both
+    // font-size fallback branches identically. See
+    // `pdf::structure::adapters::OcrFontSizeScale` for the mixed route, where that is not
+    // true.
+    let font_size_scale = crate::pdf::structure::adapters::OcrFontSizeScale::uniform(points_per_pixel);
     #[cfg(feature = "ocr")]
     if let Some(detection) = detection {
         let hints = super::layout_hints::detection_to_layout_hints_pixel_space(detection, page_height as f32);
@@ -2925,7 +3127,7 @@ fn assemble_ocr_page_paragraphs(
             &hints,
             0.5,
             0.2,
-            points_per_pixel,
+            font_size_scale,
         );
         apply_ocr_text_list_fallback(&mut paragraphs);
         return paragraphs;
@@ -2933,10 +3135,12 @@ fn assemble_ocr_page_paragraphs(
     #[cfg(not(feature = "ocr"))]
     let _ = detection;
 
-    crate::pdf::structure::adapters::ocr_doc_to_paragraphs(doc, page_height, points_per_pixel)
+    crate::pdf::structure::adapters::ocr_doc_to_paragraphs(doc, page_height, font_size_scale)
 }
 
-/// Fill in `is_list_item` for paragraphs the OCR layout route left unclassified.
+/// Fill in `is_list_item` for paragraphs the OCR layout route left unclassified,
+/// and OVERRIDE a layout classification that disagrees with an unambiguous text
+/// list marker.
 ///
 /// `ocr_doc_to_layout_paragraphs` (`crate::pdf::structure::adapters`) -- the OCR
 /// counterpart of the native-PDF `finalize_paragraph`
@@ -2947,32 +3151,45 @@ fn assemble_ocr_page_paragraphs(
 /// does (`looks_like_list_item` runs unconditionally in `finalize_paragraph`,
 /// independent of any layout hint). RT-DETR-style layout models commonly detect a
 /// run of bulleted/numbered lines as one "Text" region rather than per-item
-/// `ListItem` boxes, or miss/mislabel individual items outright; when that happens
-/// every item in the run silently loses its list classification, and
+/// `ListItem` boxes, or miss/mislabel individual items outright -- including,
+/// observed on `ordinance_2197_scanned.pdf`, classifying a numbered item as a
+/// `Title`/`SectionHeader` (`## 8. Maximum height of structures: 50'`). When that
+/// happens the item silently loses its list classification, and
 /// `heuristically_restructured_ocr_pages`'s document-wide "already structured" gate
 /// then refuses to re-derive it from segments, because that gate exists precisely
 /// to protect a *correct* layout classification found elsewhere in the document
 /// (see its doc comment). See #695.
 ///
-/// This adds a conservative text-marker fallback directly onto the paragraphs the
-/// layout route already built, so layout ADDS structure instead of silently
-/// dropping what the text alone would have shown. It never touches a paragraph the
-/// layout path already classified (heading, list, code, formula, furniture) -- only
-/// a paragraph left with no classification at all can be turned into a list item,
-/// and only when its own text unambiguously opens with a list marker.
+/// This adds a text-marker pass directly onto the paragraphs the layout route
+/// already built, so layout ADDS structure instead of silently dropping or
+/// misclassifying what the text alone would have shown:
+/// - A paragraph left with no classification at all (the common case) is filled in.
+/// - A paragraph the layout route classified as a heading (`heading_level.is_some()`,
+///   ordinarily from a `Title`/`SectionHeader` hint) is OVERRIDDEN when its text
+///   unambiguously opens with a list marker: `heading_level` is cleared so the two
+///   classifications never coexist (`assembly.rs`'s paragraph-to-element step checks
+///   `heading_level` first and would otherwise render it as a heading, silently
+///   discarding the list flag this function just set). This is safe specifically
+///   because `looks_like_list_item` already rejects numbered SECTION headings via
+///   `is_numbered_section_heading` ("1. INTRODUCTION", "3.2 Methods", "IV. Results"),
+///   so text that passes the predicate is not a real heading in the first place --
+///   the layout hint was wrong, not the text shape.
+/// - A paragraph classified as code, a formula, or page furniture is NEVER touched:
+///   those classifications are about the paragraph's *nature*, not a competing guess
+///   at the same nature the way a `Text`/heading misclassification is, so a
+///   coincidental marker-shaped prefix (a numbered code line, an OCR'd page-footer
+///   digit) must not flip them.
+/// - A paragraph the layout route already classified as a list item is left as-is.
 #[cfg(all(feature = "ocr", feature = "layout-detection"))]
 fn apply_ocr_text_list_fallback(paragraphs: &mut [crate::pdf::structure::types::PdfParagraph]) {
     for paragraph in paragraphs.iter_mut() {
-        if paragraph.is_list_item
-            || paragraph.heading_level.is_some()
-            || paragraph.is_code_block
-            || paragraph.is_formula
-            || paragraph.is_page_furniture
-        {
+        if paragraph.is_list_item || paragraph.is_code_block || paragraph.is_formula || paragraph.is_page_furniture {
             continue;
         }
         if crate::pdf::structure::pipeline::looks_like_list_item(paragraph.text.trim()) {
             paragraph.is_list_item = true;
+            paragraph.heading_level = None;
+            paragraph.layout_class = Some(crate::pdf::structure::types::LayoutHintClass::ListItem);
         }
     }
 }
@@ -3860,8 +4077,11 @@ async fn extract_with_ocr_for_page(
                         ocr_layout_height,
                     )
                 });
+                // `ocr_doc`'s bbox AND ocr_geometry are both still raw OCR raster pixels here
+                // (same pure-OCR-route reasoning as `assemble_ocr_page_paragraphs` above).
+                let font_size_scale = crate::pdf::structure::adapters::OcrFontSizeScale::uniform(points_per_pixel);
                 let paragraphs =
-                    crate::pdf::structure::adapters::ocr_doc_to_paragraphs(ocr_doc, ocr_layout_height, points_per_pixel);
+                    crate::pdf::structure::adapters::ocr_doc_to_paragraphs(ocr_doc, ocr_layout_height, font_size_scale);
                 all_page_paragraphs[page_idx] = Some(paragraphs);
             }
 
@@ -4984,15 +5204,17 @@ mod tests {
         assert!(paragraphs[3].is_list_item, "bullet marker must be recovered");
     }
 
-    /// The fallback must be strictly additive: a paragraph the layout route
-    /// already classified (as a heading here) is never touched, even though its
-    /// text also happens to start with a marker-shaped prefix. This assertion
-    /// passes with or without the fix -- it documents the "never clears an
-    /// existing classification" half of the contract that the next test exercises
-    /// from the other direction.
+    /// A GENUINE numbered-section heading is left untouched even though it shares
+    /// the "digit, separator, text" shape a list marker has: "1. INTRODUCTION" is
+    /// excluded by `looks_like_list_item` itself (via `is_numbered_section_heading`,
+    /// its ALL-CAPS-remainder branch), so this paragraph never reaches the override
+    /// branch at all. This assertion passes with or without the fix -- it pins the
+    /// "a real heading is never reclassified" half of the contract that the next
+    /// two tests exercise from the other direction (a heading whose text is NOT a
+    /// genuine section heading).
     #[cfg(all(feature = "ocr", feature = "layout-detection"))]
     #[test]
-    fn apply_ocr_text_list_fallback_never_overrides_an_existing_heading() {
+    fn apply_ocr_text_list_fallback_never_overrides_a_genuine_numbered_section_heading() {
         let mut paragraph = ocr_paragraph("1. INTRODUCTION");
         paragraph.heading_level = Some(2);
 
@@ -5003,6 +5225,60 @@ mod tests {
             !paragraph.is_list_item,
             "a paragraph already classified as a heading must not also become a list item"
         );
+    }
+
+    /// Regression for the `--ocr-scanned-pages --layout` list-F1 collapse (task
+    /// #665): on `ordinance_2197_scanned.pdf` the layout model classified
+    /// `"8. Maximum height of structures: 50'"` as a `Title` heading rather than a
+    /// `ListItem`. Its text is NOT a genuine numbered section heading -- unlike
+    /// "1. INTRODUCTION" above, the remainder is mixed-case prose, so
+    /// `is_numbered_section_heading` (and therefore the exclusion inside
+    /// `looks_like_list_item`) does not fire -- so the text-marker signal must win.
+    ///
+    /// Against the pre-fix code (which `continue`s whenever `heading_level.is_some()`,
+    /// unconditionally), both assertions fail: `is_list_item` stays `false` and
+    /// `heading_level` stays `Some(2)`.
+    #[cfg(all(feature = "ocr", feature = "layout-detection"))]
+    #[test]
+    fn apply_ocr_text_list_fallback_overrides_a_misclassified_title_heading() {
+        let mut paragraph = ocr_paragraph("8. Maximum height of structures: 50'");
+        paragraph.heading_level = Some(2);
+        paragraph.layout_class = Some(crate::pdf::structure::types::LayoutHintClass::Title);
+
+        apply_ocr_text_list_fallback(std::slice::from_mut(&mut paragraph));
+
+        assert!(
+            paragraph.is_list_item,
+            "an unambiguous list marker must win over a Title heading hint"
+        );
+        assert_eq!(
+            paragraph.heading_level, None,
+            "heading_level must be cleared: assembly.rs checks heading_level BEFORE is_list_item, \
+             so leaving it set would silently render this as a heading regardless of is_list_item"
+        );
+    }
+
+    /// Same override, exercised through a `SectionHeader` hint instead of `Title`
+    /// (the two layout classes `should_promote_logo_followed_by_title` /
+    /// `apply_hint_to_paragraph` can assign `heading_level` from), and at a
+    /// different heading level, to show the override is not level- or
+    /// hint-class-specific.
+    ///
+    /// Against the pre-fix code, both assertions fail for the same reason as above.
+    #[cfg(all(feature = "ocr", feature = "layout-detection"))]
+    #[test]
+    fn apply_ocr_text_list_fallback_overrides_a_misclassified_section_header_heading() {
+        let mut paragraph = ocr_paragraph("(2) second item continues the numbered run");
+        paragraph.heading_level = Some(3);
+        paragraph.layout_class = Some(crate::pdf::structure::types::LayoutHintClass::SectionHeader);
+
+        apply_ocr_text_list_fallback(std::slice::from_mut(&mut paragraph));
+
+        assert!(
+            paragraph.is_list_item,
+            "an unambiguous list marker must win over a SectionHeader heading hint"
+        );
+        assert_eq!(paragraph.heading_level, None, "heading_level must be cleared alongside setting is_list_item");
     }
 
     /// A paragraph already marked as a list item by a high-confidence layout hint
@@ -8151,6 +8427,108 @@ Name: ___
         assert_eq!(scaled.detections[0].bbox.y2, 600.0);
     }
 
+    /// #665: the mixed OCR route (`--ocr-scanned-pages` / `force_ocr_pages` / the per-page
+    /// fallback) never threaded layout detections down into per-page OCR assembly at all --
+    /// `extract_with_ocr_for_page`'s `layout_detections` parameter was hardcoded to `None` on
+    /// this route, so `--layout` alone produced byte-identical output with zero layout log
+    /// lines. `detection_for_mixed_route_page` is the lookup that closes that gap: given the
+    /// whole-document layout pass's per-page `Vec<DetectionResult>`, it returns exactly the
+    /// entry for a page's own document-wide 0-based index, unmodified.
+    ///
+    /// Fails on unfixed code two ways: (1) `detection_for_mixed_route_page` does not exist on
+    /// the mixed route at all before this fix, so this fails to compile; (2) if the fix's
+    /// per-page alignment regresses to an off-by-one (e.g. reading `page_idx + 1` or
+    /// `page_idx - 1`), the middle assertion below fails because it would return page 0's or
+    /// page 2's very different `page_width`/`page_height`/bbox values instead of page 1's.
+    #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+    #[test]
+    fn detection_for_mixed_route_page_selects_the_aligned_page_without_transforming_it() {
+        let page0 = crate::layout::DetectionResult {
+            page_width: 111,
+            page_height: 222,
+            detections: Vec::new(),
+        };
+        let page1 = crate::layout::DetectionResult {
+            page_width: 333,
+            page_height: 444,
+            detections: vec![crate::layout::LayoutDetection {
+                class_name: crate::layout::LayoutClass::SectionHeader,
+                confidence: 0.95,
+                bbox: crate::layout::BBox {
+                    x1: 10.0,
+                    y1: 20.0,
+                    x2: 30.0,
+                    y2: 40.0,
+                },
+            }],
+        };
+        let page2 = crate::layout::DetectionResult {
+            page_width: 555,
+            page_height: 666,
+            detections: Vec::new(),
+        };
+        let detections = vec![page0, page1, page2];
+
+        let found =
+            detection_for_mixed_route_page(Some(&detections), 1).expect("page index 1 must have a detection");
+
+        // Pinned to page 1's exact pixel-space numbers -- not page 0's or page 2's, and not a
+        // rescaled derivative of them. Any coordinate transform belongs downstream, inside
+        // `extract_with_ocr_for_page` (`scale_detection_to_dimensions` /
+        // `scale_detection_to_ocr_coordinates`), not in this lookup.
+        assert_eq!(found.page_width, 333);
+        assert_eq!(found.page_height, 444);
+        assert_eq!(found.detections.len(), 1);
+        assert_eq!(found.detections[0].bbox.x1, 10.0);
+        assert_eq!(found.detections[0].bbox.y1, 20.0);
+        assert_eq!(found.detections[0].bbox.x2, 30.0);
+        assert_eq!(found.detections[0].bbox.y2, 40.0);
+
+        assert!(
+            detection_for_mixed_route_page(Some(&detections), 5).is_none(),
+            "an out-of-range page index must not silently return a neighboring page's detection"
+        );
+        assert!(
+            detection_for_mixed_route_page(None, 1).is_none(),
+            "no whole-document layout pass ran (e.g. layout not configured) must mean no detection for any page"
+        );
+    }
+
+    /// #665: on the mixed OCR route, layout is only reachable when the single configured
+    /// backend is wrapped in a one-stage pipeline and driven through `run_ocr_pipeline_for_page`
+    /// -- the only per-page entry point that accepts `layout_detections` at all. Before this
+    /// fix, `single_stage_pipeline_for_layout` did not exist, so this fails to compile on
+    /// unfixed code. Pins the synthesized stage's fields (particularly `backend` and
+    /// `language`, which the fix must copy from the real `OcrConfig` rather than defaulting)
+    /// and the derived quality thresholds, since a wrong backend name here would silently
+    /// route pages to the wrong OCR engine while still calling it "layout enabled".
+    #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+    #[test]
+    fn single_stage_pipeline_for_layout_wraps_the_configured_backend() {
+        let ocr_config = crate::core::config::OcrConfig {
+            backend: "paddleocr".to_string(),
+            language: vec!["deu".to_string()],
+            ..Default::default()
+        };
+
+        let pipeline = single_stage_pipeline_for_layout(&ocr_config);
+
+        assert_eq!(
+            pipeline.stages.len(),
+            1,
+            "must wrap the single configured backend in exactly one stage"
+        );
+        assert_eq!(pipeline.stages[0].backend, "paddleocr");
+        assert_eq!(pipeline.stages[0].priority, 100);
+        assert_eq!(pipeline.stages[0].language, Some(vec!["deu".to_string()]));
+        assert!(
+            (pipeline.quality_thresholds.pipeline_min_quality - ocr_config.effective_thresholds().pipeline_min_quality)
+                .abs()
+                < f64::EPSILON,
+            "must use the ocr config's own effective thresholds rather than an arbitrary default"
+        );
+    }
+
     #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
     fn rotated_ocr_metadata(final_width: u32, final_height: u32, orientation_degrees: i32) -> crate::types::Metadata {
         let mut metadata = crate::types::Metadata::default();
@@ -8831,6 +9209,78 @@ Name: ___
             bbox.y0,
             bbox.x1,
             bbox.y1
+        );
+    }
+
+    /// Unit-mismatch regression for `assemble_mixed_ocr_page_document`'s font-size
+    /// resolution: `rescale_ocr_bboxes_to_page_points` (exercised by the previous test)
+    /// rescales `element.bbox` into PDF points, but never touches `element.ocr_geometry`
+    /// -- it stays raw OCR raster pixels, because `extraction::derive::OcrElement::geometry`
+    /// documents that field as public raster-pixel-space API and rescaling it in place
+    /// would corrupt that contract (and round away sub-pixel precision, since its point
+    /// type is `(u32, u32)`). A `Quadrilateral`-geometry element -- sceptre and paddle's
+    /// shape; Tesseract's `Rectangle` geometry never takes this branch -- must therefore
+    /// have its quad-edge-height font-size proxy scaled by the page's *own*
+    /// points-per-pixel ratio, not left in raw pixels.
+    ///
+    /// This fixture's raster/page pair (1700x2200px over 612x792pt, matching the previous
+    /// test) gives a height-axis scale of 792 / 2200 = 0.36. The element's quad spans a
+    /// 100px-tall band; the correctly-scaled font size is 100 * 0.36 = 36.0pt.
+    ///
+    /// Against unfixed code (`assemble_mixed_ocr_page_document` calling
+    /// `ocr_doc_to_paragraphs(&doc, page_height, 1.0)` with one flat `1.0` scale for both
+    /// the bbox and geometry fallback branches), this asserts `36.0` and fails: the actual
+    /// value is `100.0`, the raw unscaled raster-pixel quad-edge height -- inflated by
+    /// exactly the 1/0.36 ~= 2.78x this fixture's raster resolution implies (the ~2.08x
+    /// figure quoted at 150 DPI is this same ratio at a different render resolution).
+    #[cfg(feature = "pdf")]
+    #[test]
+    fn build_mixed_ocr_page_document_scales_quad_geometry_font_size_into_page_points() {
+        use crate::types::extraction::BoundingBox;
+        use crate::types::internal::{ElementKind, InternalDocument, InternalElement};
+        use crate::types::ocr_elements::OcrElementLevel;
+
+        let mut ocr_doc = InternalDocument::new("pdf");
+        let mut element = InternalElement::text(
+            ElementKind::OcrText {
+                level: OcrElementLevel::Block,
+            },
+            "SCEPTRE HEADING",
+            0,
+        );
+        // Deliberately a different height from the quad below (150px vs 100px), so a
+        // result of `150.0 * 0.36 = 54.0` (or unscaled `150.0`) would indicate the
+        // bbox-height fallback fired instead of the quad-edge one -- it must not, since
+        // `resolve_ocr_font_size_pt` always prefers `ocr_geometry` when present.
+        element.bbox = Some(BoundingBox {
+            x0: 100.0,
+            y0: 200.0,
+            x1: 500.0,
+            y1: 350.0,
+        });
+        // A straight (unskewed) 100px-tall quad: `quad_edge_height_px` averages the two
+        // side edges, both exactly 100px here, isolating this test from the
+        // skew-robustness behavior `test_ocr_doc_uses_quad_edge_height_not_skewed_aabb_height_for_font_size`
+        // (`pdf::structure::adapters`) already covers.
+        element.ocr_geometry = Some(crate::types::OcrBoundingGeometry::Quadrilateral {
+            points: [(100, 200), (500, 200), (500, 300), (100, 300)],
+        });
+        ocr_doc.push_element(element);
+
+        let mut result = crate::types::ExtractedDocument {
+            content: "SCEPTRE HEADING".to_string(),
+            ocr_internal_document: Some(ocr_doc),
+            ..Default::default()
+        };
+
+        let (_page_doc, paragraphs) = build_mixed_ocr_page_document(&mut result, 1, 1700, 2200, 612.0, 792.0)
+            .expect("an OCR document with a quad-geometry text element must produce a page document");
+
+        assert_eq!(paragraphs.len(), 1);
+        assert!(
+            (paragraphs[0].dominant_font_size - 36.0).abs() < 1e-3,
+            "expected the quad-edge height rescaled into PDF points (100px * 0.36 = 36.0pt), got {}",
+            paragraphs[0].dominant_font_size
         );
     }
 
@@ -9725,8 +10175,16 @@ Name: ___
         ));
 
         vec![
-            crate::pdf::structure::adapters::ocr_doc_to_paragraphs(&page1, 1000, 1.0),
-            crate::pdf::structure::adapters::ocr_doc_to_paragraphs(&page2, 1000, 1.0),
+            crate::pdf::structure::adapters::ocr_doc_to_paragraphs(
+                &page1,
+                1000,
+                crate::pdf::structure::adapters::OcrFontSizeScale::uniform(1.0),
+            ),
+            crate::pdf::structure::adapters::ocr_doc_to_paragraphs(
+                &page2,
+                1000,
+                crate::pdf::structure::adapters::OcrFontSizeScale::uniform(1.0),
+            ),
         ]
     }
 
