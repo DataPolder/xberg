@@ -70,6 +70,21 @@ pub struct Paragraph {
     pub numbering_id: Option<i64>,
     /// Indentation level within the numbering definition (0-based).
     pub numbering_level: Option<i64>,
+    /// Bookmark names (`w:bookmarkStart/@w:name`) that start inside this paragraph.
+    ///
+    /// A generated table of contents links each entry to the `_Toc…` bookmark Word
+    /// writes into the heading paragraph, so these are the link targets internal
+    /// `w:hyperlink w:anchor` references resolve against. Word's `_GoBack` bookmark
+    /// is filtered out — it records the last edit position, not a link target.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bookmarks: Vec<String>,
+    /// True when this paragraph is part of a table of contents.
+    ///
+    /// Set by either of the two markers Word emits: a `w:sdt` whose
+    /// `w:sdtPr/w:docPartObj/w:docPartGallery` is `Table of Contents`, or a `TOC`
+    /// field code.
+    #[serde(default)]
+    pub in_table_of_contents: bool,
 }
 
 /// A formatted text run within a DOCX paragraph.
@@ -1399,6 +1414,7 @@ fn apply_fld_char(
     field_instruction: &mut String,
     current_hyperlink_url: &mut Option<String>,
     field_hyperlink_stack: &mut Vec<Option<String>>,
+    toc: &mut TocState,
 ) {
     for attr in e.attributes().flatten() {
         if attr.key.as_ref() == b"w:fldCharType" {
@@ -1406,9 +1422,11 @@ fn apply_fld_char(
                 b"begin" => {
                     *in_field_instruction = true;
                     field_instruction.clear();
+                    toc.field_begin();
                 }
                 b"separate" => {
                     *in_field_instruction = false;
+                    toc.field_separate(field_instruction);
                     let url = extract_hyperlink_field_url(field_instruction);
                     field_hyperlink_stack.push(current_hyperlink_url.clone());
                     if url.is_some() {
@@ -1417,6 +1435,7 @@ fn apply_fld_char(
                 }
                 b"end" => {
                     *in_field_instruction = false;
+                    toc.field_end();
                     if let Some(saved) = field_hyperlink_stack.pop() {
                         *current_hyperlink_url = saved;
                     }
@@ -1424,6 +1443,163 @@ fn apply_fld_char(
                 _ => {}
             }
         }
+    }
+}
+
+/// `w:sdtPr/w:docPartObj/w:docPartGallery/@w:val` value that marks a structured
+/// document tag as a Word-generated table of contents.
+const TOC_DOC_PART_GALLERY: &str = "Table of Contents";
+
+/// Bookmark Word writes to remember the last edit position. Never a link target.
+const GO_BACK_BOOKMARK: &str = "_GoBack";
+
+/// True when a field instruction is a table-of-contents field (`TOC \o "1-3" \h \z \u`).
+///
+/// Only the leading keyword is matched: the switches vary per document and carry no
+/// membership information. `TOA` (table of authorities) and `TC` (a TOC *entry* marker
+/// placed on the target, not on the entry) are deliberately not matched.
+fn is_toc_field_instruction(instruction: &str) -> bool {
+    instruction
+        .split_whitespace()
+        .next()
+        .is_some_and(|keyword| keyword.eq_ignore_ascii_case("TOC"))
+}
+
+/// Tracks whether the element-dispatch loop is currently inside a table of contents.
+///
+/// Word marks a generated TOC two independent ways, and normally emits both:
+///
+/// - a `w:sdt` structured document tag whose `w:sdtPr/w:docPartObj/w:docPartGallery`
+///   has `w:val="Table of Contents"` — the reliable marker when present;
+/// - a `TOC` field code, written either as `w:fldSimple/@w:instr` or as the
+///   `w:fldChar` begin/separate/end triple with the instruction in `w:instrText` —
+///   the only marker for a TOC that is not wrapped in an `sdt`.
+///
+/// The field-code form needs real nesting bookkeeping: a TOC field's *result* contains
+/// one nested `PAGEREF` field per entry, so the region must close on the TOC field's own
+/// `end`, not on the first `end` that arrives.
+#[derive(Debug, Default)]
+struct TocState {
+    /// One entry per currently-open `w:sdt`; `true` once its gallery said TOC.
+    sdt_stack: Vec<bool>,
+    /// Number of `true` entries in `sdt_stack`, so [`Self::active`] stays O(1).
+    open_toc_sdts: usize,
+    /// One entry per currently-open `w:fldSimple`; `true` when its instruction is TOC.
+    fld_simple_stack: Vec<bool>,
+    /// Number of `true` entries in `fld_simple_stack`.
+    open_toc_fld_simple: usize,
+    /// Current `w:fldChar` begin/end nesting depth.
+    field_depth: usize,
+    /// `field_depth` of the TOC field code currently open, if any.
+    toc_field_depth: Option<usize>,
+}
+
+impl TocState {
+    /// True when content parsed right now belongs to a table of contents.
+    fn active(&self) -> bool {
+        self.open_toc_sdts > 0 || self.open_toc_fld_simple > 0 || self.toc_field_depth.is_some()
+    }
+
+    fn open_sdt(&mut self) {
+        self.sdt_stack.push(false);
+    }
+
+    fn close_sdt(&mut self) {
+        if self.sdt_stack.pop() == Some(true) {
+            self.open_toc_sdts = self.open_toc_sdts.saturating_sub(1);
+        }
+    }
+
+    /// Apply a `w:docPartGallery` to the innermost open `w:sdt`.
+    fn apply_doc_part_gallery(&mut self, e: &BytesStart) {
+        let is_toc = get_val_attr_string(e).is_some_and(|val| val.trim().eq_ignore_ascii_case(TOC_DOC_PART_GALLERY));
+        if !is_toc {
+            return;
+        }
+        if let Some(flag) = self.sdt_stack.last_mut()
+            && !*flag
+        {
+            *flag = true;
+            self.open_toc_sdts += 1;
+        }
+    }
+
+    fn open_fld_simple(&mut self, instruction: Option<&str>) {
+        let is_toc = instruction.is_some_and(is_toc_field_instruction);
+        self.fld_simple_stack.push(is_toc);
+        if is_toc {
+            self.open_toc_fld_simple += 1;
+        }
+    }
+
+    fn close_fld_simple(&mut self) {
+        if self.fld_simple_stack.pop() == Some(true) {
+            self.open_toc_fld_simple = self.open_toc_fld_simple.saturating_sub(1);
+        }
+    }
+
+    fn field_begin(&mut self) {
+        self.field_depth += 1;
+    }
+
+    /// A field's instruction is complete at `separate`; that is where the result
+    /// content starts, so that is where a TOC region opens.
+    fn field_separate(&mut self, instruction: &str) {
+        if self.toc_field_depth.is_none() && is_toc_field_instruction(instruction) {
+            self.toc_field_depth = Some(self.field_depth);
+        }
+    }
+
+    fn field_end(&mut self) {
+        if self.toc_field_depth == Some(self.field_depth) {
+            self.toc_field_depth = None;
+        }
+        self.field_depth = self.field_depth.saturating_sub(1);
+    }
+}
+
+/// Resolve whichever paragraph is currently open — a table cell's or the top-level one —
+/// exactly as [`apply_paragraph_property`] does.
+fn current_paragraph_mut<'a>(
+    table_stack: &'a mut [TableContext],
+    current_paragraph: &'a mut Option<Paragraph>,
+) -> Option<&'a mut Paragraph> {
+    if let Some(ctx) = table_stack.last_mut() {
+        ctx.paragraph.as_mut()
+    } else {
+        current_paragraph.as_mut()
+    }
+}
+
+/// Mark the open paragraph as part of a table of contents.
+///
+/// Called both when a paragraph opens inside an already-active TOC region and right
+/// after a `w:fldChar` moves the parser into one: Word puts the TOC field's `begin`
+/// inside the first entry's paragraph, so a check made only at `<w:p>` would miss it.
+/// The flag is never cleared, which is what lets the *last* entry stay marked even
+/// though its `</w:p>` arrives after the field's `end`.
+fn mark_paragraph_in_toc(table_stack: &mut [TableContext], current_paragraph: &mut Option<Paragraph>) {
+    if let Some(para) = current_paragraph_mut(table_stack, current_paragraph) {
+        para.in_table_of_contents = true;
+    }
+}
+
+/// Record a `w:bookmarkStart` on the open paragraph so internal `w:hyperlink w:anchor`
+/// references — every entry of a generated TOC — have something to resolve against.
+fn apply_bookmark_start(e: &BytesStart, table_stack: &mut [TableContext], current_paragraph: &mut Option<Paragraph>) {
+    let Some(name) = e
+        .attributes()
+        .flatten()
+        .find(|attr| attr.key.as_ref() == b"w:name")
+        .and_then(|attr| std::str::from_utf8(&attr.value).ok().map(String::from))
+    else {
+        return;
+    };
+    if name.is_empty() || name == GO_BACK_BOOKMARK {
+        return;
+    }
+    if let Some(para) = current_paragraph_mut(table_stack, current_paragraph) {
+        para.bookmarks.push(name);
     }
 }
 
@@ -1908,6 +2084,7 @@ impl<R: Read + Seek> DocxParser<R> {
         let mut field_instruction = String::new();
         let mut field_hyperlink_stack: Vec<Option<String>> = Vec::new();
         let mut current_hyperlink_url: Option<String> = None;
+        let mut toc = TocState::default();
         let mut table_stack: Vec<TableContext> = Vec::new();
         let mut mc_fallback_depth: u32 = 0;
         let mut stop_depth: u32 = if stop_tag.is_some() { 1 } else { 0 };
@@ -1946,6 +2123,9 @@ impl<R: Read + Seek> DocxParser<R> {
                                 current_paragraph_index = out.paragraphs.len();
                                 current_paragraph = Some(Paragraph::new());
                             }
+                            if toc.active() {
+                                mark_paragraph_in_toc(&mut table_stack, &mut current_paragraph);
+                            }
                         }
                         b"w:r" => {
                             let mut run = Run::default();
@@ -1964,7 +2144,20 @@ impl<R: Read + Seek> DocxParser<R> {
                                 &mut field_instruction,
                                 &mut current_hyperlink_url,
                                 &mut field_hyperlink_stack,
+                                &mut toc,
                             );
+                            if toc.active() {
+                                mark_paragraph_in_toc(&mut table_stack, &mut current_paragraph);
+                            }
+                        }
+                        b"w:sdt" => {
+                            toc.open_sdt();
+                        }
+                        b"w:docPartGallery" => {
+                            toc.apply_doc_part_gallery(e);
+                        }
+                        b"w:bookmarkStart" => {
+                            apply_bookmark_start(e, &mut table_stack, &mut current_paragraph);
                         }
                         b"w:instrText" => {
                             in_instr_text = true;
@@ -1986,6 +2179,10 @@ impl<R: Read + Seek> DocxParser<R> {
                             field_hyperlink_stack.push(current_hyperlink_url.clone());
                             if url.is_some() {
                                 current_hyperlink_url = url;
+                            }
+                            toc.open_fld_simple(instr.as_deref());
+                            if toc.active() {
+                                mark_paragraph_in_toc(&mut table_stack, &mut current_paragraph);
                             }
                         }
                         b"mc:Fallback" => {
@@ -2080,12 +2277,39 @@ impl<R: Read + Seek> DocxParser<R> {
                             apply_paragraph_property(e, &mut table_stack, &mut current_paragraph);
                         }
                         b"w:hyperlink" => {
+                            let mut has_relationship_id = false;
+                            let mut relationship_url: Option<String> = None;
+                            let mut anchor: Option<String> = None;
                             for attr in e.attributes().flatten() {
-                                if attr.key.as_ref() == b"r:id"
-                                    && let Ok(rid) = std::str::from_utf8(&attr.value)
-                                {
-                                    current_hyperlink_url = self.relationships.get(rid).cloned();
+                                match attr.key.as_ref() {
+                                    b"r:id" => {
+                                        has_relationship_id = true;
+                                        if let Ok(rid) = std::str::from_utf8(&attr.value) {
+                                            relationship_url = self.relationships.get(rid).cloned();
+                                        }
+                                    }
+                                    b"w:anchor" => {
+                                        anchor = std::str::from_utf8(&attr.value)
+                                            .ok()
+                                            .filter(|value| !value.is_empty())
+                                            .map(String::from);
+                                    }
+                                    _ => {}
                                 }
+                            }
+                            // `w:anchor` names a bookmark inside the document and was
+                            // previously ignored, so an internal jump — every entry of a
+                            // generated table of contents — produced no link at all. On its
+                            // own the anchor is the whole target; alongside an `r:id` it is
+                            // that external URL's fragment.
+                            match (has_relationship_id, relationship_url, anchor) {
+                                (_, Some(url), Some(anchor)) if !url.contains('#') => {
+                                    current_hyperlink_url = Some(format!("{url}#{anchor}"));
+                                }
+                                (_, Some(url), _) => current_hyperlink_url = Some(url),
+                                (_, None, Some(anchor)) => current_hyperlink_url = Some(format!("#{anchor}")),
+                                (true, None, None) => current_hyperlink_url = None,
+                                (false, None, None) => {}
                             }
                         }
                         b"w:drawing" => {
@@ -2156,7 +2380,17 @@ impl<R: Read + Seek> DocxParser<R> {
                                 &mut field_instruction,
                                 &mut current_hyperlink_url,
                                 &mut field_hyperlink_stack,
+                                &mut toc,
                             );
+                            if toc.active() {
+                                mark_paragraph_in_toc(&mut table_stack, &mut current_paragraph);
+                            }
+                        }
+                        b"w:docPartGallery" => {
+                            toc.apply_doc_part_gallery(e);
+                        }
+                        b"w:bookmarkStart" => {
+                            apply_bookmark_start(e, &mut table_stack, &mut current_paragraph);
                         }
                         b"w:b" | b"w:i" | b"w:u" | b"w:strike" | b"w:dstrike" | b"w:vertAlign" | b"w:sz"
                         | b"w:color" | b"w:highlight" => {
@@ -2314,7 +2548,11 @@ impl<R: Read + Seek> DocxParser<R> {
                         b"w:instrText" => {
                             in_instr_text = false;
                         }
+                        b"w:sdt" => {
+                            toc.close_sdt();
+                        }
                         b"w:fldSimple" => {
+                            toc.close_fld_simple();
                             if let Some(saved) = field_hyperlink_stack.pop() {
                                 current_hyperlink_url = saved;
                             }

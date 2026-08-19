@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- DOCX table-of-contents entries are now identified and linked (#1452). Entries carry a
+  `toc_entry` attribute in their element metadata, and each navigable entry produces a
+  table-of-contents relationship in the document structure pointing at the section its bookmark
+  names — previously no such relationship was ever produced, because internal `w:anchor` jumps
+  were ignored entirely and only external `r:id` links were read. Both ways Word marks a table of
+  contents are recognised: the structured-document-tag wrapper and a bare `TOC` field code.
+
 - List markers that OCR emits as their own block — common on scanned documents, where the marker
   column is recognised separately from the text column — are now reattached to the body text they
   belong to. Pairing is by shared baseline rather than adjacency, so a whole column of markers

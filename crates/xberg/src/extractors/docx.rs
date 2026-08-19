@@ -44,6 +44,10 @@ impl Default for DocxExtractor {
 /// `styles.xml` `w:name`, walking `w:basedOn`) is exposed on `Element.metadata.additional`.
 const STYLE_NAME_ATTRIBUTE: &str = "style_name";
 
+/// Attribute key set to `"true"` on every element that belongs to a table of contents
+/// (a `w:sdt` with a `Table of Contents` doc-part gallery, or a `TOC` field code).
+const TOC_ENTRY_ATTRIBUTE: &str = "toc_entry";
+
 /// Resolve a drawing's alt text: `wp:docPr/@descr`, falling back to `@name` (#81).
 ///
 /// Word writes `@descr` only when the author fills in the description field, but always
@@ -84,6 +88,14 @@ fn build_internal_document(
     let mut current_list_ordered: bool = false;
     let mut current_list_nesting_level: i64 = 0;
     let mut open_list_count: i64 = 0;
+
+    // Bookmark name -> the element it starts in, and the internal (`#anchor`) links
+    // waiting on it. A table of contents precedes the headings it points at, so the
+    // targets are only known once the whole body has been walked. Resolving here rather
+    // than through `InternalElement::anchor` leaves the heading slug anchors that
+    // `push_heading` generates intact.
+    let mut bookmark_elements: AHashMap<String, u32> = AHashMap::new();
+    let mut pending_anchor_links: Vec<(u32, String, RelationshipKind)> = Vec::new();
 
     for element in &doc.elements {
         match element {
@@ -211,18 +223,31 @@ fn build_internal_document(
                         builder.merge_attribute(elem_idx, STYLE_NAME_ATTRIBUTE, style_name);
                     }
 
+                    // Table-of-contents membership (#1452). Marked on the element rather
+                    // than expressed as a content layer so it stays additive.
+                    if paragraph.in_table_of_contents {
+                        builder.merge_attribute(elem_idx, TOC_ENTRY_ATTRIBUTE, "true");
+                    }
+
+                    for bookmark in &paragraph.bookmarks {
+                        bookmark_elements.entry(bookmark.clone()).or_insert(elem_idx);
+                    }
+
                     for run in &paragraph.runs {
                         if run.math_latex.is_some() || run.text.is_empty() {
                             continue;
                         }
                         if let Some(ref url) = run.hyperlink_url {
-                            if url.starts_with('#') {
-                                let anchor_key = url.trim_start_matches('#').to_string();
-                                builder.push_relationship(
-                                    elem_idx,
-                                    RelationshipTarget::Key(anchor_key),
-                                    RelationshipKind::InternalLink,
-                                );
+                            if let Some(anchor_key) = url.strip_prefix('#') {
+                                // A link inside a TOC is what makes that TOC navigable, so
+                                // it is reported as `TocEntry` rather than a generic
+                                // internal link.
+                                let kind = if paragraph.in_table_of_contents {
+                                    RelationshipKind::TocEntry
+                                } else {
+                                    RelationshipKind::InternalLink
+                                };
+                                pending_anchor_links.push((elem_idx, anchor_key.to_string(), kind));
                             }
                             builder.push_uri(ExtractedUri::hyperlink(url.as_str(), Some(run.text.clone())));
                         }
@@ -432,6 +457,22 @@ fn build_internal_document(
             let idx = builder.push_comment_definition(&text, &key, None);
             builder.set_layer(idx, ContentLayer::Footnote);
         }
+    }
+
+    // Resolve internal (`w:anchor`) links against the bookmarks collected above. A TOC
+    // entry's several runs share one `w:hyperlink`, so the same (source, bookmark) pair
+    // arrives once per run and is emitted only once. An unknown bookmark stays a
+    // `Key` target, which `derive::resolve_relationships` reports as one warning.
+    let mut linked: std::collections::HashSet<(u32, &str)> = std::collections::HashSet::new();
+    for (source, anchor_key, kind) in &pending_anchor_links {
+        if !linked.insert((*source, anchor_key.as_str())) {
+            continue;
+        }
+        let target = match bookmark_elements.get(anchor_key) {
+            Some(&target_idx) => RelationshipTarget::Index(target_idx),
+            None => RelationshipTarget::Key(anchor_key.clone()),
+        };
+        builder.push_relationship(*source, target, *kind);
     }
 
     builder.build()
@@ -2016,6 +2057,225 @@ mod tests {
             Some(&"Intense Quote".to_string()),
             "resolved w:pStyle name should surface as element metadata: {:?}",
             quoted.metadata.additional
+        );
+    }
+
+    /// A Word-generated table of contents wrapped in a `w:sdt` structured document tag,
+    /// followed by the heading its single entry points at (#1452).
+    const TOC_SDT_DOCUMENT_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:sdt>
+      <w:sdtPr>
+        <w:docPartObj>
+          <w:docPartGallery w:val="Table of Contents"/>
+          <w:docPartUnique/>
+        </w:docPartObj>
+      </w:sdtPr>
+      <w:sdtContent>
+        <w:p><w:hyperlink w:anchor="_Toc100"><w:r><w:t>Introduction</w:t></w:r></w:hyperlink></w:p>
+      </w:sdtContent>
+    </w:sdt>
+    <w:p>
+      <w:pPr><w:pStyle w:val="Heading1"/></w:pPr>
+      <w:bookmarkStart w:id="1" w:name="_Toc100"/>
+      <w:r><w:t>Introduction</w:t></w:r>
+      <w:bookmarkEnd w:id="1"/>
+    </w:p>
+    <w:p><w:r><w:t>Body text.</w:t></w:r></w:p>
+  </w:body>
+</w:document>"#;
+
+    async fn extract_docx_internal_document(data: &[u8]) -> crate::types::internal::InternalDocument {
+        DocxExtractor::new()
+            .extract_content(
+                data,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                &ExtractionConfig {
+                    include_document_structure: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_sdt_table_of_contents_marks_its_entries() {
+        let data = build_test_docx_with_parts(TOC_SDT_DOCUMENT_XML, None, None, None, None, None, None);
+        let internal_doc = extract_docx_internal_document(&data).await;
+        let elements = crate::extraction::transform::convert_internal_elements_to_elements(&internal_doc, &None);
+
+        let introductions: Vec<_> = elements.iter().filter(|e| e.text.trim() == "Introduction").collect();
+        assert_eq!(
+            introductions.len(),
+            2,
+            "expected the TOC entry and the heading it points at: {:?}",
+            elements.iter().map(|e| &e.text).collect::<Vec<_>>()
+        );
+
+        // Unfixed code never looks at `w:sdt`/`w:docPartGallery`, so no element carries
+        // the marker and `get("toc_entry")` is `None` here.
+        assert_eq!(
+            introductions[0].metadata.additional.get(TOC_ENTRY_ATTRIBUTE),
+            Some(&"true".to_string()),
+            "the sdt-wrapped TOC entry should be marked: {:?}",
+            introductions[0].metadata.additional
+        );
+        assert_eq!(
+            introductions[1].metadata.additional.get(TOC_ENTRY_ATTRIBUTE),
+            None,
+            "the heading the TOC points at is not itself a TOC entry"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_bare_toc_field_code_marks_its_entries() {
+        // No `w:sdt`: the `TOC` field code is the only marker. The first entry's paragraph
+        // is where the field begins, the second holds a nested `PAGEREF` field (whose `end`
+        // must not close the TOC) and then the TOC field's own `end`.
+        let document_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r><w:fldChar w:fldCharType="begin"/></w:r>
+      <w:r><w:instrText xml:space="preserve">TOC \o "1-3" \h \z \u</w:instrText></w:r>
+      <w:r><w:fldChar w:fldCharType="separate"/></w:r>
+      <w:hyperlink w:anchor="_Toc200"><w:r><w:t>First section</w:t></w:r></w:hyperlink>
+    </w:p>
+    <w:p>
+      <w:hyperlink w:anchor="_Toc201"><w:r><w:t>Second section</w:t></w:r></w:hyperlink>
+      <w:r><w:fldChar w:fldCharType="begin"/></w:r>
+      <w:r><w:instrText xml:space="preserve">PAGEREF _Toc201 \h</w:instrText></w:r>
+      <w:r><w:fldChar w:fldCharType="separate"/></w:r>
+      <w:r><w:t>2</w:t></w:r>
+      <w:r><w:fldChar w:fldCharType="end"/></w:r>
+      <w:r><w:fldChar w:fldCharType="end"/></w:r>
+    </w:p>
+    <w:p><w:r><w:t>Body text outside the TOC.</w:t></w:r></w:p>
+  </w:body>
+</w:document>"#;
+
+        let data = build_test_docx_with_parts(document_xml, None, None, None, None, None, None);
+        let internal_doc = extract_docx_internal_document(&data).await;
+        let elements = crate::extraction::transform::convert_internal_elements_to_elements(&internal_doc, &None);
+
+        let first_entry = elements
+            .iter()
+            .find(|e| e.text.contains("First section"))
+            .expect("first TOC entry element");
+        let second_entry = elements
+            .iter()
+            .find(|e| e.text.contains("Second section"))
+            .expect("second TOC entry element");
+        let body = elements
+            .iter()
+            .find(|e| e.text.contains("Body text outside"))
+            .expect("post-TOC body element");
+
+        // Unfixed code accumulates the `TOC` instruction into `field_instruction` and
+        // discards it, so `get("toc_entry")` is `None` for both entries.
+        assert_eq!(
+            first_entry.metadata.additional.get(TOC_ENTRY_ATTRIBUTE),
+            Some(&"true".to_string()),
+            "the entry whose paragraph opens the TOC field should be marked"
+        );
+        assert_eq!(
+            second_entry.metadata.additional.get(TOC_ENTRY_ATTRIBUTE),
+            Some(&"true".to_string()),
+            "a nested PAGEREF field's end must not close the TOC region"
+        );
+        assert_eq!(
+            body.metadata.additional.get(TOC_ENTRY_ATTRIBUTE),
+            None,
+            "content after the TOC field's end is not part of the TOC"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_toc_entry_anchor_resolves_to_a_toc_entry_relationship() {
+        use crate::types::document_structure::RelationshipKind as PublicRelationshipKind;
+
+        let data = build_test_docx_with_parts(TOC_SDT_DOCUMENT_XML, None, None, None, None, None, None);
+        let internal_doc = extract_docx_internal_document(&data).await;
+        let result = crate::extraction::derive::derive_extraction_result(
+            internal_doc,
+            true,
+            crate::core::config::OutputFormat::Plain,
+        );
+        let doc = result.document.as_ref().expect("DocumentStructure should be present");
+
+        // Unfixed code reads only `r:id` on `w:hyperlink`, so the `w:anchor` jump produces
+        // no link at all and `doc.relationships` is empty — this fails with `0`.
+        let toc_relationships: Vec<_> = doc
+            .relationships
+            .iter()
+            .filter(|rel| rel.kind == PublicRelationshipKind::TocEntry)
+            .collect();
+        assert_eq!(
+            toc_relationships.len(),
+            1,
+            "expected one TocEntry relationship, got: {:?}",
+            doc.relationships
+        );
+
+        // Hierarchical derivation represents a heading as the Group it heads, with the
+        // Heading itself as that group's first child (`derive.rs`), and `elem_to_node`
+        // maps the heading element to the GROUP. So a bookmark on a heading resolves to
+        // the section, which is the correct destination for a table-of-contents entry --
+        // following it should land on the whole section, not just its title line.
+        let target = &doc.nodes[toc_relationships[0].target.0 as usize];
+        assert!(
+            matches!(
+                &target.content,
+                crate::types::NodeContent::Group { heading_text: Some(text), .. } if text == "Introduction"
+            ),
+            "TocEntry should target the section headed by the bookmarked heading, got: {:?}",
+            target.content
+        );
+        let heading_child = &doc.nodes[target.children[0].0 as usize];
+        assert!(
+            matches!(&heading_child.content, crate::types::NodeContent::Heading { text, .. } if text == "Introduction"),
+            "the targeted group's first child should be the heading itself, got: {:?}",
+            heading_child.content
+        );
+    }
+
+    #[tokio::test]
+    async fn test_internal_anchor_outside_a_toc_is_an_internal_link() {
+        let document_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:hyperlink w:anchor="_Ref9001"><w:r><w:t>see the appendix</w:t></w:r></w:hyperlink></w:p>
+    <w:p>
+      <w:pPr><w:pStyle w:val="Heading1"/></w:pPr>
+      <w:bookmarkStart w:id="4" w:name="_Ref9001"/>
+      <w:r><w:t>Appendix</w:t></w:r>
+      <w:bookmarkEnd w:id="4"/>
+    </w:p>
+  </w:body>
+</w:document>"#;
+
+        let data = build_test_docx_with_parts(document_xml, None, None, None, None, None, None);
+        let internal_doc = extract_docx_internal_document(&data).await;
+        let result = crate::extraction::derive::derive_extraction_result(
+            internal_doc,
+            true,
+            crate::core::config::OutputFormat::Plain,
+        );
+        let doc = result.document.as_ref().expect("DocumentStructure should be present");
+
+        // Unfixed code yields no relationship at all here, so this fails with `[]`.
+        assert_eq!(
+            doc.relationships.len(),
+            1,
+            "expected one internal link, got: {:?}",
+            doc.relationships
+        );
+        assert_eq!(
+            doc.relationships[0].kind,
+            crate::types::document_structure::RelationshipKind::InternalLink,
+            "an anchor link outside a table of contents stays an InternalLink"
         );
     }
 
