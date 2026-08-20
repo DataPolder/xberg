@@ -3517,6 +3517,12 @@ fn assemble_ocr_page_paragraphs(
             font_size_scale,
         );
         apply_ocr_text_list_fallback(&mut paragraphs);
+        // #729: `regroup_layout_lines_by_element` (above, inside
+        // `ocr_doc_to_layout_paragraphs`) isolates an ML-hinted list marker into its
+        // own paragraph and never rejoins it to its body. Gated independently of
+        // `pipeline::REATTACH_DETACHED_LIST_MARKERS` -- see
+        // `adapters::REATTACH_OCR_LAYOUT_LIST_MARKERS`'s doc comment.
+        crate::pdf::structure::adapters::reattach_ocr_layout_list_markers(&mut paragraphs);
         return paragraphs;
     }
     #[cfg(not(feature = "ocr"))]

@@ -861,7 +861,9 @@ const DETACHED_MARKER_MAX_OVERLAP_FONT_FACTOR: f32 = 0.5;
 /// How many paragraphs ahead of a detached marker its body may sit. A marker
 /// *column* emits every marker before any body ("(a)", "(b)", "(c)", then three
 /// bodies), so the body is not necessarily the next paragraph.
-const DETACHED_MARKER_MAX_LOOKAHEAD: usize = 8;
+///
+/// Also reused by the OCR layout route's `adapters::reattach_ocr_layout_list_markers`.
+pub(super) const DETACHED_MARKER_MAX_LOOKAHEAD: usize = 8;
 
 /// Minimum word count of the body paragraph. Excludes single-token neighbours,
 /// which is what a marker-shaped table column looks like.
@@ -990,7 +992,14 @@ fn detached_list_marker(paragraph: &PdfParagraph) -> Option<SegmentData> {
 }
 
 /// Whether `paragraph` is the body line the detached `marker` belongs to.
-fn accepts_detached_list_marker(paragraph: &PdfParagraph, marker: &SegmentData) -> bool {
+///
+/// Also reused, unmodified, by the OCR layout route's own reattachment pass
+/// (`adapters::reattach_ocr_layout_list_markers`) -- this body-side test has no
+/// dependency on how the marker paragraph itself was classified, only on the
+/// candidate body's own shape, so it applies identically to both routes. See that
+/// function's doc comment for why the marker-side test (`detached_list_marker`,
+/// below) is NOT similarly shared.
+pub(super) fn accepts_detached_list_marker(paragraph: &PdfParagraph, marker: &SegmentData) -> bool {
     if paragraph.heading_level.is_some()
         || paragraph.is_list_item
         || paragraph.is_code_block
@@ -1966,7 +1975,7 @@ fn finalize_paragraph(
 /// marker ("1.", "a)", "(2)", "•") and the item body arrive as separate
 /// spans on the same line. `looks_like_list_item` rejects those markers
 /// because it requires trailing text; this predicate accepts them.
-fn is_bare_list_marker(text: &str) -> bool {
+pub(super) fn is_bare_list_marker(text: &str) -> bool {
     let t = text.trim();
     if t.is_empty() || t.chars().count() > 5 {
         return false;
@@ -6582,8 +6591,18 @@ mod tests {
             column_seg("(b)", 72.0, 14.0, 660.0),
             column_seg("(c)", 72.0, 14.0, 620.0),
             column_seg("A ten foot wide minimum buffer along the lot line", 110.0, 300.0, 700.0),
-            column_seg("Ten foot wide minimum buffers along Lake Pointe Parkway", 110.0, 300.0, 660.0),
-            column_seg("Required buffers may include the pedestrian walkway", 110.0, 300.0, 620.0),
+            column_seg(
+                "Ten foot wide minimum buffers along Lake Pointe Parkway",
+                110.0,
+                300.0,
+                660.0,
+            ),
+            column_seg(
+                "Required buffers may include the pedestrian walkway",
+                110.0,
+                300.0,
+                620.0,
+            ),
         ];
         let gap_ys = compute_paragraph_gap_ys(&segments);
 
@@ -6617,8 +6636,18 @@ mod tests {
             column_seg("(b)", 72.0, 14.0, 660.0),
             column_seg("(c)", 72.0, 14.0, 620.0),
             column_seg("A ten foot wide minimum buffer along the lot line", 110.0, 300.0, 700.0),
-            column_seg("Ten foot wide minimum buffers along Lake Pointe Parkway", 110.0, 300.0, 660.0),
-            column_seg("Required buffers may include the pedestrian walkway", 110.0, 300.0, 620.0),
+            column_seg(
+                "Ten foot wide minimum buffers along Lake Pointe Parkway",
+                110.0,
+                300.0,
+                660.0,
+            ),
+            column_seg(
+                "Required buffers may include the pedestrian walkway",
+                110.0,
+                300.0,
+                620.0,
+            ),
         ];
         let gap_ys = compute_paragraph_gap_ys(&segments);
 
@@ -6638,7 +6667,12 @@ mod tests {
     fn a_bare_marker_does_not_adopt_a_block_on_another_baseline() {
         let segments = vec![
             column_seg("(a)", 72.0, 14.0, 700.0),
-            column_seg("An indented block that begins on the next line entirely", 110.0, 300.0, 660.0),
+            column_seg(
+                "An indented block that begins on the next line entirely",
+                110.0,
+                300.0,
+                660.0,
+            ),
         ];
         let gap_ys = compute_paragraph_gap_ys(&segments);
 

@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **With layout detection on, a list marker split from its body is now rejoined.** The layout route
+  isolates any line the layout model classifies as a list item into its own paragraph, which leaves
+  a bare `1.` stranded from the text it introduces. The equivalent native-PDF repair was
+  unreachable there -- the document-global OCR heuristic that leads to it declines to run once
+  anything is already classified, and its marker test rejects paragraphs that are already flagged
+  as list items, which these are by construction. Measured on a scanned ordinance, the layout route
+  carried markers on 27 of 56 list items against the non-layout route's 37.
+
 - **OCR list markers mis-read as letters are now repaired.** `repair_ocr_list_markers` existed for
   exactly this failure but recognised only the literal `l.` and `<digits>,` forms, so the mis-reads
   measured on a scanned ordinance -- `L.`, `lL.`, and a `G.` that was really a `6.` -- fell straight
