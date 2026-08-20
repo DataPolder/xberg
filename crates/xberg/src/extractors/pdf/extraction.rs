@@ -54,6 +54,26 @@ fn needs_structured_extraction(hierarchy_enabled: bool, output_format: &OutputFo
         || ocr_inline_images
 }
 
+/// Report a table-extraction failure that took out a whole detector pass, not just one page.
+///
+/// The per-page warnings in `pdf::oxide::table` cannot cover these: a stage that fails or
+/// panics outright returns no pages at all, so its own warnings never reach the caller and
+/// the document comes back with an empty `tables` list indistinguishable from a PDF that
+/// genuinely has none. ~keep
+///
+/// Module-scoped (rather than nested inside `extract_all_from_oxide_document`) so
+/// `mod tests` below can exercise its message format directly — see
+/// `table_stage_failure_warning_formats_the_message_it_promises`.
+fn table_stage_failure_warning(stage: &str, error: &impl std::fmt::Display) -> crate::types::ProcessingWarning {
+    crate::types::ProcessingWarning {
+        source: std::borrow::Cow::Borrowed("pdf_tables"),
+        message: std::borrow::Cow::Owned(format!(
+            "{stage} table extraction failed for the document: {error}; \
+             tables from this pass were skipped"
+        )),
+    }
+}
+
 /// Extract text, metadata, tables, and annotations from a PDF document using the pdf_oxide backend.
 ///
 /// Accepts an authenticated `OxideDocument`, then delegates to each oxide extraction module.
@@ -136,22 +156,6 @@ pub(crate) fn extract_all_from_oxide_document(
     let retain_hierarchy_segments = needs_structured && !config.force_ocr;
 
     let mut extraction_warnings: Vec<crate::types::ProcessingWarning> = Vec::new();
-
-    /// Report a table-extraction failure that took out a whole detector pass, not just one page.
-    ///
-    /// The per-page warnings in `pdf::oxide::table` cannot cover these: a stage that fails or
-    /// panics outright returns no pages at all, so its own warnings never reach the caller and
-    /// the document comes back with an empty `tables` list indistinguishable from a PDF that
-    /// genuinely has none. ~keep
-    fn table_stage_failure_warning(stage: &str, error: &impl std::fmt::Display) -> crate::types::ProcessingWarning {
-        crate::types::ProcessingWarning {
-            source: std::borrow::Cow::Borrowed("pdf_tables"),
-            message: std::borrow::Cow::Owned(format!(
-                "{stage} table extraction failed for the document: {error}; \
-                 tables from this pass were skipped"
-            )),
-        }
-    }
 
     let extract_tables_flag = config.pdf_options.as_ref().is_none_or(|opts| opts.extract_tables);
     let allow_single_column = config
@@ -542,8 +546,36 @@ fn join_pages_with_boundaries(
 
 #[cfg(test)]
 mod tests {
-    use super::needs_structured_extraction;
+    use super::{needs_structured_extraction, table_stage_failure_warning};
     use crate::core::config::OutputFormat;
+
+    /// Characterises `table_stage_failure_warning`'s message format only — it constructs the
+    /// error directly rather than driving a real pdf_oxide failure, so it does NOT prove any
+    /// table-extraction pass can fail or panic. That coverage used to live in
+    /// `crates/xberg/tests/issue_603_pdf_table_stage_failure_warning.rs` as
+    /// `should_emit_pdf_tables_warning_when_whole_document_table_pass_panics`, driven through the
+    /// public API against `test_documents/pdf/total_order_panic_1198_tables_path.pdf`. That
+    /// fixture stopped panicking once the `xberg-pdf-oxide` fork picked up upstream commit
+    /// `9b0f9c99` ("Fix reading-order sort panics on scanned/malformed PDFs (#807)"), which
+    /// replaced the non-transitive pairwise tategaki column comparator with
+    /// `sort_vertical_tategaki`, a genuine total order — `9b0f9c99` is an ancestor of the
+    /// `xberg-pdf-oxide` 1.0.1 version this crate now consumes. No fixture in `test_documents/`
+    /// still reaches a real `pdf_oxide` panic through the table-detection stage, so the old test
+    /// asserted a panic-recovery warning against code that no longer panics. Do not re-add a
+    /// test that asserts a panic on this fixture.
+    #[test]
+    fn table_stage_failure_warning_formats_the_message_it_promises() {
+        let cause = "pdf_oxide panicked during table extraction: boom";
+        let warning = table_stage_failure_warning("whole-document", &cause);
+
+        assert_eq!(warning.source, "pdf_tables");
+        let message = warning.message.as_ref();
+        assert_eq!(
+            message,
+            "whole-document table extraction failed for the document: pdf_oxide panicked during table \
+             extraction: boom; tables from this pass were skipped"
+        );
+    }
 
     /// Regression test for the defective `Custom(_)` catch-all shipped in #1388:
     /// `OutputFormat::FromStr` never rejects an unknown string, so a typo like
