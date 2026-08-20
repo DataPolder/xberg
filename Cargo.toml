@@ -109,7 +109,7 @@ reqwest = { version = "0.13.4", default-features = false }
 # drops text, system-fonts, memmap-fonts, raster-images — all pure-Rust, WASM-safe).
 resvg = { version = "0.48", default-features = false }
 rusqlite = { version = "0.40", features = ["bundled"] }
-sceptre = { version = "0.6.0", default-features = false }
+sceptre = { version = "0.7.0", default-features = false }
 
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.151" }
@@ -163,22 +163,23 @@ xberg = { path = "./crates/xberg", version = "1.1.0", default-features = false }
 xberg-gliner = { path = "./crates/xberg-gliner", version = "1.1.0", default-features = false }
 
 [patch.crates-io]
-# TEMPORARY: ONE out-of-tree sibling checkout remains, `sceptre`. Remove it once sceptre 0.7.0
-# is published and confirmed live in the registry, then bump the `sceptre` version requirement
-# above to match. `cargo publish` IGNORES [patch], so xberg MUST NOT be released while this
-# entry is here -- the published crate would resolve sceptre from crates.io, not from this
-# checkout, and would not carry the local changes.
+# NO out-of-tree sibling checkouts remain. Both third-party overrides are gone as of
+# 2026-08-20, so `cargo publish` -- which IGNORES [patch] -- now resolves exactly what a
+# local build does, and the standing "do not release while a patch entry is present"
+# blocker is discharged:
+#   * xberg-pdf-oxide 1.0.1 is published; the pin
+#     `pdf_oxide = { package = "xberg-pdf-oxide", version = "1.0.1" }` above resolves from
+#     the registry. The registry copy is the PACKAGED file set, which `include` filters --
+#     it is not byte-identical to the fork checkout.
+#   * sceptre 0.7.0 is published and confirmed live; the pin above was bumped 0.6.0 -> 0.7.0
+#     in the same commit that removed its override. Bumping without removing (or removing
+#     without bumping) would have silently resolved a sceptre lacking the width_ths and MSRV
+#     work, so the two MUST stay together.
 #
-# xberg-pdf-oxide's entry was removed on 2026-08-20: 1.0.1 is published, and the pin
-# `pdf_oxide = { package = "xberg-pdf-oxide", version = "1.0.1" }` above now resolves from the
-# registry. Note the registry copy is the PACKAGED file set, which `include` filters -- it is
-# not byte-identical to the fork checkout.
-#
-# The five entries below them are self-patches of our own workspace members, which are already
+# The five entries below are self-patches of our own workspace members, which are already
 # declared as `path = ..., version = ...` deps -- so path resolution wins locally with or
 # without them. They only bite if some third-party crates.io dependency ever depends on
 # `xberg*`. Left in place deliberately; see task #751 before removing. ~keep
-sceptre = { path = "../sceptre/crates/sceptre" }
 xberg = { path = "crates/xberg" }
 xberg-gliner = { path = "crates/xberg-gliner" }
 xberg-tesseract = { path = "crates/xberg-tesseract" }
