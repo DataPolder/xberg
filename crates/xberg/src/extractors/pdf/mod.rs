@@ -76,19 +76,16 @@ fn raw_pdf_needs_lopdf_compatibility_pass(content: &[u8]) -> bool {
 /// No password handling is needed here, and adding it would buy nothing.
 ///
 /// A document neither parser can count is let through rather than rejected. `max_pages`
-/// is opt-in (`SecurityLimits` defaults it to `usize::MAX`, the fast path below), and
+/// is opt-in (`SecurityLimits` defaults it to `None`, the fast path below), and
 /// failing closed on "cannot tell" would turn a parse failure into a spurious
 /// `TooManyPages`, masking the real error on documents the extraction path may still
 /// recover.
 #[cfg(feature = "pdf")]
 fn enforce_page_limit(content: &[u8], config: &ExtractionConfig) -> Result<()> {
-    let max_pages = config
-        .security_limits
-        .as_ref()
-        .map_or(usize::MAX, |limits| limits.max_pages);
-    if max_pages == usize::MAX {
+    let max_pages = config.security_limits.as_ref().and_then(|limits| limits.max_pages);
+    let Some(max_pages) = max_pages else {
         return Ok(());
-    }
+    };
 
     let Some(page_count) = oxide_page_count(content).or_else(|| lopdf_page_count(content)) else {
         return Ok(());
@@ -3658,7 +3655,7 @@ mod tests {
         let extractor = PdfExtractor::new();
         let config = ExtractionConfig {
             security_limits: Some(crate::extractors::security::SecurityLimits {
-                max_pages: real_page_count - 1,
+                max_pages: Some(real_page_count - 1),
                 ..Default::default()
             }),
             ..Default::default()
@@ -3750,7 +3747,7 @@ mod tests {
         let extractor = PdfExtractor::new();
         let config = ExtractionConfig {
             security_limits: Some(crate::extractors::security::SecurityLimits {
-                max_pages: 2,
+                max_pages: Some(2),
                 ..Default::default()
             }),
             pdf_options: Some(PdfConfig {
@@ -3786,7 +3783,7 @@ mod tests {
         let extractor = PdfExtractor::new();
         let config = ExtractionConfig {
             security_limits: Some(crate::extractors::security::SecurityLimits {
-                max_pages: real_page_count,
+                max_pages: Some(real_page_count),
                 ..Default::default()
             }),
             ..Default::default()
@@ -3801,7 +3798,7 @@ mod tests {
     }
 
     /// The default `SecurityLimits` (no override) must extract a multi-page document exactly
-    /// as before #1451: `max_pages` defaulting to anything less than `usize::MAX` would
+    /// as before #1451: `max_pages` defaulting to anything other than `None` (unlimited) would
     /// silently start rejecting existing callers' documents.
     #[tokio::test]
     #[cfg(feature = "pdf")]

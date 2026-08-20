@@ -50,24 +50,22 @@ pub struct SecurityLimits {
     /// Maximum cells per table (100,000)
     pub max_table_cells: usize,
 
-    /// Maximum number of pages in a single document (`usize::MAX`, i.e. off).
+    /// Maximum number of pages in a single document. `None` means unlimited.
     ///
     /// Checked once the page count is known and before any per-page work (OCR,
     /// layout detection, rendering) starts. Byte-size limits do not bound page
     /// count: a scanned page can compress to a few kilobytes, so a document well
     /// under `max_content_size` or `max_archive_size` can still hold thousands of
-    /// pages of per-page work. Defaults to unlimited because a real ceiling here
-    /// is workload-specific and a low default would silently reject legitimate
-    /// large documents; callers that want a ceiling set this explicitly.
-    // `usize::MAX` is a sentinel for "unlimited" and has no faithful representation in a
-    // generated binding: alef reads the `Default` impl into concrete values, and a path
-    // expression it cannot fold yields the target language's zero -- which would invert the
-    // meaning from "no page cap" to "reject every document" in all 15 bindings. The field was
-    // added by GH#1451 and has never been generated, so skipping preserves the status quo
-    // exactly rather than shipping an inverted default. Modelling unlimited as `Option<usize>`
-    // (`None` = unlimited) would make it representable everywhere; tracked separately. ~keep
-    #[cfg_attr(alef, alef(skip))]
-    pub max_pages: usize,
+    /// pages of per-page work. Defaults to `None` (unlimited) because a real
+    /// ceiling here is workload-specific and a low default would silently reject
+    /// legitimate large documents; callers that want a ceiling set this explicitly.
+    // GH#764: modelled as `Option<usize>` rather than a `usize::MAX` sentinel, which had no
+    // faithful representation in a generated binding -- alef reads `Default` impls into
+    // concrete values, and a path expression it cannot fold yields the target language's zero,
+    // which would have inverted "no page cap" into "reject every document" in all 15 bindings.
+    // `Option<usize>` maps cleanly to None/nil/null/undefined everywhere, so the field now
+    // generates instead of being skipped.
+    pub max_pages: Option<usize>,
 }
 
 impl Default for SecurityLimits {
@@ -82,7 +80,7 @@ impl Default for SecurityLimits {
             max_iterations: 10_000_000,
             max_xml_depth: 1024,
             max_table_cells: 100_000,
-            max_pages: usize::MAX,
+            max_pages: None,
         }
     }
 }
@@ -689,7 +687,7 @@ mod tests {
     fn test_default_max_pages_is_unlimited() {
         // A default that rejects real documents would be worse than the risk it
         // mitigates (issue #1451): the ceiling only applies once a caller opts in.
-        assert_eq!(SecurityLimits::default().max_pages, usize::MAX);
+        assert_eq!(SecurityLimits::default().max_pages, None);
     }
 
     #[test]
