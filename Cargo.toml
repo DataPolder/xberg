@@ -99,8 +99,9 @@ parking_lot = "0.12.5"
 # ~530 `use pdf_oxide::...` call sites are untouched. The 1.0.1 fork made every
 # capability that used to sit behind `rendering`/`legacy-crypto`/`icc` unconditional
 # (its own `[features]` table is now just `default = []` plus two opt-in CJK font
-# extras), so no feature list belongs here anymore. See [patch.crates-io] below:
-# this currently resolves to the local fork checkout, not the crates.io release.
+# extras), so no feature list belongs here anymore. Resolves from crates.io as of
+# 2026-08-20; the [patch.crates-io] override that pointed at the sibling fork
+# checkout is gone.
 pdf_oxide = { package = "xberg-pdf-oxide", version = "1.0.1" }
 rayon = "1.12.0"
 reqwest = { version = "0.13.4", default-features = false }
@@ -138,7 +139,7 @@ tracing = "0.1"
 # no-ORT targets (wasm32, x86_64-linux-android). The ONNX frontend crate is CPU-only
 # and WASM-safe; the top-level `tract` facade instead defaults to CUDA and bundles
 # GPU backends, so it is unusable here. See issue #1275.
-tract-onnx = { version = "0.23.4", default-features = false }
+tract-onnx = { version = "0.23.5", default-features = false }
 tree-sitter-language-pack = { version = "1.15.0", default-features = false, features = ["serde"] }
 url = "2.5.8"
 # usvg (re-exported by resvg) with only the `writer` feature so `Tree::to_string`
@@ -162,14 +163,22 @@ xberg = { path = "./crates/xberg", version = "1.1.0", default-features = false }
 xberg-gliner = { path = "./crates/xberg-gliner", version = "1.1.0", default-features = false }
 
 [patch.crates-io]
-# TEMPORARY: local sceptre carries the width_ths=1.0 detection fix, and local
-# xberg-pdf-oxide is the fork checkout itself (see the dependency comment above
-# `pdf_oxide` in [workspace.dependencies]). Remove each entry once its crate
-# publishes the corresponding release and the version requirement above is
-# bumped. `cargo publish` ignores [patch], so xberg MUST NOT be released while
-# either entry is here.
+# TEMPORARY: ONE out-of-tree sibling checkout remains, `sceptre`. Remove it once sceptre 0.7.0
+# is published and confirmed live in the registry, then bump the `sceptre` version requirement
+# above to match. `cargo publish` IGNORES [patch], so xberg MUST NOT be released while this
+# entry is here -- the published crate would resolve sceptre from crates.io, not from this
+# checkout, and would not carry the local changes.
+#
+# xberg-pdf-oxide's entry was removed on 2026-08-20: 1.0.1 is published, and the pin
+# `pdf_oxide = { package = "xberg-pdf-oxide", version = "1.0.1" }` above now resolves from the
+# registry. Note the registry copy is the PACKAGED file set, which `include` filters -- it is
+# not byte-identical to the fork checkout.
+#
+# The five entries below them are self-patches of our own workspace members, which are already
+# declared as `path = ..., version = ...` deps -- so path resolution wins locally with or
+# without them. They only bite if some third-party crates.io dependency ever depends on
+# `xberg*`. Left in place deliberately; see task #751 before removing. ~keep
 sceptre = { path = "../sceptre/crates/sceptre" }
-xberg-pdf-oxide = { path = "../xberg-pdf-oxide" }
 xberg = { path = "crates/xberg" }
 xberg-gliner = { path = "crates/xberg-gliner" }
 xberg-tesseract = { path = "crates/xberg-tesseract" }
