@@ -18,6 +18,14 @@ const QUIET_DIRECTIVES: &[&str] = &[
     "rustls=warn",
     "hyper_util=warn",
     "hf_hub=info",
+    // `EnvFilter` matches directives by TARGET PREFIX, not by crate identity. The PDF engine
+    // is our fork of PDFOxide; its `[lib] name = "xberg_pdf_oxide"` means its `tracing`
+    // targets are `xberg_pdf_oxide::...`, which does not start with `pdf_oxide`. Both entries
+    // are kept (mirrors the same belt-and-braces match in
+    // `crates/xberg/src/pdf/render.rs::is_pdf_engine_target`): `xberg_pdf_oxide=warn` for the
+    // fork as it actually compiles today, `pdf_oxide=warn` in case upstream `pdf_oxide` still
+    // surfaces in some build. Dropping either one silently un-suppresses that engine's warnings.
+    "xberg_pdf_oxide=warn",
     "pdf_oxide=warn",
     "tower_http=info",
 ];
@@ -200,12 +208,17 @@ mod tests {
     #[test]
     fn pdf_oxide_user_override_wins() {
         let directives = filter_directives(&build_env_filter(Some("info,pdf_oxide=debug")));
+        // Exact-token comparison, not `str::contains`: `"xberg_pdf_oxide=warn"` (a distinct,
+        // still-active suppression for the fork's real target) contains `"pdf_oxide=warn"` as a
+        // literal substring, so a naive `contains` check here would false-negative on the very
+        // presence this test exists to rule out.
+        let tokens: Vec<&str> = directives.split(',').map(str::trim).collect();
         assert!(
-            directives.contains("pdf_oxide=debug"),
+            tokens.contains(&"pdf_oxide=debug"),
             "user-supplied pdf_oxide=debug must be preserved; got: {directives}"
         );
         assert!(
-            !directives.contains("pdf_oxide=warn"),
+            !tokens.contains(&"pdf_oxide=warn"),
             "default pdf_oxide suppression must not replace a user override; got: {directives}"
         );
     }
@@ -231,6 +244,77 @@ mod tests {
         assert!(
             directives.contains("hf_hub=info"),
             "hf_hub=info suppression must still be applied; got: {directives}"
+        );
+    }
+
+    /// A minimal `Layer` that records the `target` of every event it observes downstream of
+    /// the `EnvFilter` under test. `on_event` only runs for events the filter let through, so
+    /// anything captured here genuinely passed filtering -- this is what lets the behavioural
+    /// test below assert on the filter's actual effect instead of on `QUIET_DIRECTIVES`'
+    /// string contents.
+    #[derive(Default)]
+    struct RecordingLayer {
+        targets: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    }
+
+    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for RecordingLayer {
+        fn on_event(&self, event: &tracing::Event<'_>, _ctx: tracing_subscriber::layer::Context<'_, S>) {
+            self.targets
+                .lock()
+                .expect("recording layer mutex poisoned")
+                .push(event.metadata().target().to_string());
+        }
+    }
+
+    /// Behavioural regression test for the `pdf_oxide` -> `xberg_pdf_oxide` rename.
+    ///
+    /// The tests above assert on the *directive string* -- they would have kept passing while
+    /// `QUIET_DIRECTIVES` listed only `"pdf_oxide=warn"`, even though `EnvFilter` matches by
+    /// target prefix and the fork's real targets are `xberg_pdf_oxide::...`, which does not
+    /// start with `pdf_oxide`. That is exactly why the suppression went dead unnoticed: the
+    /// test checked the identifier, not the mechanism. This test builds the real `EnvFilter`
+    /// `build_env_filter` returns, fires actual `tracing` events through it, and checks what
+    /// a downstream layer actually observes.
+    ///
+    /// Uses `tracing::subscriber::with_default` (a *scoped* dispatcher), not
+    /// `set_global_default`: `tracing` has one global dispatcher slot per process, tests in
+    /// this binary run concurrently, and a global install here would race every other test and
+    /// silently win or lose depending on execution order. This also means we do not need
+    /// `tracing::callsite::rebuild_interest_cache()` -- each `tracing::warn!` call site below is
+    /// unique to this test function, so its interest is computed for the first time against the
+    /// scoped subscriber installed by `with_default`, not against a stale global cache.
+    #[test]
+    fn xberg_pdf_oxide_warn_target_is_filtered_out_by_default() {
+        use tracing_subscriber::layer::SubscriberExt as _;
+
+        let filter = build_env_filter(None);
+        let recorder = RecordingLayer::default();
+        let targets = recorder.targets.clone();
+        let subscriber = tracing_subscriber::registry().with(filter).with(recorder);
+
+        tracing::subscriber::with_default(subscriber, || {
+            // Should be suppressed: the fork's real target after the `[lib] name` rename.
+            // Against unfixed code (only `"pdf_oxide=warn"` in QUIET_DIRECTIVES), this target
+            // does not match that directive's prefix, the root level stays "info", and a WARN
+            // event always passes an "info" root filter -- so this event WOULD be captured and
+            // the first assertion below WOULD fail.
+            tracing::warn!(target: "xberg_pdf_oxide::fonts", "noisy fork warning");
+            // Positive control: an unrelated target at the same level must still pass, so this
+            // test cannot pass by accidentally filtering everything out.
+            tracing::warn!(target: "xberg::extract", "should still be observed");
+        });
+
+        let captured = targets.lock().expect("recording layer mutex poisoned");
+        assert!(
+            !captured.iter().any(|target| target == "xberg_pdf_oxide::fonts"),
+            "xberg_pdf_oxide::fonts WARN event must be suppressed by the default filter; \
+             captured targets: {captured:?}"
+        );
+        assert!(
+            captured.iter().any(|target| target == "xberg::extract"),
+            "positive control failed: xberg::extract WARN event must still pass through \
+             (if this also fails, the test filtered everything and proves nothing); \
+             captured targets: {captured:?}"
         );
     }
 }
