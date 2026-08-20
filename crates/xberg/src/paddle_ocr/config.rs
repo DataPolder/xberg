@@ -29,9 +29,11 @@ const DEFAULT_DETECTION_LIMIT_SIDE_LEN: u32 = 1024;
 /// let config = PaddleOcrConfig::new("ch")
 ///     .with_cache_dir("/path/to/cache".into());
 ///
-/// // Table detection is on by default; disable it explicitly if unwanted
+/// // Table detection is off by default (unlike `TesseractConfig`); PaddleOCR has no
+/// // per-word table-candidate signal, so unfiltered clustering over-fabricates tables
+/// // on ordinary prose. Enable it explicitly once you've validated it for your corpus.
 /// let config = PaddleOcrConfig::new("en")
-///     .with_table_detection(false);
+///     .with_table_detection(true);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -49,12 +51,21 @@ pub struct PaddleOcrConfig {
     /// Can misfire on short text regions, rotating crops incorrectly before recognition.
     pub use_angle_cls: bool,
 
-    /// Enable table structure detection (default: true, matching `TesseractConfig`).
+    /// Enable table structure detection (default: **false**, unlike `TesseractConfig`
+    /// which defaults to `true` — see `crate::ocr::types::TesseractConfig`).
     ///
-    /// This only clusters and reconstructs a grid from word boxes PaddleOCR has already
-    /// produced (see `crate::paddle_ocr::backend::PaddleOcrBackend::process_image`) — it does
-    /// not run any additional model inference, so the added per-page cost is the CPU-only
-    /// clustering/reconstruction pass, not another ONNX call.
+    /// PaddleOCR has no per-word table-candidate confidence carve-out the way Tesseract's
+    /// TSV does (every recognised word is a clustering candidate), so unfiltered clustering
+    /// over-fabricates tables on ordinary prose. This stays off until it clears a
+    /// cell-scored accuracy measurement (see the pinning test at the bottom of this file).
+    /// Consequence for callers: switching an existing config from the Tesseract backend to
+    /// PaddleOCR with stock defaults silently produces **no** OCR tables — enable this
+    /// explicitly if you need them.
+    ///
+    /// When enabled, this only clusters and reconstructs a grid from word boxes PaddleOCR
+    /// has already produced (see `crate::paddle_ocr::backend::PaddleOcrBackend::process_image`)
+    /// — it does not run any additional model inference, so the added per-page cost is the
+    /// CPU-only clustering/reconstruction pass, not another ONNX call.
     pub enable_table_detection: bool,
 
     /// Database threshold for text detection (default: 0.3)
