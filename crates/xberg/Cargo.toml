@@ -1316,7 +1316,7 @@ ort = { version = "2.0.0-rc.13", default-features = false, features = ["std", "n
 outlook-pst = { version = "1.2.0", optional = true }
 parking_lot = { workspace = true }
 pastey = "0.2"
-pdf_oxide = { workspace = true, features = ["rendering"], optional = true }
+pdf_oxide = { workspace = true, optional = true }
 # Registry + text-exposition-format encoder backing the `/metrics` endpoint (#1391).
 # `default-features = false` drops the `protobuf` dependency, which nothing here needs.
 prometheus = { version = "0.14", default-features = false, optional = true }

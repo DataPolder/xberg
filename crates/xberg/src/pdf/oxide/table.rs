@@ -1794,13 +1794,11 @@ fn is_numeric_word(text: &str) -> bool {
 /// text-matrix-rotated cell (GH#1358: sideways spec-table columns whose
 /// `TableCell::spans` carry non-zero `rotation_degrees`), where sorting by
 /// raw page-space X/Y instead of the run's own advance axis reads the cell's
-/// words out of order. `TableCell::spans` only ever carries real rotation
-/// data when pdf_oxide's geometric table detector (`grid_to_table`) clones
-/// the original page spans into the cell; pdf_oxide's tagged-PDF/MCID path
-/// (`extract_cell`) synthesizes its own per-MCID spans with
-/// `rotation_degrees` hardcoded to `0.0`, so this sort is a no-op there
-/// regardless of the source PDF's actual rotation — that is a pdf_oxide
-/// limitation, not something fixable on this side of the crate boundary.
+/// words out of order. `TableCell::spans` carries real rotation data both when
+/// pdf_oxide's geometric table detector (`grid_to_table`) clones the original
+/// page spans into the cell, and on pdf_oxide's tagged-PDF/MCID path
+/// (`extract_cell`), which synthesizes its own per-MCID spans but carries the
+/// source block's `rotation_degrees` forward rather than hardcoding `0.0`.
 ///
 /// Embedded newlines inside span text are collapsed to spaces to produce
 /// clean single-line cell strings.
