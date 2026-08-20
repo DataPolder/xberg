@@ -1623,22 +1623,22 @@ mod tests {
     /// (`run_layout_for_pdf_pages_async`, gated on the default-on
     /// `tokio-runtime` feature) with a page whose font resource is
     /// structurally invalid, so `pdf_oxide` drops every glyph drawn with it
-    /// and reports the drop through `log::warn!` (see `crate::pdf::render`
+    /// and reports the drop through `tracing::warn!` (see `crate::pdf::render`
     /// and the #291/#1364 fixture in `tests/issue_291_dropped_glyph_warning.rs`).
     #[cfg(feature = "tokio-runtime")]
     #[tokio::test]
     async fn glyph_drop_warnings_survive_the_spawn_blocking_layout_pass() {
         use crate::core::config::layout::LayoutStrategy;
 
-        // Capture is opt-in: unless an application (here, the test) asks for
-        // it, `render_page_capturing_glyph_drops` arms nothing. Asserting the
-        // return value (rather than ignoring it) is required, not cosmetic —
-        // a test binary where some other component already owns the `log`
-        // backend would otherwise pass this test for the wrong reason: no
-        // warnings would ever be captured at all, layout render or not. ~keep
+        // Capture is opt-in: unless an application (here, the test) asks for it,
+        // `render_page_capturing_glyph_drops` arms nothing. Asserting the return value
+        // (rather than ignoring it) is required, not cosmetic — a test binary where some
+        // other component already owns the `tracing` dispatcher would otherwise pass this
+        // test for the wrong reason: no warnings would ever be captured at all, layout
+        // render or not. ~keep
         assert!(
             crate::pdf::render::install_pdf_render_diagnostics(),
-            "no other component should own the log backend in this test binary"
+            "no other component should own the tracing dispatcher in this test binary"
         );
         // Drain any residual state left on this thread by an earlier test
         // that happened to reuse it, so the empty-buffer assertion below is

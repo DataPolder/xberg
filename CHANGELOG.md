@@ -11,6 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **PDF glyph-drop warnings are captured again, and can now be composed into an existing
+  subscriber.** pdf_oxide 1.0.1 migrated its diagnostics from the `log` facade to `tracing`, so the
+  `log::Log` sink that collected them received nothing and every "glyph ink is missing" warning
+  stopped reaching `processing_warnings`. The log *target* was unchanged, which is why a check of
+  the target alone passed while the capture was dead. The sink is now a
+  `tracing_subscriber::Layer`, exposed as `xberg::pdf::render::glyph_drop_capture_layer()` for
+  applications that already install a subscriber -- `tracing` has a single global dispatcher slot,
+  and `xberg-cli` claims it in `main()`, so a capture that called `set_global_default` for itself
+  would lose the race and go dark in the CLI while still passing in every test binary (which
+  installs no subscriber and therefore always wins the slot). `install_pdf_render_diagnostics()`
+  remains for embedders with no subscriber of their own, and no longer caps the whole process at
+  `WARN` or discards other crates' events.
+
 - **With layout detection on, a list marker split from its body is now rejoined.** The layout route
   isolates any line the layout model classifies as a list item into its own paragraph, which leaves
   a bare `1.` stranded from the text it introduces. The equivalent native-PDF repair was

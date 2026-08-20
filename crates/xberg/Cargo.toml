@@ -1393,6 +1393,13 @@ tower-http = { version = "0.7", features = [
     "compression-zstd",
 ], optional = true }
 tracing = { workspace = true }
+# Needed in the LIBRARY (not just dev) so the PDF glyph-drop capture can be exposed as a
+# composable `Layer` rather than seizing the process's single global `tracing` dispatcher.
+# `xberg-cli` already installs its own `fmt()` subscriber in `main()`, so a capture that
+# called `set_global_default` would simply lose the race and go dark in the CLI while every
+# test binary — which has no `fmt` subscriber — still passed. See `pdf::render`.
+# Trimmed to what the layer needs: no `fmt`, `ansi` or `tracing-log` in the core crate.
+tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "registry"] }
 tracing-opentelemetry = { version = "0.33", optional = true }
 # Pure-Rust ONNX engine — the inference-seam backend on no-ORT targets (WASM,
 # Android x86_64). `tract-onnx` (not the `tract` facade) is CPU-only + wasm-safe.

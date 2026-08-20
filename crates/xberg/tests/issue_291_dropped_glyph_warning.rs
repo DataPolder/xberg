@@ -17,7 +17,7 @@ use xberg::pdf::render::{install_pdf_render_diagnostics, render_pdf_page_to_png,
 /// { reason: "Font object is not a dictionary" }`.
 ///
 /// Per issue #1364, that failure does not abort the page: `load_resources`
-/// logs it via `log::warn!("Failed to parse font '{}': {}. Text using this
+/// logs it via `tracing::warn!("Failed to parse font '{}': {}. Text using this
 /// font may render incorrectly.", ...)` and continues, so every glyph the
 /// content stream later paints with `/F1` is dropped (the renderer has no
 /// font to shape it with) while the page still renders `Ok`. Unlike a
@@ -151,21 +151,28 @@ fn build_pdf_with_resolvable_font() -> Vec<u8> {
 /// invalid renders successfully (as it must — a broken font resource must
 /// not fail the whole page) but drops every glyph drawn with it. Before this
 /// fix nothing surfaced that: `RenderedImage` has no diagnostic field, and
-/// pdf_oxide's own `log::warn!` call had no `log::Log` backend installed to
-/// receive it, so the drop was invisible twice over.
+/// pdf_oxide's own warning had no subscriber installed to receive it, so the
+/// drop was invisible twice over. (It reported through `log::warn!` then and
+/// through `tracing::warn!` since the 1.0.1 fork migration — the second time
+/// this went dark, the target was unchanged and only the transport moved.)
 ///
 /// This asserts the xberg-side capture end to end: rendering the *same* page
 /// twice (e.g. once for a preview and once for OCR, or a retry) hits the
-/// identical pdf_oxide cause both times, so the two `log::warn!` records
+/// identical pdf_oxide cause both times, so the two `tracing::warn!` records
 /// must dedup into exactly one `ProcessingWarning`, sourced `"pdf-render"`
 /// and naming the page — not one warning per render call.
 #[test]
 fn test_dropped_glyphs_from_malformed_font_produce_one_deduped_warning() {
-    // Capture is opt-in — a library must not seize the process-global `log`
-    // backend on its own. An application (here, the test) asks for it.
+    // Capture is opt-in — a library must not seize the process-global `tracing` dispatcher
+    // on its own. An application (here, the test) asks for it.
+    //
+    // ★ This assertion holding here is NOT evidence that capture works in the CLI. A test
+    // binary installs no subscriber of its own, so `install_pdf_render_diagnostics` always
+    // wins the single global dispatcher slot; `xberg-cli` claims that slot first and composes
+    // `glyph_drop_capture_layer()` into its own stack instead. Both paths need exercising.
     assert!(
         install_pdf_render_diagnostics(),
-        "no other component should own the log backend in this test binary"
+        "no other component should own the tracing dispatcher in this test binary"
     );
 
     // Drain any residual state from a previous render on this thread so the
@@ -227,11 +234,16 @@ fn test_dropped_glyphs_from_malformed_font_produce_one_deduped_warning() {
 /// spurious warnings.
 #[test]
 fn test_resolvable_font_page_produces_no_glyph_drop_warning() {
-    // Install first, otherwise "no warnings" would pass trivially because
-    // capture was never armed — a test that passes when the code is broken.
+    // Install first, otherwise "no warnings" would pass trivially because capture was never
+    // armed — a test that passes when the code is broken.
+    //
+    // ★ That guard is necessary but NOT sufficient, and this test is the standing example:
+    // when the capture went dark on the pdf_oxide 1.0.1 log->tracing migration it kept
+    // passing, because an empty buffer satisfies `warnings.is_empty()` just as well as a
+    // working sink that found nothing. Only the positive tests caught the regression.
     assert!(
         install_pdf_render_diagnostics(),
-        "no other component should own the log backend in this test binary"
+        "no other component should own the tracing dispatcher in this test binary"
     );
     let _ = take_pdf_oxide_render_warnings();
 

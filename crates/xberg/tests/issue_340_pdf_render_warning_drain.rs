@@ -112,13 +112,17 @@ fn build_pdf_with_malformed_font_resource() -> Vec<u8> {
 /// makes this test fail with an empty `processing_warnings`.
 #[tokio::test]
 async fn extract_surfaces_glyph_drop_warning_through_public_api() {
-    // Capture is opt-in — a library must not seize the process-global `log`
-    // backend on its own, so nothing arms it during extraction and without
-    // this call `render_page_capturing_glyph_drops` short-circuits to a plain
-    // render and the drain under test would have nothing to drain.
+    // Capture is opt-in — a library must not seize the process-global `tracing` dispatcher
+    // on its own, so nothing arms it during extraction and without this call
+    // `render_page_capturing_glyph_drops` short-circuits to a plain render and the drain
+    // under test would have nothing to drain.
+    //
+    // ★ A test binary installs no subscriber of its own, so this always wins the single
+    // global dispatcher slot. `xberg-cli` claims that slot first and composes
+    // `glyph_drop_capture_layer()` in instead — this passing says nothing about that path.
     assert!(
         install_pdf_render_diagnostics(),
-        "no other component should own the log backend in this test binary"
+        "no other component should own the tracing dispatcher in this test binary"
     );
 
     let pdf = build_pdf_with_malformed_font_resource();

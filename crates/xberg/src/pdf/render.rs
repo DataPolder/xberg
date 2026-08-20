@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 const PDF_RENDER_WARNING_SOURCE: &str = "pdf-render";
 
 thread_local! {
-    /// Buffer for `pdf_oxide`'s `log::warn!` records emitted while a render
+    /// Buffer for `pdf_oxide`'s `tracing::warn!` records emitted while a render
     /// call made by this thread is in flight. `None` when no render call is
     /// currently capturing (the default, and the state between calls).
     static PDF_OXIDE_LOG_CAPTURE: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
@@ -26,14 +26,14 @@ thread_local! {
 
 static PDF_OXIDE_LOGGER_INIT: Once = Once::new();
 
-/// Whether [`install_pdf_render_diagnostics`] actually won the global `log`
-/// backend. Capture is skipped entirely while this is false, so the render
-/// path costs nothing for the overwhelming majority of embedders who never
-/// opt in.
+/// Whether [`install_pdf_render_diagnostics`] actually won the process's
+/// global `tracing` [`Subscriber`](tracing::Subscriber) slot. Capture is
+/// skipped entirely while this is false, so the render path costs nothing for
+/// the overwhelming majority of embedders who never opt in.
 static PDF_OXIDE_CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
 
-/// A [`log::Log`] sink that captures `pdf_oxide`'s warning-level records into
-/// the calling thread's [`PDF_OXIDE_LOG_CAPTURE`] buffer.
+/// A [`tracing::Subscriber`] that captures `pdf_oxide`'s warning-level events
+/// into the calling thread's [`PDF_OXIDE_LOG_CAPTURE`] buffer.
 ///
 /// # Why this exists (#1364)
 ///
@@ -47,22 +47,35 @@ static PDF_OXIDE_CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
 /// advanced as if it painted. `RenderedImage` carries no diagnostic field, so
 /// none of this is visible to callers through the return value.
 ///
-/// `pdf_oxide` *does* report every one of these cases through `log::warn!`,
-/// but this crate never installed a [`log::Log`] backend, so — independent of
-/// this fix — those records were going to the default no-op logger and were
-/// dropped a second time. That is the exact upstream-plus-local gap #1364
-/// describes: pdf_oxide's own diagnostic channel existed but nothing was
-/// listening.
+/// `pdf_oxide` *does* report every one of these cases through `tracing::warn!`,
+/// but this crate never installed a [`tracing::Subscriber`], so — independent
+/// of this fix — those records went to whatever the process's default
+/// dispatcher was (typically none) and were dropped a second time. That is
+/// the exact upstream-plus-local gap #1364 describes: pdf_oxide's own
+/// diagnostic channel existed but nothing was listening.
 ///
-/// This is the xberg-side fix: install a capturing logger (once per process;
-/// if the host application has already claimed the `log` facade for its own
-/// logger, [`ensure_pdf_oxide_log_capture_installed`] leaves it alone and
-/// this capture path silently yields nothing — no worse than today), and
-/// during each render call collect `pdf_oxide`'s own target-prefixed warnings
-/// into a `ProcessingWarning`. The actual *decision* about which glyph gets
-/// dropped and why remains entirely inside `pdf_oxide`/`ttf-parser` — that
-/// part is upstream and is not touched here.
-/// Whether a `log` target belongs to the PDF engine whose warnings this module captures.
+/// # The migration off `log` (pdf_oxide 1.0.1, fork commit `0aed9f1b`)
+///
+/// This module used to install a [`log::Log`] backend instead, because at the
+/// time `pdf_oxide` reported these through `log::warn!`. As of pdf_oxide
+/// 1.0.1 the fork migrated its diagnostics off the `log` facade entirely
+/// ("refactor!: migrate from the log facade to tracing") — its `Cargo.toml`
+/// carries no `log` dependency at all any more, and every site this module
+/// cares about is now `tracing::warn!(target: "xberg_pdf_oxide::...", "{}",
+/// ...)`. A `log::Log` backend receives nothing from that, which is why the
+/// old capture silently went dark on this upgrade. This struct is the
+/// tracing-side replacement, installed the same way as before: opt-in, once
+/// per process, whichever side wins the single global slot keeps it.
+///
+/// This is the xberg-side fix: install a capturing subscriber (once per
+/// process; if the host application has already claimed the `tracing`
+/// dispatcher for its own subscriber, [`install_pdf_render_diagnostics`]
+/// leaves it alone and this capture path silently yields nothing — no worse
+/// than today), and during each render call collect `pdf_oxide`'s own
+/// target-prefixed warnings into a `ProcessingWarning`. The actual *decision*
+/// about which glyph gets dropped and why remains entirely inside
+/// `pdf_oxide`/`ttf-parser` — that part is upstream and is not touched here.
+/// Whether a `tracing` target belongs to the PDF engine whose warnings this module captures.
 ///
 /// The engine is our fork of PDFOxide. Its records carry the target `module_path!()` produced
 /// inside the fork itself, which derives from its own `[lib] name = "xberg_pdf_oxide"`. The
@@ -80,83 +93,156 @@ fn is_pdf_engine_target(target: &str) -> bool {
 
 struct PdfOxideWarningCapture;
 
-impl log::Log for PdfOxideWarningCapture {
-    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
-        metadata.level() <= log::Level::Warn
+impl PdfOxideWarningCapture {
+    fn interested(metadata: &tracing::Metadata<'_>) -> bool {
+        *metadata.level() <= tracing::Level::WARN && is_pdf_engine_target(metadata.target())
+    }
+}
+
+/// Pulls the `message` field out of a `tracing::Event`.
+///
+/// A `tracing` event's message is a *field* (named `"message"`), not
+/// something `Event` exposes as a plain string. `tracing::warn!("{}", x)` —
+/// the form pdf_oxide uses at `text_rasterizer.rs:502` — records it via
+/// [`record_debug`](tracing::field::Visit::record_debug): the value handed in
+/// is the formatted `fmt::Arguments`, and `fmt::Arguments`'s `Debug` impl
+/// forwards to its `Display` impl, so `format!("{value:?}")` below is the
+/// plain formatted text, not a debug-quoted string. A bare string-literal
+/// message (`tracing::warn!("literal")`, used by some other sites in the
+/// fork) instead reaches [`record_str`](tracing::field::Visit::record_str).
+/// Both are implemented so either form is captured. Same pattern as the
+/// `MessageVisitor` already used for tracing-capture tests elsewhere in this
+/// crate (`tests/gpu_acceleration.rs`).
+#[derive(Default)]
+struct MessageVisitor(String);
+
+impl tracing::field::Visit for MessageVisitor {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        if field.name() == "message" {
+            self.0 = format!("{value:?}");
+        }
     }
 
-    /// Records outside the PDF engine are dropped rather than re-emitted.
+    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        if field.name() == "message" {
+            self.0 = value.to_string();
+        }
+    }
+}
+
+impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for PdfOxideWarningCapture {
+    /// Capture the engine's warnings into this thread's buffer; ignore every other event.
     ///
-    /// The engine's log target comes from `module_path!()` in the *emitting* crate, i.e. its
-    /// own `[lib] name`, which is `xberg_pdf_oxide`. Our `package = "xberg-pdf-oxide"` alias
-    /// in Cargo.toml renames the extern crate to `pdf_oxide` for this crate's ~530 `use`
-    /// sites, but it does NOT change what the fork itself compiles as, so it does not change
-    /// the target. Both prefixes are accepted deliberately: matching only the current name
-    /// would leave the next rename failing exactly the way this one did -- silently, with the
-    /// warnings simply never arriving and only an assert-zero test still passing (#697).
+    /// This is deliberately the **only** trait method overridden. `Layer::enabled` and
+    /// `Layer::max_level_hint` are filters over the *whole subscriber stack*, not per-layer
+    /// ones: narrowing either here would silence the host application's own `fmt` layer for
+    /// every non-`pdf_oxide` event, and cap the process at `WARN`. A library must not make
+    /// that trade on its embedder's behalf. Filtering inside the callback instead costs one
+    /// level check and one target comparison per event and affects nobody else.
     ///
-    /// Forwarding them to `tracing` is the obvious instinct — this sink owns the
-    /// process's only `log` backend, so anything it drops is gone — but it does not
-    /// work here and must not be reintroduced. The `tracing/log` feature is enabled
-    /// in this build (pulled in through `tower`), which makes every `tracing` event
-    /// also emit a `log` record. A forwarding sink therefore feeds itself: one
-    /// `tracing::warn!` becomes a `log` record, which becomes a `tracing::warn!`,
-    /// until the thread's stack is exhausted. That is not hypothetical — it aborted
-    /// the #1364 regression test with `fatal runtime error: stack overflow`.
+    /// Re-emitting a captured record through another facade is the obvious instinct and must
+    /// not be reintroduced. The `tracing/log` feature is enabled in this build (pulled in
+    /// through `tower`), which makes a `tracing::warn!` also emit a `log::Record` whenever no
+    /// global `tracing` dispatcher is set. If this method forwarded what it captured by
+    /// calling `log::warn!`, that record would round-trip back into `tracing` through the same
+    /// bridge, back to this layer, forever. That is not hypothetical: forwarding between the
+    /// two facades is exactly what produced the #1364 regression test's `fatal runtime error:
+    /// stack overflow`. This method only ever appends to a thread-local `Vec<String>`.
     ///
-    /// Dropping them is acceptable precisely because installation is opt-in: before
-    /// [`install_pdf_render_diagnostics`] is called there is no `log` backend at all
-    /// and these records already go nowhere, so an application that opts in is
-    /// choosing this trade knowingly rather than having it imposed.
-    fn log(&self, record: &log::Record<'_>) {
-        if !self.enabled(record.metadata()) || !is_pdf_engine_target(record.target()) {
+    /// The buffer is thread-local *by design*, and the layout pass runs the render inside
+    /// `tokio::task::spawn_blocking`. That works because a layer's `on_event` runs
+    /// synchronously on whichever thread emitted the event, so the warning lands in the same
+    /// thread's buffer that `render_page_capturing_glyph_drops` armed and will drain.
+    /// `glyph_drop_warnings_survive_the_spawn_blocking_layout_pass` exists to pin that.
+    fn on_event(&self, event: &tracing::Event<'_>, _ctx: tracing_subscriber::layer::Context<'_, S>) {
+        if !Self::interested(event.metadata()) {
             return;
         }
-        let message = record.args().to_string();
+        let mut visitor = MessageVisitor::default();
+        event.record(&mut visitor);
         PDF_OXIDE_LOG_CAPTURE.with(|cell| {
             if let Some(buffer) = cell.borrow_mut().as_mut() {
-                buffer.push(message);
+                buffer.push(visitor.0);
             }
         });
     }
-
-    fn flush(&self) {}
 }
 
-/// Install [`PdfOxideWarningCapture`] as the process-wide `log` backend,
-/// exactly once.
+/// A `tracing` [`Layer`](tracing_subscriber::Layer) that captures the PDF engine's glyph-drop
+/// warnings, for composing into an application's existing subscriber stack.
 ///
-/// If another component already installed a `log::Log` implementation (an
-/// application wiring `env_logger`, for instance), `log::set_boxed_logger`
-/// fails and this is a no-op: we do not fight over ownership of the global
-/// logger slot, and we do not touch `log::set_max_level` unless our install
-/// won, so we never silently raise or lower a level someone else configured.
-/// In that case `pdf_oxide`'s glyph-drop records go wherever that other
-/// logger sends them instead of into [`take_pdf_oxide_render_warnings`].
-/// **Opt-in.** Nothing calls this automatically, and that is deliberate: xberg
-/// is a library, and `log` has exactly one global backend slot per process. A
-/// library that claims it on its own behalf breaks its embedder — a host that
-/// later calls `env_logger::init()` panics, and until this returns, every
-/// `log` record in the process is routed here rather than wherever the host
-/// intended. That decision belongs to the application, so it is exposed as a
-/// call an application makes knowingly.
+/// Prefer this over [`install_pdf_render_diagnostics`] whenever the application installs a
+/// subscriber of its own, because `tracing` has exactly **one** global dispatcher slot and
+/// composing shares it instead of racing for it:
 ///
-/// Returns `true` if this call (or an earlier one) installed the capture, and
-/// `false` if some other component already owns the `log` backend — in which
-/// case `pdf_oxide`'s glyph-drop records go to that logger and
-/// [`take_pdf_oxide_render_warnings`] stays empty.
+/// ```ignore
+/// tracing_subscriber::fmt()
+///     .with_env_filter(env_filter)
+///     .finish()
+///     .with(xberg::pdf::render::glyph_drop_capture_layer())
+///     .try_init();
+/// ```
 ///
-/// Without this call the #1364 warnings are not produced. The glyph drop
-/// itself is decided inside `pdf_oxide`, which reports it only through
-/// `log::warn!`; there is no return-value channel to read instead.
+/// Constructing the layer arms the capture — [`render_page_capturing_glyph_drops`] is a no-op
+/// until something does, so that the render path costs nothing for the majority of embedders
+/// who never opt in. Building a layer you then discard leaves the render path arming and
+/// draining an empty buffer: harmless, but pointless.
+pub fn glyph_drop_capture_layer<S: tracing::Subscriber>() -> impl tracing_subscriber::Layer<S> {
+    PDF_OXIDE_CAPTURE_ACTIVE.store(true, Ordering::Release);
+    PdfOxideWarningCapture
+}
+
+/// Install the glyph-drop capture as the process-wide `tracing`
+/// [`Subscriber`](tracing::Subscriber), exactly once.
+///
+/// **Prefer [`glyph_drop_capture_layer`] if the application installs a subscriber of its own.**
+/// `tracing` has exactly one global default dispatcher slot per process, and this function
+/// claims it. If something else already holds it — an application wiring
+/// `tracing_subscriber::fmt()...try_init()`, which is what `xberg-cli` does in `main()` —
+/// `set_global_default` fails and this is a no-op, so the engine's glyph-drop records go to
+/// that other subscriber and [`take_pdf_oxide_render_warnings`] stays empty. This function is
+/// the fallback for embedders that have no subscriber at all; composing the layer is what
+/// works when they do.
+///
+/// ★ That distinction is not theoretical, and it does not show up in tests. A test binary
+/// installs no `fmt` subscriber, so the capture always wins the slot there and every test
+/// passes — while the CLI, which claims the slot first, captures nothing. The port that
+/// introduced this function in its `set_global_default`-only form would have gone green on all
+/// three glyph-drop tests with the real CLI path still dead. Warnings arriving in a test are
+/// not evidence that they arrive in production; the contested resource only exists once
+/// something else has claimed it.
+///
+/// **Opt-in.** Nothing calls this automatically: a library that seizes the global dispatcher on
+/// its own behalf breaks its embedder, because a host that later calls
+/// `tracing_subscriber::fmt()...init()` panics (`.try_init()` instead returns `Err`). That
+/// decision belongs to the application.
+///
+/// Returns whether the capture is active — `true` if this call installed it, an earlier call
+/// did, or a [`glyph_drop_capture_layer`] was composed into someone else's stack; `false` if
+/// some other component owns the dispatcher slot and no layer was composed.
+///
+/// Without one of the two opt-ins the #1364 warnings are not produced. The glyph drop itself is
+/// decided inside `pdf_oxide`, which reports it only through `tracing::warn!`; there is no
+/// return-value channel to read instead.
 pub fn install_pdf_render_diagnostics() -> bool {
     PDF_OXIDE_LOGGER_INIT.call_once(|| {
-        if log::set_boxed_logger(Box::new(PdfOxideWarningCapture)).is_ok() {
-            // Only warnings are captured, so asking the `log` facade for anything
-            // more verbose would cost every dependency a formatted record per call
-            // for output this sink immediately discards.
-            log::set_max_level(log::LevelFilter::Warn);
+        use tracing_subscriber::layer::SubscriberExt as _;
+
+        // A bare `Registry` carrying only this layer: it neither filters nor caps the level for
+        // anything else, so the earlier form's side effect — every event in the process below
+        // `WARN` silently discarded, via a `max_level_hint` that applied stack-wide — is gone.
+        let subscriber = tracing_subscriber::registry().with(PdfOxideWarningCapture);
+        if tracing::subscriber::set_global_default(subscriber).is_ok() {
             PDF_OXIDE_CAPTURE_ACTIVE.store(true, Ordering::Release);
+            // Re-resolve any callsite whose interest was already cached (as
+            // `never()`, from being reached with no global dispatcher
+            // installed at all) before this call. This is safe here
+            // specifically *because* `set_global_default` just above
+            // succeeded: by the time this runs, the process has a global
+            // default (this subscriber) for every thread to resolve interest
+            // against. Calling this with no global default set at all is the
+            // known hazard that disables `tracing` process-wide.
+            tracing::callsite::rebuild_interest_cache();
         }
     });
     PDF_OXIDE_CAPTURE_ACTIVE.load(Ordering::Acquire)
