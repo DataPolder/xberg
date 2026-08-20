@@ -11,6 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **OCR list markers mis-read as letters are now repaired.** `repair_ocr_list_markers` existed for
+  exactly this failure but recognised only the literal `l.` and `<digits>,` forms, so the mis-reads
+  measured on a scanned ordinance -- `L.`, `lL.`, and a `G.` that was really a `6.` -- fell straight
+  through and their items stayed prose. The confusions OCR actually produces are now covered
+  (`L`/`I` for 1, `G`/`b` for 6, `S` for 5, `O`/`D` for 0). Because `A.`, `B.` and `(a)` are
+  legitimate lettered markers in the same documents, an ambiguous letter is only rewritten when the
+  nearest unambiguous marker on each side of it is numeric; a lettered neighbour vetoes the repair,
+  and a marker with no determinable context is left alone.
+
 - **A DOCX `Heading1` paragraph is now reported as heading level 1, not 2.** The style catalog
   resolves `w:outlineLvl`, which ISO 29500 defines as zero-based, so it correctly adds one. The
   name-based fallback used when a document ships no `styles.xml`, or whose style omits

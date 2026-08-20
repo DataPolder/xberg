@@ -389,6 +389,13 @@ fn normalize_markdown_for_scoring(text: &str) -> String {
 ///
 /// Used by the pipeline to decide whether to accept a result or try the next backend.
 /// Higher is better. Combines multiple signal dimensions into a single score.
+/// Neutralization switch for the widened list-marker repair added for #733 (letter-for-digit
+/// OCR confusions and the doubled `lL.` misread of a single `1.`). Flip to `false` to A/B this
+/// behavior in isolation — the original, narrower repairs (`3,` -> `3.` and `l.` -> `1.`) are
+/// unconditional and keep working either way.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+const ENABLE_WIDENED_OCR_LIST_MARKER_REPAIR: bool = true;
+
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 /// Repair ordered-list markers the OCR engine mis-read at the start of a line.
 ///
@@ -399,35 +406,62 @@ fn normalize_markdown_for_scoring(text: &str) -> String {
 /// recorded ordinance, 4 of 19 markers were destroyed this way and the markdown had 18 list
 /// items against the source's 31.
 ///
-/// Deliberately narrow, because rewriting text the engine got right is worse than leaving a
-/// marker broken. A line is only repaired when it looks like nothing but a list item:
+/// Two repairs are unconditional because the marker they fix is never a legitimate list
+/// letter: `<digits>,` (the period read as a comma) and `l.` / `lL.` (the digit one read as a
+/// lowercase L, sometimes split into two characters).
 ///
-/// * the marker is at the very start of the line,
-/// * the number is 1-2 digits (a real list; `2024, the year ...` is not),
-/// * it is followed by exactly one space and then an uppercase letter, and
-/// * for the `l.` case the character is a bare lowercase L, which is never a valid marker.
+/// A third, wider class is gated behind [`ENABLE_WIDENED_OCR_LIST_MARKER_REPAIR`]: single
+/// uppercase letters Tesseract confuses with a digit (`L`/`G`/`b`/`S`/`O`/`D`/`I`). These
+/// *are* ambiguous — `A.`, `B.`, `G.`, `H.` are legitimate lettered markers in this same
+/// corpus, so a lone `G.` cannot be repaired on its own shape alone. The discriminator is the
+/// run of list markers around it: this function already sees the whole page (`text`, split
+/// into every line), so it classifies every marker-shaped line first — unambiguous numeric
+/// (`5.`, `12.`) or unambiguous letter (`A.`, `F.`, any letter not in the confusable set) —
+/// and then, for each ambiguous line, looks outward past prose to the nearest classified
+/// marker on each side. A `G.` between `5.` and `7.` sits in a numeric run and is repaired to
+/// `6.`; a `G.` between `F.` and `H.` sits in a lettered run and is left alone. A `G.` with no
+/// determinable neighbor on either side is left alone — the same "decline to judge" posture
+/// used elsewhere in this file when a signal is not trustworthy.
 ///
-/// Sentences beginning "3, and the remainder ..." keep their comma because of the uppercase
-/// requirement; prose beginning "l. " does not occur.
+/// Deliberately narrow otherwise, because rewriting text the engine got right is worse than
+/// leaving a marker broken. A line is only ever a repair candidate when it looks like nothing
+/// but a list item: the marker is at the very start of the line, the number is 1-2 digits (a
+/// real list; `2024, the year ...` is not), and it is followed by exactly one space and then
+/// an uppercase letter. Sentences beginning "3, and the remainder ..." keep their comma
+/// because of the uppercase requirement; prose beginning "l. " does not occur.
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 pub(crate) fn repair_ocr_list_markers(text: &str) -> std::borrow::Cow<'_, str> {
-    if !text.lines().any(line_has_repairable_marker) {
+    let lines: Vec<&str> = text.lines().collect();
+    let kinds: Vec<LineMarkerKind> = lines.iter().map(|line| classify_marker_line(line)).collect();
+
+    let mut repair_flags = vec![false; lines.len()];
+    let mut any_repair = false;
+    for (index, kind) in kinds.iter().enumerate() {
+        let repair = match kind {
+            LineMarkerKind::LegacyRepairableDigit | LineMarkerKind::LegacyRepairableL => true,
+            LineMarkerKind::DoubledOneMisread if ENABLE_WIDENED_OCR_LIST_MARKER_REPAIR => true,
+            LineMarkerKind::AmbiguousLetter(_) if ENABLE_WIDENED_OCR_LIST_MARKER_REPAIR => {
+                ambiguous_marker_is_numeric_context(&kinds, index)
+            }
+            _ => false,
+        };
+        if repair {
+            repair_flags[index] = true;
+            any_repair = true;
+        }
+    }
+
+    if !any_repair {
         return std::borrow::Cow::Borrowed(text);
     }
+
     let mut out = String::with_capacity(text.len());
-    for (index, line) in text.lines().enumerate() {
+    for (index, line) in lines.iter().enumerate() {
         if index > 0 {
             out.push('\n');
         }
-        if line_has_repairable_marker(line) {
-            let (marker, rest) = line.split_at(line.find(' ').unwrap_or(0));
-            if marker.starts_with('l') {
-                out.push('1');
-            } else {
-                out.push_str(&marker[..marker.len() - 1]);
-            }
-            out.push('.');
-            out.push_str(rest);
+        if repair_flags[index] {
+            out.push_str(&repaired_marker_line(line, &kinds[index]));
         } else {
             out.push_str(line);
         }
@@ -438,22 +472,133 @@ pub(crate) fn repair_ocr_list_markers(text: &str) -> std::borrow::Cow<'_, str> {
     std::borrow::Cow::Owned(out)
 }
 
-/// Does this line begin with an ordered-list marker the engine mis-read?
+/// How a line's leading token reads as an ordered-list marker.
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
-fn line_has_repairable_marker(line: &str) -> bool {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LineMarkerKind {
+    /// Not a list-marker-shaped line at all.
+    None,
+    /// `<digits>,` — the period was read as a comma. Never ambiguous, always repaired.
+    LegacyRepairableDigit,
+    /// `l.` — the digit one was read as a lowercase L. Never a valid marker otherwise, always
+    /// repaired.
+    LegacyRepairableL,
+    /// `lL.` — the digit one split into two mis-read characters. Never a valid marker,
+    /// repaired when the widened gate is on.
+    DoubledOneMisread,
+    /// A single letter Tesseract also produces for a digit (see [`confusable_digit_for_letter`]).
+    /// Ambiguous with a genuine lettered marker; only repaired when its neighboring markers on
+    /// the page indicate a numeric run.
+    AmbiguousLetter(char),
+    /// An unambiguous numeric marker (`5.`, `12.`) — already correct, used as context.
+    Digit,
+    /// An unambiguous letter marker (a letter that is not in the confusable set, e.g. `A.`,
+    /// `F.`) — already correct, used as context.
+    Letter,
+}
+
+/// Classify a line's leading token as an ordered-list marker, if it looks like one at all.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn classify_marker_line(line: &str) -> LineMarkerKind {
     let Some((marker, rest)) = line.split_once(' ') else {
-        return false;
+        return LineMarkerKind::None;
     };
     // Exactly one space, then an uppercase letter: the shape of a list item, not of prose.
     if !rest.chars().next().is_some_and(char::is_uppercase) {
-        return false;
+        return LineMarkerKind::None;
     }
-    match marker.strip_suffix(',') {
-        // `3,` / `12,` -> the period was read as a comma.
-        Some(digits) => !digits.is_empty() && digits.len() <= 2 && digits.bytes().all(|b| b.is_ascii_digit()),
-        // `l.` -> the digit one was read as a lowercase L. Never a valid marker otherwise.
-        None => marker == "l.",
+    if let Some(digits) = marker.strip_suffix(',') {
+        // `3,` / `12,` -> the period was read as a comma. ~keep
+        if !digits.is_empty() && digits.len() <= 2 && digits.bytes().all(|b| b.is_ascii_digit()) {
+            return LineMarkerKind::LegacyRepairableDigit;
+        }
+        return LineMarkerKind::None;
     }
+    if marker == "l." {
+        return LineMarkerKind::LegacyRepairableL;
+    }
+    if marker == "lL." {
+        return LineMarkerKind::DoubledOneMisread;
+    }
+    let Some(body) = marker.strip_suffix('.') else {
+        return LineMarkerKind::None;
+    };
+    if !body.is_empty() && body.len() <= 2 && body.bytes().all(|b| b.is_ascii_digit()) {
+        return LineMarkerKind::Digit;
+    }
+    let mut chars = body.chars();
+    if let (Some(ch), None) = (chars.next(), chars.next())
+        && ch.is_ascii_alphabetic()
+    {
+        return match confusable_digit_for_letter(ch) {
+            Some(_) => LineMarkerKind::AmbiguousLetter(ch),
+            None => LineMarkerKind::Letter,
+        };
+    }
+    LineMarkerKind::None
+}
+
+/// The digit Tesseract sometimes mis-reads as this uppercase letter, if any.
+///
+/// Deliberately the exact confusion set observed on the ordinance fixture, not a general
+/// OCR confusion table: widening it further would widen the set of legitimate lettered
+/// markers (`A.` .. `Z.`) this function has to reason about being corrupted.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn confusable_digit_for_letter(ch: char) -> Option<char> {
+    match ch {
+        'L' => Some('1'),
+        'G' | 'b' => Some('6'),
+        'S' => Some('5'),
+        'O' | 'D' => Some('0'),
+        'I' => Some('1'),
+        _ => None,
+    }
+}
+
+/// This marker line's contribution, if any, to deciding whether a *neighboring* ambiguous
+/// line sits in a numeric or a lettered run.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn nearest_marker_is_digit(kind: &LineMarkerKind) -> Option<bool> {
+    match kind {
+        LineMarkerKind::Digit | LineMarkerKind::LegacyRepairableDigit | LineMarkerKind::LegacyRepairableL => Some(true),
+        LineMarkerKind::Letter => Some(false),
+        LineMarkerKind::AmbiguousLetter(_) | LineMarkerKind::DoubledOneMisread | LineMarkerKind::None => None,
+    }
+}
+
+/// Whether the ambiguous letter marker at `kinds[index]` sits in a numeric list, based on the
+/// nearest determinable marker on each side.
+///
+/// Repairs only when every side that found an answer says "numeric" (a `Letter` neighbor on
+/// either side vetoes the repair) and at least one side found an answer at all. A page with no
+/// determinable neighbor in either direction is left alone.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn ambiguous_marker_is_numeric_context(kinds: &[LineMarkerKind], index: usize) -> bool {
+    let before = kinds[..index].iter().rev().find_map(nearest_marker_is_digit);
+    let after = kinds[index + 1..].iter().find_map(nearest_marker_is_digit);
+    matches!(
+        (before, after),
+        (Some(true), Some(true)) | (Some(true), None) | (None, Some(true))
+    )
+}
+
+/// Rewrite a line already decided to be repaired, per its classified kind.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn repaired_marker_line(line: &str, kind: &LineMarkerKind) -> String {
+    let space_index = line.find(' ').unwrap_or(0);
+    let (marker, rest) = line.split_at(space_index);
+    let mut out = String::with_capacity(line.len());
+    match kind {
+        LineMarkerKind::LegacyRepairableDigit => out.push_str(&marker[..marker.len() - 1]),
+        LineMarkerKind::LegacyRepairableL | LineMarkerKind::DoubledOneMisread => out.push('1'),
+        LineMarkerKind::AmbiguousLetter(ch) => {
+            out.push(confusable_digit_for_letter(*ch).expect("classified as ambiguous only when confusable"));
+        }
+        LineMarkerKind::None | LineMarkerKind::Digit | LineMarkerKind::Letter => out.push_str(marker),
+    }
+    out.push('.');
+    out.push_str(rest);
+    out
 }
 
 /// Resolve a backend's confidence semantics from the object the registry holds for it,
@@ -1153,9 +1298,8 @@ fn assemble_mixed_ocr_page_document(
     // contract) -- so the quad-edge fallback (sceptre/paddle) still needs the real
     // points-per-pixel ratio for this page, `geometry_points_per_pixel`. See
     // `pdf::structure::adapters::OcrFontSizeScale` for why these can't share one scalar.
-    let font_size_scale = crate::pdf::structure::adapters::OcrFontSizeScale::bbox_already_in_points(
-        geometry_points_per_pixel,
-    );
+    let font_size_scale =
+        crate::pdf::structure::adapters::OcrFontSizeScale::bbox_already_in_points(geometry_points_per_pixel);
     let paragraphs = crate::pdf::structure::adapters::ocr_doc_to_paragraphs(&doc, page_height, font_size_scale);
     if !paragraphs.is_empty() {
         let mut assembled = crate::pdf::structure::assemble_internal_document(
@@ -1298,7 +1442,13 @@ fn rescale_ocr_bboxes_to_page_points(
 /// `processed_width`/`processed_height` are the dimensions of the space `(x, y)`
 /// is currently in (i.e. the auto-rotated image the backend ran detection on).
 #[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
-fn undo_auto_rotate_point(x: f64, y: f64, correction_degrees: u16, processed_width: f64, processed_height: f64) -> (f64, f64) {
+fn undo_auto_rotate_point(
+    x: f64,
+    y: f64,
+    correction_degrees: u16,
+    processed_width: f64,
+    processed_height: f64,
+) -> (f64, f64) {
     match correction_degrees {
         90 => (y, processed_height - x),
         180 => (processed_width - x, processed_height - y),
@@ -1566,7 +1716,11 @@ fn build_pipeline_ocr_page_document(
 /// `layout_detections_for_mixed` in [`extract_mixed_ocr_native`]); the plain single-backend
 /// fast path is untouched when layout is off, so non-layout mixed-route output stays
 /// byte-identical.
-#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf", feature = "layout-detection"))]
+#[cfg(all(
+    any(feature = "ocr", feature = "ocr-pipeline"),
+    feature = "pdf",
+    feature = "layout-detection"
+))]
 fn single_stage_pipeline_for_layout(
     ocr_config: &crate::core::config::OcrConfig,
 ) -> crate::core::config::OcrPipelineConfig {
@@ -1601,7 +1755,11 @@ fn single_stage_pipeline_for_layout(
 /// pure index (rather than folding a rescale into it) means a page-alignment bug here shows up
 /// as a wrong page's detection landing on the wrong page, not as a subtly-wrong coordinate on
 /// the right one.
-#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf", feature = "layout-detection"))]
+#[cfg(all(
+    any(feature = "ocr", feature = "ocr-pipeline"),
+    feature = "pdf",
+    feature = "layout-detection"
+))]
 fn detection_for_mixed_route_page(
     detections: Option<&[crate::layout::DetectionResult]>,
     page_idx: usize,
@@ -2108,7 +2266,8 @@ pub(crate) async fn extract_mixed_ocr_native(
             for (page_idx, data, width, height) in &encoded {
                 let backend_clone = Arc::clone(backend);
                 let page_rotation_degrees = page_rotations.get(*page_idx).copied().unwrap_or(0);
-                let config_clone = ocr_config_with_page_rotation_hint(&ocr_config_owned, page_rotation_degrees).into_owned();
+                let config_clone =
+                    ocr_config_with_page_rotation_hint(&ocr_config_owned, page_rotation_degrees).into_owned();
                 let (upright_data, upright_width, upright_height, correction_degrees) =
                     upright_raster_for_backend(data, *width, *height, page_rotation_degrees, orientation_handling)?;
                 let idx = *page_idx;
@@ -2276,8 +2435,7 @@ pub(crate) async fn extract_mixed_ocr_native(
             ocr_output_thresholds.min_ocr_mean_confidence,
         );
         let judged_by_confidence = confidence_gate_applies(confidence_semantics, confidence);
-        if !rejected_by_confidence
-            && (judged_by_confidence || !is_ocr_recognition_noise(text, &ocr_output_thresholds))
+        if !rejected_by_confidence && (judged_by_confidence || !is_ocr_recognition_noise(text, &ocr_output_thresholds))
         {
             return true;
         }
@@ -3715,7 +3873,9 @@ pub(crate) async fn extract_with_ocr(
             None,
         ))
         .await?;
-    Ok((text, mean_conf, tables, elements, doc, usage, page_texts, rasters, formulas))
+    Ok((
+        text, mean_conf, tables, elements, doc, usage, page_texts, rasters, formulas,
+    ))
 }
 
 /// Same as [`extract_with_ocr`], but `page_rotation_override` -- when non-zero -- is used as
@@ -4067,7 +4227,8 @@ async fn extract_with_ocr_for_page(
                 };
                 #[cfg(not(feature = "pdf"))]
                 let page_rotation_degrees: u32 = 0;
-                let config_clone = ocr_config_with_page_rotation_hint(&ocr_config_owned, page_rotation_degrees).into_owned();
+                let config_clone =
+                    ocr_config_with_page_rotation_hint(&ocr_config_owned, page_rotation_degrees).into_owned();
                 // No PDF `/Rotate` is ever known without the `pdf` feature (`page_rotation_degrees`
                 // is always `0` above in that build), so there is nothing to correct upright.
                 #[cfg(feature = "pdf")]
@@ -4241,7 +4402,10 @@ async fn extract_with_ocr_for_page(
                             page_idx + 1
                         )
                     } else {
-                        format!("OCR of page {} failed and could not be recovered: {error}", page_idx + 1)
+                        format!(
+                            "OCR of page {} failed and could not be recovered: {error}",
+                            page_idx + 1
+                        )
                     }),
                 });
                 page_backend_errors.push((page_idx, error));
@@ -5177,14 +5341,10 @@ async fn run_ocr_pipeline_for_page(
             // images are the only place the text ever was.
             #[cfg(feature = "pdf")]
             if let Some(first_stage) = available_stages.first()
-                && let Some((text, page_texts, recovered_images, warnings)) =
-                    Box::pin(recover_pipeline_document_from_image_xobjects(
-                        content,
-                        config,
-                        ocr_config,
-                        &first_stage.backend,
-                    ))
-                    .await
+                && let Some((text, page_texts, recovered_images, warnings)) = Box::pin(
+                    recover_pipeline_document_from_image_xobjects(content, config, ocr_config, &first_stage.backend),
+                )
+                .await
             {
                 let doc = attach_ocr_pipeline_stage_warnings(None, &text, &unavailable_backends, &stage_failures);
                 let doc = attach_ocr_fallback_warnings(doc, &text, warnings);
@@ -5636,7 +5796,11 @@ mod tests {
 
         apply_ocr_text_list_fallback(std::slice::from_mut(&mut paragraph));
 
-        assert_eq!(paragraph.heading_level, Some(2), "an existing heading must survive untouched");
+        assert_eq!(
+            paragraph.heading_level,
+            Some(2),
+            "an existing heading must survive untouched"
+        );
         assert!(
             !paragraph.is_list_item,
             "a paragraph already classified as a heading must not also become a list item"
@@ -5694,7 +5858,10 @@ mod tests {
             paragraph.is_list_item,
             "an unambiguous list marker must win over a SectionHeader heading hint"
         );
-        assert_eq!(paragraph.heading_level, None, "heading_level must be cleared alongside setting is_list_item");
+        assert_eq!(
+            paragraph.heading_level, None,
+            "heading_level must be cleared alongside setting is_list_item"
+        );
     }
 
     /// A paragraph already marked as a list item by a high-confidence layout hint
@@ -5708,7 +5875,10 @@ mod tests {
 
         apply_ocr_text_list_fallback(std::slice::from_mut(&mut paragraph));
 
-        assert!(paragraph.is_list_item, "an existing list classification must survive untouched");
+        assert!(
+            paragraph.is_list_item,
+            "an existing list classification must survive untouched"
+        );
     }
 
     /// Plain prose -- the overwhelming majority of any document's paragraphs --
@@ -5798,8 +5968,15 @@ mod tests {
         );
         apply_ocr_text_list_fallback(&mut paragraphs);
 
-        assert_eq!(paragraphs.len(), 3, "each marker-opening line must become its own paragraph");
-        assert!(paragraphs.iter().all(|paragraph| paragraph.is_list_item), "every split item must be classified");
+        assert_eq!(
+            paragraphs.len(),
+            3,
+            "each marker-opening line must become its own paragraph"
+        );
+        assert!(
+            paragraphs.iter().all(|paragraph| paragraph.is_list_item),
+            "every split item must be classified"
+        );
     }
 
     #[cfg(feature = "ocr")]
@@ -8916,7 +9093,11 @@ Name: ___
     /// per-page alignment regresses to an off-by-one (e.g. reading `page_idx + 1` or
     /// `page_idx - 1`), the middle assertion below fails because it would return page 0's or
     /// page 2's very different `page_width`/`page_height`/bbox values instead of page 1's.
-    #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+    #[cfg(all(
+        feature = "layout-detection",
+        any(feature = "ocr", feature = "ocr-pipeline"),
+        feature = "pdf"
+    ))]
     #[test]
     fn detection_for_mixed_route_page_selects_the_aligned_page_without_transforming_it() {
         let page0 = crate::layout::DetectionResult {
@@ -8945,8 +9126,7 @@ Name: ___
         };
         let detections = vec![page0, page1, page2];
 
-        let found =
-            detection_for_mixed_route_page(Some(&detections), 1).expect("page index 1 must have a detection");
+        let found = detection_for_mixed_route_page(Some(&detections), 1).expect("page index 1 must have a detection");
 
         // Pinned to page 1's exact pixel-space numbers -- not page 0's or page 2's, and not a
         // rescaled derivative of them. Any coordinate transform belongs downstream, inside
@@ -8978,7 +9158,11 @@ Name: ___
     /// `language`, which the fix must copy from the real `OcrConfig` rather than defaulting)
     /// and the derived quality thresholds, since a wrong backend name here would silently
     /// route pages to the wrong OCR engine while still calling it "layout enabled".
-    #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+    #[cfg(all(
+        feature = "layout-detection",
+        any(feature = "ocr", feature = "ocr-pipeline"),
+        feature = "pdf"
+    ))]
     #[test]
     fn single_stage_pipeline_for_layout_wraps_the_configured_backend() {
         let ocr_config = crate::core::config::OcrConfig {
@@ -10097,8 +10281,7 @@ Name: ___
         // a landscape MediaBox with `/Rotate 270`, mirroring the ordinance-scan case this
         // session's fix (972d2269f7) targeted.
         let content = rotated_landscape_pdf(270);
-        let rendered =
-            render_selected_pages_for_ocr(&content, &[0]).expect("rotated fixture page must render for OCR");
+        let rendered = render_selected_pages_for_ocr(&content, &[0]).expect("rotated fixture page must render for OCR");
         let images: Vec<image::DynamicImage> = rendered.into_iter().map(|(_, image)| image).collect();
 
         let config = ExtractionConfig {
@@ -10862,7 +11045,10 @@ Name: ___
         crate::plugins::unregister_ocr_backend("doc-global-heuristic-mixed-mock").unwrap();
 
         let structured_pages = result.2;
-        assert!(!structured_pages.is_empty(), "expected at least one structured OCR page");
+        assert!(
+            !structured_pages.is_empty(),
+            "expected at least one structured OCR page"
+        );
         let all_kinds: Vec<_> = structured_pages
             .values()
             .flat_map(|doc| doc.elements.iter().map(|e| e.kind.clone()))
@@ -11015,7 +11201,10 @@ Name: ___
         crate::plugins::unregister_ocr_backend("doc-global-heuristic-pipeline-mock").unwrap();
 
         let structured_pages = result.2;
-        assert!(!structured_pages.is_empty(), "expected at least one structured OCR page");
+        assert!(
+            !structured_pages.is_empty(),
+            "expected at least one structured OCR page"
+        );
         let all_kinds: Vec<_> = structured_pages
             .values()
             .flat_map(|doc| doc.elements.iter().map(|e| e.kind.clone()))
@@ -11370,7 +11559,9 @@ Name: ___
             "expected one page-raster call, one in-stage fallback call, and one pipeline-level recovery call"
         );
 
-        let warnings = doc.expect("recovery warnings must produce a document").processing_warnings;
+        let warnings = doc
+            .expect("recovery warnings must produce a document")
+            .processing_warnings;
         assert!(
             warnings
                 .iter()
@@ -11452,7 +11643,9 @@ Name: ___
 
         crate::plugins::unregister_ocr_backend(BACKEND_NAME).unwrap();
 
-        let error = result.expect_err("a document with no recoverable page must still fail").to_string();
+        let error = result
+            .expect_err("a document with no recoverable page must still fail")
+            .to_string();
         assert!(
             error.contains("OCR failed on all 1 page(s)") && error.contains(VLM_NO_CONTENT_ERROR),
             "the aggregate failure must name the page count and the root cause; got: {error}"
@@ -11730,6 +11923,69 @@ Each row of the preceding table records one measurement taken during the survey 
     }
 
     #[test]
+    fn should_map_confusable_letters_to_their_intended_digit() {
+        use super::confusable_digit_for_letter;
+        assert_eq!(confusable_digit_for_letter('L'), Some('1'));
+        assert_eq!(confusable_digit_for_letter('G'), Some('6'));
+        assert_eq!(confusable_digit_for_letter('b'), Some('6'));
+        assert_eq!(confusable_digit_for_letter('S'), Some('5'));
+        assert_eq!(confusable_digit_for_letter('O'), Some('0'));
+        assert_eq!(confusable_digit_for_letter('D'), Some('0'));
+        assert_eq!(confusable_digit_for_letter('I'), Some('1'));
+        assert_eq!(
+            confusable_digit_for_letter('A'),
+            None,
+            "A is a legitimate lettered marker"
+        );
+    }
+
+    #[test]
+    fn should_repair_a_doubled_misread_of_a_digit_one() {
+        // `lL.` is the digit `1` split into two mis-read characters; never a valid marker.
+        let text = "lL. A six-foot (6') pedestrian sidewalk towards Creek Bend Drive";
+        assert_eq!(
+            repair_ocr_list_markers(text).as_ref(),
+            "1. A six-foot (6') pedestrian sidewalk towards Creek Bend Drive"
+        );
+    }
+
+    #[test]
+    fn should_repair_a_letter_misread_of_a_digit_inside_a_numeric_run() {
+        // Verbatim shape from the ordinance: `G.` between two numeric markers is a mis-read
+        // `6.`, not a lettered marker.
+        let text = "5. Front setback: 20 feet\nG. Side setback: 10 feet\n7. Rear setback: 15 feet";
+        assert_eq!(
+            repair_ocr_list_markers(text).as_ref(),
+            "5. Front setback: 20 feet\n6. Side setback: 10 feet\n7. Rear setback: 15 feet"
+        );
+    }
+
+    #[test]
+    fn should_repair_a_letter_misread_with_context_on_only_one_side() {
+        // No marker precedes it on the page, but the following marker is numeric.
+        let text = "G. Side setback: 10 feet\n7. Rear setback: 15 feet";
+        assert_eq!(
+            repair_ocr_list_markers(text).as_ref(),
+            "6. Side setback: 10 feet\n7. Rear setback: 15 feet"
+        );
+    }
+
+    #[test]
+    fn should_not_touch_a_genuine_lettered_marker_between_lettered_neighbors() {
+        // This is the corruption this discriminator exists to prevent: `G.` here is the
+        // legitimate 7th item of a lettered list, not a mis-read `6.`.
+        let text = "F. Fire lane width: 20 feet\nG. Side setback: 10 feet\nH. Height limit: 35 feet";
+        assert_eq!(repair_ocr_list_markers(text).as_ref(), text);
+    }
+
+    #[test]
+    fn should_not_touch_an_isolated_ambiguous_letter_marker() {
+        // No determinable neighbor on either side -- decline to judge rather than guess.
+        let text = "G. Side setback: 10 feet";
+        assert_eq!(repair_ocr_list_markers(text).as_ref(), text);
+    }
+
+    #[test]
     fn legibility_backend_still_rejects_a_page_below_the_floor() {
         // Tesseract's own scale must keep working exactly as before: `Legibility { scale_max:
         // 100.0 }` normalizes to the same fraction as the old unconditional `c < threshold`
@@ -11788,7 +12044,10 @@ Each row of the preceding table records one measurement taken during the survey 
         // reject it (8 < 75). Only normalizing by the backend's own `scale_max` gets this right.
         use super::confidence_gate_rejects;
         let thresholds = OcrQualityThresholds::default();
-        assert_eq!(thresholds.min_ocr_mean_confidence, 75.0, "test assumes the documented default");
+        assert_eq!(
+            thresholds.min_ocr_mean_confidence, 75.0,
+            "test assumes the documented default"
+        );
         let semantics = crate::plugins::ConfidenceSemantics::Legibility { scale_max: 10.0 };
 
         assert!(
