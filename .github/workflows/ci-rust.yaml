@@ -412,6 +412,93 @@ jobs:
             -- sceptre_ocr:: doc_orientation:: layout:: paddle_ocr::
         shell: bash
 
+  # #741: narrow, non-ORT feature legs that no other job in this file exercises in
+  # isolation. `pdf` alone (no ocr/ocr-pipeline, no ML) rotted into two independent
+  # compile errors -- compute_quality_score missing its ocr/ocr-pipeline cfg gate, and
+  # render.rs's `log::set_boxed_logger` call (gated behind log's non-default `std`
+  # feature, only ever turned on transitively by unrelated crates in the full-feature
+  # graph) -- while `full`, `formats`, and every other leg in this file stayed green for
+  # months, because they all enable enough of the dependency graph to activate `log/std`
+  # by accident. `no-ort-target` and `formats-no-heic` share the exact `pdf` feature
+  # closure and are real shipping configurations (`no-ort-target` underlies both
+  # wasm-target and android-target; `formats-no-heic` underlies `full-no-heic`, which
+  # feeds macos-intel-target and the Swift cross-build), so a break in either is just as
+  # invisible to the rest of this file as the `pdf` break was.
+  #
+  # One matrix entry per leg (not sequential steps in one job): fixing the first of the
+  # two `pdf` breaks above only *revealed* the second -- a job that stops at its first
+  # failing step would have reported red, gotten "fixed", and then gone green again while
+  # still carrying the second break. `fail-fast: false` means every leg always reports its
+  # own real, independent result.
+  #
+  # No install-system-deps / setup-onnx-runtime / setup-tesseract-cache: none of these
+  # three feature sets pull ORT, Tesseract, or libheif, so this job stays cheap --
+  # `cargo check` (not build/test/clippy) against three feature closures that mostly
+  # reuse each other's dependency graph, on cached sccache artifacts.
+  narrow-feature-legs:
+    name: Narrow feature leg (${{ matrix.name }})
+    if: github.repository == 'xberg-io/xberg' && github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: pdf
+            features: pdf
+          - name: no-ort-target
+            features: no-ort-target
+          - name: formats-no-heic
+            features: formats-no-heic
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Setup Rust
+        uses: xberg-io/actions/setup-rust@v1
+        with:
+          cache-key-prefix: rust-feature-leg-${{ matrix.name }}
+          use-sccache: "true"
+
+      - name: cargo check -p xberg --no-default-features --features ${{ matrix.name }}
+        run: cargo check --locked -p xberg --no-default-features --features "${{ matrix.features }}"
+        shell: bash
+
+  # #741 continued: `wasm-target` is only ever compiled by publish.yaml's `wasm-bindings`
+  # job, which runs solely on a release tag *and* is `continue-on-error: true` (a WASM
+  # build failure does not block the release, by design -- see that job's comment). That
+  # means a wasm-target compile break can ride along through an unbounded number of PRs
+  # before a release attempt even notices it, and even then nothing goes red. This is the
+  # same blind spot the `pdf` break exploited, just on the WASM leg. `cargo check` against
+  # the wasm32 target is far cheaper than wasm-pack's full build+wasm-opt pipeline and
+  # gives every PR that touches crates/xberg the same coverage `narrow-feature-legs` gives
+  # the host-target legs. Kept as its own job (not folded into the matrix above) because
+  # it needs the wasm32 rustup target and the WASI SDK (`ocr-wasm` cross-compiles
+  # tesseract-wasm's C sources against it, same as publish.yaml's wasm-bindings job).
+  wasm-target-check:
+    name: Narrow feature leg (wasm-target, wasm32)
+    if: github.repository == 'xberg-io/xberg' && github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Setup Rust
+        uses: xberg-io/actions/setup-rust@v1
+        with:
+          target: wasm32-unknown-unknown
+          cache-key-prefix: rust-wasm-target-check
+          use-sccache: "true"
+
+      - uses: xberg-io/actions/install-wasi-sdk@v1
+
+      - name: cargo check -p xberg --no-default-features --features wasm-target --target wasm32-unknown-unknown
+        run: cargo check --locked -p xberg --no-default-features --features wasm-target --target wasm32-unknown-unknown
+        shell: bash
+
   live-hf:
     name: Live HF preset tests
     if: github.repository == 'xberg-io/xberg' && github.actor != 'dependabot[bot]'
