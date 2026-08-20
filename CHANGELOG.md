@@ -306,6 +306,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Docker guide and README now state that the published images are CPU-only and that GPU
   support requires a source build against a CUDA-enabled ONNX Runtime (#1455).
 
+- `Table::bounding_box` now documents both coordinate spaces it is actually populated in, instead
+  of unconditionally claiming PDF points with a bottom-left origin. Tables from a PDF's native
+  content, and from a scanned PDF page processed through the OCR pipeline, are in that space — the
+  pipeline rescales the OCR backend's pixel output before it reaches this field. Tables detected by
+  OCR on a standalone image (no backing PDF page, so no page geometry to rescale into) are in raw
+  raster pixel coordinates with a top-left origin instead, matching the existing (and unchanged)
+  behavior of every standalone-image OCR backend. No extraction behavior changes; only the
+  documented contract does, mirroring the same fix already applied to `Formula::bounding_box`.
+
 ### Removed
 
 - The unwired `region_has_repeating_columns` table-candidate filter, together with its three
