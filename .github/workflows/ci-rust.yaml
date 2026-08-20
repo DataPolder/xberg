@@ -174,9 +174,8 @@ jobs:
           # sample was a bare ```rust fence, so it *executed*, called into Tesseract and
           # died with InitError on any machine without eng.traineddata installed.
           # Most carry no examples yet; gating them now is what stops the next one from
-          # rotting the same way. xberg-cli is a binary with no lib target, and
-          # crates/ttf-parser-compat is a vendored ttf-parser fork whose doctests are
-          # upstream's, so neither belongs here. ~keep
+          # rotting the same way. xberg-cli is a binary with no lib target, so it does
+          # not belong here. ~keep
           cargo test --locked -p xberg-tesseract --doc
           cargo test --locked -p xberg-gliner --doc
           cargo test --locked -p xberg-candle-ocr --doc

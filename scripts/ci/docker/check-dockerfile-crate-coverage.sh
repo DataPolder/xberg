@@ -9,6 +9,16 @@
 # failed to load its manifest inside the Docker build context (which only
 # contains the crates each Dockerfile explicitly COPYs) while every
 # non-Docker CI leg — which checks out the full repo — stayed green.
+#
+# It also checks the REVERSE direction, which the member-driven pass above is
+# structurally incapable of seeing: a COPY line naming a crate that no longer
+# exists. That happened to this very crate — `crates/ttf-parser-compat` was
+# deleted when pdf_oxide became a path dependency and all ten COPY lines were
+# left behind, so every Docker publish job died on
+#   "/crates/ttf-parser-compat": not found
+# before compiling anything, while this script reported full coverage. Iterating
+# over members alone can never catch a dangling COPY; you have to iterate over
+# the COPY lines too.
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -32,8 +42,29 @@ for dockerfile in docker/Dockerfile.*; do
     done
 done
 
+# Reverse direction: every `COPY crates/<x>/` must name a real workspace member.
+# Guards against a deleted crate leaving a dangling COPY behind.
+for dockerfile in docker/Dockerfile.*; do
+    [ -f "$dockerfile" ] || continue
+
+    while read -r copied; do
+        [ -n "$copied" ] || continue
+        for member in "${members[@]}"; do
+            if [ "$member" = "$copied" ]; then
+                copied=""
+                break
+            fi
+        done
+        [ -n "$copied" ] || continue
+        echo "::error file=${dockerfile}::COPY names 'crates/${copied}', which is not a Cargo workspace member (deleted crate?)"
+        status=1
+    done < <(grep -oE '^COPY crates/[a-zA-Z0-9_-]+/' "$dockerfile" \
+             | sed 's#^COPY crates/##; s#/$##' | sort -u)
+done
+
 if [ "$status" -eq 0 ]; then
-    echo "All Cargo workspace members are covered by every docker/Dockerfile.*"
+    echo "All Cargo workspace members are covered by every docker/Dockerfile.*,"
+    echo "and every docker COPY of a crates/ path names a real workspace member."
 fi
 
 exit "$status"
