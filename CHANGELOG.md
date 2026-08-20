@@ -177,6 +177,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The LLM client's own response-cache setting no longer changes the extraction cache key, so
   toggling it stops causing spurious cache misses.
 
+- The Tesseract OCR cache key is now derived from the variables actually applied to the engine, so
+  changing one can no longer be served a stale result. The key hashed a hand-maintained copy of
+  `TesseractConfig` fields that had drifted from the set `apply_tesseract_variables` writes:
+  `hocr_font_info` is set unconditionally and has no field of its own, so enabling it changed the
+  hOCR output while leaving every key untouched, and 306 stale entries kept being served -- a
+  font-size median of 232.5 against 23 on a cold cache, which surfaced as 61 reported headings where
+  the correct answer was 7. `CACHE_SCHEMA_VERSION` is bumped so entries already on disk are dropped.
+
+- `ocr.tesseract_config.use_cache` no longer changes the whole-document extraction cache key. Only
+  the top-level cache-control fields were normalised before the rest of the config was hashed, so
+  toggling this OCR-level cache switch also forced a full re-extraction. The `cache_version_tag`
+  documentation no longer calls the tag a build fingerprint: it hashes only the crate version and
+  the cache schema version, so two separately built binaries at the same version share entries.
+
+- Setting `ocr.tesseract_config` no longer changes what Tesseract recognises. The section being
+  absent is a sentinel meaning the caller has made no explicit Tesseract choice, and only then does
+  PDF image extraction install its own defaults -- the whole-page page-segmentation mode, the
+  sparse-image retry and word-element inclusion. Materialising the section to set a single field
+  silently dropped all three: 194 recognised words against 217 on the same scan. The CLI's
+  `--ocr-no-cache` did exactly that; it now mutates an already-present section only, and warns
+  naming the cache directory as the workaround when there is none.
+
+- Bounding boxes on OCR-backed PDF pages are reported in PDF points with a bottom-left origin,
+  matching digital pages, instead of OCR raster pixels (#1423). `document.nodes[].bbox`,
+  `pages[].hierarchy.blocks[].bbox` and `chunks[].metadata.page_spans[].bbox` were all in the
+  raster's pixel space, and nothing in the response distinguished the two spaces or exposed the
+  raster size, so the boxes could not be mapped back onto the page. Table bounding boxes were never
+  flipped at all, despite `Table::bounding_box` documenting PDF coordinates with `y0` at the bottom.
+  Both the mixed-OCR route and the pipeline/VLM-fallback route convert now; no public type changed.
+
+- Glyph-drop warnings from the PDF engine reach callers again. A log record's target comes from the
+  emitting crate's library name, so publishing the engine fork as `xberg-pdf-oxide` changed it while
+  the capture sink still filtered on the former `pdf_oxide` prefix: every record was rejected, and
+  for twelve days no `ProcessingWarning` about unparseable fonts was produced at all. A `package =`
+  alias kept all call sites reading as `pdf_oxide`, which is why the rename was invisible; both
+  prefixes are accepted now. Restoring the capture also exposed that every warn-level record from
+  the engine was being reported as a glyph drop, including notices that text rendered correctly.
+  Those are excluded; an unrecognised warning is still reported.
+
+- A table whose cells hold more than one word is no longer discarded whole (#688). Column detection
+  groups words by their left edge, so every word after the first in a multi-word cell minted a
+  spurious, near-empty column -- exactly the shape the sparsity and content-asymmetry rules reject,
+  which then took the real table with it: a scanned newspaper stock table emitted no rows against
+  seventeen in ground truth. Words adjacent within a detected row are now merged into one cell token
+  before columns are detected, while the original words still fill the cells, so text is unchanged
+  wherever columns were already found. Scored by cell multiset over 255 corpus PDFs, table cell
+  recall goes from 19.3% to 30.0% and precision from 46.2% to 49.5%; of the 42 with ground-truth
+  tables, 11 improve, 28 are unchanged and 3 regress by under 1.5 points. This path serves native
+  PDF extraction as well as all three OCR backends.
+
+- PaddleOCR tables are validated and scoped like the other backends'. Reconstructed grids reached
+  the result without passing the structural validator Tesseract's grids already went through, so a
+  page of prose became a 36-column table; and a page was reconstructed as a single table rather than
+  one per detected region.
+
 - OCR-backed PDF extraction now runs the same geometry-derived structure heuristic as native PDF
   extraction (font-clustering headings, list-marker detection, document-wide refinement passes) when
   `output_format` is not `Plain`, instead of never structuring OCR output at all. How much structure
@@ -272,6 +327,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `--ocr-no-cache` on the CLI bypasses the Tesseract OCR result cache, exposing the existing
+  `TesseractConfig.use_cache` field.
+
 - `SecurityLimits.max_pages` caps how many pages a single document may have (#1451). It defaults to
   unlimited, so no existing caller changes behaviour, and the check runs before layout detection,
   OCR, or opening the full document — an oversized PDF is rejected rather than truncated, matching
@@ -332,8 +390,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Recognized formula LaTeX no longer carries raw BPE markers (`Ġ`) or special tokens. The
   RapidLaTeXOCR tokenizer file declares a ByteLevel pre-tokenizer but no decoder; the loader now
   attaches the matching decoder and skips special tokens when decoding.
-  comparable to native PDF geometry, instead of rendered-image pixels whose DPI varied per page.
-  Image inputs, and PDF pages whose geometry is unavailable, keep pixel coordinates and say so.
+- Formula bounding boxes on PDF pages are reported in PDF points, comparable to native PDF
+  geometry, instead of rendered-image pixels whose DPI varied per page. Image inputs, and PDF
+  pages whose geometry is unavailable, keep pixel coordinates and say so.
 - The RST text path now renders `.. math::` directives inside `$$` display-math delimiters instead
   of a literal `math:` prose prefix.
 - Rotated PDF text runs are now reassembled along their own reading axis on the default extraction path, restoring
