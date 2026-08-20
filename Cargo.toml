@@ -81,7 +81,12 @@ libc = "0.2.189"
 # Only consumed by crates/xberg-libwpd. ~keep
 libz-sys = { version = "1.1", features = ["static"] }
 liter-llm = { version = "1.17.0", default-features = false }
-log = "0.4"
+# `std` is NOT a default feature of `log`. `pdf::render`'s glyph-drop warning capture
+# calls `log::set_boxed_logger`, which only exists behind it, so a feature set that
+# happens not to pull `log/std` in transitively fails to compile (`pdf` without `ocr`
+# did exactly that). Requesting it here makes the requirement explicit instead of
+# leaving it to whichever unrelated crate enables it first.
+log = { version = "0.4", features = ["std"] }
 memmap2 = "0.9"
 minijinja = "2"
 nom-exif = { version = "3.6", default-features = false }

@@ -768,6 +768,7 @@ fn accept_or_reject_ocr_page(
     String::new()
 }
 
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 pub(crate) fn compute_quality_score(text: &str, thresholds: &OcrQualityThresholds) -> f64 {
     let trimmed = text.trim();
     if trimmed.is_empty() {
