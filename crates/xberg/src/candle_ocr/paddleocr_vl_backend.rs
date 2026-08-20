@@ -238,7 +238,39 @@ impl Plugin for PaddleOcrVlBackend {
 }
 
 /// Inherits the `RequiresUpright` default for `page_orientation_handling` — unmeasured, not validated (#657).
-/// It also never reads the `backend_options["page_rotation_degrees"]` hint that `crate::paddle_ocr` acts on.
+///
+/// # Why this backend must not copy `crate::paddle_ocr`'s `page_rotation_degrees` handling (#734)
+///
+/// It was previously suspected that this backend simply *forgot* to read the
+/// `backend_options["page_rotation_degrees"]` hint the way
+/// [`crate::paddle_ocr::backend::PaddleOcrBackend`] does. That comparison does not transfer,
+/// for two independent reasons, and copying it here would introduce a real defect:
+///
+/// 1. **No block list to reorder.** `PaddleOcrBackend`'s fix
+///    (`page_rotation_degrees_from_backend_options` -> `residual_rotation_for_reorder` ->
+///    `reorder_blocks_for_page_rotation`) exists because its two-stage detector+recognizer
+///    warps each detected text quad upright internally but leaves its *block list* in raw
+///    raster `(y, x)` order, so the caller must reorder. This backend
+///    (`xberg_candle_ocr::models::PaddleOcrVlEngine::process_image`) is a single-pass
+///    vision-language model that autoregressively decodes one markdown string per page
+///    (`CandleOcrOutput { content, .. }`, no bounding boxes) — there is no block list here to
+///    reorder.
+/// 2. **Reading the hint under `RequiresUpright` would double-rotate.** `page_rotation_degrees`
+///    is injected into `backend_options` *unconditionally* by
+///    `ocr_config_with_page_rotation_hint` whenever a page carries a `/Rotate` value —
+///    regardless of the backend's declared `page_orientation_handling`
+///    (`crate::extractors::pdf::ocr`). For a `RequiresUpright` backend specifically, the
+///    pipeline *also* pre-rotates the raster to upright before calling `process_image`
+///    (`upright_raster_for_backend`), so the raster this backend receives is already upright
+///    even though the hint in its config still reports the page's raw, uncorrected rotation.
+///    Rotating that already-upright raster again by the raw hint would be a strictly worse
+///    defect than not reading it at all.
+///
+/// Reading `page_rotation_degrees` here would only become sound if this backend's declared
+/// capability changed away from `RequiresUpright` (out of scope for #734 — that decision needs
+/// its own measurement, see the module-level rotation-order benchmark notes) *and* the new
+/// logic operated on raw, unrotated raster pixels rather than reordering blocks that do not
+/// exist. Until then, not reading the hint is correct, not an omission.
 #[async_trait]
 impl OcrBackend for PaddleOcrVlBackend {
     /// Process an image using the PaddleOCR-VL engine.
@@ -458,5 +490,23 @@ mod tests {
         let backend = PaddleOcrVlBackend::default_task();
         assert!(backend.initialize().is_ok());
         assert!(backend.shutdown().is_ok());
+    }
+
+    /// Regression tripwire for #734: this backend has no block list to reorder (see the
+    /// `OcrBackend` impl's doc comment), so it must stay on the inherited `RequiresUpright`
+    /// default rather than declaring `SelfCorrecting`/`RecognisesRotatedText` without also
+    /// adding raster-level rotation handling. This test passes today — there is no bug in the
+    /// current code, only a hazard in copying `crate::paddle_ocr::backend`'s block-reorder fix
+    /// here — and exists to fail the moment someone flips the declared capability without also
+    /// working out how a single-pass VLM with no bounding boxes is supposed to honour
+    /// `page_rotation_degrees`.
+    #[test]
+    fn should_stay_on_requires_upright_until_rotation_handling_is_measured() {
+        let backend = PaddleOcrVlBackend::default_task();
+        let dynamic: &dyn OcrBackend = &backend;
+        assert_eq!(
+            dynamic.page_orientation_handling(),
+            crate::plugins::PageOrientationHandling::RequiresUpright
+        );
     }
 }
