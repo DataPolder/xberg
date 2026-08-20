@@ -1312,6 +1312,35 @@ fn union_bboxes(lines: &[types::PdfParagraph]) -> Option<(f32, f32, f32, f32)> {
 #[cfg(all(feature = "ocr", feature = "layout-detection"))]
 const REATTACH_OCR_LAYOUT_LIST_MARKERS: bool = true;
 
+/// A/B switch for the marker-run/body-run pairing phase of
+/// [`reattach_ocr_layout_list_markers`] (#729).
+///
+/// Independent of [`REATTACH_OCR_LAYOUT_LIST_MARKERS`], which gates the
+/// single-marker/adjacent-body pass above -- flip either alone to evaluate the
+/// two passes separately. The single-marker pass pairs by *baseline*, which
+/// can never match a stacked marker column against a stacked body column (see
+/// [`DETACHED_MARKER_RUN_MIN_LENGTH`]'s doc comment); this second phase pairs
+/// by *position* instead, to recover that shape.
+#[cfg(all(feature = "ocr", feature = "layout-detection"))]
+const REATTACH_OCR_LAYOUT_MARKER_RUN_PAIRS: bool = true;
+
+/// Minimum number of consecutive bare markers required before the marker-run
+/// pairing phase (#729) will pair a run at all.
+///
+/// A lone bare marker is exactly as likely to be an exhibit label (`"B."`
+/// immediately before a `"## EXHIBIT B"` heading) as a genuine list-item
+/// marker -- `accepts_detached_list_marker`'s heading-level rejection is what
+/// correctly keeps that case unpaired, and this run-pairing phase must not
+/// re-open it by treating a single marker as sufficient signal on its own.
+/// Requiring at least two consecutive markers is the only evidence that
+/// distinguishes a real marker column ("(a)", "(b)", "(c)", ...) from an
+/// isolated, ambiguous bare marker. Precision is the scarce resource on this
+/// corpus: a prior rewrite of a related detached-marker pass went from 50.39
+/// to 47.64 GT F1 with zero files improved and was rejected on exactly that
+/// basis.
+#[cfg(all(feature = "ocr", feature = "layout-detection"))]
+const DETACHED_MARKER_RUN_MIN_LENGTH: usize = 2;
+
 /// Reattach an OCR layout-route list marker that `regroup_layout_lines_by_element`
 /// isolated into its own paragraph back onto the body paragraph it belongs to.
 /// (#729)
@@ -1385,6 +1414,77 @@ pub(crate) fn reattach_ocr_layout_list_markers(paragraphs: &mut Vec<types::PdfPa
         consumed[marker_index] = true;
         consumed[body_index] = true;
         pairs.push((marker_index, body_index));
+    }
+
+    // Second phase (#729): pair a whole marker RUN with the whole body RUN that
+    // immediately follows it, positionally. The pass above pairs by baseline, which
+    // can never match this shape -- six vertically stacked paragraphs, three bare
+    // markers ("(a)", "(b)", "(c)") followed by three body paragraphs in the same
+    // order -- because ordinary single-spaced leading (~1.15-1.5x font size) is more
+    // than double `DETACHED_MARKER_BASELINE_TOLERANCE_FONT_FACTOR` (0.6), so no
+    // marker and no body in this shape ever shares a baseline with anything. What
+    // proves the pairing here is POSITION, not geometry: the nth marker in a maximal
+    // marker run pairs with the nth paragraph of the maximal body run that follows
+    // it, provided the body run is at least as long as the marker run (never a
+    // partial pairing) and every resulting pair agrees on rotation frame.
+    if REATTACH_OCR_LAYOUT_MARKER_RUN_PAIRS {
+        let mut index = 0usize;
+        while index < paragraphs.len() {
+            if consumed[index] || ocr_detached_list_marker(&paragraphs[index]).is_none() {
+                index += 1;
+                continue;
+            }
+
+            let mut marker_indices = vec![index];
+            let mut cursor = index + 1;
+            while cursor < paragraphs.len()
+                && !consumed[cursor]
+                && ocr_detached_list_marker(&paragraphs[cursor]).is_some()
+            {
+                marker_indices.push(cursor);
+                cursor += 1;
+            }
+
+            if marker_indices.len() < DETACHED_MARKER_RUN_MIN_LENGTH {
+                index = cursor;
+                continue;
+            }
+
+            let mut body_indices = Vec::new();
+            let mut body_cursor = cursor;
+            while body_cursor < paragraphs.len()
+                && !consumed[body_cursor]
+                && accepts_marker_run_body(&paragraphs[body_cursor])
+            {
+                body_indices.push(body_cursor);
+                body_cursor += 1;
+            }
+
+            if body_indices.len() < marker_indices.len() {
+                index = body_cursor.max(cursor);
+                continue;
+            }
+            body_indices.truncate(marker_indices.len());
+
+            let rotation_agrees = marker_indices.iter().zip(body_indices.iter()).all(|(&marker_idx, &body_idx)| {
+                let marker_segment = paragraphs[marker_idx].lines.first().and_then(|line| line.segments.first());
+                let body_segment = paragraphs[body_idx].lines.first().and_then(|line| line.segments.first());
+                match (marker_segment, body_segment) {
+                    (Some(marker_segment), Some(body_segment)) => body_segment.has_same_rotation(marker_segment),
+                    _ => false,
+                }
+            });
+
+            if rotation_agrees {
+                for (&marker_idx, &body_idx) in marker_indices.iter().zip(body_indices.iter()) {
+                    consumed[marker_idx] = true;
+                    consumed[body_idx] = true;
+                    pairs.push((marker_idx, body_idx));
+                }
+            }
+
+            index = body_cursor;
+        }
     }
 
     if pairs.is_empty() {
@@ -1469,6 +1569,61 @@ fn ocr_detached_list_marker(paragraph: &types::PdfParagraph) -> Option<crate::pd
         && segment.font_size > 0.0
         && segment.upright_baseline().is_finite();
     geometry_is_usable.then(|| segment.clone())
+}
+
+/// Body-side test for the marker-run/body-run pairing phase of
+/// [`reattach_ocr_layout_list_markers`] (#729).
+///
+/// Applies every SEMANTIC guard of `pipeline::accepts_detached_list_marker` --
+/// not already a heading, list item, code block, formula, or page furniture;
+/// first line not itself marker-shaped; at least
+/// [`super::pipeline::DETACHED_MARKER_MIN_BODY_WORDS`] words -- but
+/// deliberately NOT that function's baseline/indent geometry. A stacked marker
+/// run and the stacked body run that follows it live on different baselines by
+/// construction: "(a)", "(b)", "(c)" each own their own baseline, and
+/// body1/body2/body3 sit on baselines below all three, so the single-marker
+/// geometric test can never pass for this shape -- that mismatch is exactly
+/// why this second phase exists, and re-applying that geometry here would
+/// reject every candidate it is meant to accept. What proves the pairing
+/// instead is POSITION (nth marker in the run pairs with nth body in the
+/// immediately following run) -- established by the caller, not by this
+/// predicate. Rotation agreement is checked separately by the caller, per
+/// resulting pair, once the run lengths are known.
+#[cfg(all(feature = "ocr", feature = "layout-detection"))]
+fn accepts_marker_run_body(paragraph: &types::PdfParagraph) -> bool {
+    if paragraph.heading_level.is_some()
+        || paragraph.is_list_item
+        || paragraph.is_code_block
+        || paragraph.is_formula
+        || paragraph.is_page_furniture
+    {
+        return false;
+    }
+    let Some(first_line) = paragraph.lines.first() else {
+        return false;
+    };
+    if first_line.segments.is_empty() {
+        return false;
+    }
+    let first_line_text = first_line
+        .segments
+        .iter()
+        .map(|segment| segment.text.trim())
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if super::pipeline::looks_like_list_item(&first_line_text) || super::pipeline::is_bare_list_marker(&first_line_text)
+    {
+        return false;
+    }
+
+    let body_words = paragraph
+        .lines
+        .iter()
+        .flat_map(|line| line.segments.iter())
+        .flat_map(|segment| segment.text.split_whitespace())
+        .count();
+    body_words >= super::pipeline::DETACHED_MARKER_MIN_BODY_WORDS
 }
 
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
@@ -3171,6 +3326,94 @@ mod tests {
             paragraphs.len(),
             2,
             "a candidate outside the hanging-indent bound must not merge"
+        );
+    }
+
+    /// #729 marker-run/body-run pairing: a marker COLUMN ("(a)", "(b)", "(c)")
+    /// stacked directly above a body COLUMN of three paragraphs, in the same order,
+    /// must pair positionally even though no marker and no body share a baseline --
+    /// ordinary single-spaced leading is far outside
+    /// `DETACHED_MARKER_BASELINE_TOLERANCE_FONT_FACTOR`, so the single-marker,
+    /// baseline-paired pass above cannot pair any of these six paragraphs. Against
+    /// unfixed code (no marker-run pairing phase, or
+    /// `REATTACH_OCR_LAYOUT_MARKER_RUN_PAIRS` flipped to `false`) this asserts
+    /// `paragraphs.len() == 3` and fails with `paragraphs.len() == 6` (nothing
+    /// merges).
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn reattach_ocr_layout_list_markers_pairs_a_stacked_marker_run_with_a_stacked_body_run() {
+        let mut marker_a = list_test_paragraph("(a)", (10.0, 900.0, 30.0, 920.0));
+        marker_a.is_list_item = true;
+        let mut marker_b = list_test_paragraph("(b)", (10.0, 880.0, 30.0, 900.0));
+        marker_b.is_list_item = true;
+        let mut marker_c = list_test_paragraph("(c)", (10.0, 860.0, 30.0, 880.0));
+        marker_c.is_list_item = true;
+
+        let body1 = list_test_paragraph(
+            "A ten foot minimum buffer applies to this parcel.",
+            (10.0, 840.0, 500.0, 860.0),
+        );
+        let body2 = list_test_paragraph(
+            "Ten foot buffers apply similarly to adjoining parcels.",
+            (10.0, 820.0, 500.0, 840.0),
+        );
+        let body3 = list_test_paragraph(
+            "Buffers must be maintained along every property line.",
+            (10.0, 800.0, 500.0, 820.0),
+        );
+
+        let mut paragraphs = vec![marker_a, marker_b, marker_c, body1, body2, body3];
+        reattach_ocr_layout_list_markers(&mut paragraphs);
+
+        assert_eq!(
+            paragraphs.len(),
+            3,
+            "the marker run and the following body run must pair positionally"
+        );
+        assert!(paragraphs.iter().all(|paragraph| paragraph.is_list_item));
+        assert!(paragraphs[0].text.starts_with("(a) "), "got {:?}", paragraphs[0].text);
+        assert!(paragraphs[1].text.starts_with("(b) "), "got {:?}", paragraphs[1].text);
+        assert!(paragraphs[2].text.starts_with("(c) "), "got {:?}", paragraphs[2].text);
+    }
+
+    /// #729 negative: a marker RUN of length one must never pair through the
+    /// run-pairing phase, even with an eligible body run immediately following it --
+    /// see `DETACHED_MARKER_RUN_MIN_LENGTH`'s doc comment (a lone bare marker is
+    /// exactly as likely to be an exhibit label as a genuine list marker). The
+    /// fixture is geometrically stacked, not side-by-side, so the single-marker,
+    /// baseline-paired pass above cannot pair it either. This test does NOT
+    /// discriminate on `REATTACH_OCR_LAYOUT_MARKER_RUN_PAIRS` (both `true` and
+    /// `false` leave `paragraphs.len() == 4`, since the min-length guard rejects the
+    /// run before pairing regardless) -- it verifies `DETACHED_MARKER_RUN_MIN_LENGTH`
+    /// specifically. Against code with `DETACHED_MARKER_RUN_MIN_LENGTH` lowered to
+    /// `1` this asserts `paragraphs.len() == 4` and fails with
+    /// `paragraphs.len() == 3`.
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn reattach_ocr_layout_list_markers_does_not_pair_a_run_of_length_one() {
+        let mut marker_a = list_test_paragraph("(a)", (10.0, 900.0, 30.0, 920.0));
+        marker_a.is_list_item = true;
+
+        let body1 = list_test_paragraph(
+            "A ten foot minimum buffer applies to this parcel.",
+            (10.0, 840.0, 500.0, 860.0),
+        );
+        let body2 = list_test_paragraph(
+            "Ten foot buffers apply similarly to adjoining parcels.",
+            (10.0, 820.0, 500.0, 840.0),
+        );
+        let body3 = list_test_paragraph(
+            "Buffers must be maintained along every property line.",
+            (10.0, 800.0, 500.0, 820.0),
+        );
+
+        let mut paragraphs = vec![marker_a, body1, body2, body3];
+        reattach_ocr_layout_list_markers(&mut paragraphs);
+
+        assert_eq!(
+            paragraphs.len(),
+            4,
+            "a run of length one must not be paired by the run-pairing phase"
         );
     }
 

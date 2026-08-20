@@ -885,7 +885,10 @@ pub(super) const DETACHED_MARKER_MAX_LOOKAHEAD: usize = 8;
 
 /// Minimum word count of the body paragraph. Excludes single-token neighbours,
 /// which is what a marker-shaped table column looks like.
-const DETACHED_MARKER_MIN_BODY_WORDS: usize = 2;
+///
+/// `pub(super)` so `adapters::accepts_marker_run_body` (#729) can reuse it for
+/// the marker-run/body-run pairing phase of `adapters::reattach_ocr_layout_list_markers`.
+pub(super) const DETACHED_MARKER_MIN_BODY_WORDS: usize = 2;
 
 /// Whether the two detached-list-marker reattachment passes (this module's
 /// [`detached_list_marker`] and `adapters::ocr_detached_list_marker`) reject a
