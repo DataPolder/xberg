@@ -216,6 +216,10 @@ pub(crate) fn extract_html_inline_images(html: &str, options: Option<ConversionO
 
     let mut opts = options.unwrap_or_default();
     opts.extract_images = true;
+    // html-to-markdown-rs defaults `capture_svg` to false, so inline `<svg>` elements
+    // are silently dropped even with `extract_images = true` (data-URI `<img>` sources
+    // still work — that path is unaffected because it is not gated on this flag).
+    opts.capture_svg = true;
     opts.output_format = LibOutputFormat::Plain;
     opts.extract_metadata = false;
 
