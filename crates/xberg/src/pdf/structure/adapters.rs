@@ -1555,6 +1555,44 @@ pub(crate) fn reattach_ocr_layout_list_markers(paragraphs: &mut Vec<types::PdfPa
     });
 }
 
+/// Reattach a genuinely UNCLASSIFIED bare OCR list marker -- `is_list_item ==
+/// false`, because no ML layout hint ever fired on it -- to the body paragraph it
+/// belongs to. (#729)
+///
+/// Delegates to the native pipeline's own
+/// [`super::pipeline::reattach_detached_list_markers`] unchanged: that function's
+/// own doc comment already states its geometry test is expressed relative to font
+/// size specifically so it "behaves identically" on OCR's raster-derived paragraph
+/// geometry and native PDF points, but nothing on any OCR call path actually
+/// invoked it before this -- its only real-world reachability from OCR was through
+/// `heuristically_restructured_ocr_pages`, whose document-wide "already structured"
+/// gate is tripped by the very ML classifications that make list-marker recovery
+/// necessary in the first place, so in practice it ran natively only.
+///
+/// This is the mirror image of [`reattach_ocr_layout_list_markers`], not a
+/// duplicate of it. That function's marker-side test (`ocr_detached_list_marker`)
+/// requires `is_list_item == true` -- proof an ML hint already fired on the marker
+/// -- and pairs a whole marker run against a whole body run by position. This
+/// function's marker-side test (`pipeline::detached_list_marker`) requires the
+/// OPPOSITE, `is_list_item == false`, and pairs a single marker to a single body by
+/// baseline instead: it covers the shape `reattach_ocr_layout_list_markers` cannot
+/// reach at all -- no hint ever fired on the marker (missing detection, confidence
+/// below 0.8, or `layout-detection` disabled entirely) -- so the marker paragraph
+/// is not `is_list_item == true` by construction the way that function's
+/// precondition requires. Without this pass such a marker stays a bare, unmerged
+/// paragraph and renders as literal marker text (e.g. `"(a)"`) in the output.
+///
+/// Never touches `heading_level` (`pipeline::reattach_detached_list_markers` only
+/// ever sets `is_list_item`), so -- like `apply_ocr_text_list_fallback` in
+/// `extractors::pdf::ocr` -- it cannot trip
+/// `heuristically_restructured_ocr_pages`'s "already structured" gate or regress
+/// heading detection: callers run it entirely outside that gate, as a fallback
+/// pass alongside `apply_ocr_text_list_fallback`, never before it.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+pub(crate) fn reattach_detached_ocr_list_markers(paragraphs: &mut Vec<types::PdfParagraph>) {
+    super::pipeline::reattach_detached_list_markers(paragraphs);
+}
+
 /// The lone segment of an OCR layout-route paragraph that is nothing but a list
 /// marker AND that an ML `ListItem` hint already classified as such.
 ///
@@ -3239,6 +3277,40 @@ mod tests {
 
         assert_eq!(paragraphs.len(), 1, "marker and body must merge into one paragraph");
         assert!(paragraphs[0].is_list_item);
+        assert_eq!(paragraphs[0].text, "1. Overview of the setback requirements");
+    }
+
+    /// #729 (redefined): a bare marker paragraph that NO ML layout hint ever
+    /// classified -- `is_list_item` left at its default `false`, unlike the
+    /// `reattach_ocr_layout_list_markers` fixtures above which set it to `true` to
+    /// simulate a fired hint -- is outside that function's precondition and stays
+    /// unmerged. `reattach_detached_ocr_list_markers` covers exactly this shape by
+    /// delegating to the native pipeline's own baseline-paired
+    /// `reattach_detached_list_markers`, whose marker-side test requires the
+    /// opposite precondition (`is_list_item == false`).
+    ///
+    /// Against unfixed code (no `reattach_detached_ocr_list_markers` wired into any
+    /// OCR call path) this asserts `paragraphs.len() == 1` and
+    /// `paragraphs[0].is_list_item == true`; today `reattach_detached_ocr_list_markers`
+    /// does not exist at all, so calling it is itself the change under test, and
+    /// without it the two paragraphs stay unmerged (`len() == 2`) with the marker
+    /// paragraph's text staying the literal `"1."` -- the exact #729 symptom
+    /// (`(a)`, `(b)`, `(c)` rendered as plain text).
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn reattach_detached_ocr_list_markers_rejoins_a_marker_no_ml_hint_ever_classified() {
+        let marker = list_test_paragraph("1.", (10.0, 780.0, 30.0, 800.0));
+        let body = list_test_paragraph("Overview of the setback requirements", (35.0, 780.0, 500.0, 800.0));
+        assert!(!marker.is_list_item, "fixture must start unclassified, unlike the ML-hint fixtures above");
+
+        let mut paragraphs = vec![marker, body];
+        reattach_detached_ocr_list_markers(&mut paragraphs);
+
+        assert_eq!(paragraphs.len(), 1, "marker and body must merge into one paragraph");
+        assert!(
+            paragraphs[0].is_list_item,
+            "the merged paragraph must be classified as a list item"
+        );
         assert_eq!(paragraphs[0].text, "1. Overview of the setback requirements");
     }
 

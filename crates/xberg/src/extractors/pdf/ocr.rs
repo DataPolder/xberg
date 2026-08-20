@@ -2553,6 +2553,10 @@ pub(crate) async fn extract_mixed_ocr_native(
                         .cloned()
                         .unwrap_or_default();
                     apply_ocr_text_list_fallback(&mut paragraphs);
+                    // #729: recover a bare marker no ML hint ever classified, e.g. a
+                    // marker paragraph whose body landed several paragraphs away --
+                    // see `adapters::reattach_detached_ocr_list_markers`'s doc comment.
+                    crate::pdf::structure::adapters::reattach_detached_ocr_list_markers(&mut paragraphs);
                     let mut new_page_doc = crate::pdf::structure::assemble_internal_document(
                         vec![paragraphs],
                         &existing.tables,
@@ -3518,6 +3522,12 @@ fn assemble_ocr_page_paragraphs(
             font_size_scale,
         );
         apply_ocr_text_list_fallback(&mut paragraphs);
+        // #729: a bare marker no ML hint ever classified (`is_list_item` still
+        // `false`) is invisible to `reattach_ocr_layout_list_markers` below, whose
+        // marker-side test requires the opposite -- see
+        // `adapters::reattach_detached_ocr_list_markers`'s doc comment. Runs first so
+        // both passes only ever see markers still in their own precondition's state.
+        crate::pdf::structure::adapters::reattach_detached_ocr_list_markers(&mut paragraphs);
         // #729: `regroup_layout_lines_by_element` (above, inside
         // `ocr_doc_to_layout_paragraphs`) isolates an ML-hinted list marker into its
         // own paragraph and never rejoins it to its body. Gated independently of
@@ -4644,6 +4654,10 @@ async fn extract_with_ocr_for_page(
                         let mut fallback_pages = pages.clone();
                         for page in &mut fallback_pages {
                             apply_ocr_text_list_fallback(page);
+                            // #729: recover a bare marker no ML hint ever classified --
+                            // see `adapters::reattach_detached_ocr_list_markers`'s doc
+                            // comment.
+                            crate::pdf::structure::adapters::reattach_detached_ocr_list_markers(page);
                         }
                         Some(crate::pdf::structure::assemble_internal_document(
                             fallback_pages,

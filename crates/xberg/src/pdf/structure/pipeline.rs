@@ -963,7 +963,7 @@ pub(super) fn is_bare_detached_list_marker(text: &str) -> bool {
 /// Everything is expressed relative to font size, so the OCR route (whose
 /// geometry may be in a different unit space) and the native route (points) get
 /// the same behaviour.
-fn reattach_detached_list_markers(paragraphs: &mut Vec<PdfParagraph>) {
+pub(super) fn reattach_detached_list_markers(paragraphs: &mut Vec<PdfParagraph>) {
     if !REATTACH_DETACHED_LIST_MARKERS || paragraphs.len() < 2 {
         return;
     }
