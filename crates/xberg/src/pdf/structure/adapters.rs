@@ -174,12 +174,28 @@ const DEFAULT_OCR_FONT_SIZE_PT: f32 = 12.0;
 /// A/B switch for the block-median font-size resolution described on
 /// [`ocr_block_median_font_sizes`] (#712).
 ///
+/// **Off.** Measured a net regression over GT-scored full-text F1 across 3
+/// backends x 7 scanned fixtures: better on 2 files, worse on 10, tied on 2.
+/// The mechanism is over-fusion -- taking a block-wide median collapses
+/// legitimately distinct fragments into one font size, and the max block size
+/// grows in every affected file (ordinance/paddle 327 words vs 70;
+/// nougat_007/sceptre 549 vs 111), which drags word-gluing artefacts up with
+/// it. It does deliver one real win -- fabricated mid-sentence headings
+/// (`### storage.`, `### groundwork for future developments. Over time,`) went
+/// 14 -> 0 on multi_page/paddle and 9 -> 0 on nougat_007/sceptre -- but that
+/// win is now covered directly at the heading gate by
+/// `SUPPRESS_LOWERCASE_START_HEADINGS` (#712), without paying for it in
+/// full-text fusion. For this to come back, the median would need to be scoped
+/// tighter than "whole hOCR block" -- e.g. per physical line rather than per
+/// block -- so it stops fusing fragments that legitimately belong to different
+/// lines.
+///
 /// **This is the single edit that neutralises the whole feature**: flip it to
-/// `false` and [`ocr_block_median_font_sizes`] returns an empty map, so every
-/// element falls back to the exact per-fragment resolution that shipped before --
-/// no other line of this module needs to change, and no call site does either.
+/// `true` and [`ocr_block_median_font_sizes`] resumes producing entries, so
+/// every element goes back through the block-median path -- no other line of
+/// this module needs to change, and no call site does either.
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
-const RESOLVE_OCR_FONT_SIZE_PER_BLOCK: bool = true;
+const RESOLVE_OCR_FONT_SIZE_PER_BLOCK: bool = false;
 
 /// A block needs at least this many measurable fragments before a median is worth
 /// taking. At one sample the median is the sample, so the entry would be an exact

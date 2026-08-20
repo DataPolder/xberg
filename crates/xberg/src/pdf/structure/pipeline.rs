@@ -841,6 +841,24 @@ fn segments_to_paragraphs(
 /// from the shipped one only in this behaviour; nothing else guards the pass.
 const REATTACH_DETACHED_LIST_MARKERS: bool = true;
 
+/// Suppress heading promotion for a fragment whose text starts lowercase or with
+/// a sentence-continuation word (#712).
+///
+/// This is the fabrication signature of the OCR mid-line paragraph break: when
+/// `font_change` (`(line.font_size - prev.font_size).abs() > 1.5`) splits a
+/// physical line on intra-line ascender/descender noise, the stray tail
+/// fragment almost always starts mid-sentence -- lowercase, or with "is", "of",
+/// "and", and the like -- because a real sentence or heading boundary does not
+/// land there. That stray fragment's own (noise-inflated) font size is then
+/// read as `first.font_size` for the *next* paragraph and can clear the
+/// heading-distance gate in [`super::classify::find_heading_level`], fabricating
+/// a heading out of a sentence fragment (e.g. `### storage.`,
+/// `### groundwork for future developments. Over time,`). Reuses
+/// [`super::classify::starts_with_lowercase_or_continuation`], the same guard
+/// the rescue pass already trusts for the identical judgment, so this adds no
+/// new heuristic surface. Flip to `false` to restore pre-#712 behaviour.
+const SUPPRESS_LOWERCASE_START_HEADINGS: bool = true;
+
 /// How closely a detached marker's baseline must agree with the baseline of the
 /// body line it is claimed to belong to, as a multiple of the larger of the two
 /// font sizes. Scale-free by construction, so it behaves identically on
@@ -1893,7 +1911,11 @@ fn finalize_paragraph(
 
     let mut heading_level = super::classify::find_heading_level(first.font_size, heading_map, gap_info);
     if heading_level.is_some()
-        && (word_count > 20 || super::layout_classify::is_separator_text(trimmed) || page_number_like)
+        && (word_count > 20
+            || super::layout_classify::is_separator_text(trimmed)
+            || page_number_like
+            || (SUPPRESS_LOWERCASE_START_HEADINGS
+                && super::classify::starts_with_lowercase_or_continuation(trimmed)))
     {
         heading_level = None;
     }
@@ -8623,6 +8645,24 @@ where new shares are issued;";
         assert!(
             !para.is_page_furniture,
             "classification must not mark page furniture without positional evidence"
+        );
+    }
+
+    /// #712: a fragment whose text starts lowercase must not be promoted to a
+    /// heading even when its font size matches a heading centroid exactly. This is
+    /// the fabrication signature the OCR mid-line `font_change` break produces --
+    /// see `SUPPRESS_LOWERCASE_START_HEADINGS`'s doc comment. Against unfixed code
+    /// (`SUPPRESS_LOWERCASE_START_HEADINGS = false`) this asserts
+    /// `para.heading_level == None` and fails with `para.heading_level == Some(2)`.
+    #[test]
+    fn test_finalize_paragraph_suppresses_heading_for_lowercase_start_fragment() {
+        let heading_map = vec![(12.0, Some(2)), (9.0, None)];
+        let gap_info = crate::pdf::structure::classify::precompute_gap_info(&heading_map);
+        let seg = seg_at("storage.", 10.0, 700.0, 12.0, false);
+        let para = finalize_paragraph(&[&seg], &heading_map, &gap_info).expect("paragraph");
+        assert_eq!(
+            para.heading_level, None,
+            "a lowercase-starting fragment must not become a heading"
         );
     }
 
