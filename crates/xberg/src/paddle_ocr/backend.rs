@@ -397,6 +397,16 @@ impl BoxScoreSummary {
     }
 }
 
+/// Result of clustering, reconstructing, and validating OCR table candidates from a
+/// page's word boxes. Factored out of `process_image` so the table-building logic is
+/// unit-testable without spinning up a PaddleOCR engine (see `build_ocr_tables_from_words`).
+struct BuiltOcrTables {
+    tables: Vec<Table>,
+    table_count: u32,
+    table_rows: Option<u32>,
+    table_cols: Option<u32>,
+}
+
 impl PaddleOcrBackend {
     /// Create a new PaddleOCR backend with default configuration.
     pub fn new() -> Result<Self> {
@@ -1148,6 +1158,97 @@ impl PaddleOcrBackend {
         Ok((text_blocks, processed_width, processed_height))
     }
 
+    /// Clusters `words` into table-candidate regions, reconstructs a grid for each, validates
+    /// it structurally, and builds the `Table` entries `process_image` returns -- including a
+    /// real `bounding_box` derived from the region's word extents (#defect-1: previously left
+    /// `None`, which meant nothing downstream -- `table_bboxes_by_page` /
+    /// `filter_segments_by_table_bboxes` -- could suppress the prose the table duplicates).
+    fn build_ocr_tables_from_words(words: &[crate::table_core::HocrWord]) -> BuiltOcrTables {
+        let mut tables: Vec<Table> = vec![];
+        let mut table_count = 0u32;
+        let mut table_rows: Option<u32> = None;
+        let mut table_cols: Option<u32> = None;
+
+        for region_words in crate::table_core::cluster_words_into_table_regions(words) {
+            if region_words.len() < crate::table_core::MIN_TABLE_CANDIDATE_WORDS {
+                continue;
+            }
+
+            let cells = reconstruct_table(&region_words, TABLE_COLUMN_ALIGNMENT_THRESHOLD_PX, 0.5);
+            if cells.is_empty() || cells[0].is_empty() {
+                continue;
+            }
+
+            // Pixel-space extents of the words that formed this region, mirroring
+            // Tesseract's derivation in `ocr::processor::execution::process_ocr_result`
+            // (region_left/top/right/bottom from region_words' min/max). This is the
+            // same raster pixel space (x0=left, y0=top, x1=right, y1=bottom, y increasing
+            // downward) already used for every other OCR-sourced `BoundingBox` in this
+            // file (see the line-element bbox construction in `process_image`).
+            let region_left = region_words.iter().map(|w| w.left).min().unwrap_or(0);
+            let region_top = region_words.iter().map(|w| w.top).min().unwrap_or(0);
+            let region_right = region_words.iter().map(|w| w.left + w.width).max().unwrap_or(0);
+            let region_bottom = region_words.iter().map(|w| w.top + w.height).max().unwrap_or(0);
+
+            // PaddleOCR has no per-word table-candidate confidence carve-out the way
+            // Tesseract's TSV does, so every recognised word on the page is a clustering
+            // candidate (`elements_to_hocr_words` above just filters by OCR confidence, not
+            // "is this tabular"). Left unfiltered, a page of ordinary prose reconstructs into
+            // one giant sparse grid: each line's words rarely share x-positions with any other
+            // line, so `reconstruct_table`'s column detection manufactures one column per word
+            // (xberg-io/xberg — measured 36 columns / 390 rows of near-empty cells on a
+            // 16-page municipal ordinance with zero real tables). Tesseract's own OCR table
+            // path (`ocr::processor::execution::process_ocr_result`) avoids this by running
+            // every candidate grid through `pdf::table_reconstruct::post_process_table`, the
+            // shared structural validator (column count, cell-content density, prose-length,
+            // and column-flow heuristics tuned against the PDF native-text table corpus) —
+            // reused here rather than duplicated so both backends reject the same shapes for
+            // the same reasons. Only available under the `pdf` feature (same as Tesseract's own
+            // gate at `ocr::processor::execution`); without it, table candidates pass through
+            // unfiltered, matching Tesseract's degraded behavior in that build.
+            #[cfg(feature = "pdf")]
+            let cleaned = crate::pdf::table_reconstruct::post_process_table(cells, false, false);
+            #[cfg(not(feature = "pdf"))]
+            let cleaned = Some(cells);
+            let Some(cells) = cleaned else {
+                continue;
+            };
+
+            table_count += 1;
+            if table_rows.is_none() {
+                table_rows = Some(cells.len() as u32);
+                table_cols = cells.first().map(|row| row.len() as u32);
+            }
+
+            let table_markdown = table_to_markdown(&cells);
+
+            tables.push(Table {
+                cells,
+                markdown: table_markdown,
+                // `process_image` OCRs a single image/page at a time and has no
+                // document-level page context to draw from here — Tesseract's own
+                // equivalent push site (`ocr::processor::execution::process_ocr_result`)
+                // hardcodes the same value for the same reason; callers with real
+                // multi-page context (e.g. the PDF mixed route) reassign it afterward.
+                page_number: 1,
+                bounding_box: Some(crate::types::extraction::BoundingBox {
+                    x0: region_left as f64,
+                    y0: region_top as f64,
+                    x1: region_right as f64,
+                    y1: region_bottom as f64,
+                }),
+                ..Default::default()
+            });
+        }
+
+        BuiltOcrTables {
+            tables,
+            table_count,
+            table_rows,
+            table_cols,
+        }
+    }
+
     fn select_output_elements(
         lines: &[OcrElement],
         words: &[OcrElement],
@@ -1364,57 +1465,11 @@ impl OcrBackend for PaddleOcrBackend {
         if effective_config.enable_table_detection && !line_elements.is_empty() {
             let table_elements = line_elements.iter().chain(&word_elements).cloned().collect::<Vec<_>>();
             let words = elements_to_hocr_words(&table_elements, 0.3);
-
-            for region_words in crate::table_core::cluster_words_into_table_regions(&words) {
-                if region_words.len() < crate::table_core::MIN_TABLE_CANDIDATE_WORDS {
-                    continue;
-                }
-
-                let cells = reconstruct_table(&region_words, TABLE_COLUMN_ALIGNMENT_THRESHOLD_PX, 0.5);
-                if cells.is_empty() || cells[0].is_empty() {
-                    continue;
-                }
-
-                // PaddleOCR has no per-word table-candidate confidence carve-out the way
-                // Tesseract's TSV does, so every recognised word on the page is a clustering
-                // candidate (`elements_to_hocr_words` above just filters by OCR confidence, not
-                // "is this tabular"). Left unfiltered, a page of ordinary prose reconstructs into
-                // one giant sparse grid: each line's words rarely share x-positions with any other
-                // line, so `reconstruct_table`'s column detection manufactures one column per word
-                // (xberg-io/xberg — measured 36 columns / 390 rows of near-empty cells on a
-                // 16-page municipal ordinance with zero real tables). Tesseract's own OCR table
-                // path (`ocr::processor::execution::process_ocr_result`) avoids this by running
-                // every candidate grid through `pdf::table_reconstruct::post_process_table`, the
-                // shared structural validator (column count, cell-content density, prose-length,
-                // and column-flow heuristics tuned against the PDF native-text table corpus) —
-                // reused here rather than duplicated so both backends reject the same shapes for
-                // the same reasons. Only available under the `pdf` feature (same as Tesseract's own
-                // gate at `ocr::processor::execution`); without it, table candidates pass through
-                // unfiltered, matching Tesseract's degraded behavior in that build.
-                #[cfg(feature = "pdf")]
-                let cleaned = crate::pdf::table_reconstruct::post_process_table(cells, false, false);
-                #[cfg(not(feature = "pdf"))]
-                let cleaned = Some(cells);
-                let Some(cells) = cleaned else {
-                    continue;
-                };
-
-                table_count += 1;
-                if table_rows.is_none() {
-                    table_rows = Some(cells.len() as u32);
-                    table_cols = cells.first().map(|row| row.len() as u32);
-                }
-
-                let table_markdown = table_to_markdown(&cells);
-
-                tables.push(Table {
-                    cells,
-                    markdown: table_markdown,
-                    page_number: 1,
-                    bounding_box: None,
-                    ..Default::default()
-                });
-            }
+            let built = Self::build_ocr_tables_from_words(&words);
+            tables = built.tables;
+            table_count = built.table_count;
+            table_rows = built.table_rows;
+            table_cols = built.table_cols;
         }
 
         let metadata = Metadata {
@@ -2463,6 +2518,43 @@ mod tests {
             height,
             confidence: 90.0,
         }
+    }
+
+    /// Defect regression: the `Table` PaddleOCR emits must carry a real `bounding_box`
+    /// derived from the words that formed the table region, not the hardcoded `None` the
+    /// unfixed code pushed regardless of geometry.
+    ///
+    /// Without the fix, `Table.bounding_box` is unconditionally `None`, so this test's
+    /// equality assertion fails: `left` is `None` instead of
+    /// `Some(BoundingBox { x0: 0.0, y0: 500.0, x1: 240.0, y1: 535.0 })`. That `None` is exactly
+    /// why nothing downstream (`pdf::structure::pipeline::table_bboxes_by_page` /
+    /// `filter_segments_by_table_bboxes`) can suppress the prose the table duplicates.
+    #[test]
+    fn build_ocr_tables_from_words_populates_bounding_box_from_region_extents() {
+        let words = vec![
+            // 2 rows x 3 cols: left=0..240, top=500..535 in pixel space.
+            hocr_word_at("B11", 0, 500, 40, 15),
+            hocr_word_at("B12", 100, 500, 40, 15),
+            hocr_word_at("B13", 200, 500, 40, 15),
+            hocr_word_at("B21", 0, 520, 40, 15),
+            hocr_word_at("B22", 100, 520, 40, 15),
+            hocr_word_at("B23", 200, 520, 40, 15),
+        ];
+
+        let built = PaddleOcrBackend::build_ocr_tables_from_words(&words);
+
+        assert_eq!(built.tables.len(), 1, "the 3x2 grid should be detected as exactly one table");
+        let table = &built.tables[0];
+        assert_eq!(
+            table.bounding_box,
+            Some(crate::types::extraction::BoundingBox {
+                x0: 0.0,
+                y0: 500.0,
+                x1: 240.0,
+                y1: 535.0,
+            }),
+            "bounding_box must be derived from the region's word extents, not left None"
+        );
     }
 
     /// Two tables stacked vertically with a large blank gap between them must become two
