@@ -431,11 +431,21 @@ pub(crate) fn table_to_markdown(table: &[Vec<String>]) -> String {
 /// average word height, so a wider multiple avoids splitting a single
 /// table's own row gaps while still separating genuinely distinct tables
 /// (or a table from surrounding prose) on the same page.
+//
+// This module also compiles for `feature = "pdf"` (shared with the native PDF table path), but
+// the only real callers of this constant -- `ocr::processor::execution` (gated `feature = "ocr"`)
+// and `paddle_ocr::backend` (gated `paddle_ocr`) -- need neither `pdf` nor each other's gate. A
+// gate as wide as the module's left this compiled with zero callers on a `pdf`-only leg. ~keep
+#[cfg(any(feature = "ocr", paddle_ocr))]
 pub(crate) const TABLE_REGION_GAP_HEIGHT_MULTIPLIER: u32 = 3;
 
 /// Minimum number of words for a spatial region to be treated as a table
 /// candidate. Mirrors the previous whole-page threshold so a single small
 /// table on an otherwise text-only page is not over-fabricated.
+//
+// Same reasoning as `TABLE_REGION_GAP_HEIGHT_MULTIPLIER` above: real callers are gated `ocr` or
+// `paddle_ocr`, not `pdf`. ~keep
+#[cfg(any(feature = "ocr", paddle_ocr))]
 pub(crate) const MIN_TABLE_CANDIDATE_WORDS: usize = 6;
 
 /// Split table-candidate words into vertically separated regions.
@@ -452,6 +462,11 @@ pub(crate) const MIN_TABLE_CANDIDATE_WORDS: usize = 6;
 /// a new region. Each region is reconstructed independently, giving each
 /// table its own bounding box.
 ///
+// Same reasoning as `TABLE_REGION_GAP_HEIGHT_MULTIPLIER` above: the two real callers --
+// `ocr::processor::execution::perform_ocr`'s table-detection branch (gated `feature = "ocr"`)
+// and `PaddleOcrBackend::build_ocr_tables_from_words` (gated `paddle_ocr`) -- never need the
+// wider `pdf` gate this module carries. ~keep
+#[cfg(any(feature = "ocr", paddle_ocr))]
 pub(crate) fn cluster_words_into_table_regions(words: &[HocrWord]) -> Vec<Vec<HocrWord>> {
     if words.is_empty() {
         return Vec::new();
