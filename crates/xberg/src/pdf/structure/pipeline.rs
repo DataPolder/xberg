@@ -961,6 +961,13 @@ pub(super) enum DetachedMarkerFrame {
     /// Native PDF text: defer to the segment's own `rotation_degrees`.
     Native,
     /// OCR route on a page whose PDF `/Rotate` is `degrees` (0/90/180/270).
+    ///
+    /// Only ever constructed from the OCR adapters, so on a feature set without
+    /// OCR this variant is genuinely dead -- the `Native` arm still carries the
+    /// whole native structure-tree path. `-D warnings` on the narrow `pdf` leg
+    /// turns that into a hard error, so silence it exactly there rather than
+    /// splitting the enum. ~keep
+    #[cfg_attr(not(any(feature = "ocr", feature = "ocr-pipeline")), allow(dead_code))]
     OcrOnPage(u32),
 }
 
