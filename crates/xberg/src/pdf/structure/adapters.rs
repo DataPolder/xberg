@@ -2024,23 +2024,26 @@ mod tests {
             .collect()
     }
 
-    /// #712: `SegmentData::font_size` is a *detection-box height* for sceptre and
-    /// PaddleOCR, and detection-box height varies with the glyph mix (ascenders,
-    /// descenders, punctuation) *inside one physical line*. The heights here are the
-    /// real recorded sceptre values for one body line of the regression fixture --
-    /// 32/36/32/36/32/32px -- which per-fragment resolution turns into six different
-    /// font sizes spanning 4.0pt.
+    /// #712 proposed block-median font sizing to remove intra-line detection-box
+    /// variance, but `f4a9c19b13` reverted it: measured on GT-scored full-text F1
+    /// across 3 backends x 7 scanned fixtures, it was better on 2 files, worse on
+    /// 10, tied on 2 (over-fusion -- taking a whole-block median collapsed
+    /// legitimately distinct fragments and grew max block size in every affected
+    /// file). `RESOLVE_OCR_FONT_SIZE_PER_BLOCK` now defaults to `false`, so
+    /// `ocr_block_median_font_sizes` returns an empty map and every fragment falls
+    /// back to `geometric_ocr_font_size_pt`, i.e. its own quad edge height (here,
+    /// `font_size_scale` is `OcrFontSizeScale::uniform(1.0)` and each element is a
+    /// single line, so the resolved font size is exactly the raw fragment height
+    /// in pixels, unchanged fragment to fragment).
     ///
-    /// That spread is doubly destructive: 36/32 = 1.12 against
-    /// `MIN_HEADING_FONT_RATIO = 1.15` eats ~80% of the heading heuristic's headroom
-    /// before any real size difference is considered, and 4.0 > the 1.5-absolute-point
-    /// `font_change` paragraph break in `pdf::structure::pipeline`, so a paragraph
-    /// breaks *between two words of one sentence*.
-    ///
-    /// Against unfixed code (or with `RESOLVE_OCR_FONT_SIZE_PER_BLOCK = false`) the
-    /// first assertion fails: the font sizes come back
-    /// `[32.0, 36.0, 32.0, 36.0, 32.0, 32.0]` instead of six copies of `32.0`, and
-    /// the spread assertion reports `4.0` instead of `0.0`.
+    /// This pins that shipped per-fragment behaviour as a regression guard: the
+    /// real recorded sceptre heights for one body line of the regression fixture,
+    /// 32/36/32/36/32/32px, must resolve to six *different* font sizes -- the
+    /// mid-sentence heading fabrication that motivated the median is now caught
+    /// downstream instead, by `SUPPRESS_LOWERCASE_START_HEADINGS` in
+    /// `pdf::structure::pipeline`. If this test starts failing with all-32.0
+    /// values, `RESOLVE_OCR_FONT_SIZE_PER_BLOCK` was flipped back to `true`
+    /// without re-running the A/B that rejected it.
     #[test]
     fn test_ocr_block_median_font_size_removes_intra_line_detection_box_variance() {
         let doc = quad_fragment_document(Some("block_1_1"), &[32, 36, 32, 36, 32, 32], None);
@@ -2050,27 +2053,31 @@ mod tests {
 
         assert_eq!(
             font_sizes,
-            vec![32.0_f32; 6],
-            "every fragment of one hOCR block must resolve to the block median (32.0)"
+            vec![32.0_f32, 36.0, 32.0, 36.0, 32.0, 32.0],
+            "per-fragment resolution (RESOLVE_OCR_FONT_SIZE_PER_BLOCK = false) must \
+             reproduce each fragment's own detection-box height verbatim"
         );
         let spread =
             font_sizes.iter().copied().fold(f32::MIN, f32::max) - font_sizes.iter().copied().fold(f32::MAX, f32::min);
         assert_eq!(
-            spread, 0.0,
-            "intra-block font-size spread must be 0.0, well under the 1.5pt paragraph-break threshold"
+            spread, 4.0,
+            "intra-block font-size spread is the un-smoothed 36.0 - 32.0 gap; the block \
+             median (spread 0.0) was measured and rejected, see f4a9c19b13"
         );
     }
 
-    /// The aggregate must be the median, not the mean. OCR detection routinely emits
-    /// one badly fragmented box per block -- a stray character, a piece of a rule read
-    /// as text, a box that swallowed part of the line above -- and its magnitude is
-    /// arbitrary. Four true 30px fragments plus one 120px outlier have median `30.0`
-    /// but mean `48.0`: a mean would move the whole block 60% above its real type
-    /// size, which is exactly the kind of shift the 1.15 heading ratio reacts to.
+    /// The block-median aggregate (median, not mean, to survive a fragmented
+    /// outlier) is intact but *inert*: `f4a9c19b13` set
+    /// `RESOLVE_OCR_FONT_SIZE_PER_BLOCK = false` after an A/B showed it was a net
+    /// full-text F1 regression (2 files better, 10 worse, 2 tied across 3 backends
+    /// x 7 fixtures). With it off, `ocr_block_median_font_sizes` returns no
+    /// entries at all, so `resolve_ocr_font_size_pt` never sees a
+    /// `block_median_pt` and falls through to `geometric_ocr_font_size_pt` for
+    /// every fragment individually -- the 120px outlier resolves to its own raw
+    /// `120.0`, not the block's `30.0` median.
     ///
-    /// Against unfixed code this fails on the outlier fragment, which resolves to its
-    /// own `120.0`; the assertion then reports the full
-    /// `[30.0, 30.0, 30.0, 30.0, 120.0]`.
+    /// This pins that shipped per-fragment behaviour as a regression guard for
+    /// the const staying `false`.
     #[test]
     fn test_ocr_block_font_size_uses_median_so_a_fragmented_outlier_does_not_move_it() {
         let doc = quad_fragment_document(Some("block_1_1"), &[30, 30, 30, 30, 120], None);
@@ -2080,16 +2087,19 @@ mod tests {
 
         assert_eq!(
             font_sizes,
-            vec![30.0_f32; 5],
-            "the median (30.0) must survive a 4x outlier; the mean would be 48.0"
+            vec![30.0_f32, 30.0, 30.0, 30.0, 120.0],
+            "with the block median off (f4a9c19b13), the outlier fragment resolves to \
+             its own raw detection-box height, 120.0, not the block's 30.0 median"
         );
     }
 
-    /// The same block-median wiring must reach the ML-layout route, which builds its
-    /// lines through `make_ocr_line_paragraphs` rather than `make_ocr_block_paragraphs`
-    /// and would otherwise keep the per-fragment variance.
-    ///
-    /// Against unfixed code this fails with `[32.0, 36.0, 32.0, 36.0, 32.0, 32.0]`.
+    /// The ML-layout route (`ocr_doc_to_layout_paragraphs`, which builds lines
+    /// through `make_ocr_line_paragraphs` rather than `make_ocr_block_paragraphs`)
+    /// shares the same `ocr_block_median_font_sizes` wiring as the non-layout
+    /// route, so it must also stay on per-fragment resolution while
+    /// `RESOLVE_OCR_FONT_SIZE_PER_BLOCK = false` (`f4a9c19b13`): each fragment
+    /// keeps its own raw detection-box height instead of being fused to a block
+    /// median.
     #[cfg(feature = "layout-detection")]
     #[test]
     fn test_layout_route_also_resolves_font_size_as_a_block_median() {
@@ -2100,8 +2110,9 @@ mod tests {
 
         assert_eq!(
             font_sizes,
-            vec![32.0_f32; 6],
-            "the layout route must apply the same block median"
+            vec![32.0_f32, 36.0, 32.0, 36.0, 32.0, 32.0],
+            "the layout route must reproduce the same per-fragment (non-median) \
+             resolution as the non-layout route while the const is false"
         );
     }
 
@@ -3294,8 +3305,18 @@ mod tests {
     /// `paragraphs[0].is_list_item == true`; today `reattach_detached_ocr_list_markers`
     /// does not exist at all, so calling it is itself the change under test, and
     /// without it the two paragraphs stay unmerged (`len() == 2`) with the marker
-    /// paragraph's text staying the literal `"1."` -- the exact #729 symptom
+    /// segment never spliced into the body's first line -- the exact #729 symptom
     /// (`(a)`, `(b)`, `(c)` rendered as plain text).
+    ///
+    /// `reattach_detached_ocr_list_markers` wraps
+    /// `pipeline::reattach_detached_list_markers`, which -- by design -- does
+    /// `body.text.clear()` after splicing the marker segment into `body.lines`
+    /// (see that function's comment: "Text is rebuilt from `lines` downstream").
+    /// The rebuild is `synchronize_paragraph_text_metadata` /
+    /// `join_line_texts_plain` in `assembly.rs`, which this unit test never calls,
+    /// so `paragraphs[0].text` is `""` here BY CONSTRUCTION and can never equal
+    /// the joined string. Assert on the thing this function actually mutates
+    /// instead: the spliced segment list.
     #[cfg(feature = "layout-detection")]
     #[test]
     fn reattach_detached_ocr_list_markers_rejoins_a_marker_no_ml_hint_ever_classified() {
@@ -3311,7 +3332,17 @@ mod tests {
             paragraphs[0].is_list_item,
             "the merged paragraph must be classified as a list item"
         );
-        assert_eq!(paragraphs[0].text, "1. Overview of the setback requirements");
+        let segment_texts = paragraphs[0].lines[0]
+            .segments
+            .iter()
+            .map(|segment| segment.text.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            segment_texts,
+            vec!["1.", "Overview of the setback requirements"],
+            "the marker segment must be spliced in ahead of the body segment; \
+             .text itself is deliberately left empty for downstream rebuild"
+        );
     }
 
     /// #729: the body is not necessarily the very next paragraph -- an unrelated,
