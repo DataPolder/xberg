@@ -43,8 +43,8 @@ fn doc_orientation_detector() -> &'static crate::doc_orientation::DocOrientation
     &DETECTOR
 }
 
-use crate::types::OcrElement;
 use crate::table_core::{MIN_TABLE_CANDIDATE_WORDS, cluster_words_into_table_regions};
+use crate::types::OcrElement;
 
 #[cfg(auto_rotate)]
 /// Rotate raw RGB image data by the given degrees (0, 90, 180, 270).

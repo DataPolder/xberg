@@ -39,7 +39,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1824346307;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1406542978;
 
 // Section: executor
 
@@ -5078,6 +5078,12 @@ fn wire__crate__create_ocr_backend_dart_impl_impl(
             let api_emits_structured_markdown = decode_DartFn_Inputs__Output_bool_AnyhowException(
                 <flutter_rust_bridge::DartOpaque>::sse_decode(&mut deserializer),
             );
+            let api_confidence_semantics = decode_DartFn_Inputs__Output_confidence_semantics_AnyhowException(
+                <flutter_rust_bridge::DartOpaque>::sse_decode(&mut deserializer),
+            );
+            let api_page_orientation_handling = decode_DartFn_Inputs__Output_page_orientation_handling_AnyhowException(
+                <flutter_rust_bridge::DartOpaque>::sse_decode(&mut deserializer),
+            );
             let api_process_document = decode_DartFn_Inputs_String_ocr_config_Output_extracted_document_AnyhowException(
                 <flutter_rust_bridge::DartOpaque>::sse_decode(&mut deserializer),
             );
@@ -5095,6 +5101,8 @@ fn wire__crate__create_ocr_backend_dart_impl_impl(
                         api_supports_table_detection,
                         api_supports_document_processing,
                         api_emits_structured_markdown,
+                        api_confidence_semantics,
+                        api_page_orientation_handling,
                         api_process_document,
                     ))?;
                     Ok(output_ok)
@@ -8005,6 +8013,36 @@ fn wire__crate__install_pdf_render_diagnostics_impl(
         },
     )
 }
+fn wire__crate__layout_wastes_plain_output_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "layout_wastes_plain_output",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(ptr_, rust_vec_len_, data_len_)
+            };
+            let mut deserializer = flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_layout_enabled = <bool>::sse_decode(&mut deserializer);
+            let api_output_format = <crate::OutputFormat>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let output_ok =
+                        Result::<_, ()>::Ok(crate::layout_wastes_plain_output(api_layout_enabled, api_output_format))?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__list_document_extractors_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -9159,6 +9197,13 @@ const _: fn() = || {
         let CodeMetadata = None::<crate::CodeMetadata>.unwrap();
         let _: Vec<crate::CodeChunkInfo> = CodeMetadata.chunks;
         let _: Option<crate::CodeDataNode> = CodeMetadata.data;
+    }
+    match None::<crate::ConfidenceSemantics>.unwrap() {
+        crate::ConfidenceSemantics::Legibility { scale_max } => {
+            let _: f64 = scale_max;
+        }
+        crate::ConfidenceSemantics::Uncalibrated => {}
+        crate::ConfidenceSemantics::None => {}
     }
     {
         let ContentConfig = None::<crate::ContentConfig>.unwrap();
@@ -10610,6 +10655,9 @@ const _: fn() = || {
         let _: i64 = OcrQualityThresholds.min_garbage_chars;
         let _: f64 = OcrQualityThresholds.max_fragmented_word_ratio;
         let _: f64 = OcrQualityThresholds.critical_fragmented_word_ratio;
+        let _: f64 = OcrQualityThresholds.max_ocr_output_fragmented_word_ratio;
+        let _: f64 = OcrQualityThresholds.min_ocr_mean_confidence;
+        let _: i64 = OcrQualityThresholds.min_words_for_ocr_output_check;
         let _: f64 = OcrQualityThresholds.min_avg_word_length;
         let _: i64 = OcrQualityThresholds.min_words_for_avg_length_check;
         let _: f64 = OcrQualityThresholds.min_consecutive_repeat_ratio;
@@ -10793,6 +10841,7 @@ const _: fn() = || {
         let _: bool = PdfConfig.ocr_inline_images;
         let _: bool = PdfConfig.extract_form_fields;
         let _: bool = PdfConfig.reading_order;
+        let _: crate::PdfBackend = PdfConfig.backend;
     }
     {
         let PdfFormField = None::<crate::PdfFormField>.unwrap();
@@ -11616,6 +11665,31 @@ fn decode_DartFn_Inputs__Output_bool_AnyhowException(
 
     move || flutter_rust_bridge::for_generated::convert_into_dart_fn_future(body(dart_opaque.clone()))
 }
+fn decode_DartFn_Inputs__Output_confidence_semantics_AnyhowException(
+    dart_opaque: flutter_rust_bridge::DartOpaque,
+) -> impl Fn() -> flutter_rust_bridge::DartFnFuture<crate::ConfidenceSemantics> {
+    use flutter_rust_bridge::IntoDart;
+
+    async fn body(dart_opaque: flutter_rust_bridge::DartOpaque) -> crate::ConfidenceSemantics {
+        let args = vec![];
+        let message = FLUTTER_RUST_BRIDGE_HANDLER.dart_fn_invoke(dart_opaque, args).await;
+
+        let mut deserializer = flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+        let action = deserializer.cursor.read_u8().unwrap();
+        let ans = match action {
+            0 => std::result::Result::Ok(<crate::ConfidenceSemantics>::sse_decode(&mut deserializer)),
+            1 => std::result::Result::Err(<flutter_rust_bridge::for_generated::anyhow::Error>::sse_decode(
+                &mut deserializer,
+            )),
+            _ => unreachable!(),
+        };
+        deserializer.end();
+        let ans = ans.expect("Dart throws exception but Rust side assume it is not failable");
+        ans
+    }
+
+    move || flutter_rust_bridge::for_generated::convert_into_dart_fn_future(body(dart_opaque.clone()))
+}
 fn decode_DartFn_Inputs__Output_i_64_AnyhowException(
     dart_opaque: flutter_rust_bridge::DartOpaque,
 ) -> impl Fn() -> flutter_rust_bridge::DartFnFuture<i64> {
@@ -11679,6 +11753,31 @@ fn decode_DartFn_Inputs__Output_ocr_backend_type_AnyhowException(
         let action = deserializer.cursor.read_u8().unwrap();
         let ans = match action {
             0 => std::result::Result::Ok(<crate::OcrBackendType>::sse_decode(&mut deserializer)),
+            1 => std::result::Result::Err(<flutter_rust_bridge::for_generated::anyhow::Error>::sse_decode(
+                &mut deserializer,
+            )),
+            _ => unreachable!(),
+        };
+        deserializer.end();
+        let ans = ans.expect("Dart throws exception but Rust side assume it is not failable");
+        ans
+    }
+
+    move || flutter_rust_bridge::for_generated::convert_into_dart_fn_future(body(dart_opaque.clone()))
+}
+fn decode_DartFn_Inputs__Output_page_orientation_handling_AnyhowException(
+    dart_opaque: flutter_rust_bridge::DartOpaque,
+) -> impl Fn() -> flutter_rust_bridge::DartFnFuture<crate::PageOrientationHandling> {
+    use flutter_rust_bridge::IntoDart;
+
+    async fn body(dart_opaque: flutter_rust_bridge::DartOpaque) -> crate::PageOrientationHandling {
+        let args = vec![];
+        let message = FLUTTER_RUST_BRIDGE_HANDLER.dart_fn_invoke(dart_opaque, args).await;
+
+        let mut deserializer = flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+        let action = deserializer.cursor.read_u8().unwrap();
+        let ans = match action {
+            0 => std::result::Result::Ok(<crate::PageOrientationHandling>::sse_decode(&mut deserializer)),
             1 => std::result::Result::Err(<flutter_rust_bridge::for_generated::anyhow::Error>::sse_decode(
                 &mut deserializer,
             )),
@@ -13237,6 +13336,30 @@ impl SseDecode for crate::CodeMetadata {
             chunks: var_chunks,
             data: var_data,
         };
+    }
+}
+
+impl SseDecode for crate::ConfidenceSemantics {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut tag_ = <i32>::sse_decode(deserializer);
+        match tag_ {
+            0 => {
+                let mut var_scaleMax = <f64>::sse_decode(deserializer);
+                return crate::ConfidenceSemantics::Legibility {
+                    scale_max: var_scaleMax,
+                };
+            }
+            1 => {
+                return crate::ConfidenceSemantics::Uncalibrated;
+            }
+            2 => {
+                return crate::ConfidenceSemantics::None;
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
     }
 }
 
@@ -17774,6 +17897,9 @@ impl SseDecode for crate::OcrQualityThresholds {
         let mut var_minGarbageChars = <i64>::sse_decode(deserializer);
         let mut var_maxFragmentedWordRatio = <f64>::sse_decode(deserializer);
         let mut var_criticalFragmentedWordRatio = <f64>::sse_decode(deserializer);
+        let mut var_maxOcrOutputFragmentedWordRatio = <f64>::sse_decode(deserializer);
+        let mut var_minOcrMeanConfidence = <f64>::sse_decode(deserializer);
+        let mut var_minWordsForOcrOutputCheck = <i64>::sse_decode(deserializer);
         let mut var_minAvgWordLength = <f64>::sse_decode(deserializer);
         let mut var_minWordsForAvgLengthCheck = <i64>::sse_decode(deserializer);
         let mut var_minConsecutiveRepeatRatio = <f64>::sse_decode(deserializer);
@@ -17794,6 +17920,9 @@ impl SseDecode for crate::OcrQualityThresholds {
             min_garbage_chars: var_minGarbageChars,
             max_fragmented_word_ratio: var_maxFragmentedWordRatio,
             critical_fragmented_word_ratio: var_criticalFragmentedWordRatio,
+            max_ocr_output_fragmented_word_ratio: var_maxOcrOutputFragmentedWordRatio,
+            min_ocr_mean_confidence: var_minOcrMeanConfidence,
+            min_words_for_ocr_output_check: var_minWordsForOcrOutputCheck,
             min_avg_word_length: var_minAvgWordLength,
             min_words_for_avg_length_check: var_minWordsForAvgLengthCheck,
             min_consecutive_repeat_ratio: var_minConsecutiveRepeatRatio,
@@ -19426,6 +19555,19 @@ impl SseDecode for crate::PageInfo {
     }
 }
 
+impl SseDecode for crate::PageOrientationHandling {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::PageOrientationHandling::SelfCorrecting,
+            1 => crate::PageOrientationHandling::RecognisesRotatedText,
+            2 => crate::PageOrientationHandling::RequiresUpright,
+            _ => unreachable!("Invalid variant for PageOrientationHandling: {}", inner),
+        };
+    }
+}
+
 impl SseDecode for crate::PageRange {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -19571,6 +19713,18 @@ impl SseDecode for crate::PdfAnnotationType {
     }
 }
 
+impl SseDecode for crate::PdfBackend {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::PdfBackend::PdfOxide,
+            1 => crate::PdfBackend::Pdfium,
+            _ => unreachable!("Invalid variant for PdfBackend: {}", inner),
+        };
+    }
+}
+
 impl SseDecode for crate::PdfConfig {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -19586,6 +19740,7 @@ impl SseDecode for crate::PdfConfig {
         let mut var_ocrInlineImages = <bool>::sse_decode(deserializer);
         let mut var_extractFormFields = <bool>::sse_decode(deserializer);
         let mut var_readingOrder = <bool>::sse_decode(deserializer);
+        let mut var_backend = <crate::PdfBackend>::sse_decode(deserializer);
         return crate::PdfConfig {
             extract_images: var_extractImages,
             extract_tables: var_extractTables,
@@ -19599,6 +19754,7 @@ impl SseDecode for crate::PdfConfig {
             ocr_inline_images: var_ocrInlineImages,
             extract_form_fields: var_extractFormFields,
             reading_order: var_readingOrder,
+            backend: var_backend,
         };
     }
 }
@@ -21713,49 +21869,50 @@ fn pde_ffi_dispatcher_primary_impl(
         268 => wire__crate__find_unmarked_claims_impl(port, ptr, rust_vec_len, data_len),
         #[cfg(feature = "pdf")]
         269 => wire__crate__install_pdf_render_diagnostics_impl(port, ptr, rust_vec_len, data_len),
-        270 => wire__crate__list_document_extractors_impl(port, ptr, rust_vec_len, data_len),
-        271 => wire__crate__list_embedding_backends_impl(port, ptr, rust_vec_len, data_len),
-        272 => wire__crate__list_ocr_backends_impl(port, ptr, rust_vec_len, data_len),
-        273 => wire__crate__list_post_processors_impl(port, ptr, rust_vec_len, data_len),
-        274 => wire__crate__list_renderers_impl(port, ptr, rust_vec_len, data_len),
-        275 => wire__crate__list_reranker_backends_impl(port, ptr, rust_vec_len, data_len),
-        276 => wire__crate__list_supported_formats_impl(port, ptr, rust_vec_len, data_len),
-        277 => wire__crate__list_tokenizer_backends_impl(port, ptr, rust_vec_len, data_len),
-        278 => wire__crate__list_validators_impl(port, ptr, rust_vec_len, data_len),
+        270 => wire__crate__layout_wastes_plain_output_impl(port, ptr, rust_vec_len, data_len),
+        271 => wire__crate__list_document_extractors_impl(port, ptr, rust_vec_len, data_len),
+        272 => wire__crate__list_embedding_backends_impl(port, ptr, rust_vec_len, data_len),
+        273 => wire__crate__list_ocr_backends_impl(port, ptr, rust_vec_len, data_len),
+        274 => wire__crate__list_post_processors_impl(port, ptr, rust_vec_len, data_len),
+        275 => wire__crate__list_renderers_impl(port, ptr, rust_vec_len, data_len),
+        276 => wire__crate__list_reranker_backends_impl(port, ptr, rust_vec_len, data_len),
+        277 => wire__crate__list_supported_formats_impl(port, ptr, rust_vec_len, data_len),
+        278 => wire__crate__list_tokenizer_backends_impl(port, ptr, rust_vec_len, data_len),
+        279 => wire__crate__list_validators_impl(port, ptr, rust_vec_len, data_len),
         #[cfg(feature = "url-ingestion")]
-        279 => wire__crate__map_url_impl(port, ptr, rust_vec_len, data_len),
+        280 => wire__crate__map_url_impl(port, ptr, rust_vec_len, data_len),
         #[cfg(any(
             any(feature = "late-interaction-presets", feature = "late-interaction"),
             feature = "late-interaction-presets"
         ))]
-        280 => wire__crate__max_sim_rank_impl(port, ptr, rust_vec_len, data_len),
+        281 => wire__crate__max_sim_rank_impl(port, ptr, rust_vec_len, data_len),
         #[cfg(any(
             any(feature = "late-interaction-presets", feature = "late-interaction"),
             feature = "late-interaction-presets"
         ))]
-        281 => wire__crate__max_sim_score_impl(port, ptr, rust_vec_len, data_len),
-        282 => wire__crate__register_document_extractor_impl(port, ptr, rust_vec_len, data_len),
-        283 => wire__crate__register_embedding_backend_impl(port, ptr, rust_vec_len, data_len),
-        284 => wire__crate__register_ocr_backend_impl(port, ptr, rust_vec_len, data_len),
-        285 => wire__crate__register_post_processor_impl(port, ptr, rust_vec_len, data_len),
-        286 => wire__crate__register_renderer_impl(port, ptr, rust_vec_len, data_len),
-        287 => wire__crate__register_reranker_backend_impl(port, ptr, rust_vec_len, data_len),
-        288 => wire__crate__register_tokenizer_backend_impl(port, ptr, rust_vec_len, data_len),
-        289 => wire__crate__register_validator_impl(port, ptr, rust_vec_len, data_len),
+        282 => wire__crate__max_sim_score_impl(port, ptr, rust_vec_len, data_len),
+        283 => wire__crate__register_document_extractor_impl(port, ptr, rust_vec_len, data_len),
+        284 => wire__crate__register_embedding_backend_impl(port, ptr, rust_vec_len, data_len),
+        285 => wire__crate__register_ocr_backend_impl(port, ptr, rust_vec_len, data_len),
+        286 => wire__crate__register_post_processor_impl(port, ptr, rust_vec_len, data_len),
+        287 => wire__crate__register_renderer_impl(port, ptr, rust_vec_len, data_len),
+        288 => wire__crate__register_reranker_backend_impl(port, ptr, rust_vec_len, data_len),
+        289 => wire__crate__register_tokenizer_backend_impl(port, ptr, rust_vec_len, data_len),
+        290 => wire__crate__register_validator_impl(port, ptr, rust_vec_len, data_len),
         #[cfg(feature = "pdf")]
-        290 => wire__crate__take_pdf_oxide_render_warnings_impl(port, ptr, rust_vec_len, data_len),
+        291 => wire__crate__take_pdf_oxide_render_warnings_impl(port, ptr, rust_vec_len, data_len),
         #[cfg(feature = "transcription")]
-        291 => wire__crate__timestamp_token_to_ms_impl(port, ptr, rust_vec_len, data_len),
-        292 => wire__crate__unregister_document_extractor_impl(port, ptr, rust_vec_len, data_len),
-        293 => wire__crate__unregister_embedding_backend_impl(port, ptr, rust_vec_len, data_len),
-        294 => wire__crate__unregister_ocr_backend_impl(port, ptr, rust_vec_len, data_len),
-        295 => wire__crate__unregister_post_processor_impl(port, ptr, rust_vec_len, data_len),
-        296 => wire__crate__unregister_renderer_impl(port, ptr, rust_vec_len, data_len),
-        297 => wire__crate__unregister_reranker_backend_impl(port, ptr, rust_vec_len, data_len),
-        298 => wire__crate__unregister_tokenizer_backend_impl(port, ptr, rust_vec_len, data_len),
-        299 => wire__crate__unregister_validator_impl(port, ptr, rust_vec_len, data_len),
+        292 => wire__crate__timestamp_token_to_ms_impl(port, ptr, rust_vec_len, data_len),
+        293 => wire__crate__unregister_document_extractor_impl(port, ptr, rust_vec_len, data_len),
+        294 => wire__crate__unregister_embedding_backend_impl(port, ptr, rust_vec_len, data_len),
+        295 => wire__crate__unregister_ocr_backend_impl(port, ptr, rust_vec_len, data_len),
+        296 => wire__crate__unregister_post_processor_impl(port, ptr, rust_vec_len, data_len),
+        297 => wire__crate__unregister_renderer_impl(port, ptr, rust_vec_len, data_len),
+        298 => wire__crate__unregister_reranker_backend_impl(port, ptr, rust_vec_len, data_len),
+        299 => wire__crate__unregister_tokenizer_backend_impl(port, ptr, rust_vec_len, data_len),
+        300 => wire__crate__unregister_validator_impl(port, ptr, rust_vec_len, data_len),
         #[cfg(feature = "markdown-footnotes")]
-        300 => wire__crate__verify_excerpt_impl(port, ptr, rust_vec_len, data_len),
+        301 => wire__crate__verify_excerpt_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -22957,6 +23114,27 @@ impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::CodeMetadata> {
 impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for FrbWrapper<crate::CodeMetadata> {}
 impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<crate::CodeMetadata>> for crate::CodeMetadata {
     fn into_into_dart(self) -> FrbWrapper<crate::CodeMetadata> {
+        self.into()
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::ConfidenceSemantics> {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self.0 {
+            crate::ConfidenceSemantics::Legibility { scale_max } => {
+                [0.into_dart(), scale_max.into_into_dart().into_dart()].into_dart()
+            }
+            crate::ConfidenceSemantics::Uncalibrated => [1.into_dart()].into_dart(),
+            crate::ConfidenceSemantics::None => [2.into_dart()].into_dart(),
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for FrbWrapper<crate::ConfidenceSemantics> {}
+impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<crate::ConfidenceSemantics>> for crate::ConfidenceSemantics {
+    fn into_into_dart(self) -> FrbWrapper<crate::ConfidenceSemantics> {
         self.into()
     }
 }
@@ -26309,6 +26487,9 @@ impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::OcrQualityThresholds> {
             self.0.min_garbage_chars.into_into_dart().into_dart(),
             self.0.max_fragmented_word_ratio.into_into_dart().into_dart(),
             self.0.critical_fragmented_word_ratio.into_into_dart().into_dart(),
+            self.0.max_ocr_output_fragmented_word_ratio.into_into_dart().into_dart(),
+            self.0.min_ocr_mean_confidence.into_into_dart().into_dart(),
+            self.0.min_words_for_ocr_output_check.into_into_dart().into_dart(),
             self.0.min_avg_word_length.into_into_dart().into_dart(),
             self.0.min_words_for_avg_length_check.into_into_dart().into_dart(),
             self.0.min_consecutive_repeat_ratio.into_into_dart().into_dart(),
@@ -26648,6 +26829,23 @@ impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<crate::PageInfo>> for crate::P
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::PageOrientationHandling> {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self.0 {
+            crate::PageOrientationHandling::SelfCorrecting => 0.into_dart(),
+            crate::PageOrientationHandling::RecognisesRotatedText => 1.into_dart(),
+            crate::PageOrientationHandling::RequiresUpright => 2.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for FrbWrapper<crate::PageOrientationHandling> {}
+impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<crate::PageOrientationHandling>> for crate::PageOrientationHandling {
+    fn into_into_dart(self) -> FrbWrapper<crate::PageOrientationHandling> {
+        self.into()
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::PageRange> {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -26809,6 +27007,22 @@ impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<crate::PdfAnnotationType>> for
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::PdfBackend> {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self.0 {
+            crate::PdfBackend::PdfOxide => 0.into_dart(),
+            crate::PdfBackend::Pdfium => 1.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for FrbWrapper<crate::PdfBackend> {}
+impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<crate::PdfBackend>> for crate::PdfBackend {
+    fn into_into_dart(self) -> FrbWrapper<crate::PdfBackend> {
+        self.into()
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::PdfConfig> {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -26824,6 +27038,7 @@ impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::PdfConfig> {
             self.0.ocr_inline_images.into_into_dart().into_dart(),
             self.0.extract_form_fields.into_into_dart().into_dart(),
             self.0.reading_order.into_into_dart().into_dart(),
+            self.0.backend.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -29780,6 +29995,27 @@ impl SseEncode for crate::CodeMetadata {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <Vec<crate::CodeChunkInfo>>::sse_encode(self.chunks, serializer);
         <Option<crate::CodeDataNode>>::sse_encode(self.data, serializer);
+    }
+}
+
+impl SseEncode for crate::ConfidenceSemantics {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        match self {
+            crate::ConfidenceSemantics::Legibility { scale_max } => {
+                <i32>::sse_encode(0, serializer);
+                <f64>::sse_encode(scale_max, serializer);
+            }
+            crate::ConfidenceSemantics::Uncalibrated => {
+                <i32>::sse_encode(1, serializer);
+            }
+            crate::ConfidenceSemantics::None => {
+                <i32>::sse_encode(2, serializer);
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
     }
 }
 
@@ -33221,6 +33457,9 @@ impl SseEncode for crate::OcrQualityThresholds {
         <i64>::sse_encode(self.min_garbage_chars, serializer);
         <f64>::sse_encode(self.max_fragmented_word_ratio, serializer);
         <f64>::sse_encode(self.critical_fragmented_word_ratio, serializer);
+        <f64>::sse_encode(self.max_ocr_output_fragmented_word_ratio, serializer);
+        <f64>::sse_encode(self.min_ocr_mean_confidence, serializer);
+        <i64>::sse_encode(self.min_words_for_ocr_output_check, serializer);
         <f64>::sse_encode(self.min_avg_word_length, serializer);
         <i64>::sse_encode(self.min_words_for_avg_length_check, serializer);
         <f64>::sse_encode(self.min_consecutive_repeat_ratio, serializer);
@@ -34654,6 +34893,23 @@ impl SseEncode for crate::PageInfo {
     }
 }
 
+impl SseEncode for crate::PageOrientationHandling {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::PageOrientationHandling::SelfCorrecting => 0,
+                crate::PageOrientationHandling::RecognisesRotatedText => 1,
+                crate::PageOrientationHandling::RequiresUpright => 2,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
 impl SseEncode for crate::PageRange {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -34767,6 +35023,22 @@ impl SseEncode for crate::PdfAnnotationType {
     }
 }
 
+impl SseEncode for crate::PdfBackend {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::PdfBackend::PdfOxide => 0,
+                crate::PdfBackend::Pdfium => 1,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
 impl SseEncode for crate::PdfConfig {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -34782,6 +35054,7 @@ impl SseEncode for crate::PdfConfig {
         <bool>::sse_encode(self.ocr_inline_images, serializer);
         <bool>::sse_encode(self.extract_form_fields, serializer);
         <bool>::sse_encode(self.reading_order, serializer);
+        <crate::PdfBackend>::sse_encode(self.backend, serializer);
     }
 }
 

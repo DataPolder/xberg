@@ -9,7 +9,34 @@ import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'lib.freezed.dart';
 
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `ChunkClassificationEnrichmentConfig`, `DocumentExtractorDartCallbacks`, `EmbeddingBackendDartCallbacks`, `OcrBackendDartCallbacks`, `PostProcessorDartCallbacks`, `RendererDartCallbacks`, `RerankerBackendDartCallbacks`, `TokenizerBackendDartCallbacks`, `ValidatorDartCallbacks`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `backend_type`, `can_handle`, `count_tokens`, `dimensions`, `embed`, `emits_structured_markdown`, `estimated_duration_ms`, `extract`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `name`, `name`, `name`, `name`, `name`, `name`, `name`, `name`, `priority`, `priority`, `priority`, `process_document`, `process_image_file`, `process_image`, `process`, `processing_stage`, `render_result`, `rerank`, `should_process`, `should_validate`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `supported_languages`, `supported_mime_types`, `supports_document_processing`, `supports_language`, `supports_table_detection`, `validate`, `version`, `version`, `version`, `version`, `version`, `version`, `version`, `version`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `backend_type`, `can_handle`, `confidence_semantics`, `count_tokens`, `dimensions`, `embed`, `emits_structured_markdown`, `estimated_duration_ms`, `extract`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `name`, `name`, `name`, `name`, `name`, `name`, `name`, `name`, `page_orientation_handling`, `priority`, `priority`, `priority`, `process_document`, `process_image_file`, `process_image`, `process`, `processing_stage`, `render_result`, `rerank`, `should_process`, `should_validate`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `supported_languages`, `supported_mime_types`, `supports_document_processing`, `supports_language`, `supports_table_detection`, `validate`, `version`, `version`, `version`, `version`, `version`, `version`, `version`, `version`
+
+/// Whether enabling layout detection while `output_format` stays `Plain`
+/// wastes the layout pass.
+///
+/// Layout detection exists to feed the structured-reconstruction pipeline that turns
+/// detected regions into headings, lists and tables. At `Plain` no renderer
+/// consumes that structure — the layout model still runs (measured: 20s on tesseract, 202s
+/// on paddle, for a 16-page scan) and every region it detects is discarded. This implements
+/// point 4 of the documented OCR/layout contract: "layout enabled implies output should be
+/// structured, never plain."
+///
+/// This is a pure predicate meant to back a *warning*, not a validation error and not a
+/// coercion: `Plain` stays the default output format and layout stays off by default, so a
+/// caller combining both deliberately is still free to do so. Pass the fully resolved values
+/// (after every override has been applied), not raw CLI flags.
+///
+/// **Returns:**
+///
+/// `true` when layout is enabled and the output format is `Plain` — the
+/// layout work will be computed and its structure discarded.
+Future<bool> layoutWastesPlainOutput({
+  required bool layoutEnabled,
+  required OutputFormat outputFormat,
+}) => RustLib.instance.api.crateLayoutWastesPlainOutput(
+  layoutEnabled: layoutEnabled,
+  outputFormat: outputFormat,
+);
 
 /// Extract content from a single bytes or URI input.
 Future<ExtractionResult> extract({
@@ -230,32 +257,38 @@ Future<List<LateInteractionMatch>> maxSimRank({
 Future<DoctorReport> doctor({required ExtractionConfig config}) =>
     RustLib.instance.api.crateDoctor(config: config);
 
-/// Install `PdfOxideWarningCapture` as the process-wide `log` backend,
-/// exactly once.
+/// Install the glyph-drop capture as the process-wide `tracing`
+/// `Subscriber`, exactly once.
 ///
-/// If another component already installed a `log.Log` implementation (an
-/// application wiring `env_logger`, for instance), `log.set_boxed_logger`
-/// fails and this is a no-op: we do not fight over ownership of the global
-/// logger slot, and we do not touch `log.set_max_level` unless our install
-/// won, so we never silently raise or lower a level someone else configured.
-/// In that case `pdf_oxide`'s glyph-drop records go wherever that other
-/// logger sends them instead of into `take_pdf_oxide_render_warnings`.
-/// **Opt-in.** Nothing calls this automatically, and that is deliberate: xberg
-/// is a library, and `log` has exactly one global backend slot per process. A
-/// library that claims it on its own behalf breaks its embedder — a host that
-/// later calls `env_logger.init()` panics, and until this returns, every
-/// `log` record in the process is routed here rather than wherever the host
-/// intended. That decision belongs to the application, so it is exposed as a
-/// call an application makes knowingly.
+/// **Prefer `glyph_drop_capture_layer` if the application installs a subscriber of its own.**
+/// `tracing` has exactly one global default dispatcher slot per process, and this function
+/// claims it. If something else already holds it — an application wiring
+/// `tracing_subscriber.fmt()...try_init()`, which is what `xberg-cli` does in `main()` —
+/// `set_global_default` fails and this is a no-op, so the engine's glyph-drop records go to
+/// that other subscriber and `take_pdf_oxide_render_warnings` stays empty. This function is
+/// the fallback for embedders that have no subscriber at all; composing the layer is what
+/// works when they do.
 ///
-/// Returns `true` if this call (or an earlier one) installed the capture, and
-/// `false` if some other component already owns the `log` backend — in which
-/// case `pdf_oxide`'s glyph-drop records go to that logger and
-/// `take_pdf_oxide_render_warnings` stays empty.
+/// ★ That distinction is not theoretical, and it does not show up in tests. A test binary
+/// installs no `fmt` subscriber, so the capture always wins the slot there and every test
+/// passes — while the CLI, which claims the slot first, captures nothing. The port that
+/// introduced this function in its `set_global_default`-only form would have gone green on all
+/// three glyph-drop tests with the real CLI path still dead. Warnings arriving in a test are
+/// not evidence that they arrive in production; the contested resource only exists once
+/// something else has claimed it.
 ///
-/// Without this call the #1364 warnings are not produced. The glyph drop
-/// itself is decided inside `pdf_oxide`, which reports it only through
-/// `log.warn!`; there is no return-value channel to read instead.
+/// **Opt-in.** Nothing calls this automatically: a library that seizes the global dispatcher on
+/// its own behalf breaks its embedder, because a host that later calls
+/// `tracing_subscriber.fmt()...init()` panics (`.try_init()` instead returns `Err`). That
+/// decision belongs to the application.
+///
+/// Returns whether the capture is active — `true` if this call installed it, an earlier call
+/// did, or a `glyph_drop_capture_layer` was composed into someone else's stack; `false` if
+/// some other component owns the dispatcher slot and no layer was composed.
+///
+/// Without one of the two opt-ins the #1364 warnings are not produced. The glyph drop itself is
+/// decided inside `pdf_oxide`, which reports it only through `tracing.warn!`; there is no
+/// return-value channel to read instead.
 Future<bool> installPdfRenderDiagnostics() =>
     RustLib.instance.api.crateInstallPdfRenderDiagnostics();
 
@@ -276,7 +309,7 @@ Future<bool> installPdfRenderDiagnostics() =>
 /// As of #340, `crate.extractors.pdf.mod` drains this unconditionally right
 /// after assembling a document's `processing_warnings`, so every PDF
 /// extraction that renders at least one page picks up any captured
-/// glyph-drop warnings for free. ~keep: that drain only ever observes
+/// glyph-drop warnings for free. that drain only ever observes
 /// warnings from render calls that happened on the *same OS thread* before it
 /// ran, because `PDF_OXIDE_PENDING_WARNINGS` is thread-local. OCR page
 /// rendering runs inline on the extracting task's thread, so it is covered.
@@ -1089,6 +1122,8 @@ Future<OcrBackendDartImpl> createOcrBackendDartImpl({
   required FutureOr<bool> Function() supportsTableDetection,
   required FutureOr<bool> Function() supportsDocumentProcessing,
   required FutureOr<bool> Function() emitsStructuredMarkdown,
+  required FutureOr<ConfidenceSemantics> Function() confidenceSemantics,
+  required FutureOr<PageOrientationHandling> Function() pageOrientationHandling,
   required FutureOr<ExtractedDocument> Function(String, OcrConfig)
   processDocument,
 }) => RustLib.instance.api.crateCreateOcrBackendDartImpl(
@@ -1102,6 +1137,8 @@ Future<OcrBackendDartImpl> createOcrBackendDartImpl({
   supportsTableDetection: supportsTableDetection,
   supportsDocumentProcessing: supportsDocumentProcessing,
   emitsStructuredMarkdown: emitsStructuredMarkdown,
+  confidenceSemantics: confidenceSemantics,
+  pageOrientationHandling: pageOrientationHandling,
   processDocument: processDocument,
 );
 
@@ -2886,7 +2923,7 @@ class ChunkingConfig {
   ///
   /// Config-file only: like `RerankerConfig` and the local-ONNX branch of
   /// `embedding`, this has no CLI flag and no environment variable. Only the secret/identity
-  /// fields of LLM-routed configs (model, API key, base URL) get that reach. ~keep
+  /// fields of LLM-routed configs (model, API key, base URL) get that reach.
   final SparseEmbeddingConfig? sparseEmbedding;
 
   /// Optional late-interaction (ColBERT) embedding configuration for chunk embeddings.
@@ -2896,7 +2933,7 @@ class ChunkingConfig {
   /// `late-interaction` feature; without it, a warning is emitted and no
   /// late-interaction vectors are attached.
   ///
-  /// Config-file only, for the same reason as `sparse_embedding` above. ~keep
+  /// Config-file only, for the same reason as `sparse_embedding` above.
   final LateInteractionConfig? lateInteraction;
 
   /// Use a preset configuration (overrides individual settings if provided).
@@ -3395,6 +3432,25 @@ class CodeMetadata {
           data == other.data;
 }
 
+@freezed
+sealed class ConfidenceSemantics with _$ConfidenceSemantics {
+  const ConfidenceSemantics._();
+
+  /// Validated to track legibility on a known scale — usable as an absolute quality gate.
+  const factory ConfidenceSemantics.legibility({
+    /// The upper bound of the reported confidence scale (e.g. `100.0` for Tesseract).
+    required double scaleMax,
+  }) = ConfidenceSemantics_Legibility;
+
+  /// A number is reported, but it is not validated to correlate with legibility.
+  /// Never gate on it.
+  const factory ConfidenceSemantics.uncalibrated() =
+      ConfidenceSemantics_Uncalibrated;
+
+  /// No page-level confidence is reported at all.
+  const factory ConfidenceSemantics.none() = ConfidenceSemantics_None;
+}
+
 /// Content extraction and conversion configuration.
 ///
 /// Controls how HTML is converted to the output format. Uses
@@ -3434,7 +3490,7 @@ class ContentConfig {
   /// tracking pixels, GTM iframes) is meant for browsers with JavaScript
   /// disabled, not for a markdown reader, and `strip_tags` cannot drop it —
   /// on `preprocessing_preset: "standard"` (crawlberg's only path) it only
-  /// removes the wrapper and still renders the children. ~keep
+  /// removes the wrapper and still renders the children.
   ///
   /// Example: `[".cookie-banner", "#ad-container", "[role='complementary']"]`
   final List<String> excludeSelectors;
@@ -4129,6 +4185,11 @@ class CrawlConfig {
   final AuthConfig? auth;
 
   /// Maximum response body size in bytes.
+  ///
+  /// `None` does not mean unbounded: an unset cap falls back to a 100 MiB safety
+  /// ceiling, because HTTP responses are decompressed while being read and a few
+  /// hundred compressed bytes can otherwise expand to gigabytes in memory. To read
+  /// bodies larger than that, set this explicitly.
   final PlatformInt64? maxBodySize;
 
   /// CSS selectors for tags to remove from HTML before processing.
@@ -6089,7 +6150,7 @@ sealed class EmbeddingModelType with _$EmbeddingModelType {
     ///
     /// Boxed because `LlmConfig` carries liter-llm's full configuration surface and is
     /// an order of magnitude larger than the other variants, which would otherwise make
-    /// every `Preset`/`Custom` value pay for it. ~keep
+    /// every `Preset`/`Custom` value pay for it.
     required LlmConfig llm,
   }) = EmbeddingModelType_Llm;
 
@@ -10607,7 +10668,7 @@ class LlmConfig {
   /// of `EmbeddingModelType::Llm` and `RerankerModelType::Llm`, whose other variants
   /// are tens of bytes. Inlining this and the two sub-configs below pushed that
   /// variant to 480 bytes and tripped `clippy::large_enum_variant` on the
-  /// `--features full` leg. ~keep
+  /// `--features full` leg.
   final LlmCacheConfig? cache;
 
   /// Budget enforcement configuration.
@@ -11716,10 +11777,16 @@ class OcrConfig {
 
   /// Enable automatic page rotation based on orientation detection.
   ///
-  /// When enabled, uses Tesseract's `DetectOrientationScript()` to detect
-  /// page orientation (0/90/180/270 degrees) before OCR. If the page is
-  /// rotated with high confidence, the image is corrected before recognition.
-  /// This is critical for handling rotated scanned documents.
+  /// When enabled, page orientation (0/90/180/270 degrees) is detected with an
+  /// ONNX PP-LCNet document-orientation classifier — NOT Tesseract's own
+  /// `DetectOrientationScript()`/OSD, which this crate does not call. If the
+  /// page is rotated with high confidence, the image is corrected before
+  /// recognition. Applies to every OCR backend; the tesseract-only
+  /// `TesseractConfig::preprocessing` field of the same name is OR'd in on
+  /// top of this one and affects tesseract alone.
+  ///
+  /// Independent of a page's PDF `/Rotate` entry, which is handled separately
+  /// on every OCR route regardless of this setting.
   final bool autoRotate;
 
   /// Ergonomic VLM fallback policy.
@@ -12214,6 +12281,47 @@ class OcrQualityThresholds {
   /// Normal English text has ~20-30% short words. 80%+ is definitive garbage.
   final double criticalFragmentedWordRatio;
 
+  /// Maximum fraction of short (1-2 char) words an *OCR result* may carry before the page
+  /// is rejected as recognition noise rather than accepted as content.
+  ///
+  /// This is a different decision, and a different operating point, from
+  /// [`Self::max_fragmented_word_ratio`] / [`Self::critical_fragmented_word_ratio`]: those
+  /// ask "is the native text bad enough that we should OCR this page?", and are tuned to
+  /// only fire on text that is already definitively broken (0.6 / 0.8). Here we are judging
+  /// what OCR *produced*, where the failure mode is an engine run over line art — a scanned
+  /// plat, an engineering drawing, a signature flourish — returning confident-looking
+  /// strings that are not words.
+  ///
+  /// Measured over the 16 pages of a recorded municipal ordinance (13 prose pages, 3 scanned
+  /// survey drawings): prose ran 0.04-0.28, the drawings 0.42-0.47. The default sits in that
+  /// gap with margin on both sides. Raise it to keep more marginal text, lower it to be
+  /// stricter — but note the cost is asymmetric, since a false positive deletes real content
+  /// while a false negative only leaves noise in place.
+  final double maxOcrOutputFragmentedWordRatio;
+
+  /// Minimum mean OCR confidence (0-100) a page must reach for its text to be accepted.
+  ///
+  /// This is the engine's own uncertainty about what it read, and it is a far sharper
+  /// instrument than any statistic derived from the output text. Measured per page over a
+  /// recorded municipal ordinance (10 prose pages, 6 scanned survey/architectural drawings)
+  /// with Tesseract 5.5.3:
+  ///
+  ///     prose      86.3 - 95.3
+  ///     drawings   18.5 - 64.3
+  ///
+  /// The default sits in that gap with ~11 points of margin on each side. Compare the
+  /// short-word ratio, which separated the same two groups by 0.09 on a 0-1 scale.
+  ///
+  /// A backend that reports no confidence (no `mean_text_conf` in its result metadata)
+  /// skips this check entirely and falls back to
+  /// [`Self::max_ocr_output_fragmented_word_ratio`]. Set to 0.0 to disable.
+  final double minOcrMeanConfidence;
+
+  /// Minimum word count before [`Self::max_ocr_output_fragmented_word_ratio`] may reject a
+  /// page. Short pages (a signature block, an exhibit title) are legitimately dominated by
+  /// short words, so the ratio is not meaningful on them and the veto stays disabled.
+  final PlatformInt64 minWordsForOcrOutputCheck;
+
   /// Minimum average word length. Below this with enough words indicates garbled extraction.
   final double minAvgWordLength;
 
@@ -12272,6 +12380,9 @@ class OcrQualityThresholds {
     required this.minGarbageChars,
     required this.maxFragmentedWordRatio,
     required this.criticalFragmentedWordRatio,
+    required this.maxOcrOutputFragmentedWordRatio,
+    required this.minOcrMeanConfidence,
+    required this.minWordsForOcrOutputCheck,
     required this.minAvgWordLength,
     required this.minWordsForAvgLengthCheck,
     required this.minConsecutiveRepeatRatio,
@@ -12295,6 +12406,9 @@ class OcrQualityThresholds {
       minGarbageChars.hashCode ^
       maxFragmentedWordRatio.hashCode ^
       criticalFragmentedWordRatio.hashCode ^
+      maxOcrOutputFragmentedWordRatio.hashCode ^
+      minOcrMeanConfidence.hashCode ^
+      minWordsForOcrOutputCheck.hashCode ^
       minAvgWordLength.hashCode ^
       minWordsForAvgLengthCheck.hashCode ^
       minConsecutiveRepeatRatio.hashCode ^
@@ -12320,6 +12434,10 @@ class OcrQualityThresholds {
           minGarbageChars == other.minGarbageChars &&
           maxFragmentedWordRatio == other.maxFragmentedWordRatio &&
           criticalFragmentedWordRatio == other.criticalFragmentedWordRatio &&
+          maxOcrOutputFragmentedWordRatio ==
+              other.maxOcrOutputFragmentedWordRatio &&
+          minOcrMeanConfidence == other.minOcrMeanConfidence &&
+          minWordsForOcrOutputCheck == other.minWordsForOcrOutputCheck &&
           minAvgWordLength == other.minAvgWordLength &&
           minWordsForAvgLengthCheck == other.minWordsForAvgLengthCheck &&
           minConsecutiveRepeatRatio == other.minConsecutiveRepeatRatio &&
@@ -12598,7 +12716,9 @@ enum PaddleLanguage {
 /// let config = PaddleOcrConfig::new("ch")
 ///     .with_cache_dir("/path/to/cache".into());
 ///
-/// // Enable table detection
+/// // Table detection is off by default (unlike `TesseractConfig`); PaddleOCR has no
+/// // per-word table-candidate signal, so unfiltered clustering over-fabricates tables
+/// // on ordinary prose. Enable it explicitly once you've validated it for your corpus.
 /// let config = PaddleOcrConfig::new("en")
 ///     .with_table_detection(true);
 /// ```
@@ -12616,7 +12736,21 @@ class PaddleOcrConfig {
   /// Can misfire on short text regions, rotating crops incorrectly before recognition.
   final bool useAngleCls;
 
-  /// Enable table structure detection (default: false)
+  /// Enable table structure detection (default: **false**, unlike `TesseractConfig`
+  /// which defaults to `true` — see `crate::ocr::types::TesseractConfig`).
+  ///
+  /// PaddleOCR has no per-word table-candidate confidence carve-out the way Tesseract's
+  /// TSV does (every recognised word is a clustering candidate), so unfiltered clustering
+  /// over-fabricates tables on ordinary prose. This stays off until it clears a
+  /// cell-scored accuracy measurement (see the pinning test at the bottom of this file).
+  /// Consequence for callers: switching an existing config from the Tesseract backend to
+  /// PaddleOCR with stock defaults silently produces **no** OCR tables — enable this
+  /// explicitly if you need them.
+  ///
+  /// When enabled, this only clusters and reconstructs a grid from word boxes PaddleOCR
+  /// has already produced (see `crate::paddle_ocr::backend::PaddleOcrBackend::process_image`)
+  /// — it does not run any additional model inference, so the added per-page cost is the
+  /// CPU-only clustering/reconstruction pass, not another ONNX call.
   final bool enableTableDetection;
 
   /// Database threshold for text detection (default: 0.3)
@@ -13084,6 +13218,68 @@ class PageInfo {
           hasVectorGraphics == other.hasVectorGraphics;
 }
 
+/// How a backend copes with a page raster whose text is not upright.
+///
+/// Rotated-page handling is a backend capability, not a universal guarantee. An A/B run this
+/// session against `/Rotate 270` scanned pages showed the three handled cases genuinely differ:
+/// Tesseract reconstructs correct reading order on a sideways raster outright; PaddleOCR
+/// recognises the rotated text correctly (it warps each detected quad upright before running
+/// recognition) but leaves its block list in raw raster `(y, x)` order, so the caller must
+/// reorder; sceptre produces character garbage on the same sideways raster and only reads
+/// correctly once the page is rendered upright first. A caller that skips an upright-render step
+/// for a backend that actually needs one gets silent garbage, not an error.
+///
+/// # Only one variant is discriminated (#657)
+///
+/// Read this before "simplifying" the type. There is exactly one decision point in the
+/// codebase that inspects this value: `upright_raster_for_backend`
+/// (`crate::extractors::pdf::ocr`), which tests `orientation_handling != RequiresUpright` and
+/// otherwise does nothing. Every other mention forwards the value to that test. So, *to that
+/// codepath*, `SelfCorrecting` and `RecognisesRotatedText` are behaviourally identical — the
+/// enum is a boolean at the point of use, and the three variants describe measured backend
+/// behaviour rather than three dispatch paths.
+///
+/// `RecognisesRotatedText`'s actual remedy is not this enum. The block-order fix is the
+/// `backend_options["page_rotation_degrees"]` hint injected by
+/// `ocr_config_with_page_rotation_hint` (`crate::extractors::pdf::ocr`) **unconditionally, for
+/// every backend**, which `PaddleOcrBackend::process_image` reads back
+/// (`page_rotation_degrees_from_backend_options` -> `residual_rotation_for_reorder` ->
+/// `reorder_blocks_for_page_rotation`, `crate::paddle_ocr::backend`) and applies internally.
+/// Declaring `RecognisesRotatedText` therefore changes nothing on its own; a backend in that
+/// class must also read the hint. Conversely, gating that hint on this enum would remove a
+/// field from Tesseract's `OcrConfig` and hence from the OCR cache key
+/// (`hash(image + language + config)`), invalidating every cached page — do not do it without
+/// its own A/B.
+///
+/// # PDF-route-only
+///
+/// Only the PDF OCR routes call `OcrBackend::page_orientation_handling` (the `--force-ocr`
+/// route via `extract_with_ocr` and the scanned-pages route via `extract_mixed_ocr_native`).
+/// The raw-image route (`crate::extractors::image`) never calls it: there is no `/Rotate` to
+/// consult, and orientation there is handled by the PP-LCNet document-orientation classifier
+/// (`crate::doc_orientation`) gated on `OcrConfig::auto_rotate`.
+///
+/// # Cost of the default
+///
+/// The trait default is `RequiresUpright` (deliberately the least capable option, see
+/// [`OcrBackend::page_orientation_handling`]). A backend that does not declare therefore pays,
+/// on every page with `/Rotate != 0`, a re-encode plus rotation of the raster in
+/// `upright_raster_for_backend` and a bounding-box round-trip back through
+/// `undo_upright_raster_correction`. That is the safe direction to be wrong in, but it is not
+/// free, and for a backend that never got measured it is not known to be necessary either.
+enum PageOrientationHandling {
+  /// Reconstructs reading order regardless of page rotation — safe to hand a
+  /// raster in any orientation.
+  selfCorrecting,
+
+  /// Recognises rotated text correctly but emits blocks in raw raster order,
+  /// so the caller must reorder.
+  recognisesRotatedText,
+
+  /// Requires an upright raster; rotated text produces garbage.
+  requiresUpright,
+}
+
 /// Page range for a chunk (0-indexed, inclusive).
 class PageRange {
   /// Start page (0-indexed, inclusive).
@@ -13418,6 +13614,24 @@ enum PdfAnnotationType {
   other,
 }
 
+/// PDF extraction backend selection.
+///
+/// Controls which engine parses and renders PDF documents. Wire format is
+/// snake_case in all serializers (JSON, TOML, YAML). Defaults to
+/// [`PdfBackend::PdfOxide`] -- selecting anything else never changes behavior
+/// for a caller who does not opt in.
+enum PdfBackend {
+  /// pdf_oxide (default) -- the pure-Rust PDF engine xberg ships today.
+  pdfOxide,
+
+  /// pdfium -- Google's PDFium engine, gated behind the `pdf-pdfium` Cargo
+  /// feature. Selection only: no extraction implementation exists yet
+  /// (issue #700 adds the selection level, not the engine). A build
+  /// without the `pdf-pdfium` feature must reject this at the CLI
+  /// validation layer rather than silently falling back to `PdfOxide`.
+  pdfium,
+}
+
 /// PDF-specific configuration.
 class PdfConfig {
   /// Extract images from PDF
@@ -13494,6 +13708,14 @@ class PdfConfig {
   /// `Auto` alone does not turn reordering on. Defaults to `false`.
   final bool readingOrder;
 
+  /// Which engine parses and renders this PDF.
+  ///
+  /// Defaults to [`PdfBackend::PdfOxide`] -- the only backend with an
+  /// extraction implementation today. Selecting [`PdfBackend::Pdfium`]
+  /// requires the `pdf-pdfium` feature and is rejected otherwise; see
+  /// [`PdfBackend`].
+  final PdfBackend backend;
+
   const PdfConfig({
     required this.extractImages,
     required this.extractTables,
@@ -13507,6 +13729,7 @@ class PdfConfig {
     required this.ocrInlineImages,
     required this.extractFormFields,
     required this.readingOrder,
+    required this.backend,
   });
 
   @override
@@ -13522,7 +13745,8 @@ class PdfConfig {
       allowSingleColumnTables.hashCode ^
       ocrInlineImages.hashCode ^
       extractFormFields.hashCode ^
-      readingOrder.hashCode;
+      readingOrder.hashCode ^
+      backend.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -13540,7 +13764,8 @@ class PdfConfig {
           allowSingleColumnTables == other.allowSingleColumnTables &&
           ocrInlineImages == other.ocrInlineImages &&
           extractFormFields == other.extractFormFields &&
-          readingOrder == other.readingOrder;
+          readingOrder == other.readingOrder &&
+          backend == other.backend;
 }
 
 /// A form field extracted from a PDF's AcroForm or XFA structure.
@@ -15141,7 +15366,7 @@ sealed class RerankerModelType with _$RerankerModelType {
     /// LLM provider configuration specifying the model and API credentials.
     ///
     /// Boxed for the same reason as `EmbeddingModelType::Llm` -- kept in step so the two
-    /// parallel enums present one shape to the generated bindings. ~keep
+    /// parallel enums present one shape to the generated bindings.
     required LlmConfig llm,
   }) = RerankerModelType_Llm;
 
@@ -16054,8 +16279,26 @@ class Table {
   /// Page number where the table was found (1-indexed)
   final PlatformInt64 pageNumber;
 
-  /// Bounding box of the table on the page (PDF coordinates: x0=left, y0=bottom, x1=right, y1=top).
-  /// Only populated for PDF-extracted tables when position data is available.
+  /// Bounding box of the table's position. Only populated when position data is
+  /// available from the producing extractor.
+  ///
+  /// The coordinate space depends on how the table was produced, and callers must
+  /// know which route produced a given `Table` before interpreting this field:
+  ///
+  /// - Tables extracted from a PDF's native content, and tables recognized on a
+  ///   scanned PDF page that went through xberg's OCR pipeline (`--force-ocr` /
+  ///   `--ocr-scanned-pages`), are in **PDF points with a bottom-left origin**
+  ///   (x0=left, y0=bottom, x1=right, y1=top; y increases upward). For the OCR
+  ///   case, the pipeline rescales the backend's raw pixel output into this space
+  ///   before it reaches `Table::bounding_box` — see
+  ///   `rescale_ocr_bboxes_to_page_points` in `extractors::pdf::ocr`.
+  /// - Tables detected by OCR on a standalone image with no backing PDF page (for
+  ///   example extracting a bare PNG/JPEG/TIFF) are in **raster pixel coordinates
+  ///   with a top-left origin** (x0=left, y0=top, x1=right, y1=bottom; y increases
+  ///   downward) — the same convention the OCR backend (Tesseract, PaddleOCR,
+  ///   candle-based backends) or the layout detector reported them in. There is no
+  ///   PDF page geometry to rescale into for this case, so the raw pixel box is
+  ///   passed through unchanged.
   final BoundingBox? boundingBox;
 
   /// Stable identifier shared by every `tables[]` entry that represents a
@@ -17360,7 +17603,9 @@ sealed class XbergError with _$XbergError {
     required PlatformInt64 limitMs,
   }) = XbergError_Timeout;
 
-  /// The extraction was cancelled via a `CancellationToken`.
+  /// The extraction was cancelled. Reachable today only via the REST async-jobs API
+  /// (`DELETE /jobs/{id}`); no binding exposes an in-process way to cancel an
+  /// extraction.
   const factory XbergError.cancelled() = XbergError_Cancelled;
 
   /// A security policy was violated (e.g. zip bomb, oversized archive).

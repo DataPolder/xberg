@@ -342,7 +342,11 @@ impl DropScoreDiscardStats {
     /// "no discards to report" reading, not a measured score of zero).
     fn mean(&self) -> f64 {
         let scored_count = self.scored_count();
-        if scored_count == 0 { 0.0 } else { self.sum / scored_count as f64 }
+        if scored_count == 0 {
+            0.0
+        } else {
+            self.sum / scored_count as f64
+        }
     }
 }
 
@@ -393,7 +397,11 @@ impl BoxScoreSummary {
     /// Mean of recorded, non-NaN scores; `0.0` when nothing has been recorded (a "no data"
     /// reading, not a measured score of zero).
     fn mean(&self) -> f64 {
-        if self.count == 0 { 0.0 } else { self.sum / self.count as f64 }
+        if self.count == 0 {
+            0.0
+        } else {
+            self.sum / self.count as f64
+        }
     }
 }
 
@@ -820,7 +828,12 @@ impl PaddleOcrBackend {
             plugin_name: "paddle-ocr".to_string(),
         })??;
 
-        Self::reorder_blocks_for_page_rotation(&mut text_blocks, page_rotation_degrees, processed_width, processed_height);
+        Self::reorder_blocks_for_page_rotation(
+            &mut text_blocks,
+            page_rotation_degrees,
+            processed_width,
+            processed_height,
+        );
         let vertical_cjk = Self::sort_vertical_cjk_blocks(&mut text_blocks, language);
 
         let mut line_elements = Vec::with_capacity(text_blocks.len());
@@ -968,7 +981,13 @@ impl PaddleOcrBackend {
     /// applies the same inverse quarter-turn arithmetic used elsewhere in the OCR
     /// pipeline (`extractors::pdf::ocr::inverse_rotate_ocr_point`) to undo it,
     /// without touching any stored bbox — only used to compute a sort key.
-    fn reading_order_point(x: f32, y: f32, correction_degrees: u32, raster_width: f32, raster_height: f32) -> (f32, f32) {
+    fn reading_order_point(
+        x: f32,
+        y: f32,
+        correction_degrees: u32,
+        raster_width: f32,
+        raster_height: f32,
+    ) -> (f32, f32) {
         match correction_degrees {
             90 => (y, raster_height - x),
             180 => (raster_width - x, raster_height - y),
@@ -1387,11 +1406,12 @@ impl OcrBackend for PaddleOcrBackend {
         //
         // A different signal is needed. The most promising is what `drop_score` (default 0.5)
         // DISCARDS above, since the surviving detections' mean cannot see it.
-        let recognition_confidences: Vec<f64> =
-            line_elements.iter().map(|element| element.confidence.recognition).collect();
+        let recognition_confidences: Vec<f64> = line_elements
+            .iter()
+            .map(|element| element.confidence.recognition)
+            .collect();
         if !recognition_confidences.is_empty() {
-            let observed =
-                recognition_confidences.iter().sum::<f64>() / recognition_confidences.len() as f64;
+            let observed = recognition_confidences.iter().sum::<f64>() / recognition_confidences.len() as f64;
             let min = recognition_confidences.iter().copied().fold(f64::INFINITY, f64::min);
             tracing::debug!(
                 target: "xberg::paddle::confidence",
@@ -1437,12 +1457,9 @@ impl OcrBackend for PaddleOcrBackend {
                 ie.ocr_confidence = Some(elem.confidence.clone());
                 ie.ocr_geometry = Some(elem.geometry.clone());
                 ie.attributes = Some(
-                    [(
-                        crate::ocr::hocr_parser::HOCR_BLOCK_ID_ATTRIBUTE.to_string(),
-                        block_id,
-                    )]
-                    .into_iter()
-                    .collect(),
+                    [(crate::ocr::hocr_parser::HOCR_BLOCK_ID_ATTRIBUTE.to_string(), block_id)]
+                        .into_iter()
+                        .collect(),
                 );
                 doc.push_element(ie);
             }
@@ -1990,7 +2007,11 @@ mod tests {
         PaddleOcrBackend::reorder_blocks_for_page_rotation(&mut blocks, 270, 900, 1000);
 
         let order: Vec<&str> = blocks.iter().map(|block| block.block.text.as_str()).collect();
-        assert_eq!(order, ["line1", "line2", "line3", "line4"], "reading order must be monotonic");
+        assert_eq!(
+            order,
+            ["line1", "line2", "line3", "line4"],
+            "reading order must be monotonic"
+        );
     }
 
     /// #640 — an unrotated page (`page_rotation_degrees == 0`, the overwhelmingly
@@ -2022,16 +2043,25 @@ mod tests {
             backend_options: Some(serde_json::json!({"page_rotation_degrees": 270})),
             ..Default::default()
         };
-        assert_eq!(PaddleOcrBackend::page_rotation_degrees_from_backend_options(&with_hint), 270);
+        assert_eq!(
+            PaddleOcrBackend::page_rotation_degrees_from_backend_options(&with_hint),
+            270
+        );
 
         let without_hint = OcrConfig::default();
-        assert_eq!(PaddleOcrBackend::page_rotation_degrees_from_backend_options(&without_hint), 0);
+        assert_eq!(
+            PaddleOcrBackend::page_rotation_degrees_from_backend_options(&without_hint),
+            0
+        );
 
         let non_numeric = OcrConfig {
             backend_options: Some(serde_json::json!({"page_rotation_degrees": "sideways"})),
             ..Default::default()
         };
-        assert_eq!(PaddleOcrBackend::page_rotation_degrees_from_backend_options(&non_numeric), 0);
+        assert_eq!(
+            PaddleOcrBackend::page_rotation_degrees_from_backend_options(&non_numeric),
+            0
+        );
     }
 
     /// The defect this guards: `reorder_blocks_for_page_rotation`'s premise is that its
@@ -2543,7 +2573,11 @@ mod tests {
 
         let built = PaddleOcrBackend::build_ocr_tables_from_words(&words);
 
-        assert_eq!(built.tables.len(), 1, "the 3x2 grid should be detected as exactly one table");
+        assert_eq!(
+            built.tables.len(),
+            1,
+            "the 3x2 grid should be detected as exactly one table"
+        );
         let table = &built.tables[0];
         assert_eq!(
             table.bounding_box,
@@ -2643,7 +2677,11 @@ mod tests {
 
         let cells = reconstruct_table(&regions[0], 20, 0.5);
         assert_eq!(cells.len(), 2, "both shared rows should be reconstructed");
-        assert_eq!(cells[0].len(), 4, "all four columns from both sub-tables should be detected");
+        assert_eq!(
+            cells[0].len(),
+            4,
+            "all four columns from both sub-tables should be detected"
+        );
     }
 
     /// A page-scale defect test: two real tables of *differing* shapes (2 cols vs 3 cols), far
@@ -2968,7 +3006,11 @@ mod tests {
         // report described (many columns, mostly-empty cells) -- confirming this fixture
         // reproduces the defect rather than accidentally sidestepping it.
         let regions = crate::table_core::cluster_words_into_table_regions(&words);
-        assert_eq!(regions.len(), 1, "a page of continuous prose has no gap wide enough to split");
+        assert_eq!(
+            regions.len(),
+            1,
+            "a page of continuous prose has no gap wide enough to split"
+        );
         let raw = reconstruct_table(&regions[0], TABLE_COLUMN_ALIGNMENT_THRESHOLD_PX, 0.5);
         assert!(
             raw.first().is_some_and(|row| row.len() >= 20),

@@ -711,14 +711,16 @@ fn parse_paragraph(
         attrs.insert(HOCR_BASELINE_CONST_ATTRIBUTE.to_string(), avg_const.to_string());
     }
     if any_line_font_size {
-        elem.attributes
-            .get_or_insert_with(Default::default)
-            .insert(HOCR_LINE_FONT_SIZES_ATTRIBUTE.to_string(), join_per_line_values(&line_font_sizes));
+        elem.attributes.get_or_insert_with(Default::default).insert(
+            HOCR_LINE_FONT_SIZES_ATTRIBUTE.to_string(),
+            join_per_line_values(&line_font_sizes),
+        );
     }
     if any_line_x_height {
-        elem.attributes
-            .get_or_insert_with(Default::default)
-            .insert(HOCR_LINE_X_HEIGHTS_ATTRIBUTE.to_string(), join_per_line_values(&line_x_heights));
+        elem.attributes.get_or_insert_with(Default::default).insert(
+            HOCR_LINE_X_HEIGHTS_ATTRIBUTE.to_string(),
+            join_per_line_values(&line_x_heights),
+        );
     }
     {
         let attrs = elem.attributes.get_or_insert_with(Default::default);

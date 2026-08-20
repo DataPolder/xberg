@@ -1418,8 +1418,7 @@ fn reconstruct_region_table_with_column_gap(
     // separate `detect_columns(region, col_gap)` no longer agrees with the grid's column
     // count — and `repair_split_numeric_track` fails safe on a count mismatch, which would
     // have silently switched the repair off rather than reporting anything (#688).
-    let (mut grid, mut column_positions) =
-        crate::table_core::reconstruct_table_with_columns(region, col_gap, 0.5);
+    let (mut grid, mut column_positions) = crate::table_core::reconstruct_table_with_columns(region, col_gap, 0.5);
     // Takes `column_positions` by &mut so a successful repair drops the merged boundary from
     // BOTH: the repair collapses two grid columns into one, and a stale extra position would
     // leave `grid` one column narrower than `column_positions` for every consumer below —

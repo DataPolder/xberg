@@ -21,6 +21,7 @@ defmodule Xberg.LayoutStrategy do
   @doc "Run layout detection unconditionally on every page."
   @spec always() :: t()
   def always, do: @always
+
   @doc "Pre-screen each page with cheap geometry signals and run the model only on pages likely to benefit (multi-column, table-bearing, figure-heavy, form-like, or rotated pages)."
   @spec auto() :: t()
   def auto, do: @auto

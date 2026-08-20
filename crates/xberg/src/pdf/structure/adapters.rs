@@ -1373,7 +1373,9 @@ const DETACHED_MARKER_RUN_MIN_LENGTH: usize = 2;
 /// item in the structure-tree route (e.g. a bare "-" that IS the whole item) --
 /// a real regression risk in code under separate evaluation that this task does
 /// not touch. The body-side test (`pipeline::accepts_detached_list_marker`) has no
-/// such conflict and is reused unchanged.
+/// such conflict and is reused, given `page_rotation_degrees` (the page's PDF
+/// `/Rotate`) so it compares geometry in the OCR-corrected frame (#760) instead
+/// of the native one -- see `pipeline::DetachedMarkerFrame`.
 ///
 /// Runs directly on the per-page paragraphs `ocr_doc_to_layout_paragraphs`
 /// produces, inside `extractors::pdf::ocr::assemble_ocr_page_paragraphs`, right
@@ -1393,11 +1395,12 @@ const DETACHED_MARKER_RUN_MIN_LENGTH: usize = 2;
 /// documents as a real production bug for a sibling code path. Space-joining every
 /// line's segment text mirrors that existing marker-led convention instead.
 #[cfg(all(feature = "ocr", feature = "layout-detection"))]
-pub(crate) fn reattach_ocr_layout_list_markers(paragraphs: &mut Vec<types::PdfParagraph>) {
+pub(crate) fn reattach_ocr_layout_list_markers(paragraphs: &mut Vec<types::PdfParagraph>, page_rotation_degrees: u32) {
     if !REATTACH_OCR_LAYOUT_LIST_MARKERS || paragraphs.len() < 2 {
         return;
     }
 
+    let frame = super::pipeline::DetachedMarkerFrame::OcrOnPage(page_rotation_degrees);
     let mut consumed = vec![false; paragraphs.len()];
     let mut pairs: Vec<(usize, usize)> = Vec::new();
 
@@ -1410,7 +1413,8 @@ pub(crate) fn reattach_ocr_layout_list_markers(paragraphs: &mut Vec<types::PdfPa
         };
         let limit = (marker_index + 1 + super::pipeline::DETACHED_MARKER_MAX_LOOKAHEAD).min(paragraphs.len());
         let body_index = (marker_index + 1..limit).find(|&candidate| {
-            !consumed[candidate] && super::pipeline::accepts_detached_list_marker(&paragraphs[candidate], &marker)
+            !consumed[candidate]
+                && super::pipeline::accepts_detached_list_marker(&paragraphs[candidate], &marker, frame)
         });
         let Some(body_index) = body_index else {
             continue;
@@ -1560,14 +1564,20 @@ pub(crate) fn reattach_ocr_layout_list_markers(paragraphs: &mut Vec<types::PdfPa
 /// belongs to. (#729)
 ///
 /// Delegates to the native pipeline's own
-/// [`super::pipeline::reattach_detached_list_markers`] unchanged: that function's
-/// own doc comment already states its geometry test is expressed relative to font
-/// size specifically so it "behaves identically" on OCR's raster-derived paragraph
-/// geometry and native PDF points, but nothing on any OCR call path actually
-/// invoked it before this -- its only real-world reachability from OCR was through
-/// `heuristically_restructured_ocr_pages`, whose document-wide "already structured"
-/// gate is tripped by the very ML classifications that make list-marker recovery
-/// necessary in the first place, so in practice it ran natively only.
+/// [`super::pipeline::reattach_detached_list_markers`], passing
+/// [`super::pipeline::DetachedMarkerFrame::OcrOnPage`] with this page's PDF
+/// `/Rotate` value (#760): that function's own geometry test is expressed
+/// relative to font size specifically so it "behaves identically" on OCR's
+/// raster-derived paragraph geometry and native PDF points, but on a *rotated*
+/// OCR page the raw baseline/advance geometry sits in the raster frame, not the
+/// upright one, and OCR segments cannot carry the correction on
+/// `rotation_degrees` the way native rotated text does -- see
+/// `DetachedMarkerFrame`'s doc comment for why. Nothing on any OCR call path
+/// actually invoked this function before #729 -- its only real-world
+/// reachability from OCR was through `heuristically_restructured_ocr_pages`,
+/// whose document-wide "already structured" gate is tripped by the very ML
+/// classifications that make list-marker recovery necessary in the first place,
+/// so in practice it ran natively only.
 ///
 /// This is the mirror image of [`reattach_ocr_layout_list_markers`], not a
 /// duplicate of it. That function's marker-side test (`ocr_detached_list_marker`)
@@ -1589,8 +1599,14 @@ pub(crate) fn reattach_ocr_layout_list_markers(paragraphs: &mut Vec<types::PdfPa
 /// heading detection: callers run it entirely outside that gate, as a fallback
 /// pass alongside `apply_ocr_text_list_fallback`, never before it.
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
-pub(crate) fn reattach_detached_ocr_list_markers(paragraphs: &mut Vec<types::PdfParagraph>) {
-    super::pipeline::reattach_detached_list_markers(paragraphs);
+pub(crate) fn reattach_detached_ocr_list_markers(
+    paragraphs: &mut Vec<types::PdfParagraph>,
+    page_rotation_degrees: u32,
+) {
+    super::pipeline::reattach_detached_list_markers(
+        paragraphs,
+        super::pipeline::DetachedMarkerFrame::OcrOnPage(page_rotation_degrees),
+    );
 }
 
 /// The lone segment of an OCR layout-route paragraph that is nothing but a list
@@ -3284,7 +3300,7 @@ mod tests {
         let body = list_test_paragraph("Overview of the setback requirements", (35.0, 780.0, 500.0, 800.0));
 
         let mut paragraphs = vec![marker, body];
-        reattach_ocr_layout_list_markers(&mut paragraphs);
+        reattach_ocr_layout_list_markers(&mut paragraphs, 0);
 
         assert_eq!(paragraphs.len(), 1, "marker and body must merge into one paragraph");
         assert!(paragraphs[0].is_list_item);
@@ -3322,10 +3338,13 @@ mod tests {
     fn reattach_detached_ocr_list_markers_rejoins_a_marker_no_ml_hint_ever_classified() {
         let marker = list_test_paragraph("1.", (10.0, 780.0, 30.0, 800.0));
         let body = list_test_paragraph("Overview of the setback requirements", (35.0, 780.0, 500.0, 800.0));
-        assert!(!marker.is_list_item, "fixture must start unclassified, unlike the ML-hint fixtures above");
+        assert!(
+            !marker.is_list_item,
+            "fixture must start unclassified, unlike the ML-hint fixtures above"
+        );
 
         let mut paragraphs = vec![marker, body];
-        reattach_detached_ocr_list_markers(&mut paragraphs);
+        reattach_detached_ocr_list_markers(&mut paragraphs, 0);
 
         assert_eq!(paragraphs.len(), 1, "marker and body must merge into one paragraph");
         assert!(
@@ -3343,6 +3362,97 @@ mod tests {
             "the marker segment must be spliced in ahead of the body segment; \
              .text itself is deliberately left empty for downstream rebuild"
         );
+    }
+
+    /// Helper: an OCR paragraph carrying the given raw raster geometry (`x`,
+    /// `y` == `baseline_y`, `width`, `height`, `font_size`), matching the shape
+    /// [`make_ocr_pdf_line`] always produces for OCR segments
+    /// (`rotation_degrees == 0.0`).
+    fn rotated_list_test_paragraph(
+        text: &str,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        font_size: f32,
+    ) -> types::PdfParagraph {
+        let line = make_ocr_pdf_line(text, x, y, width, height, font_size, false, false);
+        make_ocr_paragraph(
+            text.to_string(),
+            vec![line],
+            Some((x, y, x + width, y + height)),
+            font_size,
+        )
+    }
+
+    /// #760: on a page with a PDF `/Rotate 270`, the marker/body pair measured on
+    /// fixture `ordinance_2197` (marker `y=2378.0 h=65.0`, body `y=1324.0
+    /// h=933.0`, `font_size=30.0` -- see `pipeline::tests::ocr_frame_270_...`
+    /// for the derivation of the exact numbers) must be rejoined once
+    /// `page_rotation_degrees` is threaded through to
+    /// `pipeline::accepts_detached_list_marker` as `DetachedMarkerFrame::OcrOnPage(270)`.
+    ///
+    /// Against unfixed code -- which had no `page_rotation_degrees` parameter at
+    /// all, equivalent to always calling with `0` (the `DetachedMarkerFrame::OcrOnPage(_)`
+    /// default arm, byte-identical to the pre-#760 `Native` frame for an
+    /// unrotated-tagged OCR segment) -- this asserts `paragraphs.len() == 1` and
+    /// FAILS with `paragraphs.len() == 2`: the baseline gate rejects the pair
+    /// (delta 1054.0 against tolerance 18.0) before the indent check ever runs,
+    /// exactly the #760 symptom (18 detached markers, 0 of their bodies
+    /// reattached).
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn reattach_ocr_layout_list_markers_pairs_a_270_rotated_marker_using_the_corrected_frame() {
+        let mut marker = rotated_list_test_paragraph("(a)", 3317.0, 2378.0, 100.0, 65.0, 30.0);
+        marker.is_list_item = true;
+        let body = rotated_list_test_paragraph("Buffer requirement", 3367.0, 1324.0, 50.0, 933.0, 30.0);
+
+        let mut unrotated = vec![marker.clone(), body.clone()];
+        reattach_ocr_layout_list_markers(&mut unrotated, 0);
+        assert_eq!(
+            unrotated.len(),
+            2,
+            "page_rotation_degrees == 0 must NOT correct this rotated-page pair (pre-#760 behaviour)"
+        );
+
+        let mut rotated = vec![marker, body];
+        reattach_ocr_layout_list_markers(&mut rotated, 270);
+        assert_eq!(
+            rotated.len(),
+            1,
+            "page_rotation_degrees == 270 must reattach the marker to its body"
+        );
+        assert!(rotated[0].is_list_item);
+    }
+
+    /// #760: the same fix, exercised through [`reattach_detached_ocr_list_markers`]
+    /// (the unclassified-marker mirror -- `is_list_item == false`, unlike the ML-hint
+    /// fixture above). See that test's doc comment for the measured numbers and the
+    /// unfixed-code prediction: `page_rotation_degrees == 0` must leave the pair
+    /// unmerged (`len() == 2`); `270` must merge it (`len() == 1`).
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn reattach_detached_ocr_list_markers_pairs_a_270_rotated_marker_using_the_corrected_frame() {
+        let marker = rotated_list_test_paragraph("(a)", 3317.0, 2378.0, 100.0, 65.0, 30.0);
+        let body = rotated_list_test_paragraph("Buffer requirement", 3367.0, 1324.0, 50.0, 933.0, 30.0);
+        assert!(!marker.is_list_item, "fixture must start unclassified");
+
+        let mut unrotated = vec![marker.clone(), body.clone()];
+        reattach_detached_ocr_list_markers(&mut unrotated, 0);
+        assert_eq!(
+            unrotated.len(),
+            2,
+            "page_rotation_degrees == 0 must NOT correct this rotated-page pair"
+        );
+
+        let mut rotated = vec![marker, body];
+        reattach_detached_ocr_list_markers(&mut rotated, 270);
+        assert_eq!(
+            rotated.len(),
+            1,
+            "page_rotation_degrees == 270 must reattach the marker to its body"
+        );
+        assert!(rotated[0].is_list_item);
     }
 
     /// #729: the body is not necessarily the very next paragraph -- an unrelated,
@@ -3364,7 +3474,7 @@ mod tests {
         let body = list_test_paragraph("Overview of the setback requirements", (35.0, 900.0, 500.0, 920.0));
 
         let mut paragraphs = vec![marker, heading, body];
-        reattach_ocr_layout_list_markers(&mut paragraphs);
+        reattach_ocr_layout_list_markers(&mut paragraphs, 0);
 
         assert_eq!(
             paragraphs.len(),
@@ -3390,7 +3500,7 @@ mod tests {
         let body = list_test_paragraph("Overview", (35.0, 780.0, 500.0, 800.0));
 
         let mut paragraphs = vec![marker, body];
-        reattach_ocr_layout_list_markers(&mut paragraphs);
+        reattach_ocr_layout_list_markers(&mut paragraphs, 0);
 
         assert_eq!(
             paragraphs.len(),
@@ -3413,7 +3523,7 @@ mod tests {
         second_item.is_list_item = true;
 
         let mut paragraphs = vec![marker, second_item];
-        reattach_ocr_layout_list_markers(&mut paragraphs);
+        reattach_ocr_layout_list_markers(&mut paragraphs, 0);
 
         assert_eq!(
             paragraphs.len(),
@@ -3436,7 +3546,7 @@ mod tests {
         let body = list_test_paragraph("Overview of the setback requirements", (140.0, 780.0, 600.0, 800.0));
 
         let mut paragraphs = vec![marker, body];
-        reattach_ocr_layout_list_markers(&mut paragraphs);
+        reattach_ocr_layout_list_markers(&mut paragraphs, 0);
 
         assert_eq!(
             paragraphs.len(),
@@ -3479,7 +3589,7 @@ mod tests {
         );
 
         let mut paragraphs = vec![marker_a, marker_b, marker_c, body1, body2, body3];
-        reattach_ocr_layout_list_markers(&mut paragraphs);
+        reattach_ocr_layout_list_markers(&mut paragraphs, 0);
 
         assert_eq!(
             paragraphs.len(),
@@ -3524,7 +3634,7 @@ mod tests {
         );
 
         let mut paragraphs = vec![marker_a, body1, body2, body3];
-        reattach_ocr_layout_list_markers(&mut paragraphs);
+        reattach_ocr_layout_list_markers(&mut paragraphs, 0);
 
         assert_eq!(
             paragraphs.len(),

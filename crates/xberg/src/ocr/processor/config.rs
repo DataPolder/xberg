@@ -381,15 +381,11 @@ mod tests {
             ),
             (
                 "tessedit_dont_blkrej_good_wds",
-                Box::new(|c: &mut TesseractConfig| {
-                    c.tessedit_dont_blkrej_good_wds = !c.tessedit_dont_blkrej_good_wds
-                }),
+                Box::new(|c: &mut TesseractConfig| c.tessedit_dont_blkrej_good_wds = !c.tessedit_dont_blkrej_good_wds),
             ),
             (
                 "tessedit_dont_rowrej_good_wds",
-                Box::new(|c: &mut TesseractConfig| {
-                    c.tessedit_dont_rowrej_good_wds = !c.tessedit_dont_rowrej_good_wds
-                }),
+                Box::new(|c: &mut TesseractConfig| c.tessedit_dont_rowrej_good_wds = !c.tessedit_dont_rowrej_good_wds),
             ),
             (
                 "tessedit_enable_dict_correction",
@@ -434,7 +430,10 @@ mod tests {
             );
         }
 
-        let names: Vec<&str> = tesseract_variable_set(&baseline).iter().map(|(name, _)| *name).collect();
+        let names: Vec<&str> = tesseract_variable_set(&baseline)
+            .iter()
+            .map(|(name, _)| *name)
+            .collect();
         for (name, _) in &flips {
             assert!(
                 names.contains(name),

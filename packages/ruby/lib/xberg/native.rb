@@ -17,7 +17,7 @@ library_candidates = dlexts.flat_map do |dlext|
     File.join(__dir__, "..", extension_name, ruby_abi, "#{extension_name}.#{dlext}"),
     File.join(__dir__, "..", extension_name, ruby_abi, "lib#{extension_name}.#{dlext}"),
     File.join(__dir__, "..", "#{extension_name}.#{dlext}"),
-    File.join(__dir__, "..", "lib#{extension_name}.#{dlext}"),
+    File.join(__dir__, "..", "lib#{extension_name}.#{dlext}")
   ]
 end
 
@@ -33,6 +33,7 @@ unless native_extension
 end
 
 require native_extension
+
 module Xberg
   # Target format for re-encoding extracted images.
   #
@@ -62,13 +63,20 @@ module Xberg
     def self.from_hash(hash)
       discriminator = hash[:type] || hash["type"]
       case discriminator
-      when "native" then ImageOutputFormatNative.from_hash(hash)
-      when "png" then ImageOutputFormatPng.from_hash(hash)
-      when "jpeg" then ImageOutputFormatJpeg.from_hash(hash)
-      when "webp" then ImageOutputFormatWebp.from_hash(hash)
-      when "heif" then ImageOutputFormatHeif.from_hash(hash)
-      when "svg" then ImageOutputFormatSvg.from_hash(hash)
-      else raise "Unknown discriminator: #{discriminator}"
+      when "native"
+        ImageOutputFormatNative.from_hash(hash)
+      when "png"
+        ImageOutputFormatPng.from_hash(hash)
+      when "jpeg"
+        ImageOutputFormatJpeg.from_hash(hash)
+      when "webp"
+        ImageOutputFormatWebp.from_hash(hash)
+      when "heif"
+        ImageOutputFormatHeif.from_hash(hash)
+      when "svg"
+        ImageOutputFormatSvg.from_hash(hash)
+      else
+        raise "Unknown discriminator: #{discriminator}"
       end
     end
   end
@@ -135,7 +143,8 @@ module Xberg
 
     # JPEG quality (1–100, default 85).
     sig { returns(Integer) }
-    def quality = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def quality = super
     sig { returns(T::Boolean) }
     def native? = false
     sig { returns(T::Boolean) }
@@ -165,7 +174,8 @@ module Xberg
 
     # WebP quality (1–100, default 80).
     sig { returns(Integer) }
-    def quality = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def quality = super
     sig { returns(T::Boolean) }
     def native? = false
     sig { returns(T::Boolean) }
@@ -198,7 +208,8 @@ module Xberg
 
     # HEIF quality (1–100, default 80).
     sig { returns(Integer) }
-    def quality = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def quality = super
     sig { returns(T::Boolean) }
     def native? = false
     sig { returns(T::Boolean) }
@@ -268,10 +279,14 @@ module Xberg
     def self.from_hash(hash)
       discriminator = hash[:type] || hash["type"]
       case discriminator
-      when "preset" then LateInteractionModelTypePreset.from_hash(hash)
-      when "custom" then LateInteractionModelTypeCustom.from_hash(hash)
-      when "plugin" then LateInteractionModelTypePlugin.from_hash(hash)
-      else raise "Unknown discriminator: #{discriminator}"
+      when "preset"
+        LateInteractionModelTypePreset.from_hash(hash)
+      when "custom"
+        LateInteractionModelTypeCustom.from_hash(hash)
+      when "plugin"
+        LateInteractionModelTypePlugin.from_hash(hash)
+      else
+        raise "Unknown discriminator: #{discriminator}"
       end
     end
   end
@@ -282,7 +297,8 @@ module Xberg
 
     # Preset name (e.g. "colbert").
     sig { returns(String) }
-    def name = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def name = super
     sig { returns(T::Boolean) }
     def preset? = true
     sig { returns(T::Boolean) }
@@ -303,17 +319,21 @@ module Xberg
 
     # HuggingFace model repository ID.
     sig { returns(String) }
-    def model_id = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def model_id = super
     # Path to the ONNX file within the repo. Defaults to `"onnx/model.onnx"`.
     sig { returns(T.nilable(String)) }
-    def model_file = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def model_file = super
     # Sibling files that must be downloaded alongside `model_file`.
     sig { returns(T::Array[String]) }
-    def additional_files = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def additional_files = super
     # Maximum token sequence length. Stored as `i64` for FFI compatibility;
     # negative values are clamped to the model default.
     sig { returns(T.nilable(Integer)) }
-    def max_length = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def max_length = super
     sig { returns(T::Boolean) }
     def preset? = false
     sig { returns(T::Boolean) }
@@ -324,7 +344,12 @@ module Xberg
     # @return [self]
     sig { params(hash: T::Hash[T.untyped, T.untyped]).returns(T.attached_class) }
     def self.from_hash(hash)
-      new(model_id: hash[:model_id] || hash["model_id"], model_file: hash[:model_file] || hash["model_file"], additional_files: hash[:additional_files] || hash["additional_files"], max_length: hash[:max_length] || hash["max_length"])
+      new(
+        model_id: hash[:model_id] || hash["model_id"],
+        model_file: hash[:model_file] || hash["model_file"],
+        additional_files: hash[:additional_files] || hash["additional_files"],
+        max_length: hash[:max_length] || hash["max_length"]
+      )
     end
   end
   ## In-process late-interaction backend registered via the plugin system.
@@ -334,7 +359,8 @@ module Xberg
 
     # Name the backend was registered under.
     sig { returns(String) }
-    def name = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def name = super
     sig { returns(T::Boolean) }
     def preset? = false
     sig { returns(T::Boolean) }
@@ -372,11 +398,16 @@ module Xberg
     def self.from_hash(hash)
       discriminator = hash[:type] || hash["type"]
       case discriminator
-      when "azure_ad" then CredentialProviderConfigAzureAd.from_hash(hash)
-      when "vertex_oauth2" then CredentialProviderConfigVertexOauth2.from_hash(hash)
-      when "vertex_adc" then CredentialProviderConfigVertexAdc.from_hash(hash)
-      when "bedrock_web_identity" then CredentialProviderConfigBedrockWebIdentity.from_hash(hash)
-      else raise "Unknown discriminator: #{discriminator}"
+      when "azure_ad"
+        CredentialProviderConfigAzureAd.from_hash(hash)
+      when "vertex_oauth2"
+        CredentialProviderConfigVertexOauth2.from_hash(hash)
+      when "vertex_adc"
+        CredentialProviderConfigVertexAdc.from_hash(hash)
+      when "bedrock_web_identity"
+        CredentialProviderConfigBedrockWebIdentity.from_hash(hash)
+      else
+        raise "Unknown discriminator: #{discriminator}"
       end
     end
   end
@@ -387,17 +418,21 @@ module Xberg
 
     # Azure AD tenant ID.
     sig { returns(String) }
-    def tenant_id = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def tenant_id = super
     # Application (client) ID.
     sig { returns(String) }
-    def client_id = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def client_id = super
     # Client secret value. Secret — never logged.
     sig { returns(String) }
-    def client_secret = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def client_secret = super
     # OAuth2 scope. Defaults to liter-llm's own
     # `https://cognitiveservices.azure.com/.default` when unset.
     sig { returns(T.nilable(String)) }
-    def scope = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def scope = super
     sig { returns(T::Boolean) }
     def azure_ad? = true
     sig { returns(T::Boolean) }
@@ -410,7 +445,12 @@ module Xberg
     # @return [self]
     sig { params(hash: T::Hash[T.untyped, T.untyped]).returns(T.attached_class) }
     def self.from_hash(hash)
-      new(tenant_id: hash[:tenant_id] || hash["tenant_id"], client_id: hash[:client_id] || hash["client_id"], client_secret: hash[:client_secret] || hash["client_secret"], scope: hash[:scope] || hash["scope"])
+      new(
+        tenant_id: hash[:tenant_id] || hash["tenant_id"],
+        client_id: hash[:client_id] || hash["client_id"],
+        client_secret: hash[:client_secret] || hash["client_secret"],
+        scope: hash[:scope] || hash["scope"]
+      )
     end
   end
   ## Google Vertex AI OAuth2 via a service-account JSON key file on disk.
@@ -426,10 +466,12 @@ module Xberg
     # Path to a Google service-account JSON key file (the same file
     # `GOOGLE_APPLICATION_CREDENTIALS` would point to).
     sig { returns(String) }
-    def service_account_key_file = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def service_account_key_file = super
     # OAuth2 scope. Defaults to liter-llm's own Vertex AI scope when unset.
     sig { returns(T.nilable(String)) }
-    def scope = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def scope = super
     sig { returns(T::Boolean) }
     def azure_ad? = false
     sig { returns(T::Boolean) }
@@ -442,7 +484,10 @@ module Xberg
     # @return [self]
     sig { params(hash: T::Hash[T.untyped, T.untyped]).returns(T.attached_class) }
     def self.from_hash(hash)
-      new(service_account_key_file: hash[:service_account_key_file] || hash["service_account_key_file"], scope: hash[:scope] || hash["scope"])
+      new(
+        service_account_key_file: hash[:service_account_key_file] || hash["service_account_key_file"],
+        scope: hash[:scope] || hash["scope"]
+      )
     end
   end
   ## Google Vertex AI Application Default Credentials, resolved from the GCE/GKE/Cloud Run
@@ -453,7 +498,8 @@ module Xberg
 
     # OAuth2 scope. Defaults to liter-llm's own Vertex AI scope when unset.
     sig { returns(T.nilable(String)) }
-    def scope = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def scope = super
     sig { returns(T::Boolean) }
     def azure_ad? = false
     sig { returns(T::Boolean) }
@@ -476,18 +522,22 @@ module Xberg
 
     # ARN of the IAM role to assume.
     sig { returns(String) }
-    def role_arn = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def role_arn = super
     # Path to a file containing the OIDC JWT (the same file
     # `AWS_WEB_IDENTITY_TOKEN_FILE` would point to).
     sig { returns(String) }
-    def token_file = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def token_file = super
     # STS session name. Defaults to liter-llm's own default (`"liter-llm-session"`) when
     # unset.
     sig { returns(T.nilable(String)) }
-    def session_name = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def session_name = super
     # AWS region. Defaults to liter-llm's own default (`"us-east-1"`) when unset.
     sig { returns(T.nilable(String)) }
-    def region = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def region = super
     sig { returns(T::Boolean) }
     def azure_ad? = false
     sig { returns(T::Boolean) }
@@ -500,7 +550,12 @@ module Xberg
     # @return [self]
     sig { params(hash: T::Hash[T.untyped, T.untyped]).returns(T.attached_class) }
     def self.from_hash(hash)
-      new(role_arn: hash[:role_arn] || hash["role_arn"], token_file: hash[:token_file] || hash["token_file"], session_name: hash[:session_name] || hash["session_name"], region: hash[:region] || hash["region"])
+      new(
+        role_arn: hash[:role_arn] || hash["role_arn"],
+        token_file: hash[:token_file] || hash["token_file"],
+        session_name: hash[:session_name] || hash["session_name"],
+        region: hash[:region] || hash["region"]
+      )
     end
   end
 end
@@ -537,10 +592,14 @@ module Xberg
     def self.from_hash(hash)
       discriminator = hash[:mode] || hash["mode"]
       case discriminator
-      when "disabled" then VlmFallbackPolicyDisabled.from_hash(hash)
-      when "on_low_quality" then VlmFallbackPolicyOnLowQuality.from_hash(hash)
-      when "always" then VlmFallbackPolicyAlways.from_hash(hash)
-      else raise "Unknown discriminator: #{discriminator}"
+      when "disabled"
+        VlmFallbackPolicyDisabled.from_hash(hash)
+      when "on_low_quality"
+        VlmFallbackPolicyOnLowQuality.from_hash(hash)
+      when "always"
+        VlmFallbackPolicyAlways.from_hash(hash)
+      else
+        raise "Unknown discriminator: #{discriminator}"
       end
     end
   end
@@ -575,7 +634,8 @@ module Xberg
     # Minimum acceptable quality score from the classical backend.
     # Pages scoring below this are retried with VLM.
     sig { returns(Float) }
-    def quality_threshold = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def quality_threshold = super
     sig { returns(T::Boolean) }
     def disabled? = false
     sig { returns(T::Boolean) }
@@ -624,9 +684,12 @@ module Xberg
     def self.from_hash(hash)
       discriminator = hash[:mode] || hash["mode"]
       case discriminator
-      when "auto" then OcrStrategyAuto.from_hash(hash)
-      when "scanned_pages" then OcrStrategyScannedPages.from_hash(hash)
-      else raise "Unknown discriminator: #{discriminator}"
+      when "auto"
+        OcrStrategyAuto.from_hash(hash)
+      when "scanned_pages"
+        OcrStrategyScannedPages.from_hash(hash)
+      else
+        raise "Unknown discriminator: #{discriminator}"
       end
     end
   end
@@ -666,7 +729,8 @@ module Xberg
     # Minimum scan confidence, in `[0.0, 1.0]`. Values outside the range are
     # clamped. See [`DEFAULT_SCANNED_MIN_CONFIDENCE`] for how to pick one.
     sig { returns(Float) }
-    def min_confidence = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def min_confidence = super
     sig { returns(T::Boolean) }
     def auto? = false
     sig { returns(T::Boolean) }
@@ -705,9 +769,12 @@ module Xberg
     def self.from_hash(hash)
       discriminator = hash[:type] || hash["type"]
       case discriminator
-      when "characters" then ChunkSizingCharacters.from_hash(hash)
-      when "tokenizer" then ChunkSizingTokenizer.from_hash(hash)
-      else raise "Unknown discriminator: #{discriminator}"
+      when "characters"
+        ChunkSizingCharacters.from_hash(hash)
+      when "tokenizer"
+        ChunkSizingTokenizer.from_hash(hash)
+      else
+        raise "Unknown discriminator: #{discriminator}"
       end
     end
   end
@@ -737,12 +804,14 @@ module Xberg
     # or a HuggingFace model ID, e.g. "Xenova/gpt-4o", "bert-base-uncased".
     # A registered backend name takes precedence over a HuggingFace ID.
     sig { returns(String) }
-    def model = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def model = super
     # Optional cache directory override for tokenizer files.
     # Defaults to hf-hub's standard cache (`~/.cache/huggingface/`).
     # Can also be set via `XBERG_TOKENIZER_CACHE_DIR` environment variable.
     sig { returns(T.nilable(String)) }
-    def cache_dir = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def cache_dir = super
     sig { returns(T::Boolean) }
     def characters? = false
     sig { returns(T::Boolean) }
@@ -771,11 +840,16 @@ module Xberg
     def self.from_hash(hash)
       discriminator = hash[:type] || hash["type"]
       case discriminator
-      when "preset" then EmbeddingModelTypePreset.from_hash(hash)
-      when "custom" then EmbeddingModelTypeCustom.from_hash(hash)
-      when "llm" then EmbeddingModelTypeLlm.from_hash(hash)
-      when "plugin" then EmbeddingModelTypePlugin.from_hash(hash)
-      else raise "Unknown discriminator: #{discriminator}"
+      when "preset"
+        EmbeddingModelTypePreset.from_hash(hash)
+      when "custom"
+        EmbeddingModelTypeCustom.from_hash(hash)
+      when "llm"
+        EmbeddingModelTypeLlm.from_hash(hash)
+      when "plugin"
+        EmbeddingModelTypePlugin.from_hash(hash)
+      else
+        raise "Unknown discriminator: #{discriminator}"
       end
     end
   end
@@ -786,7 +860,8 @@ module Xberg
 
     # Preset name (e.g. "balanced", "multilingual", "large").
     sig { returns(String) }
-    def name = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def name = super
     sig { returns(T::Boolean) }
     def preset? = true
     sig { returns(T::Boolean) }
@@ -809,10 +884,12 @@ module Xberg
 
     # HuggingFace model repository ID (e.g. "BAAI/bge-small-en-v1.5").
     sig { returns(String) }
-    def model_id = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def model_id = super
     # Number of dimensions in the model's output embedding vectors.
     sig { returns(Integer) }
-    def dimensions = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def dimensions = super
     sig { returns(T::Boolean) }
     def preset? = false
     sig { returns(T::Boolean) }
@@ -842,7 +919,8 @@ module Xberg
     # an order of magnitude larger than the other variants, which would otherwise make
     # every `Preset`/`Custom` value pay for it. ~keep
     sig { returns(LlmConfig) }
-    def llm = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def llm = super
     sig { returns(T::Boolean) }
     def preset? = false
     sig { returns(T::Boolean) }
@@ -883,7 +961,8 @@ module Xberg
 
     # Name the backend was registered under via `register_embedding_backend`.
     sig { returns(String) }
-    def name = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def name = super
     sig { returns(T::Boolean) }
     def preset? = false
     sig { returns(T::Boolean) }
@@ -918,11 +997,16 @@ module Xberg
     def self.from_hash(hash)
       discriminator = hash[:type] || hash["type"]
       case discriminator
-      when "preset" then RerankerModelTypePreset.from_hash(hash)
-      when "custom" then RerankerModelTypeCustom.from_hash(hash)
-      when "llm" then RerankerModelTypeLlm.from_hash(hash)
-      when "plugin" then RerankerModelTypePlugin.from_hash(hash)
-      else raise "Unknown discriminator: #{discriminator}"
+      when "preset"
+        RerankerModelTypePreset.from_hash(hash)
+      when "custom"
+        RerankerModelTypeCustom.from_hash(hash)
+      when "llm"
+        RerankerModelTypeLlm.from_hash(hash)
+      when "plugin"
+        RerankerModelTypePlugin.from_hash(hash)
+      else
+        raise "Unknown discriminator: #{discriminator}"
       end
     end
   end
@@ -933,7 +1017,8 @@ module Xberg
 
     # Preset name (e.g. "balanced", "fast", "quality", "multilingual").
     sig { returns(String) }
-    def name = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def name = super
     sig { returns(T::Boolean) }
     def preset? = true
     sig { returns(T::Boolean) }
@@ -956,34 +1041,39 @@ module Xberg
 
     # HuggingFace model repository ID (e.g. "cross-encoder/ms-marco-MiniLM-L6-v2").
     sig { returns(String) }
-    def model_id = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def model_id = super
     # Path to the ONNX file within the repo.
     #
     # Defaults to `"onnx/model.onnx"` when `None`. Override for repos that
     # place the weight elsewhere (e.g. `"model.onnx"` for `rozgo/bge-reranker-v2-m3`,
     # `"onnx/model_quantized.onnx"` for int8 variants).
     sig { returns(T.nilable(String)) }
-    def model_file = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def model_file = super
     # Sibling files that must be downloaded alongside `model_file`.
     #
     # Empty for most repos. Set to e.g. `vec!["model.onnx.data".into()]` for
     # `rozgo/bge-reranker-v2-m3`, which ships the weights in a co-located
     # `model.onnx.data` blob.
     sig { returns(T::Array[String]) }
-    def additional_files = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def additional_files = super
     # Maximum token sequence length for the tokenizer.
     #
     # Stored as `i64` for FFI compatibility across language bindings.
     # Must be positive; a non-positive value is rejected with a validation error.
     sig { returns(T.nilable(Integer)) }
-    def max_length = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def max_length = super
     # Scoring head for the ONNX model's output tensor.
     #
     # Defaults to [`RerankerHead::CrossEncoder`]. Set to
     # [`RerankerHead::Qwen3Generative`] for Qwen3 generative-reranker
     # checkpoints (e.g. `Qwen/Qwen3-Reranker-0.6B`).
     sig { returns(RerankerHead) }
-    def head = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def head = super
     sig { returns(T::Boolean) }
     def preset? = false
     sig { returns(T::Boolean) }
@@ -996,7 +1086,13 @@ module Xberg
     # @return [self]
     sig { params(hash: T::Hash[T.untyped, T.untyped]).returns(T.attached_class) }
     def self.from_hash(hash)
-      new(model_id: hash[:model_id] || hash["model_id"], model_file: hash[:model_file] || hash["model_file"], additional_files: hash[:additional_files] || hash["additional_files"], max_length: hash[:max_length] || hash["max_length"], head: hash[:head] || hash["head"])
+      new(
+        model_id: hash[:model_id] || hash["model_id"],
+        model_file: hash[:model_file] || hash["model_file"],
+        additional_files: hash[:additional_files] || hash["additional_files"],
+        max_length: hash[:max_length] || hash["max_length"],
+        head: hash[:head] || hash["head"]
+      )
     end
   end
   ## Provider-hosted reranker via liter-llm (e.g. Cohere, Jina, Voyage).
@@ -1012,7 +1108,8 @@ module Xberg
     # Boxed for the same reason as `EmbeddingModelType::Llm` -- kept in step so the two
     # parallel enums present one shape to the generated bindings. ~keep
     sig { returns(LlmConfig) }
-    def llm = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def llm = super
     sig { returns(T::Boolean) }
     def preset? = false
     sig { returns(T::Boolean) }
@@ -1047,7 +1144,8 @@ module Xberg
 
     # Name the backend was registered under via `register_reranker_backend`.
     sig { returns(String) }
-    def name = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def name = super
     sig { returns(T::Boolean) }
     def preset? = false
     sig { returns(T::Boolean) }
@@ -1082,10 +1180,14 @@ module Xberg
     def self.from_hash(hash)
       discriminator = hash[:type] || hash["type"]
       case discriminator
-      when "preset" then SparseEmbeddingModelTypePreset.from_hash(hash)
-      when "custom" then SparseEmbeddingModelTypeCustom.from_hash(hash)
-      when "plugin" then SparseEmbeddingModelTypePlugin.from_hash(hash)
-      else raise "Unknown discriminator: #{discriminator}"
+      when "preset"
+        SparseEmbeddingModelTypePreset.from_hash(hash)
+      when "custom"
+        SparseEmbeddingModelTypeCustom.from_hash(hash)
+      when "plugin"
+        SparseEmbeddingModelTypePlugin.from_hash(hash)
+      else
+        raise "Unknown discriminator: #{discriminator}"
       end
     end
   end
@@ -1096,7 +1198,8 @@ module Xberg
 
     # Preset name (e.g. "splade").
     sig { returns(String) }
-    def name = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def name = super
     sig { returns(T::Boolean) }
     def preset? = true
     sig { returns(T::Boolean) }
@@ -1117,17 +1220,21 @@ module Xberg
 
     # HuggingFace model repository ID.
     sig { returns(String) }
-    def model_id = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def model_id = super
     # Path to the ONNX file within the repo. Defaults to `"onnx/model.onnx"`.
     sig { returns(T.nilable(String)) }
-    def model_file = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def model_file = super
     # Sibling files that must be downloaded alongside `model_file`.
     sig { returns(T::Array[String]) }
-    def additional_files = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def additional_files = super
     # Maximum token sequence length. Stored as `i64` for FFI compatibility;
     # negative values are clamped to the model default.
     sig { returns(T.nilable(Integer)) }
-    def max_length = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def max_length = super
     sig { returns(T::Boolean) }
     def preset? = false
     sig { returns(T::Boolean) }
@@ -1138,7 +1245,12 @@ module Xberg
     # @return [self]
     sig { params(hash: T::Hash[T.untyped, T.untyped]).returns(T.attached_class) }
     def self.from_hash(hash)
-      new(model_id: hash[:model_id] || hash["model_id"], model_file: hash[:model_file] || hash["model_file"], additional_files: hash[:additional_files] || hash["additional_files"], max_length: hash[:max_length] || hash["max_length"])
+      new(
+        model_id: hash[:model_id] || hash["model_id"],
+        model_file: hash[:model_file] || hash["model_file"],
+        additional_files: hash[:additional_files] || hash["additional_files"],
+        max_length: hash[:max_length] || hash["max_length"]
+      )
     end
   end
   ## In-process sparse-embedding backend registered via the plugin system.
@@ -1148,7 +1260,8 @@ module Xberg
 
     # Name the backend was registered under.
     sig { returns(String) }
-    def name = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def name = super
     sig { returns(T::Boolean) }
     def preset? = false
     sig { returns(T::Boolean) }
@@ -1182,28 +1295,50 @@ module Xberg
     def self.from_hash(hash)
       discriminator = hash[:node_type] || hash["node_type"]
       case discriminator
-      when "title" then NodeContentTitle.from_hash(hash)
-      when "heading" then NodeContentHeading.from_hash(hash)
-      when "paragraph" then NodeContentParagraph.from_hash(hash)
-      when "list" then NodeContentList.from_hash(hash)
-      when "list_item" then NodeContentListItem.from_hash(hash)
-      when "table" then NodeContentTable.from_hash(hash)
-      when "image" then NodeContentImage.from_hash(hash)
-      when "code" then NodeContentCode.from_hash(hash)
-      when "quote" then NodeContentQuote.from_hash(hash)
-      when "formula" then NodeContentFormula.from_hash(hash)
-      when "footnote" then NodeContentFootnote.from_hash(hash)
-      when "comment" then NodeContentComment.from_hash(hash)
-      when "group" then NodeContentGroup.from_hash(hash)
-      when "page_break" then NodeContentPageBreak.from_hash(hash)
-      when "slide" then NodeContentSlide.from_hash(hash)
-      when "definition_list" then NodeContentDefinitionList.from_hash(hash)
-      when "definition_item" then NodeContentDefinitionItem.from_hash(hash)
-      when "citation" then NodeContentCitation.from_hash(hash)
-      when "admonition" then NodeContentAdmonition.from_hash(hash)
-      when "raw_block" then NodeContentRawBlock.from_hash(hash)
-      when "metadata_block" then NodeContentMetadataBlock.from_hash(hash)
-      else raise "Unknown discriminator: #{discriminator}"
+      when "title"
+        NodeContentTitle.from_hash(hash)
+      when "heading"
+        NodeContentHeading.from_hash(hash)
+      when "paragraph"
+        NodeContentParagraph.from_hash(hash)
+      when "list"
+        NodeContentList.from_hash(hash)
+      when "list_item"
+        NodeContentListItem.from_hash(hash)
+      when "table"
+        NodeContentTable.from_hash(hash)
+      when "image"
+        NodeContentImage.from_hash(hash)
+      when "code"
+        NodeContentCode.from_hash(hash)
+      when "quote"
+        NodeContentQuote.from_hash(hash)
+      when "formula"
+        NodeContentFormula.from_hash(hash)
+      when "footnote"
+        NodeContentFootnote.from_hash(hash)
+      when "comment"
+        NodeContentComment.from_hash(hash)
+      when "group"
+        NodeContentGroup.from_hash(hash)
+      when "page_break"
+        NodeContentPageBreak.from_hash(hash)
+      when "slide"
+        NodeContentSlide.from_hash(hash)
+      when "definition_list"
+        NodeContentDefinitionList.from_hash(hash)
+      when "definition_item"
+        NodeContentDefinitionItem.from_hash(hash)
+      when "citation"
+        NodeContentCitation.from_hash(hash)
+      when "admonition"
+        NodeContentAdmonition.from_hash(hash)
+      when "raw_block"
+        NodeContentRawBlock.from_hash(hash)
+      when "metadata_block"
+        NodeContentMetadataBlock.from_hash(hash)
+      else
+        raise "Unknown discriminator: #{discriminator}"
       end
     end
   end
@@ -1214,7 +1349,8 @@ module Xberg
 
     # The title text content.
     sig { returns(String) }
-    def text = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def text = super
     sig { returns(T::Boolean) }
     def title? = true
     sig { returns(T::Boolean) }
@@ -1271,10 +1407,12 @@ module Xberg
 
     # Heading depth (1 = h1, 2 = h2, …, 6 = h6).
     sig { returns(Integer) }
-    def level = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def level = super
     # The heading text content.
     sig { returns(String) }
-    def text = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def text = super
     sig { returns(T::Boolean) }
     def title? = false
     sig { returns(T::Boolean) }
@@ -1331,7 +1469,8 @@ module Xberg
 
     # The paragraph text content.
     sig { returns(String) }
-    def text = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def text = super
     sig { returns(T::Boolean) }
     def title? = false
     sig { returns(T::Boolean) }
@@ -1388,7 +1527,8 @@ module Xberg
 
     # `true` for ordered (numbered) lists; `false` for unordered (bullet) lists.
     sig { returns(T::Boolean) }
-    def ordered = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def ordered = super
     sig { returns(T::Boolean) }
     def title? = false
     sig { returns(T::Boolean) }
@@ -1445,7 +1585,8 @@ module Xberg
 
     # The list item text content.
     sig { returns(String) }
-    def text = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def text = super
     sig { returns(T::Boolean) }
     def title? = false
     sig { returns(T::Boolean) }
@@ -1502,7 +1643,8 @@ module Xberg
 
     # Structured grid of table cells.
     sig { returns(TableGrid) }
-    def grid = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def grid = super
     sig { returns(T::Boolean) }
     def title? = false
     sig { returns(T::Boolean) }
@@ -1559,13 +1701,16 @@ module Xberg
 
     # Optional alt text or caption describing the image.
     sig { returns(T.nilable(String)) }
-    def description = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def description = super
     # Index into the parent `ExtractedDocument::images` list.
     sig { returns(T.nilable(Integer)) }
-    def image_index = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def image_index = super
     # Source URL or path of the image (from `<img src="...">` or `![](src)`).
     sig { returns(T.nilable(String)) }
-    def src = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def src = super
     sig { returns(T::Boolean) }
     def title? = false
     sig { returns(T::Boolean) }
@@ -1612,7 +1757,11 @@ module Xberg
     # @return [self]
     sig { params(hash: T::Hash[T.untyped, T.untyped]).returns(T.attached_class) }
     def self.from_hash(hash)
-      new(description: hash[:description] || hash["description"], image_index: hash[:image_index] || hash["image_index"], src: hash[:src] || hash["src"])
+      new(
+        description: hash[:description] || hash["description"],
+        image_index: hash[:image_index] || hash["image_index"],
+        src: hash[:src] || hash["src"]
+      )
     end
   end
   ## Code block.
@@ -1622,10 +1771,12 @@ module Xberg
 
     # The source code text content.
     sig { returns(String) }
-    def text = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def text = super
     # Programming language identifier (e.g. `"rust"`, `"python"`).
     sig { returns(T.nilable(String)) }
-    def language = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def language = super
     sig { returns(T::Boolean) }
     def title? = false
     sig { returns(T::Boolean) }
@@ -1736,7 +1887,8 @@ module Xberg
 
     # The formula source text (LaTeX or plain mathematical notation).
     sig { returns(String) }
-    def text = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def text = super
     sig { returns(T::Boolean) }
     def title? = false
     sig { returns(T::Boolean) }
@@ -1793,7 +1945,8 @@ module Xberg
 
     # The footnote body text.
     sig { returns(String) }
-    def text = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def text = super
     sig { returns(T::Boolean) }
     def title? = false
     sig { returns(T::Boolean) }
@@ -1854,7 +2007,8 @@ module Xberg
 
     # The comment body text.
     sig { returns(String) }
-    def text = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def text = super
     sig { returns(T::Boolean) }
     def title? = false
     sig { returns(T::Boolean) }
@@ -1914,13 +2068,16 @@ module Xberg
 
     # Optional display label for the group (e.g. section name).
     sig { returns(T.nilable(String)) }
-    def label = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def label = super
     # Heading level of the section heading that opened this group (1-6).
     sig { returns(T.nilable(Integer)) }
-    def heading_level = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def heading_level = super
     # Text of the section heading that opened this group.
     sig { returns(T.nilable(String)) }
-    def heading_text = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def heading_text = super
     sig { returns(T::Boolean) }
     def title? = false
     sig { returns(T::Boolean) }
@@ -1967,7 +2124,11 @@ module Xberg
     # @return [self]
     sig { params(hash: T::Hash[T.untyped, T.untyped]).returns(T.attached_class) }
     def self.from_hash(hash)
-      new(label: hash[:label] || hash["label"], heading_level: hash[:heading_level] || hash["heading_level"], heading_text: hash[:heading_text] || hash["heading_text"])
+      new(
+        label: hash[:label] || hash["label"],
+        heading_level: hash[:heading_level] || hash["heading_level"],
+        heading_text: hash[:heading_text] || hash["heading_text"]
+      )
     end
   end
   ## Page break marker.
@@ -2031,10 +2192,12 @@ module Xberg
 
     # 1-indexed slide number.
     sig { returns(Integer) }
-    def number = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def number = super
     # Slide title text, if present.
     sig { returns(T.nilable(String)) }
-    def title = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def title = super
     sig { returns(T::Boolean) }
     def title? = false
     sig { returns(T::Boolean) }
@@ -2145,10 +2308,12 @@ module Xberg
 
     # The term being defined.
     sig { returns(String) }
-    def term = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def term = super
     # The definition or description of the term.
     sig { returns(String) }
-    def definition = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def definition = super
     sig { returns(T::Boolean) }
     def title? = false
     sig { returns(T::Boolean) }
@@ -2205,10 +2370,12 @@ module Xberg
 
     # Citation key (e.g. BibTeX key or reference ID).
     sig { returns(String) }
-    def key = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def key = super
     # Formatted citation text as it appears in the document.
     sig { returns(String) }
-    def text = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def text = super
     sig { returns(T::Boolean) }
     def title? = false
     sig { returns(T::Boolean) }
@@ -2267,10 +2434,12 @@ module Xberg
 
     # Kind of admonition (e.g. "note", "warning", "tip", "danger").
     sig { returns(String) }
-    def kind = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def kind = super
     # Optional explicit title overriding the default kind label.
     sig { returns(T.nilable(String)) }
-    def title = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def title = super
     sig { returns(T::Boolean) }
     def title? = false
     sig { returns(T::Boolean) }
@@ -2330,10 +2499,12 @@ module Xberg
 
     # Source format identifier (e.g. "html", "latex", "jsx").
     sig { returns(String) }
-    def format = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def format = super
     # Verbatim source content in the specified format.
     sig { returns(String) }
-    def content = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def content = super
     sig { returns(T::Boolean) }
     def title? = false
     sig { returns(T::Boolean) }
@@ -2390,7 +2561,8 @@ module Xberg
 
     # Key-value pairs extracted from the metadata block.
     sig { returns(T::Array[T::Array[String]]) }
-    def entries = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def entries = super
     sig { returns(T::Boolean) }
     def title? = false
     sig { returns(T::Boolean) }
@@ -2457,19 +2629,32 @@ module Xberg
     def self.from_hash(hash)
       discriminator = hash[:annotation_type] || hash["annotation_type"]
       case discriminator
-      when "bold" then AnnotationKindBold.from_hash(hash)
-      when "italic" then AnnotationKindItalic.from_hash(hash)
-      when "underline" then AnnotationKindUnderline.from_hash(hash)
-      when "strikethrough" then AnnotationKindStrikethrough.from_hash(hash)
-      when "code" then AnnotationKindCode.from_hash(hash)
-      when "subscript" then AnnotationKindSubscript.from_hash(hash)
-      when "superscript" then AnnotationKindSuperscript.from_hash(hash)
-      when "link" then AnnotationKindLink.from_hash(hash)
-      when "highlight" then AnnotationKindHighlight.from_hash(hash)
-      when "color" then AnnotationKindColor.from_hash(hash)
-      when "font_size" then AnnotationKindFontSize.from_hash(hash)
-      when "custom" then AnnotationKindCustom.from_hash(hash)
-      else raise "Unknown discriminator: #{discriminator}"
+      when "bold"
+        AnnotationKindBold.from_hash(hash)
+      when "italic"
+        AnnotationKindItalic.from_hash(hash)
+      when "underline"
+        AnnotationKindUnderline.from_hash(hash)
+      when "strikethrough"
+        AnnotationKindStrikethrough.from_hash(hash)
+      when "code"
+        AnnotationKindCode.from_hash(hash)
+      when "subscript"
+        AnnotationKindSubscript.from_hash(hash)
+      when "superscript"
+        AnnotationKindSuperscript.from_hash(hash)
+      when "link"
+        AnnotationKindLink.from_hash(hash)
+      when "highlight"
+        AnnotationKindHighlight.from_hash(hash)
+      when "color"
+        AnnotationKindColor.from_hash(hash)
+      when "font_size"
+        AnnotationKindFontSize.from_hash(hash)
+      when "custom"
+        AnnotationKindCustom.from_hash(hash)
+      else
+        raise "Unknown discriminator: #{discriminator}"
       end
     end
   end
@@ -2732,10 +2917,12 @@ module Xberg
 
     # Hyperlink target URL.
     sig { returns(String) }
-    def url = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def url = super
     # Optional link title attribute.
     sig { returns(T.nilable(String)) }
-    def title = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def title = super
     sig { returns(T::Boolean) }
     def bold? = false
     sig { returns(T::Boolean) }
@@ -2810,7 +2997,8 @@ module Xberg
 
     # CSS-compatible color value (e.g. `"#ff0000"`, `"red"`).
     sig { returns(String) }
-    def value = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def value = super
     sig { returns(T::Boolean) }
     def bold? = false
     sig { returns(T::Boolean) }
@@ -2849,7 +3037,8 @@ module Xberg
 
     # Font size including unit (e.g. `"12pt"`, `"1.2em"`, `"16px"`).
     sig { returns(String) }
-    def value = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def value = super
     sig { returns(T::Boolean) }
     def bold? = false
     sig { returns(T::Boolean) }
@@ -2888,10 +3077,12 @@ module Xberg
 
     # Name of the custom annotation kind.
     sig { returns(String) }
-    def name = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def name = super
     # Optional value or parameter for the annotation.
     sig { returns(T.nilable(String)) }
-    def value = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def value = super
     sig { returns(T::Boolean) }
     def bold? = false
     sig { returns(T::Boolean) }
@@ -2943,28 +3134,50 @@ module Xberg
     def self.from_hash(hash)
       discriminator = hash[:format_type] || hash["format_type"]
       case discriminator
-      when "pdf" then FormatMetadataPdf.from_hash(hash)
-      when "docx" then FormatMetadataDocx.from_hash(hash)
-      when "excel" then FormatMetadataExcel.from_hash(hash)
-      when "email" then FormatMetadataEmail.from_hash(hash)
-      when "pptx" then FormatMetadataPptx.from_hash(hash)
-      when "archive" then FormatMetadataArchive.from_hash(hash)
-      when "image" then FormatMetadataImage.from_hash(hash)
-      when "xml" then FormatMetadataXml.from_hash(hash)
-      when "text" then FormatMetadataText.from_hash(hash)
-      when "html" then FormatMetadataHtml.from_hash(hash)
-      when "ocr" then FormatMetadataOcr.from_hash(hash)
-      when "csv" then FormatMetadataCsv.from_hash(hash)
-      when "bibtex" then FormatMetadataBibtex.from_hash(hash)
-      when "citation" then FormatMetadataCitation.from_hash(hash)
-      when "fiction_book" then FormatMetadataFictionBook.from_hash(hash)
-      when "dbf" then FormatMetadataDbf.from_hash(hash)
-      when "jats" then FormatMetadataJats.from_hash(hash)
-      when "epub" then FormatMetadataEpub.from_hash(hash)
-      when "pst" then FormatMetadataPst.from_hash(hash)
-      when "audio" then FormatMetadataAudio.from_hash(hash)
-      when "code" then FormatMetadataCode.from_hash(hash)
-      else raise "Unknown discriminator: #{discriminator}"
+      when "pdf"
+        FormatMetadataPdf.from_hash(hash)
+      when "docx"
+        FormatMetadataDocx.from_hash(hash)
+      when "excel"
+        FormatMetadataExcel.from_hash(hash)
+      when "email"
+        FormatMetadataEmail.from_hash(hash)
+      when "pptx"
+        FormatMetadataPptx.from_hash(hash)
+      when "archive"
+        FormatMetadataArchive.from_hash(hash)
+      when "image"
+        FormatMetadataImage.from_hash(hash)
+      when "xml"
+        FormatMetadataXml.from_hash(hash)
+      when "text"
+        FormatMetadataText.from_hash(hash)
+      when "html"
+        FormatMetadataHtml.from_hash(hash)
+      when "ocr"
+        FormatMetadataOcr.from_hash(hash)
+      when "csv"
+        FormatMetadataCsv.from_hash(hash)
+      when "bibtex"
+        FormatMetadataBibtex.from_hash(hash)
+      when "citation"
+        FormatMetadataCitation.from_hash(hash)
+      when "fiction_book"
+        FormatMetadataFictionBook.from_hash(hash)
+      when "dbf"
+        FormatMetadataDbf.from_hash(hash)
+      when "jats"
+        FormatMetadataJats.from_hash(hash)
+      when "epub"
+        FormatMetadataEpub.from_hash(hash)
+      when "pst"
+        FormatMetadataPst.from_hash(hash)
+      when "audio"
+        FormatMetadataAudio.from_hash(hash)
+      when "code"
+        FormatMetadataCode.from_hash(hash)
+      else
+        raise "Unknown discriminator: #{discriminator}"
       end
     end
   end
@@ -2975,7 +3188,8 @@ module Xberg
 
     # @return [PdfMetadata]
     sig { returns(PdfMetadata) }
-    def value = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def value = super
     sig { returns(T::Boolean) }
     def pdf? = true
     sig { returns(T::Boolean) }
@@ -3032,7 +3246,8 @@ module Xberg
 
     # @return [DocxMetadata]
     sig { returns(DocxMetadata) }
-    def value = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def value = super
     sig { returns(T::Boolean) }
     def pdf? = false
     sig { returns(T::Boolean) }
@@ -3089,7 +3304,8 @@ module Xberg
 
     # @return [ExcelMetadata]
     sig { returns(ExcelMetadata) }
-    def value = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def value = super
     sig { returns(T::Boolean) }
     def pdf? = false
     sig { returns(T::Boolean) }
@@ -3146,7 +3362,8 @@ module Xberg
 
     # @return [EmailMetadata]
     sig { returns(EmailMetadata) }
-    def value = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def value = super
     sig { returns(T::Boolean) }
     def pdf? = false
     sig { returns(T::Boolean) }
@@ -3203,7 +3420,8 @@ module Xberg
 
     # @return [PptxMetadata]
     sig { returns(PptxMetadata) }
-    def value = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def value = super
     sig { returns(T::Boolean) }
     def pdf? = false
     sig { returns(T::Boolean) }
@@ -3260,7 +3478,8 @@ module Xberg
 
     # @return [ArchiveMetadata]
     sig { returns(ArchiveMetadata) }
-    def value = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def value = super
     sig { returns(T::Boolean) }
     def pdf? = false
     sig { returns(T::Boolean) }
@@ -3317,7 +3536,8 @@ module Xberg
 
     # @return [ImageMetadata]
     sig { returns(ImageMetadata) }
-    def value = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def value = super
     sig { returns(T::Boolean) }
     def pdf? = false
     sig { returns(T::Boolean) }
@@ -3374,7 +3594,8 @@ module Xberg
 
     # @return [XmlMetadata]
     sig { returns(XmlMetadata) }
-    def value = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def value = super
     sig { returns(T::Boolean) }
     def pdf? = false
     sig { returns(T::Boolean) }
@@ -3431,7 +3652,8 @@ module Xberg
 
     # @return [TextMetadata]
     sig { returns(TextMetadata) }
-    def value = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def value = super
     sig { returns(T::Boolean) }
     def pdf? = false
     sig { returns(T::Boolean) }
@@ -3488,7 +3710,8 @@ module Xberg
 
     # @return [HtmlMetadata]
     sig { returns(HtmlMetadata) }
-    def value = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def value = super
     sig { returns(T::Boolean) }
     def pdf? = false
     sig { returns(T::Boolean) }
@@ -3545,7 +3768,8 @@ module Xberg
 
     # @return [OcrMetadata]
     sig { returns(OcrMetadata) }
-    def value = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def value = super
     sig { returns(T::Boolean) }
     def pdf? = false
     sig { returns(T::Boolean) }
@@ -3602,7 +3826,8 @@ module Xberg
 
     # @return [CsvMetadata]
     sig { returns(CsvMetadata) }
-    def value = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def value = super
     sig { returns(T::Boolean) }
     def pdf? = false
     sig { returns(T::Boolean) }
@@ -3659,7 +3884,8 @@ module Xberg
 
     # @return [BibtexMetadata]
     sig { returns(BibtexMetadata) }
-    def value = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def value = super
     sig { returns(T::Boolean) }
     def pdf? = false
     sig { returns(T::Boolean) }
@@ -3716,7 +3942,8 @@ module Xberg
 
     # @return [CitationMetadata]
     sig { returns(CitationMetadata) }
-    def value = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def value = super
     sig { returns(T::Boolean) }
     def pdf? = false
     sig { returns(T::Boolean) }
@@ -3773,7 +4000,8 @@ module Xberg
 
     # @return [FictionBookMetadata]
     sig { returns(FictionBookMetadata) }
-    def value = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def value = super
     sig { returns(T::Boolean) }
     def pdf? = false
     sig { returns(T::Boolean) }
@@ -3830,7 +4058,8 @@ module Xberg
 
     # @return [DbfMetadata]
     sig { returns(DbfMetadata) }
-    def value = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def value = super
     sig { returns(T::Boolean) }
     def pdf? = false
     sig { returns(T::Boolean) }
@@ -3887,7 +4116,8 @@ module Xberg
 
     # @return [JatsMetadata]
     sig { returns(JatsMetadata) }
-    def value = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def value = super
     sig { returns(T::Boolean) }
     def pdf? = false
     sig { returns(T::Boolean) }
@@ -3944,7 +4174,8 @@ module Xberg
 
     # @return [EpubMetadata]
     sig { returns(EpubMetadata) }
-    def value = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def value = super
     sig { returns(T::Boolean) }
     def pdf? = false
     sig { returns(T::Boolean) }
@@ -4001,7 +4232,8 @@ module Xberg
 
     # @return [PstMetadata]
     sig { returns(PstMetadata) }
-    def value = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def value = super
     sig { returns(T::Boolean) }
     def pdf? = false
     sig { returns(T::Boolean) }
@@ -4058,7 +4290,8 @@ module Xberg
 
     # @return [AudioMetadata]
     sig { returns(AudioMetadata) }
-    def value = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def value = super
     sig { returns(T::Boolean) }
     def pdf? = false
     sig { returns(T::Boolean) }
@@ -4125,7 +4358,8 @@ module Xberg
 
     # @return [CodeMetadata]
     sig { returns(CodeMetadata) }
-    def value = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def value = super
     sig { returns(T::Boolean) }
     def pdf? = false
     sig { returns(T::Boolean) }
@@ -4195,9 +4429,12 @@ module Xberg
     def self.from_hash(hash)
       discriminator = hash[:type] || hash["type"]
       case discriminator
-      when "rectangle" then OcrBoundingGeometryRectangle.from_hash(hash)
-      when "quadrilateral" then OcrBoundingGeometryQuadrilateral.from_hash(hash)
-      else raise "Unknown discriminator: #{discriminator}"
+      when "rectangle"
+        OcrBoundingGeometryRectangle.from_hash(hash)
+      when "quadrilateral"
+        OcrBoundingGeometryQuadrilateral.from_hash(hash)
+      else
+        raise "Unknown discriminator: #{discriminator}"
       end
     end
   end
@@ -4208,16 +4445,20 @@ module Xberg
 
     # Left x-coordinate in pixels
     sig { returns(Integer) }
-    def left = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def left = super
     # Top y-coordinate in pixels
     sig { returns(Integer) }
-    def top = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def top = super
     # Width in pixels
     sig { returns(Integer) }
-    def width = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def width = super
     # Height in pixels
     sig { returns(Integer) }
-    def height = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def height = super
     sig { returns(T::Boolean) }
     def rectangle? = true
     sig { returns(T::Boolean) }
@@ -4226,7 +4467,12 @@ module Xberg
     # @return [self]
     sig { params(hash: T::Hash[T.untyped, T.untyped]).returns(T.attached_class) }
     def self.from_hash(hash)
-      new(left: hash[:left] || hash["left"], top: hash[:top] || hash["top"], width: hash[:width] || hash["width"], height: hash[:height] || hash["height"])
+      new(
+        left: hash[:left] || hash["left"],
+        top: hash[:top] || hash["top"],
+        width: hash[:width] || hash["width"],
+        height: hash[:height] || hash["height"]
+      )
     end
   end
   ## 4-point quadrilateral for rotated/skewed text (PaddleOCR).
@@ -4239,7 +4485,8 @@ module Xberg
 
     # Four corner points as `[[x, y], ...]` in clockwise order
     sig { returns(String) }
-    def points = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def points = super
     sig { returns(T::Boolean) }
     def rectangle? = false
     sig { returns(T::Boolean) }
@@ -4272,10 +4519,14 @@ module Xberg
     def self.from_hash(hash)
       discriminator = hash[:kind] || hash["kind"]
       case discriminator
-      when "context" then DiffLineContext.from_hash(hash)
-      when "added" then DiffLineAdded.from_hash(hash)
-      when "removed" then DiffLineRemoved.from_hash(hash)
-      else raise "Unknown discriminator: #{discriminator}"
+      when "context"
+        DiffLineContext.from_hash(hash)
+      when "added"
+        DiffLineAdded.from_hash(hash)
+      when "removed"
+        DiffLineRemoved.from_hash(hash)
+      else
+        raise "Unknown discriminator: #{discriminator}"
       end
     end
   end
@@ -4286,7 +4537,8 @@ module Xberg
 
     # @return [String]
     sig { returns(String) }
-    def value = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def value = super
     sig { returns(T::Boolean) }
     def context? = true
     sig { returns(T::Boolean) }
@@ -4307,7 +4559,8 @@ module Xberg
 
     # @return [String]
     sig { returns(String) }
-    def value = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def value = super
     sig { returns(T::Boolean) }
     def context? = false
     sig { returns(T::Boolean) }
@@ -4328,7 +4581,8 @@ module Xberg
 
     # @return [String]
     sig { returns(String) }
-    def value = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def value = super
     sig { returns(T::Boolean) }
     def context? = false
     sig { returns(T::Boolean) }
@@ -4359,12 +4613,18 @@ module Xberg
     def self.from_hash(hash)
       discriminator = hash[:type] || hash["type"]
       case discriminator
-      when "paragraph" then RevisionAnchorParagraph.from_hash(hash)
-      when "table_cell" then RevisionAnchorTableCell.from_hash(hash)
-      when "page" then RevisionAnchorPage.from_hash(hash)
-      when "slide" then RevisionAnchorSlide.from_hash(hash)
-      when "sheet" then RevisionAnchorSheet.from_hash(hash)
-      else raise "Unknown discriminator: #{discriminator}"
+      when "paragraph"
+        RevisionAnchorParagraph.from_hash(hash)
+      when "table_cell"
+        RevisionAnchorTableCell.from_hash(hash)
+      when "page"
+        RevisionAnchorPage.from_hash(hash)
+      when "slide"
+        RevisionAnchorSlide.from_hash(hash)
+      when "sheet"
+        RevisionAnchorSheet.from_hash(hash)
+      else
+        raise "Unknown discriminator: #{discriminator}"
       end
     end
   end
@@ -4375,7 +4635,8 @@ module Xberg
 
     # Zero-based index of the paragraph in document order.
     sig { returns(Integer) }
-    def index = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def index = super
     sig { returns(T::Boolean) }
     def paragraph? = true
     sig { returns(T::Boolean) }
@@ -4400,13 +4661,16 @@ module Xberg
 
     # Zero-based row index within the table.
     sig { returns(Integer) }
-    def row = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def row = super
     # Zero-based column index within the table.
     sig { returns(Integer) }
-    def col = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def col = super
     # Zero-based index of the table in document order.
     sig { returns(Integer) }
-    def table_index = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def table_index = super
     sig { returns(T::Boolean) }
     def paragraph? = false
     sig { returns(T::Boolean) }
@@ -4421,7 +4685,11 @@ module Xberg
     # @return [self]
     sig { params(hash: T::Hash[T.untyped, T.untyped]).returns(T.attached_class) }
     def self.from_hash(hash)
-      new(row: hash[:row] || hash["row"], col: hash[:col] || hash["col"], table_index: hash[:table_index] || hash["table_index"])
+      new(
+        row: hash[:row] || hash["row"],
+        col: hash[:col] || hash["col"],
+        table_index: hash[:table_index] || hash["table_index"]
+      )
     end
   end
   ## Page, identified by its zero-based index.
@@ -4431,7 +4699,8 @@ module Xberg
 
     # Zero-based page index.
     sig { returns(Integer) }
-    def index = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def index = super
     sig { returns(T::Boolean) }
     def paragraph? = false
     sig { returns(T::Boolean) }
@@ -4456,7 +4725,8 @@ module Xberg
 
     # Zero-based slide index.
     sig { returns(Integer) }
-    def index = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def index = super
     sig { returns(T::Boolean) }
     def paragraph? = false
     sig { returns(T::Boolean) }
@@ -4481,10 +4751,12 @@ module Xberg
 
     # Zero-based sheet index.
     sig { returns(Integer) }
-    def index = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def index = super
     # Sheet display name when available.
     sig { returns(T.nilable(String)) }
-    def name = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def name = super
     sig { returns(T::Boolean) }
     def paragraph? = false
     sig { returns(T::Boolean) }
@@ -4519,13 +4791,20 @@ module Xberg
     def self.from_hash(hash)
       discriminator = hash[:type] || hash["type"]
       case discriminator
-      when "small_file" then NoChunkingReasonSmallFile.from_hash(hash)
-      when "few_pages" then NoChunkingReasonFewPages.from_hash(hash)
-      when "text_layer_detected" then NoChunkingReasonTextLayerDetected.from_hash(hash)
-      when "format_not_chunkable" then NoChunkingReasonFormatNotChunkable.from_hash(hash)
-      when "chunking_disabled" then NoChunkingReasonChunkingDisabled.from_hash(hash)
-      when "fast_text_extraction" then NoChunkingReasonFastTextExtraction.from_hash(hash)
-      else raise "Unknown discriminator: #{discriminator}"
+      when "small_file"
+        NoChunkingReasonSmallFile.from_hash(hash)
+      when "few_pages"
+        NoChunkingReasonFewPages.from_hash(hash)
+      when "text_layer_detected"
+        NoChunkingReasonTextLayerDetected.from_hash(hash)
+      when "format_not_chunkable"
+        NoChunkingReasonFormatNotChunkable.from_hash(hash)
+      when "chunking_disabled"
+        NoChunkingReasonChunkingDisabled.from_hash(hash)
+      when "fast_text_extraction"
+        NoChunkingReasonFastTextExtraction.from_hash(hash)
+      else
+        raise "Unknown discriminator: #{discriminator}"
       end
     end
   end
@@ -4536,10 +4815,12 @@ module Xberg
 
     # Actual size in bytes.
     sig { returns(Integer) }
-    def size_bytes = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def size_bytes = super
     # Threshold in bytes.
     sig { returns(Integer) }
-    def threshold_bytes = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def threshold_bytes = super
     sig { returns(T::Boolean) }
     def small_file? = true
     sig { returns(T::Boolean) }
@@ -4556,7 +4837,10 @@ module Xberg
     # @return [self]
     sig { params(hash: T::Hash[T.untyped, T.untyped]).returns(T.attached_class) }
     def self.from_hash(hash)
-      new(size_bytes: hash[:size_bytes] || hash["size_bytes"], threshold_bytes: hash[:threshold_bytes] || hash["threshold_bytes"])
+      new(
+        size_bytes: hash[:size_bytes] || hash["size_bytes"],
+        threshold_bytes: hash[:threshold_bytes] || hash["threshold_bytes"]
+      )
     end
   end
   ## Document has fewer pages than threshold.
@@ -4566,10 +4850,12 @@ module Xberg
 
     # Actual page count.
     sig { returns(Integer) }
-    def page_count = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def page_count = super
     # Threshold page count.
     sig { returns(Integer) }
-    def threshold = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def threshold = super
     sig { returns(T::Boolean) }
     def small_file? = false
     sig { returns(T::Boolean) }
@@ -4596,10 +4882,12 @@ module Xberg
 
     # Percentage of pages with text (0.0 to 1.0).
     sig { returns(Float) }
-    def text_coverage = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def text_coverage = super
     # Average characters per page.
     sig { returns(Integer) }
-    def avg_chars_per_page = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def avg_chars_per_page = super
     sig { returns(T::Boolean) }
     def small_file? = false
     sig { returns(T::Boolean) }
@@ -4616,7 +4904,10 @@ module Xberg
     # @return [self]
     sig { params(hash: T::Hash[T.untyped, T.untyped]).returns(T.attached_class) }
     def self.from_hash(hash)
-      new(text_coverage: hash[:text_coverage] || hash["text_coverage"], avg_chars_per_page: hash[:avg_chars_per_page] || hash["avg_chars_per_page"])
+      new(
+        text_coverage: hash[:text_coverage] || hash["text_coverage"],
+        avg_chars_per_page: hash[:avg_chars_per_page] || hash["avg_chars_per_page"]
+      )
     end
   end
   ## Document format does not support chunking.
@@ -4626,7 +4917,8 @@ module Xberg
 
     # MIME type of the document.
     sig { returns(String) }
-    def mime_type = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def mime_type = super
     sig { returns(T::Boolean) }
     def small_file? = false
     sig { returns(T::Boolean) }
@@ -4711,11 +5003,16 @@ module Xberg
     def self.from_hash(hash)
       discriminator = hash[:type] || hash["type"]
       case discriminator
-      when "large_file" then ChunkingReasonLargeFile.from_hash(hash)
-      when "many_pages" then ChunkingReasonManyPages.from_hash(hash)
-      when "ocr_required" then ChunkingReasonOcrRequired.from_hash(hash)
-      when "large_and_many_pages" then ChunkingReasonLargeAndManyPages.from_hash(hash)
-      else raise "Unknown discriminator: #{discriminator}"
+      when "large_file"
+        ChunkingReasonLargeFile.from_hash(hash)
+      when "many_pages"
+        ChunkingReasonManyPages.from_hash(hash)
+      when "ocr_required"
+        ChunkingReasonOcrRequired.from_hash(hash)
+      when "large_and_many_pages"
+        ChunkingReasonLargeAndManyPages.from_hash(hash)
+      else
+        raise "Unknown discriminator: #{discriminator}"
       end
     end
   end
@@ -4726,10 +5023,12 @@ module Xberg
 
     # Actual size in bytes.
     sig { returns(Integer) }
-    def size_bytes = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def size_bytes = super
     # Threshold in bytes.
     sig { returns(Integer) }
-    def threshold_bytes = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def threshold_bytes = super
     sig { returns(T::Boolean) }
     def large_file? = true
     sig { returns(T::Boolean) }
@@ -4742,7 +5041,10 @@ module Xberg
     # @return [self]
     sig { params(hash: T::Hash[T.untyped, T.untyped]).returns(T.attached_class) }
     def self.from_hash(hash)
-      new(size_bytes: hash[:size_bytes] || hash["size_bytes"], threshold_bytes: hash[:threshold_bytes] || hash["threshold_bytes"])
+      new(
+        size_bytes: hash[:size_bytes] || hash["size_bytes"],
+        threshold_bytes: hash[:threshold_bytes] || hash["threshold_bytes"]
+      )
     end
   end
   ## Document has many pages.
@@ -4752,10 +5054,12 @@ module Xberg
 
     # Actual page count.
     sig { returns(Integer) }
-    def page_count = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def page_count = super
     # Threshold page count.
     sig { returns(Integer) }
-    def threshold = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def threshold = super
     sig { returns(T::Boolean) }
     def large_file? = false
     sig { returns(T::Boolean) }
@@ -4778,10 +5082,12 @@ module Xberg
 
     # Page count.
     sig { returns(Integer) }
-    def page_count = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def page_count = super
     # Whether OCR is forced.
     sig { returns(T::Boolean) }
-    def force_ocr = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def force_ocr = super
     sig { returns(T::Boolean) }
     def large_file? = false
     sig { returns(T::Boolean) }
@@ -4804,10 +5110,12 @@ module Xberg
 
     # Actual size in bytes.
     sig { returns(Integer) }
-    def size_bytes = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def size_bytes = super
     # Actual page count.
     sig { returns(Integer) }
-    def page_count = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def page_count = super
     sig { returns(T::Boolean) }
     def large_file? = false
     sig { returns(T::Boolean) }
@@ -4840,10 +5148,14 @@ module Xberg
     def self.from_hash(hash)
       discriminator = hash[:type] || hash["type"]
       case discriminator
-      when "basic" then AuthConfigBasic.from_hash(hash)
-      when "bearer" then AuthConfigBearer.from_hash(hash)
-      when "header" then AuthConfigHeader.from_hash(hash)
-      else raise "Unknown discriminator: #{discriminator}"
+      when "basic"
+        AuthConfigBasic.from_hash(hash)
+      when "bearer"
+        AuthConfigBearer.from_hash(hash)
+      when "header"
+        AuthConfigHeader.from_hash(hash)
+      else
+        raise "Unknown discriminator: #{discriminator}"
       end
     end
   end
@@ -4854,10 +5166,12 @@ module Xberg
 
     # Username sent in the `Authorization: Basic` header.
     sig { returns(String) }
-    def username = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def username = super
     # Password sent in the `Authorization: Basic` header.
     sig { returns(String) }
-    def password = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def password = super
     sig { returns(T::Boolean) }
     def basic? = true
     sig { returns(T::Boolean) }
@@ -4878,7 +5192,8 @@ module Xberg
 
     # Token sent in the `Authorization: Bearer` header.
     sig { returns(String) }
-    def token = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def token = super
     sig { returns(T::Boolean) }
     def basic? = false
     sig { returns(T::Boolean) }
@@ -4899,10 +5214,12 @@ module Xberg
 
     # HTTP header name to set on each request.
     sig { returns(String) }
-    def name = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def name = super
     # HTTP header value to send.
     sig { returns(String) }
-    def value = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def value = super
     sig { returns(T::Boolean) }
     def basic? = false
     sig { returns(T::Boolean) }
@@ -4947,10 +5264,14 @@ module Xberg
     def self.from_hash(hash)
       discriminator = hash[:type] || hash["type"]
       case discriminator
-      when "exact" then HostMatcherExact.from_hash(hash)
-      when "suffix" then HostMatcherSuffix.from_hash(hash)
-      when "cidr" then HostMatcherCidr.from_hash(hash)
-      else raise "Unknown discriminator: #{discriminator}"
+      when "exact"
+        HostMatcherExact.from_hash(hash)
+      when "suffix"
+        HostMatcherSuffix.from_hash(hash)
+      when "cidr"
+        HostMatcherCidr.from_hash(hash)
+      else
+        raise "Unknown discriminator: #{discriminator}"
       end
     end
   end
@@ -4961,7 +5282,8 @@ module Xberg
 
     # The hostname to match.
     sig { returns(String) }
-    def value = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def value = super
     sig { returns(T::Boolean) }
     def exact? = true
     sig { returns(T::Boolean) }
@@ -4982,7 +5304,8 @@ module Xberg
 
     # The dot-prefixed suffix to match. A leading dot is optional.
     sig { returns(String) }
-    def value = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def value = super
     sig { returns(T::Boolean) }
     def exact? = false
     sig { returns(T::Boolean) }
@@ -5004,7 +5327,8 @@ module Xberg
     # The CIDR block. Validated when built through [`HostMatcher::cidr`] or
     # deserialization.
     sig { returns(String) }
-    def value = super # rubocop:disable Lint/UselessMethodDefinition
+    # rubocop:disable Lint/UselessMethodDefinition
+    def value = super
     sig { returns(T::Boolean) }
     def exact? = false
     sig { returns(T::Boolean) }

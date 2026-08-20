@@ -99,7 +99,10 @@ fn svg_to_webp_emits_no_image_encoder_warnings() {
     // `image_encoder` warnings about images that were never encoded -- it was satisfied by the
     // very defect it should have caught. Assert there is something to encode BEFORE asserting
     // that encoding it produced no warnings.
-    let images = result.images.as_ref().expect("images must be Some when extract_images=true");
+    let images = result
+        .images
+        .as_ref()
+        .expect("images must be Some when extract_images=true");
     assert!(
         !images.is_empty(),
         "HTML with inline SVG must yield at least one ExtractedImage before the warning check \

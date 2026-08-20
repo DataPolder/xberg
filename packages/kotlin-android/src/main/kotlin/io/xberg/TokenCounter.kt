@@ -30,10 +30,10 @@ package io.xberg
 class TokenCounter internal constructor(handle: Long) : AutoCloseable {
     private var nativeHandle: Long = handle
     internal val handle: Long
-        @Synchronized get() {
-            check(nativeHandle != 0L) { "TokenCounter is closed" }
-            return nativeHandle
-        }
+    @Synchronized get() {
+        check(nativeHandle != 0L) { "TokenCounter is closed" }
+        return nativeHandle
+    }
 
     @Synchronized
     override fun close() {

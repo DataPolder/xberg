@@ -178,7 +178,11 @@ enum PdfDocumentOrigin {
 /// tags yields `pages: None` -- indistinguishable at the call site from "this document
 /// has no pages", and a silent shape change between the native and OCR paths for the
 /// same input. Every arm that falls back here previously lost per-page access entirely. ~keep
-fn flat_pdf_document(text: &str, mime_type: &str, boundaries: Option<&[crate::types::PageBoundary]>) -> InternalDocument {
+fn flat_pdf_document(
+    text: &str,
+    mime_type: &str,
+    boundaries: Option<&[crate::types::PageBoundary]>,
+) -> InternalDocument {
     let mut doc = InternalDocument::new("pdf");
     doc.mime_type = mime_type.to_string();
     let normalized = crate::extraction::transform::normalize_line_endings(text);
@@ -189,7 +193,9 @@ fn flat_pdf_document(text: &str, mime_type: &str, boundaries: Option<&[crate::ty
     let usable: Option<&[crate::types::PageBoundary]> = boundaries.filter(|bounds| {
         normalized.len() == text.len()
             && !bounds.is_empty()
-            && bounds.iter().all(|b| b.byte_start <= b.byte_end && b.byte_end <= normalized.len())
+            && bounds
+                .iter()
+                .all(|b| b.byte_start <= b.byte_end && b.byte_end <= normalized.len())
     });
 
     let page_at = |offset: usize| -> Option<u32> {
@@ -1211,8 +1217,7 @@ async fn recognize_pdf_formula_regions(
                     );
                 }
             }
-            let allow_synthesis =
-                formula_synthesis_allowed(regions_pts.is_some(), formula_slots.len(), elements.len());
+            let allow_synthesis = formula_synthesis_allowed(regions_pts.is_some(), formula_slots.len(), elements.len());
             let formula_boxes: Vec<Option<crate::types::BoundingBox>> = formula_slots.iter().map(|f| f.bbox).collect();
             let element_boxes: Vec<Option<crate::types::BoundingBox>> =
                 elements.iter().map(|(bbox, _)| *bbox).collect();
@@ -1983,12 +1988,11 @@ impl PdfExtractor {
         // already shifted every later offset, so re-map before handing them to the document
         // selector or page tagging would attribute content to the wrong page. ~keep
         #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
-        let selector_boundaries: Option<Vec<crate::types::PageBoundary>> = boundaries.as_ref().map(|bounds| {
-            match ocr_results_map.as_ref() {
+        let selector_boundaries: Option<Vec<crate::types::PageBoundary>> =
+            boundaries.as_ref().map(|bounds| match ocr_results_map.as_ref() {
                 Some(accepted) if !accepted.is_empty() => ocr::boundaries_after_replacements(bounds, accepted),
                 _ => bounds.clone(),
-            }
-        });
+            });
         #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
         let (mut doc, document_origin, document_is_structured) = select_pdf_document(
             extraction_method,
@@ -2440,7 +2444,8 @@ mod tests {
         let mut structured = InternalDocument::new("pdf");
         structured.push_element(InternalElement::text(ElementKind::Heading { level: 1 }, represented, 0));
 
-        let (selected, is_structured) = select_native_pdf_document(&native_text, "application/pdf", Some(structured), None);
+        let (selected, is_structured) =
+            select_native_pdf_document(&native_text, "application/pdf", Some(structured), None);
 
         assert!(!is_structured);
         assert_eq!(selected.elements.len(), 1);
@@ -2454,7 +2459,8 @@ mod tests {
         let mut structured = InternalDocument::new("pdf");
         structured.push_element(InternalElement::text(ElementKind::Heading { level: 1 }, represented, 0));
 
-        let (selected, is_structured) = select_native_pdf_document(&native_text, "application/pdf", Some(structured), None);
+        let (selected, is_structured) =
+            select_native_pdf_document(&native_text, "application/pdf", Some(structured), None);
 
         assert!(is_structured);
         assert!(matches!(selected.elements[0].kind, ElementKind::Heading { level: 1 }));
@@ -3644,7 +3650,10 @@ mod tests {
             .expect("fixture must parse")
             .page_count()
             .expect("fixture must expose a page count");
-        assert!(real_page_count > 1, "fixture must have more than one page to exercise the limit");
+        assert!(
+            real_page_count > 1,
+            "fixture must have more than one page to exercise the limit"
+        );
 
         let extractor = PdfExtractor::new();
         let config = ExtractionConfig {
@@ -3731,8 +3740,8 @@ mod tests {
     #[tokio::test]
     #[cfg(feature = "pdf")]
     async fn encrypted_document_over_max_pages_is_rejected_like_any_other() {
-        use base64::Engine as _;
         use crate::core::config::pdf::PdfConfig;
+        use base64::Engine as _;
 
         let content = base64::engine::general_purpose::STANDARD
             .decode(ENCRYPTED_THREE_PAGE_PDF_BASE64)

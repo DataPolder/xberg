@@ -40,7 +40,7 @@ no default build profile, so it needs a build with `--features formula-recogniti
 | Baseline | 33.9%        | 87.4%   | 447 ms       |
 | Layout   | 41.1%        | 90.1%   | 1500 ms      |
 
-_171-document PDF corpus, CPU only. GPU acceleration significantly reduces the time penalty._
+*171-document PDF corpus, CPU only. GPU acceleration significantly reduces the time penalty.*
 
 :::note[Layout Detection Model]
 Xberg uses only the RT-DETR v2 model for layout detection. The `preset` field is not available in `LayoutDetectionConfig`. Configure table structure recognition separately via `table_model` — see "Table Structure Models" below.

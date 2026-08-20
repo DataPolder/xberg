@@ -179,8 +179,19 @@ fn should_map_named_variants_to_their_dedicated_code_and_type() {
     let cases: [(XbergError, u32, &str); 6] = [
         (XbergError::Io(std::io::Error::other("t")), 1001, "io"),
         (XbergError::validation("t"), 1002, "validation"),
-        (XbergError::UnsupportedFormat("t/mime".to_string()), 1003, "unsupported_format"),
-        (XbergError::Timeout { elapsed_ms: 1, limit_ms: 2 }, 1004, "timeout"),
+        (
+            XbergError::UnsupportedFormat("t/mime".to_string()),
+            1003,
+            "unsupported_format",
+        ),
+        (
+            XbergError::Timeout {
+                elapsed_ms: 1,
+                limit_ms: 2,
+            },
+            1004,
+            "timeout",
+        ),
         (XbergError::Cancelled, 1005, "cancelled"),
         (XbergError::security("t"), 1006, "security"),
     ];

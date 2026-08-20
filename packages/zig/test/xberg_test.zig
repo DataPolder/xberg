@@ -96,9 +96,9 @@ fn expectFailure(result: anytype) !void {
 
 test "extract fails on a malformed input document instead of returning empty content" {
     try expectFailure(xberg.extract("{ not valid json", "{}"));
-}
+    }
 
-test "extract fails on a malformed config instead of returning empty content" {
-    const valid_input = "{\"kind\":\"bytes\",\"bytes\":[],\"mime_type\":\"text/plain\"}";
-    try expectFailure(xberg.extract(valid_input, "{ not valid json"));
-}
+    test "extract fails on a malformed config instead of returning empty content" {
+        const valid_input = "{\"kind\":\"bytes\",\"bytes\":[],\"mime_type\":\"text/plain\"}";
+        try expectFailure(xberg.extract(valid_input, "{ not valid json"));
+        }

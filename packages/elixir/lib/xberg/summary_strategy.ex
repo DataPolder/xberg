@@ -13,6 +13,7 @@ defmodule Xberg.SummaryStrategy do
   @doc "Pure-Rust extractive summary (TextRank over the chunk graph). Deterministic, fast, no external service required."
   @spec extractive() :: t()
   def extractive, do: @extractive
+
   @doc "Abstractive summary produced by liter-llm. Requires `liter-llm` feature and a configured `LlmConfig`. Token usage is captured in [`ExtractedDocument::llm_usage`](super::extraction::ExtractedDocument::llm_usage)."
   @spec abstractive() :: t()
   def abstractive, do: @abstractive

@@ -300,7 +300,11 @@ fn lines_share_block(previous: &LineBounds, current: &LineBounds, median_line_he
 
     let overlap = (previous.right.min(current.right) - previous.left.max(current.left)).max(0.0);
     let narrower_width = (previous.right - previous.left).min(current.right - current.left);
-    let overlap_ratio = if narrower_width > 0.0 { overlap / narrower_width } else { 0.0 };
+    let overlap_ratio = if narrower_width > 0.0 {
+        overlap / narrower_width
+    } else {
+        0.0
+    };
     let left_edge_offset = (previous.left - current.left).abs();
 
     overlap_ratio >= MIN_BLOCK_HORIZONTAL_OVERLAP_RATIO
@@ -1046,7 +1050,10 @@ mod tests {
         let block_ids = assign_line_block_ids(&elements);
 
         assert_eq!(block_ids.len(), 2);
-        assert_eq!(block_ids[0], block_ids[1], "close overlapping lines must share a block id");
+        assert_eq!(
+            block_ids[0], block_ids[1],
+            "close overlapping lines must share a block id"
+        );
     }
 
     #[cfg(paddle_ocr)]
@@ -1058,7 +1065,10 @@ mod tests {
 
         let block_ids = assign_line_block_ids(&elements);
 
-        assert_ne!(block_ids[0], block_ids[1], "a gap far exceeding line height must start a new block");
+        assert_ne!(
+            block_ids[0], block_ids[1],
+            "a gap far exceeding line height must start a new block"
+        );
     }
 
     #[cfg(paddle_ocr)]

@@ -102,11 +102,12 @@ dotnet add package XbergIo.Xberg
 
 Or via NuGet Package Manager:
 
-```
+```text
 Install-Package XbergIo.Xberg
 ```
 
 ### System Requirements
+
 - **.NET 10.0+** required
 - Optional: [ONNX Runtime](https://github.com/microsoft/onnxruntime/releases) version 1.24+ for ORT-dependent inference features
 - Optional: [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) for OCR functionality

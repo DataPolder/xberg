@@ -659,8 +659,9 @@ mod tests {
         doc.sections.push(section);
 
         // The equation sits in the third paragraph, which is ordinal 2.
-        let scanned: AHashMap<usize, Vec<(usize, String)>> =
-            [(2usize, vec![(2usize, "\\frac{a}{b}".to_string())])].into_iter().collect();
+        let scanned: AHashMap<usize, Vec<(usize, String)>> = [(2usize, vec![(2usize, "\\frac{a}{b}".to_string())])]
+            .into_iter()
+            .collect();
         let internal = build_hwpx_internal_document(doc, "application/haansofthwpx", &scanned);
 
         let kinds: Vec<&ElementKind> = internal.elements.iter().map(|e| &e.kind).collect();
@@ -684,7 +685,10 @@ mod tests {
 
         let found = scan(&hwpx_package(&[("Contents/section0.xml", xml)]));
 
-        assert_eq!(found.get(&0).map(Vec::as_slice), Some(&[(1usize, "\\frac{a}{b}".to_string())][..]));
+        assert_eq!(
+            found.get(&0).map(Vec::as_slice),
+            Some(&[(1usize, "\\frac{a}{b}".to_string())][..])
+        );
     }
 
     /// `&amp;` separates the columns of a matrix, so a reader that drops entity
@@ -701,7 +705,11 @@ mod tests {
         // Compare against the script with its references already resolved. A
         // reader that drops them converts `1 &amp; 2` as `1 2`, which differs.
         let expected = unhwp::equation::to_latex("bmatrix { 1 & 2 # 3 & 4 }");
-        assert_eq!(latex, expected.trim(), "the scan must resolve `&amp;` before conversion");
+        assert_eq!(
+            latex,
+            expected.trim(),
+            "the scan must resolve `&amp;` before conversion"
+        );
         assert_ne!(
             latex,
             unhwp::equation::to_latex("bmatrix { 1  2 # 3  4 }").trim(),
@@ -743,7 +751,11 @@ mod tests {
 
         let found = scan(&hwpx_package(&[("Contents/section0.xml", xml)]));
 
-        assert_eq!(found.get(&0).map(|f| f[0].0), Some(1), "the equation is in the second paragraph");
+        assert_eq!(
+            found.get(&0).map(|f| f[0].0),
+            Some(1),
+            "the equation is in the second paragraph"
+        );
     }
 
     #[test]
@@ -856,7 +868,9 @@ mod tests {
         doc.sections.push(section);
 
         let section_formulas: AHashMap<usize, Vec<(usize, String)>> =
-            [(0usize, vec![(0usize, "\\frac{a}{b}".to_string())])].into_iter().collect();
+            [(0usize, vec![(0usize, "\\frac{a}{b}".to_string())])]
+                .into_iter()
+                .collect();
         let internal = build_hwpx_internal_document(doc, "application/haansofthwpx", &section_formulas);
 
         let formulas: Vec<&str> = internal
@@ -910,7 +924,9 @@ mod tests {
         doc.sections.push(section);
 
         let section_formulas: AHashMap<usize, Vec<(usize, String)>> =
-            [(0usize, vec![(0usize, "\\frac{a}{b}".to_string())])].into_iter().collect();
+            [(0usize, vec![(0usize, "\\frac{a}{b}".to_string())])]
+                .into_iter()
+                .collect();
         let internal = build_hwpx_internal_document(doc, "application/haansofthwpx", &section_formulas);
 
         let formulas: Vec<&str> = internal

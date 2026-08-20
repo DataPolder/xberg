@@ -32,6 +32,7 @@ defmodule Xberg.TableModel do
   @doc "SLANet-plus -- 7.78MB, lightweight general-purpose."
   @spec slanet_plus() :: t()
   def slanet_plus, do: @slanet_plus
+
   @doc "Classifier-routed SLANeXT: auto-select wired/wireless per table. Uses PP-LCNet classifier (6.78MB) + both SLANeXT variants (730MB total)."
   @spec slanet_auto() :: t()
   def slanet_auto, do: @slanet_auto

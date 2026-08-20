@@ -17,11 +17,11 @@ final class Xberg
      * @return ExtractionResult
      * @throws \Xberg\XbergException
      */
-    public static function extract(
-ExtractInput $input, ExtractionConfig $config): ExtractionResult
+    public static function extract(ExtractInput $input, ExtractionConfig $config): ExtractionResult
     {
         return \Xberg\XbergApi::extract($input, $config); // delegate to native extension class
     }
+
     /**
      * Extract content from multiple bytes or URI inputs.
      *
@@ -30,11 +30,11 @@ ExtractInput $input, ExtractionConfig $config): ExtractionResult
      * @return ExtractionResult
      * @throws \Xberg\XbergException
      */
-    public static function extractBatch(
-array $inputs, ExtractionConfig $config): ExtractionResult
+    public static function extractBatch(array $inputs, ExtractionConfig $config): ExtractionResult
     {
         return \Xberg\XbergApi::extractBatch($inputs, $config); // delegate to native extension class
     }
+
     /**
      * Discover all pages and sitemaps reachable from `uri` without extracting document content.
      *
@@ -50,11 +50,11 @@ array $inputs, ExtractionConfig $config): ExtractionResult
      * @return MapResult
      * @throws \Xberg\XbergException
      */
-    public static function mapUrl(
-string $uri, UrlExtractionConfig $config): MapResult
+    public static function mapUrl(string $uri, UrlExtractionConfig $config): MapResult
     {
         return \Xberg\XbergApi::mapUrl($uri, $config); // delegate to native extension class
     }
+
     /**
      * List all supported document formats.
      *
@@ -76,9 +76,11 @@ string $uri, UrlExtractionConfig $config): MapResult
      *
      * @return array<SupportedFormat>
      */
-    public static function listSupportedFormats(): array {
+    public static function listSupportedFormats(): array
+    {
         return \Xberg\XbergApi::listSupportedFormats(); // delegate to native extension class
     }
+
     /**
      * Ensure built-in extractors are registered.
      *
@@ -93,9 +95,11 @@ string $uri, UrlExtractionConfig $config): MapResult
      * @return void
      * @throws \Xberg\XbergException
      */
-    public static function ensureInitialized(): void {
+    public static function ensureInitialized(): void
+    {
         \Xberg\XbergApi::ensureInitialized(); // delegate to native extension class
     }
+
     /**
      * List the names of all registered embedding backends.
      *
@@ -105,18 +109,22 @@ string $uri, UrlExtractionConfig $config): MapResult
      * @return array<string>
      * @throws \Xberg\XbergException
      */
-    public static function listEmbeddingBackends(): array {
+    public static function listEmbeddingBackends(): array
+    {
         return \Xberg\XbergApi::listEmbeddingBackends(); // delegate to native extension class
     }
+
     /**
      * List names of all registered document extractors.
      *
      * @return array<string>
      * @throws \Xberg\XbergException
      */
-    public static function listDocumentExtractors(): array {
+    public static function listDocumentExtractors(): array
+    {
         return \Xberg\XbergApi::listDocumentExtractors(); // delegate to native extension class
     }
+
     /**
      * List all registered OCR backends.
      *
@@ -125,9 +133,11 @@ string $uri, UrlExtractionConfig $config): MapResult
      * @return array<string>
      * @throws \Xberg\XbergException
      */
-    public static function listOcrBackends(): array {
+    public static function listOcrBackends(): array
+    {
         return \Xberg\XbergApi::listOcrBackends(); // delegate to native extension class
     }
+
     /**
      * List all registered post-processor names.
      *
@@ -137,18 +147,22 @@ string $uri, UrlExtractionConfig $config): MapResult
      * @return array<string>
      * @throws \Xberg\XbergException
      */
-    public static function listPostProcessors(): array {
+    public static function listPostProcessors(): array
+    {
         return \Xberg\XbergApi::listPostProcessors(); // delegate to native extension class
     }
+
     /**
      * List names of all registered renderers.
      *
      * @return array<string>
      * @throws \Xberg\XbergException
      */
-    public static function listRenderers(): array {
+    public static function listRenderers(): array
+    {
         return \Xberg\XbergApi::listRenderers(); // delegate to native extension class
     }
+
     /**
      * List the names of all registered reranker backends.
      *
@@ -160,9 +174,11 @@ string $uri, UrlExtractionConfig $config): MapResult
      * @return array<string>
      * @throws \Xberg\XbergException
      */
-    public static function listRerankerBackends(): array {
+    public static function listRerankerBackends(): array
+    {
         return \Xberg\XbergApi::listRerankerBackends(); // delegate to native extension class
     }
+
     /**
      * List the names of all registered tokenizer backends.
      *
@@ -172,18 +188,22 @@ string $uri, UrlExtractionConfig $config): MapResult
      * @return array<string>
      * @throws \Xberg\XbergException
      */
-    public static function listTokenizerBackends(): array {
+    public static function listTokenizerBackends(): array
+    {
         return \Xberg\XbergApi::listTokenizerBackends(); // delegate to native extension class
     }
+
     /**
      * List names of all registered validators.
      *
      * @return array<string>
      * @throws \Xberg\XbergException
      */
-    public static function listValidators(): array {
+    public static function listValidators(): array
+    {
         return \Xberg\XbergApi::listValidators(); // delegate to native extension class
     }
+
     /**
      * Run chunk classification against an extraction result.
      *
@@ -199,11 +219,11 @@ string $uri, UrlExtractionConfig $config): MapResult
      * @return void
      * @throws \Xberg\XbergException
      */
-    public static function classifyChunks(
-ExtractedDocument $result, ChunkClassificationConfig $config): void
+    public static function classifyChunks(ExtractedDocument $result, ChunkClassificationConfig $config): void
     {
         \Xberg\XbergApi::classifyChunks($result, $config); // delegate to native extension class
     }
+
     /**
      * Find unmarked claims in markdown text.
      *
@@ -217,11 +237,11 @@ ExtractedDocument $result, ChunkClassificationConfig $config): void
      * @param string $markdown
      * @return array<string>
      */
-    public static function findUnmarkedClaims(
-string $markdown): array
+    public static function findUnmarkedClaims(string $markdown): array
     {
         return \Xberg\XbergApi::findUnmarkedClaims($markdown); // delegate to native extension class
     }
+
     /**
      * Verify that an excerpt appears verbatim in source text.
      *
@@ -233,11 +253,11 @@ string $markdown): array
      * @param string $source_text
      * @return bool
      */
-    public static function verifyExcerpt(
-string $excerpt, string $source_text): bool
+    public static function verifyExcerpt(string $excerpt, string $source_text): bool
     {
         return \Xberg\XbergApi::verifyExcerpt($excerpt, $source_text); // delegate to native extension class
     }
+
     /**
      * Score a query against a document using ColBERT's MaxSim operator: for each
      * query token vector, take the maximum dot product against any document
@@ -256,11 +276,11 @@ string $excerpt, string $source_text): bool
      * @param MultiVectorEmbedding $doc
      * @return float
      */
-    public static function maxSimScore(
-MultiVectorEmbedding $query, MultiVectorEmbedding $doc): float
+    public static function maxSimScore(MultiVectorEmbedding $query, MultiVectorEmbedding $doc): float
     {
         return \Xberg\XbergApi::maxSimScore($query, $doc); // delegate to native extension class
     }
+
     /**
      * Rank a set of documents against a query by MaxSim score, descending.
      *
@@ -275,11 +295,11 @@ MultiVectorEmbedding $query, MultiVectorEmbedding $doc): float
      * @param array<MultiVectorEmbedding> $docs
      * @return array<LateInteractionMatch>
      */
-    public static function maxSimRank(
-MultiVectorEmbedding $query, array $docs): array
+    public static function maxSimRank(MultiVectorEmbedding $query, array $docs): array
     {
         return \Xberg\XbergApi::maxSimRank($query, $docs); // delegate to native extension class
     }
+
     /**
      * Probe the backends and settings in `config` and report what will actually
      * execute on this host.
@@ -290,11 +310,11 @@ MultiVectorEmbedding $query, array $docs): array
      * @param ExtractionConfig $config
      * @return DoctorReport
      */
-    public static function doctor(
-ExtractionConfig $config): DoctorReport
+    public static function doctor(ExtractionConfig $config): DoctorReport
     {
         return \Xberg\XbergApi::doctor($config); // delegate to native extension class
     }
+
     /**
      * Install [`PdfOxideWarningCapture`] as the process-wide `log` backend,
      * exactly once.
@@ -325,9 +345,11 @@ ExtractionConfig $config): DoctorReport
      *
      * @return bool
      */
-    public static function installPdfRenderDiagnostics(): bool {
+    public static function installPdfRenderDiagnostics(): bool
+    {
         return \Xberg\XbergApi::installPdfRenderDiagnostics(); // delegate to native extension class
     }
+
     /**
      * Drain the glyph-drop [`ProcessingWarning`]s accumulated on this thread by
      * render calls since the last call to this function.
@@ -362,9 +384,11 @@ ExtractionConfig $config): DoctorReport
      *
      * @return array<ProcessingWarning>
      */
-    public static function takePdfOxideRenderWarnings(): array {
+    public static function takePdfOxideRenderWarnings(): array
+    {
         return \Xberg\XbergApi::takePdfOxideRenderWarnings(); // delegate to native extension class
     }
+
     /**
      * Build the four (or three) token Whisper decoder prompt.
      *
@@ -382,10 +406,21 @@ ExtractionConfig $config): DoctorReport
      * @return array<int>
      */
     public static function buildDecoderPromptTokens(
-int $start_of_transcript, int $lang_id, int $transcribe, int $no_timestamps, bool $timestamps): array
-    {
-        return \Xberg\XbergApi::buildDecoderPromptTokens($start_of_transcript, $lang_id, $transcribe, $no_timestamps, $timestamps); // delegate to native extension class
+        int $start_of_transcript,
+        int $lang_id,
+        int $transcribe,
+        int $no_timestamps,
+        bool $timestamps,
+    ): array {
+        return \Xberg\XbergApi::buildDecoderPromptTokens(
+            $start_of_transcript,
+            $lang_id,
+            $transcribe,
+            $no_timestamps,
+            $timestamps,
+        ); // delegate to native extension class
     }
+
     /**
      * Convert a raw Whisper timestamp token ID to a millisecond offset from the
      * start of the 30-second chunk it was decoded in.
@@ -397,264 +432,263 @@ int $start_of_transcript, int $lang_id, int $transcribe, int $no_timestamps, boo
      * @param int $timestamp_begin_id
      * @return int
      */
-    public static function timestampTokenToMs(
-int $token_id, int $timestamp_begin_id): int
+    public static function timestampTokenToMs(int $token_id, int $timestamp_begin_id): int
     {
         return \Xberg\XbergApi::timestampTokenToMs($token_id, $timestamp_begin_id); // delegate to native extension class
     }
+
     /**
      * registerOcrBackend.
      *
      * @param OcrBackend $backend
      * @return void
      */
-    public static function registerOcrBackend(
-OcrBackend $backend) : void
+    public static function registerOcrBackend(OcrBackend $backend): void
     {
         \Xberg\XbergApi::registerOcrBackend($backend); // delegate to native extension class
     }
+
     /**
      * unregisterOcrBackend.
      *
      * @param string $name
      * @return void
      */
-    public static function unregisterOcrBackend(
-string $name) : void
+    public static function unregisterOcrBackend(string $name): void
     {
         \Xberg\XbergApi::unregisterOcrBackend($name); // delegate to native extension class
     }
+
     /**
      * clearOcrBackends.
      *
      * @return void
      */
-    public static function clearOcrBackends(
-) : void
+    public static function clearOcrBackends(): void
     {
         \Xberg\XbergApi::clearOcrBackends(); // delegate to native extension class
     }
+
     /**
      * registerPostProcessor.
      *
      * @param PostProcessor $backend
      * @return void
      */
-    public static function registerPostProcessor(
-PostProcessor $backend) : void
+    public static function registerPostProcessor(PostProcessor $backend): void
     {
         \Xberg\XbergApi::registerPostProcessor($backend); // delegate to native extension class
     }
+
     /**
      * unregisterPostProcessor.
      *
      * @param string $name
      * @return void
      */
-    public static function unregisterPostProcessor(
-string $name) : void
+    public static function unregisterPostProcessor(string $name): void
     {
         \Xberg\XbergApi::unregisterPostProcessor($name); // delegate to native extension class
     }
+
     /**
      * clearPostProcessors.
      *
      * @return void
      */
-    public static function clearPostProcessors(
-) : void
+    public static function clearPostProcessors(): void
     {
         \Xberg\XbergApi::clearPostProcessors(); // delegate to native extension class
     }
+
     /**
      * registerValidator.
      *
      * @param Validator $backend
      * @return void
      */
-    public static function registerValidator(
-Validator $backend) : void
+    public static function registerValidator(Validator $backend): void
     {
         \Xberg\XbergApi::registerValidator($backend); // delegate to native extension class
     }
+
     /**
      * unregisterValidator.
      *
      * @param string $name
      * @return void
      */
-    public static function unregisterValidator(
-string $name) : void
+    public static function unregisterValidator(string $name): void
     {
         \Xberg\XbergApi::unregisterValidator($name); // delegate to native extension class
     }
+
     /**
      * clearValidators.
      *
      * @return void
      */
-    public static function clearValidators(
-) : void
+    public static function clearValidators(): void
     {
         \Xberg\XbergApi::clearValidators(); // delegate to native extension class
     }
+
     /**
      * registerDocumentExtractor.
      *
      * @param DocumentExtractor $backend
      * @return void
      */
-    public static function registerDocumentExtractor(
-DocumentExtractor $backend) : void
+    public static function registerDocumentExtractor(DocumentExtractor $backend): void
     {
         \Xberg\XbergApi::registerDocumentExtractor($backend); // delegate to native extension class
     }
+
     /**
      * unregisterDocumentExtractor.
      *
      * @param string $name
      * @return void
      */
-    public static function unregisterDocumentExtractor(
-string $name) : void
+    public static function unregisterDocumentExtractor(string $name): void
     {
         \Xberg\XbergApi::unregisterDocumentExtractor($name); // delegate to native extension class
     }
+
     /**
      * clearDocumentExtractors.
      *
      * @return void
      */
-    public static function clearDocumentExtractors(
-) : void
+    public static function clearDocumentExtractors(): void
     {
         \Xberg\XbergApi::clearDocumentExtractors(); // delegate to native extension class
     }
+
     /**
      * registerEmbeddingBackend.
      *
      * @param EmbeddingBackend $backend
      * @return void
      */
-    public static function registerEmbeddingBackend(
-EmbeddingBackend $backend) : void
+    public static function registerEmbeddingBackend(EmbeddingBackend $backend): void
     {
         \Xberg\XbergApi::registerEmbeddingBackend($backend); // delegate to native extension class
     }
+
     /**
      * unregisterEmbeddingBackend.
      *
      * @param string $name
      * @return void
      */
-    public static function unregisterEmbeddingBackend(
-string $name) : void
+    public static function unregisterEmbeddingBackend(string $name): void
     {
         \Xberg\XbergApi::unregisterEmbeddingBackend($name); // delegate to native extension class
     }
+
     /**
      * clearEmbeddingBackends.
      *
      * @return void
      */
-    public static function clearEmbeddingBackends(
-) : void
+    public static function clearEmbeddingBackends(): void
     {
         \Xberg\XbergApi::clearEmbeddingBackends(); // delegate to native extension class
     }
+
     /**
      * registerRenderer.
      *
      * @param Renderer $backend
      * @return void
      */
-    public static function registerRenderer(
-Renderer $backend) : void
+    public static function registerRenderer(Renderer $backend): void
     {
         \Xberg\XbergApi::registerRenderer($backend); // delegate to native extension class
     }
+
     /**
      * unregisterRenderer.
      *
      * @param string $name
      * @return void
      */
-    public static function unregisterRenderer(
-string $name) : void
+    public static function unregisterRenderer(string $name): void
     {
         \Xberg\XbergApi::unregisterRenderer($name); // delegate to native extension class
     }
+
     /**
      * clearRenderers.
      *
      * @return void
      */
-    public static function clearRenderers(
-) : void
+    public static function clearRenderers(): void
     {
         \Xberg\XbergApi::clearRenderers(); // delegate to native extension class
     }
+
     /**
      * registerRerankerBackend.
      *
      * @param RerankerBackend $backend
      * @return void
      */
-    public static function registerRerankerBackend(
-RerankerBackend $backend) : void
+    public static function registerRerankerBackend(RerankerBackend $backend): void
     {
         \Xberg\XbergApi::registerRerankerBackend($backend); // delegate to native extension class
     }
+
     /**
      * unregisterRerankerBackend.
      *
      * @param string $name
      * @return void
      */
-    public static function unregisterRerankerBackend(
-string $name) : void
+    public static function unregisterRerankerBackend(string $name): void
     {
         \Xberg\XbergApi::unregisterRerankerBackend($name); // delegate to native extension class
     }
+
     /**
      * clearRerankerBackends.
      *
      * @return void
      */
-    public static function clearRerankerBackends(
-) : void
+    public static function clearRerankerBackends(): void
     {
         \Xberg\XbergApi::clearRerankerBackends(); // delegate to native extension class
     }
+
     /**
      * registerTokenizerBackend.
      *
      * @param TokenizerBackend $backend
      * @return void
      */
-    public static function registerTokenizerBackend(
-TokenizerBackend $backend) : void
+    public static function registerTokenizerBackend(TokenizerBackend $backend): void
     {
         \Xberg\XbergApi::registerTokenizerBackend($backend); // delegate to native extension class
     }
+
     /**
      * unregisterTokenizerBackend.
      *
      * @param string $name
      * @return void
      */
-    public static function unregisterTokenizerBackend(
-string $name) : void
+    public static function unregisterTokenizerBackend(string $name): void
     {
         \Xberg\XbergApi::unregisterTokenizerBackend($name); // delegate to native extension class
     }
+
     /**
      * clearTokenizerBackends.
      *
      * @return void
      */
-    public static function clearTokenizerBackends(
-) : void
+    public static function clearTokenizerBackends(): void
     {
         \Xberg\XbergApi::clearTokenizerBackends(); // delegate to native extension class
     }

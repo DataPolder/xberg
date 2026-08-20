@@ -59,6 +59,14 @@ pub struct SecurityLimits {
     /// pages of per-page work. Defaults to unlimited because a real ceiling here
     /// is workload-specific and a low default would silently reject legitimate
     /// large documents; callers that want a ceiling set this explicitly.
+    // `usize::MAX` is a sentinel for "unlimited" and has no faithful representation in a
+    // generated binding: alef reads the `Default` impl into concrete values, and a path
+    // expression it cannot fold yields the target language's zero -- which would invert the
+    // meaning from "no page cap" to "reject every document" in all 15 bindings. The field was
+    // added by GH#1451 and has never been generated, so skipping preserves the status quo
+    // exactly rather than shipping an inverted default. Modelling unlimited as `Option<usize>`
+    // (`None` = unlimited) would make it representable everywhere; tracked separately. ~keep
+    #[cfg_attr(alef, alef(skip))]
     pub max_pages: usize,
 }
 
@@ -686,10 +694,19 @@ mod tests {
 
     #[test]
     fn test_too_many_pages_display_names_the_limit() {
-        let error = SecurityError::TooManyPages { count: 4_000, max: 1_000 };
+        let error = SecurityError::TooManyPages {
+            count: 4_000,
+            max: 1_000,
+        };
         let message = error.to_string();
-        assert!(message.contains("4000"), "message must name the observed count: {message}");
-        assert!(message.contains("1000"), "message must name the configured max: {message}");
+        assert!(
+            message.contains("4000"),
+            "message must name the observed count: {message}"
+        );
+        assert!(
+            message.contains("1000"),
+            "message must name the configured max: {message}"
+        );
         assert!(
             message.contains("max_pages"),
             "message must name the limit that was hit: {message}"

@@ -20,6 +20,7 @@ defmodule Xberg.TableOverlapPreference do
   @doc "Keep whichever table carries more content (cell count + markdown length). This is the historical default. TATR/SLANeXT tables usually recognize more cells and therefore win, which maximizes table-structure F1 but can lower text F1 when the recognized cell reflow diverges from the source reading order."
   @spec content() :: t()
   def content, do: @content
+
   @doc "Prefer the native oxide table when it overlaps a layout table. Native tables preserve the source reading order, which scores higher on text F1 for documents where the layout model's cell reflow diverges from the ground truth."
   @spec native() :: t()
   def native, do: @native

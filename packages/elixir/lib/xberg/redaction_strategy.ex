@@ -15,9 +15,11 @@ defmodule Xberg.RedactionStrategy do
   @doc "Replace the matched span with a fixed mask token (default `\"[REDACTED]\"`)."
   @spec mask() :: t()
   def mask, do: @mask
+
   @doc "Replace with a SHA-256 hash of the original value (truncated to 16 hex chars). Lets downstream consumers do equality joins without recovering the source."
   @spec hash() :: t()
   def hash, do: @hash
+
   @doc "Replace with a per-category running token (`\"[PERSON_1]\"`, `\"[PERSON_2]\"`, …) so the same person referenced twice gets the same token within the document."
   @spec token_replace() :: t()
   def token_replace, do: @token_replace

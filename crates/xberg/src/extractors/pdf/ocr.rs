@@ -2556,7 +2556,14 @@ pub(crate) async fn extract_mixed_ocr_native(
                     // #729: recover a bare marker no ML hint ever classified, e.g. a
                     // marker paragraph whose body landed several paragraphs away --
                     // see `adapters::reattach_detached_ocr_list_markers`'s doc comment.
-                    crate::pdf::structure::adapters::reattach_detached_ocr_list_markers(&mut paragraphs);
+                    // #760: threaded with this page's known PDF `/Rotate` so the
+                    // reattachment's baseline/indent comparison runs in the rotation-
+                    // corrected frame instead of the raw raster one.
+                    let page_rotation_degrees = page_rotations.get((*page_number - 1) as usize).copied().unwrap_or(0);
+                    crate::pdf::structure::adapters::reattach_detached_ocr_list_markers(
+                        &mut paragraphs,
+                        page_rotation_degrees,
+                    );
                     let mut new_page_doc = crate::pdf::structure::assemble_internal_document(
                         vec![paragraphs],
                         &existing.tables,
@@ -3502,6 +3509,12 @@ fn assemble_ocr_page_paragraphs(
     page_height: u32,
     detection: Option<&crate::layout::DetectionResult>,
     points_per_pixel: f32,
+    // The page's PDF `/Rotate` value (0/90/180/270), or `0` when unknown (e.g. no
+    // `pdf` feature). Threaded to the detached-list-marker reattachment passes
+    // below so their baseline/indent comparisons run in the rotation-corrected
+    // frame instead of the raw raster one (#760) -- see
+    // `pdf::structure::pipeline::DetachedMarkerFrame`.
+    page_rotation_degrees: u32,
 ) -> Vec<crate::pdf::structure::types::PdfParagraph> {
     // `doc`'s bbox AND ocr_geometry are still both raw OCR raster pixels at this point in
     // the pure-OCR route (the pixel -> point rescale runs later, in
@@ -3527,13 +3540,13 @@ fn assemble_ocr_page_paragraphs(
         // marker-side test requires the opposite -- see
         // `adapters::reattach_detached_ocr_list_markers`'s doc comment. Runs first so
         // both passes only ever see markers still in their own precondition's state.
-        crate::pdf::structure::adapters::reattach_detached_ocr_list_markers(&mut paragraphs);
+        crate::pdf::structure::adapters::reattach_detached_ocr_list_markers(&mut paragraphs, page_rotation_degrees);
         // #729: `regroup_layout_lines_by_element` (above, inside
         // `ocr_doc_to_layout_paragraphs`) isolates an ML-hinted list marker into its
         // own paragraph and never rejoins it to its body. Gated independently of
         // `pipeline::REATTACH_DETACHED_LIST_MARKERS` -- see
         // `adapters::REATTACH_OCR_LAYOUT_LIST_MARKERS`'s doc comment.
-        crate::pdf::structure::adapters::reattach_ocr_layout_list_markers(&mut paragraphs);
+        crate::pdf::structure::adapters::reattach_ocr_layout_list_markers(&mut paragraphs, page_rotation_degrees);
         return paragraphs;
     }
     #[cfg(not(feature = "ocr"))]
@@ -4496,11 +4509,31 @@ async fn extract_with_ocr_for_page(
                 }
 
                 if let Some(ref ocr_doc) = ocr_result.ocr_internal_document {
+                    // Same lookup as the per-page `page_rotation_degrees` computed above for
+                    // the backend call (#760) -- that one is scoped to the join_set/backend
+                    // loop and does not survive to here, so it is recomputed identically:
+                    // an explicit override wins, otherwise the PDF's own known `/Rotate` for
+                    // this page (falling back to the image-derived rotation when the render
+                    // state was never opened), defaulting to `0` when nothing is known.
+                    #[cfg(feature = "pdf")]
+                    let page_rotation_degrees = if page_rotation_override != 0 {
+                        page_rotation_override
+                    } else {
+                        lazy_pdf_render_state
+                            .as_ref()
+                            .and_then(|(_, _, rotations)| rotations.get(page_idx))
+                            .or_else(|| external_image_page_rotations.as_ref().and_then(|r| r.get(page_idx)))
+                            .copied()
+                            .unwrap_or(0)
+                    };
+                    #[cfg(not(feature = "pdf"))]
+                    let page_rotation_degrees: u32 = 0;
                     let paragraphs = assemble_ocr_page_paragraphs(
                         ocr_doc,
                         ocr_layout_height,
                         ocr_scaled_detection.as_ref(),
                         points_per_pixel,
+                        page_rotation_degrees,
                     );
 
                     tracing::debug!(
@@ -4652,12 +4685,31 @@ async fn extract_with_ocr_for_page(
                         // would (see `apply_ocr_text_list_fallback`'s own doc comment on the
                         // "already structured" gate this must not trip).
                         let mut fallback_pages = pages.clone();
-                        for page in &mut fallback_pages {
+                        for (page_idx, page) in fallback_pages.iter_mut().enumerate() {
                             apply_ocr_text_list_fallback(page);
                             // #729: recover a bare marker no ML hint ever classified --
                             // see `adapters::reattach_detached_ocr_list_markers`'s doc
                             // comment.
-                            crate::pdf::structure::adapters::reattach_detached_ocr_list_markers(page);
+                            // #760: same rotation lookup as `assemble_ocr_page_paragraphs`'s
+                            // call site above -- an explicit override wins, otherwise this
+                            // page's own known PDF `/Rotate`, defaulting to `0`.
+                            #[cfg(feature = "pdf")]
+                            let page_rotation_degrees = if page_rotation_override != 0 {
+                                page_rotation_override
+                            } else {
+                                lazy_pdf_render_state
+                                    .as_ref()
+                                    .and_then(|(_, _, rotations)| rotations.get(page_idx))
+                                    .or_else(|| external_image_page_rotations.as_ref().and_then(|r| r.get(page_idx)))
+                                    .copied()
+                                    .unwrap_or(0)
+                            };
+                            #[cfg(not(feature = "pdf"))]
+                            let page_rotation_degrees: u32 = 0;
+                            crate::pdf::structure::adapters::reattach_detached_ocr_list_markers(
+                                page,
+                                page_rotation_degrees,
+                            );
                         }
                         Some(crate::pdf::structure::assemble_internal_document(
                             fallback_pages,

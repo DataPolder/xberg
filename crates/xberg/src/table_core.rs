@@ -387,8 +387,10 @@ fn assign_words_to_cells(words: &[HocrWord], row_positions: &[u32], col_position
     let mut table: Vec<Vec<Vec<String>>> = vec![vec![vec![]; num_cols]; num_rows];
 
     for word in words {
-        if let (Some(r), Some(c)) = (find_row_index(row_positions, word), find_column_index(col_positions, word))
-            && r < num_rows
+        if let (Some(r), Some(c)) = (
+            find_row_index(row_positions, word),
+            find_column_index(col_positions, word),
+        ) && r < num_rows
             && c < num_cols
         {
             table[r][c].push(word.text.clone());
@@ -971,7 +973,10 @@ mod tests {
             3,
             "Wid/Zone must stay 2 distinct columns, not collapsed by the Foo/Bar merge fix"
         );
-        assert_eq!(table[0], vec!["Name".to_string(), "Wid".to_string(), "Zone".to_string()]);
+        assert_eq!(
+            table[0],
+            vec!["Name".to_string(), "Wid".to_string(), "Zone".to_string()]
+        );
         assert_eq!(
             table[1],
             vec!["Foo Bar".to_string(), "Val1".to_string(), "Val2".to_string()],
@@ -1047,16 +1052,16 @@ mod tests {
     /// of the correct 2 (`["X Y", "Z"]`).
     #[test]
     fn test_reconstruct_table_zero_height_words_merge_on_touching_gap() {
-        let words = vec![
-            word("X", 0, 0, 10, 0),
-            word("Y", 10, 0, 10, 0),
-            word("Z", 50, 0, 10, 0),
-        ];
+        let words = vec![word("X", 0, 0, 10, 0), word("Y", 10, 0, 10, 0), word("Z", 50, 0, 10, 0)];
 
         let table = reconstruct_table(&words, 5, 0.5);
 
         assert_eq!(table.len(), 1);
-        assert_eq!(table[0].len(), 2, "X and Y touch with a 0px gap and must merge into one cell");
+        assert_eq!(
+            table[0].len(),
+            2,
+            "X and Y touch with a 0px gap and must merge into one cell"
+        );
         assert_eq!(table[0], vec!["X Y".to_string(), "Z".to_string()]);
     }
 
@@ -1124,5 +1129,4 @@ mod tests {
         assert_eq!(grid[0], vec!["Left".to_string(), "Right".to_string()]);
         assert_eq!(grid[1], vec!["L2".to_string(), "R2".to_string()]);
     }
-
 }

@@ -2282,10 +2282,10 @@ mod tests {
             0,
         );
         if let Some(size) = font_size {
-            element
-                .attributes
-                .get_or_insert_with(Default::default)
-                .insert(crate::ocr::hocr_parser::HOCR_FONT_SIZE_ATTRIBUTE.to_string(), size.to_string());
+            element.attributes.get_or_insert_with(Default::default).insert(
+                crate::ocr::hocr_parser::HOCR_FONT_SIZE_ATTRIBUTE.to_string(),
+                size.to_string(),
+            );
         }
         element
     }

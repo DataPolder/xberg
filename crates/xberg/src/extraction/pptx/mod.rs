@@ -1967,7 +1967,11 @@ pub(crate) mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(math, vec!["Q", "Z"], "text shape and list item both emit a formula node");
+        assert_eq!(
+            math,
+            vec!["Q", "Z"],
+            "text shape and list item both emit a formula node"
+        );
 
         let texts: Vec<String> = structure
             .nodes
@@ -1984,7 +1988,10 @@ pub(crate) mod tests {
             !joined.contains('Q') && !joined.contains('Z'),
             "no text node keeps the bare LaTeX: {joined}"
         );
-        assert!(joined.contains("Rate") && joined.contains("Growth"), "words survive: {joined}");
+        assert!(
+            joined.contains("Rate") && joined.contains("Growth"),
+            "words survive: {joined}"
+        );
     }
 
     /// #47: OMML math wrapped in `mc:AlternateContent`/`mc:Choice`/`a14:m` must be

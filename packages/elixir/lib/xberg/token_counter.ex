@@ -15,6 +15,7 @@ defmodule Xberg.TokenCounter do
   def new do
     %__MODULE__{ref: Native.tokencounter_new()}
   end
+
   def default() do
     ref = Native.tokencounter_new()
     %__MODULE__{ref: ref}

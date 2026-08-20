@@ -423,7 +423,11 @@ mod tests {
             .iter()
             .find(|(centroid, _)| (*centroid - 11.5).abs() < 0.01)
             .map(|(_, level)| *level);
-        assert_eq!(candidate_level, Some(Some(1)), "11.5 over a 10pt body sits exactly on the ratio boundary");
+        assert_eq!(
+            candidate_level,
+            Some(Some(1)),
+            "11.5 over a 10pt body sits exactly on the ratio boundary"
+        );
     }
 
     /// Documents a genuine, deliberate *native*-scale behavior change: for a body font

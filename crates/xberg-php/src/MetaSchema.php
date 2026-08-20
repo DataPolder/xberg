@@ -19,6 +19,7 @@ final class MetaSchema
     {
         throw new \RuntimeException('Not implemented — provided by the native extension.');
     }
+
     /**
      * Compile the given JSON text as a Draft 2020-12 meta-schema.
      */

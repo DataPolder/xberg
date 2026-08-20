@@ -1740,11 +1740,17 @@ mod tests {
         assert_eq!(tesseract.min_confidence, non_default_tesseract_config.min_confidence);
         assert_eq!(
             tesseract.preprocessing.as_ref().map(|p| p.target_dpi),
-            non_default_tesseract_config.preprocessing.as_ref().map(|p| p.target_dpi)
+            non_default_tesseract_config
+                .preprocessing
+                .as_ref()
+                .map(|p| p.target_dpi)
         );
         assert_eq!(
             tesseract.preprocessing.as_ref().map(|p| p.auto_rotate),
-            non_default_tesseract_config.preprocessing.as_ref().map(|p| p.auto_rotate)
+            non_default_tesseract_config
+                .preprocessing
+                .as_ref()
+                .map(|p| p.auto_rotate)
         );
         assert_eq!(
             tesseract.preprocessing.as_ref().map(|p| p.deskew),
@@ -1756,7 +1762,10 @@ mod tests {
         );
         assert_eq!(
             tesseract.preprocessing.as_ref().map(|p| p.contrast_enhance),
-            non_default_tesseract_config.preprocessing.as_ref().map(|p| p.contrast_enhance)
+            non_default_tesseract_config
+                .preprocessing
+                .as_ref()
+                .map(|p| p.contrast_enhance)
         );
         assert_eq!(
             tesseract.preprocessing.as_ref().map(|p| p.binarization_method.clone()),
@@ -1767,13 +1776,19 @@ mod tests {
         );
         assert_eq!(
             tesseract.preprocessing.as_ref().map(|p| p.invert_colors),
-            non_default_tesseract_config.preprocessing.as_ref().map(|p| p.invert_colors)
+            non_default_tesseract_config
+                .preprocessing
+                .as_ref()
+                .map(|p| p.invert_colors)
         );
         assert_eq!(
             tesseract.enable_table_detection,
             non_default_tesseract_config.enable_table_detection
         );
-        assert_eq!(tesseract.table_min_confidence, non_default_tesseract_config.table_min_confidence);
+        assert_eq!(
+            tesseract.table_min_confidence,
+            non_default_tesseract_config.table_min_confidence
+        );
         assert_eq!(
             tesseract.table_column_threshold,
             non_default_tesseract_config.table_column_threshold
@@ -1818,7 +1833,10 @@ mod tests {
             tesseract.textord_space_size_is_variable,
             non_default_tesseract_config.textord_space_size_is_variable
         );
-        assert_eq!(tesseract.thresholding_method, non_default_tesseract_config.thresholding_method);
+        assert_eq!(
+            tesseract.thresholding_method,
+            non_default_tesseract_config.thresholding_method
+        );
     }
 
     /// `--ocr-no-cache false` (explicitly re-enabling) must flip an already-disabled

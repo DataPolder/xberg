@@ -553,7 +553,12 @@ mod tests {
             .iter()
             .filter(|w| w.message.contains("max_files_in_archive"))
             .collect();
-        assert_eq!(cap_warnings.len(), 1, "expected exactly one cap warning: {:?}", warnings);
+        assert_eq!(
+            cap_warnings.len(),
+            1,
+            "expected exactly one cap warning: {:?}",
+            warnings
+        );
         assert!(
             cap_warnings[0].message.contains("Skipped 3"),
             "warning must report the 3 skipped entries: {}",
@@ -688,7 +693,9 @@ mod tests {
             extract_ooxml_embedded_objects(&inner_zip_bytes, "word/embeddings/", "inner", &config).await;
 
         assert!(
-            !outer_warnings.iter().any(|w| w.message.contains("max_files_in_archive")),
+            !outer_warnings
+                .iter()
+                .any(|w| w.message.contains("max_files_in_archive")),
             "outer container is exactly at the cap and must not warn: {:?}",
             outer_warnings
         );

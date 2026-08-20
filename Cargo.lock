@@ -11919,6 +11919,7 @@ dependencies = [
  "cbindgen",
  "crawlberg",
  "html-to-markdown-rs",
+ "serde",
  "serde_json",
  "tempfile",
  "tokio",

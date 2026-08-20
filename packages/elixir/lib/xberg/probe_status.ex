@@ -15,6 +15,7 @@ defmodule Xberg.ProbeStatus do
   @doc "The backend or setting will work as configured."
   @spec pass() :: t()
   def pass, do: @pass
+
   @doc "The check ran and found something actionable, but nothing is broken (e.g. stray cache files, stale model revisions). Never fails the report."
   @spec warn() :: t()
   def warn, do: @warn

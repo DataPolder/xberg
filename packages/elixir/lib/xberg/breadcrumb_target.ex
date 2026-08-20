@@ -52,6 +52,7 @@ defmodule Xberg.BreadcrumbTarget do
   @doc "Inert (#1393). Previously prepended the heading breadcrumb into chunk `content`; no longer has any effect — `content` is left untouched, exactly like `Metadata`. Kept as the default only for wire/API compatibility."
   @spec content() :: t()
   def content, do: @content
+
   @doc "Inert (#1393), and was already a no-op on `content` before this change. Kept only for backward compatibility, since `Content` is no longer distinguishable from it."
   @spec metadata() :: t()
   def metadata, do: @metadata

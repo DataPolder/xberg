@@ -829,7 +829,7 @@ fn segments_to_paragraphs(
     let segments = order_segments_in_reading_frames(segments);
     let mut paragraphs = blocks_to_paragraphs(segments, heading_map, paragraph_gap_ys);
     apply_text_repair_to_structure_tree_paragraphs(&mut paragraphs, true);
-    reattach_detached_list_markers(&mut paragraphs);
+    reattach_detached_list_markers(&mut paragraphs, DetachedMarkerFrame::Native);
     merge_continuation_paragraphs(&mut paragraphs);
     synchronize_paragraph_text_metadata(&mut paragraphs);
     paragraphs
@@ -932,6 +932,81 @@ pub(super) fn is_bare_detached_list_marker(text: &str) -> bool {
     is_bare_list_marker(text) && !(EXCLUDE_AMBIGUOUS_DETACHED_MARKERS && is_ambiguous_detached_marker(text))
 }
 
+/// Which reading frame [`accepts_detached_list_marker`] should compare geometry in.
+///
+/// `Native` is the pre-#760 behaviour: it reuses each segment's own
+/// `rotation_degrees` via [`SegmentData::upright_baseline`] /
+/// [`SegmentData::upright_advance_extent`], unchanged. `OcrOnPage` is the OCR
+/// route's correction (#760): OCR segments always carry `rotation_degrees ==
+/// 0.0` -- `rotation_degrees` on native text encodes that TEXT RUN's own
+/// orientation on the page, and OCR's raster boxes have no analogous per-run
+/// signal, so `adapters::make_ocr_pdf_line` hardcodes `0.0` -- but on a page
+/// with a PDF `/Rotate`, the OCR raster stays MediaBox-oriented by design, so a
+/// rotated page's segment `x`/`y`/`width`/`height` sit in the RASTER frame while
+/// this predicate needs the UPRIGHT reading frame. `OcrOnPage(degrees)`
+/// recovers that frame locally, from the page's own `/Rotate` value, without
+/// writing anything back onto [`SegmentData`].
+///
+/// Writing the correction onto `SegmentData::rotation_degrees` globally instead
+/// was tried and rejected: it silently activates roughly 82 other
+/// `is_unrotated()` / `has_same_rotation()` / `upright_*()` call sites across 10
+/// files, all written for native text's TEXT-LOCAL-ADVANCE convention (`width`
+/// is the run's advance along its own baseline), which OCR's axis-aligned boxes
+/// do not satisfy -- it regressed `ocr_test_rotated_90` (word count 15 -> 13,
+/// glued "conversion toJSON") and scrambled `ocr_test_rotated_270`'s reading
+/// order entirely. Keeping the correction local to this one predicate, computed
+/// fresh from the raw fields on every call, avoids all of that blast radius.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum DetachedMarkerFrame {
+    /// Native PDF text: defer to the segment's own `rotation_degrees`.
+    Native,
+    /// OCR route on a page whose PDF `/Rotate` is `degrees` (0/90/180/270).
+    OcrOnPage(u32),
+}
+
+impl DetachedMarkerFrame {
+    /// The baseline coordinate to compare, in this frame.
+    ///
+    /// The OCR arms are measured against fixture `ordinance_2197` (`/Rotate
+    /// 270`), tesseract backend, except `90`, which mirrors `270` by symmetry
+    /// and has no fixture measurement backing it -- see this type's doc
+    /// comment. `180` is confirmed a no-op: it falls through to the same
+    /// `baseline_y` read as the unrotated default.
+    fn baseline(self, segment: &SegmentData) -> f32 {
+        match self {
+            Self::Native => segment.upright_baseline(),
+            // Measured: the FAR raster-x edge (`x + width`), not the near edge
+            // (`x`) -- the far edge discriminates correct marker/body pairs
+            // from wrong ones (delta 0-1 vs 215 against an 18-wide tolerance);
+            // the near edge cannot (75-76 vs 139).
+            Self::OcrOnPage(270) => segment.x + segment.width,
+            // UNVERIFIED: derived by mirroring the 270 case (the near edge
+            // instead of the far edge, matching the opposite rotation
+            // handedness), not measured against any fixture.
+            Self::OcrOnPage(90) => segment.x,
+            Self::OcrOnPage(_) => segment.baseline_y,
+        }
+    }
+
+    /// `(start, end)` along the reading direction, in this frame.
+    fn advance_extent(self, segment: &SegmentData) -> (f32, f32) {
+        match self {
+            Self::Native => segment.upright_advance_extent(),
+            // Measured: the advance axis runs along -y on a 270-rotated page,
+            // and the reading-order START is the FAR raster-y edge
+            // (`y + height`), not the near edge -- omitting the raster-y
+            // extent mirrors the span ([-y, -y+height] instead of
+            // [-(y+height), -y]) and inverts the indent test.
+            Self::OcrOnPage(270) => (-(segment.y + segment.height), -segment.y),
+            // UNVERIFIED: derived by mirroring the 270 case (the advance axis
+            // runs along +y instead of -y, so the near/far roles swap and no
+            // negation is needed), not measured against any fixture.
+            Self::OcrOnPage(90) => (segment.y, segment.y + segment.height),
+            Self::OcrOnPage(_) => (segment.x, segment.x + segment.width),
+        }
+    }
+}
+
 /// Reattach a list marker that was emitted as a paragraph of its own to the
 /// body line it belongs to.
 ///
@@ -963,7 +1038,7 @@ pub(super) fn is_bare_detached_list_marker(text: &str) -> bool {
 /// Everything is expressed relative to font size, so the OCR route (whose
 /// geometry may be in a different unit space) and the native route (points) get
 /// the same behaviour.
-pub(super) fn reattach_detached_list_markers(paragraphs: &mut Vec<PdfParagraph>) {
+pub(super) fn reattach_detached_list_markers(paragraphs: &mut Vec<PdfParagraph>, frame: DetachedMarkerFrame) {
     if !REATTACH_DETACHED_LIST_MARKERS || paragraphs.len() < 2 {
         return;
     }
@@ -979,8 +1054,9 @@ pub(super) fn reattach_detached_list_markers(paragraphs: &mut Vec<PdfParagraph>)
             continue;
         };
         let limit = (marker_index + 1 + DETACHED_MARKER_MAX_LOOKAHEAD).min(paragraphs.len());
-        let body_index = (marker_index + 1..limit)
-            .find(|&candidate| !consumed[candidate] && accepts_detached_list_marker(&paragraphs[candidate], &marker));
+        let body_index = (marker_index + 1..limit).find(|&candidate| {
+            !consumed[candidate] && accepts_detached_list_marker(&paragraphs[candidate], &marker, frame)
+        });
         let Some(body_index) = body_index else {
             continue;
         };
@@ -1058,13 +1134,19 @@ fn detached_list_marker(paragraph: &PdfParagraph) -> Option<SegmentData> {
 
 /// Whether `paragraph` is the body line the detached `marker` belongs to.
 ///
-/// Also reused, unmodified, by the OCR layout route's own reattachment pass
+/// Also reused by the OCR layout route's own reattachment pass
 /// (`adapters::reattach_ocr_layout_list_markers`) -- this body-side test has no
 /// dependency on how the marker paragraph itself was classified, only on the
-/// candidate body's own shape, so it applies identically to both routes. See that
-/// function's doc comment for why the marker-side test (`detached_list_marker`,
-/// below) is NOT similarly shared.
-pub(super) fn accepts_detached_list_marker(paragraph: &PdfParagraph, marker: &SegmentData) -> bool {
+/// candidate body's own shape, so it applies identically to both routes once
+/// given the right [`DetachedMarkerFrame`] (#760): the OCR route passes
+/// `OcrOnPage`, native passes `Native`. See that function's doc comment for why
+/// the marker-side test (`detached_list_marker`, below) is NOT similarly
+/// shared.
+pub(super) fn accepts_detached_list_marker(
+    paragraph: &PdfParagraph,
+    marker: &SegmentData,
+    frame: DetachedMarkerFrame,
+) -> bool {
     if paragraph.heading_level.is_some()
         || paragraph.is_list_item
         || paragraph.is_code_block
@@ -1111,7 +1193,7 @@ pub(super) fn accepts_detached_list_marker(paragraph: &PdfParagraph, marker: &Se
         return false;
     }
 
-    let baseline_delta = (anchor.upright_baseline() - marker.upright_baseline()).abs();
+    let baseline_delta = (frame.baseline(anchor) - frame.baseline(marker)).abs();
     if !baseline_delta.is_finite() || baseline_delta > font_size * DETACHED_MARKER_BASELINE_TOLERANCE_FONT_FACTOR {
         return false;
     }
@@ -1119,10 +1201,9 @@ pub(super) fn accepts_detached_list_marker(paragraph: &PdfParagraph, marker: &Se
     let body_left = first_line
         .segments
         .iter()
-        .map(|segment| segment.upright_advance_extent().0)
+        .map(|segment| frame.advance_extent(segment).0)
         .fold(f32::INFINITY, f32::min);
-    let marker_start = marker.upright_advance_extent().0;
-    let marker_end = marker.upright_advance_extent().1;
+    let (marker_start, marker_end) = frame.advance_extent(marker);
     if !body_left.is_finite() || !marker_start.is_finite() || !marker_end.is_finite() {
         return false;
     }
@@ -1917,8 +1998,7 @@ fn finalize_paragraph(
         && (word_count > 20
             || super::layout_classify::is_separator_text(trimmed)
             || page_number_like
-            || (SUPPRESS_LOWERCASE_START_HEADINGS
-                && super::classify::starts_with_lowercase_or_continuation(trimmed)))
+            || (SUPPRESS_LOWERCASE_START_HEADINGS && super::classify::starts_with_lowercase_or_continuation(trimmed)))
     {
         heading_level = None;
     }
@@ -6742,11 +6822,36 @@ mod tests {
             column_seg("-", 72.0, 14.0, 620.0),
             column_seg("(1)", 72.0, 14.0, 580.0),
             column_seg("1.", 72.0, 14.0, 540.0),
-            column_seg("A times B is a well known identity in group theory here", 110.0, 300.0, 700.0),
-            column_seg("This paragraph number precedes ordinary book prose here", 110.0, 300.0, 660.0),
-            column_seg("Dash marker prose gets folded into its own body text", 110.0, 300.0, 620.0),
-            column_seg("Parenthesised marker prose gets folded into its own body", 110.0, 300.0, 580.0),
-            column_seg("Numbered marker prose gets folded into its own body", 110.0, 300.0, 540.0),
+            column_seg(
+                "A times B is a well known identity in group theory here",
+                110.0,
+                300.0,
+                700.0,
+            ),
+            column_seg(
+                "This paragraph number precedes ordinary book prose here",
+                110.0,
+                300.0,
+                660.0,
+            ),
+            column_seg(
+                "Dash marker prose gets folded into its own body text",
+                110.0,
+                300.0,
+                620.0,
+            ),
+            column_seg(
+                "Parenthesised marker prose gets folded into its own body",
+                110.0,
+                300.0,
+                580.0,
+            ),
+            column_seg(
+                "Numbered marker prose gets folded into its own body",
+                110.0,
+                300.0,
+                540.0,
+            ),
         ];
         let gap_ys = compute_paragraph_gap_ys(&segments);
 
@@ -6778,6 +6883,106 @@ mod tests {
         assert!(
             texts.iter().any(|text| text.starts_with("1. Numbered marker")),
             "a '1.' marker must still reattach to its body: {texts:?}"
+        );
+    }
+
+    /// Helper: a segment carrying raw OCR raster geometry (`rotation_degrees ==
+    /// 0.0`, as every OCR segment does -- see `adapters::make_ocr_pdf_line`),
+    /// with `y == baseline_y` (also always true for OCR segments -- both fields
+    /// are set from the same hOCR line-box value).
+    fn ocr_raster_seg(text: &str, x: f32, y: f32, width: f32, height: f32, font_size: f32) -> SegmentData {
+        SegmentData {
+            text: text.to_string(),
+            x,
+            y,
+            width,
+            height,
+            font_size,
+            is_bold: false,
+            is_italic: false,
+            is_monospace: false,
+            baseline_y: y,
+            rotation_degrees: 0.0,
+            assigned_role: None,
+        }
+    }
+
+    /// #760: `DetachedMarkerFrame::OcrOnPage(270)` must accept the
+    /// marker/body pair whose geometry was measured on fixture `ordinance_2197`
+    /// (`/Rotate 270`, tesseract) -- marker `y=2378.0 h=65.0`, body `y=1324.0
+    /// h=933.0`, both at `font_size=30.0` (chosen so the tolerance,
+    /// `30.0 * DETACHED_MARKER_BASELINE_TOLERANCE_FONT_FACTOR`, is `18.0`, and
+    /// the max indent, `30.0 * DETACHED_MARKER_MAX_INDENT_FONT_FACTOR`, is
+    /// `180.0` -- both match the values reported against the fixture). `x`/
+    /// `width` are constructed, not measured, so the two segments' corrected-270
+    /// baseline (`x + width`) coincide (delta `0.0`), isolating the advance/
+    /// indent half of the fix: `frame.advance_extent()` gives marker
+    /// `(-2443.0, -2378.0)` and body `(-2257.0, -1324.0)`, so
+    /// `indent = body_left - marker_end = -2257.0 - (-2378.0) = 121.0`, within
+    /// `[-15.0, 180.0]`.
+    ///
+    /// `DetachedMarkerFrame::Native` is, for an OCR segment, byte-for-byte the
+    /// pre-#760 behaviour (`upright_baseline()`/`upright_advance_extent()`
+    /// short-circuit on `rotation_degrees == 0.0` to the raw `baseline_y`/
+    /// `(x, x + width)` -- exactly what unfixed `accepts_detached_list_marker`
+    /// read, since it had no frame parameter at all). Against that frame this
+    /// same pair is REJECTED at the baseline gate: `|2378.0 - 1324.0| == 1054.0`
+    /// (within the 1049..1922 range measured on the real fixture) against a
+    /// tolerance of `18.0` -- the indent check is never reached.
+    #[test]
+    fn ocr_frame_270_accepts_the_measured_pair_that_the_native_frame_rejects() {
+        let marker = ocr_raster_seg("(a)", 3317.0, 2378.0, 100.0, 65.0, 30.0);
+        let body_segment = ocr_raster_seg("Buffer requirement", 3367.0, 1324.0, 50.0, 933.0, 30.0);
+        let body = para(vec![line(vec![body_segment])]);
+
+        assert!(
+            !accepts_detached_list_marker(&body, &marker, DetachedMarkerFrame::Native),
+            "Native frame must reject the pair: baseline delta 1054.0 exceeds tolerance 18.0"
+        );
+        assert!(
+            accepts_detached_list_marker(&body, &marker, DetachedMarkerFrame::OcrOnPage(270)),
+            "OcrOnPage(270) must accept the pair: baseline delta 0.0, indent 121.0 <= 180.0"
+        );
+    }
+
+    /// #760: pins the exact corrected-frame values for a 270-rotated page, so a
+    /// future change to the formula shows up here directly rather than only
+    /// through the pass/fail outcome above.
+    #[test]
+    fn ocr_frame_270_baseline_and_advance_extent_match_the_measured_formula() {
+        let marker = ocr_raster_seg("(a)", 3317.0, 2378.0, 100.0, 65.0, 30.0);
+        let body_segment = ocr_raster_seg("Buffer requirement", 3367.0, 1324.0, 50.0, 933.0, 30.0);
+        let frame = DetachedMarkerFrame::OcrOnPage(270);
+
+        assert_eq!(frame.baseline(&marker), 3417.0, "far raster-x edge (x + width)");
+        assert_eq!(frame.baseline(&body_segment), 3417.0, "far raster-x edge (x + width)");
+        assert_eq!(
+            frame.advance_extent(&marker),
+            (-2443.0, -2378.0),
+            "advance runs along -y; start is the FAR raster-y edge -(y + height)"
+        );
+        assert_eq!(
+            frame.advance_extent(&body_segment),
+            (-2257.0, -1324.0),
+            "advance runs along -y; start is the FAR raster-y edge -(y + height)"
+        );
+    }
+
+    /// #760: `180` is confirmed a no-op for the OCR rotation correction -- both
+    /// helpers on `DetachedMarkerFrame::OcrOnPage(180)` must read the same raw
+    /// fields as the unrotated default, matching `Native`'s behaviour for an
+    /// unrotated (`rotation_degrees == 0.0`) OCR segment exactly.
+    #[test]
+    fn ocr_frame_180_is_a_no_op() {
+        let segment = ocr_raster_seg("text", 100.0, 700.0, 40.0, 10.0, 11.0);
+
+        assert_eq!(
+            DetachedMarkerFrame::OcrOnPage(180).baseline(&segment),
+            DetachedMarkerFrame::Native.baseline(&segment)
+        );
+        assert_eq!(
+            DetachedMarkerFrame::OcrOnPage(180).advance_extent(&segment),
+            DetachedMarkerFrame::Native.advance_extent(&segment)
         );
     }
 
@@ -9238,7 +9443,10 @@ mod list_marker_tests {
     /// rejects them. See `EXCLUDE_AMBIGUOUS_DETACHED_MARKERS`.
     #[test]
     fn detached_predicate_rejects_the_ambiguous_shapes_the_general_one_still_accepts() {
-        assert!(is_bare_list_marker("*"), "general predicate must still accept a lone '*'");
+        assert!(
+            is_bare_list_marker("*"),
+            "general predicate must still accept a lone '*'"
+        );
         assert!(
             is_bare_list_marker("[42]"),
             "general predicate must still accept a bracketed integer"

@@ -169,7 +169,8 @@ impl PptxExtractor {
                 if let Some(title_text) = trimmed.strip_prefix("# ") {
                     in_notes = false;
                     saw_title = true;
-                    let (title_text, title_formulas) = Self::split_line_math(title_text, &forms, formulas, plain_output);
+                    let (title_text, title_formulas) =
+                        Self::split_line_math(title_text, &forms, formulas, plain_output);
                     Self::push_line_formulas(&mut builder, &title_formulas, *slide_num, budget)?;
                     let title = title_text.trim();
                     if !title.is_empty() {
@@ -1111,8 +1112,9 @@ mod tests {
        xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
     <p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>Hello</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld>
 </p:sld>"#;
-        let extra_parts: Vec<(String, Vec<u8>)> =
-            (0..5).map(|i| (format!("ppt/extra_{}.xml", i), b"<x/>".to_vec())).collect();
+        let extra_parts: Vec<(String, Vec<u8>)> = (0..5)
+            .map(|i| (format!("ppt/extra_{}.xml", i), b"<x/>".to_vec()))
+            .collect();
         let extra_refs: Vec<(&str, &[u8])> = extra_parts.iter().map(|(p, d)| (p.as_str(), d.as_slice())).collect();
         let pptx = crate::extraction::pptx::tests::build_single_slide_pptx(slide_xml, None, &extra_refs);
 
@@ -1150,8 +1152,9 @@ mod tests {
        xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
     <p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>Hello</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld>
 </p:sld>"#;
-        let extra_parts: Vec<(String, Vec<u8>)> =
-            (0..5).map(|i| (format!("ppt/extra_{}.xml", i), b"<x/>".to_vec())).collect();
+        let extra_parts: Vec<(String, Vec<u8>)> = (0..5)
+            .map(|i| (format!("ppt/extra_{}.xml", i), b"<x/>".to_vec()))
+            .collect();
         let extra_refs: Vec<(&str, &[u8])> = extra_parts.iter().map(|(p, d)| (p.as_str(), d.as_slice())).collect();
         let pptx = crate::extraction::pptx::tests::build_single_slide_pptx(slide_xml, None, &extra_refs);
 

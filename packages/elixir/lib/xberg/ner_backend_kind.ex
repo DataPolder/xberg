@@ -13,6 +13,7 @@ defmodule Xberg.NerBackendKind do
   @doc "`xberg-gliner` ONNX inference. Requires `ner-onnx` feature. Models download lazily from `xberg-io/gliner-models`."
   @spec onnx() :: t()
   def onnx, do: @onnx
+
   @doc "liter-llm zero-shot NER via structured-output prompts. Requires `ner-llm` feature. Useful when domain-specific categories outstrip the ONNX taxonomy."
   @spec llm() :: t()
   def llm, do: @llm

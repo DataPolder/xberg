@@ -1146,7 +1146,11 @@ mod tests {
             .filter(|e| matches!(e.kind, ElementKind::Formula))
             .map(|e| e.text.as_str())
             .collect();
-        assert_eq!(formulas, vec!["E = mc^2"], "display math only; inline math stays in the text");
+        assert_eq!(
+            formulas,
+            vec!["E = mc^2"],
+            "display math only; inline math stays in the text"
+        );
         assert!(doc.elements.iter().any(|e| e.text.contains("$x^2$")));
     }
 

@@ -1853,6 +1853,303 @@ as PlatformInt64,
 }
 
 /// @nodoc
+mixin _$ConfidenceSemantics {
+
+
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is ConfidenceSemantics);
+}
+
+
+@override
+int get hashCode => runtimeType.hashCode;
+
+@override
+String toString() {
+  return 'ConfidenceSemantics()';
+}
+
+
+}
+
+/// @nodoc
+class $ConfidenceSemanticsCopyWith<$Res>  {
+$ConfidenceSemanticsCopyWith(ConfidenceSemantics _, $Res Function(ConfidenceSemantics) __);
+}
+
+
+/// Adds pattern-matching-related methods to [ConfidenceSemantics].
+extension ConfidenceSemanticsPatterns on ConfidenceSemantics {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( ConfidenceSemantics_Legibility value)?  legibility,TResult Function( ConfidenceSemantics_Uncalibrated value)?  uncalibrated,TResult Function( ConfidenceSemantics_None value)?  none,required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case ConfidenceSemantics_Legibility() when legibility != null:
+return legibility(_that);case ConfidenceSemantics_Uncalibrated() when uncalibrated != null:
+return uncalibrated(_that);case ConfidenceSemantics_None() when none != null:
+return none(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( ConfidenceSemantics_Legibility value)  legibility,required TResult Function( ConfidenceSemantics_Uncalibrated value)  uncalibrated,required TResult Function( ConfidenceSemantics_None value)  none,}){
+final _that = this;
+switch (_that) {
+case ConfidenceSemantics_Legibility():
+return legibility(_that);case ConfidenceSemantics_Uncalibrated():
+return uncalibrated(_that);case ConfidenceSemantics_None():
+return none(_that);}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( ConfidenceSemantics_Legibility value)?  legibility,TResult? Function( ConfidenceSemantics_Uncalibrated value)?  uncalibrated,TResult? Function( ConfidenceSemantics_None value)?  none,}){
+final _that = this;
+switch (_that) {
+case ConfidenceSemantics_Legibility() when legibility != null:
+return legibility(_that);case ConfidenceSemantics_Uncalibrated() when uncalibrated != null:
+return uncalibrated(_that);case ConfidenceSemantics_None() when none != null:
+return none(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( double scaleMax)?  legibility,TResult Function()?  uncalibrated,TResult Function()?  none,required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case ConfidenceSemantics_Legibility() when legibility != null:
+return legibility(_that.scaleMax);case ConfidenceSemantics_Uncalibrated() when uncalibrated != null:
+return uncalibrated();case ConfidenceSemantics_None() when none != null:
+return none();case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( double scaleMax)  legibility,required TResult Function()  uncalibrated,required TResult Function()  none,}) {final _that = this;
+switch (_that) {
+case ConfidenceSemantics_Legibility():
+return legibility(_that.scaleMax);case ConfidenceSemantics_Uncalibrated():
+return uncalibrated();case ConfidenceSemantics_None():
+return none();}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( double scaleMax)?  legibility,TResult? Function()?  uncalibrated,TResult? Function()?  none,}) {final _that = this;
+switch (_that) {
+case ConfidenceSemantics_Legibility() when legibility != null:
+return legibility(_that.scaleMax);case ConfidenceSemantics_Uncalibrated() when uncalibrated != null:
+return uncalibrated();case ConfidenceSemantics_None() when none != null:
+return none();case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+
+
+class ConfidenceSemantics_Legibility extends ConfidenceSemantics {
+  const ConfidenceSemantics_Legibility({required this.scaleMax}): super._();
+
+
+/// The upper bound of the reported confidence scale (e.g. `100.0` for Tesseract).
+ final  double scaleMax;
+
+/// Create a copy of ConfidenceSemantics
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$ConfidenceSemantics_LegibilityCopyWith<ConfidenceSemantics_Legibility> get copyWith => _$ConfidenceSemantics_LegibilityCopyWithImpl<ConfidenceSemantics_Legibility>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is ConfidenceSemantics_Legibility&&(identical(other.scaleMax, scaleMax) || other.scaleMax == scaleMax));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,scaleMax);
+
+@override
+String toString() {
+  return 'ConfidenceSemantics.legibility(scaleMax: $scaleMax)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $ConfidenceSemantics_LegibilityCopyWith<$Res> implements $ConfidenceSemanticsCopyWith<$Res> {
+  factory $ConfidenceSemantics_LegibilityCopyWith(ConfidenceSemantics_Legibility value, $Res Function(ConfidenceSemantics_Legibility) _then) = _$ConfidenceSemantics_LegibilityCopyWithImpl;
+@useResult
+$Res call({
+ double scaleMax
+});
+
+
+
+
+}
+/// @nodoc
+class _$ConfidenceSemantics_LegibilityCopyWithImpl<$Res>
+    implements $ConfidenceSemantics_LegibilityCopyWith<$Res> {
+  _$ConfidenceSemantics_LegibilityCopyWithImpl(this._self, this._then);
+
+  final ConfidenceSemantics_Legibility _self;
+  final $Res Function(ConfidenceSemantics_Legibility) _then;
+
+/// Create a copy of ConfidenceSemantics
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? scaleMax = null,}) {
+  return _then(ConfidenceSemantics_Legibility(
+scaleMax: null == scaleMax ? _self.scaleMax : scaleMax // ignore: cast_nullable_to_non_nullable
+as double,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class ConfidenceSemantics_Uncalibrated extends ConfidenceSemantics {
+  const ConfidenceSemantics_Uncalibrated(): super._();
+
+
+
+
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is ConfidenceSemantics_Uncalibrated);
+}
+
+
+@override
+int get hashCode => runtimeType.hashCode;
+
+@override
+String toString() {
+  return 'ConfidenceSemantics.uncalibrated()';
+}
+
+
+}
+
+
+
+
+/// @nodoc
+
+
+class ConfidenceSemantics_None extends ConfidenceSemantics {
+  const ConfidenceSemantics_None(): super._();
+
+
+
+
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is ConfidenceSemantics_None);
+}
+
+
+@override
+int get hashCode => runtimeType.hashCode;
+
+@override
+String toString() {
+  return 'ConfidenceSemantics.none()';
+}
+
+
+}
+
+
+
+
+/// @nodoc
 mixin _$CredentialProviderConfig {
 
 
@@ -3032,7 +3329,7 @@ class EmbeddingModelType_Llm extends EmbeddingModelType {
 ///
 /// Boxed because `LlmConfig` carries liter-llm's full configuration surface and is
 /// an order of magnitude larger than the other variants, which would otherwise make
-/// every `Preset`/`Custom` value pay for it. ~keep
+/// every `Preset`/`Custom` value pay for it.
  final  LlmConfig llm;
 
 /// Create a copy of EmbeddingModelType
@@ -11736,7 +12033,7 @@ class RerankerModelType_Llm extends RerankerModelType {
 /// LLM provider configuration specifying the model and API credentials.
 ///
 /// Boxed for the same reason as `EmbeddingModelType::Llm` -- kept in step so the two
-/// parallel enums present one shape to the generated bindings. ~keep
+/// parallel enums present one shape to the generated bindings.
  final  LlmConfig llm;
 
 /// Create a copy of RerankerModelType

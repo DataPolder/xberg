@@ -455,9 +455,18 @@ mod tests {
         // prior to this fix. It pins the constraint that the error names both the EP that was
         // requested and why it is unavailable, as used by the CUDA, TensorRT, and CoreML arms.
         let message = unavailable_gpu_ep_error_message("CUDA", "Install a CUDA-enabled ONNX Runtime.");
-        assert!(message.contains("CUDA execution provider requested"), "message: {message:?}");
-        assert!(message.contains("not available in the loaded ONNX Runtime"), "message: {message:?}");
-        assert!(message.contains("Install a CUDA-enabled ONNX Runtime."), "message: {message:?}");
+        assert!(
+            message.contains("CUDA execution provider requested"),
+            "message: {message:?}"
+        );
+        assert!(
+            message.contains("not available in the loaded ONNX Runtime"),
+            "message: {message:?}"
+        );
+        assert!(
+            message.contains("Install a CUDA-enabled ONNX Runtime."),
+            "message: {message:?}"
+        );
     }
 
     #[test]
@@ -486,7 +495,11 @@ mod tests {
 
     #[test]
     fn explicit_gpu_providers_resolve_to_explicit_request() {
-        for provider in [ExecutionProviderType::CoreMl, ExecutionProviderType::Cuda, ExecutionProviderType::TensorRt] {
+        for provider in [
+            ExecutionProviderType::CoreMl,
+            ExecutionProviderType::Cuda,
+            ExecutionProviderType::TensorRt,
+        ] {
             let accel = AccelerationConfig { provider, device_id: 0 };
             assert_eq!(resolve_execution_provider(Some(&accel)), accel.provider);
             assert!(
@@ -504,7 +517,10 @@ mod tests {
         // `apply_execution_providers` itself, which is exactly why `OrtBackend::build_session`
         // retried CPU-only on ANY session-build error, including an explicit request that
         // `apply_execution_providers` deliberately hard-errored on (commit b0444fffdd).
-        let auto = AccelerationConfig { provider: ExecutionProviderType::Auto, device_id: 0 };
+        let auto = AccelerationConfig {
+            provider: ExecutionProviderType::Auto,
+            device_id: 0,
+        };
         assert_eq!(resolve_execution_provider(Some(&auto)), ExecutionProviderType::Auto);
         assert!(!is_explicit_provider_request(Some(&auto)));
         assert_eq!(resolve_execution_provider(None), ExecutionProviderType::Auto);

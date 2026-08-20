@@ -1115,7 +1115,11 @@ fn extract_para_with_annotations(
     reader: &mut EntityReader<'_>,
     budget: &mut SecurityBudget,
     xref_titles: &HashMap<String, String>,
-) -> Result<(String, Vec<crate::types::document_structure::TextAnnotation>, Vec<String>)> {
+) -> Result<(
+    String,
+    Vec<crate::types::document_structure::TextAnnotation>,
+    Vec<String>,
+)> {
     use crate::types::builder;
 
     let mut text = String::new();
@@ -1731,7 +1735,10 @@ mod tests {
         let internal = build_docbook_internal_document(docbook, false, &mut budget).expect("prefixed DocBook parses");
 
         let text = internal.content();
-        assert!(text.contains("Prefixed text."), "prefixed elements must reach the text: {text}");
+        assert!(
+            text.contains("Prefixed text."),
+            "prefixed elements must reach the text: {text}"
+        );
     }
 
     #[test]

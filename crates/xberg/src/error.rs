@@ -722,21 +722,31 @@ mod tests {
         assert_eq!(XbergError::ocr("t").api_error_type(), "OCRError");
         assert_eq!(XbergError::validation("t").api_error_type(), "ValidationError");
         assert_eq!(XbergError::cache("t").api_error_type(), "CacheError");
-        assert_eq!(XbergError::image_processing("t").api_error_type(), "ImageProcessingError");
+        assert_eq!(
+            XbergError::image_processing("t").api_error_type(),
+            "ImageProcessingError"
+        );
         assert_eq!(XbergError::serialization("t").api_error_type(), "SerializationError");
         assert_eq!(
             XbergError::MissingDependency("t".to_string()).api_error_type(),
             "MissingDependencyError"
         );
         assert_eq!(plugin_error().api_error_type(), "PluginError");
-        assert_eq!(XbergError::LockPoisoned("t".to_string()).api_error_type(), "LockPoisonedError");
+        assert_eq!(
+            XbergError::LockPoisoned("t".to_string()).api_error_type(),
+            "LockPoisonedError"
+        );
         assert_eq!(
             XbergError::UnsupportedFormat("t/mime".to_string()).api_error_type(),
             "UnsupportedFormatError"
         );
         assert_eq!(XbergError::embedding("t").api_error_type(), "EmbeddingError");
         assert_eq!(
-            XbergError::Timeout { elapsed_ms: 1, limit_ms: 2 }.api_error_type(),
+            XbergError::Timeout {
+                elapsed_ms: 1,
+                limit_ms: 2
+            }
+            .api_error_type(),
             "TimeoutError"
         );
         assert_eq!(XbergError::Other("t".to_string()).api_error_type(), "Error");
@@ -749,7 +759,10 @@ mod tests {
     #[cfg(feature = "api")]
     #[test]
     fn should_categorize_validation_and_unsupported_format_as_bad_request() {
-        assert_eq!(XbergError::validation("t").api_status_category(), ApiStatusCategory::Validation);
+        assert_eq!(
+            XbergError::validation("t").api_status_category(),
+            ApiStatusCategory::Validation
+        );
         assert_eq!(
             XbergError::UnsupportedFormat("t".to_string()).api_status_category(),
             ApiStatusCategory::Validation
@@ -759,8 +772,14 @@ mod tests {
     #[cfg(feature = "api")]
     #[test]
     fn should_categorize_parsing_and_ocr_as_unprocessable_entity() {
-        assert_eq!(XbergError::parsing("t").api_status_category(), ApiStatusCategory::Unprocessable);
-        assert_eq!(XbergError::ocr("t").api_status_category(), ApiStatusCategory::Unprocessable);
+        assert_eq!(
+            XbergError::parsing("t").api_status_category(),
+            ApiStatusCategory::Unprocessable
+        );
+        assert_eq!(
+            XbergError::ocr("t").api_status_category(),
+            ApiStatusCategory::Unprocessable
+        );
     }
 
     #[cfg(feature = "api")]
@@ -771,7 +790,10 @@ mod tests {
             ApiStatusCategory::Internal
         );
         assert_eq!(XbergError::Cancelled.api_status_category(), ApiStatusCategory::Internal);
-        assert_eq!(XbergError::Other("t".to_string()).api_status_category(), ApiStatusCategory::Internal);
+        assert_eq!(
+            XbergError::Other("t".to_string()).api_status_category(),
+            ApiStatusCategory::Internal
+        );
         assert_eq!(plugin_error().api_status_category(), ApiStatusCategory::Internal);
     }
 
@@ -784,7 +806,11 @@ mod tests {
             "unsupported_format"
         );
         assert_eq!(
-            XbergError::Timeout { elapsed_ms: 1, limit_ms: 2 }.extraction_error_type(),
+            XbergError::Timeout {
+                elapsed_ms: 1,
+                limit_ms: 2
+            }
+            .extraction_error_type(),
             "timeout"
         );
         assert_eq!(XbergError::Cancelled.extraction_error_type(), "cancelled");
@@ -803,7 +829,10 @@ mod tests {
             "other"
         );
         assert_eq!(plugin_error().extraction_error_type(), "other");
-        assert_eq!(XbergError::LockPoisoned("t".to_string()).extraction_error_type(), "other");
+        assert_eq!(
+            XbergError::LockPoisoned("t".to_string()).extraction_error_type(),
+            "other"
+        );
         assert_eq!(XbergError::embedding("t").extraction_error_type(), "other");
         assert_eq!(XbergError::Other("t".to_string()).extraction_error_type(), "other");
         assert_eq!(XbergError::transcription("t").extraction_error_type(), "other");
@@ -819,7 +848,11 @@ mod tests {
             1003
         );
         assert_eq!(
-            XbergError::Timeout { elapsed_ms: 1, limit_ms: 2 }.extraction_error_code(),
+            XbergError::Timeout {
+                elapsed_ms: 1,
+                limit_ms: 2
+            }
+            .extraction_error_code(),
             1004
         );
         assert_eq!(XbergError::Cancelled.extraction_error_code(), 1005);
@@ -833,7 +866,10 @@ mod tests {
         assert_eq!(XbergError::cache("t").extraction_error_code(), 1099);
         assert_eq!(XbergError::image_processing("t").extraction_error_code(), 1099);
         assert_eq!(XbergError::serialization("t").extraction_error_code(), 1099);
-        assert_eq!(XbergError::MissingDependency("t".to_string()).extraction_error_code(), 1099);
+        assert_eq!(
+            XbergError::MissingDependency("t".to_string()).extraction_error_code(),
+            1099
+        );
         assert_eq!(plugin_error().extraction_error_code(), 1099);
         assert_eq!(XbergError::LockPoisoned("t".to_string()).extraction_error_code(), 1099);
         assert_eq!(XbergError::embedding("t").extraction_error_code(), 1099);
@@ -845,7 +881,10 @@ mod tests {
     #[cfg(feature = "mcp")]
     #[test]
     fn should_categorize_client_input_errors_as_invalid_params_for_mcp() {
-        assert_eq!(XbergError::validation("t").mcp_error_category(), McpErrorCategory::InvalidParams);
+        assert_eq!(
+            XbergError::validation("t").mcp_error_category(),
+            McpErrorCategory::InvalidParams
+        );
         assert_eq!(
             XbergError::UnsupportedFormat("t".to_string()).mcp_error_category(),
             McpErrorCategory::InvalidParams
@@ -854,13 +893,19 @@ mod tests {
             XbergError::MissingDependency("t".to_string()).mcp_error_category(),
             McpErrorCategory::InvalidParams
         );
-        assert_eq!(XbergError::security("t").mcp_error_category(), McpErrorCategory::InvalidParams);
+        assert_eq!(
+            XbergError::security("t").mcp_error_category(),
+            McpErrorCategory::InvalidParams
+        );
     }
 
     #[cfg(feature = "mcp")]
     #[test]
     fn should_categorize_parsing_as_parse_error_for_mcp() {
-        assert_eq!(XbergError::parsing("t").mcp_error_category(), McpErrorCategory::ParseError);
+        assert_eq!(
+            XbergError::parsing("t").mcp_error_category(),
+            McpErrorCategory::ParseError
+        );
     }
 
     #[cfg(feature = "mcp")]
@@ -878,17 +923,42 @@ mod tests {
         );
         assert_eq!(XbergError::ocr("t").mcp_error_category(), McpErrorCategory::Internal);
         assert_eq!(XbergError::cache("t").mcp_error_category(), McpErrorCategory::Internal);
-        assert_eq!(XbergError::image_processing("t").mcp_error_category(), McpErrorCategory::Internal);
-        assert_eq!(XbergError::serialization("t").mcp_error_category(), McpErrorCategory::Internal);
-        assert_eq!(plugin_error().mcp_error_category(), McpErrorCategory::Internal);
-        assert_eq!(XbergError::LockPoisoned("t".to_string()).mcp_error_category(), McpErrorCategory::Internal);
-        assert_eq!(XbergError::embedding("t").mcp_error_category(), McpErrorCategory::Internal);
         assert_eq!(
-            XbergError::Timeout { elapsed_ms: 1, limit_ms: 2 }.mcp_error_category(),
+            XbergError::image_processing("t").mcp_error_category(),
             McpErrorCategory::Internal
         );
-        assert_eq!(XbergError::Other("t".to_string()).mcp_error_category(), McpErrorCategory::Internal);
-        assert_eq!(XbergError::transcription("t").mcp_error_category(), McpErrorCategory::Internal);
-        assert_eq!(XbergError::reranking("t").mcp_error_category(), McpErrorCategory::Internal);
+        assert_eq!(
+            XbergError::serialization("t").mcp_error_category(),
+            McpErrorCategory::Internal
+        );
+        assert_eq!(plugin_error().mcp_error_category(), McpErrorCategory::Internal);
+        assert_eq!(
+            XbergError::LockPoisoned("t".to_string()).mcp_error_category(),
+            McpErrorCategory::Internal
+        );
+        assert_eq!(
+            XbergError::embedding("t").mcp_error_category(),
+            McpErrorCategory::Internal
+        );
+        assert_eq!(
+            XbergError::Timeout {
+                elapsed_ms: 1,
+                limit_ms: 2
+            }
+            .mcp_error_category(),
+            McpErrorCategory::Internal
+        );
+        assert_eq!(
+            XbergError::Other("t".to_string()).mcp_error_category(),
+            McpErrorCategory::Internal
+        );
+        assert_eq!(
+            XbergError::transcription("t").mcp_error_category(),
+            McpErrorCategory::Internal
+        );
+        assert_eq!(
+            XbergError::reranking("t").mcp_error_category(),
+            McpErrorCategory::Internal
+        );
     }
 }

@@ -19,6 +19,9 @@ defmodule Xberg.SparseEmbeddingModelType do
   @type plugin :: %{type: :plugin, name: String.t()}
 
   def preset(name), do: {:preset, %{name: name}}
-  def custom(model_id, model_file, additional_files, max_length), do: {:custom, %{model_id: model_id, model_file: model_file, additional_files: additional_files, max_length: max_length}}
+
+  def custom(model_id, model_file, additional_files, max_length),
+    do: {:custom, %{model_id: model_id, model_file: model_file, additional_files: additional_files, max_length: max_length}}
+
   def plugin(name), do: {:plugin, %{name: name}}
 end

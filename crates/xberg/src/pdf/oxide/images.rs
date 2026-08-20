@@ -197,10 +197,7 @@ pub(crate) struct PageFallbackImage {
 // `crate::extractors::pdf::ocr` are gated `any(ocr, ocr-pipeline)`, and the `binstall`
 // CLI profile pulls `ocr-pipeline` (via `liter-llm`) without `ocr`. ~keep
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
-pub(crate) fn page_ocr_fallback_image_bytes(
-    doc: &pdf_oxide::PdfDocument,
-    page_idx: usize,
-) -> Vec<PageFallbackImage> {
+pub(crate) fn page_ocr_fallback_image_bytes(doc: &pdf_oxide::PdfDocument, page_idx: usize) -> Vec<PageFallbackImage> {
     let handles = match doc.page_image_handles(page_idx) {
         Ok(h) => h,
         Err(error) => {

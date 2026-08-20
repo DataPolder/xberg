@@ -158,7 +158,11 @@ pub enum Pipeline {
     #[serde(rename = "sceptre-ort", alias = "sceptre")]
     Sceptre,
     /// Sceptre OCR (ONNX Runtime) + layout detection
-    #[serde(rename = "sceptre-ort+layout", alias = "sceptre-ort-layout", alias = "sceptre-layout")]
+    #[serde(
+        rename = "sceptre-ort+layout",
+        alias = "sceptre-ort-layout",
+        alias = "sceptre-layout"
+    )]
     SceptreLayout,
     /// Sceptre OCR (ONNX Runtime) with auto_rotate enabled
     #[serde(rename = "sceptre-ort-autorotate", alias = "sceptre-autorotate")]
@@ -287,10 +291,7 @@ impl Pipeline {
             "paddle-autorotate" => Some(Pipeline::PaddleAutoRotate),
             "paddle-norotate" => Some(Pipeline::PaddleNoRotate),
             "sceptre" | "sceptre-ort" | "sceptre_ort" => Some(Pipeline::Sceptre),
-            "sceptre-ort+layout"
-            | "sceptre-ort-layout"
-            | "sceptre-layout"
-            | "sceptre+layout"
+            "sceptre-ort+layout" | "sceptre-ort-layout" | "sceptre-layout" | "sceptre+layout"
             | "sceptre_ort_layout" => Some(Pipeline::SceptreLayout),
             "sceptre-ort-autorotate" | "sceptre-autorotate" | "sceptre_ort_autorotate" | "sceptre_autorotate" => {
                 Some(Pipeline::SceptreAutoRotate)
@@ -2462,7 +2463,8 @@ mod tests {
             assert!(config.force_ocr, "Sceptre preset {} must force OCR", pipeline.name());
             assert_eq!(ocr.backend, "sceptre", "unexpected backend for {}", pipeline.name());
             assert_eq!(
-                backend_options["model"]["backend"], SCEPTRE_MODEL_BACKEND_ORT,
+                backend_options["model"]["backend"],
+                SCEPTRE_MODEL_BACKEND_ORT,
                 "unexpected inference engine for {}",
                 pipeline.name()
             );
@@ -2473,7 +2475,8 @@ mod tests {
                 pipeline.name()
             );
             assert_eq!(
-                ocr.auto_rotate, expected_auto_rotate,
+                ocr.auto_rotate,
+                expected_auto_rotate,
                 "unexpected auto_rotate for {}",
                 pipeline.name()
             );

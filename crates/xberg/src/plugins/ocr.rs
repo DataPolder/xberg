@@ -37,7 +37,13 @@ pub enum OcrBackendType {
 /// scale was once applied unconditionally to sceptre's output and rejected every page of a
 /// 16-page document, emptying it. This descriptor exists so gating code can ask a backend what
 /// its number means instead of assuming.
-#[derive(Debug, Clone, Copy, PartialEq)]
+// `Default` is `Uncalibrated`, matching `OcrBackend::confidence_semantics`'s trait default
+// exactly. It reinforces that invariant rather than competing with it: the one value it is
+// never safe to fall back to is `Legibility`, which would let an undeclared backend inherit
+// Tesseract's gate threshold. `serde` and `Default` are required because the `Legibility`
+// variant carries a payload, so alef marshals this type through JSON rather than as a plain
+// C-like integer the way it handles the unit-only `PageOrientationHandling` below. ~keep
+#[derive(Debug, Clone, Copy, PartialEq, Default, serde::Deserialize, serde::Serialize)]
 pub enum ConfidenceSemantics {
     /// Validated to track legibility on a known scale — usable as an absolute quality gate.
     Legibility {
@@ -46,6 +52,7 @@ pub enum ConfidenceSemantics {
     },
     /// A number is reported, but it is not validated to correlate with legibility.
     /// Never gate on it.
+    #[default]
     Uncalibrated,
     /// No page-level confidence is reported at all.
     None,

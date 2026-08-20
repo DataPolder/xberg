@@ -35,7 +35,11 @@ pub(crate) fn convert_asciimath_to_latex(source: &str, budget: &mut SecurityBudg
     .ok()?;
     let latex = crate::extraction::mathml::convert_mathml_str_to_latex(&mathml, budget).ok()?;
     let latex = latex.trim();
-    if latex.is_empty() { None } else { Some(latex.to_string()) }
+    if latex.is_empty() {
+        None
+    } else {
+        Some(latex.to_string())
+    }
 }
 
 #[cfg(test)]

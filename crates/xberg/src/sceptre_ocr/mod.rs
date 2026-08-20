@@ -580,7 +580,11 @@ fn lines_share_block(previous: &BoundingBox, current: &BoundingBox, median_line_
 
     let overlap = (previous.x1.min(current.x1) - previous.x0.max(current.x0)).max(0.0);
     let narrower_width = (previous.x1 - previous.x0).min(current.x1 - current.x0);
-    let overlap_ratio = if narrower_width > 0.0 { overlap / narrower_width } else { 0.0 };
+    let overlap_ratio = if narrower_width > 0.0 {
+        overlap / narrower_width
+    } else {
+        0.0
+    };
     let left_edge_offset = (previous.x0 - current.x0).abs();
 
     overlap_ratio >= BLOCK_MIN_HORIZONTAL_OVERLAP_RATIO
@@ -621,11 +625,7 @@ fn build_internal_document(elements: &[OcrElement]) -> InternalDocument {
         internal.bbox = geometry_bounds(&element.geometry);
         internal.ocr_geometry = Some(element.geometry.clone());
         internal.ocr_confidence = Some(element.confidence.clone());
-        internal.attributes = Some(
-            [(HOCR_BLOCK_ID_ATTRIBUTE.to_string(), block_id)]
-                .into_iter()
-                .collect(),
-        );
+        internal.attributes = Some([(HOCR_BLOCK_ID_ATTRIBUTE.to_string(), block_id)].into_iter().collect());
         document.push_element(internal);
     }
     document

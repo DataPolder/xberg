@@ -356,6 +356,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   dco_decode_DartFn_Inputs__Output_bool_AnyhowException(dynamic raw);
 
   @protected
+  FutureOr<ConfidenceSemantics> Function()
+  dco_decode_DartFn_Inputs__Output_confidence_semantics_AnyhowException(
+    dynamic raw,
+  );
+
+  @protected
   FutureOr<PlatformInt64> Function()
   dco_decode_DartFn_Inputs__Output_i_64_AnyhowException(dynamic raw);
 
@@ -366,6 +372,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   FutureOr<OcrBackendType> Function()
   dco_decode_DartFn_Inputs__Output_ocr_backend_type_AnyhowException(
+    dynamic raw,
+  );
+
+  @protected
+  FutureOr<PageOrientationHandling> Function()
+  dco_decode_DartFn_Inputs__Output_page_orientation_handling_AnyhowException(
     dynamic raw,
   );
 
@@ -1053,6 +1065,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   CodeMetadata dco_decode_code_metadata(dynamic raw);
+
+  @protected
+  ConfidenceSemantics dco_decode_confidence_semantics(dynamic raw);
 
   @protected
   ContentConfig dco_decode_content_config(dynamic raw);
@@ -2266,6 +2281,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PageInfo dco_decode_page_info(dynamic raw);
 
   @protected
+  PageOrientationHandling dco_decode_page_orientation_handling(dynamic raw);
+
+  @protected
   PageRange dco_decode_page_range(dynamic raw);
 
   @protected
@@ -2288,6 +2306,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   PdfAnnotationType dco_decode_pdf_annotation_type(dynamic raw);
+
+  @protected
+  PdfBackend dco_decode_pdf_backend(dynamic raw);
 
   @protected
   PdfConfig dco_decode_pdf_config(dynamic raw);
@@ -3612,6 +3633,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   CodeMetadata sse_decode_code_metadata(SseDeserializer deserializer);
+
+  @protected
+  ConfidenceSemantics sse_decode_confidence_semantics(
+    SseDeserializer deserializer,
+  );
 
   @protected
   ContentConfig sse_decode_content_config(SseDeserializer deserializer);
@@ -5149,6 +5175,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PageInfo sse_decode_page_info(SseDeserializer deserializer);
 
   @protected
+  PageOrientationHandling sse_decode_page_orientation_handling(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   PageRange sse_decode_page_range(SseDeserializer deserializer);
 
   @protected
@@ -5173,6 +5204,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PdfAnnotationType sse_decode_pdf_annotation_type(
     SseDeserializer deserializer,
   );
+
+  @protected
+  PdfBackend sse_decode_pdf_backend(SseDeserializer deserializer);
 
   @protected
   PdfConfig sse_decode_pdf_config(SseDeserializer deserializer);
@@ -5849,6 +5883,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_DartFn_Inputs__Output_confidence_semantics_AnyhowException(
+    FutureOr<ConfidenceSemantics> Function() self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_DartFn_Inputs__Output_i_64_AnyhowException(
     FutureOr<PlatformInt64> Function() self,
     SseSerializer serializer,
@@ -5863,6 +5903,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_DartFn_Inputs__Output_ocr_backend_type_AnyhowException(
     FutureOr<OcrBackendType> Function() self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void
+  sse_encode_DartFn_Inputs__Output_page_orientation_handling_AnyhowException(
+    FutureOr<PageOrientationHandling> Function() self,
     SseSerializer serializer,
   );
 
@@ -6928,6 +6975,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_code_metadata(CodeMetadata self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_confidence_semantics(
+    ConfidenceSemantics self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_content_config(ContentConfig self, SseSerializer serializer);
@@ -8889,6 +8942,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_page_info(PageInfo self, SseSerializer serializer);
 
   @protected
+  void sse_encode_page_orientation_handling(
+    PageOrientationHandling self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_page_range(PageRange self, SseSerializer serializer);
 
   @protected
@@ -8914,6 +8973,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     PdfAnnotationType self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_pdf_backend(PdfBackend self, SseSerializer serializer);
 
   @protected
   void sse_encode_pdf_config(PdfConfig self, SseSerializer serializer);

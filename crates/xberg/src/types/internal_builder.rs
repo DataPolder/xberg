@@ -193,8 +193,8 @@ impl InternalDocumentBuilder {
         for (row_index, row) in cells.iter().enumerate() {
             for (col_index, cell) in row.iter().enumerate() {
                 let repeats_left = col_index > 0 && row[col_index - 1] == *cell;
-                let repeats_above = row_index > 0
-                    && cells[row_index - 1].get(col_index).is_some_and(|above| above == cell);
+                let repeats_above =
+                    row_index > 0 && cells[row_index - 1].get(col_index).is_some_and(|above| above == cell);
                 if repeats_left || repeats_above {
                     continue;
                 }
@@ -494,7 +494,9 @@ impl InternalDocumentBuilder {
     /// attached attributes to the same element index.
     pub fn merge_attribute(&mut self, index: u32, key: impl Into<String>, value: impl Into<String>) {
         if let Some(elem) = self.doc.elements.get_mut(index as usize) {
-            elem.attributes.get_or_insert_with(AHashMap::new).insert(key.into(), value.into());
+            elem.attributes
+                .get_or_insert_with(AHashMap::new)
+                .insert(key.into(), value.into());
         }
     }
 

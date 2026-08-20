@@ -187,6 +187,7 @@ impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for PdfOxideWarningCap
 /// until something does, so that the render path costs nothing for the majority of embedders
 /// who never opt in. Building a layer you then discard leaves the render path arming and
 /// draining an empty buffer: harmless, but pointless.
+#[cfg_attr(alef, alef(skip))]
 pub fn glyph_drop_capture_layer<S: tracing::Subscriber>() -> impl tracing_subscriber::Layer<S> {
     PDF_OXIDE_CAPTURE_ACTIVE.store(true, Ordering::Release);
     PdfOxideWarningCapture

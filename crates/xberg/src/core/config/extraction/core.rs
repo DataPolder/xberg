@@ -948,8 +948,6 @@ fn default_true() -> bool {
     true
 }
 
-
-
 #[cfg(test)]
 mod tests {
     /// Polyglot bindings serialize a zero-valued mirror struct with every field

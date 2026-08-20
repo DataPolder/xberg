@@ -307,7 +307,14 @@ impl<'a> AsciiDocParser<'a> {
     /// as AsciiMath unless the document names `latexmath`.
     fn pending_math_notation(&self) -> Option<MathNotation> {
         self.pending_attrs.first().and_then(|attr| {
-            match attr.split(',').next().unwrap_or("").trim().to_ascii_lowercase().as_str() {
+            match attr
+                .split(',')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_ascii_lowercase()
+                .as_str()
+            {
                 "latexmath" => Some(MathNotation::Latex),
                 "asciimath" => Some(MathNotation::AsciiMath),
                 "stem" => Some(self.stem_notation()),

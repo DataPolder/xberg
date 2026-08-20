@@ -22,6 +22,9 @@ defmodule Xberg.NoChunkingReason do
 
   def small_file(size_bytes, threshold_bytes), do: {:small_file, %{size_bytes: size_bytes, threshold_bytes: threshold_bytes}}
   def few_pages(page_count, threshold), do: {:few_pages, %{page_count: page_count, threshold: threshold}}
-  def text_layer_detected(text_coverage, avg_chars_per_page), do: {:text_layer_detected, %{text_coverage: text_coverage, avg_chars_per_page: avg_chars_per_page}}
+
+  def text_layer_detected(text_coverage, avg_chars_per_page),
+    do: {:text_layer_detected, %{text_coverage: text_coverage, avg_chars_per_page: avg_chars_per_page}}
+
   def format_not_chunkable(mime_type), do: {:format_not_chunkable, %{mime_type: mime_type}}
 end

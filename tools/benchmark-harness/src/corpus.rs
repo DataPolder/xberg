@@ -106,10 +106,11 @@ fn matches_filter(doc: &CorpusDocument, relative_fixture_path: &Path, filter: &C
             .any(|exact| exact == &doc.name || Path::new(exact) == relative_fixture_path);
 
     (!has_name_filter || matches_name)
-        && filter
-            .file_types
-            .as_ref()
-            .is_none_or(|types| types.iter().any(|requested| file_type_matches(requested, &doc.file_type)))
+        && filter.file_types.as_ref().is_none_or(|types| {
+            types
+                .iter()
+                .any(|requested| file_type_matches(requested, &doc.file_type))
+        })
         && filter.max_file_size.is_none_or(|max_size| doc.file_size <= max_size)
         && (!filter.require_ground_truth || doc.ground_truth_text.is_some())
         && (!filter.require_markdown_ground_truth || doc.ground_truth_markdown.is_some())
@@ -332,8 +333,7 @@ mod tests {
         let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
         let fixtures_dir = crate_root.join("fixtures");
 
-        let expected_counts: &[(&str, usize)] =
-            &[("wpd", 7), ("docbook", 7), ("jpeg", 17), ("tiff", 2), ("yaml", 6)];
+        let expected_counts: &[(&str, usize)] = &[("wpd", 7), ("docbook", 7), ("jpeg", 17), ("tiff", 2), ("yaml", 6)];
 
         for (requested, expected_count) in expected_counts {
             let docs = build_corpus(

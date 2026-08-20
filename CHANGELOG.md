@@ -263,7 +263,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   layer. Fully scanned documents took a branch that ignored the OCR structure entirely.
 
 - `Plain` output no longer contains markdown syntax. The OCR layer ran a second, independent heading
-  heuristic and wrote `## ` into the content string, which reached `Plain` verbatim and was escaped
+  heuristic and wrote `##` into the content string, which reached `Plain` verbatim and was escaped
   to `\#\#` on the standalone-image path.
 
 - Sceptre OCR no longer collapses a page into a single paragraph: word fragments sharing a line
