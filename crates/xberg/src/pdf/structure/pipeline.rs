@@ -869,6 +869,48 @@ pub(super) const DETACHED_MARKER_MAX_LOOKAHEAD: usize = 8;
 /// which is what a marker-shaped table column looks like.
 const DETACHED_MARKER_MIN_BODY_WORDS: usize = 2;
 
+/// Whether the two detached-list-marker reattachment passes (this module's
+/// [`detached_list_marker`] and `adapters::ocr_detached_list_marker`) reject a
+/// lone `*` and a bracketed integer `[N]` as marker paragraphs, on top of the
+/// general [`is_bare_list_marker`] test.
+///
+/// Both shapes are ambiguous specifically in the *detached* (cross-paragraph)
+/// case, where the marker paragraph can be reattached to a body many
+/// paragraphs away: a standalone `*` line is also a bare multiplication sign
+/// in isolated mathematical prose, and `[N]` is the standard printed
+/// paragraph-number notation in reference works (e.g. Jung's Collected
+/// Works), not a list marker. Reattaching either turns unrelated prose into a
+/// fabricated list item. Flip to `false` to restore the pre-tightening
+/// behaviour where both are accepted. Deliberately does NOT touch
+/// `is_bare_list_marker` itself, which stays available to the *same-line*
+/// split-marker cases in `blocks_to_paragraphs` and `finalize_paragraph`,
+/// where the marker and body are already adjacent segments on one physical
+/// line and this cross-paragraph ambiguity does not arise. ~keep
+const EXCLUDE_AMBIGUOUS_DETACHED_MARKERS: bool = true;
+
+/// Whether `text` is a marker shape that is ambiguous enough to reject in the
+/// *detached* (cross-paragraph) reattachment passes even though
+/// [`is_bare_list_marker`] accepts it. See [`EXCLUDE_AMBIGUOUS_DETACHED_MARKERS`].
+fn is_ambiguous_detached_marker(text: &str) -> bool {
+    let t = text.trim();
+    if t == "*" {
+        return true;
+    }
+    if let Some(inner) = t.strip_prefix('[').and_then(|rest| rest.strip_suffix(']')) {
+        return !inner.is_empty() && inner.chars().all(|character| character.is_ascii_digit());
+    }
+    false
+}
+
+/// Narrower sibling of [`is_bare_list_marker`] used only by the two detached
+/// (cross-paragraph) reattachment passes -- this module's
+/// [`detached_list_marker`] and `adapters::ocr_detached_list_marker`. See
+/// [`EXCLUDE_AMBIGUOUS_DETACHED_MARKERS`] for why the two predicates
+/// deliberately differ.
+pub(super) fn is_bare_detached_list_marker(text: &str) -> bool {
+    is_bare_list_marker(text) && !(EXCLUDE_AMBIGUOUS_DETACHED_MARKERS && is_ambiguous_detached_marker(text))
+}
+
 /// Reattach a list marker that was emitted as a paragraph of its own to the
 /// body line it belongs to.
 ///
@@ -887,8 +929,10 @@ const DETACHED_MARKER_MIN_BODY_WORDS: usize = 2;
 ///
 /// Deliberately narrow, because this pass is shared with native extraction:
 /// - The marker paragraph must be exactly one line holding exactly one segment
-///   whose whole text is a bare marker ([`is_bare_list_marker`]) — prose can
-///   never produce that, so flowing text has nothing here to match.
+///   whose whole text is a bare marker ([`is_bare_detached_list_marker`]) —
+///   prose can never produce that, so flowing text has nothing here to match.
+///   Narrower than the general [`is_bare_list_marker`]: see
+///   [`EXCLUDE_AMBIGUOUS_DETACHED_MARKERS`].
 /// - The body must not already be a heading or a list item, and its first line
 ///   must not already start with a marker.
 /// - The body must be strictly to the right of the marker, within one hanging
@@ -979,7 +1023,7 @@ fn detached_list_marker(paragraph: &PdfParagraph) -> Option<SegmentData> {
     let [segment] = line.segments.as_slice() else {
         return None;
     };
-    if !is_bare_list_marker(&segment.text) {
+    if !is_bare_detached_list_marker(&segment.text) {
         return None;
     }
     let geometry_is_usable = segment.x.is_finite()
@@ -6660,6 +6704,58 @@ mod tests {
         );
     }
 
+    /// TASK #722 follow-up: a lone `*` and a bracketed integer `[N]` must NOT be
+    /// treated as detached list markers -- `*` is also a multiplication sign in
+    /// isolated math prose, and `[N]` is standard printed paragraph-number
+    /// notation (e.g. Jung's Collected Works), not a marker. The other three
+    /// marker families must keep reattaching exactly as before.
+    #[test]
+    fn ambiguous_detached_markers_are_excluded_while_unambiguous_ones_still_reattach() {
+        let segments = vec![
+            column_seg("*", 72.0, 14.0, 700.0),
+            column_seg("[42]", 72.0, 20.0, 660.0),
+            column_seg("-", 72.0, 14.0, 620.0),
+            column_seg("(1)", 72.0, 14.0, 580.0),
+            column_seg("1.", 72.0, 14.0, 540.0),
+            column_seg("A times B is a well known identity in group theory here", 110.0, 300.0, 700.0),
+            column_seg("This paragraph number precedes ordinary book prose here", 110.0, 300.0, 660.0),
+            column_seg("Dash marker prose gets folded into its own body text", 110.0, 300.0, 620.0),
+            column_seg("Parenthesised marker prose gets folded into its own body", 110.0, 300.0, 580.0),
+            column_seg("Numbered marker prose gets folded into its own body", 110.0, 300.0, 540.0),
+        ];
+        let gap_ys = compute_paragraph_gap_ys(&segments);
+
+        let paragraphs = segments_to_paragraphs(segments, &[(11.0, None)], &gap_ys);
+
+        assert_eq!(
+            paragraphs.len(),
+            7,
+            "the '*' and '[42]' markers must stay detached (2 extra paragraphs); the other three must reattach"
+        );
+
+        let texts: Vec<String> = paragraphs.iter().map(paragraph_segment_text).collect();
+        assert!(
+            texts.iter().any(|text| text == "*"),
+            "a lone '*' must remain its own paragraph, not fold into the math prose below it: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|text| text == "[42]"),
+            "a bracketed integer must remain its own paragraph, not fold into the following prose: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|text| text.starts_with("- Dash marker")),
+            "a dash marker must still reattach to its body: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|text| text.starts_with("(1) Parenthesised marker")),
+            "a parenthesised marker must still reattach to its body: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|text| text.starts_with("1. Numbered marker")),
+            "a '1.' marker must still reattach to its body: {texts:?}"
+        );
+    }
+
     /// Precision guard (passes with and without the reattachment pass). A bare
     /// marker must not adopt an indented block on a *different* baseline: that is
     /// an ordinary following paragraph, not the marker's own item text.
@@ -9070,7 +9166,7 @@ where new shares are issued;";
 
 #[cfg(test)]
 mod list_marker_tests {
-    use super::{is_bare_list_marker, looks_like_list_item};
+    use super::{is_bare_detached_list_marker, is_bare_list_marker, looks_like_list_item};
 
     #[test]
     fn bare_markers_are_detected() {
@@ -9092,6 +9188,39 @@ mod list_marker_tests {
         assert!(!is_bare_list_marker("(appendix)"));
         assert!(!is_bare_list_marker("Item"));
         assert!(!is_bare_list_marker(""));
+    }
+
+    /// The general [`is_bare_list_marker`] still accepts a lone `*` and a
+    /// bracketed integer -- only the narrower detached-reattachment predicate
+    /// rejects them. See `EXCLUDE_AMBIGUOUS_DETACHED_MARKERS`.
+    #[test]
+    fn detached_predicate_rejects_the_ambiguous_shapes_the_general_one_still_accepts() {
+        assert!(is_bare_list_marker("*"), "general predicate must still accept a lone '*'");
+        assert!(
+            is_bare_list_marker("[42]"),
+            "general predicate must still accept a bracketed integer"
+        );
+        assert!(
+            !is_bare_detached_list_marker("*"),
+            "a lone '*' is also a multiplication sign; the detached pass must reject it"
+        );
+        assert!(
+            !is_bare_detached_list_marker("[42]"),
+            "a bracketed integer is a printed paragraph number; the detached pass must reject it"
+        );
+    }
+
+    /// Every shape the task's evidence names as "good, keep" must survive the
+    /// tightening on the detached-reattachment predicate.
+    #[test]
+    fn detached_predicate_still_accepts_the_unambiguous_shapes() {
+        assert!(is_bare_detached_list_marker("-"));
+        assert!(is_bare_detached_list_marker("–"));
+        assert!(is_bare_detached_list_marker("—"));
+        assert!(is_bare_detached_list_marker("(1)"));
+        assert!(is_bare_detached_list_marker("(k)"));
+        assert!(is_bare_detached_list_marker("1."));
+        assert!(is_bare_detached_list_marker("f."));
     }
 
     #[test]

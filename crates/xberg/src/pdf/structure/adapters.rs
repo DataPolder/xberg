@@ -1443,7 +1443,7 @@ fn ocr_detached_list_marker(paragraph: &types::PdfParagraph) -> Option<crate::pd
     let [segment] = line.segments.as_slice() else {
         return None;
     };
-    if !super::pipeline::is_bare_list_marker(&segment.text) {
+    if !super::pipeline::is_bare_detached_list_marker(&segment.text) {
         return None;
     }
     let geometry_is_usable = segment.x.is_finite()
