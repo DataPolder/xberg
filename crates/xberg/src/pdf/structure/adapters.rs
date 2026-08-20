@@ -1280,7 +1280,11 @@ fn merge_structural_group(lines: Vec<types::PdfParagraph>) -> Option<types::PdfP
     Some(merged)
 }
 
-#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+// Both call sites -- `push_body_group` and `merge_structural_group` -- are gated on
+// `layout-detection` as well, so the looser `any(ocr, ocr-pipeline)` gate this used to carry
+// left the function compiled with zero callers on the `ocr`-without-`layout-detection` leg,
+// which is one of the narrow feature legs CI now checks independently (a167989b2e). ~keep
+#[cfg(all(feature = "ocr", feature = "layout-detection"))]
 fn trim_blank_boundaries(mut lines: Vec<types::PdfParagraph>) -> Vec<types::PdfParagraph> {
     let first_content = lines
         .iter()
@@ -1466,14 +1470,23 @@ pub(crate) fn reattach_ocr_layout_list_markers(paragraphs: &mut Vec<types::PdfPa
             }
             body_indices.truncate(marker_indices.len());
 
-            let rotation_agrees = marker_indices.iter().zip(body_indices.iter()).all(|(&marker_idx, &body_idx)| {
-                let marker_segment = paragraphs[marker_idx].lines.first().and_then(|line| line.segments.first());
-                let body_segment = paragraphs[body_idx].lines.first().and_then(|line| line.segments.first());
-                match (marker_segment, body_segment) {
-                    (Some(marker_segment), Some(body_segment)) => body_segment.has_same_rotation(marker_segment),
-                    _ => false,
-                }
-            });
+            let rotation_agrees = marker_indices
+                .iter()
+                .zip(body_indices.iter())
+                .all(|(&marker_idx, &body_idx)| {
+                    let marker_segment = paragraphs[marker_idx]
+                        .lines
+                        .first()
+                        .and_then(|line| line.segments.first());
+                    let body_segment = paragraphs[body_idx]
+                        .lines
+                        .first()
+                        .and_then(|line| line.segments.first());
+                    match (marker_segment, body_segment) {
+                        (Some(marker_segment), Some(body_segment)) => body_segment.has_same_rotation(marker_segment),
+                        _ => false,
+                    }
+                });
 
             if rotation_agrees {
                 for (&marker_idx, &body_idx) in marker_indices.iter().zip(body_indices.iter()) {
