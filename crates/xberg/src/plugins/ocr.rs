@@ -41,8 +41,9 @@ pub enum OcrBackendType {
 // exactly. It reinforces that invariant rather than competing with it: the one value it is
 // never safe to fall back to is `Legibility`, which would let an undeclared backend inherit
 // Tesseract's gate threshold. `serde` and `Default` are required because the `Legibility`
-// variant carries a payload, so alef marshals this type through JSON rather than as a plain
-// C-like integer the way it handles the unit-only `PageOrientationHandling` below. ~keep
+// variant carries a payload. The payload is NOT what forces the JSON marshalling, though: the
+// generated bridge marshals every trait method's return value that way, which is why the
+// unit-only `PageOrientationHandling` below needs exactly the same derives. ~keep
 #[derive(Debug, Clone, Copy, PartialEq, Default, serde::Deserialize, serde::Serialize)]
 pub enum ConfidenceSemantics {
     /// Validated to track legibility on a known scale — usable as an absolute quality gate.
@@ -107,7 +108,14 @@ pub enum ConfidenceSemantics {
 /// `upright_raster_for_backend` and a bounding-box round-trip back through
 /// `undo_upright_raster_correction`. That is the safe direction to be wrong in, but it is not
 /// free, and for a backend that never got measured it is not known to be necessary either.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// `Default` and `serde` are required by the generated FFI bridge, which marshals the return value
+// of EVERY `OcrBackend` trait method through JSON -- see `XbergOcrBackendBridge` in
+// `crates/xberg-ffi/src/lib.rs`, where `page_orientation_handling` does
+// `serde_json::from_str::<PageOrientationHandling>(&json)` and falls back to `Default::default()`
+// on an uninitialised vtable slot, a failing host callback, or a null result. Whether a variant
+// carries a payload makes no difference to that. `RequiresUpright` is the default so it matches
+// `OcrBackend::page_orientation_handling`'s trait default exactly. ~keep
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize, serde::Serialize)]
 pub enum PageOrientationHandling {
     /// Reconstructs reading order regardless of page rotation — safe to hand a
     /// raster in any orientation.
@@ -116,6 +124,7 @@ pub enum PageOrientationHandling {
     /// so the caller must reorder.
     RecognisesRotatedText,
     /// Requires an upright raster; rotated text produces garbage.
+    #[default]
     RequiresUpright,
 }
 
