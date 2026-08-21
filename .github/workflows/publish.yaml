@@ -608,6 +608,17 @@ jobs:
           test -n "$(find build-output -name '*.whl')" || {
             echo "::error::no wheel produced by musl build for ${{ matrix.target }}"; exit 1; }
 
+      # Closes xberg-io/xberg#490: the wheel-existence check above only proves a
+      # file was produced, never that it installs and extracts correctly on the
+      # musl libc family it was cross-compiled for. This installs it into a real
+      # Alpine container and runs an actual extraction against a known fixture,
+      # asserting the exact expected text comes back. No continue-on-error: a
+      # broken wheel must fail this job, not merely warn.
+      - name: Smoke-test musl wheel (real extraction, not just import)
+        run: |
+          wheel="$(find build-output -name '*.whl' | head -n1)"
+          bash scripts/ci/smoke-test-musl-python-wheel.sh "$wheel"
+
       - uses: actions/upload-artifact@v7
         with:
           name: python-wheels-musl-${{ matrix.arch }}
