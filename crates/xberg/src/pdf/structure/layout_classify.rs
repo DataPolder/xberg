@@ -12,10 +12,6 @@ const MAX_PROSE_CODE_SYNTAX_RATIO: f64 = 0.03;
 const CODE_HEADING_OVERRIDE_CONFIDENCE: f32 = 0.8;
 const MIN_STRUCTURED_CODE_SYNTAX_CHARACTERS: usize = 3;
 const MIN_CODE_ASSIGNMENT_OPERATORS: usize = 2;
-/// Maximum word count for a paragraph to be considered a short drawing/plat
-/// label (e.g. "SITE PLAN", "LEGEND", "EXHIBIT B-1") rather than embedded
-/// picture content or prose swept up by an oversized `Picture` region.
-const PICTURE_LABEL_MAX_WORD_COUNT: usize = 6;
 
 /// Apply layout detection overrides to classified paragraphs.
 ///
@@ -297,37 +293,6 @@ pub(super) fn is_separator_text(text: &str) -> bool {
     total >= 6 && (alnum as f64 / total as f64) < 0.15
 }
 
-/// Check if text looks like a short drawing/plat label (e.g. "SITE PLAN",
-/// "LEGEND", "EXHIBIT B-1", `RESERVE "A"`) rather than embedded picture
-/// content or prose incidentally swept into a `Picture` region.
-///
-/// Layout detectors commonly draw a single `Picture` region over an entire
-/// scanned drawing/plat page, so every OCR'd paragraph on that page —
-/// including the drawing's own printed labels, title-block tags, and legend
-/// entries — spatially falls inside it. Short, ALL-CAPS text is the dominant
-/// signature of a genuine drawing label, as distinct from OCR noise
-/// fragments (which are exempted separately via `heading_level`, once
-/// promoted) or mixed-case prose/captions, so it is carved out of Picture
-/// furniture suppression regardless of hint confidence.
-fn looks_like_picture_label(text: &str) -> bool {
-    let trimmed = text.trim();
-    if trimmed.is_empty() || is_separator_text(trimmed) {
-        return false;
-    }
-    let word_count = trimmed.split_whitespace().count();
-    if word_count == 0 || word_count > PICTURE_LABEL_MAX_WORD_COUNT {
-        return false;
-    }
-    let mut has_alphabetic = false;
-    for character in trimmed.chars().filter(|c| c.is_alphabetic()) {
-        has_alphabetic = true;
-        if character.is_lowercase() {
-            return false;
-        }
-    }
-    has_alphabetic
-}
-
 /// Infer heading level from section numbering in the text.
 ///
 /// Academic papers use numbering to indicate heading depth:
@@ -497,7 +462,7 @@ pub(super) fn apply_hint_to_paragraph(para: &mut PdfParagraph, hint: &LayoutHint
             para.is_page_furniture = hint.confidence >= 0.8;
         }
         LayoutHintClass::Picture if para.heading_level.is_none() => {
-            para.is_page_furniture = !looks_like_picture_label(&para_text);
+            para.is_page_furniture = true;
         }
         LayoutHintClass::Text | LayoutHintClass::Caption | LayoutHintClass::Footnote
             if !debug.no_demote
@@ -1553,120 +1518,6 @@ mod tests {
         apply_hint_to_paragraph(&mut para, &hint, None);
         assert!(para.is_page_furniture, "figure label must become furniture");
         assert_eq!(para.heading_level, None, "non-heading para must stay non-heading");
-    }
-
-    #[test]
-    fn test_picture_hint_preserves_short_uppercase_label() {
-        // A `Picture` region typically blankets an entire scanned drawing page, so a
-        // short printed label like a plat's "SITE PLAN" title spatially falls inside
-        // it even though it is genuine document content, not embedded picture noise.
-        // Before the fix, Picture unconditionally set `is_page_furniture = true` with
-        // no confidence floor and no text-based carve-out, so this label was silently
-        // deleted regardless of hint confidence.
-        let mut para = PdfParagraph {
-            text: "SITE PLAN".to_string(),
-            lines: vec![],
-            dominant_font_size: 12.0,
-            heading_level: None,
-            is_bold: false,
-            is_list_item: false,
-            is_code_block: false,
-            is_formula: false,
-            is_page_furniture: false,
-            layout_class: None,
-            layout_region_path: None,
-            caption_for: None,
-            block_bbox: None,
-            word_count: 2,
-        };
-        let hint = LayoutHint {
-            class_name: LayoutHintClass::Picture,
-            confidence: 0.95,
-            left: 0.0,
-            bottom: 0.0,
-            right: 100.0,
-            top: 50.0,
-        };
-        apply_hint_to_paragraph(&mut para, &hint, None);
-        assert!(
-            !para.is_page_furniture,
-            "a short ALL-CAPS drawing label must survive a high-confidence Picture hint"
-        );
-    }
-
-    #[test]
-    fn test_picture_hint_suppresses_prose_at_any_confidence() {
-        // A confidence floor was tried here and REJECTED by measurement. Gating
-        // Picture suppression on `confidence >= 0.8` recovered the drawing labels
-        // but also admitted the picture noise a low-confidence region sweeps up:
-        // on ordinance_2197 it moved tesseract F1 0.949 -> 0.925 and noise
-        // 0.8% -> 5.0%, and regressed paddle and sceptre too. The short-ALL-CAPS
-        // carve-out alone recovers the same labels at F1 0.940 / noise 1.6%.
-        // So prose inside a Picture region stays suppressed at ANY confidence.
-        let mut para = PdfParagraph {
-            text: "Some photo caption prose that runs long".to_string(),
-            lines: vec![],
-            dominant_font_size: 12.0,
-            heading_level: None,
-            is_bold: false,
-            is_list_item: false,
-            is_code_block: false,
-            is_formula: false,
-            is_page_furniture: false,
-            layout_class: None,
-            layout_region_path: None,
-            caption_for: None,
-            block_bbox: None,
-            word_count: 7,
-        };
-        let hint = LayoutHint {
-            class_name: LayoutHintClass::Picture,
-            confidence: 0.5,
-            left: 0.0,
-            bottom: 0.0,
-            right: 100.0,
-            top: 50.0,
-        };
-        apply_hint_to_paragraph(&mut para, &hint, None);
-        assert!(
-            para.is_page_furniture,
-            "mixed-case prose inside a Picture region must stay suppressed even at low confidence"
-        );
-    }
-
-    #[test]
-    fn test_looks_like_picture_label_recognizes_short_uppercase_labels() {
-        for label in [
-            "SITE PLAN",
-            "LEGEND",
-            "TOWNHOME LOT CONFIGURATION",
-            "SHARED COMMON AREA PLAN",
-            "EXHIBIT B-1",
-            "RESERVE \"A\"",
-        ] {
-            assert!(looks_like_picture_label(label), "{label}");
-        }
-    }
-
-    #[test]
-    fn test_looks_like_picture_label_rejects_mixed_case_text() {
-        assert!(!looks_like_picture_label("Figure 1: schematic"));
-        assert!(!looks_like_picture_label("refuGe Design Studio"));
-        assert!(!looks_like_picture_label("Copyright 2019"));
-    }
-
-    #[test]
-    fn test_looks_like_picture_label_rejects_long_uppercase_text() {
-        assert!(!looks_like_picture_label(
-            "THIS IS A VERY LONG ALL CAPS SENTENCE THAT IS NOT A SHORT LABEL"
-        ));
-    }
-
-    #[test]
-    fn test_looks_like_picture_label_rejects_separator_and_empty() {
-        assert!(!looks_like_picture_label(""));
-        assert!(!looks_like_picture_label("   "));
-        assert!(!looks_like_picture_label("----------"));
     }
 
     #[test]

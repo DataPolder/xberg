@@ -11,14 +11,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Drawing and plat labels are no longer deleted from scanned pages.** A layout detector draws a
-  single `Picture` region over an entire scanned drawing page, so every OCR'd paragraph on it --
-  including the drawing's own printed labels -- fell inside that region and was suppressed as page
-  furniture. Short ALL-CAPS labels ("SITE PLAN", "LEGEND", `RESERVE "A"`, "EXHIBIT B-1") are now
-  exempt, while mixed-case prose swept into a picture region stays suppressed. Measured on a
-  scanned ordinance: recall 0.915 -> 0.943 with F1 within 0.01 of the old value on every backend.
-  A confidence floor was also tried and rejected -- it recovered the same labels but admitted
-  enough picture noise to move F1 0.949 -> 0.925 and noise 0.8% -> 5.0%.
 - **List items keep the document's own marker.** The PDF pipeline strips the marker off an item's
   text so the text reads as content, then discarded it, leaving renderers to synthesize a position.
   On a legal document whose clauses are cross-referenced by their printed label that silently
