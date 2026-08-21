@@ -108,6 +108,14 @@ if ! {
   # wasm-target's ner-candle-wasm would pull gemm-f16 in on aarch64 (no fullfp16),
   # past the --exclude xberg-gliner guard above. Matches every Taskfile path. ~keep
   extra_excludes+=(--exclude xberg-wasm)
+  # xberg-pdfium-render: --all-features enables its `bindings` feature, whose build.rs
+  # regenerates bindgen output from include/<release>/*.h. That directory ships only
+  # `rust-import-wrapper.h`, so the build script deliberately fails with
+  # NoHeaderFilesFound rather than silently reusing the checked-in bindings. Every
+  # Taskfile path already carries this exclude (.task/languages/rust.yml:35-44); this
+  # leg was the one place it was missing, so the crate becoming a workspace member
+  # would have failed the workspace test run outright. ~keep
+  extra_excludes+=(--exclude xberg-pdfium-render)
   RUST_BACKTRACE=full cargo test --locked \
     --workspace \
     --exclude xberg \
