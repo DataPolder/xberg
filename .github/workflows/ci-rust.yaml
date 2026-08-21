@@ -588,6 +588,82 @@ jobs:
         run: cargo test --locked -p xberg-cli --no-default-features --features "${{ matrix.features }}" feature_profile_tests
         shell: bash
 
+  # #702: `PdfBackend::Pdfium` (crates/xberg/src/extractors/pdf/pdfium_engine.rs) had zero
+  # executed CI coverage. Its regression test,
+  # `pdfium_engine_extracts_real_text_when_the_library_is_available`, is gated
+  # `#[cfg(all(feature = "pdf", feature = "pdf-pdfium"))]`, and `pdf-pdfium` is enabled by no
+  # feature set any job in this file (or `task rust:test:ci`) builds -- not even `full` -- so
+  # the test has never once compiled, let alone run. On top of that, the test itself
+  # soft-passes (returns early reporting success) whenever `bind_once()` cannot load a real
+  # `libpdfium`, which is true on every runner today because nothing provisions the library.
+  # This job closes both gaps: it builds the crate with `pdf,pdf-pdfium` explicitly and
+  # provisions a real pdfium runtime via the existing `download-pdfium` composite action
+  # (rather than a third bespoke download script), then runs only that one test.
+  #
+  # Version pin: the checked-in bindings under
+  # crates/xberg-pdfium-render/include/pdfium_7678/ were generated against pdfium release
+  # 7678, while scripts/download_pdfium_runtime.sh's own default (used by
+  # `task pdfium:download`) pins 7881 for unrelated reasons (see commit f88391c26c). A
+  # binary/bindings version mismatch resolves every `FPDF_*` symbol via `dlopen` at runtime,
+  # not at compile time, so a mismatched download would not fail cleanly -- it can crash the
+  # test process instead of raising `XbergError::MissingDependency`. Pin this job's download
+  # to 7678 (the bindings' actual version), not the script's default, to keep binary and
+  # bindings in lockstep.
+  #
+  # `stage-pdfium-runtime` (the second existing composite action) copies the runtime library
+  # into a binding crate/package directory for build-time linking or co-located dlopen (e.g.
+  # crates/xberg-node, packages/ruby) -- it has no role here. `pdfium_engine::bind_once` reads
+  # `PDFIUM_DYNAMIC_LIB_PATH` directly (see that function's doc comment), so this job points
+  # that env var at the directory `download-pdfium` already populated instead of staging a
+  # copy anywhere. ~keep
+  pdfium-engine:
+    name: Rust pdfium engine (real library)
+    if: github.repository == 'xberg-io/xberg' && github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      # Only the pdf/ fixtures this test reads (pdf_test_document("multi_page.pdf")) are
+      # needed -- no other extractor runs in this job. ~keep
+      - name: Fetch test_documents fixtures
+        uses: xberg-io/actions/fetch-test-documents@v1
+        with:
+          include: |
+            pdf/**
+
+      - name: Setup Rust
+        uses: xberg-io/actions/setup-rust@v1
+        with:
+          cache-key-prefix: rust-pdfium-engine
+          use-sccache: "true"
+
+      - name: Download Pdfium runtime (pinned to the checked-in bindings' release)
+        uses: ./.github/actions/download-pdfium
+        with:
+          pdfium-version: "7678"
+
+      - name: Run pdfium engine test (real library required, not skip-on-absence)
+        run: |
+          cargo test --locked -p xberg --features "pdf,pdf-pdfium" --lib \
+            extractors::pdf::tests::pdfium_engine_extracts_real_text_when_the_library_is_available \
+            -- --exact --nocapture
+        shell: bash
+        env:
+          PDFIUM_DYNAMIC_LIB_PATH: ${{ env.XBERG_PDFIUM_PREBUILT }}/lib
+          LD_LIBRARY_PATH: ${{ env.XBERG_PDFIUM_PREBUILT }}/lib
+          DYLD_LIBRARY_PATH: ${{ env.XBERG_PDFIUM_PREBUILT }}/lib
+          DYLD_FALLBACK_LIBRARY_PATH: ${{ env.XBERG_PDFIUM_PREBUILT }}/lib
+          # See ESTABLISHED FACTS / deliverable C: today this env var is not read by the test
+          # (mod.rs soft-skips on MissingDependency and on an unreadable fixture regardless of
+          # any env var). It is set here in anticipation of the mod.rs patch described in the
+          # report so this job starts enforcing a hard failure the moment that patch lands,
+          # without a second workflow edit. Until that patch lands, this job can go green by
+          # executing the bind-failure branch and returning early -- see deliverable E.
+          XBERG_REQUIRE_PDFIUM: "1"
+
   live-hf:
     name: Live HF preset tests
     if: github.repository == 'xberg-io/xberg' && github.actor != 'dependabot[bot]'

@@ -4004,9 +4004,29 @@ mod tests {
     #[tokio::test]
     #[cfg(all(feature = "pdf", feature = "pdf-pdfium"))]
     async fn pdfium_engine_extracts_real_text_when_the_library_is_available() {
+        // Skip-on-absence is right for a developer without the bucket-fetched corpus, but it must
+        // never be how CI passes. `XBERG_REQUIRE_PDFIUM` (set by the `pdfium-engine` job) turns
+        // every skip in this test into a failure, following the same truthy-env convention as
+        // `XBERG_REQUIRE_MODELS` in tests/candle_backends.rs. Without it this test reports success
+        // whenever libpdfium cannot be loaded -- which is exactly how the engine ended up with no
+        // executed coverage at all. ~keep
+        let require_pdfium = matches!(
+            std::env::var("XBERG_REQUIRE_PDFIUM").as_deref(),
+            Ok("1" | "true" | "yes")
+        );
+
         let pdf_path = pdf_test_document("multi_page.pdf");
-        let Ok(content) = std::fs::read(&pdf_path) else {
-            return;
+        let content = match std::fs::read(&pdf_path) {
+            Ok(content) => content,
+            Err(err) => {
+                assert!(
+                    !require_pdfium,
+                    "XBERG_REQUIRE_PDFIUM is set but the fixture at {} could not be read ({err}); \
+                     a fixture-fetch failure is a checkout bug, never a reason to report success",
+                    pdf_path.display()
+                );
+                return;
+            }
         };
 
         let extractor = PdfExtractor::new();
@@ -4025,6 +4045,12 @@ mod tests {
                     matches!(err, crate::XbergError::MissingDependency(_)),
                     "expected a MissingDependency error (pdfium library not found on this \
                      machine) if extraction fails at all, got a different error variant: {err:?}"
+                );
+                assert!(
+                    !require_pdfium,
+                    "XBERG_REQUIRE_PDFIUM is set, so a real libpdfium was supposed to be loadable, \
+                     but binding failed: {err:?}. Returning here would report success without ever \
+                     exercising the engine."
                 );
                 return;
             }

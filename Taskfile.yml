@@ -46,6 +46,8 @@ includes:
     taskfile: ./.task/tools/fixtures.yml
   test-apps:
     taskfile: ./.task/tools/test-apps.yml
+  pdfium:
+    taskfile: ./.task/tools/pdfium.yml
   _tools:
     taskfile: ./.task/tools/general.yml
     flatten: true
