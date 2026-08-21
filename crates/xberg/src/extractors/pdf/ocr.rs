@@ -731,19 +731,25 @@ pub(crate) fn is_ocr_recognition_noise(text: &str, thresholds: &OcrQualityThresh
 
 /// Accept a page's OCR text, or drop it and record why.
 ///
-/// Returns the empty string for a rejected page. A rejected page must not fall back to
-/// anything: the alternative to noise here is nothing, and a drawing that produced no
-/// readable words genuinely has none. The warning is the only trace, so it always fires —
-/// a page silently losing its text would be worse than the noise it replaces.
+/// Returns the page's text — empty when rejected — and whether it was rejected. A rejected
+/// page must not fall back to anything: the alternative to noise here is nothing, and a
+/// drawing that produced no readable words genuinely has none. The warning is the only
+/// trace, so it always fires — a page silently losing its text would be worse than the
+/// noise it replaces.
+///
+/// The verdict is returned separately because an empty string does not carry it: a
+/// genuinely blank page yields one too. Callers need to tell the two apart because a
+/// rejected page's *structured paragraphs* have to be discarded as well, and those are
+/// assembled independently of this text.
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 fn accept_or_reject_ocr_page(
     page_index: usize,
     content: String,
     thresholds: &OcrQualityThresholds,
     warnings: &mut Vec<crate::types::ProcessingWarning>,
-) -> String {
+) -> (String, bool) {
     if !is_ocr_recognition_noise(&content, thresholds) {
-        return content;
+        return (content, false);
     }
     let stats = ocr_output_stats(&content, thresholds);
     tracing::warn!(
@@ -765,7 +771,7 @@ fn accept_or_reject_ocr_page(
             thresholds.max_ocr_output_fragmented_word_ratio * 100.0
         )),
     });
-    String::new()
+    (String::new(), true)
 }
 
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
@@ -4124,6 +4130,10 @@ async fn extract_with_ocr_for_page(
     };
 
     let mut page_texts = vec![String::new(); total_pages];
+    // Which pages the quality gate rejected. Kept separately from `page_texts` because an
+    // empty string is ambiguous -- a blank page produces one too -- and the structured
+    // paragraphs of a rejected page must be dropped along with its text.
+    let mut rejected_pages = vec![false; total_pages];
     let mut all_page_paragraphs: Vec<Option<Vec<crate::pdf::structure::types::PdfParagraph>>> = vec![None; total_pages];
     #[allow(unused_mut)]
     let mut collected_tables: Vec<crate::types::Table> = Vec::new();
@@ -4554,12 +4564,14 @@ async fn extract_with_ocr_for_page(
                     let png_bytes = bytes::Bytes::copy_from_slice(png_arc.as_ref());
                     captured_rasters.push(build_page_raster_image(page_idx, png_bytes, *w, *h));
                 }
-                page_texts[page_idx] = accept_or_reject_ocr_page(
+                let (page_text, page_rejected) = accept_or_reject_ocr_page(
                     page_idx,
                     ocr_result.content,
                     &ocr_output_thresholds,
                     &mut recognition_noise_warnings,
                 );
+                page_texts[page_idx] = page_text;
+                rejected_pages[page_idx] = page_rejected;
                 continue;
             }
 
@@ -4591,12 +4603,14 @@ async fn extract_with_ocr_for_page(
                 let png_bytes = bytes::Bytes::copy_from_slice(png_arc.as_ref());
                 captured_rasters.push(build_page_raster_image(page_idx, png_bytes, *w, *h));
             }
-            page_texts[page_idx] = accept_or_reject_ocr_page(
+            let (page_text, page_rejected) = accept_or_reject_ocr_page(
                 page_idx,
                 ocr_result.content,
                 &ocr_output_thresholds,
                 &mut recognition_noise_warnings,
             );
+            page_texts[page_idx] = page_text;
+            rejected_pages[page_idx] = page_rejected;
         }
     }
 
@@ -4637,6 +4651,25 @@ async fn extract_with_ocr_for_page(
             result.push_str("\n\n");
         }
         result.push_str(text);
+    }
+
+    // A page the quality gate rejected must not keep its structured paragraphs either.
+    //
+    // The paragraphs and the page text are two renderings of the same OCR output, built by
+    // different assemblies: `all_page_paragraphs` above, `page_texts` from
+    // `accept_or_reject_ocr_page`. Only the text was ever judged, and the rendered document
+    // is built exclusively from the paragraphs -- so a scanned survey plat lost its text,
+    // logged its warning, and rendered its garbage anyway. The mixed route already couples
+    // the two (`ocr_results.retain` feeding `merge_structured_ocr_pages_into_internal_document`);
+    // this is that same coupling for the force-ocr route, which never had it.
+    //
+    // Clearing before `fill_unstructured_ocr_pages` is deliberate and safe: that function
+    // only rebuilds paragraphs from `page_texts[page_index]`, which is empty for exactly
+    // these pages, so it cannot resurrect them.
+    for (page_idx, page_rejected) in rejected_pages.iter().enumerate() {
+        if *page_rejected {
+            all_page_paragraphs[page_idx] = None;
+        }
     }
 
     fill_unstructured_ocr_pages(&mut all_page_paragraphs, &page_texts);
@@ -11772,7 +11805,9 @@ Name: ___
 /// must survive — carry more weight than the positive ones.
 #[cfg(all(test, any(feature = "ocr", feature = "ocr-pipeline")))]
 mod recognition_noise_tests {
-    use super::{NativeTextStats, is_ocr_recognition_noise, ocr_output_stats, repair_ocr_list_markers};
+    use super::{
+        NativeTextStats, accept_or_reject_ocr_page, is_ocr_recognition_noise, ocr_output_stats, repair_ocr_list_markers,
+    };
     use crate::core::config::OcrQualityThresholds;
 
     /// Verbatim from page 4 of a recorded municipal ordinance: Tesseract run over a scanned
@@ -11794,6 +11829,37 @@ Pointe Parkway and Creek Bend Drive, be rezoned from Business Office (B-O) Distr
 Planned Development (PD) District Final Development Plan; and WHEREAS, the City Planning \
 and Zoning Commission forwarded its final report to the City Council, recommending \
 approval of the rezoning request; and";
+
+    /// The verdict has to leave this function, not just the emptied text. A rejected page's
+    /// structured paragraphs are assembled separately and were rendered regardless of the
+    /// verdict -- the survey plat lost its text, logged its warning, and printed its garbage
+    /// anyway. Callers now drop those paragraphs, which they can only do if `rejected` is
+    /// distinguishable from "this page was blank".
+    #[test]
+    fn should_report_the_rejection_verdict_alongside_the_text() {
+        let thresholds = OcrQualityThresholds::default();
+        let mut warnings = Vec::new();
+
+        let (text, rejected) = accept_or_reject_ocr_page(3, PLAT_DRAWING_NOISE.to_string(), &thresholds, &mut warnings);
+        assert!(
+            rejected,
+            "the plat drawing must be reported as rejected, not merely emptied"
+        );
+        assert!(text.is_empty(), "a rejected page contributes no text");
+        assert_eq!(warnings.len(), 1, "rejection must always leave a trace");
+
+        let (prose, prose_rejected) =
+            accept_or_reject_ocr_page(0, ORDINANCE_PROSE.to_string(), &thresholds, &mut warnings);
+        assert!(!prose_rejected, "ordinary legal prose must not be reported as rejected");
+        assert_eq!(prose, ORDINANCE_PROSE, "an accepted page keeps its text verbatim");
+        assert_eq!(warnings.len(), 1, "an accepted page adds no warning");
+
+        // A blank page is NOT a rejection: both yield empty text, and conflating them would
+        // make the caller discard the paragraphs of every legitimately empty page.
+        let (blank, blank_rejected) = accept_or_reject_ocr_page(1, String::new(), &thresholds, &mut warnings);
+        assert!(!blank_rejected, "an empty page is blank, not rejected");
+        assert!(blank.is_empty());
+    }
 
     #[test]
     fn should_reject_ocr_of_a_scanned_drawing() {
