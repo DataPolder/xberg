@@ -747,84 +747,6 @@ fn is_dictionary_invalid_noise(dict_invalid_word_ratio: Option<f64>, thresholds:
     dict_invalid_word_ratio.is_some_and(|ratio| ratio > thresholds.max_ocr_output_dict_invalid_word_ratio)
 }
 
-/// Parses the `OCR_TESSERACT_DICT_INVALID_LINES_METADATA_KEY` metadata value (a JSON array
-/// of `{"text": ..., "ratio": ...}` objects, see that key's doc comment) back into
-/// `(line text, invalid ratio)` pairs for [`strip_dictionary_invalid_lines`]. Absent or
-/// malformed entries are simply skipped rather than treated as an error: this is a
-/// best-effort supplementary signal, never load-bearing for anything else in the pipeline.
-fn dict_invalid_lines_from_metadata(
-    metadata: &ahash::AHashMap<std::borrow::Cow<'_, str>, serde_json::Value>,
-) -> Vec<(String, f64)> {
-    metadata
-        .get(crate::ocr_metadata_keys::OCR_TESSERACT_DICT_INVALID_LINES_METADATA_KEY)
-        .and_then(|v| v.as_array())
-        .map(|entries| {
-            entries
-                .iter()
-                .filter_map(|entry| {
-                    let text = entry.get("text")?.as_str()?.to_string();
-                    let ratio = entry.get("ratio")?.as_f64()?;
-                    Some((text, ratio))
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-/// Removes individual OCR lines whose OWN dictionary-checkable words are mostly not real
-/// words, rather than vetoing the whole page the way [`is_dictionary_invalid_noise`] does.
-///
-/// This is the per-LINE counterpart to the page-level dictionary veto (#see module docs on
-/// `is_dictionary_invalid_noise`): a scanned drawing's title-block label ("LAAALDLI",
-/// "OWATS DNDEVET OPMENT") sits on its own physical line, spatially and dictionary-wise
-/// separate from the rest of the page's prose. Diluting that one bad line into a whole-page
-/// average (as the page-level ratio does) hides it behind every healthy line sharing the
-/// page; scoring the line on its own words does not.
-///
-/// The blast radius of a wrong call here is exactly one line, never the whole page, which is
-/// why this can run unconditionally (unlike the page veto, deliberately left disabled by
-/// default pending calibration): a page that also contains real content on other lines --
-/// the ordinance's own plant list, mixing recognized words like "Azalea" with unrecognized
-/// botanical names like "Ligustrum" on the SAME line -- keeps that mixed line's ratio well
-/// under the default threshold, so it survives untouched while a fully-invalid noise line
-/// does not.
-///
-/// `dict_invalid_lines` is the raw per-line signal reported by
-/// `ocr::processor::execution::dictionary_invalid_noise_lines` (Tesseract-only; empty for
-/// every other backend, so this is always a no-op for them). Matching is done on the
-/// whitespace-normalized line text, since `content` may have been reflowed by later
-/// Markdown/table assembly steps that do not otherwise change a line's words.
-fn strip_dictionary_invalid_lines(
-    content: &str,
-    dict_invalid_lines: &[(String, f64)],
-    line_ratio_threshold: f64,
-) -> (String, usize) {
-    let noise: std::collections::HashSet<String> = dict_invalid_lines
-        .iter()
-        .filter(|(_, ratio)| *ratio > line_ratio_threshold)
-        .map(|(text, _)| text.split_whitespace().collect::<Vec<_>>().join(" "))
-        .filter(|normalized| !normalized.is_empty())
-        .collect();
-    if noise.is_empty() {
-        return (content.to_string(), 0);
-    }
-
-    let mut removed = 0usize;
-    let kept: Vec<&str> = content
-        .lines()
-        .filter(|line| {
-            let normalized = line.split_whitespace().collect::<Vec<_>>().join(" ");
-            if noise.contains(&normalized) {
-                removed += 1;
-                false
-            } else {
-                true
-            }
-        })
-        .collect();
-    (kept.join("\n"), removed)
-}
-
 /// Accept a page's OCR text, or drop it and record why.
 ///
 /// Returns the page's text — empty when rejected — and whether it was rejected. A rejected
@@ -844,22 +766,7 @@ fn accept_or_reject_ocr_page(
     thresholds: &OcrQualityThresholds,
     warnings: &mut Vec<crate::types::ProcessingWarning>,
     dict_invalid_word_ratio: Option<f64>,
-    dict_invalid_lines: &[(String, f64)],
 ) -> (String, bool) {
-    let (content, stripped_line_count) = strip_dictionary_invalid_lines(
-        &content,
-        dict_invalid_lines,
-        thresholds.max_ocr_output_dict_invalid_line_ratio,
-    );
-    if stripped_line_count > 0 {
-        tracing::warn!(
-            page = page_index + 1,
-            stripped_line_count,
-            threshold = thresholds.max_ocr_output_dict_invalid_line_ratio,
-            "removed OCR line(s) whose dictionary-checkable words are mostly not real words"
-        );
-    }
-
     let fragmented_noise = is_ocr_recognition_noise(&content, thresholds);
     let dictionary_noise = is_dictionary_invalid_noise(dict_invalid_word_ratio, thresholds);
     if !fragmented_noise && !dictionary_noise {
@@ -4719,14 +4626,12 @@ async fn extract_with_ocr_for_page(
                     .additional
                     .get(crate::ocr_metadata_keys::OCR_TESSERACT_DICT_INVALID_WORD_RATIO_METADATA_KEY)
                     .and_then(|v| v.as_f64());
-                let dict_invalid_lines = dict_invalid_lines_from_metadata(&ocr_result.metadata.additional);
                 let (page_text, page_rejected) = accept_or_reject_ocr_page(
                     page_idx,
                     ocr_result.content,
                     &ocr_output_thresholds,
                     &mut recognition_noise_warnings,
                     dict_invalid_word_ratio,
-                    &dict_invalid_lines,
                 );
                 page_texts[page_idx] = page_text;
                 rejected_pages[page_idx] = page_rejected;
@@ -4766,14 +4671,12 @@ async fn extract_with_ocr_for_page(
                 .additional
                 .get(crate::ocr_metadata_keys::OCR_TESSERACT_DICT_INVALID_WORD_RATIO_METADATA_KEY)
                 .and_then(|v| v.as_f64());
-            let dict_invalid_lines = dict_invalid_lines_from_metadata(&ocr_result.metadata.additional);
             let (page_text, page_rejected) = accept_or_reject_ocr_page(
                 page_idx,
                 ocr_result.content,
                 &ocr_output_thresholds,
                 &mut recognition_noise_warnings,
                 dict_invalid_word_ratio,
-                &dict_invalid_lines,
             );
             page_texts[page_idx] = page_text;
             rejected_pages[page_idx] = page_rejected;
@@ -12015,7 +11918,6 @@ approval of the rezoning request; and";
             &thresholds,
             &mut warnings,
             None,
-            &[],
         );
         assert!(
             rejected,
@@ -12025,15 +11927,14 @@ approval of the rezoning request; and";
         assert_eq!(warnings.len(), 1, "rejection must always leave a trace");
 
         let (prose, prose_rejected) =
-            accept_or_reject_ocr_page(0, ORDINANCE_PROSE.to_string(), &thresholds, &mut warnings, None, &[]);
+            accept_or_reject_ocr_page(0, ORDINANCE_PROSE.to_string(), &thresholds, &mut warnings, None);
         assert!(!prose_rejected, "ordinary legal prose must not be reported as rejected");
         assert_eq!(prose, ORDINANCE_PROSE, "an accepted page keeps its text verbatim");
         assert_eq!(warnings.len(), 1, "an accepted page adds no warning");
 
         // A blank page is NOT a rejection: both yield empty text, and conflating them would
         // make the caller discard the paragraphs of every legitimately empty page.
-        let (blank, blank_rejected) =
-            accept_or_reject_ocr_page(1, String::new(), &thresholds, &mut warnings, None, &[]);
+        let (blank, blank_rejected) = accept_or_reject_ocr_page(1, String::new(), &thresholds, &mut warnings, None);
         assert!(!blank_rejected, "an empty page is blank, not rejected");
         assert!(blank.is_empty());
     }
@@ -12554,7 +12455,6 @@ Each row of the preceding table records one measurement taken during the survey 
             &configured,
             &mut warnings,
             Some(0.9),
-            &[],
         );
         assert!(
             rejected,
@@ -12575,106 +12475,9 @@ Each row of the preceding table records one measurement taken during the survey 
         };
         let mut warnings = Vec::new();
         let (text, rejected) =
-            accept_or_reject_ocr_page(0, ORDINANCE_PROSE.to_string(), &configured, &mut warnings, None, &[]);
+            accept_or_reject_ocr_page(0, ORDINANCE_PROSE.to_string(), &configured, &mut warnings, None);
         assert!(!rejected, "an absent ratio must never itself trigger rejection");
         assert_eq!(text, ORDINANCE_PROSE);
         assert!(warnings.is_empty());
-    }
-
-    /// A single fully dictionary-invalid line is removed, while the rest of the page's text
-    /// -- including a genuinely blank line and a legitimate short line -- survives untouched.
-    /// This is the exact defect from the ordinance's elevations page: "LAAALDLI sk" and
-    /// "OWATS DNDEVET OPMENT" are read confidently but are not real words, while
-    /// "RIGHT ELEVATION" on the same page reads correctly and must not be touched.
-    #[test]
-    fn should_strip_only_the_fully_invalid_line() {
-        let content = "RIGHT ELEVATION\nOWATS DNDEVET OPMENT\nLEFT ELEVATION";
-        let dict_invalid_lines = vec![
-            ("RIGHT ELEVATION".to_string(), 0.0),
-            ("OWATS DNDEVET OPMENT".to_string(), 1.0),
-            ("LEFT ELEVATION".to_string(), 0.0),
-        ];
-        let (cleaned, removed) = strip_dictionary_invalid_lines(content, &dict_invalid_lines, 0.75);
-        assert_eq!(removed, 1, "exactly one line must be removed");
-        assert_eq!(cleaned, "RIGHT ELEVATION\nLEFT ELEVATION");
-    }
-
-    /// A mixed line -- some dictionary-valid words, some invalid, ratio below the threshold
-    /// -- must survive. This is the plant-list guard: "Ligustrum, Photinia, Azalea, Indian
-    /// Hawthorne" mixes recognized words ("Azalea", "Indian") with unrecognized botanical
-    /// genus names ("Ligustrum"), so its ratio must stay below the default 0.75 and the line
-    /// must never be a candidate for removal.
-    #[test]
-    fn should_never_strip_a_mixed_line_below_threshold() {
-        let content = "Ligustrum, Photinia, Azalea, Indian Hawthorne";
-        let dict_invalid_lines = vec![(
-            "Ligustrum, Photinia, Azalea, Indian Hawthorne".to_string(),
-            0.5,
-        )];
-        let (cleaned, removed) = strip_dictionary_invalid_lines(content, &dict_invalid_lines, 0.75);
-        assert_eq!(removed, 0, "a line at 0.5, below the 0.75 threshold, must not be removed");
-        assert_eq!(cleaned, content);
-    }
-
-    /// A ratio exactly AT the threshold must not be removed -- the check is strictly
-    /// greater-than, mirroring `is_dictionary_invalid_noise`'s page-level `>` comparison.
-    #[test]
-    fn should_not_strip_a_line_exactly_at_the_threshold() {
-        let content = "Photinia Ligustrum";
-        let dict_invalid_lines = vec![("Photinia Ligustrum".to_string(), 0.75)];
-        let (cleaned, removed) = strip_dictionary_invalid_lines(content, &dict_invalid_lines, 0.75);
-        assert_eq!(removed, 0);
-        assert_eq!(cleaned, content);
-    }
-
-    /// No reported lines at all (e.g. every non-Tesseract backend, which never populates
-    /// `dict_invalid_lines`) must leave content completely unchanged.
-    #[test]
-    fn should_leave_content_unchanged_when_no_lines_are_reported() {
-        let content = "RIGHT ELEVATION\nOWATS DNDEVET OPMENT";
-        let (cleaned, removed) = strip_dictionary_invalid_lines(content, &[], 0.75);
-        assert_eq!(removed, 0);
-        assert_eq!(cleaned, content);
-    }
-
-    /// End-to-end through `accept_or_reject_ocr_page` with the default thresholds: the page
-    /// as a whole is still ACCEPTED (fragmentation and the page-level dictionary veto do not
-    /// fire), but the noise line is gone from the returned text and the plant-list line
-    /// survives verbatim. This is the exact shape of the fix: a per-line strip, not a
-    /// whole-page verdict.
-    #[test]
-    fn should_accept_the_page_but_strip_its_noise_line_by_default() {
-        let thresholds = OcrQualityThresholds::default();
-        let content = "RIGHT ELEVATION\nOWATS DNDEVET OPMENT\nLEFT ELEVATION\n\
-                        Ligustrum, Photinia, Azalea, Indian Hawthorne";
-        let dict_invalid_lines = vec![
-            ("RIGHT ELEVATION".to_string(), 0.0),
-            ("OWATS DNDEVET OPMENT".to_string(), 1.0),
-            ("LEFT ELEVATION".to_string(), 0.0),
-            (
-                "Ligustrum, Photinia, Azalea, Indian Hawthorne".to_string(),
-                0.5,
-            ),
-        ];
-        let mut warnings = Vec::new();
-        let (text, rejected) = accept_or_reject_ocr_page(
-            0,
-            content.to_string(),
-            &thresholds,
-            &mut warnings,
-            None,
-            &dict_invalid_lines,
-        );
-        assert!(!rejected, "the page must be accepted, not vetoed wholesale");
-        assert!(
-            !text.contains("OWATS DNDEVET OPMENT"),
-            "the noise line must be gone from the returned text: {text:?}"
-        );
-        assert!(
-            text.contains("Ligustrum, Photinia, Azalea, Indian Hawthorne"),
-            "the plant-list line must survive verbatim: {text:?}"
-        );
-        assert!(text.contains("RIGHT ELEVATION"));
-        assert!(text.contains("LEFT ELEVATION"));
     }
 }

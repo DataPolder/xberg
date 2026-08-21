@@ -629,16 +629,6 @@ struct IteratorExtractionResult {
     /// [`dictionary_invalid_word_ratio`] for what counts as checkable and why `None`
     /// (rather than `0.0`) means "too few checkable words to be meaningful".
     dict_invalid_word_ratio: Option<f64>,
-    /// Per-LINE dictionary-invalid ratios, `(reconstructed line text, invalid ratio)`,
-    /// for every physical OCR line with enough dictionary-checkable words to make a ratio
-    /// meaningful. See [`dictionary_invalid_noise_lines`] for why this exists alongside
-    /// `dict_invalid_word_ratio`: a page-wide ratio is diluted by every healthy line on the
-    /// same page, so it cannot isolate a single noise line the way this can. The threshold
-    /// deciding which of these lines actually count as noise is applied by the caller
-    /// (`extractors::pdf::ocr::strip_dictionary_invalid_lines`), not here -- this only
-    /// reports the raw per-line signal, same division of responsibility as
-    /// `dict_invalid_word_ratio` itself.
-    dict_invalid_lines: Vec<(String, f64)>,
 }
 
 /// Minimum letters a word must have before Tesseract's dictionary lookup is meaningful.
@@ -775,7 +765,6 @@ fn extract_elements_via_iterator(
         skipped_words: 0,
         non_text_block_word_count: 0,
         dict_invalid_word_ratio: None,
-        dict_invalid_lines: Vec::new(),
     };
 
     let page_iter = match api.get_page_iterator() {
@@ -840,7 +829,6 @@ fn extract_elements_via_iterator(
     }
 
     let dict_invalid_word_ratio = dictionary_invalid_word_ratio(api, &word_extraction.words);
-    let dict_invalid_lines = dictionary_invalid_noise_lines(api, &word_extraction.words);
 
     let mut elements = Vec::new();
     let mut non_text_block_word_count = 0usize;
@@ -882,137 +870,7 @@ fn extract_elements_via_iterator(
         skipped_words: word_extraction.skipped,
         non_text_block_word_count,
         dict_invalid_word_ratio,
-        dict_invalid_lines,
     })
-}
-
-/// Minimum dictionary-checkable words a single OCR *line* must contain before its own
-/// dictionary-invalid ratio is reported at all.
-///
-/// Deliberately lower than [`MIN_DICT_CANDIDATES_FOR_RATIO`] (5, for the whole page): a
-/// physical line is short (a title-block label, a heading), so a five-word floor would
-/// silence this signal for nearly every line on the page. Two independently checkable words
-/// is enough to tell "every word on this line is nonsense" from "one unusual term stands
-/// alone on this line" -- the latter is exactly the shape of a real proper noun or technical
-/// term (a lone plant genus, a part number) that must not be flagged from a single data
-/// point. The blast radius of a wrong per-line call is only that one line, not the whole
-/// page, which is what makes a lower floor than the page-level one safe here.
-const MIN_DICT_CANDIDATES_FOR_LINE: usize = 2;
-
-/// Vertical tolerance, as a fraction of a word's own height, used to decide whether the next
-/// word in reading order continues the current OCR line or starts a new one. See
-/// [`group_words_into_lines`].
-const LINE_VERTICAL_TOLERANCE_RATIO: f64 = 0.5;
-
-/// Reconstructs Tesseract's own text-line grouping from word bounding boxes.
-///
-/// `words` must already be in the `ResultIterator`'s block/paragraph/line/word reading
-/// order (as returned by `ResultIterator::extract_all_words`). Tesseract's C API exposes
-/// line boundaries only through iterator traversal state, not through a field on
-/// [`xberg_tesseract::WordData`] itself, so this reconstructs them geometrically instead: a
-/// word whose vertical center falls outside the running line's `[top, bottom]` band
-/// (expanded by [`LINE_VERTICAL_TOLERANCE_RATIO`]) starts a new line. This is an
-/// approximation of the true `RIL_TEXTLINE` boundary, but reading order plus vertical
-/// position is sufficient for the dictionary-invalid-line check, which only needs "these
-/// words are on the same printed line", not exact line geometry.
-fn group_words_into_lines(words: &[xberg_tesseract::WordData]) -> Vec<Vec<&xberg_tesseract::WordData>> {
-    let mut lines: Vec<Vec<&xberg_tesseract::WordData>> = Vec::new();
-    let mut current: Vec<&xberg_tesseract::WordData> = Vec::new();
-    let mut band_top = 0i32;
-    let mut band_bottom = 0i32;
-
-    for word in words {
-        let height = (word.bottom - word.top).max(1) as f64;
-        let tolerance = (height * LINE_VERTICAL_TOLERANCE_RATIO) as i32;
-        let center = (word.top + word.bottom) / 2;
-        let continues_line = !current.is_empty() && center >= band_top - tolerance && center <= band_bottom + tolerance;
-
-        if continues_line {
-            band_top = band_top.min(word.top);
-            band_bottom = band_bottom.max(word.bottom);
-        } else {
-            if !current.is_empty() {
-                lines.push(std::mem::take(&mut current));
-            }
-            band_top = word.top;
-            band_bottom = word.bottom;
-        }
-        current.push(word);
-    }
-    if !current.is_empty() {
-        lines.push(current);
-    }
-    lines
-}
-
-/// Per-LINE dictionary-invalid ratios: `(reconstructed line text, invalid ratio)` for every
-/// line (see [`group_words_into_lines`]) with at least [`MIN_DICT_CANDIDATES_FOR_LINE`]
-/// dictionary-checkable words.
-///
-/// This exists alongside the whole-page [`dictionary_invalid_word_ratio`] because a page's
-/// average dilutes a single bad line: a title-block label misread as line noise sits next to
-/// many correctly-read prose words on the SAME page, so the page-wide ratio never isolates
-/// it. Scoring each line on its own words fixes that without touching the rest of the page.
-fn dictionary_invalid_noise_lines(api: &TesseractAPI, words: &[xberg_tesseract::WordData]) -> Vec<(String, f64)> {
-    dictionary_invalid_noise_lines_from(words, |text| match api.is_valid_word(text) {
-        Ok(0) => Some(false),
-        Ok(_) => Some(true),
-        Err(_) => None,
-    })
-}
-
-/// Pure core of [`dictionary_invalid_noise_lines`], taking dictionary lookup as an injected
-/// function (same convention as [`invalid_word_ratio_from`] does for the page-level ratio)
-/// so line grouping and per-line thresholding are unit-testable without a live `TesseractAPI`
-/// handle.
-fn dictionary_invalid_noise_lines_from(
-    words: &[xberg_tesseract::WordData],
-    is_valid: impl Fn(&str) -> Option<bool>,
-) -> Vec<(String, f64)> {
-    group_words_into_lines(words)
-        .into_iter()
-        .filter_map(|line_words| {
-            let ratio = invalid_word_ratio_from_refs(&line_words, MIN_DICT_CANDIDATES_FOR_LINE, &is_valid)?;
-            let text = line_words
-                .iter()
-                .map(|w| w.text.trim())
-                .filter(|t| !t.is_empty())
-                .collect::<Vec<_>>()
-                .join(" ");
-            (!text.is_empty()).then_some((text, ratio))
-        })
-        .collect()
-}
-
-/// Same dictionary-candidate accounting as [`invalid_word_ratio_from`], but over `&WordData`
-/// references (as produced by [`group_words_into_lines`]) with a caller-supplied minimum
-/// candidate count, so the page-level and line-level callers can each apply their own floor
-/// without duplicating the candidate-filtering rule itself.
-fn invalid_word_ratio_from_refs(
-    words: &[&xberg_tesseract::WordData],
-    min_candidates: usize,
-    is_valid: impl Fn(&str) -> Option<bool>,
-) -> Option<f64> {
-    let mut candidates = 0usize;
-    let mut invalid = 0usize;
-    for word in words {
-        let text = word.text.trim();
-        if text.chars().count() < MIN_WORD_LEN_FOR_DICT_CHECK || !text.chars().all(|c| c.is_alphabetic()) {
-            continue;
-        }
-        match is_valid(text) {
-            Some(true) => candidates += 1,
-            Some(false) => {
-                candidates += 1;
-                invalid += 1;
-            }
-            None => {}
-        }
-    }
-    if candidates < min_candidates {
-        return None;
-    }
-    Some(invalid as f64 / candidates as f64)
 }
 
 /// Perform OCR on an image using Tesseract.
@@ -1604,22 +1462,6 @@ pub(super) fn perform_ocr(
                     ),
                 );
             }
-            if !extraction.dict_invalid_lines.is_empty() {
-                let lines_json = extraction
-                    .dict_invalid_lines
-                    .iter()
-                    .map(|(text, ratio)| {
-                        serde_json::json!({
-                            "text": text,
-                            "ratio": serde_json::Number::from_f64(*ratio).unwrap_or(serde_json::Number::from(0)),
-                        })
-                    })
-                    .collect();
-                metadata.insert(
-                    crate::ocr_metadata_keys::OCR_TESSERACT_DICT_INVALID_LINES_METADATA_KEY.to_string(),
-                    serde_json::Value::Array(lines_json),
-                );
-            }
             ocr_elements = Some(extraction.elements);
         }
         _ => {
@@ -2038,128 +1880,6 @@ mod tests {
         let ratio = invalid_word_ratio_from(&words, is_valid).expect("enough candidates to score");
 
         assert_eq!(ratio, 0.0, "the failed lookup must not count as invalid");
-    }
-
-    /// Same as [`dict_word`] but with a real vertical bounding box, needed by every
-    /// [`group_words_into_lines`] / [`dictionary_invalid_noise_lines_from`] test:
-    /// `dict_word` alone zeroes `top`/`bottom`, which would make every word collapse onto
-    /// one line regardless of what the test is trying to prove.
-    fn dict_word_on_line(text: &str, line_top: i32) -> xberg_tesseract::WordData {
-        xberg_tesseract::WordData {
-            top: line_top,
-            bottom: line_top + 20,
-            ..dict_word(text)
-        }
-    }
-
-    /// Two vertically separated bands of words must become two separate lines, each
-    /// keeping its own words in order.
-    #[test]
-    fn group_words_into_lines_separates_two_vertical_bands() {
-        let words = vec![
-            dict_word_on_line("RIGHT", 0),
-            dict_word_on_line("ELEVATION", 0),
-            dict_word_on_line("LEFT", 100),
-            dict_word_on_line("ELEVATION", 100),
-        ];
-
-        let lines = group_words_into_lines(&words);
-
-        assert_eq!(lines.len(), 2, "two separated vertical bands must yield two lines");
-        assert_eq!(lines[0].iter().map(|w| w.text.as_str()).collect::<Vec<_>>(), [
-            "RIGHT", "ELEVATION"
-        ]);
-        assert_eq!(lines[1].iter().map(|w| w.text.as_str()).collect::<Vec<_>>(), [
-            "LEFT", "ELEVATION"
-        ]);
-    }
-
-    /// Words whose vertical bands overlap (a normal line has some jitter between word
-    /// bounding boxes) must be grouped into a single line, not split spuriously.
-    #[test]
-    fn group_words_into_lines_keeps_one_line_together_despite_jitter() {
-        let words = vec![
-            dict_word_on_line("OWATS", 0),
-            dict_word_on_line("DNDEVET", 2),
-            dict_word_on_line("OPMENT", 1),
-        ];
-
-        let lines = group_words_into_lines(&words);
-
-        assert_eq!(lines.len(), 1, "small vertical jitter must not split one line into several");
-        assert_eq!(lines[0].len(), 3);
-    }
-
-    /// The ordinance's exact defect, reproduced directly: a line whose words are entirely
-    /// dictionary-invalid ("OWATS DNDEVET OPMENT") must be reported with a ratio of 1.0,
-    /// while a correctly-read ALL-CAPS heading on its own line ("RIGHT ELEVATION", real
-    /// dictionary words) must be reported at 0.0. Both are ALL-CAPS, so this proves the
-    /// signal discriminates on dictionary membership, not letter case.
-    #[test]
-    fn dictionary_invalid_noise_lines_reports_high_ratio_only_for_the_garbage_line() {
-        let words = vec![
-            dict_word_on_line("RIGHT", 0),
-            dict_word_on_line("ELEVATION", 0),
-            dict_word_on_line("OWATS", 100),
-            dict_word_on_line("DNDEVET", 100),
-            dict_word_on_line("OPMENT", 100),
-        ];
-        let is_valid = |text: &str| Some(matches!(text, "RIGHT" | "ELEVATION"));
-
-        let lines = dictionary_invalid_noise_lines_from(&words, is_valid);
-
-        assert_eq!(lines.len(), 2, "both lines have >= 2 candidates and must both be scored");
-        let right_elevation = lines
-            .iter()
-            .find(|(text, _)| text == "RIGHT ELEVATION")
-            .expect("RIGHT ELEVATION line must be present");
-        assert_eq!(right_elevation.1, 0.0, "a correctly-read heading must score 0.0, not be flagged");
-        let garbage = lines
-            .iter()
-            .find(|(text, _)| text == "OWATS DNDEVET OPMENT")
-            .expect("OWATS DNDEVET OPMENT line must be present");
-        assert_eq!(garbage.1, 1.0, "an all-invalid line must score exactly 1.0");
-    }
-
-    /// A mixed line -- some real dictionary words, some not -- must land at a ratio well
-    /// below a full veto, proving genuine proper nouns sharing a line with recognized words
-    /// (the ordinance's own plant list: "Ligustrum, Photinia, Azalea, Indian Hawthorne")
-    /// are not treated the same as a fully-invalid noise line.
-    #[test]
-    fn dictionary_invalid_noise_lines_reports_a_mixed_ratio_for_a_mixed_line() {
-        let words = vec![
-            dict_word_on_line("Ligustrum", 0),
-            dict_word_on_line("Photinia", 0),
-            dict_word_on_line("Azalea", 0),
-            dict_word_on_line("Indian", 0),
-            dict_word_on_line("Hawthorne", 0),
-        ];
-        let is_valid = |text: &str| Some(matches!(text, "Azalea" | "Indian" | "Hawthorne"));
-
-        let lines = dictionary_invalid_noise_lines_from(&words, is_valid);
-
-        assert_eq!(lines.len(), 1);
-        assert_eq!(
-            lines[0].1, 0.4,
-            "2 of 5 candidates invalid must score exactly 0.4, well under a 0.75 line veto"
-        );
-    }
-
-    /// A line with only one dictionary-checkable word (below `MIN_DICT_CANDIDATES_FOR_LINE`)
-    /// must never be scored at all, even when that one word is dictionary-invalid -- a lone
-    /// proper noun or technical term standing alone on its own line must not be flagged from
-    /// a single data point.
-    #[test]
-    fn dictionary_invalid_noise_lines_ignores_a_single_candidate_line() {
-        let words = vec![dict_word_on_line("Ligustrum", 0), dict_word_on_line("sp", 0)];
-        let is_valid = |_: &str| Some(false);
-
-        let lines = dictionary_invalid_noise_lines_from(&words, is_valid);
-
-        assert!(
-            lines.is_empty(),
-            "a line with only one dictionary-checkable word must never be scored, got {lines:?}"
-        );
     }
 
     fn word_at(left: u32, top: u32, width: u32, height: u32, text: &str) -> crate::table_core::HocrWord {
