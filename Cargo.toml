@@ -115,7 +115,7 @@ reqwest = { version = "0.13.4", default-features = false }
 # drops text, system-fonts, memmap-fonts, raster-images — all pure-Rust, WASM-safe).
 resvg = { version = "0.48", default-features = false }
 rusqlite = { version = "0.40", features = ["bundled"] }
-sceptre = { version = "0.7.0", default-features = false }
+sceptre = { version = "0.7.1", default-features = false }
 
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.151" }
@@ -177,10 +177,11 @@ xberg-gliner = { path = "./crates/xberg-gliner", version = "1.1.0", default-feat
 #     `pdf_oxide = { package = "xberg-pdf-oxide", version = "1.0.1" }` above resolves from
 #     the registry. The registry copy is the PACKAGED file set, which `include` filters --
 #     it is not byte-identical to the fork checkout.
-#   * sceptre 0.7.0 is published and confirmed live; the pin above was bumped 0.6.0 -> 0.7.0
-#     in the same commit that removed its override. Bumping without removing (or removing
-#     without bumping) would have silently resolved a sceptre lacking the width_ths and MSRV
-#     work, so the two MUST stay together.
+#   * sceptre is published and confirmed live; the pin was bumped 0.6.0 -> 0.7.0 in the same
+#     commit that removed its override. Bumping without removing (or removing without
+#     bumping) would have silently resolved a sceptre lacking the width_ths and MSRV work, so
+#     the two MUST stay together. Now at 0.7.1 (the region-ordering fix), which resolves from
+#     the registry -- editing ../sceptre changes nothing in an xberg build.
 #
 # The five entries below are self-patches of our own workspace members, which are already
 # declared as `path = ..., version = ...` deps -- so path resolution wins locally with or
