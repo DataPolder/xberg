@@ -13,7 +13,7 @@ use comrak::nodes::{
 };
 
 use crate::types::document_structure::{AnnotationKind, ContentLayer, TextAnnotation};
-use crate::types::internal::{ElementKind, InternalDocument, InternalElement};
+use crate::types::internal::{ElementKind, InternalDocument, InternalElement, list_item_source_label_from_attributes};
 
 use super::common::{
     FootnoteCollector, NestingKind, RenderState, handle_container_end, is_body_element, is_container_end,
@@ -710,12 +710,26 @@ pub(crate) fn build_comrak_ast<'a>(doc: &InternalDocument, arena: &'a comrak::Ar
             }
 
             ElementKind::ListItem { ordered } => {
+                // comrak's CommonMark writer takes the marker style and the running
+                // number from the *enclosing* `List` node alone -- an `Item`'s own
+                // `NodeList` is not consulted -- and CommonMark cannot express a
+                // lettered or parenthesized marker like "B." or "(a)" as a list
+                // ordinal at all. So when the source label survived, the label is
+                // written as leading text and the enclosing list is forced to
+                // bulleted: emitting it as an ordered list would print a synthesized
+                // "1." beside the real "B.", renumbering a document whose clauses are
+                // cross-referenced by their printed label. A bullet defers to the
+                // label instead of competing with it.
+                let source_label =
+                    list_item_source_label_from_attributes(elem_attributes).filter(|label| !label.is_empty());
+                let numbered = ordered && source_label.is_none();
+                let list_type = if numbered {
+                    comrak::nodes::ListType::Ordered
+                } else {
+                    comrak::nodes::ListType::Bullet
+                };
                 let item_list = comrak::nodes::NodeList {
-                    list_type: if ordered {
-                        comrak::nodes::ListType::Ordered
-                    } else {
-                        comrak::nodes::ListType::Bullet
-                    },
+                    list_type,
                     bullet_char: b'-',
                     start: 1,
                     tight: true,
@@ -723,21 +737,27 @@ pub(crate) fn build_comrak_ast<'a>(doc: &InternalDocument, arena: &'a comrak::Ar
                 };
                 let item = mk(arena, NodeValue::Item(item_list));
                 let item_para = mk(arena, NodeValue::Paragraph);
+                if let Some(label) = source_label {
+                    item_para.append(mk_text(arena, &format!("{label} ")));
+                }
                 let (item_text, item_annotations) = strip_redundant_list_marker(elem_text, elem_annotations);
                 build_inlines(arena, item_para, item_text, item_annotations.as_ref());
                 item.append(item_para);
 
                 let list_parent = if matches!(parent.data.borrow().value, NodeValue::List(..)) {
+                    // A run opened by `ListStart` is already numbered; a labelled item
+                    // joining it has to demote the whole run, or comrak resumes counting
+                    // around it.
+                    if !numbered && let NodeValue::List(list) = &mut parent.data.borrow_mut().value {
+                        list.list_type = comrak::nodes::ListType::Bullet;
+                        list.bullet_char = b'-';
+                    }
                     parent
                 } else {
                     let implicit_list = mk(
                         arena,
                         NodeValue::List(comrak::nodes::NodeList {
-                            list_type: if ordered {
-                                comrak::nodes::ListType::Ordered
-                            } else {
-                                comrak::nodes::ListType::Bullet
-                            },
+                            list_type,
                             bullet_char: b'-',
                             start: 1,
                             tight: true,

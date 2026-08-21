@@ -687,7 +687,14 @@ fn push_paragraph_element(builder: &mut InternalDocumentBuilder, para: &PdfParag
         };
         let (normalized, removed_prefix_len) = normalize_list_text(&text);
         let annotations = shift_annotations_after_prefix_removal(annotations, removed_prefix_len, normalized.len());
-        return builder.push_list_item(normalized, ordered, annotations, page, bbox);
+        let element_id = builder.push_list_item(normalized, ordered, annotations, page, bbox);
+        // The marker just stripped off `text` is the document's own label. Keep it:
+        // an ordinance is cross-referenced by printed clause number, so a
+        // synthesized sequence position is not an acceptable substitute.
+        if ordered && removed_prefix_len > 0 {
+            builder.set_list_item_source_label(element_id, text[..removed_prefix_len].trim());
+        }
+        return element_id;
     }
 
     if para.is_page_furniture {
@@ -2121,6 +2128,38 @@ mod tests {
             has_italic,
             "Should have italic annotation; text: {}, annotations: {:?}",
             elem.text, elem.annotations
+        );
+    }
+
+    /// The producer half of the literal-list-label fix. `normalize_list_text`
+    /// strips `"B."` off the item text so the text reads as content; without
+    /// the `set_list_item_source_label` call in `push_paragraph_element` the
+    /// label is gone for good and a renderer can only synthesize a position,
+    /// silently renumbering clauses that the document cross-references by their
+    /// printed label. Neutralise that call and this fails with `None`.
+    #[test]
+    fn ordered_list_item_keeps_its_literal_source_marker() {
+        let mut para = make_paragraph("B. The Property shall be developed in substantial conformance.", None);
+        para.is_list_item = true;
+
+        let doc = assemble_internal_document(vec![vec![para]], &[], None, &[]);
+
+        let item = doc
+            .elements
+            .iter()
+            .find(|element| matches!(element.kind, ElementKind::ListItem { .. }))
+            .expect("the paragraph should assemble into a ListItem element");
+
+        assert_eq!(
+            item.list_item_source_label(),
+            Some("B."),
+            "the stripped marker must be recorded, not discarded; text is {:?}",
+            item.text
+        );
+        assert!(
+            !item.text.starts_with("B."),
+            "the marker must still be stripped from the item text; got {:?}",
+            item.text
         );
     }
 

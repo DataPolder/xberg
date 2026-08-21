@@ -65,7 +65,15 @@ pub(crate) fn render_doctags(doc: &InternalDocument) -> String {
         match elem.kind {
             ElementKind::ListItem { ordered } => {
                 state.open(&mut out, ordered);
-                push_element(&mut out, "list_item", loc, &normalize_inline_text(&elem.text), None);
+                // DocTags' `list_item` tag carries no separate marker slot -- a literal
+                // source label (e.g. "B.", "(a)") that the auto `ordered` container alone
+                // cannot express is prefixed onto the visible text instead, exactly as the
+                // other text-based renderers (comrak/markdown, djot, plain) do.
+                let text = match elem.list_item_source_label() {
+                    Some(label) if !label.is_empty() => format!("{label} {}", elem.text),
+                    _ => elem.text.clone(),
+                };
+                push_element(&mut out, "list_item", loc, &normalize_inline_text(&text), None);
                 continue;
             }
             ElementKind::ListStart { ordered } => {

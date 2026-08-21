@@ -11,6 +11,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Drawing and plat labels are no longer deleted from scanned pages.** A layout detector draws a
+  single `Picture` region over an entire scanned drawing page, so every OCR'd paragraph on it --
+  including the drawing's own printed labels -- fell inside that region and was suppressed as page
+  furniture. Short ALL-CAPS labels ("SITE PLAN", "LEGEND", `RESERVE "A"`, "EXHIBIT B-1") are now
+  exempt, while mixed-case prose swept into a picture region stays suppressed. Measured on a
+  scanned ordinance: recall 0.915 -> 0.943 with F1 within 0.01 of the old value on every backend.
+  A confidence floor was also tried and rejected -- it recovered the same labels but admitted
+  enough picture noise to move F1 0.949 -> 0.925 and noise 0.8% -> 5.0%.
+- **List items keep the document's own marker.** The PDF pipeline strips the marker off an item's
+  text so the text reads as content, then discarded it, leaving renderers to synthesize a position.
+  On a legal document whose clauses are cross-referenced by their printed label that silently
+  renumbers the text: "B." became "1.", "(a)" became "1.". The literal marker is now recorded and
+  rendered, and an item carrying one is emitted as a bullet so no synthesized ordinal competes
+  with it.
+- **A parenthesized quantity no longer starts a list.** "Two (2) additional on-street parking
+  spaces" wrapping onto a new line made `(2) additional ...` look like a list marker plus body, so
+  the sentence was split into a list item mid-clause. A parenthesized numeric marker followed by a
+  space and a lowercase word is now treated as prose; `(a)`/`(b)` sub-items and genuine `(1) First
+  point` enumerations are unaffected.
+
 - **PDF glyph-drop warnings are captured again, and can now be composed into an existing
   subscriber.** pdf_oxide 1.0.1 migrated its diagnostics from the `log` facade to `tracing`, so the
   `log::Log` sink that collected them received nothing and every "glyph ink is missing" warning

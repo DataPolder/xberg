@@ -77,6 +77,14 @@ pub(crate) fn render_plain(doc: &InternalDocument) -> String {
                 }
             }
             ElementKind::ListItem { .. } => {
+                // Plain text renders no marker glyph at all (no "1."/"-" prefix, by
+                // design -- this format is markers-off across the board). A literal
+                // source label (e.g. "B.", "(a)") is the one piece of list-item
+                // structure this format can still carry, so it is kept as visible text.
+                if let Some(label) = elem.list_item_source_label().filter(|label| !label.is_empty()) {
+                    out.push_str(label);
+                    out.push(' ');
+                }
                 out.push_str(&elem.text);
                 out.push('\n');
             }

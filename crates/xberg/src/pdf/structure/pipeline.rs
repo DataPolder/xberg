@@ -2172,12 +2172,53 @@ pub(crate) fn looks_like_list_item(text: &str) -> bool {
     let Some(marker) = super::list_marker::parse_ordered_list_marker(t) else {
         return false;
     };
+    let Some(first_content_char) = t.get(marker.content_start..).and_then(|content| content.chars().next()) else {
+        return false;
+    };
     marker.has_content
         && marker.has_separator
         && !is_probable_author_byline(t)
-        && t.get(marker.content_start..)
-            .and_then(|content| content.chars().next())
-            .is_some_and(char::is_alphabetic)
+        && first_content_char.is_alphabetic()
+        && !is_inline_parenthesized_quantity(t, &marker, first_content_char)
+}
+
+/// Reject a line-leading `(N)` when it reads as a mid-sentence quantity
+/// clarification -- "Two\n(2) additional on-street parking spaces" wraps onto
+/// a physical line that *starts* with `(2)`, which is shaped identically to a
+/// genuine numbered marker like `(2) Second item`.
+///
+/// The distinguishing signal is capitalization plus how the marker was
+/// separated from its content:
+///
+/// - A **newline** between the marker and its content (`"(2)\nsecond item"`)
+///   means the marker arrived as its own text run, glued to the next run by
+///   line reconstruction rather than by the source author -- that shape is
+///   trusted regardless of case, exactly as it always has been.
+/// - A plain **space** on the same physical line, followed by a **lowercase**
+///   word (`"(2) additional …"`, `"(7) on-street …"`), is the shape of a
+///   number spelled out in prose ("Two (2) additional…") that happens to
+///   start a wrapped line. A genuine enumerated item is a new sentence and so
+///   starts with a capital letter (`"(2) Second point."`); this heuristic
+///   costs nothing there.
+///
+/// Scoped to `(`-parenthesized **numeric** markers only: `(a)`/`(b)`/`(c)` are
+/// this same ordinance's genuine sub-item markers (never quantity
+/// clarifications, since nobody writes "two (b) items"), and non-parenthesized
+/// families (`"1. "`, `"[1] "`) have no equivalent English idiom that produces
+/// this false positive, so they are left untouched.
+fn is_inline_parenthesized_quantity(
+    t: &str,
+    marker: &super::list_marker::OrderedListMarker,
+    first_content_char: char,
+) -> bool {
+    if !t.starts_with('(') || marker.numeric_value.is_none() {
+        return false;
+    }
+    let separator_region = t.get(..marker.content_start).unwrap_or("");
+    if separator_region.contains(['\n', '\r']) {
+        return false;
+    }
+    !first_content_char.is_uppercase()
 }
 
 /// Whether a single-capital marker is more likely the first author initial.
@@ -9524,6 +9565,41 @@ mod list_marker_tests {
         assert!(!looks_like_list_item("—\t\nbody"));
         assert!(!looks_like_list_item("–\n8 show the remaining figures"));
         assert!(!looks_like_list_item("—continuation"));
+    }
+
+    /// #### FAILS against unfixed code
+    /// Both assertions currently evaluate to `true` (unfixed
+    /// `looks_like_list_item` accepts any `(N) <alphabetic>` line), so
+    /// `assert!(!looks_like_list_item(...))` panics with `assertion failed:
+    /// !looks_like_list_item("(2) additional on-street parallel parking
+    /// spaces")` (and the `(7)` sibling) on unfixed code.
+    #[test]
+    fn parenthesized_quantity_clarifications_are_not_list_items() {
+        assert!(!looks_like_list_item(
+            "(2) additional on-street parallel parking spaces"
+        ));
+        assert!(!looks_like_list_item("(7) on-street spaces on Lake Pointe Parkway"));
+        assert!(!looks_like_list_item("(3) additional off-street spaces"));
+        assert!(!looks_like_list_item("(9) exceptions apply"));
+    }
+
+    /// Lettered sub-items in parentheses are genuine markers in this same
+    /// ordinance and must survive the quantity-clarification heuristic above
+    /// (it is scoped to *numeric* parenthesized markers only).
+    #[test]
+    fn parenthesized_letter_markers_remain_list_items() {
+        assert!(looks_like_list_item("(a) Front setback: 25'"));
+        assert!(looks_like_list_item("(b) Side setback: 0'/6'"));
+        assert!(looks_like_list_item("(c) Street side setback: Lot 1 - 15'"));
+    }
+
+    /// A capitalized, space-separated numeric parenthesized marker is a
+    /// genuine enumerated item (a new sentence), not a quantity
+    /// clarification, and must still be accepted.
+    #[test]
+    fn capitalized_parenthesized_numeric_markers_remain_list_items() {
+        assert!(looks_like_list_item("(1) First point"));
+        assert!(looks_like_list_item("(2) Second point"));
     }
 
     #[test]

@@ -500,6 +500,19 @@ impl InternalDocumentBuilder {
         }
     }
 
+    /// Record the literal source list-marker text on an already-pushed list item.
+    ///
+    /// `normalize_list_text` strips the marker off the item's text so the text
+    /// reads as content; without this the original label is lost and renderers
+    /// can only synthesize a sequence position. That silently renumbers a
+    /// document whose clauses are cross-referenced by their printed label.
+    /// An empty label is ignored.
+    pub fn set_list_item_source_label(&mut self, index: u32, label: impl Into<String>) {
+        if let Some(elem) = self.doc.elements.get_mut(index as usize) {
+            elem.set_list_item_source_label(label);
+        }
+    }
+
     /// Set annotations on an already-pushed element.
     pub fn set_annotations(&mut self, index: u32, annotations: Vec<TextAnnotation>) {
         if let Some(elem) = self.doc.elements.get_mut(index as usize) {
