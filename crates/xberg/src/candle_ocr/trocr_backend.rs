@@ -32,6 +32,52 @@ fn variant_discriminant(v: TrocrVariant) -> u8 {
 /// Type alias for the engine pool mapping.
 type EnginePoolMap = AHashMap<(u8, DevicePreference, PathBuf, String), Arc<TrocrEngine>>;
 
+/// Tallest a single cropped text-line image is expected to be, in pixels.
+///
+/// TrOCR is trained on single-line crops (see `TrocrBackend` docs). A raster this
+/// tall is far more likely to be a whole page handed to the backend by mistake than
+/// an unusually large line crop: at the pipeline's 150 DPI page render, even a large
+/// heading line is well under this, while a full US Letter or A4 page renders to
+/// roughly 1650-2550px tall. Chosen with headroom above the `test_hello_world.png`
+/// fixture (200px) used in `xberg-candle-ocr`'s own integration test.
+const MAX_LINE_CROP_HEIGHT_PX: u32 = 300;
+
+/// Reject an `image_bytes` payload that looks like a full page rather than a single
+/// cropped text line, before it is handed to a model trained only on the latter.
+///
+/// TrOCR's [`ImageProcessor`](xberg_candle_ocr::models::image_processor::ImageProcessor)
+/// force-resizes any input to a fixed 384x384 square, discarding the original aspect
+/// ratio. Handed a whole-page raster, it does not error — it decodes, resizes, and runs
+/// inference to completion, producing confident-looking but fabricated text (the model
+/// decodes whatever line-shaped pattern the squashed page most resembles). Returning
+/// `Ok` with hallucinated content is worse than failing loudly here: a caller checking
+/// only the exit code has no way to tell the two apart otherwise.
+fn reject_whole_page_input(image_bytes: &[u8]) -> Result<()> {
+    let (width, height) =
+        xberg_candle_ocr::models::image_processor::dimensions(image_bytes).map_err(|e| crate::XbergError::Ocr {
+            message: format!("TrOCR: failed to read image dimensions: {e}"),
+            source: Some(Box::new(e)),
+        })?;
+
+    if height > MAX_LINE_CROP_HEIGHT_PX {
+        return Err(crate::XbergError::Validation {
+            message: format!(
+                "candle-trocr received a {width}x{height} image that looks like a full page, not a \
+                 single cropped text line. TrOCR is trained on line-level crops and will silently \
+                 hallucinate text on whole-page input instead of failing (the pipeline force-resizes \
+                 any input to a 384x384 square, destroying page layout). Either: (1) crop the page \
+                 into individual text lines/regions before calling this backend (e.g. via a text \
+                 detector or layout model), or (2) use a full-page backend instead, such as \
+                 `candle-paddleocr-vl`, `candle-glm-ocr`, `candle-deepseek-ocr`, `tesseract`, \
+                 `paddle-ocr`, or `sceptre`."
+            ),
+            source: None,
+        });
+    }
+
+    Ok(())
+}
+
 /// Process-wide engine pool keyed by `(variant_discriminant, device_preference)`.
 ///
 /// `TrocrEngine` initialisation downloads and parses safetensors weights from HF Hub
@@ -217,6 +263,8 @@ impl OcrBackend for TrocrBackend {
             });
         }
 
+        reject_whole_page_input(image_bytes)?;
+
         let image_bytes_owned = image_bytes.to_vec();
 
         let content = tokio::task::spawn_blocking(move || {
@@ -359,5 +407,47 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn fixture_bytes(name: &str) -> Vec<u8> {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../../test_documents/images/{name}"));
+        std::fs::read(&path).unwrap_or_else(|e| panic!("failed to read fixture {}: {e}", path.display()))
+    }
+
+    /// A whole scanned page (595x842, an A4-shaped raster) must be rejected before TrOCR
+    /// wastes a forward pass hallucinating line-shaped text on it.
+    ///
+    /// This regression-guards the fix for the bug measured against
+    /// `test_documents/pdf_scanned/ordinance_2197_scanned.pdf`: `candle-trocr` exited 0 and
+    /// emitted 145 bytes of receipt-shaped hallucination (`AMOUNT NAME`, `CASHIER`, ...) for a
+    /// 16-page zoning ordinance, because nothing rejected the full-page raster before it was
+    /// force-resized to 384x384 and decoded anyway. Before the fix (no `reject_whole_page_input`
+    /// call in `process_image`), this assertion fails: `is_err()` is `false` because no check
+    /// exists to reject a full-page input.
+    #[test]
+    fn test_reject_whole_page_input_rejects_full_page_raster() {
+        let bytes = fixture_bytes("ocr_test_original.png");
+        let result = reject_whole_page_input(&bytes);
+        assert!(
+            result.is_err(),
+            "a 595x842 full-page raster must be rejected as line-level TrOCR input, got Ok"
+        );
+        let message = result.unwrap_err().to_string();
+        assert!(
+            message.contains("full page"),
+            "error message must explain the mismatch, got: {message}"
+        );
+    }
+
+    /// A genuine single-line crop (800x200, wide and short) must be accepted.
+    #[test]
+    fn test_reject_whole_page_input_accepts_line_crop() {
+        let bytes = fixture_bytes("test_hello_world.png");
+        let result = reject_whole_page_input(&bytes);
+        assert!(
+            result.is_ok(),
+            "an 800x200 single-line crop must be accepted, got {:?}",
+            result.err().map(|e| e.to_string())
+        );
     }
 }
