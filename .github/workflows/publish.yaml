@@ -2452,7 +2452,14 @@ jobs:
   cli-proxy-wheels:
     name: Build CLI proxy wheel (${{ matrix.target }})
     needs: [prepare, check-cli, cli-binaries, cli-binaries-musl]
-    if: ${{ needs.prepare.outputs.is_tag == 'true' && needs.cli-binaries.result == 'success' && needs.cli-binaries-musl.result == 'success' && (needs.check-cli.outputs.exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
+    # Runs on dry runs too, matching `check-cli` and `zig-package`. This job is where the
+    # runtime wheel-payload smoke test lives (GH#1407), and gating it on `is_tag` alone meant
+    # a dry run SKIPPED the one check that would have caught a 257-byte launcher wheel -- the
+    # matrix never expanded, so the run went green having exercised nothing. Safe to widen:
+    # the job ends at `upload-artifact` and contains no twine, token or secret, and
+    # `cli-binaries`/`cli-binaries-musl` carry no `is_tag` term either, so they produce real
+    # binaries on a dry run rather than stubs. ~keep
+    if: ${{ (needs.prepare.outputs.is_tag == 'true' || needs.prepare.outputs.dry_run == 'true') && needs.cli-binaries.result == 'success' && needs.cli-binaries-musl.result == 'success' && (needs.check-cli.outputs.exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
