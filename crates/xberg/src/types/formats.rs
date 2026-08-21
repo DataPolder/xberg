@@ -353,6 +353,20 @@ impl Default for ImagePreprocessingConfig {
 /// Provides fine-grained control over Tesseract OCR engine parameters.
 /// Most users can use the defaults, but these settings allow optimization
 /// for specific document types (invoices, handwriting, etc.).
+///
+/// **This is the public-facing counterpart of [`crate::ocr::types::TesseractConfig`]
+/// (the internal, engine-facing representation with `u8`/`String` fields instead of
+/// `i32`/`Vec<String>`).** They are two independent struct definitions bridged only by
+/// an explicit `From<&TesseractConfig> for crate::ocr::types::TesseractConfig` impl in
+/// `ocr/types.rs` — that conversion carries field *values* across, but each struct keeps
+/// its own `Default` impl, and the conversion does nothing to keep those two defaults in
+/// sync. Several production call sites (`extractors::image::apply_default_tesseract_psm`,
+/// `configured_region_ocr`, `sparse_image_ocr_fallback_config`) construct *this* struct's
+/// default and convert it, bypassing the internal struct's `Default` entirely — so if the
+/// two defaults disagree, standalone image OCR silently uses this struct's value while
+/// PDF-embedded OCR (which can reach the internal `Default` directly when no
+/// `tesseract_config` is set) uses the other. When changing a default here, also update
+/// [`crate::ocr::types::TesseractConfig::default`], and vice versa.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "api", derive(utoipa::ToSchema))]
 #[serde(default)]
@@ -416,7 +430,11 @@ pub struct TesseractConfig {
     /// Use pre-adapted templates for character classification
     pub classify_use_pre_adapted_templates: bool,
 
-    /// Enable N-gram language model
+    /// Enable N-gram language model.
+    ///
+    /// Kept on by default (see [`Self::default`] and
+    /// [`crate::ocr::types::TesseractConfig::language_model_ngram_on`] for the rationale);
+    /// keep this field's default in sync with the internal struct's.
     pub language_model_ngram_on: bool,
 
     /// Don't reject good words during block-level processing
@@ -462,7 +480,9 @@ impl Default for TesseractConfig {
             table_row_threshold_ratio: 0.5,
             use_cache: true,
             classify_use_pre_adapted_templates: true,
-            language_model_ngram_on: false,
+            // Must match crate::ocr::types::TesseractConfig::default() — see the struct-level
+            // doc comment above for why the two defaults can silently diverge otherwise.
+            language_model_ngram_on: true,
             tessedit_dont_blkrej_good_wds: true,
             tessedit_dont_rowrej_good_wds: true,
             tessedit_enable_dict_correction: true,
@@ -541,5 +561,34 @@ impl Default for ImageDpiConfig {
             min_dpi: 72,
             max_dpi: 600,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// This is the public-facing `TesseractConfig` (re-exported as `crate::types::
+    /// TesseractConfig`), not `crate::ocr::types::TesseractConfig` (the internal,
+    /// engine-facing struct with its own separate `Default` impl). The two defaults must
+    /// agree: `extractors::image::apply_default_tesseract_psm` and related call sites
+    /// construct *this* struct's default and convert it into the internal one, bypassing
+    /// the internal struct's own `Default` — so a stale value here silently overrides the
+    /// internal default for every standalone image OCR call, even after the internal
+    /// default is changed.
+    ///
+    /// Against the unfixed code this struct's `language_model_ngram_on` default is
+    /// `false`, disagreeing with `crate::ocr::types::TesseractConfig::default()`'s `true`
+    /// (see that struct's doc comment for why `true` is the deliberate, documented
+    /// default), so this assertion fails with `false` instead of `true`.
+    #[test]
+    fn test_tesseract_config_default_matches_internal_ngram_default() {
+        let config = TesseractConfig::default();
+
+        assert!(
+            config.language_model_ngram_on,
+            "public TesseractConfig::default() must match crate::ocr::types::TesseractConfig::default() \
+             for language_model_ngram_on (true), or standalone image OCR silently gets the stale value"
+        );
     }
 }

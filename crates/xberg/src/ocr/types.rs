@@ -103,6 +103,14 @@ pub struct TesseractConfig {
     /// `extractors::pdf::ocr`). Left off, Tesseract does not apply this penalty at all.
     /// Kept on by default rather than off, unlike upstream's own default, because prose
     /// pages are unaffected while noise pages are meaningfully suppressed.
+    ///
+    /// **This default must stay in sync with
+    /// [`crate::types::TesseractConfig::language_model_ngram_on`]'s default** (the
+    /// public-facing counterpart, in `types/formats.rs`). The two structs have independent
+    /// `Default` impls, and several call sites in `extractors::image` construct the public
+    /// struct's default and convert it (via the `From` impl below) *before* this default is
+    /// ever consulted — so this field's value only reaches standalone image OCR when both
+    /// defaults agree.
     pub language_model_ngram_on: bool,
     /// Tesseract `tessedit_dont_blkrej_good_wds` variable.
     pub tessedit_dont_blkrej_good_wds: bool,

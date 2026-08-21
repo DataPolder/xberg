@@ -2456,6 +2456,39 @@ mod tests {
             assert_eq!(tesseract_config.psm, SPARSE_IMAGE_OCR_FALLBACK_PSM);
             assert!(tesseract_config.preprocessing.is_some());
         }
+
+        /// Regression test for the standalone-image-OCR variant of the `TesseractConfig`
+        /// duplication hazard: `apply_default_whole_image_tesseract_psm` materializes
+        /// `crate::types::TesseractConfig::default()` (the public struct) whenever the
+        /// caller never set `tesseract_config` explicitly, which is the default path for
+        /// every plain image (PNG/JPG/TIFF/...) OCR request. That materialized value is
+        /// later converted into `crate::ocr::types::TesseractConfig` (the internal,
+        /// engine-facing struct) via `From`, which carries the value across as-is — it does
+        /// NOT fall back to the internal struct's own `Default`. So if the public struct's
+        /// default ever drifts from the internal struct's default, standalone image OCR
+        /// silently keeps using the stale public value while other callers that reach the
+        /// internal `Default` directly (e.g. PDF-embedded OCR, which never calls this
+        /// function) get the current one.
+        ///
+        /// Against the unfixed code, `crate::types::TesseractConfig::default()` still has
+        /// `language_model_ngram_on: false`, so this assertion fails with `false` even
+        /// though `crate::ocr::types::TesseractConfig::default()` already has `true`.
+        #[test]
+        fn should_apply_public_ngram_default_to_whole_image_tesseract_config() {
+            let mut whole_image_config = crate::core::config::OcrConfig::default();
+            apply_default_whole_image_tesseract_psm(&mut whole_image_config);
+
+            let tesseract_config = whole_image_config
+                .tesseract_config
+                .expect("default whole-image OCR must materialize a Tesseract configuration");
+
+            assert!(
+                tesseract_config.language_model_ngram_on,
+                "standalone image OCR must use the same language_model_ngram_on default as the \
+                 internal TesseractConfig, not a stale value baked in from the public struct's \
+                 own Default impl"
+            );
+        }
     }
 
     fn image_ocr_document(text: &str) -> InternalDocument {
