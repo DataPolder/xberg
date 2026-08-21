@@ -57,8 +57,14 @@ default = [
 pdf-surface = ["xberg/pdf"]
 # Gates `--pdf-backend pdfium` (#700): PdfBackend::Pdfium always exists once
 # `pdf-surface` is on, but selecting it without this feature is rejected at
-# validation time with an actionable rebuild hint -- no pdfium extraction
-# implementation exists yet, so there is no silent fallback to pdf-oxide.
+# CLI validation time with an actionable rebuild hint. With this feature on,
+# CLI validation accepts the selection -- but no pdfium extraction
+# implementation exists yet (#702), so `xberg::extractors::pdf::PdfExtractor`
+# itself rejects `PdfBackend::Pdfium` at extraction time with an actionable
+# error, regardless of this feature. That core-level rejection is what
+# actually prevents a silent fallback to pdf-oxide: CLI validation alone only
+# covers `xberg-cli`, not library callers, the API/MCP servers, or other
+# language bindings that build `ExtractionConfig` directly.
 pdf-pdfium-surface = ["pdf-surface", "xberg/pdf-pdfium"]
 pdf-heuristic = ["pdf-surface"]
 pdf-ocr = ["pdf-heuristic", "ocr-surface", "xberg/ocr"]

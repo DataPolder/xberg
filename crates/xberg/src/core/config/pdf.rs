@@ -21,9 +21,14 @@ pub enum PdfBackend {
     PdfOxide,
     /// pdfium -- Google's PDFium engine, gated behind the `pdf-pdfium` Cargo
     /// feature. Selection only: no extraction implementation exists yet
-    /// (issue #700 adds the selection level, not the engine). A build
-    /// without the `pdf-pdfium` feature must reject this at the CLI
-    /// validation layer rather than silently falling back to `PdfOxide`.
+    /// (issue #700 adds the selection level, #702 adds the extraction dispatch
+    /// seam -- neither adds the engine). A build without the `pdf-pdfium`
+    /// feature must reject this at the CLI validation layer rather than
+    /// silently falling back to `PdfOxide`. A build *with* the feature still
+    /// rejects it, at extraction time
+    /// (`extractors::pdf::PdfExtractor::extract_core`), because selection
+    /// alone never wires up an engine -- see that function's doc comment for
+    /// why the rejection lives there and not only in CLI validation.
     Pdfium,
 }
 

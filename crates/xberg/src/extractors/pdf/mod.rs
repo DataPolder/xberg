@@ -1356,6 +1356,18 @@ impl PdfExtractor {
     ///
     /// Accepts an optional `path` which is passed to OCR backends to allow
     /// direct document-level processing (bypassing page rendering).
+    ///
+    /// This is the dispatch seam for `PdfConfig::backend` (#702): the single place
+    /// that routes a PDF extraction request to a backend implementation. Adding a
+    /// real `PdfBackend::Pdfium` engine means adding a branch here, not touching
+    /// `extract_content`/`extract_path` or any caller. The dispatch is enforced here
+    /// -- in the core crate, below every binding -- rather than only in
+    /// `xberg-cli`'s `ExtractionOverrides::validate`, because any caller that builds
+    /// `ExtractionConfig` directly (library use, the API/MCP servers, or a language
+    /// binding) sets `PdfConfig::backend` without ever going through CLI validation.
+    /// Without an enforcement point here, such a caller selecting
+    /// `PdfBackend::Pdfium` would have silently gotten `pdf_oxide` output mislabeled
+    /// as pdfium.
     async fn extract_core(
         &self,
         content: &[u8],
@@ -1364,7 +1376,48 @@ impl PdfExtractor {
         path: Option<&std::path::Path>,
     ) -> Result<InternalDocument> {
         tracing::debug!(format = "pdf", size_bytes = content.len(), "extraction starting");
+        #[cfg(feature = "pdf")]
+        {
+            let backend = config
+                .pdf_options
+                .as_ref()
+                .map(|options| options.backend)
+                .unwrap_or_default();
+            match backend {
+                crate::core::config::PdfBackend::PdfOxide => {
+                    self.extract_core_oxide(content, mime_type, config, path).await
+                }
+                crate::core::config::PdfBackend::Pdfium => {
+                    self.extract_core_pdfium(content, mime_type, config, path).await
+                }
+            }
+        }
+        #[cfg(not(feature = "pdf"))]
         self.extract_core_oxide(content, mime_type, config, path).await
+    }
+
+    /// Dispatch target for `PdfBackend::Pdfium`.
+    ///
+    /// No pdfium extraction implementation exists yet -- `crates/xberg-pdfium-render`
+    /// is wired into the workspace and the `pdf-pdfium` Cargo feature makes the
+    /// dependency available, but nothing calls into it. This fails loudly rather
+    /// than falling back to `extract_core_oxide`: silently reusing `pdf_oxide`
+    /// output under a caller's `PdfBackend::Pdfium` selection would produce a
+    /// document the caller believes came from pdfium, which is worse than an error.
+    #[cfg(feature = "pdf")]
+    async fn extract_core_pdfium(
+        &self,
+        _content: &[u8],
+        _mime_type: &str,
+        _config: &ExtractionConfig,
+        _path: Option<&std::path::Path>,
+    ) -> Result<InternalDocument> {
+        Err(crate::XbergError::validation(
+            "PDF extraction requested backend 'pdfium', but no pdfium extraction \
+             implementation exists yet (issue #702 adds the dispatch seam only). Use \
+             the default 'pdf-oxide' backend instead, or wait for pdfium extraction \
+             support before selecting 'pdfium'.",
+        ))
     }
 
     /// Core extraction via the pdf_oxide backend.
@@ -3817,6 +3870,78 @@ mod tests {
             result.is_ok(),
             "default security limits must not reject a normal multi-page document: {:?}",
             result.err()
+        );
+    }
+
+    /// Proves the `PdfBackend::Pdfium` dispatch branch in `extract_core` (#702):
+    /// selecting pdfium must fail with a specific, actionable error naming the
+    /// backend and telling the caller what to do, rather than the oxide parser's
+    /// generic "corrupt file" error. Content is deliberately not a valid PDF --
+    /// dispatch must happen before any parsing, so a real pdfium rejection never
+    /// reaches the parser at all.
+    ///
+    /// Fails against unfixed code: `extract_core` unconditionally calls
+    /// `extract_core_oxide` and never reads `PdfConfig::backend`, so `content`
+    /// gets handed straight to `pdf_oxide`. The oxide parser rejects the garbage
+    /// bytes with an `XbergError::Parsing` whose message describes a corrupt/invalid
+    /// PDF and never contains the word "pdfium" -- the
+    /// `message.contains("pdfium")` assertion below fails.
+    #[tokio::test]
+    #[cfg(feature = "pdf")]
+    async fn pdfium_backend_is_rejected_with_actionable_error_not_generic_parse_failure() {
+        let extractor = PdfExtractor::new();
+        let mut config = ExtractionConfig::default();
+        config.pdf_options = Some(crate::core::config::PdfConfig {
+            backend: crate::core::config::PdfBackend::Pdfium,
+            ..Default::default()
+        });
+
+        let result = extractor
+            .extract_content(b"not a real pdf", "application/pdf", &config)
+            .await;
+
+        let error = result.expect_err("selecting pdfium must fail, not silently extract via pdf_oxide");
+        let message = error.to_string();
+        assert!(
+            message.contains("pdfium"),
+            "error must name the requested backend 'pdfium', got: {message}"
+        );
+        assert!(
+            message.contains("pdf-oxide"),
+            "error must tell the caller what to do (use pdf-oxide instead), got: {message}"
+        );
+    }
+
+    /// Proves there is no silent fallback (#702's core danger): given a document
+    /// `pdf_oxide` can extract perfectly well, selecting `PdfBackend::Pdfium` must
+    /// still fail rather than quietly returning `pdf_oxide`'s output mislabeled as
+    /// pdfium. Uses a real, valid multi-page PDF specifically to rule out "it failed
+    /// because the input was bad" as an explanation for the error.
+    ///
+    /// Fails against unfixed code: `extract_core` ignores `PdfConfig::backend`
+    /// entirely and always calls `extract_core_oxide`, so `result.is_ok()` is `true`
+    /// pre-fix (the exact silent-fallback failure mode #702 exists to close) instead
+    /// of the `false` asserted here.
+    #[tokio::test]
+    #[cfg(feature = "pdf")]
+    async fn pdfium_backend_never_silently_falls_back_to_pdf_oxide_output() {
+        let pdf_path = pdf_test_document("multi_page.pdf");
+        let Ok(content) = std::fs::read(&pdf_path) else {
+            return;
+        };
+
+        let extractor = PdfExtractor::new();
+        let mut config = ExtractionConfig::default();
+        config.pdf_options = Some(crate::core::config::PdfConfig {
+            backend: crate::core::config::PdfBackend::Pdfium,
+            ..Default::default()
+        });
+
+        let result = extractor.extract_content(&content, "application/pdf", &config).await;
+        assert!(
+            result.is_err(),
+            "pdfium selected on a document pdf_oxide could extract fine must still error, \
+             not silently return pdf_oxide's output under the caller's pdfium selection"
         );
     }
 
