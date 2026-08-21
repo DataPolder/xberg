@@ -31,3 +31,12 @@ pub(crate) const OCR_AUTO_ROTATED_METADATA_KEY: &str = "auto_rotated";
 /// as `0.0` ("every word is valid"). See `dictionary_invalid_word_ratio` in
 /// `ocr::processor::execution` and `is_dictionary_invalid_noise` in `extractors::pdf::ocr`.
 pub(crate) const OCR_TESSERACT_DICT_INVALID_WORD_RATIO_METADATA_KEY: &str = "tesseract_dict_invalid_word_ratio";
+/// Per-LINE breakdown of the same dictionary-invalid signal: a JSON array of
+/// `{"text": <reconstructed line text>, "ratio": <invalid fraction>}` objects, one per
+/// physical OCR line with enough dictionary-checkable words to make a ratio meaningful.
+/// Tesseract-only, same absence semantics as
+/// [`OCR_TESSERACT_DICT_INVALID_WORD_RATIO_METADATA_KEY`]. A page-wide ratio is diluted by
+/// every healthy line sharing the page, so it cannot isolate one noise line the way this
+/// can. See `dictionary_invalid_noise_lines` in `ocr::processor::execution` and
+/// `strip_dictionary_invalid_lines` in `extractors::pdf::ocr`.
+pub(crate) const OCR_TESSERACT_DICT_INVALID_LINES_METADATA_KEY: &str = "tesseract_dict_invalid_lines";

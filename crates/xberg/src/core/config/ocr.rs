@@ -181,6 +181,27 @@ pub struct OcrQualityThresholds {
     #[serde(default = "default_max_ocr_output_dict_invalid_word_ratio")]
     pub max_ocr_output_dict_invalid_word_ratio: f64,
 
+    /// Maximum fraction of a single OCR LINE's dictionary-checkable words that
+    /// `TesseractAPI::is_valid_word` may reject before that one line -- not the whole page --
+    /// is dropped as recognition noise. See `strip_dictionary_invalid_lines` in
+    /// `extractors::pdf::ocr` and `dictionary_invalid_noise_lines` in
+    /// `ocr::processor::execution`.
+    ///
+    /// Unlike [`Self::max_ocr_output_dict_invalid_word_ratio`] (the whole-page veto, left
+    /// inert by default because a false positive there deletes an entire page), this
+    /// line-level check is enabled out of the box: a wrong call here only drops one physical
+    /// line, so the same page-wide conservatism is not required. A line still needs at least
+    /// two independently dictionary-checkable words before its ratio is trusted at all (see
+    /// `MIN_DICT_CANDIDATES_FOR_LINE` in `ocr::processor::execution`), which is what keeps a
+    /// lone real proper noun or technical term standing alone on its own line from ever being
+    /// scored in the first place -- it never has a second checkable word to form a ratio
+    /// from. A multi-word line mixing real and invented terms (e.g. a plant list reading
+    /// "Ligustrum, Photinia, Azalea, Indian Hawthorne") keeps a mixed ratio well under this
+    /// default, because most such lines carry enough recognizable words to pull the ratio
+    /// down; only a line whose words are almost entirely dictionary-invalid is dropped.
+    #[serde(default = "default_max_ocr_output_dict_invalid_line_ratio")]
+    pub max_ocr_output_dict_invalid_line_ratio: f64,
+
     /// Minimum average word length. Below this with enough words indicates garbled extraction.
     #[serde(default = "default_min_avg_word_length")]
     pub min_avg_word_length: f64,
@@ -257,6 +278,7 @@ impl Default for OcrQualityThresholds {
             max_ocr_output_fragmented_word_ratio: default_max_ocr_output_fragmented_word_ratio(),
             min_words_for_ocr_output_check: default_min_words_for_ocr_output_check(),
             max_ocr_output_dict_invalid_word_ratio: default_max_ocr_output_dict_invalid_word_ratio(),
+            max_ocr_output_dict_invalid_line_ratio: default_max_ocr_output_dict_invalid_line_ratio(),
             min_avg_word_length: 2.0,
             min_words_for_avg_length_check: 50,
             min_consecutive_repeat_ratio: 0.08,
@@ -309,6 +331,15 @@ fn default_min_words_for_ocr_output_check() -> usize {
 /// the range the ratio can actually reach, so it can never fire until calibrated and lowered.
 fn default_max_ocr_output_dict_invalid_word_ratio() -> f64 {
     1.01
+}
+/// Enabled by default (unlike the page-level veto above): a wrong call here drops one
+/// physical line, not a whole page, so the blast radius does not demand the same
+/// pre-calibration conservatism. `0.75` sits below a fully-invalid line (ratio `1.0`, e.g. a
+/// misread title-block label with no recognizable words at all) and above a mixed line that
+/// still carries some real dictionary words (e.g. a plant list mixing recognized and
+/// unrecognized botanical names).
+fn default_max_ocr_output_dict_invalid_line_ratio() -> f64 {
+    0.75
 }
 fn default_min_avg_word_length() -> f64 {
     2.0
