@@ -10,6 +10,8 @@ mod layout_hints;
 mod layout_runner;
 pub(crate) mod ocr;
 mod pages;
+#[cfg(all(feature = "pdf", feature = "pdf-pdfium"))]
+mod pdfium_engine;
 #[cfg(feature = "layout-detection")]
 pub(crate) mod reading_order;
 #[cfg(all(feature = "liter-llm", feature = "layout-detection"))]
@@ -1398,13 +1400,12 @@ impl PdfExtractor {
 
     /// Dispatch target for `PdfBackend::Pdfium`.
     ///
-    /// No pdfium extraction implementation exists yet -- `crates/xberg-pdfium-render`
-    /// is wired into the workspace and the `pdf-pdfium` Cargo feature makes the
-    /// dependency available, but nothing calls into it. This fails loudly rather
-    /// than falling back to `extract_core_oxide`: silently reusing `pdf_oxide`
-    /// output under a caller's `PdfBackend::Pdfium` selection would produce a
-    /// document the caller believes came from pdfium, which is worse than an error.
-    #[cfg(feature = "pdf")]
+    /// Without the `pdf-pdfium` Cargo feature, `crates/xberg-pdfium-render` is not
+    /// even compiled in, so this fails loudly rather than falling back to
+    /// `extract_core_oxide`: silently reusing `pdf_oxide` output under a caller's
+    /// `PdfBackend::Pdfium` selection would produce a document the caller believes
+    /// came from pdfium, which is worse than an error.
+    #[cfg(all(feature = "pdf", not(feature = "pdf-pdfium")))]
     async fn extract_core_pdfium(
         &self,
         _content: &[u8],
@@ -1413,11 +1414,33 @@ impl PdfExtractor {
         _path: Option<&std::path::Path>,
     ) -> Result<InternalDocument> {
         Err(crate::XbergError::validation(
-            "PDF extraction requested backend 'pdfium', but no pdfium extraction \
-             implementation exists yet (issue #702 adds the dispatch seam only). Use \
-             the default 'pdf-oxide' backend instead, or wait for pdfium extraction \
-             support before selecting 'pdfium'.",
+            "PDF extraction requested backend 'pdfium', but this build was compiled \
+             without the 'pdf-pdfium' Cargo feature, so no pdfium extraction engine is \
+             available. Use the default 'pdf-oxide' backend instead, or rebuild with \
+             --features pdf-pdfium to enable pdfium extraction.",
         ))
+    }
+
+    /// Dispatch target for `PdfBackend::Pdfium` when the `pdf-pdfium` feature is
+    /// enabled (#702).
+    ///
+    /// Delegates to [`pdfium_engine::extract`], a deliberately smaller engine than
+    /// `extract_core_oxide`: see that module's doc comment for exactly what it
+    /// extracts and what it does not (no tables, images, annotations, form fields,
+    /// embedded files, or OCR fallback). Binding to the pdfium shared library is a
+    /// runtime concern -- see `pdfium_engine::bind_once` -- so this can still fail
+    /// with an actionable `XbergError::MissingDependency` even though the feature
+    /// compiled cleanly.
+    #[cfg(all(feature = "pdf", feature = "pdf-pdfium"))]
+    async fn extract_core_pdfium(
+        &self,
+        content: &[u8],
+        mime_type: &str,
+        config: &ExtractionConfig,
+        _path: Option<&std::path::Path>,
+    ) -> Result<InternalDocument> {
+        enforce_page_limit(content, config)?;
+        pdfium_engine::extract(content, mime_type, config).await
     }
 
     /// Core extraction via the pdf_oxide backend.
@@ -3886,8 +3909,12 @@ mod tests {
     /// bytes with an `XbergError::Parsing` whose message describes a corrupt/invalid
     /// PDF and never contains the word "pdfium" -- the
     /// `message.contains("pdfium")` assertion below fails.
+    ///
+    /// Gated on `not(feature = "pdf-pdfium")`: this exercises the *stub* rejection
+    /// wording. With `pdf-pdfium` enabled the real engine runs instead (see
+    /// `pdfium_engine`), whose error text this assertion does not describe.
     #[tokio::test]
-    #[cfg(feature = "pdf")]
+    #[cfg(all(feature = "pdf", not(feature = "pdf-pdfium")))]
     async fn pdfium_backend_is_rejected_with_actionable_error_not_generic_parse_failure() {
         let extractor = PdfExtractor::new();
         let mut config = ExtractionConfig::default();
@@ -3922,8 +3949,14 @@ mod tests {
     /// entirely and always calls `extract_core_oxide`, so `result.is_ok()` is `true`
     /// pre-fix (the exact silent-fallback failure mode #702 exists to close) instead
     /// of the `false` asserted here.
+    ///
+    /// Gated on `not(feature = "pdf-pdfium")`: with the real engine enabled, a valid
+    /// document legitimately extracting via pdfium is the whole point (see
+    /// `pdfium_engine_extracts_real_text_when_the_library_is_available` below), not
+    /// a silent fallback -- this test's premise (pdfium selection must always fail)
+    /// only holds for the stub.
     #[tokio::test]
-    #[cfg(feature = "pdf")]
+    #[cfg(all(feature = "pdf", not(feature = "pdf-pdfium")))]
     async fn pdfium_backend_never_silently_falls_back_to_pdf_oxide_output() {
         let pdf_path = pdf_test_document("multi_page.pdf");
         let Ok(content) = std::fs::read(&pdf_path) else {
@@ -3943,6 +3976,86 @@ mod tests {
             "pdfium selected on a document pdf_oxide could extract fine must still error, \
              not silently return pdf_oxide's output under the caller's pdfium selection"
         );
+    }
+
+    /// Proves the `pdf-pdfium` engine (#702) actually extracts text and metadata
+    /// through pdfium rather than reusing `pdf_oxide` output. `multi_page.pdf` is a
+    /// 5-page document whose first page's text is known ahead of time (verified
+    /// with `pdftotext` against the fixture).
+    ///
+    /// Requires a real `libpdfium` on the system library search path (or
+    /// `PDFIUM_DYNAMIC_LIB_PATH` pointing at one) -- this repository provisions
+    /// neither today, so this test skips (rather than fails) when
+    /// `pdfium_engine::bind_once` cannot load the library. That is an environment
+    /// gap, not a code defect; asserting the error is specifically
+    /// `XbergError::MissingDependency` (rather than string-matching the message)
+    /// still proves the failure came from library loading and not from the stub
+    /// rejection or some other error being swallowed.
+    ///
+    /// Fails against unfixed code: the stub `extract_core_pdfium` unconditionally
+    /// returns `XbergError::Validation` (never attempting to load pdfium), so on a
+    /// machine without `libpdfium` installed the `matches!(err,
+    /// XbergError::MissingDependency(_))` assertion below fails -- the error variant
+    /// is `Validation`, not `MissingDependency` -- and on a machine *with*
+    /// `libpdfium` installed the stub still returns `Validation` unconditionally, so
+    /// `result.is_ok()` never becomes `true` and the `.expect`-equivalent match's
+    /// `Ok` arm is never reached; either way the real extraction assertions further
+    /// down never run against unfixed code.
+    #[tokio::test]
+    #[cfg(all(feature = "pdf", feature = "pdf-pdfium"))]
+    async fn pdfium_engine_extracts_real_text_when_the_library_is_available() {
+        let pdf_path = pdf_test_document("multi_page.pdf");
+        let Ok(content) = std::fs::read(&pdf_path) else {
+            return;
+        };
+
+        let extractor = PdfExtractor::new();
+        let mut config = ExtractionConfig::default();
+        config.pdf_options = Some(crate::core::config::PdfConfig {
+            backend: crate::core::config::PdfBackend::Pdfium,
+            ..Default::default()
+        });
+
+        let result = extractor.extract_content(&content, "application/pdf", &config).await;
+
+        let doc = match result {
+            Ok(doc) => doc,
+            Err(err) => {
+                assert!(
+                    matches!(err, crate::XbergError::MissingDependency(_)),
+                    "expected a MissingDependency error (pdfium library not found on this \
+                     machine) if extraction fails at all, got a different error variant: {err:?}"
+                );
+                return;
+            }
+        };
+
+        let result = crate::extraction::derive::derive_extraction_result(
+            doc,
+            true,
+            crate::core::config::OutputFormat::Plain,
+        );
+
+        assert!(
+            result.content.contains("The Evolution of the Word Processor"),
+            "expected the fixture's real first-page heading in pdfium output, got: {:?}",
+            result.content
+        );
+        assert!(
+            result.content.contains("Christopher Latham Sholes"),
+            "expected real body text from the fixture in pdfium output, got: {:?}",
+            result.content
+        );
+
+        let page_count = result
+            .metadata
+            .format
+            .as_ref()
+            .and_then(|format| match format {
+                crate::types::FormatMetadata::Pdf(pdf) => pdf.page_count,
+                _ => None,
+            });
+        assert_eq!(page_count, Some(5), "multi_page.pdf has 5 pages");
     }
 
     #[tokio::test]

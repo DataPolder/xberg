@@ -69,17 +69,17 @@ pdf-oxide = [
     "html",
     "image-encode",
 ]
-# Selection-only leaf: PdfConfig::backend and PdfBackend (core/config/pdf.rs)
-# always compile under `pdf`. This pulls in the `xberg-pdfium-render` crate
-# (crates/xberg-pdfium-render), but no pdfium extraction implementation is wired
-# up on top of it yet. `extractors::pdf::PdfExtractor::extract_core`
-# (crates/xberg/src/extractors/pdf/mod.rs) *does* dispatch on PdfBackend::Pdfium
-# -- but only to fail loudly with an actionable error (#702); nothing there calls
-# into this dependency, and that rejection applies with this feature on or off.
-# It exists purely so `xberg-cli`'s `pdf-pdfium-surface` has something to gate
-# `--pdf-backend pdfium` on -- enabling it makes the dependency available, not
-# the extraction itself.
-pdf-pdfium = ["dep:pdfium-render"]
+# PdfConfig::backend and PdfBackend (core/config/pdf.rs) always compile under
+# `pdf`. This feature pulls in the `xberg-pdfium-render` crate (crates/xberg-pdfium-render)
+# and wires a real (if intentionally smaller-scope than pdf-oxide) extraction engine
+# behind `extractors::pdf::PdfExtractor::extract_core_pdfium` (#702) -- see
+# `crates/xberg/src/extractors/pdf/pdfium_engine.rs` for exactly what it extracts.
+# Without this feature, selecting `PdfBackend::Pdfium` still fails loudly with an
+# actionable error rather than silently falling back to `pdf-oxide`.
+# `tokio-runtime` is required because the pdfium FFI calls are synchronous and
+# CPU-bound and must run inside `tokio::task::spawn_blocking`, not inline on the
+# async runtime.
+pdf-pdfium = ["dep:pdfium-render", "tokio-runtime"]
 # `zip` and `quick-xml` are not optional extras here: an .xlsx *is* a zip, and the
 # parts calamine does not model — revision headers, cell comments — are read out of
 # it directly. Without them a bare `--features excel` build did not compile at all.
