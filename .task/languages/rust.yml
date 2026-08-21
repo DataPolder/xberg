@@ -9,6 +9,7 @@ vars:
   BUILD_PROFILE: '{{.BUILD_PROFILE | default "release"}}'
   RUST_BACKTRACE: '{{.RUST_BACKTRACE | default "1"}}'
   CARGO_TERM_COLOR: "always"
+  PDFIUM_VERSION: "7881"
 
 tasks:
   install:
@@ -31,21 +32,31 @@ tasks:
   build:dev:
     desc: "Build all Rust crates in debug mode"
     cmds:
-      - cmd: cargo build --locked --workspace --all-features --exclude xberg-php --exclude xberg-node --exclude xberg-wasm --exclude xberg-candle-ocr
+      # Note: exclude xberg-pdfium-render. --all-features enables its `bindings` feature, which runs
+      # bindgen from build.rs; the crate ships no pdfium headers (include/pdfium_7678/ holds only the
+      # 0-byte generated wrapper, which the scan skips), so build.rs fails rather than silently reusing
+      # the checked-in src/bindgen/pdfium_7678.rs. Static vs dynamic linking is NOT a feature here --
+      # it is selected by the PDFIUM_STATIC_LIB_PATH / PDFIUM_DYNAMIC_LIB_PATH env vars (build.rs:54-60).
+      - cmd: cargo build --locked --workspace --all-features --exclude xberg-php --exclude xberg-node --exclude xberg-wasm --exclude xberg-candle-ocr --exclude xberg-pdfium-render
         platforms: [linux]
-      - cmd: cargo build --locked --workspace --all-features --exclude xberg-php --exclude xberg-node --exclude xberg-wasm --exclude xberg-candle-ocr
+      - cmd: cargo build --locked --workspace --all-features --exclude xberg-php --exclude xberg-node --exclude xberg-wasm --exclude xberg-candle-ocr --exclude xberg-pdfium-render
         platforms: [darwin]
-      - cmd: cargo build --locked --workspace --all-features --exclude xberg-php --exclude xberg-node --exclude xberg-wasm --exclude benchmark-harness
+      - cmd: cargo build --locked --workspace --all-features --exclude xberg-php --exclude xberg-node --exclude xberg-wasm --exclude benchmark-harness --exclude xberg-pdfium-render
         platforms: [windows]
 
   build:release:
     desc: "Build all Rust crates in release mode"
     cmds:
-      - cmd: cargo build --locked --release --workspace --all-features --exclude xberg-php --exclude xberg-node --exclude xberg-wasm --exclude xberg-candle-ocr
+      # Note: exclude xberg-pdfium-render. --all-features enables its `bindings` feature, which runs
+      # bindgen from build.rs; the crate ships no pdfium headers (include/pdfium_7678/ holds only the
+      # 0-byte generated wrapper, which the scan skips), so build.rs fails rather than silently reusing
+      # the checked-in src/bindgen/pdfium_7678.rs. Static vs dynamic linking is NOT a feature here --
+      # it is selected by the PDFIUM_STATIC_LIB_PATH / PDFIUM_DYNAMIC_LIB_PATH env vars (build.rs:54-60).
+      - cmd: cargo build --locked --release --workspace --all-features --exclude xberg-php --exclude xberg-node --exclude xberg-wasm --exclude xberg-candle-ocr --exclude xberg-pdfium-render
         platforms: [linux]
-      - cmd: cargo build --locked --release --workspace --all-features --exclude xberg-php --exclude xberg-node --exclude xberg-wasm --exclude xberg-candle-ocr
+      - cmd: cargo build --locked --release --workspace --all-features --exclude xberg-php --exclude xberg-node --exclude xberg-wasm --exclude xberg-candle-ocr --exclude xberg-pdfium-render
         platforms: [darwin]
-      - cmd: cargo build --locked --release --workspace --all-features --exclude xberg-php --exclude xberg-node --exclude xberg-wasm --exclude benchmark-harness
+      - cmd: cargo build --locked --release --workspace --all-features --exclude xberg-php --exclude xberg-node --exclude xberg-wasm --exclude benchmark-harness --exclude xberg-pdfium-render
         platforms: [windows]
 
   build:ci:
@@ -53,11 +64,16 @@ tasks:
     env:
       RUSTFLAGS: "-C debuginfo=2"
     cmds:
-      - cmd: cargo build --locked --release --workspace --all-features --exclude xberg-php --exclude xberg-node --exclude xberg-wasm --exclude xberg-candle-ocr
+      # Note: exclude xberg-pdfium-render. --all-features enables its `bindings` feature, which runs
+      # bindgen from build.rs; the crate ships no pdfium headers (include/pdfium_7678/ holds only the
+      # 0-byte generated wrapper, which the scan skips), so build.rs fails rather than silently reusing
+      # the checked-in src/bindgen/pdfium_7678.rs. Static vs dynamic linking is NOT a feature here --
+      # it is selected by the PDFIUM_STATIC_LIB_PATH / PDFIUM_DYNAMIC_LIB_PATH env vars (build.rs:54-60).
+      - cmd: cargo build --locked --release --workspace --all-features --exclude xberg-php --exclude xberg-node --exclude xberg-wasm --exclude xberg-candle-ocr --exclude xberg-pdfium-render
         platforms: [linux]
-      - cmd: cargo build --locked --release --workspace --all-features --exclude xberg-php --exclude xberg-node --exclude xberg-wasm --exclude xberg-candle-ocr
+      - cmd: cargo build --locked --release --workspace --all-features --exclude xberg-php --exclude xberg-node --exclude xberg-wasm --exclude xberg-candle-ocr --exclude xberg-pdfium-render
         platforms: [darwin]
-      - cmd: cargo build --locked --release --workspace --all-features --exclude xberg-php --exclude xberg-node --exclude xberg-wasm --exclude benchmark-harness
+      - cmd: cargo build --locked --release --workspace --all-features --exclude xberg-php --exclude xberg-node --exclude xberg-wasm --exclude benchmark-harness --exclude xberg-pdfium-render
         platforms: [windows]
 
   build:profiling:

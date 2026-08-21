@@ -70,11 +70,13 @@ pdf-oxide = [
     "image-encode",
 ]
 # Selection-only leaf: PdfConfig::backend and PdfBackend (core/config/pdf.rs)
-# always compile under `pdf`, but no pdfium extraction implementation exists
-# yet, so this feature pulls no dependency of its own. It exists purely so
-# `xberg-cli`'s `pdf-pdfium-surface` has something to gate `--pdf-backend
-# pdfium` on -- enabling it does not make pdfium extraction work.
-pdf-pdfium = []
+# always compile under `pdf`. This now pulls in the `xberg-pdfium-render` crate
+# (crates/xberg-pdfium-render), but no pdfium extraction implementation is wired
+# up on top of it yet -- there is no code path that dispatches PdfBackend::Pdfium
+# to it. It exists purely so `xberg-cli`'s `pdf-pdfium-surface` has something to
+# gate `--pdf-backend pdfium` on -- enabling it makes the dependency available,
+# not the extraction itself.
+pdf-pdfium = ["dep:pdfium-render"]
 # `zip` and `quick-xml` are not optional extras here: an .xlsx *is* a zip, and the
 # parts calamine does not model — revision headers, cell comments — are read out of
 # it directly. Without them a bare `--features excel` build did not compile at all.
@@ -1317,6 +1319,7 @@ outlook-pst = { version = "1.2.0", optional = true }
 parking_lot = { workspace = true }
 pastey = "0.2"
 pdf_oxide = { workspace = true, optional = true }
+pdfium-render = { workspace = true, optional = true }
 # Registry + text-exposition-format encoder backing the `/metrics` endpoint (#1391).
 # `default-features = false` drops the `protobuf` dependency, which nothing here needs.
 prometheus = { version = "0.14", default-features = false, optional = true }

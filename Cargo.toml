@@ -10,6 +10,7 @@ members = [
     "crates/xberg-libwpd",
     "crates/xberg-node",
     "crates/xberg-paddle-ocr",
+    "crates/xberg-pdfium-render",
     "crates/xberg-php",
     "crates/xberg-py",
     "crates/xberg-tesseract",
@@ -103,6 +104,11 @@ parking_lot = "0.12.5"
 # 2026-08-20; the [patch.crates-io] override that pointed at the sibling fork
 # checkout is gone.
 pdf_oxide = { package = "xberg-pdf-oxide", version = "1.0.1" }
+# Our fork of pdfium-render. `package =` keeps the extern crate name `pdfium_render`
+# (matches the `[lib] name = "pdfium_render"` in crates/xberg-pdfium-render/Cargo.toml),
+# so any `use pdfium_render::...` call site is unaffected. Path dependency inside the
+# workspace; needs no [patch.crates-io] entry (see the note above that block).
+pdfium-render = { package = "xberg-pdfium-render", path = "./crates/xberg-pdfium-render", version = "1.1.0" }
 rayon = "1.12.0"
 reqwest = { version = "0.13.4", default-features = false }
 # SVG rendering (resvg re-exports tiny_skia and usvg; default-features = false

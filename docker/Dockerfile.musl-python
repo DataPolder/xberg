@@ -43,6 +43,7 @@ COPY crates/xberg-py/ crates/xberg-py/
 COPY crates/xberg-tesseract/ crates/xberg-tesseract/
 COPY crates/xberg-paddle-ocr/ crates/xberg-paddle-ocr/
 COPY crates/xberg-candle-ocr/ crates/xberg-candle-ocr/
+COPY crates/xberg-pdfium-render/ crates/xberg-pdfium-render/
 COPY crates/xberg-libheif/ crates/xberg-libheif/
 COPY crates/xberg-libwpd/ crates/xberg-libwpd/
 COPY packages/python/ packages/python/
