@@ -1332,4 +1332,44 @@ mod tests {
             pages
         );
     }
+
+
+    /// With no `security_limits` override the container must still enforce the default
+    /// `SecurityLimits::max_files_in_archive`: "unset" means the default ceiling, not "no
+    /// ceiling". An archive past that default must be rejected.
+    #[cfg(feature = "excel")]
+    #[tokio::test]
+    async fn test_xlsx_extract_content_rejects_archive_over_default_entry_limit() {
+        let default_limit = crate::extractors::security::SecurityLimits::default().max_files_in_archive;
+        // `build_test_xlsx` writes five fixed parts of its own, so this alone already
+        // exceeds the ceiling. Rebased onto the current helper, which takes the extra
+        // parts as a slice rather than a count.
+        let names: Vec<String> = (0..=default_limit).map(|i| format!("xl/extra_{i}.xml")).collect();
+        let extra_parts: Vec<(&str, &[u8])> = names.iter().map(|n| (n.as_str(), b"<x/>".as_slice())).collect();
+        let data = build_test_xlsx(&extra_parts);
+        let extractor = ExcelExtractor::new();
+        let config = ExtractionConfig::default();
+        assert!(
+            config.security_limits.is_none(),
+            "this test must exercise the unset fallback, not an explicit limit"
+        );
+
+        let result = extractor
+            .extract_content(
+                &data,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                &config,
+            )
+            .await;
+
+        assert!(
+            result.is_err(),
+            "an archive over the default max_files_in_archive must be rejected when no limit is configured"
+        );
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains(&default_limit.to_string()),
+            "error should mention the default limit ({default_limit}), got: {err_msg}"
+        );
+    }
 }
