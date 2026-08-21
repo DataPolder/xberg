@@ -11,6 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A page the OCR quality gate rejects no longer renders its garbage anyway.** The gate emptied a
+  rejected page's text and logged a warning, but the rendered document is assembled exclusively from
+  the structured paragraphs, which nothing ever judged — so a scanned survey plat lost its text,
+  recorded its own rejection, and printed `LAAALDLI sk` and `OWATS DNDEVET OPMENT` regardless. The
+  verdict now reaches the paragraphs. The mixed extraction route already coupled the two through
+  `ocr_results.retain`; the force-OCR route never had that wiring. Measured over the 22-file scanned
+  corpus against the same build with the coupling disabled: junk lines 632 → 398, ground-truth lines
+  5786 → 5784, with 21 of the 22 documents byte-identical. The two lost lines are drawing title-block
+  metadata on pages the gate rejects whole; recovering those is a separate change to how layout
+  Picture regions suppress text.
+
 - **List items keep the document's own marker.** The PDF pipeline strips the marker off an item's
   text so the text reads as content, then discarded it, leaving renderers to synthesize a position.
   On a legal document whose clauses are cross-referenced by their printed label that silently
@@ -343,6 +354,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `sceptre` 0.7.0 → 0.7.1, picking up its region-ordering fix. The dependency resolves from
+  crates.io rather than the sibling checkout, so the fix only reaches an xberg build once the pin
+  moves and the lock checksum moves with it.
 - The `cli` Docker image no longer ships build-time executables it cannot reach at runtime.
   Alpine's `onnxruntime` package includes a 16.7 MB `onnx_test_runner` test harness and pulls in
   `protoc`'s codegen binaries transitively; the CLI links `libonnxruntime.so` and `libprotoc.so`,
