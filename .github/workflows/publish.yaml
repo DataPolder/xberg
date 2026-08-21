@@ -160,7 +160,11 @@ jobs:
   validate-versions:
     name: Validate language manifest versions
     needs: prepare
-    if: ${{ needs.prepare.outputs.is_tag == 'true' }}
+    # Runs on dry runs too. Checkout + a version comparison, no secret, no mutation, so there
+    # is nothing to guard against -- and catching a language manifest that disagrees with the
+    # release version is precisely what a dry run is for. It can legitimately go red when the
+    # version has not been bumped yet; that is the intended signal, not a flake. ~keep
+    if: ${{ needs.prepare.outputs.is_tag == 'true' || needs.prepare.outputs.dry_run == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
