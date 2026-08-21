@@ -742,6 +742,7 @@ pub(crate) fn is_ocr_recognition_noise(text: &str, thresholds: &OcrQualityThresh
 /// The default threshold (see `OcrQualityThresholds::max_ocr_output_dict_invalid_word_ratio`)
 /// disables this check until it is calibrated, matching the same conservatism the
 /// fragmented-word-ratio veto was built with: a false positive here deletes real content.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 fn is_dictionary_invalid_noise(dict_invalid_word_ratio: Option<f64>, thresholds: &OcrQualityThresholds) -> bool {
     dict_invalid_word_ratio.is_some_and(|ratio| ratio > thresholds.max_ocr_output_dict_invalid_word_ratio)
 }
