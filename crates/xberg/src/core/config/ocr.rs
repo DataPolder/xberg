@@ -162,6 +162,25 @@ pub struct OcrQualityThresholds {
     #[serde(default = "default_min_words_for_ocr_output_check")]
     pub min_words_for_ocr_output_check: usize,
 
+    /// Maximum fraction of a Tesseract page's dictionary-checkable words that
+    /// `TesseractAPI::is_valid_word` may reject before the page is treated as recognition
+    /// noise, supplementing (never replacing) [`Self::max_ocr_output_fragmented_word_ratio`].
+    ///
+    /// Tesseract-only: other backends never report this ratio (see
+    /// `dictionary_invalid_word_ratio` in `ocr::processor::execution`), so this threshold is
+    /// simply never consulted for them.
+    ///
+    /// Calibration owed, same as [`crate::ocr::types::TesseractConfig::min_confidence`]:
+    /// unlike [`Self::max_ocr_output_fragmented_word_ratio`] (measured across a recorded
+    /// ordinance's prose vs. drawing pages), this ratio has not yet had a page-level
+    /// measurement run over a labeled corpus. The default therefore disables the check
+    /// entirely (`1.01`, above the `[0.0, 1.0]` range a ratio can reach) rather than guess an
+    /// operating point. Do not lower this without running that measurement first — the cost
+    /// of a wrong threshold here is the same as for the fragmented-word-ratio veto: a false
+    /// positive deletes real content, a false negative only leaves noise in place.
+    #[serde(default = "default_max_ocr_output_dict_invalid_word_ratio")]
+    pub max_ocr_output_dict_invalid_word_ratio: f64,
+
     /// Minimum average word length. Below this with enough words indicates garbled extraction.
     #[serde(default = "default_min_avg_word_length")]
     pub min_avg_word_length: f64,
@@ -237,6 +256,7 @@ impl Default for OcrQualityThresholds {
             min_ocr_mean_confidence: default_min_ocr_mean_confidence(),
             max_ocr_output_fragmented_word_ratio: default_max_ocr_output_fragmented_word_ratio(),
             min_words_for_ocr_output_check: default_min_words_for_ocr_output_check(),
+            max_ocr_output_dict_invalid_word_ratio: default_max_ocr_output_dict_invalid_word_ratio(),
             min_avg_word_length: 2.0,
             min_words_for_avg_length_check: 50,
             min_consecutive_repeat_ratio: 0.08,
@@ -284,6 +304,11 @@ fn default_max_ocr_output_fragmented_word_ratio() -> f64 {
 }
 fn default_min_words_for_ocr_output_check() -> usize {
     20
+}
+/// Disables the dictionary-invalid-word-ratio veto by default: `1.01` is above `[0.0, 1.0]`,
+/// the range the ratio can actually reach, so it can never fire until calibrated and lowered.
+fn default_max_ocr_output_dict_invalid_word_ratio() -> f64 {
+    1.01
 }
 fn default_min_avg_word_length() -> f64 {
     2.0

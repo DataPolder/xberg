@@ -729,6 +729,23 @@ pub(crate) fn is_ocr_recognition_noise(text: &str, thresholds: &OcrQualityThresh
     stats.fragmented_word_ratio >= thresholds.max_ocr_output_fragmented_word_ratio
 }
 
+/// Whether a page's Tesseract dictionary-invalid-word ratio crosses the configured
+/// threshold, SUPPLEMENTING [`is_ocr_recognition_noise`] -- never replacing it, and never
+/// making the veto less strict than the fragmented-word-ratio check alone would.
+///
+/// `dict_invalid_word_ratio` is `None` for every non-Tesseract backend (they never report
+/// this ratio at all) and for Tesseract pages too short to make it meaningful (see
+/// `dictionary_invalid_word_ratio` in `ocr::processor::execution`). Absence must never be
+/// read as `0.0`: this function only rejects on a *reported* ratio, so a backend or page
+/// that cannot compute the signal simply never trips this particular check.
+///
+/// The default threshold (see `OcrQualityThresholds::max_ocr_output_dict_invalid_word_ratio`)
+/// disables this check until it is calibrated, matching the same conservatism the
+/// fragmented-word-ratio veto was built with: a false positive here deletes real content.
+fn is_dictionary_invalid_noise(dict_invalid_word_ratio: Option<f64>, thresholds: &OcrQualityThresholds) -> bool {
+    dict_invalid_word_ratio.is_some_and(|ratio| ratio > thresholds.max_ocr_output_dict_invalid_word_ratio)
+}
+
 /// Accept a page's OCR text, or drop it and record why.
 ///
 /// Returns the page's text — empty when rejected — and whether it was rejected. A rejected
@@ -747,8 +764,11 @@ fn accept_or_reject_ocr_page(
     content: String,
     thresholds: &OcrQualityThresholds,
     warnings: &mut Vec<crate::types::ProcessingWarning>,
+    dict_invalid_word_ratio: Option<f64>,
 ) -> (String, bool) {
-    if !is_ocr_recognition_noise(&content, thresholds) {
+    let fragmented_noise = is_ocr_recognition_noise(&content, thresholds);
+    let dictionary_noise = is_dictionary_invalid_noise(dict_invalid_word_ratio, thresholds);
+    if !fragmented_noise && !dictionary_noise {
         return (content, false);
     }
     let stats = ocr_output_stats(&content, thresholds);
@@ -757,18 +777,39 @@ fn accept_or_reject_ocr_page(
         words = stats.word_count,
         fragmented_word_ratio = stats.fragmented_word_ratio,
         threshold = thresholds.max_ocr_output_fragmented_word_ratio,
+        dict_invalid_word_ratio = dict_invalid_word_ratio,
+        dict_invalid_word_ratio_threshold = thresholds.max_ocr_output_dict_invalid_word_ratio,
+        rejected_by_dictionary_signal = dictionary_noise,
         "rejecting OCR output as recognition noise; the page contributes no text"
     );
-    warnings.push(crate::types::ProcessingWarning {
-        source: std::borrow::Cow::Borrowed("ocr"),
-        message: std::borrow::Cow::Owned(format!(
-            "Page {} produced OCR output that is recognition noise rather than text \
-             ({:.0}% of {} words are 1-2 characters, threshold {:.0}%); the page is most \
-             likely a drawing or diagram. Its text was discarded.",
-            page_index + 1,
+    // Name only the signals that actually fired. Leading with the fragmentation numbers
+    // unconditionally would report a ratio *below* its own threshold as the reason whenever
+    // the dictionary signal is what rejected the page.
+    let mut reasons: Vec<String> = Vec::new();
+    if fragmented_noise {
+        reasons.push(format!(
+            "{:.0}% of {} words are 1-2 characters, threshold {:.0}%",
             stats.fragmented_word_ratio * 100.0,
             stats.word_count,
             thresholds.max_ocr_output_fragmented_word_ratio * 100.0
+        ));
+    }
+    if let Some(ratio) = dict_invalid_word_ratio
+        && dictionary_noise
+    {
+        reasons.push(format!(
+            "{:.0}% of dictionary-checkable words are not real words, threshold {:.0}%",
+            ratio * 100.0,
+            thresholds.max_ocr_output_dict_invalid_word_ratio * 100.0
+        ));
+    }
+    warnings.push(crate::types::ProcessingWarning {
+        source: std::borrow::Cow::Borrowed("ocr"),
+        message: std::borrow::Cow::Owned(format!(
+            "Page {} produced OCR output that is recognition noise rather than text ({}); the \
+             page is most likely a drawing or diagram. Its text was discarded.",
+            page_index + 1,
+            reasons.join("; ")
         )),
     });
     (String::new(), true)
@@ -3947,6 +3988,11 @@ pub(crate) async fn extract_with_ocr(
 /// it, `content: None` makes the lookup fall back to `1.0` (pixels treated as points), silently
 /// defeating the document-global heading heuristic's absolute-point font-gap comparisons.
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+// Each parameter is independently documented above and forwarded verbatim by every caller
+// (see `run_ocr_pipeline_for_page`); bundling them into a params struct would only move the
+// arity, not remove it, since callers still need to name each field individually. Matches the
+// same suppression already used for other multi-parameter internal helpers in this crate (see
+// `onnx::download_model_files`).
 #[allow(clippy::too_many_arguments)]
 async fn extract_with_ocr_for_page(
     content: Option<&[u8]>,
@@ -4564,11 +4610,17 @@ async fn extract_with_ocr_for_page(
                     let png_bytes = bytes::Bytes::copy_from_slice(png_arc.as_ref());
                     captured_rasters.push(build_page_raster_image(page_idx, png_bytes, *w, *h));
                 }
+                let dict_invalid_word_ratio = ocr_result
+                    .metadata
+                    .additional
+                    .get(crate::ocr_metadata_keys::OCR_TESSERACT_DICT_INVALID_WORD_RATIO_METADATA_KEY)
+                    .and_then(|v| v.as_f64());
                 let (page_text, page_rejected) = accept_or_reject_ocr_page(
                     page_idx,
                     ocr_result.content,
                     &ocr_output_thresholds,
                     &mut recognition_noise_warnings,
+                    dict_invalid_word_ratio,
                 );
                 page_texts[page_idx] = page_text;
                 rejected_pages[page_idx] = page_rejected;
@@ -4603,11 +4655,17 @@ async fn extract_with_ocr_for_page(
                 let png_bytes = bytes::Bytes::copy_from_slice(png_arc.as_ref());
                 captured_rasters.push(build_page_raster_image(page_idx, png_bytes, *w, *h));
             }
+            let dict_invalid_word_ratio = ocr_result
+                .metadata
+                .additional
+                .get(crate::ocr_metadata_keys::OCR_TESSERACT_DICT_INVALID_WORD_RATIO_METADATA_KEY)
+                .and_then(|v| v.as_f64());
             let (page_text, page_rejected) = accept_or_reject_ocr_page(
                 page_idx,
                 ocr_result.content,
                 &ocr_output_thresholds,
                 &mut recognition_noise_warnings,
+                dict_invalid_word_ratio,
             );
             page_texts[page_idx] = page_text;
             rejected_pages[page_idx] = page_rejected;
@@ -5194,6 +5252,8 @@ pub(crate) async fn run_ocr_pipeline(
 /// `points_per_pixel_override` is likewise forwarded verbatim to every stage's
 /// [`extract_with_ocr_for_page`] call. See that function's doc comments for why both exist.
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+// Same rationale as `extract_with_ocr_for_page`, whose full parameter set this function
+// forwards to every pipeline stage verbatim (see doc comment above).
 #[allow(clippy::too_many_arguments)]
 async fn run_ocr_pipeline_for_page(
     content: Option<&[u8]>,
@@ -11806,7 +11866,8 @@ Name: ___
 #[cfg(all(test, any(feature = "ocr", feature = "ocr-pipeline")))]
 mod recognition_noise_tests {
     use super::{
-        NativeTextStats, accept_or_reject_ocr_page, is_ocr_recognition_noise, ocr_output_stats, repair_ocr_list_markers,
+        NativeTextStats, accept_or_reject_ocr_page, is_dictionary_invalid_noise, is_ocr_recognition_noise,
+        ocr_output_stats, repair_ocr_list_markers,
     };
     use crate::core::config::OcrQualityThresholds;
 
@@ -11840,7 +11901,13 @@ approval of the rezoning request; and";
         let thresholds = OcrQualityThresholds::default();
         let mut warnings = Vec::new();
 
-        let (text, rejected) = accept_or_reject_ocr_page(3, PLAT_DRAWING_NOISE.to_string(), &thresholds, &mut warnings);
+        let (text, rejected) = accept_or_reject_ocr_page(
+            3,
+            PLAT_DRAWING_NOISE.to_string(),
+            &thresholds,
+            &mut warnings,
+            None,
+        );
         assert!(
             rejected,
             "the plat drawing must be reported as rejected, not merely emptied"
@@ -11849,14 +11916,14 @@ approval of the rezoning request; and";
         assert_eq!(warnings.len(), 1, "rejection must always leave a trace");
 
         let (prose, prose_rejected) =
-            accept_or_reject_ocr_page(0, ORDINANCE_PROSE.to_string(), &thresholds, &mut warnings);
+            accept_or_reject_ocr_page(0, ORDINANCE_PROSE.to_string(), &thresholds, &mut warnings, None);
         assert!(!prose_rejected, "ordinary legal prose must not be reported as rejected");
         assert_eq!(prose, ORDINANCE_PROSE, "an accepted page keeps its text verbatim");
         assert_eq!(warnings.len(), 1, "an accepted page adds no warning");
 
         // A blank page is NOT a rejection: both yield empty text, and conflating them would
         // make the caller discard the paragraphs of every legitimately empty page.
-        let (blank, blank_rejected) = accept_or_reject_ocr_page(1, String::new(), &thresholds, &mut warnings);
+        let (blank, blank_rejected) = accept_or_reject_ocr_page(1, String::new(), &thresholds, &mut warnings, None);
         assert!(!blank_rejected, "an empty page is blank, not rejected");
         assert!(blank.is_empty());
     }
@@ -12317,5 +12384,89 @@ Each row of the preceding table records one measurement taken during the survey 
         );
         assert!(prose < thresholds.max_ocr_output_fragmented_word_ratio);
         assert!(noise >= thresholds.max_ocr_output_fragmented_word_ratio);
+    }
+
+    /// `None` (the signal absent, e.g. every non-Tesseract backend) must never trip the
+    /// dictionary-invalid veto, no matter how strict the threshold is configured -- absence
+    /// is "no evidence", not "0.0 valid words".
+    #[test]
+    fn should_never_flag_dictionary_noise_when_ratio_is_absent() {
+        let strict = OcrQualityThresholds {
+            max_ocr_output_dict_invalid_word_ratio: 0.0,
+            ..Default::default()
+        };
+        assert!(!is_dictionary_invalid_noise(None, &strict));
+    }
+
+    /// The default threshold disables the check entirely: it must reject nothing, even a
+    /// page whose dictionary-invalid ratio is 1.0 (every checkable word rejected), until an
+    /// operator explicitly calibrates and lowers it.
+    #[test]
+    fn should_disable_dictionary_veto_by_default() {
+        let thresholds = OcrQualityThresholds::default();
+        assert!(
+            !is_dictionary_invalid_noise(Some(1.0), &thresholds),
+            "the default threshold must be a no-op until calibrated"
+        );
+    }
+
+    /// Once explicitly configured, the dictionary signal must reject a page whose ratio
+    /// exceeds the threshold, and keep one at or below it.
+    #[test]
+    fn should_respect_a_configured_dictionary_threshold() {
+        let configured = OcrQualityThresholds {
+            max_ocr_output_dict_invalid_word_ratio: 0.5,
+            ..Default::default()
+        };
+        assert!(is_dictionary_invalid_noise(Some(0.51), &configured));
+        assert!(!is_dictionary_invalid_noise(Some(0.5), &configured));
+        assert!(!is_dictionary_invalid_noise(Some(0.2), &configured));
+    }
+
+    /// The dictionary signal must SUPPLEMENT the fragmented-word-ratio veto: a page that
+    /// passes the fragmented-word check but fails an explicitly configured dictionary
+    /// threshold must still be rejected by `accept_or_reject_ocr_page`.
+    #[test]
+    fn should_reject_via_dictionary_signal_even_when_fragmentation_is_fine() {
+        let configured = OcrQualityThresholds {
+            max_ocr_output_dict_invalid_word_ratio: 0.5,
+            ..Default::default()
+        };
+        assert!(
+            !is_ocr_recognition_noise(ORDINANCE_PROSE, &configured),
+            "fixture must NOT be flagged by fragmentation alone, or this test proves nothing"
+        );
+
+        let mut warnings = Vec::new();
+        let (text, rejected) = accept_or_reject_ocr_page(
+            0,
+            ORDINANCE_PROSE.to_string(),
+            &configured,
+            &mut warnings,
+            Some(0.9),
+        );
+        assert!(
+            rejected,
+            "a page failing only the dictionary signal must still be rejected"
+        );
+        assert!(text.is_empty());
+        assert_eq!(warnings.len(), 1);
+    }
+
+    /// A `dict_invalid_word_ratio` of `None` on the same fixture, same threshold, must NOT
+    /// reject -- proving the previous test's rejection came from the ratio, not the
+    /// threshold value alone.
+    #[test]
+    fn should_not_reject_via_dictionary_signal_when_ratio_is_absent() {
+        let configured = OcrQualityThresholds {
+            max_ocr_output_dict_invalid_word_ratio: 0.5,
+            ..Default::default()
+        };
+        let mut warnings = Vec::new();
+        let (text, rejected) =
+            accept_or_reject_ocr_page(0, ORDINANCE_PROSE.to_string(), &configured, &mut warnings, None);
+        assert!(!rejected, "an absent ratio must never itself trigger rejection");
+        assert_eq!(text, ORDINANCE_PROSE);
+        assert!(warnings.is_empty());
     }
 }

@@ -624,6 +624,78 @@ struct IteratorExtractionResult {
     /// embedded image region, or a ruling line) that are now retained in
     /// `elements` instead of being silently dropped (#180).
     non_text_block_word_count: usize,
+    /// Fraction of this page's dictionary-checkable words that Tesseract's own DAWG
+    /// dictionary (`TesseractAPI::is_valid_word`) rejects as not-a-word. See
+    /// [`dictionary_invalid_word_ratio`] for what counts as checkable and why `None`
+    /// (rather than `0.0`) means "too few checkable words to be meaningful".
+    dict_invalid_word_ratio: Option<f64>,
+}
+
+/// Minimum letters a word must have before Tesseract's dictionary lookup is meaningful.
+/// Digits, single letters, and punctuation are never in the DAWG dictionary regardless of
+/// legitimacy, so scoring them would bias the ratio toward "invalid" on output OCR read
+/// perfectly correctly.
+const MIN_WORD_LEN_FOR_DICT_CHECK: usize = 3;
+
+/// Minimum number of dictionary-checkable words on a page before
+/// [`dictionary_invalid_word_ratio`] reports a ratio at all, mirroring the same
+/// conservatism as `OcrQualityThresholds::min_words_for_ocr_output_check`: a short page
+/// (a signature block, an exhibit title) does not carry enough checkable words for the
+/// ratio to mean anything.
+const MIN_DICT_CANDIDATES_FOR_RATIO: usize = 5;
+
+/// Fraction of a page's alphabetic, dictionary-checkable words that Tesseract's own
+/// dictionary rejects as not-a-word.
+///
+/// This is the dictionary-validity supplement to the recognition-noise gate
+/// (`is_ocr_recognition_noise` in `extractors::pdf::ocr`): a page of scanned line art
+/// noise ("LAAALDLI", "AEA") is read by Tesseract with confident-looking output, so
+/// per-word OCR confidence and the fragmented-word-ratio heuristic do not always catch
+/// it — but few of its "words" are real dictionary words. `TesseractAPI::is_valid_word`
+/// is Tesseract's own DAWG dictionary lookup, and is only usable while the `TesseractAPI`
+/// handle that performed this page's OCR is still open (the dictionary lives inside that
+/// engine instance) — callers must call this before the API is dropped.
+///
+/// Returns `None`, never `0.0`, when there are too few dictionary-checkable words to make
+/// a ratio meaningful: a `0.0` here would read as "every word is valid" to a caller that
+/// cannot tell "no evidence" from "good evidence", and this signal is a veto input, so
+/// that conflation would suppress real content.
+fn dictionary_invalid_word_ratio(api: &TesseractAPI, words: &[xberg_tesseract::WordData]) -> Option<f64> {
+    invalid_word_ratio_from(words, |text| match api.is_valid_word(text) {
+        Ok(0) => Some(false),
+        Ok(_) => Some(true),
+        // Lookup failed (e.g. interior NUL byte); don't let it bias the ratio either way.
+        Err(_) => None,
+    })
+}
+
+/// Pure core of [`dictionary_invalid_word_ratio`], taking dictionary lookup as an injected
+/// function (`Some(true)` valid, `Some(false)` invalid, `None` lookup failed / skip) so it
+/// is unit-testable without a live `TesseractAPI` handle.
+fn invalid_word_ratio_from(
+    words: &[xberg_tesseract::WordData],
+    is_valid: impl Fn(&str) -> Option<bool>,
+) -> Option<f64> {
+    let mut candidates = 0usize;
+    let mut invalid = 0usize;
+    for word in words {
+        let text = word.text.trim();
+        if text.chars().count() < MIN_WORD_LEN_FOR_DICT_CHECK || !text.chars().all(|c| c.is_alphabetic()) {
+            continue;
+        }
+        match is_valid(text) {
+            Some(true) => candidates += 1,
+            Some(false) => {
+                candidates += 1;
+                invalid += 1;
+            }
+            None => {}
+        }
+    }
+    if candidates < MIN_DICT_CANDIDATES_FOR_RATIO {
+        return None;
+    }
+    Some(invalid as f64 / candidates as f64)
 }
 
 /// Block types that historically caused a word to be dropped entirely from
@@ -692,6 +764,7 @@ fn extract_elements_via_iterator(
         elements: Vec::new(),
         skipped_words: 0,
         non_text_block_word_count: 0,
+        dict_invalid_word_ratio: None,
     };
 
     let page_iter = match api.get_page_iterator() {
@@ -755,6 +828,8 @@ fn extract_elements_via_iterator(
         );
     }
 
+    let dict_invalid_word_ratio = dictionary_invalid_word_ratio(api, &word_extraction.words);
+
     let mut elements = Vec::new();
     let mut non_text_block_word_count = 0usize;
 
@@ -794,6 +869,7 @@ fn extract_elements_via_iterator(
         elements,
         skipped_words: word_extraction.skipped,
         non_text_block_word_count,
+        dict_invalid_word_ratio,
     })
 }
 
@@ -1378,6 +1454,14 @@ pub(super) fn perform_ocr(
                     serde_json::Value::Number(extraction.non_text_block_word_count.into()),
                 );
             }
+            if let Some(ratio) = extraction.dict_invalid_word_ratio {
+                metadata.insert(
+                    crate::ocr_metadata_keys::OCR_TESSERACT_DICT_INVALID_WORD_RATIO_METADATA_KEY.to_string(),
+                    serde_json::Value::Number(
+                        serde_json::Number::from_f64(ratio).unwrap_or(serde_json::Number::from(0)),
+                    ),
+                );
+            }
             ocr_elements = Some(extraction.elements);
         }
         _ => {
@@ -1714,6 +1798,88 @@ mod tests {
     #[test]
     fn should_report_auto_rotate_unavailable_only_without_the_feature() {
         assert_eq!(is_auto_rotate_requested_but_unavailable(true), cfg!(not(auto_rotate)));
+    }
+
+    fn dict_word(text: &str) -> xberg_tesseract::WordData {
+        xberg_tesseract::WordData {
+            text: text.to_string(),
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+            confidence: 95.0,
+            font_attrs: None,
+            language: None,
+        }
+    }
+
+    /// A page dominated by non-dictionary "words" (the LAAALDLI-style noise a scanned
+    /// drawing produces) must report a HIGH invalid ratio, not `None` and not a low one.
+    #[test]
+    fn should_report_high_ratio_when_most_words_are_dictionary_invalid() {
+        let words = [
+            "LAAALDLI", "sky", "AEA", "ails", "Bri", "ENT", "FRONT", "ELEVATION",
+        ]
+        .map(dict_word);
+        // Mirror the ordinance_2197 page-13 evidence: only FRONT/ELEVATION are real words.
+        let is_valid = |text: &str| Some(matches!(text, "FRONT" | "ELEVATION"));
+
+        let ratio = invalid_word_ratio_from(&words, is_valid).expect("enough candidates to score");
+
+        assert_eq!(ratio, 0.75, "6 of 8 candidates are dictionary-invalid, expected exactly 0.75");
+    }
+
+    /// A page of genuine prose (all real dictionary words) must report a LOW invalid
+    /// ratio, not one indistinguishable from the noise case above.
+    #[test]
+    fn should_report_low_ratio_when_all_words_are_dictionary_valid() {
+        let words = ["EXHIBIT", "PLANT", "LIST", "DATE", "November", "Nineteen"].map(dict_word);
+        let is_valid = |_: &str| Some(true);
+
+        let ratio = invalid_word_ratio_from(&words, is_valid).expect("enough candidates to score");
+
+        assert_eq!(ratio, 0.0, "an all-valid page must score exactly 0.0, not merely 'low'");
+    }
+
+    /// Words below `MIN_WORD_LEN_FOR_DICT_CHECK` or containing non-alphabetic characters
+    /// (numbers, punctuation) are never dictionary words regardless of legitimacy, so they
+    /// must not count as candidates at all -- scoring them would bias real content toward
+    /// "invalid".
+    #[test]
+    fn should_exclude_short_and_non_alphabetic_words_from_candidates() {
+        let words = ["12", "a", "Bo", "3.14", "PLANT", "LIST", "DATE", "November", "Nineteen"].map(dict_word);
+        let is_valid = |_: &str| Some(true);
+
+        let ratio = invalid_word_ratio_from(&words, is_valid).expect("enough candidates to score");
+
+        assert_eq!(ratio, 0.0, "only the 5 alphabetic 3+ char words should count as candidates");
+    }
+
+    /// Too few dictionary-checkable words must yield `None`, never `0.0` -- a page this
+    /// short is not evidence that "every word is valid".
+    #[test]
+    fn should_return_none_when_too_few_candidates() {
+        let words = ["PLANT", "LIST"].map(dict_word);
+        let is_valid = |_: &str| Some(true);
+
+        assert_eq!(
+            invalid_word_ratio_from(&words, is_valid),
+            None,
+            "fewer than MIN_DICT_CANDIDATES_FOR_RATIO checkable words must not produce a ratio"
+        );
+    }
+
+    /// A failed dictionary lookup must be excluded from both the numerator and the
+    /// denominator, not silently counted as invalid (which would bias the ratio) or as
+    /// valid (which would hide real noise).
+    #[test]
+    fn should_exclude_failed_lookups_from_candidates() {
+        let words = ["PLANT", "LIST", "DATE", "November", "Nineteen", "BROKEN"].map(dict_word);
+        let is_valid = |text: &str| if text == "BROKEN" { None } else { Some(true) };
+
+        let ratio = invalid_word_ratio_from(&words, is_valid).expect("enough candidates to score");
+
+        assert_eq!(ratio, 0.0, "the failed lookup must not count as invalid");
     }
 
     fn word_at(left: u32, top: u32, width: u32, height: u32, text: &str) -> crate::table_core::HocrWord {

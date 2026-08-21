@@ -69,6 +69,14 @@ pub struct TesseractConfig {
     /// OCR Engine Mode (0 = Legacy, 1 = LSTM, 2 = Both, 3 = Default).
     pub oem: u8,
     /// Minimum word confidence threshold (0.0–100.0); words below are dropped.
+    ///
+    /// Applied per WORD, not per page (see `parse_tsv_to_elements` and
+    /// `extract_elements_via_iterator` in `ocr::processor::execution`): an individual
+    /// low-confidence word is dropped from the output while the rest of the page's words
+    /// are kept. A floor set too high can still empty an entire page one word at a time,
+    /// which is observably identical to a page-level drop, so this is not a "safe by
+    /// construction" knob. See [`Self::default`] for why this stays at `0.0` and what
+    /// measurement is owed before raising it.
     pub min_confidence: f64,
     /// Optional image preprocessing applied before recognition.
     pub preprocessing: Option<ImagePreprocessingConfig>,
@@ -85,6 +93,16 @@ pub struct TesseractConfig {
     /// Tesseract `classify_use_pre_adapted_templates` variable.
     pub classify_use_pre_adapted_templates: bool,
     /// Tesseract `language_model_ngram_on` variable.
+    ///
+    /// Enables Tesseract's character n-gram language model, which penalizes output that
+    /// does not look like a word of the target language even when the classifier itself
+    /// was confident about individual glyphs. This is the dominant failure mode this crate
+    /// has measured for scanned line art (survey plats, engineering drawings, signature
+    /// flourishes): the engine reads confident-looking non-words such as `LAAALDLI` that
+    /// downstream heuristics only partially catch (see `is_ocr_recognition_noise` in
+    /// `extractors::pdf::ocr`). Left off, Tesseract does not apply this penalty at all.
+    /// Kept on by default rather than off, unlike upstream's own default, because prose
+    /// pages are unaffected while noise pages are meaningfully suppressed.
     pub language_model_ngram_on: bool,
     /// Tesseract `tessedit_dont_blkrej_good_wds` variable.
     pub tessedit_dont_blkrej_good_wds: bool,
@@ -122,6 +140,24 @@ pub struct TesseractConfig {
     pub tessdata_path: Option<std::path::PathBuf>,
 }
 
+/// Word-level confidence floor (0.0-100.0) below which Tesseract drops a recognized word.
+/// `0.0` accepts every word Tesseract reports, regardless of confidence.
+///
+/// Calibration owed before this can safely move above `0.0`: unlike
+/// `max_ocr_output_fragmented_word_ratio` / `min_ocr_mean_confidence` in
+/// `OcrQualityThresholds` (measured as PAGE-level statistics over a recorded municipal
+/// ordinance), this floor is applied per WORD, so the required measurement is different
+/// in kind, not just in corpus: for each word Tesseract emits, cross-tabulate its raw
+/// `conf` value (TSV column 11 / the iterator's per-word confidence) against whether the
+/// word is genuinely correct — e.g. using ground truth, or the dictionary-validity signal
+/// in `dictionary_invalid_word_ratio` (`ocr::processor::execution`) as a proxy — and find
+/// the confidence value below which words are predominantly wrong. Do not raise this
+/// constant without that measurement: guessing a page-level number (like 70.0) and
+/// applying it per word risks silently deleting individual correct words throughout
+/// otherwise-good pages, which is a different and less visible failure than dropping a
+/// whole bad page.
+const MIN_CONFIDENCE_FLOOR_DEFAULT: f64 = 0.0;
+
 impl Default for TesseractConfig {
     fn default() -> Self {
         Self {
@@ -132,7 +168,7 @@ impl Default for TesseractConfig {
             psm: 3,
             output_format: "markdown".to_string(),
             oem: 3,
-            min_confidence: 0.0,
+            min_confidence: MIN_CONFIDENCE_FLOOR_DEFAULT,
             preprocessing: None,
             enable_table_detection: true,
             table_min_confidence: 0.0,
@@ -140,7 +176,7 @@ impl Default for TesseractConfig {
             table_row_threshold_ratio: 0.5,
             use_cache: true,
             classify_use_pre_adapted_templates: true,
-            language_model_ngram_on: false,
+            language_model_ngram_on: true,
             tessedit_dont_blkrej_good_wds: true,
             tessedit_dont_rowrej_good_wds: true,
             tessedit_enable_dict_correction: true,
@@ -298,6 +334,16 @@ mod tests {
         assert_eq!(config.table_column_threshold, 50);
         assert_eq!(config.table_row_threshold_ratio, 0.5);
         assert!(config.use_cache);
+        assert!(
+            config.language_model_ngram_on,
+            "the n-gram language model penalizes non-dictionary output (recognition noise) \
+             and must be on by default, not off"
+        );
+        assert_eq!(
+            config.min_confidence, MIN_CONFIDENCE_FLOOR_DEFAULT,
+            "min_confidence stays at 0.0 until it is calibrated per-word, not per-page \
+             (see MIN_CONFIDENCE_FLOOR_DEFAULT)"
+        );
 
         #[cfg(target_arch = "wasm32")]
         assert_eq!(config.psm, 6, "WASM default must be PSM_SINGLE_BLOCK (6)");
