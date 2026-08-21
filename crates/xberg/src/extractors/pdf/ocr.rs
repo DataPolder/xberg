@@ -3375,7 +3375,17 @@ fn processed_ocr_layout_dimensions(metadata: &crate::types::Metadata) -> Option<
     }
 }
 
-#[cfg(any(feature = "ocr", feature = "ocr-wasm"))]
+// Defined exactly where it is called, which is not a single feature set: the
+// `layout-detection` call site (in `extract_with_ocr_for_page`) also requires
+// `any(ocr, ocr-wasm)`, while the `not(layout-detection)` one rides only on that
+// function's own `any(ocr, ocr-pipeline)` gate. A plain `any(ocr, ocr-wasm)` left the
+// `liter-llm` build (ocr-pipeline, no ocr, no layout-detection) calling a function that
+// did not exist -- undetected since 2026-07-29 because no CI leg built that combination
+// until the xberg-cli feature legs began executing. ~keep
+#[cfg(all(
+    any(feature = "ocr", feature = "ocr-pipeline"),
+    any(feature = "ocr", feature = "ocr-wasm", not(feature = "layout-detection"))
+))]
 fn resolved_ocr_layout_dimensions(
     metadata: &crate::types::Metadata,
     render_width: u32,
