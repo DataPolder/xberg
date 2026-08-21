@@ -572,6 +572,31 @@ jobs:
         run: |
           for w in wheelhouse/*.whl; do bash scripts/ci/verify-glibc-floor.sh "$w" "$GLIBC_FLOOR"; done
 
+      # The checks above only prove a file exists (or, for Linux/Windows,
+      # inspect symbols/imports statically) -- none of them ever import or
+      # run the wheel. This installs it into a real venv on this same runner
+      # (matching glibc/macOS/Windows -- the family it was actually built
+      # for, unlike the musl leg which needs a separate Alpine container) and
+      # runs a real extraction against a known fixture, asserting the exact
+      # expected text comes back. See scripts/ci/smoke_test_python_wheel.py
+      # for why import-only is not enough. No continue-on-error: a broken
+      # wheel must fail this job, not merely warn.
+      - name: Smoke-test wheel (real extraction, not just import)
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheel="$(find wheelhouse -name '*.whl' | head -n1)"
+          python="python3"
+          venv_python="smoke-venv/bin/python"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            python="python"
+            venv_python="smoke-venv/Scripts/python.exe"
+          fi
+          "$python" -m venv smoke-venv
+          "$venv_python" -m pip install --no-cache-dir --quiet "$wheel"
+          "$venv_python" scripts/ci/smoke_test_python_wheel.py \
+            scripts/ci/fixtures/musl-python-smoke.pdf "XBERG MUSL SMOKE 490"
+
       - name: Upload wheels
         uses: actions/upload-artifact@v7
         with:
@@ -833,6 +858,20 @@ jobs:
           print("reconciled files:", pkg["files"])
           ' "staging/npm/${platform}"
           tar -czf node-bindings-${{ matrix.target }}.tar.gz -C staging npm
+
+      # The steps above only prove a .node file (and its vendored shared-lib
+      # closure) exist on disk -- never that require()ing it actually works.
+      # This installs it into a real Alpine (musl libc) container and runs a
+      # real extraction against a known fixture, asserting the exact expected
+      # text comes back. See scripts/ci/smoke_test_node_binding.js for what
+      # this catches and why a require()-only check is not enough. No
+      # continue-on-error: a broken binding must fail this job, not merely
+      # warn.
+      - name: Smoke-test musl Node binding (real extraction, not just require)
+        run: |
+          platform="linux-${{ matrix.napi_arch }}-musl"
+          bash scripts/ci/smoke-test-musl-node-binding.sh "staging/npm/${platform}"
+
       - uses: actions/upload-artifact@v7
         with:
           name: node-bindings-${{ matrix.target }}
@@ -1783,6 +1822,21 @@ jobs:
           mkdir -p "dist/java-natives/${CLASSIFIER}"
           cp build-output/libxberg_ffi.so "dist/java-natives/${CLASSIFIER}/libxberg_ffi.so"
 
+      # The step above only proves libxberg_ffi.so was produced -- never that
+      # a JVM can load it and call into it correctly. io.xberg.NativeLib
+      # already validates every required C symbol resolves by name the first
+      # time any io.xberg class is touched, but symbol presence does not
+      # prove a real extraction call works end to end. This compiles the
+      # io.xberg sources against a real JDK inside a genuine Alpine (musl
+      # libc) container and runs a real extraction against a known fixture,
+      # asserting the exact expected text comes back. See
+      # scripts/ci/fixtures/java-smoke/Smoke.java for details. No
+      # continue-on-error: a broken native library must fail this job, not
+      # merely warn.
+      - name: Smoke-test musl Java native (real extraction, not just symbol presence)
+        run: |
+          bash scripts/ci/smoke-test-musl-java-ffi.sh build-output
+
       - uses: actions/upload-artifact@v7
         with:
           name: java-natives-${{ matrix.classifier }}
@@ -1930,6 +1984,19 @@ jobs:
           # `*.so*` (not `*.so`) matches versioned sonames like libonnxruntime.so.1,
           # which a plain `*.so` glob silently drops. ~keep
           cp build-output/*.so* "dist/csharp-natives/runtimes/${RID}/native/"
+
+      # The step above only proves the shared-lib closure was produced --
+      # never that .NET can load it and call into it correctly. [DllImport]
+      # entry points bind lazily on first call, so nothing before this point
+      # has ever executed a P/Invoke into the library. This builds a small
+      # program against it inside a genuine Alpine (musl libc) container and
+      # runs a real extraction against a known fixture, asserting the exact
+      # expected text comes back. See scripts/ci/fixtures/csharp-smoke/Program.cs
+      # for details. No continue-on-error: a broken native library must fail
+      # this job, not merely warn.
+      - name: Smoke-test musl C# native (real extraction, not just P/Invoke resolution)
+        run: |
+          bash scripts/ci/smoke-test-musl-csharp-ffi.sh "dist/csharp-natives/runtimes/${{ matrix.rid }}/native"
 
       - uses: actions/upload-artifact@v7
         with:
@@ -2102,6 +2169,17 @@ jobs:
         run: |
           docker build -f docker/Dockerfile.musl-rustler \
             --output type=local,dest=./build-output .
+
+      # Nothing before this point has ever loaded libxberg_nif.so into a BEAM
+      # VM. This loads the freshly built .so directly (bypassing
+      # RustlerPrecompiled's release-download / force_build paths -- see
+      # scripts/ci/smoke_test_elixir_nif.exs for why) inside a genuine Alpine
+      # (musl libc) container and runs a real extraction against a known
+      # fixture, asserting the exact expected text comes back. No
+      # continue-on-error: a broken NIF must fail this job, not merely warn.
+      - name: Smoke-test musl Elixir NIF (real extraction, not just load)
+        run: |
+          bash scripts/ci/smoke-test-musl-elixir-nif.sh build-output/libxberg_nif.so
 
       - name: Package NIF as RustlerPrecompiled tarball
         env:
