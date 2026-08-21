@@ -360,56 +360,33 @@ extraction via `nom-exif` is pure Rust and works on every target.
 
 ---
 
-## ttf-parser
+## pdfium-render
 
-A safe, zero-allocation TrueType / OpenType / AAT font parser. xberg consumes it
-as the published `xberg-ttf-parser` crate, a fork of upstream carrying fixes
-that have not yet been released upstream:
+High-level idiomatic Rust wrapper around Pdfium, forked and vendored for xberg:
 
-- **Source**: <https://github.com/harfbuzz/ttf-parser>
-- **License**: MIT OR Apache-2.0 upstream; the fork takes the MIT option and is
-  redistributed under MIT, retaining the upstream copyright notice.
-- **Author(s)**: Yevhenii Reizner, Khaled Hosny, Laurenz Stampfl, Caleb
-  Maclennan and contributors
-- **Version**: `xberg-ttf-parser` 1.1.0, which is upstream 0.25.1 plus nine
-  upstream pull requests carried on top: `#203` (`b422ac0`), `#207` (`52a9811`),
-  `#216` (`9b9e55f`), `#222` (`3a585f1`), `#223` (`32439d2`), `#224` (`dd2337b`),
-  `#225` (`99aa5e3`), `#226` (`86daf57`) and `#228` (`023f8163`).
-- **Location**: consumed from crates.io — <https://crates.io/crates/xberg-ttf-parser>.
-  Only `crates/ttf-parser-compat/` lives in this repo; see below.
-- **Purpose**: Parse embedded font programs when rendering PDF pages. No
-  first-party xberg code calls it. It reaches xberg transitively through
-  `pdf_oxide` and `fontdb`, the only two consumers in `Cargo.lock`.
+- **Source**: <https://github.com/ajrcarey/pdfium-render>
+- **License**: MIT OR Apache-2.0 upstream; the fork takes the MIT option and is redistributed
+  under MIT, retaining the upstream copyright notice below.
+- **Author**: Alastair Carey (<alastair@alastaircarey.com>), Copyright (c) 2022-2026
+- **Forked Version**: 0.8.x-era, with bindings generated against pdfium 7543
+- **Location**: `crates/xberg-pdfium-render/`
+- **Purpose**: PDF structure-tree and content-mark access, text extraction and rendering via
+  Google's Pdfium library
 
-### Why a fork is still in the dependency graph
+### Modifications
 
-Upstream v0.25.1 rejects any CFF charstring containing the deprecated
-`dotsection` operator, dropping the affected glyphs entirely (`i`, `j`, `!`,
-`.`), so PDF pages using Type 1 derived CFF fonts silently lose those
-characters. The fix (upstream `#228`) is merged upstream but **unreleased** —
-crates.io still shows 0.25.1 as the newest `ttf-parser`. Until upstream cuts a
-0.25.2, the fork is the only way to get the fix into `pdf_oxide` and `fontdb`,
-neither of which xberg can edit.
-
-### The compat shim
-
-`crates/ttf-parser-compat/` is an xberg addition, not upstream code: a package
-literally named `ttf-parser` whose entire body is `pub use xberg_ttf_parser::*`.
-Cargo matches `[patch.crates-io]` entries on package name alone and refuses to
-patch across a rename or onto another crates.io package, so this shim is the
-only mechanism that can redirect the transitive consumers onto the fixed parser.
-It is never published. `crates/ttf-parser-compat/tests/patch_engaged.rs` fails
-loudly if the redirect ever stops taking effect, which is otherwise silent.
-
-When upstream releases a 0.25.2 carrying the nine fixes, the shim and the
-`[patch.crates-io]` entry can both be deleted and this section removed. A 0.26
-would not satisfy the `^0.25` requirement either consumer declares, so the
-release number matters.
+- Updated to Rust 2024 edition and workspace conventions
+- Added musl static linking support in `build.rs`
+- Removed examples and test data (kept in the upstream repo)
+- **Added** struct-tree and content-mark wrappers (~1,036 lines across `struct_element.rs`,
+  `struct_tree.rs`, `content_mark.rs`, `content_marks.rs`) that upstream does not provide —
+  upstream's `PdfPageStructureTree` exposes no public constructor and has no `PdfStructElement`
+  type at all
 
 ### License Compatibility
 
-MIT and Apache-2.0 are both permissive and already on the `deny.toml` allow
-list. The published crate carries upstream's license text verbatim.
+The upstream MIT OR Apache-2.0 dual license permits redistribution under MIT alone. The upstream
+author and copyright are recorded in this file, which is distributed with the source.
 
 ---
 
