@@ -3492,10 +3492,10 @@ fn ocr_points_per_pixel(
         if page_height_px == 0 {
             return 1.0;
         }
-        return lazy_pdf_render_state
+        lazy_pdf_render_state
             .map(|(doc, _, _)| page_dimensions_pt(doc, page_idx).1 / page_height_px as f32)
             .filter(|scale| scale.is_finite() && *scale > 0.0)
-            .unwrap_or(1.0);
+            .unwrap_or(1.0)
     }
     #[cfg(not(feature = "pdf"))]
     {
@@ -3941,6 +3941,7 @@ pub(crate) async fn extract_with_ocr(
 /// it, `content: None` makes the lookup fall back to `1.0` (pixels treated as points), silently
 /// defeating the document-global heading heuristic's absolute-point font-gap comparisons.
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+#[allow(clippy::too_many_arguments)]
 async fn extract_with_ocr_for_page(
     content: Option<&[u8]>,
     images: Option<&[image::DynamicImage]>,
@@ -5058,12 +5059,12 @@ async fn recover_pipeline_document_from_image_xobjects(
     let mut page_texts = vec![String::new(); page_count];
     let mut recovered_images: Vec<crate::types::ExtractedImage> = Vec::new();
     let mut warnings: Vec<crate::types::ProcessingWarning> = Vec::new();
-    for page_idx in 0..page_count {
+    for (page_idx, page_text) in page_texts.iter_mut().enumerate() {
         let Some(recovery) = recover_page_text_from_image_xobjects(&backend, &doc, page_idx, ocr_config).await else {
             continue;
         };
         if !recovery.text.is_empty() {
-            page_texts[page_idx] = recovery.text;
+            *page_text = recovery.text;
             warnings.push(xobject_fallback_warning(page_idx, recovery.attempted));
         }
         recovered_images.extend(recovery.images);
@@ -5160,6 +5161,7 @@ pub(crate) async fn run_ocr_pipeline(
 /// `points_per_pixel_override` is likewise forwarded verbatim to every stage's
 /// [`extract_with_ocr_for_page`] call. See that function's doc comments for why both exist.
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+#[allow(clippy::too_many_arguments)]
 async fn run_ocr_pipeline_for_page(
     content: Option<&[u8]>,
     images: Option<&[image::DynamicImage]>,
@@ -11126,7 +11128,7 @@ Name: ___
         );
         let all_kinds: Vec<_> = structured_pages
             .values()
-            .flat_map(|doc| doc.elements.iter().map(|e| e.kind.clone()))
+            .flat_map(|doc| doc.elements.iter().map(|e| e.kind))
             .collect();
         assert!(
             all_kinds
@@ -11282,7 +11284,7 @@ Name: ___
         );
         let all_kinds: Vec<_> = structured_pages
             .values()
-            .flat_map(|doc| doc.elements.iter().map(|e| e.kind.clone()))
+            .flat_map(|doc| doc.elements.iter().map(|e| e.kind))
             .collect();
         assert!(
             all_kinds
