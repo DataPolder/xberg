@@ -211,30 +211,22 @@ jobs:
         run: cargo check --locked -p xberg-cli --features all
         shell: bash
 
-      - name: Check xberg-cli feature profiles
-        if: runner.os == 'Linux'
-        run: |
-          cargo clippy --locked -p xberg-cli -- -D warnings
-
-          for features in \
-            all \
-            pdf-heuristic \
-            pdf-ocr \
-            core-cli \
-            paddle-ocr \
-            candle-ocr \
-            liter-llm; do
-            echo "::group::xberg-cli features: ${features}"
-            cargo clippy --locked -p xberg-cli --no-default-features --features "${features}" -- -D warnings
-            echo "::endgroup::"
-          done
-
-          for features in pdf-heuristic pdf-ocr core-cli; do
-            echo "::group::xberg-cli profile tests: ${features}"
-            cargo test --locked -p xberg-cli --no-default-features --features "${features}" feature_profile_tests
-            echo "::endgroup::"
-          done
-        shell: bash
+      # #762: the per-feature xberg-cli clippy legs used to live here as the LAST step of
+      # this 20+-step job. Steps in a job run sequentially with no continue-on-error, so any
+      # earlier failure in this job (clippy on the main workspace, the unit-test run, a
+      # doctest, any of the `check` steps) skips every step after it -- this one included.
+      # Across every CI Rust run on `main` from 2026-07-29 (shortly after this step was
+      # added) through 2026-08-21 -- upwards of 100 runs -- "Check xberg-cli feature
+      # profiles" shows `skipped` in every single one, never once `success` or `failure`,
+      # because this job has not once gone all-green that far down the step list in that
+      # window. The 7 feature legs it was meant to gate were therefore never actually
+      # exercised by CI. (The in-loop `cargo clippy` calls also ran as sequential shell
+      # commands under Actions' default `bash -e`, so even a single green run would only
+      # ever have reported the FIRST broken leg -- any leg after it in the `for` loop would
+      # never run either, the same masking #741's `narrow-feature-legs` job was written to
+      # avoid.) Moved to its own job below (`xberg-cli-feature-legs`) as a `fail-fast: false`
+      # matrix, one leg per runner, so it no longer depends on this job's other steps and
+      # every leg always reports its own real result. ~keep
 
   # GH#1389 regression guard: `cargo add xberg --features full` then `cargo build` on
   # x86_64-pc-windows-msvc used to die at LINK with an LNK2038 RuntimeLibrary mismatch,
@@ -496,6 +488,104 @@ jobs:
 
       - name: cargo check -p xberg --no-default-features --features wasm-target --target wasm32-unknown-unknown
         run: cargo check --locked -p xberg --no-default-features --features wasm-target --target wasm32-unknown-unknown
+        shell: bash
+
+  # #762: independent home for the xberg-cli per-feature clippy legs that used to be the
+  # last step of the `rust` job -- see the `~keep` comment left in that job's "Check
+  # xberg-cli --features all" step for why they never ran there. `fail-fast: false` matters
+  # here for the same reason it matters in `narrow-feature-legs` above: the original
+  # single-step `for features in ...` loop ran as sequential `bash -e` commands, so the
+  # first broken leg silently hid every leg after it in the same run. One matrix entry per
+  # leg means every leg always reports, independently, whether it actually compiles clean.
+  #
+  # `all` and `paddle-ocr` pull `xberg/paddle-ocr` (+ `embeddings`/`layout-detection` via
+  # `all`'s `default`), which link ONNX Runtime; `all` and `pdf-ocr` pull `xberg/ocr`, which
+  # links Tesseract. Every other leg (`pdf-heuristic`, `core-cli`, `candle-ocr`,
+  # `liter-llm`) is native-dependency-free, so their setup steps are skipped by matrix flag
+  # instead of paying the ORT/Tesseract download on every leg -- that is the cost this job
+  # trades for correctness: 7 separate runners (with 2 of them provisioning ORT and/or
+  # Tesseract) instead of 1 shared, but silently-never-executed, step.
+  #
+  # `feature_profile_tests` (pdf-heuristic, pdf-ocr, core-cli) is pure `clap` command
+  # introspection with no include_bytes! fixtures, so no test_documents fetch is needed.
+  xberg-cli-feature-legs:
+    name: xberg-cli feature leg (${{ matrix.name }})
+    if: github.repository == 'xberg-io/xberg' && github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: all
+            features: all
+            needs_ort: true
+            needs_tesseract: true
+            run_tests: false
+          - name: pdf-heuristic
+            features: pdf-heuristic
+            needs_ort: false
+            needs_tesseract: false
+            run_tests: true
+          - name: pdf-ocr
+            features: pdf-ocr
+            needs_ort: false
+            needs_tesseract: true
+            run_tests: true
+          - name: core-cli
+            features: core-cli
+            needs_ort: false
+            needs_tesseract: false
+            run_tests: true
+          - name: paddle-ocr
+            features: paddle-ocr
+            needs_ort: true
+            needs_tesseract: false
+            run_tests: false
+          - name: candle-ocr
+            features: candle-ocr
+            needs_ort: false
+            needs_tesseract: false
+            run_tests: false
+          - name: liter-llm
+            features: liter-llm
+            needs_ort: false
+            needs_tesseract: false
+            run_tests: false
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Setup Rust
+        uses: xberg-io/actions/setup-rust@v1
+        with:
+          cache-key-prefix: rust-xberg-cli-feature-leg-${{ matrix.name }}
+          use-sccache: "true"
+
+      - name: Install system dependencies
+        if: matrix.needs_ort || matrix.needs_tesseract
+        uses: ./.github/actions/install-system-deps
+
+      - name: Setup ONNX Runtime
+        if: matrix.needs_ort
+        uses: ./.github/actions/setup-onnx-runtime
+        with:
+          ort-version: ${{ env.ORT_VERSION }}
+
+      - name: Setup Tesseract cache
+        if: matrix.needs_tesseract
+        uses: ./.github/actions/setup-tesseract-cache
+        with:
+          label: xberg-cli-${{ matrix.name }}
+
+      - name: cargo clippy -p xberg-cli --features ${{ matrix.name }}
+        run: cargo clippy --locked -p xberg-cli --no-default-features --features "${{ matrix.features }}" -- -D warnings
+        shell: bash
+
+      - name: cargo test -p xberg-cli feature_profile_tests --features ${{ matrix.name }}
+        if: matrix.run_tests
+        run: cargo test --locked -p xberg-cli --no-default-features --features "${{ matrix.features }}" feature_profile_tests
         shell: bash
 
   live-hf:
