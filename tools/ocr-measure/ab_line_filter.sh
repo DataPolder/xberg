@@ -35,8 +35,22 @@ echo "document:      $(basename "$PDF")   backend=$BACKEND layout=$LAYOUT"
 
 run_leg() {
   local name="$1" config_json="$2" dest="$3"
-  # Remove rather than bypass: see the cache note in the header.
-  rm -rf "$CACHE/ocr" "$CACHE/extraction"
+  # Remove rather than bypass: see the cache note in the header. A plain
+  # `rm -rf` on these two directories is NOT safe here: the extraction cache holds
+  # >13k entries and rm walks it for long enough to race whatever else touches the
+  # cache, failing with ENOTEMPTY and -- under `set -e` -- killing the whole run
+  # before either leg executed, while the wrapper still reported success. Renaming
+  # first is atomic, so the leg always starts against an empty directory even if the
+  # actual deletion is slow or partially fails. ~keep
+  local stamp
+  stamp="$(date +%s)-$$"
+  local dir
+  for dir in ocr extraction; do
+    if [ -d "$CACHE/$dir" ]; then
+      mv "$CACHE/$dir" "$CACHE/.$dir.discard.$stamp" 2>/dev/null || true
+      rm -rf "$CACHE/.$dir.discard.$stamp" 2>/dev/null || true
+    fi
+  done
   local args=(
     extract "$PDF"
     --no-config-discovery
@@ -65,6 +79,16 @@ run_leg "A(filter ON, 0.75)" "" "$OUT/filter_on.md"
 run_leg "B(filter OFF, 1.01)" \
   '{"ocr":{"quality_thresholds":{"max_ocr_output_dict_invalid_line_ratio":1.01}}}' \
   "$OUT/filter_off.md"
+
+# A leg that produced nothing must fail the command. The first run of this harness
+# aborted before either leg and still reported exit 0 -- exactly the "ran vacuously"
+# failure this tool exists to detect, so it now refuses to report on absent output. ~keep
+for leg in filter_on filter_off; do
+  if [ ! -s "$OUT/$leg.md" ]; then
+    echo "FATAL: $OUT/$leg.md is missing or empty -- no measurement was taken." >&2
+    exit 3
+  fi
+done
 
 echo
 echo "=== byte-identical? (the whole question) ==="
