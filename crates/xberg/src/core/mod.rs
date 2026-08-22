@@ -30,8 +30,6 @@
 
 #[cfg(feature = "tokio-runtime")]
 pub mod batch_mode;
-#[cfg(feature = "tokio-runtime")]
-pub mod batch_optimizations;
 pub mod config;
 pub mod config_validation;
 // Unconditional: every extractor that reports partial extraction goes through
@@ -63,8 +61,6 @@ pub use config::{
 #[cfg(feature = "api-types")]
 pub use server_config::ServerConfig;
 
-#[cfg(feature = "tokio-runtime")]
-pub use batch_optimizations::{BatchProcessor, BatchProcessorConfig};
 #[cfg(feature = "pdf")]
 pub use config::PdfConfig;
 pub use extract::{extract, extract_batch};

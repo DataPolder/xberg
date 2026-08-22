@@ -50,8 +50,6 @@ default = ["tokio-runtime", "simd-utf8"]
 # `task rust:build:profiling` turns both on in one workspace build.
 profiling = []
 
-pool-metrics = []
-
 simd-utf8 = ["dep:simdutf8"]
 
 tokio-runtime = ["dep:tokio"]

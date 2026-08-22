@@ -41,10 +41,6 @@ pub use csv::CsvConfig;
 #[allow(unused_imports)]
 pub(crate) use download_progress::DownloadProgress;
 pub use email::EmailConfig;
-#[cfg(all(test, feature = "tokio-runtime", not(target_arch = "wasm32")))]
-pub(crate) use extraction::BatchBytesItem;
-#[cfg(all(test, feature = "tokio-runtime", not(target_arch = "wasm32")))]
-pub(crate) use extraction::BatchFileItem;
 pub use extraction::{
     BreadcrumbTarget, ExtractInput, ExtractInputKind, ExtractionConfig, ExtractionErrorItem, ExtractionResult,
     ExtractionSummary, FileExtractionConfig, ImageExtractionConfig, LanguageDetectionConfig, TokenReductionOptions,

@@ -3,7 +3,6 @@
 //! This module provides:
 //! - Quality processing: clean OCR artifacts, calculate quality scores
 //! - String utilities: safe decoding, mojibake fixing, encoding detection
-//! - Object pooling: reusable pools for batch processing to reduce allocations
 
 #[cfg(feature = "quality")]
 /// OCR quality analysis helpers (artifact detection, scoring, confidence aggregation).
@@ -66,10 +65,6 @@ pub(crate) fn strip_bom(s: &str) -> &str {
 pub mod json_utils;
 /// Markdown post-processing helpers used by extractors that emit Markdown output.
 pub mod markdown_utils;
-/// Generic object pool for reusing allocations across batch operations.
-pub mod pool;
-/// Heuristics for sizing thread and object pools based on CPU and workload.
-pub mod pool_sizing;
 /// Interned string pool for reducing allocation pressure on repeated strings.
 pub mod string_pool;
 /// XML helper utilities for tag-name extraction and attribute traversal.

@@ -4,11 +4,8 @@
 //! - Image extraction and processing
 //! - Token reduction
 //! - Language detection
-//! - Batch extraction items
 
 use serde::{Deserialize, Serialize};
-#[cfg(all(test, feature = "tokio-runtime", not(target_arch = "wasm32")))]
-use std::path::PathBuf;
 
 use crate::types::ExtractedDocument;
 
@@ -406,31 +403,6 @@ pub enum BreadcrumbTarget {
     /// Kept only for backward compatibility, since `Content` is no longer
     /// distinguishable from it.
     Metadata,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg(all(test, feature = "tokio-runtime", not(target_arch = "wasm32")))]
-pub(crate) struct BatchBytesItem {
-    /// The content bytes to extract from
-    pub content: Vec<u8>,
-
-    /// MIME type of the content (e.g., "application/pdf", "text/html")
-    pub mime_type: String,
-
-    /// Per-item configuration overrides (None uses batch-level defaults)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub config: Option<super::FileExtractionConfig>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg(all(test, feature = "tokio-runtime", not(target_arch = "wasm32")))]
-pub(crate) struct BatchFileItem {
-    /// Path to the file to extract from
-    pub path: PathBuf,
-
-    /// Per-file configuration overrides (None uses batch-level defaults)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub config: Option<super::FileExtractionConfig>,
 }
 
 /// Image extraction configuration.

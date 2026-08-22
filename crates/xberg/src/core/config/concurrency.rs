@@ -275,21 +275,6 @@ pub(crate) enum LayoutBatchWorkload {
     All,
 }
 
-#[cfg(all(test, feature = "tokio-runtime", not(target_arch = "wasm32")))]
-impl LayoutBatchWorkload {
-    pub(crate) fn from_layout_active(layout_active: bool) -> Self {
-        #[cfg(layout_detection)]
-        {
-            if layout_active { Self::Mixed } else { Self::None }
-        }
-        #[cfg(not(layout_detection))]
-        {
-            let _ = layout_active;
-            Self::None
-        }
-    }
-}
-
 /// Allocate batch workers and per-worker model threads without oversubscription.
 ///
 /// The total configured budget is divided between document workers so nested
