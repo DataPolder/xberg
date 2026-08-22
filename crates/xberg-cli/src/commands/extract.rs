@@ -445,10 +445,20 @@ fn batch_runtime_worker_threads(config: &ExtractionConfig, input_count: usize) -
     total_cpu_budget.min(document_workers).min(available_inputs)
 }
 
+/// Worker-thread stack size for every runtime this crate builds.
+///
+/// The extraction future is deep: a multi-stage OCR or PDF pipeline overflows tokio's
+/// default ~2 MB worker stack and aborts the process with SIGBUS rather than a catchable
+/// panic. `crates/xberg-node/src/lib.rs:62-64` hit this first and raised its pool to 16 MB;
+/// the CLI's own runtimes were never given the same budget, so the API and MCP servers ran
+/// every request on a 2 MB worker.
+pub(crate) const RUNTIME_WORKER_STACK_SIZE_BYTES: usize = 16 * 1024 * 1024;
+
 fn build_runtime(config: &ExtractionConfig) -> std::io::Result<tokio::runtime::Runtime> {
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(runtime_worker_threads(config))
         .enable_all()
+        .thread_stack_size(RUNTIME_WORKER_STACK_SIZE_BYTES)
         .build()
 }
 
@@ -461,6 +471,7 @@ fn block_on_extract_batch(inputs: Vec<ExtractInput>, config: &ExtractionConfig) 
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(worker_threads)
         .enable_all()
+        .thread_stack_size(RUNTIME_WORKER_STACK_SIZE_BYTES)
         .build()?
         .block_on(extract_batch(inputs, config))
 }

@@ -46,10 +46,22 @@ static GLOBAL_RUNTIME: OnceCell<tokio::runtime::Runtime> = OnceCell::new();
     not(target_arch = "wasm32"),
     any(feature = "embeddings", feature = "static-embeddings", feature = "reranker")
 ))]
+/// Worker-thread stack size for the global runtime.
+///
+/// A deep extraction future (multi-stage OCR, a nested archive member) exceeds tokio's
+/// ~2 MB default worker stack, and a stack overflow aborts the process with SIGBUS
+/// instead of raising a catchable panic. `crates/xberg-node/src/lib.rs:62-64` raised its
+/// pool to 16 MB for exactly this reason; this runtime had never been given the same
+/// budget.
+const GLOBAL_RUNTIME_STACK_SIZE_BYTES: usize = 16 * 1024 * 1024;
+
 pub(crate) fn global_runtime() -> crate::Result<&'static tokio::runtime::Runtime> {
     GLOBAL_RUNTIME.get_or_try_init(|| {
         tokio::runtime::Builder::new_multi_thread()
             .enable_all()
+            // See GLOBAL_RUNTIME_STACK_SIZE_BYTES: the extraction future overflows
+            // tokio's ~2 MB default worker stack and aborts rather than panicking.
+            .thread_stack_size(GLOBAL_RUNTIME_STACK_SIZE_BYTES)
             .build()
             .map_err(|e| crate::XbergError::Plugin {
                 message: format!("Failed to create global Tokio runtime: {e}"),
