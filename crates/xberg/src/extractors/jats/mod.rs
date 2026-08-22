@@ -633,11 +633,12 @@ impl InternalDocumentExtractor for JatsExtractor {
         let mut history_dates = std::collections::BTreeMap::new();
         if !jats_metadata.history_dates.is_empty() {
             for (date_type, date_val) in &jats_metadata.history_dates {
-                subject_parts.push(format!(
-                    "{}: {}",
-                    date_type[..1].to_uppercase() + &date_type[1..],
-                    date_val
-                ));
+                let mut chars = date_type.chars();
+                let capitalized_date_type = match chars.next() {
+                    Some(first_char) => first_char.to_uppercase().collect::<String>() + chars.as_str(),
+                    None => String::new(),
+                };
+                subject_parts.push(format!("{}: {}", capitalized_date_type, date_val));
                 history_dates.insert(date_type.clone(), date_val.clone());
             }
         }
