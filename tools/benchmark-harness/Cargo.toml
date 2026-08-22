@@ -45,7 +45,7 @@ chrono = { workspace = true }
 clap = { workspace = true }
 dirs = "6"
 futures = { workspace = true }
-jsonschema = "0.49"
+jsonschema = "0.50"
 libc = { workspace = true }
 num_cpus = { workspace = true }
 

@@ -1274,7 +1274,7 @@ indexmap = "2.14.0"
 infer = "0.22.0"
 itertools = { workspace = true, optional = true }
 jotdown = "0.10"
-jsonschema = { version = "0.49", optional = true, default-features = false }
+jsonschema = { version = "0.50", optional = true, default-features = false }
 libc = { workspace = true }
 # lofty: pure-Rust audio tag reader (ID3v1/v2, MP4 atoms, Vorbis comments, FLAC, etc.)
 # MIT license. Used for metadata extraction independent of the inference backend.
@@ -1410,7 +1410,7 @@ tracing-opentelemetry = { version = "0.33", optional = true }
 # Pure-Rust ONNX engine — the inference-seam backend on no-ORT targets (WASM,
 # Android x86_64). `tract-onnx` (not the `tract` facade) is CPU-only + wasm-safe.
 tract-onnx = { workspace = true, optional = true }
-unhwp = { version = "0.9.0", default-features = false, features = ["hwpx"], optional = true }
+unhwp = { version = "0.9.1", default-features = false, features = ["hwpx"], optional = true }
 unicode-normalization = { version = "0.1.25", optional = true }
 url = { workspace = true }
 urlencoding = "2"
@@ -1655,7 +1655,7 @@ filetime = "0.2"
 image = { workspace = true, default-features = false, features = ["png"] }
 # default-features=false drops jsonschema's `resolve-http` (reqwest→native-tls→openssl-sys);
 # tests validate local schemas only. Keeps the test build openssl-free.
-jsonschema = { version = "0.49", default-features = false }
+jsonschema = { version = "0.50", default-features = false }
 qrcode = { version = "0.14", default-features = false, features = ["image"] }
 # Test-only: builds an in-memory model2vec fixture (safetensors bytes) for the
 # static_engine unit tests, without a network fetch.
