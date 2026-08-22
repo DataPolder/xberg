@@ -6027,7 +6027,7 @@ mod tests {
     #[cfg(all(feature = "ocr", feature = "layout-detection"))]
     #[test]
     fn apply_ocr_text_list_fallback_overrides_a_misclassified_section_header_heading() {
-        let mut paragraph = ocr_paragraph("(2) second item continues the numbered run");
+        let mut paragraph = ocr_paragraph("(2) Second item continues the numbered run");
         paragraph.heading_level = Some(3);
         paragraph.layout_class = Some(crate::pdf::structure::types::LayoutHintClass::SectionHeader);
 
@@ -6040,6 +6040,46 @@ mod tests {
         assert_eq!(
             paragraph.heading_level, None,
             "heading_level must be cleared alongside setting is_list_item"
+        );
+    }
+
+    // ~keep
+    // Pinned against `apply_ocr_text_list_fallback_overrides_a_misclassified_section_header_heading`
+    // above: that test proves `"(2) Second item …"` (capital `S`) is an unambiguous list marker
+    // that must override a `SectionHeader` heading hint. This test proves the mirror case is
+    // deliberately NOT a list marker: `pdf::structure::pipeline::is_inline_parenthesized_quantity`
+    // treats a same-line, lowercase continuation after a parenthesized numeric marker
+    // (`"(2) second item …"`) as the shape of a spelled-out quantity clarification ("Two (2)
+    // additional…") that happens to start a wrapped line, not a genuine enumerated item -- a
+    // genuine item is a new sentence and so starts with a capital letter.
+    //
+    // The test that used to occupy this string (`ba76d1b497`, 2026-08-19) asserted the opposite
+    // -- that lowercase "(2) second item …" WAS a list marker -- and went undetected as wrong
+    // once `is_inline_parenthesized_quantity` landed in `75e50e4156` (2026-08-21) without touching
+    // this file: the fixture and the production rule silently diverged. Keeping both the capital-
+    // and lowercase-marker cases side by side means the next change to either
+    // `looks_like_list_item` or `is_inline_parenthesized_quantity` cannot repeat that collision
+    // without failing one of these two tests.
+    #[cfg(all(feature = "ocr", feature = "layout-detection"))]
+    #[test]
+    fn apply_ocr_text_list_fallback_leaves_a_lowercase_parenthesized_quantity_continuation_unclassified() {
+        let mut paragraph = ocr_paragraph("(2) second item continues the numbered run");
+        paragraph.heading_level = Some(3);
+        paragraph.layout_class = Some(crate::pdf::structure::types::LayoutHintClass::SectionHeader);
+
+        apply_ocr_text_list_fallback(std::slice::from_mut(&mut paragraph));
+
+        assert!(
+            !paragraph.is_list_item,
+            "a lowercase continuation after a parenthesized numeric marker reads as a spelled-out \
+             quantity clarification, not a genuine enumerated item, so it must not be swept into \
+             the list classification"
+        );
+        assert_eq!(
+            paragraph.heading_level,
+            Some(3),
+            "the fallback only fills gaps for unambiguous list markers; an ambiguous shape must \
+             leave the existing SectionHeader heading hint untouched"
         );
     }
 
