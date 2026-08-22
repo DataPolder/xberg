@@ -5280,6 +5280,8 @@ checksum = "47d9d19d1d6efa0109d2f65ff4c85cddd50bd572e5a00127ab10987290bcefae"
 [[package]]
 name = "liter-llm"
 version = "1.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de5d980b9ebe69c204ce3dfcd1fb5f01cf374d6ecd99f04f791b98faec0a1b27"
 dependencies = [
  "ahash 0.8.12",
  "arc-swap",
