@@ -4,6 +4,7 @@
 FROM alpine:3.21 AS builder
 
 ARG RUST_TOOLCHAIN=nightly-2026-03-10
+ARG PDFIUM_VERSION=7881
 
 WORKDIR /build
 
@@ -29,6 +30,21 @@ ENV RUSTFLAGS="-C target-feature=-crt-static"
 
 ENV ORT_LIB_LOCATION=/usr/lib
 ENV ORT_PREFER_DYNAMIC_LINK=1
+
+# Download pdfium (musl build). bblanchon/pdfium-binaries is the only source for a
+# musl-linked libpdfium.so -- chromium-browser-snapshots (the mirror used below for
+# the glibc images) does not publish musl artifacts, so this is single-source with
+# retries rather than a fallback mirror. The library is loaded at RUNTIME via
+# PDFIUM_DYNAMIC_LIB_PATH (crates/xberg/src/extractors/pdf/pdfium_engine.rs), not
+# linked at build time, so nothing else here needs to reference it.
+RUN mkdir -p /build/pdfium && \
+    ARCH=$(uname -m) && \
+    if [ "$ARCH" = "aarch64" ]; then PDFIUM_ARCH="arm64"; else PDFIUM_ARCH="x64"; fi && \
+    curl -fL --retry 5 --retry-delay 2 --retry-max-time 180 --retry-all-errors \
+        "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/${PDFIUM_VERSION}/pdfium-linux-musl-${PDFIUM_ARCH}.tgz" \
+        -o /build/pdfium.tgz && \
+    tar -xzf /build/pdfium.tgz -C /build/pdfium && \
+    rm /build/pdfium.tgz
 
 COPY Cargo.toml Cargo.lock ./
 COPY crates/xberg/ crates/xberg/
@@ -72,9 +88,16 @@ RUN apk add --no-cache libgcc && \
           /usr/bin/protoc-gen-upb-* /usr/bin/protoc-gen-upbdefs-*
 
 COPY --from=builder /build/xberg /usr/local/bin/xberg
+COPY --from=builder /build/pdfium/lib/libpdfium.so /usr/local/lib/
 
 LABEL org.opencontainers.image.source="https://github.com/xberg-io/xberg"
 LABEL org.opencontainers.image.description="Xberg document intelligence - CLI variant"
 LABEL org.opencontainers.image.licenses="MIT"
+
+# Read at runtime by extract_core_pdfium's bind_once() -- see
+# crates/xberg/src/extractors/pdf/pdfium_engine.rs. Set explicitly rather than
+# relying on musl's default dlopen search path, which is not guaranteed to
+# include /usr/local/lib.
+ENV PDFIUM_DYNAMIC_LIB_PATH=/usr/local/lib
 
 ENTRYPOINT ["xberg"]

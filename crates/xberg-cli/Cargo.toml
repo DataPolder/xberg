@@ -194,6 +194,10 @@ all = [
     "ner-llm",
     "summarization",
     "summarization-llm",
+    # Enables `--pdf-backend pdfium` (#700/#702). The Docker `cli`/`core`/`full`/
+    # `musl-build` images stage a runtime libpdfium via PDFIUM_DYNAMIC_LIB_PATH
+    # (see docker/Dockerfile.*), so this feature has a real library to load.
+    "pdf-pdfium-surface",
 ]
 
 [dependencies]

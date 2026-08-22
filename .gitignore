@@ -63,6 +63,7 @@ crates/xberg-node/*.tgz
 !crates/xberg-node/*.dylib
 !crates/xberg-node/*.so
 !crates/xberg-node/*.dll
+libpdfium.a
 .wrangler/
 .pnpm-store/
 
@@ -232,6 +233,9 @@ temp-test-*
 packages/csharp/test_html_debug.cs
 # CI renders this from runtime.json.template at publish time; template is the source of truth.
 packages/csharp/Xberg/runtime.json
+
+# Pdfium test artifacts
+crates/xberg-pdfium-render/*.jpg
 
 # AI / MCP / Agent config
 .claude/
