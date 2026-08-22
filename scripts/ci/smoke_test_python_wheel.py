@@ -32,13 +32,13 @@ def fail(message: str) -> None:
 async def run(fixture_path: str, expected_substring: str) -> None:
     try:
         from xberg import ExtractInput, extract
-    except Exception as exc:  # noqa: BLE001 - report and fail loud, not silently
+    except Exception as exc:  # report and fail loud, not silently
         fail(f"could not import the xberg native extension: {exc!r}")
         return
 
     try:
         output = await extract(ExtractInput(kind="uri", uri=fixture_path))
-    except Exception as exc:  # noqa: BLE001 - report and fail loud, not silently
+    except Exception as exc:  # report and fail loud, not silently
         fail(f"extract() raised for fixture {fixture_path!r}: {exc!r}")
         return
 
@@ -58,7 +58,7 @@ async def run(fixture_path: str, expected_substring: str) -> None:
 
 
 def main() -> None:
-    if len(sys.argv) != 3:  # noqa: PLR2004
+    if len(sys.argv) != 3:
         fail(f"usage: {sys.argv[0]} <fixture-path> <expected-substring>")
         return
     asyncio.run(run(sys.argv[1], sys.argv[2]))
