@@ -517,6 +517,21 @@ const BLOCK_MAX_LEFT_EDGE_OFFSET_IN_LINE_HEIGHTS: f64 = 0.5;
 /// to decide the same "is this the same physical line" question.
 const LINE_YCENTER_THS: f64 = 0.5;
 
+/// Minimum first-line indent, as a multiple of the running median line height,
+/// for a line to start a new paragraph block even though the vertical-gap and
+/// horizontal-overlap checks would otherwise continue the current one. Mirrors
+/// `MIN_PARAGRAPH_INDENT_IN_LINE_HEIGHTS` in `ocr::conversion`, which was added
+/// for PaddleOCR after a 16-page scanned document produced exactly 16
+/// paragraphs -- one full-page block per page -- because its paragraph breaks
+/// are marked by indentation alone, with uniform leading throughout.
+///
+/// Unlike the PaddleOCR copy this check must NOT fire for the word fragments of
+/// a single physical line (see [`LINE_YCENTER_THS`]): those march rightward
+/// across the line and so look arbitrarily "indented" against the block's left
+/// margin. [`assign_sceptre_block_ids`] therefore consults it only for lines
+/// that are not same-line fragments.
+const PARAGRAPH_MIN_INDENT_IN_LINE_HEIGHTS: f64 = 0.75;
+
 /// Group sceptre's per-line elements into paragraph blocks using their own
 /// AABB geometry, returning a stable block id per input element in the same
 /// order, so `pdf::structure::adapters::ocr_doc_to_paragraphs` can merge
@@ -537,17 +552,25 @@ fn assign_sceptre_block_ids(elements: &[OcrElement]) -> Vec<String> {
     let mut heights_seen: Vec<f64> = Vec::with_capacity(elements.len());
     let mut block_index: u32 = 0;
     let mut previous: Option<BoundingBox> = None;
+    // Leftmost edge established so far by the current block's lines, used to
+    // detect an indented paragraph start (see `starts_indented_paragraph`).
+    let mut block_left_margin: f64 = 0.0;
 
     for element in elements {
         let bounds = geometry_bounds(&element.geometry).unwrap_or_default();
         insert_sorted(&mut heights_seen, bounds.y1 - bounds.y0);
         let median_line_height = running_median(&heights_seen);
 
-        let continues_block = previous
-            .as_ref()
-            .is_some_and(|previous| lines_share_block(previous, &bounds, median_line_height));
-        if !continues_block {
+        let continues_block = previous.as_ref().is_some_and(|previous| {
+            lines_share_block(previous, &bounds, median_line_height)
+                && (shares_physical_line(previous, &bounds, median_line_height)
+                    || !starts_indented_paragraph(bounds.x0, block_left_margin, median_line_height))
+        });
+        if continues_block {
+            block_left_margin = block_left_margin.min(bounds.x0);
+        } else {
             block_index += 1;
+            block_left_margin = bounds.x0;
         }
         block_ids.push(format!("sceptre-block-{block_index}"));
         previous = Some(bounds);
@@ -556,14 +579,38 @@ fn assign_sceptre_block_ids(elements: &[OcrElement]) -> Vec<String> {
     block_ids
 }
 
+/// Whether `current` is a fragment of the same physical text line as
+/// `previous`, judged by their y-centers (see [`LINE_YCENTER_THS`]).
+fn shares_physical_line(previous: &BoundingBox, current: &BoundingBox, median_line_height: f64) -> bool {
+    if median_line_height <= 0.0 {
+        return false;
+    }
+    let previous_ycenter = (previous.y0 + previous.y1) / 2.0;
+    let current_ycenter = (current.y0 + current.y1) / 2.0;
+    (current_ycenter - previous_ycenter).abs() < LINE_YCENTER_THS * median_line_height
+}
+
+/// Whether `x0` sits far enough right of `block_left_margin` -- the leftmost
+/// edge established by the current block's lines so far -- to read as a new
+/// paragraph's indented first line, in units of `median_line_height`.
+///
+/// This is independent of (and can override) the vertical-gap/overlap checks in
+/// [`lines_share_block`], because real body text often marks a paragraph break
+/// with indentation alone and no extra vertical space (see
+/// [`PARAGRAPH_MIN_INDENT_IN_LINE_HEIGHTS`]).
+fn starts_indented_paragraph(x0: f64, block_left_margin: f64, median_line_height: f64) -> bool {
+    if median_line_height <= 0.0 {
+        return false;
+    }
+    x0 - block_left_margin > median_line_height * PARAGRAPH_MIN_INDENT_IN_LINE_HEIGHTS
+}
+
 fn lines_share_block(previous: &BoundingBox, current: &BoundingBox, median_line_height: f64) -> bool {
     if median_line_height <= 0.0 {
         return false;
     }
 
-    let previous_ycenter = (previous.y0 + previous.y1) / 2.0;
-    let current_ycenter = (current.y0 + current.y1) / 2.0;
-    if (current_ycenter - previous_ycenter).abs() < LINE_YCENTER_THS * median_line_height {
+    if shares_physical_line(previous, current, median_line_height) {
         return true;
     }
 
@@ -1566,6 +1613,72 @@ mod tests {
             block_id(9),
             line_block_ids[0],
             "a distant, unrelated line must still start a new block"
+        );
+    }
+
+    /// Sceptre counterpart of
+    /// `ocr::conversion::assign_line_block_ids_splits_indent_marked_paragraphs_with_uniform_leading`.
+    /// The PaddleOCR grouper gained an indent check after a 16-page scanned
+    /// document produced exactly 16 paragraphs; `assign_sceptre_block_ids` was
+    /// copied from it before that check existed and never received it, so this
+    /// same page collapses into a single block under sceptre.
+    ///
+    /// Paragraph breaks here are marked ONLY by first-line indentation (left
+    /// margin 200px, indent 300px): every line sits 16px below its predecessor,
+    /// well inside the 0.6x-line-height gap threshold, and every pair overlaps
+    /// horizontally. Against unfixed code all eight entries come back as
+    /// `"sceptre-block-1"`.
+    #[test]
+    fn should_split_indent_marked_paragraphs_that_share_uniform_leading() {
+        let elements = vec![
+            // Paragraph 1: indented first line, two flush continuation lines.
+            line_to_element(&word_line("Para one first", 300.0, 2200.0, 200.0, 234.0, 0.9)),
+            line_to_element(&word_line("continues here", 200.0, 2200.0, 250.0, 284.0, 0.9)),
+            line_to_element(&word_line("and ends", 200.0, 1000.0, 300.0, 334.0, 0.9)),
+            // Paragraph 2: indented first line, same 16px gap as within paragraph 1.
+            line_to_element(&word_line("Para two first", 300.0, 2200.0, 350.0, 384.0, 0.9)),
+            line_to_element(&word_line("continues here", 200.0, 2200.0, 400.0, 434.0, 0.9)),
+            line_to_element(&word_line("and ends", 200.0, 700.0, 450.0, 484.0, 0.9)),
+            // Paragraph 3: indented first line, same 16px gap again.
+            line_to_element(&word_line("Para three first", 300.0, 2200.0, 500.0, 534.0, 0.9)),
+            line_to_element(&word_line("continues here", 200.0, 2200.0, 550.0, 584.0, 0.9)),
+        ];
+
+        let block_ids = assign_sceptre_block_ids(&elements);
+
+        assert_eq!(
+            block_ids,
+            vec![
+                "sceptre-block-1",
+                "sceptre-block-1",
+                "sceptre-block-1",
+                "sceptre-block-2",
+                "sceptre-block-2",
+                "sceptre-block-2",
+                "sceptre-block-3",
+                "sceptre-block-3",
+            ],
+            "indented first lines must start a new block even though the vertical gap never changes"
+        );
+    }
+
+    /// Companion control to the indent-split test: OCR boxes are never
+    /// pixel-perfect, so continuation lines flush with the block's established
+    /// left margin must not be split apart by sub-pixel left-edge jitter.
+    #[test]
+    fn should_not_split_flush_continuation_lines_on_left_edge_jitter() {
+        let elements = vec![
+            line_to_element(&word_line("Indented first", 300.0, 2200.0, 200.0, 234.0, 0.9)),
+            line_to_element(&word_line("flush second", 201.0, 2200.0, 250.0, 284.0, 0.9)),
+            line_to_element(&word_line("flush third", 199.0, 2200.0, 300.0, 334.0, 0.9)),
+        ];
+
+        let block_ids = assign_sceptre_block_ids(&elements);
+
+        assert_eq!(
+            block_ids,
+            vec!["sceptre-block-1", "sceptre-block-1", "sceptre-block-1"],
+            "sub-pixel left-edge jitter on flush continuation lines must not start a new block"
         );
     }
 }
