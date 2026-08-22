@@ -78,8 +78,13 @@ fn split_href(href: &str) -> (&str, Option<&str>) {
 
 /// Resolve an EPUB href relative to the OPF directory.
 ///
-/// The returned path is package-relative and normalized. Attempts to escape the
-/// EPUB package root via leading `..` segments are rejected.
+/// The returned path is package-relative and normalized. This is a thin wrapper around the
+/// shared [`crate::extractors::security::resolve_container_entry`], which implements the
+/// boundary-relative rule this function pioneered: an in-bounds `..` (leaving and returning
+/// without crossing the package root) is allowed, and only a `..` that pops past the root is
+/// rejected. Percent-decoding happens here, before the call, and not inside the shared
+/// helper -- decoding after resolution would let a decoded `../` slip past a boundary check
+/// that already ran.
 pub(super) fn resolve_path(base_dir: &str, href: &str) -> Result<CanonicalHref> {
     let (relative_path, fragment) = split_href(href);
     // An href is a URL, and a ZIP entry name is not. A real package writes a
@@ -88,37 +93,22 @@ pub(super) fn resolve_path(base_dir: &str, href: &str) -> Result<CanonicalHref> 
     // `read_file_from_zip`, which retries with the undecoded name.
     let decoded = urlencoding::decode(relative_path).unwrap_or(std::borrow::Cow::Borrowed(relative_path));
     let relative_path: &str = &decoded;
-    let combined = if relative_path.starts_with('/') {
-        relative_path.trim_start_matches('/').to_string()
-    } else if base_dir.is_empty() || base_dir == "." {
-        relative_path.to_string()
-    } else {
-        format!("{}/{}", base_dir.trim_end_matches('/'), relative_path)
-    };
 
-    let mut normalized = Vec::new();
-    for segment in combined.split('/') {
-        match segment {
-            "" | "." => {}
-            ".." => {
-                if normalized.pop().is_none() {
-                    return Err(crate::XbergError::Parsing {
-                        message: format!("EPUB href '{}' escapes the package root", href),
-                        source: None,
-                    });
-                }
-            }
-            _ => normalized.push(segment),
-        }
-    }
-
-    let path = normalized.join("/");
-    if path.is_empty() {
-        return Err(crate::XbergError::Parsing {
-            message: format!("EPUB href '{}' does not contain a resolvable path", href),
+    let path = crate::extractors::security::resolve_container_entry(base_dir, relative_path).map_err(|error| {
+        use crate::extractors::security::PathTraversalError;
+        // Preserve the exact wording the two pre-existing failure modes always had; the
+        // other variants (NUL byte, drive/UNC prefix) are new checks this migration adds,
+        // so they get the shared helper's generic message.
+        let detail = match error {
+            PathTraversalError::EscapesRoot => "escapes the package root".to_string(),
+            PathTraversalError::EmptyResult => "does not contain a resolvable path".to_string(),
+            other => other.to_string(),
+        };
+        crate::XbergError::Parsing {
+            message: format!("EPUB href '{}' {}", href, detail),
             source: None,
-        });
-    }
+        }
+    })?;
 
     Ok(CanonicalHref {
         path,
@@ -204,5 +194,34 @@ mod tests {
     fn test_resolve_path_rejects_root_escape() {
         let err = resolve_path("", "../chapter.xhtml").expect_err("path should be rejected");
         assert!(err.to_string().contains("escapes the package root"));
+    }
+
+    /// Deliberate behaviour change from the path-traversal unification: a backslash in an
+    /// href is now normalised to `/` (matching PPTX/DOCX target handling) instead of being
+    /// treated as an ordinary character inside one literal path segment. Real EPUB hrefs are
+    /// URLs and never contain a literal backslash, so this only changes how a malformed href
+    /// resolves -- it does not affect any well-formed package.
+    #[test]
+    fn test_resolve_path_normalises_backslashes_like_forward_slashes() {
+        let result = resolve_path("OEBPS", "sub\\chapter.xhtml").expect("path should resolve");
+        assert_eq!(result.path, "OEBPS/sub/chapter.xhtml");
+    }
+
+    /// New hardening from the path-traversal unification: a NUL byte can never appear in a
+    /// legitimate ZIP entry name, so it is now rejected outright rather than passed through
+    /// to a `by_name` lookup that would simply miss. Observationally inert for any real EPUB.
+    #[test]
+    fn test_resolve_path_rejects_nul_byte() {
+        let err = resolve_path("OEBPS", "chapter\0.xhtml").expect_err("path should be rejected");
+        assert!(err.to_string().contains("NUL byte"));
+    }
+
+    /// Absolute paths from the OPC/EPUB convention (root-relative) still resolve when the
+    /// base directory has more than one path segment -- proving the shared helper's
+    /// root-relative branch does not accidentally retain any part of a multi-segment base.
+    #[test]
+    fn test_resolve_path_absolute_ignores_a_multi_segment_base() {
+        let result = resolve_path("OEBPS/text/nested", "/images/cover.png").expect("path should resolve");
+        assert_eq!(result.path, "images/cover.png");
     }
 }

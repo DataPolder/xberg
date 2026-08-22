@@ -1096,13 +1096,13 @@ impl InternalDocumentExtractor for DocxExtractor {
             if extract_image_data
                 && let Some(ref rid) = drawing.image_ref
                 && let Some(target) = image_rels.get(rid)
-                && !crate::extractors::security::has_path_traversal(target)
+                // Relationships in `word/_rels/document.xml.rels` resolve relative to
+                // `word/`. An in-bounds `..` (e.g. `../media/image1.png`, the normal shape
+                // for an image that lives at the package root) is legitimate and must
+                // resolve; only a `..` that pops past the package root is rejected. A
+                // leading `/` re-roots to the package root, same as before.
+                && let Ok(zip_path) = crate::extractors::security::resolve_container_entry("word", target)
             {
-                let zip_path = if let Some(stripped) = target.strip_prefix('/') {
-                    stripped.to_string()
-                } else {
-                    format!("word/{}", target)
-                };
                 if let Ok(mut file) = archive.by_name(&zip_path)
                     && file.size() <= crate::extraction::docx::MAX_IMAGE_FILE_SIZE
                 {

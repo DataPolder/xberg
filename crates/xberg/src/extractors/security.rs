@@ -265,6 +265,19 @@ impl std::error::Error for SecurityError {}
 /// `None` means unlimited, so an unset limit costs one branch and never rejects. The
 /// comparison is `>` rather than `>=` deliberately -- a document exactly at the ceiling is
 /// within it.
+// Callers are the five paginated-format extractors, each behind its own feature: odp.rs and
+// extraction/pptx/mod.rs (`office`), pdf/mod.rs (`pdf`), iwork/keynote.rs (`iwork`), and
+// image.rs (the OCR trio, for multi-frame TIFF). A default build enables none of them, so this
+// is gated to exactly that union rather than carrying `#[allow(dead_code)]`. No `test` arm:
+// nothing tests it directly, and adding one would re-hide it.
+#[cfg(any(
+    feature = "office",
+    feature = "pdf",
+    feature = "iwork",
+    feature = "ocr",
+    feature = "ocr-wasm",
+    feature = "ocr-pipeline"
+))]
 pub(crate) fn enforce_page_count(count: usize, max_pages: Option<usize>) -> Result<(), SecurityError> {
     match max_pages {
         Some(max) if count > max => Err(SecurityError::TooManyPages { count, max }),
@@ -679,27 +692,132 @@ impl SecurityBudget {
     }
 }
 
-/// Return `true` when `path_str` contains a path-traversal component (`..`).
+/// Error returned by [`resolve_container_entry`] when a container-relative entry name
+/// cannot be safely resolved.
 ///
-/// Uses [`std::path::Path::components`] rather than a string search so that
-/// normalised representations (e.g. `a/../b`) are caught while benign values
-/// like `"1..2"` in list-numbering prefixes are not falsely flagged.
+/// Deliberately narrow: this is about resolving a name against an archive-relative base
+/// directory, not filesystem confinement. See [`crate::core::path_resolver`] for the
+/// (unrelated) problem of confining a real filesystem read to a base directory.
+#[cfg(any(feature = "office", test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PathTraversalError {
+    /// A `..` component popped past the container root: there was nothing left to remove.
+    EscapesRoot,
+    /// The target contains a NUL byte, which cannot appear in a legitimate archive entry name.
+    InvalidByte,
+    /// The target carries a Windows drive letter (`C:`) or UNC (`//server/share`) prefix.
+    /// This function resolves names *inside* an archive, never a host filesystem path, so
+    /// either form is rejected outright rather than treated as a literal path segment.
+    DriveOrUncPrefix,
+    /// Resolution produced no path segments at all (e.g. a bare `..` against a one-level
+    /// base, or an input made up only of `.`/empty components).
+    EmptyResult,
+}
+
+#[cfg(any(feature = "office", test))]
+impl std::fmt::Display for PathTraversalError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Self::EscapesRoot => write!(f, "path escapes the container root"),
+            Self::InvalidByte => write!(f, "path contains a NUL byte"),
+            Self::DriveOrUncPrefix => write!(f, "path carries a drive letter or UNC prefix"),
+            Self::EmptyResult => write!(f, "path resolves to no entry"),
+        }
+    }
+}
+
+#[cfg(any(feature = "office", test))]
+impl std::error::Error for PathTraversalError {}
+
+/// Resolve a container-relative entry name against a base directory inside a ZIP-based
+/// container (an OOXML part, an EPUB package, ...).
 ///
-/// # Examples
+/// This is **boundary-relative**, not a `..`-blacklist: an in-bounds `..` that leaves and
+/// returns without crossing the container root is allowed, because that is the normal,
+/// spec-correct form of many OPC/EPUB relationships (`../media/image1.png` is exactly how a
+/// PPTX slide references an image one directory up, and how a DOCX `word/_rels/document.xml.rels`
+/// entry references an image at the package root's `media/`). Only a `..` that would pop
+/// past the root is rejected. This replaces the deleted `has_path_traversal`, which rejected
+/// every `..` unconditionally and would have broken every one of those legitimate references.
 ///
-/// Not run as a doctest: this predicate is `pub(crate)`, used by the archive and
-/// container extractors. The public entry point for archive safety is
-/// [`crate::SecurityLimits`].
+/// `base` is the container-relative directory the reference resolves against (e.g. `"word"`,
+/// `"ppt/slides"`, `"OEBPS/text"`; `""` or `"."` means the container root). A leading `/` in
+/// `target` means "relative to the container root" per the OPC/EPUB convention -- not the
+/// host filesystem -- and overrides `base` entirely.
 ///
-/// ```ignore
-/// # use xberg::extractors::security::has_path_traversal;
-/// assert!(has_path_traversal("word/../../etc/passwd"));
-/// assert!(!has_path_traversal("word/images/photo.png"));
-/// ```
-#[allow(dead_code)]
-pub(crate) fn has_path_traversal(path_str: &str) -> bool {
-    use std::path::{Component, Path};
-    Path::new(path_str).components().any(|c| c == Component::ParentDir)
+/// Backslashes in `target` are normalised to `/` explicitly rather than relying on
+/// [`std::path`], whose component parsing is target-OS-dependent: the same source can treat
+/// `a\..\..\x` as one opaque literal on Unix and as three components on Windows. A drive
+/// letter (`C:`) or UNC prefix (`//server/share`, from a normalised `\\server\share`) is
+/// rejected outright. `base` is not backslash-normalised: every real caller builds it from
+/// `/`-delimited container-relative names (a hardcoded literal, or a directory sliced out of
+/// an entry name that itself uses `/`), never from raw attacker input.
+///
+/// Percent-decoding is deliberately **not** performed here; it is format-specific (an EPUB
+/// href is a URL, an OOXML `Target` attribute is not). A caller that needs it must decode
+/// *before* calling this function -- decoding after would let a decoded `../` slip past a
+/// boundary check that already ran.
+// Every real caller (DOCX, EPUB, PPTX) lives behind `#[cfg(feature = "office")]`, so this
+// whole group compiles out with that feature off rather than carrying a blanket
+// `#[allow(dead_code)]`, which would also mask a genuinely-unused item appearing later.
+// `test` is OR'd in so the unit tests below still reach it under a non-office test build.
+#[cfg(any(feature = "office", test))]
+pub(crate) fn resolve_container_entry(base: &str, target: &str) -> Result<String, PathTraversalError> {
+    if target.contains('\0') {
+        return Err(PathTraversalError::InvalidByte);
+    }
+
+    let normalized_target = target.replace('\\', "/");
+    if is_drive_or_unc_prefixed(&normalized_target) {
+        return Err(PathTraversalError::DriveOrUncPrefix);
+    }
+
+    let mut stack: Vec<&str> = Vec::new();
+    let effective: &str = match normalized_target.strip_prefix('/') {
+        Some(root_relative) => root_relative,
+        None => {
+            for segment in base.split('/') {
+                push_segment(&mut stack, segment)?;
+            }
+            normalized_target.as_str()
+        }
+    };
+
+    for segment in effective.split('/') {
+        push_segment(&mut stack, segment)?;
+    }
+
+    if stack.is_empty() {
+        return Err(PathTraversalError::EmptyResult);
+    }
+
+    Ok(stack.join("/"))
+}
+
+/// Apply one `/`-delimited path segment to the working stack: push a normal component,
+/// ignore `.` and empty components, and pop on `..` -- erroring if there is nothing left to
+/// pop. Shared between the `base` and `target` halves of [`resolve_container_entry`] so the
+/// pop-underflow rule is exactly one rule, applied identically on both sides of the join.
+#[cfg(any(feature = "office", test))]
+fn push_segment<'a>(stack: &mut Vec<&'a str>, segment: &'a str) -> Result<(), PathTraversalError> {
+    match segment {
+        "" | "." => {}
+        ".." => {
+            if stack.pop().is_none() {
+                return Err(PathTraversalError::EscapesRoot);
+            }
+        }
+        _ => stack.push(segment),
+    }
+    Ok(())
+}
+
+/// `true` when `path` begins with a Windows drive letter (`C:`) or a UNC prefix (`//`, which
+/// is what `\\server\share` becomes after backslash normalisation).
+#[cfg(any(feature = "office", test))]
+fn is_drive_or_unc_prefixed(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    path.starts_with("//") || (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
 }
 
 #[cfg(test)]
@@ -856,38 +974,178 @@ mod tests {
         );
     }
 
+    // `resolve_container_entry` matrix. Each case below is named after the input class
+    // from the path-traversal unification brief so the test file doubles as the
+    // executable version of that comparison table.
+
     #[test]
-    fn test_path_traversal_detected_in_simple_dotdot() {
-        assert!(has_path_traversal("../etc/passwd"));
+    fn parent_relative_target_in_bounds_pops_into_the_root() {
+        // "../x" against a one-level base: the ".." exactly cancels "a", landing on "x"
+        // at the container root. This is the PPTX/DOCX "spec-correct ../media/x.png" shape.
+        assert_eq!(resolve_container_entry("a", "../x"), Ok("x".to_string()));
     }
 
     #[test]
-    fn test_path_traversal_detected_in_middle_of_path() {
-        assert!(has_path_traversal("word/images/../../etc/passwd"));
+    fn parent_relative_target_out_of_bounds_at_the_root_is_rejected() {
+        // Same "../x", but there is no base directory left to pop: this is a real escape.
+        assert_eq!(
+            resolve_container_entry("", "../x"),
+            Err(PathTraversalError::EscapesRoot)
+        );
     }
 
     #[test]
-    fn test_path_traversal_detected_at_end() {
-        assert!(has_path_traversal("word/images/.."));
+    fn double_parent_within_a_single_level_base_escapes() {
+        // "a/../../x": one push, then two pops. The base is empty, so after the local
+        // "a" is popped there is nothing left for the second "..".
+        assert_eq!(
+            resolve_container_entry("", "a/../../x"),
+            Err(PathTraversalError::EscapesRoot)
+        );
     }
 
     #[test]
-    fn test_normal_path_not_flagged() {
-        assert!(!has_path_traversal("word/images/photo.png"));
+    fn double_parent_within_a_two_level_base_is_in_bounds() {
+        // Same shape, but the base has enough depth ("root") to absorb both "a" and the
+        // outer "..": the whole path collapses to a container-root-relative "x".
+        assert_eq!(resolve_container_entry("root", "a/../../x"), Ok("x".to_string()));
     }
 
     #[test]
-    fn test_empty_path_not_flagged() {
-        assert!(!has_path_traversal(""));
+    fn absolute_target_is_root_relative_and_ignores_base() {
+        // A leading "/" means "relative to the container root" (the OPC/EPUB convention),
+        // not the host filesystem -- `base` is completely bypassed.
+        assert_eq!(resolve_container_entry("word", "/abs/x"), Ok("abs/x".to_string()));
     }
 
     #[test]
-    fn test_dotdot_in_filename_not_flagged() {
-        assert!(!has_path_traversal("images/1..2.png"));
+    fn windows_drive_letter_target_is_rejected() {
+        assert_eq!(
+            resolve_container_entry("word", "C:\\x"),
+            Err(PathTraversalError::DriveOrUncPrefix)
+        );
     }
 
     #[test]
-    fn test_absolute_path_without_traversal_not_flagged() {
-        assert!(!has_path_traversal("/usr/local/share/doc.pdf"));
+    fn unc_style_target_is_rejected() {
+        // "\\server\share\x" normalises to "//server/share/x", which is caught by the
+        // same UNC check as a literal "//..." input -- no separate UNC-specific parsing.
+        assert_eq!(
+            resolve_container_entry("word", "\\\\server\\share\\x"),
+            Err(PathTraversalError::DriveOrUncPrefix)
+        );
+    }
+
+    #[test]
+    fn backslash_traversal_is_normalised_the_same_as_forward_slash() {
+        // "a\..\..\x": backslashes are converted to "/" explicitly, so this behaves
+        // identically on every build platform instead of depending on `std::path`'s
+        // target-dependent component parsing (the drift `has_path_traversal` had).
+        assert_eq!(
+            resolve_container_entry("", "a\\..\\..\\x"),
+            Err(PathTraversalError::EscapesRoot)
+        );
+    }
+
+    #[test]
+    fn dot_segments_are_transparent_to_in_bounds_traversal() {
+        // "a/./../x": the "." is a no-op and the ".." cancels "a", leaving "x".
+        assert_eq!(resolve_container_entry("", "a/./../x"), Ok("x".to_string()));
+    }
+
+    #[test]
+    fn four_dots_is_a_literal_component_not_a_traversal_token() {
+        // "....//x": "...." is not the exact string "..", so it is pushed as an ordinary
+        // (if unusual) literal segment. The doubled slash contributes an empty component,
+        // which is dropped.
+        assert_eq!(resolve_container_entry("", "....//x"), Ok("..../x".to_string()));
+    }
+
+    #[test]
+    fn bare_dotdot_against_a_one_level_base_has_no_file_left_to_resolve() {
+        assert_eq!(resolve_container_entry("a", ".."), Err(PathTraversalError::EmptyResult));
+    }
+
+    #[test]
+    fn bare_dotdot_against_the_root_escapes() {
+        assert_eq!(resolve_container_entry("", ".."), Err(PathTraversalError::EscapesRoot));
+    }
+
+    #[test]
+    fn empty_components_are_skipped() {
+        assert_eq!(resolve_container_entry("", "a//b"), Ok("a/b".to_string()));
+    }
+
+    #[test]
+    fn trailing_dotdot_resolves_to_the_base_directory_itself() {
+        // "a/..": pushes "a" onto "root" then immediately pops it back off, landing
+        // exactly on the base -- allowed, even though the result names a directory
+        // rather than a file (the caller's `by_name` lookup will simply miss).
+        assert_eq!(resolve_container_entry("root", "a/.."), Ok("root".to_string()));
+    }
+
+    #[test]
+    fn nul_byte_is_rejected_outright() {
+        assert_eq!(
+            resolve_container_entry("word", "media/\0image1.png"),
+            Err(PathTraversalError::InvalidByte)
+        );
+    }
+
+    #[test]
+    fn percent_encoded_traversal_is_never_decoded_by_this_function() {
+        // "%2e%2e%2f" contains no literal '/' -- it is one opaque literal segment here.
+        // Decoding is the caller's job, and must happen *before* calling this function
+        // (EPUB's `resolve_path` does exactly that); decoding afterwards would let a
+        // decoded "../" slip past a boundary check that already ran.
+        assert_eq!(
+            resolve_container_entry("base", "%2e%2e%2f"),
+            Ok("base/%2e%2e%2f".to_string())
+        );
+    }
+
+    #[test]
+    fn multibyte_character_after_dotdot_is_a_literal_segment_not_a_slice_panic() {
+        // ".." followed by a 4-byte emoji is not the exact string "..", so the whole
+        // thing is pushed as a literal segment. Exact string comparison (rather than the
+        // old PPTX code's fixed-byte-offset slice) can never land mid-character.
+        assert_eq!(
+            resolve_container_entry("base", "..\u{1F600}/x"),
+            Ok("base/..\u{1F600}/x".to_string())
+        );
+    }
+
+    // DOCX-specific cases: `docx.rs` calls this with `base = "word"`. These pin the two
+    // behaviours called out in the unification plan as a deliberate change from the
+    // deleted `has_path_traversal`, which rejected every `..` unconditionally.
+
+    #[test]
+    fn docx_word_relative_target_climbs_to_the_package_root_media_directory() {
+        // The normal shape for a DOCX image whose relationship lives at the package
+        // root's "media/" directory, one level above "word/". `has_path_traversal` used
+        // to reject this outright; it is legitimate and must resolve.
+        assert_eq!(
+            resolve_container_entry("word", "../media/image1.png"),
+            Ok("media/image1.png".to_string())
+        );
+    }
+
+    #[test]
+    fn docx_word_relative_target_that_truly_escapes_the_package_still_errors() {
+        assert_eq!(
+            resolve_container_entry("word", "../../../etc/passwd"),
+            Err(PathTraversalError::EscapesRoot)
+        );
+    }
+
+    #[test]
+    fn docx_absolute_target_reroots_to_the_package_relative_name() {
+        // `has_path_traversal` allowed this (asserted deliberately at what was
+        // `security.rs:891`) and DOCX then re-rooted it by hand with `strip_prefix('/')`.
+        // The shared helper folds that re-rooting into the same call.
+        assert_eq!(
+            resolve_container_entry("word", "/media/image1.png"),
+            Ok("media/image1.png".to_string())
+        );
     }
 }
