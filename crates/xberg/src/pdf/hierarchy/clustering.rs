@@ -76,6 +76,13 @@ pub(crate) fn cluster_font_sizes(blocks: &[TextBlock], k: usize) -> Result<Vec<F
     let actual_k = k.min(blocks.len());
 
     let mut font_sizes: Vec<f32> = blocks.iter().map(|b| b.font_size).filter(|fs| fs.is_finite()).collect();
+    if font_sizes.is_empty() {
+        // Every block's font size was NaN/infinite (a PDF can produce this via a
+        // degenerate text/font matrix), so there is no usable font-size signal at
+        // all — treat it the same as the no-blocks case above rather than let the
+        // `else` branch below underflow `font_sizes.len() - 1` on an empty `Vec`.
+        return Ok(Vec::new());
+    }
     font_sizes.sort_by(|a, b| b.total_cmp(a));
     font_sizes.dedup_by(|a, b| (*a - *b).abs() < 0.05);
 
@@ -342,6 +349,44 @@ mod tests {
             },
             font_size,
         }
+    }
+
+    /// Every block's font size is non-finite (NaN), which a PDF can produce via a
+    /// degenerate text/font matrix. Before the `font_sizes.is_empty()` guard, the
+    /// `.filter(|fs| fs.is_finite())` step emptied `font_sizes` entirely, and the
+    /// `else` branch (taken whenever `font_sizes.len() < actual_k`, which includes
+    /// zero) then computed `font_sizes[font_sizes.len() - 1]`: `0usize - 1`
+    /// underflows (a debug-mode panic on its own), and in a release build (no
+    /// `overflow-checks`, matching this workspace's profile) the wrapped
+    /// `usize::MAX` index still panics on the following `Vec` index — bounds
+    /// checks are independent of `overflow-checks`. `cluster_font_sizes` must
+    /// instead return an empty cluster list, exactly like the pre-existing
+    /// no-blocks-at-all case just above it.
+    #[test]
+    fn all_non_finite_font_sizes_returns_empty_clusters_instead_of_panicking() {
+        let blocks = vec![make_block("Heading with a broken font matrix", f32::NAN)];
+
+        let clusters = cluster_font_sizes(&blocks, 1).expect("must not panic on all-NaN font sizes");
+
+        assert!(
+            clusters.is_empty(),
+            "no finite font-size signal exists, so no clusters should be produced, got {clusters:?}"
+        );
+    }
+
+    /// Positive control: a normal single finite-font-size block (the same shape
+    /// as the panic case, minus the NaN) must still produce one cluster centered
+    /// on that font size — the fix must not turn ordinary single-block input into
+    /// an empty result too.
+    #[test]
+    fn single_finite_font_size_still_produces_one_cluster() {
+        let blocks = vec![make_block("Ordinary heading", 18.0)];
+
+        let clusters = cluster_font_sizes(&blocks, 1).expect("clustering a single finite font size must succeed");
+
+        assert_eq!(clusters.len(), 1, "expected exactly one cluster, got {clusters:?}");
+        assert_eq!(clusters[0].centroid, 18.0);
+        assert_eq!(clusters[0].members.len(), 1);
     }
 
     #[test]
