@@ -427,12 +427,22 @@ impl<'a, 'b> HtmlWalker<'a, 'b> {
             }
             "th" | "td" => {
                 if let Some(ref mut table) = self.table {
+                    // Clamped at parse time so an out-of-range attribute (a hostile
+                    // `colspan="4294967295"`, say) never enters `CellMeta`/`GridCell` at
+                    // all, on top of the same clamp `grid_flatten::resolve_span_grid`
+                    // applies when it consumes these values — belt and suspenders, since
+                    // that helper also has to trust spans from an external crate it can't
+                    // control (see `extraction::grid_flatten` module docs). The bounds
+                    // themselves are the HTML Living Standard's own caps on these
+                    // attributes, not values we invented.
                     let col_span = extract_attr(attrs_str, "colspan")
                         .and_then(|v| v.parse::<u32>().ok())
-                        .unwrap_or(1);
+                        .unwrap_or(1)
+                        .clamp(1, crate::extraction::grid_flatten::MAX_COL_SPAN);
                     let row_span = extract_attr(attrs_str, "rowspan")
                         .and_then(|v| v.parse::<u32>().ok())
-                        .unwrap_or(1);
+                        .unwrap_or(1)
+                        .clamp(1, crate::extraction::grid_flatten::MAX_ROW_SPAN);
                     table.open_cell(col_span, row_span, tag == "th");
                 }
             }
