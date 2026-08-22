@@ -185,7 +185,11 @@ mod tests {
     fn colspan_three_widens_grid_exactly() {
         let rows = vec![
             vec![SpanCell::new("Header", 1, 3)],
-            vec![SpanCell::new("a", 1, 1), SpanCell::new("b", 1, 1), SpanCell::new("c", 1, 1)],
+            vec![
+                SpanCell::new("a", 1, 1),
+                SpanCell::new("b", 1, 1),
+                SpanCell::new("c", 1, 1),
+            ],
         ];
         let grid = flatten_spanned_rows(&rows);
         assert_eq!(grid[0], vec!["Header", "", ""]);
@@ -197,7 +201,10 @@ mod tests {
     /// right after it, not clamped down further.
     #[test]
     fn colspan_at_cap_is_unaffected() {
-        let rows = vec![vec![SpanCell::new("wide", 1, MAX_COL_SPAN), SpanCell::new("next", 1, 1)]];
+        let rows = vec![vec![
+            SpanCell::new("wide", 1, MAX_COL_SPAN),
+            SpanCell::new("next", 1, 1),
+        ]];
         let mut placed = Vec::new();
         let cols = resolve_span_grid(
             &rows,
@@ -213,7 +220,10 @@ mod tests {
     /// smaller value and not left unclamped.
     #[test]
     fn colspan_one_over_cap_is_clamped_to_cap() {
-        let rows = vec![vec![SpanCell::new("wide", 1, MAX_COL_SPAN + 1), SpanCell::new("next", 1, 1)]];
+        let rows = vec![vec![
+            SpanCell::new("wide", 1, MAX_COL_SPAN + 1),
+            SpanCell::new("next", 1, 1),
+        ]];
         let mut placed = Vec::new();
         let cols = resolve_span_grid(
             &rows,

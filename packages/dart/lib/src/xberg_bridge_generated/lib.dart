@@ -11,33 +11,6 @@ part 'lib.freezed.dart';
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `ChunkClassificationEnrichmentConfig`, `DocumentExtractorDartCallbacks`, `EmbeddingBackendDartCallbacks`, `OcrBackendDartCallbacks`, `PostProcessorDartCallbacks`, `RendererDartCallbacks`, `RerankerBackendDartCallbacks`, `TokenizerBackendDartCallbacks`, `ValidatorDartCallbacks`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `backend_type`, `can_handle`, `confidence_semantics`, `count_tokens`, `dimensions`, `embed`, `emits_structured_markdown`, `estimated_duration_ms`, `extract`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `name`, `name`, `name`, `name`, `name`, `name`, `name`, `name`, `page_orientation_handling`, `priority`, `priority`, `priority`, `process_document`, `process_image_file`, `process_image`, `process`, `processing_stage`, `render_result`, `rerank`, `should_process`, `should_validate`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `supported_languages`, `supported_mime_types`, `supports_document_processing`, `supports_language`, `supports_table_detection`, `validate`, `version`, `version`, `version`, `version`, `version`, `version`, `version`, `version`
 
-/// Whether enabling layout detection while `output_format` stays `Plain`
-/// wastes the layout pass.
-///
-/// Layout detection exists to feed the structured-reconstruction pipeline that turns
-/// detected regions into headings, lists and tables. At `Plain` no renderer
-/// consumes that structure — the layout model still runs (measured: 20s on tesseract, 202s
-/// on paddle, for a 16-page scan) and every region it detects is discarded. This implements
-/// point 4 of the documented OCR/layout contract: "layout enabled implies output should be
-/// structured, never plain."
-///
-/// This is a pure predicate meant to back a *warning*, not a validation error and not a
-/// coercion: `Plain` stays the default output format and layout stays off by default, so a
-/// caller combining both deliberately is still free to do so. Pass the fully resolved values
-/// (after every override has been applied), not raw CLI flags.
-///
-/// **Returns:**
-///
-/// `true` when layout is enabled and the output format is `Plain` — the
-/// layout work will be computed and its structure discarded.
-Future<bool> layoutWastesPlainOutput({
-  required bool layoutEnabled,
-  required OutputFormat outputFormat,
-}) => RustLib.instance.api.crateLayoutWastesPlainOutput(
-  layoutEnabled: layoutEnabled,
-  outputFormat: outputFormat,
-);
-
 /// Extract content from a single bytes or URI input.
 Future<ExtractionResult> extract({
   required ExtractInput input,
@@ -10284,7 +10257,7 @@ class LayoutDetectionConfig {
 
   /// How to resolve overlapping native vs layout tables.
   ///
-  /// When a native oxide table and a layout (TATR/SLANeXT) table overlap on the
+  /// When a native table and a layout (TATR/SLANeXT) table overlap on the
   /// same region, this controls which one is kept. Defaults to
   /// [`TableOverlapPreference::Content`] (historical behavior: keep the table with
   /// more content). Set to [`TableOverlapPreference::Native`] to favor source
@@ -13753,7 +13726,7 @@ class PdfConfig {
   ///
   /// When `true` (default), runs the native engine's grid detector and, if it
   /// finds nothing, falls back to the heuristic text-layer reconstruction in
-  /// `pdf::oxide::table::extract_tables_heuristic`. Set to `false` to skip
+  /// `pdf::native::table::extract_tables_heuristic`. Set to `false` to skip
   /// both passes — `tables` will then be empty in the result.
   final bool extractTables;
 
@@ -16654,7 +16627,7 @@ enum TableModel {
 
 /// How to resolve overlapping native vs layout (TATR/SLANeXT) tables.
 ///
-/// When both native oxide detection and the layout table model produce a table for
+/// When both native detection and the layout table model produce a table for
 /// the same page region, one must be dropped. This controls which one wins. Wire
 /// format is snake_case in all serializers (JSON, TOML, YAML).
 enum TableOverlapPreference {
@@ -16664,7 +16637,7 @@ enum TableOverlapPreference {
   /// text F1 when the recognized cell reflow diverges from the source reading order.
   content,
 
-  /// Prefer the native oxide table when it overlaps a layout table. Native tables
+  /// Prefer the native table when it overlaps a layout table. Native tables
   /// preserve the source reading order, which scores higher on text F1 for
   /// documents where the layout model's cell reflow diverges from the ground truth.
   native,

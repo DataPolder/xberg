@@ -5817,7 +5817,11 @@ mod tests {
     #[test]
     fn clamp_numbering_level_leaves_every_level_word_itself_permits_untouched() {
         for level in 0..=MAX_LIST_NESTING_LEVEL {
-            assert_eq!(clamp_numbering_level(level), level, "level {level} is within Word's own range");
+            assert_eq!(
+                clamp_numbering_level(level),
+                level,
+                "level {level} is within Word's own range"
+            );
         }
     }
 }

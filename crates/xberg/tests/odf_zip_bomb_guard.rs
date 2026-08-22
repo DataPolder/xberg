@@ -172,10 +172,7 @@ fn test_odp_rejects_high_compression_ratio_archive() {
 #[test]
 fn test_odt_rejects_archive_exceeding_file_count() {
     // mimetype + content.xml + two extra entries = 4 files, over the 2-file cap.
-    let bytes = odt_zip_with_extra_entries(
-        "<text:p>hi</text:p>",
-        &[("extra1.txt", b"a"), ("extra2.txt", b"b")],
-    );
+    let bytes = odt_zip_with_extra_entries("<text:p>hi</text:p>", &[("extra1.txt", b"a"), ("extra2.txt", b"b")]);
     let config = config_with_limits(low_file_count_limits());
     let result = extract_bytes_document_blocking(&bytes, ODT_MIME, &config);
     assert_is_security_error(result, "too many files");

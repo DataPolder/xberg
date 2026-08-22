@@ -1,6 +1,6 @@
 // GENERATED CODE - DO NOT MODIFY BY HAND
 // coverage:ignore-file
-// ignore_for_file: type=lint
+// ignore_for_file: type=lint, type=warning, deprecated_member_use, deprecated_member_use_from_same_package
 // ignore_for_file: unused_element, deprecated_member_use, deprecated_member_use_from_same_package, use_function_type_syntax_for_parameters, unnecessary_const, avoid_init_to_null, invalid_override_different_default_values_named, prefer_expression_function_bodies, annotate_overrides, invalid_annotation_target, unnecessary_question_mark
 
 part of 'lib.dart';
@@ -9,6 +9,7 @@ part of 'lib.dart';
 // FreezedGenerator
 // **************************************************************************
 
+// GENERATED CODE - DO NOT MODIFY BY HAND
 // dart format off
 T _$identity<T>(T value) => value;
 /// @nodoc
@@ -7157,7 +7158,7 @@ as String,
 
 
 class LateInteractionModelType_Custom extends LateInteractionModelType {
-  const LateInteractionModelType_Custom({required this.modelId, required this.modelFile, required final  List<String> additionalFiles, required this.maxLength}): _additionalFiles = additionalFiles,super._();
+  const LateInteractionModelType_Custom({required this.modelId, required this.modelFile, required  List<String> additionalFiles, required this.maxLength}): _additionalFiles = additionalFiles,super._();
   
 
 /// HuggingFace model repository ID.
@@ -11922,7 +11923,7 @@ as String,
 
 
 class RerankerModelType_Custom extends RerankerModelType {
-  const RerankerModelType_Custom({required this.modelId, required this.modelFile, required final  List<String> additionalFiles, required this.maxLength, required this.head}): _additionalFiles = additionalFiles,super._();
+  const RerankerModelType_Custom({required this.modelId, required this.modelFile, required  List<String> additionalFiles, required this.maxLength, required this.head}): _additionalFiles = additionalFiles,super._();
   
 
 /// HuggingFace model repository ID (e.g. "cross-encoder/ms-marco-MiniLM-L6-v2").
@@ -12919,7 +12920,7 @@ as String,
 
 
 class SparseEmbeddingModelType_Custom extends SparseEmbeddingModelType {
-  const SparseEmbeddingModelType_Custom({required this.modelId, required this.modelFile, required final  List<String> additionalFiles, required this.maxLength}): _additionalFiles = additionalFiles,super._();
+  const SparseEmbeddingModelType_Custom({required this.modelId, required this.modelFile, required  List<String> additionalFiles, required this.maxLength}): _additionalFiles = additionalFiles,super._();
   
 
 /// HuggingFace model repository ID.

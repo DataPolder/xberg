@@ -4244,9 +4244,7 @@ mod tests {
         use tracing_subscriber::layer::SubscriberExt as _;
         use tracing_subscriber::{EnvFilter, Layer};
 
-        use super::super::{
-            ExtractionConfig, enforce_image_page_limit, enforce_image_page_limit_stub_with_guard,
-        };
+        use super::super::{ExtractionConfig, enforce_image_page_limit, enforce_image_page_limit_stub_with_guard};
         use crate::extractors::security::SecurityLimits;
 
         /// A tracing `Layer` that records the level of every emitted event.

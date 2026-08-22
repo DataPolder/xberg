@@ -28,7 +28,7 @@
 
 use crate::*;
 use flutter_rust_bridge::for_generated::byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
-use flutter_rust_bridge::for_generated::{transform_result_dco, Lifetimeable, Lockable};
+use flutter_rust_bridge::for_generated::{Lifetimeable, Lockable, transform_result_dco};
 use flutter_rust_bridge::{Handler, IntoIntoDart};
 
 // Section: boilerplate
@@ -39,7 +39,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 939365216;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -890568742;
 
 // Section: executor
 
@@ -8004,36 +8004,6 @@ fn wire__crate__install_pdf_render_diagnostics_impl(
             move |context| {
                 transform_result_sse::<_, ()>((move || {
                     let output_ok = Result::<_, ()>::Ok(crate::install_pdf_render_diagnostics())?;
-                    Ok(output_ok)
-                })())
-            }
-        },
-    )
-}
-fn wire__crate__layout_wastes_plain_output_impl(
-    port_: flutter_rust_bridge::for_generated::MessagePort,
-    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
-    rust_vec_len_: i32,
-    data_len_: i32,
-) {
-    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
-        flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "layout_wastes_plain_output",
-            port: Some(port_),
-            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
-        },
-        move || {
-            let message = unsafe {
-                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(ptr_, rust_vec_len_, data_len_)
-            };
-            let mut deserializer = flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_layout_enabled = <bool>::sse_decode(&mut deserializer);
-            let api_output_format = <crate::OutputFormat>::sse_decode(&mut deserializer);
-            deserializer.end();
-            move |context| {
-                transform_result_sse::<_, ()>((move || {
-                    let output_ok =
-                        Result::<_, ()>::Ok(crate::layout_wastes_plain_output(api_layout_enabled, api_output_format))?;
                     Ok(output_ok)
                 })())
             }
@@ -21908,38 +21878,37 @@ fn pde_ffi_dispatcher_primary_impl(
         267 => wire__crate__extract_batch_impl(port, ptr, rust_vec_len, data_len),
         268 => wire__crate__find_unmarked_claims_impl(port, ptr, rust_vec_len, data_len),
         269 => wire__crate__install_pdf_render_diagnostics_impl(port, ptr, rust_vec_len, data_len),
-        270 => wire__crate__layout_wastes_plain_output_impl(port, ptr, rust_vec_len, data_len),
-        271 => wire__crate__list_document_extractors_impl(port, ptr, rust_vec_len, data_len),
-        272 => wire__crate__list_embedding_backends_impl(port, ptr, rust_vec_len, data_len),
-        273 => wire__crate__list_ocr_backends_impl(port, ptr, rust_vec_len, data_len),
-        274 => wire__crate__list_post_processors_impl(port, ptr, rust_vec_len, data_len),
-        275 => wire__crate__list_renderers_impl(port, ptr, rust_vec_len, data_len),
-        276 => wire__crate__list_reranker_backends_impl(port, ptr, rust_vec_len, data_len),
-        277 => wire__crate__list_supported_formats_impl(port, ptr, rust_vec_len, data_len),
-        278 => wire__crate__list_tokenizer_backends_impl(port, ptr, rust_vec_len, data_len),
-        279 => wire__crate__list_validators_impl(port, ptr, rust_vec_len, data_len),
-        280 => wire__crate__map_url_impl(port, ptr, rust_vec_len, data_len),
-        281 => wire__crate__max_sim_rank_impl(port, ptr, rust_vec_len, data_len),
-        282 => wire__crate__max_sim_score_impl(port, ptr, rust_vec_len, data_len),
-        283 => wire__crate__register_document_extractor_impl(port, ptr, rust_vec_len, data_len),
-        284 => wire__crate__register_embedding_backend_impl(port, ptr, rust_vec_len, data_len),
-        285 => wire__crate__register_ocr_backend_impl(port, ptr, rust_vec_len, data_len),
-        286 => wire__crate__register_post_processor_impl(port, ptr, rust_vec_len, data_len),
-        287 => wire__crate__register_renderer_impl(port, ptr, rust_vec_len, data_len),
-        288 => wire__crate__register_reranker_backend_impl(port, ptr, rust_vec_len, data_len),
-        289 => wire__crate__register_tokenizer_backend_impl(port, ptr, rust_vec_len, data_len),
-        290 => wire__crate__register_validator_impl(port, ptr, rust_vec_len, data_len),
-        291 => wire__crate__take_xberg_native_pdf_render_warnings_impl(port, ptr, rust_vec_len, data_len),
-        292 => wire__crate__timestamp_token_to_ms_impl(port, ptr, rust_vec_len, data_len),
-        293 => wire__crate__unregister_document_extractor_impl(port, ptr, rust_vec_len, data_len),
-        294 => wire__crate__unregister_embedding_backend_impl(port, ptr, rust_vec_len, data_len),
-        295 => wire__crate__unregister_ocr_backend_impl(port, ptr, rust_vec_len, data_len),
-        296 => wire__crate__unregister_post_processor_impl(port, ptr, rust_vec_len, data_len),
-        297 => wire__crate__unregister_renderer_impl(port, ptr, rust_vec_len, data_len),
-        298 => wire__crate__unregister_reranker_backend_impl(port, ptr, rust_vec_len, data_len),
-        299 => wire__crate__unregister_tokenizer_backend_impl(port, ptr, rust_vec_len, data_len),
-        300 => wire__crate__unregister_validator_impl(port, ptr, rust_vec_len, data_len),
-        301 => wire__crate__verify_excerpt_impl(port, ptr, rust_vec_len, data_len),
+        270 => wire__crate__list_document_extractors_impl(port, ptr, rust_vec_len, data_len),
+        271 => wire__crate__list_embedding_backends_impl(port, ptr, rust_vec_len, data_len),
+        272 => wire__crate__list_ocr_backends_impl(port, ptr, rust_vec_len, data_len),
+        273 => wire__crate__list_post_processors_impl(port, ptr, rust_vec_len, data_len),
+        274 => wire__crate__list_renderers_impl(port, ptr, rust_vec_len, data_len),
+        275 => wire__crate__list_reranker_backends_impl(port, ptr, rust_vec_len, data_len),
+        276 => wire__crate__list_supported_formats_impl(port, ptr, rust_vec_len, data_len),
+        277 => wire__crate__list_tokenizer_backends_impl(port, ptr, rust_vec_len, data_len),
+        278 => wire__crate__list_validators_impl(port, ptr, rust_vec_len, data_len),
+        279 => wire__crate__map_url_impl(port, ptr, rust_vec_len, data_len),
+        280 => wire__crate__max_sim_rank_impl(port, ptr, rust_vec_len, data_len),
+        281 => wire__crate__max_sim_score_impl(port, ptr, rust_vec_len, data_len),
+        282 => wire__crate__register_document_extractor_impl(port, ptr, rust_vec_len, data_len),
+        283 => wire__crate__register_embedding_backend_impl(port, ptr, rust_vec_len, data_len),
+        284 => wire__crate__register_ocr_backend_impl(port, ptr, rust_vec_len, data_len),
+        285 => wire__crate__register_post_processor_impl(port, ptr, rust_vec_len, data_len),
+        286 => wire__crate__register_renderer_impl(port, ptr, rust_vec_len, data_len),
+        287 => wire__crate__register_reranker_backend_impl(port, ptr, rust_vec_len, data_len),
+        288 => wire__crate__register_tokenizer_backend_impl(port, ptr, rust_vec_len, data_len),
+        289 => wire__crate__register_validator_impl(port, ptr, rust_vec_len, data_len),
+        290 => wire__crate__take_xberg_native_pdf_render_warnings_impl(port, ptr, rust_vec_len, data_len),
+        291 => wire__crate__timestamp_token_to_ms_impl(port, ptr, rust_vec_len, data_len),
+        292 => wire__crate__unregister_document_extractor_impl(port, ptr, rust_vec_len, data_len),
+        293 => wire__crate__unregister_embedding_backend_impl(port, ptr, rust_vec_len, data_len),
+        294 => wire__crate__unregister_ocr_backend_impl(port, ptr, rust_vec_len, data_len),
+        295 => wire__crate__unregister_post_processor_impl(port, ptr, rust_vec_len, data_len),
+        296 => wire__crate__unregister_renderer_impl(port, ptr, rust_vec_len, data_len),
+        297 => wire__crate__unregister_reranker_backend_impl(port, ptr, rust_vec_len, data_len),
+        298 => wire__crate__unregister_tokenizer_backend_impl(port, ptr, rust_vec_len, data_len),
+        299 => wire__crate__unregister_validator_impl(port, ptr, rust_vec_len, data_len),
+        300 => wire__crate__verify_excerpt_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -36653,7 +36622,7 @@ mod io {
     use super::*;
     use crate::*;
     use flutter_rust_bridge::for_generated::byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
-    use flutter_rust_bridge::for_generated::{transform_result_dco, Lifetimeable, Lockable};
+    use flutter_rust_bridge::for_generated::{Lifetimeable, Lockable, transform_result_dco};
     use flutter_rust_bridge::{Handler, IntoIntoDart};
 
     // Section: boilerplate
@@ -36958,7 +36927,7 @@ mod web {
     use flutter_rust_bridge::for_generated::byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
     use flutter_rust_bridge::for_generated::wasm_bindgen;
     use flutter_rust_bridge::for_generated::wasm_bindgen::prelude::*;
-    use flutter_rust_bridge::for_generated::{transform_result_dco, Lifetimeable, Lockable};
+    use flutter_rust_bridge::for_generated::{Lifetimeable, Lockable, transform_result_dco};
     use flutter_rust_bridge::{Handler, IntoIntoDart};
 
     // Section: boilerplate

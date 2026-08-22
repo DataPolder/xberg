@@ -2486,9 +2486,9 @@ typedef struct XBERGTableModel XBERGTableModel;
 /**
  * How to resolve overlapping native vs layout (TATR/SLANeXT) tables.
  *
- * When both native oxide detection and the layout table model produce a table
- * for the same page region, one must be dropped. This controls which one wins.
- * Wire format is snake_case in all serializers (JSON, TOML, YAML).
+ * When both native detection and the layout table model produce a table for
+ * the same page region, one must be dropped. This controls which one wins. Wire
+ * format is snake_case in all serializers (JSON, TOML, YAML).
  */
 typedef struct XBERGTableOverlapPreference XBERGTableOverlapPreference;
 /**
@@ -23670,14 +23670,6 @@ char *xberg_output_format_to_json(XBERGAlefHandle handle);
 char *xberg_output_format_to_string(XBERGAlefHandle handle);
 
 /**
- * Create a `OutputFormat` from a JSON string. Returns 0 on failure.
- * # Safety
- * JSON string must be valid UTF-8 and null-terminated.
- * Returned handle must be freed with `xberg_output_format_free`.
- */
-XBERGAlefHandle xberg_output_format_from_json(const char *json);
-
-/**
  * Free a `JupyterCellRendering` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
@@ -25383,41 +25375,6 @@ void xberg_link_style_free(XBERGAlefHandle handle);
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_url_escape_style_free(XBERGAlefHandle handle);
-
-/**
- * Whether enabling layout detection while `output_format` stays `Plain`
- * wastes the layout pass.
- *
- * Layout detection exists to feed the structured-reconstruction pipeline that
- * turns detected regions into headings, lists and tables. At `Plain` no
- * renderer
- * consumes that structure â the layout model still runs (measured: 20s on
- * tesseract, 202s on paddle, for a 16-page scan) and every region it detects is
- * discarded. This implements point 4 of the documented OCR/layout contract:
- * "layout enabled implies output should be structured, never plain."
- *
- * This is a pure predicate meant to back a *warning*, not a validation error
- * and not a coercion: `Plain` stays the default output format and layout stays
- * off by default, so a caller combining both deliberately is still free to do
- * so. Pass the fully resolved values (after every override has been applied),
- * not raw CLI flags.
- * \param layout_enabled Whether layout detection will run for this extraction.
- * \param output_format The resolved output format the extraction will render.
- * \return `true` when layout is enabled and the output format is `Plain` â
- * the layout work will be computed and its structure discarded.
- * \note SAFETY: Caller must ensure all pointer arguments are valid or null.
- * Returned pointers must be freed with the appropriate free function.
- * \code
- * use xberg::core::config_validation::layout_wastes_plain_output;
- * use xberg::OutputFormat;
- *
- * assert!(layout_wastes_plain_output(true, &OutputFormat::Plain));
- * assert!(!layout_wastes_plain_output(true, &OutputFormat::Markdown));
- * assert!(!layout_wastes_plain_output(false, &OutputFormat::Plain));
- * \endcode
- */
-int32_t xberg_layout_wastes_plain_output(int32_t layout_enabled,
-                                         XBERGAlefHandle output_format);
 
 /**
  * Extract content from a single bytes or URI input.
