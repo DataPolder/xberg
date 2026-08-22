@@ -64,8 +64,21 @@ const DEFAULT_OCR_LANGUAGE: &str = "eng";
 const DEFAULT_PADDLE_OCR_LANGUAGE: &str = "en";
 
 /// Backends that use short ISO 639-1 style language codes rather than ISO 639-3.
+///
+/// `candle-deepseek-ocr` belongs here with the other two candle VLM backends: its
+/// `supported_languages()` body is byte-identical to theirs
+/// (`crates/xberg/src/candle_ocr/{deepseek,glm}_ocr_backend.rs`), accepting both the
+/// ISO 639-3 and ISO 639-1 form of every language. Omitting it made the default reported
+/// as `"eng"` where its two siblings report `"en"`, for no reason either backend can see:
+/// none of the three consumes `config.language` for inference, so the difference was
+/// purely in emitted metadata.
 #[cfg(feature = "ocr-surface")]
-const PADDLE_LANGUAGE_BACKENDS: &[&str] = &["paddle-ocr", "candle-paddleocr-vl", "candle-glm-ocr"];
+const PADDLE_LANGUAGE_BACKENDS: &[&str] = &[
+    "paddle-ocr",
+    "candle-paddleocr-vl",
+    "candle-glm-ocr",
+    "candle-deepseek-ocr",
+];
 
 /// Hardware acceleration provider for ONNX Runtime models.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
@@ -2927,6 +2940,27 @@ mod tests {
             };
             assert!(overrides.validate().is_ok(), "Expected backend '{backend}' to be valid");
         }
+    }
+
+    /// The three candle VLM backends declare identical `supported_languages()` sets, so
+    /// they must all default to the same short code. `candle-deepseek-ocr` was missing
+    /// from `PADDLE_LANGUAGE_BACKENDS`, defaulting to `"eng"` where its siblings use
+    /// `"en"`. Against unfixed code the deepseek row below returns `"eng"`.
+    #[cfg(feature = "ocr-surface")]
+    #[test]
+    fn every_candle_vlm_backend_defaults_to_the_same_short_language_code() {
+        for backend in ["candle-paddleocr-vl", "candle-glm-ocr", "candle-deepseek-ocr"] {
+            assert_eq!(
+                default_language_for_backend(backend),
+                DEFAULT_PADDLE_OCR_LANGUAGE,
+                "{backend} must default to the short ISO 639-1 code its siblings use"
+            );
+        }
+        assert_eq!(
+            default_language_for_backend("tesseract"),
+            DEFAULT_OCR_LANGUAGE,
+            "a backend outside the family must keep the ISO 639-3 default"
+        );
     }
 
     #[cfg(feature = "ocr-surface")]
