@@ -220,7 +220,7 @@ pub(crate) fn get_or_init_tokenizer(model: &str) -> crate::Result<Arc<tokenizers
 /// assert!(n_gpt4 > 0);
 /// ```
 ///
-/// # Note
+/// ##### Note
 ///
 /// This function is intentionally excluded from language bindings (alef-skipped) —
 /// it is a Rust-only utility that relies on the cached tokenizer infrastructure.
