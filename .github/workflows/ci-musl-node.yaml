@@ -14,7 +14,7 @@ name: CI Musl Node Binding
 # backstop against Alpine package drift the path filter cannot see.
 on:
   push:
-    branches: [main]
+    branches: [main, chore/alef-fixes]
     paths: &musl-node-paths
       - "docker/Dockerfile.musl-node"
       - "scripts/ci/smoke-test-musl-node-binding.sh"

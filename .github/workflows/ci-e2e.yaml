@@ -2,7 +2,7 @@ name: CI E2E
 
 on:
   push:
-    branches: [main]
+    branches: [main, chore/alef-fixes]
     paths:
       - "crates/**"
       - "packages/**"
