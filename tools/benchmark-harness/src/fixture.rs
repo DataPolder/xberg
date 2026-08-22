@@ -235,7 +235,7 @@ impl Fixture {
         let Some(family) = canonical_extension_family(&document_extension_lower) else {
             return Ok(());
         };
-        if family.iter().any(|extension| *extension == file_type_lower) {
+        if family.contains(&file_type_lower) {
             return Ok(());
         }
         Err(Error::InvalidFixture {
