@@ -1543,6 +1543,20 @@ const INLINE_STYLE_BASELINE_TOLERANCE: f32 = 0.5;
 const INLINE_STYLE_MAX_FORWARD_GAP_FONT_FACTOR: f32 = 1.0;
 const INLINE_STYLE_MAX_OVERLAP_FONT_FACTOR: f32 = 0.15;
 
+/// Multiple of font size within which two consecutive lines' right edges must
+/// agree for the second to read as the wrapped tail of a heading, rather than
+/// unrelated content that merely follows it.
+///
+/// A heading that wraps mid-sentence fills its first physical line out to the
+/// text column's right margin before continuing below, so the wrapped line and
+/// its continuation land their right edges close together; a heading followed
+/// by unrelated content (a callout, a new paragraph) has no reason to share
+/// that edge and typically differs by far more. Two font-size widths is
+/// generous enough to absorb ordinary word-wrap slack -- the space left unused
+/// because the next word did not fit -- without also treating a long heading
+/// followed by a much shorter, unrelated line as a wrap. See #1467.
+const HEADING_WRAP_RIGHT_EDGE_TOLERANCE_FONT_FACTOR: f32 = 2.0;
+
 /// Detect paragraph-break y-positions from horizontal whitespace bands.
 ///
 /// Segments are clustered into visual lines after sorting by y — stream order
@@ -1728,6 +1742,23 @@ fn blocks_to_paragraphs(
             // prose beginning with a bare year — "2024 was een druk jaar" — does not
             // break its paragraph. See #1386. ~keep
             let starts_section = starts_new_line && super::classify::is_numbered_section_heading(&line.text);
+            // A numbered section heading also always ENDS the element it opens: without
+            // this term nothing else distinguishes a heading from the body text that
+            // follows it when both share font size, weight, role and line spacing --
+            // exactly the shape of a bold-only page in #1467, where the heading and the
+            // callout beneath it are otherwise identical on every signal this grouper
+            // checks. `starts_section` (above) only fires while classifying the
+            // heading's OWN line and cannot see forward to close it once it opens; this
+            // looks backward at `prev` instead. Restricting to `current_lines.len() ==
+            // 1` scopes the break to the line directly after the heading, so a
+            // paragraph that is already several lines long is untouched, and
+            // `heading_wraps_onto` exempts a heading that is itself still wrapping onto
+            // its next physical line rather than handing off to unrelated content. See
+            // #1467. ~keep
+            let follows_section = starts_new_line
+                && current_lines.len() == 1
+                && super::classify::is_numbered_section_heading(&prev.text)
+                && !heading_wraps_onto(prev, line);
             let crossed_gap = paragraph_gap_ys.iter().any(|&gap_y| {
                 let previous_baseline = prev.upright_baseline();
                 let current_baseline = line.upright_baseline();
@@ -1738,7 +1769,14 @@ fn blocks_to_paragraphs(
                 };
                 gap_y < upper && gap_y > lower
             });
-            rotation_change || font_change || role_change || bold_change || is_list || starts_section || crossed_gap
+            rotation_change
+                || font_change
+                || role_change
+                || bold_change
+                || is_list
+                || starts_section
+                || follows_section
+                || crossed_gap
         };
 
         if should_break && !current_lines.is_empty() {
@@ -1813,6 +1851,35 @@ fn is_inline_style_transition(current_is_single_visual_line: bool, previous: &Se
     next_start >= previous_start
         && advance_gap >= -(font_size * INLINE_STYLE_MAX_OVERLAP_FONT_FACTOR)
         && advance_gap <= font_size * INLINE_STYLE_MAX_FORWARD_GAP_FONT_FACTOR
+}
+
+/// Whether `line` reads as the wrapped continuation of the numbered-heading
+/// line `prev`, rather than a new, unrelated line that happens to follow it.
+///
+/// Both lines' right edges (`upright_advance_extent().1` -- the same geometry
+/// [`is_inline_style_transition`] uses for its own right-edge test) are
+/// compared: a heading that wraps mid-sentence fills its column before
+/// continuing below, so its right edge and the next line's right edge land
+/// within [`HEADING_WRAP_RIGHT_EDGE_TOLERANCE_FONT_FACTOR`] font-sizes of each
+/// other. A short heading followed by unrelated content has no reason to share
+/// that edge, so the two lines' right edges typically differ by far more.
+/// Reused from [`super::paragraphs::merge_continuation_paragraphs`] so the
+/// grouper's split and the merge pass's guard agree on the same wrap
+/// exemption. See #1467.
+pub(super) fn heading_wraps_onto(prev: &SegmentData, line: &SegmentData) -> bool {
+    if !prev.has_same_rotation(line) {
+        return false;
+    }
+    if !prev.font_size.is_finite() || !line.font_size.is_finite() {
+        return false;
+    }
+    let (_, prev_end) = prev.upright_advance_extent();
+    let (_, line_end) = line.upright_advance_extent();
+    if !prev_end.is_finite() || !line_end.is_finite() {
+        return false;
+    }
+    let tolerance = HEADING_WRAP_RIGHT_EDGE_TOLERANCE_FONT_FACTOR * prev.font_size.max(line.font_size).max(1.0);
+    (prev_end - line_end).abs() <= tolerance
 }
 
 /// Reconstruct PdfLine objects from a flat list of SegmentData, grouping by baseline_y.
@@ -6756,6 +6823,128 @@ mod tests {
         assert_eq!(
             paragraph_segment_text(&paragraphs[0]),
             "Het bestuur meldt 2024 was een druk jaar"
+        );
+    }
+
+    /// Regression for #1467: a numbered section heading, followed by unrelated
+    /// bold text at the same size, weight and line spacing, is welded to it.
+    /// Every other break signal is false here -- `font_change`, `role_change`
+    /// and `bold_change` all compare equal values, `crossed_gap` has no gaps to
+    /// find, and `looks_like_list_item` deliberately rejects numbered section
+    /// headings -- so only `follows_section` (backed by `heading_wraps_onto`
+    /// ruling out a mid-heading wrap) can separate them. Run through
+    /// `segments_to_paragraphs`, not `blocks_to_paragraphs`: the continuation
+    /// merge that runs immediately afterward would silently re-join exactly
+    /// this split unless it also refuses to absorb a heading it did not open.
+    #[test]
+    fn numbered_section_heading_is_split_from_the_callout_that_follows_it() {
+        let heading = SegmentData {
+            is_bold: true,
+            font_size: 12.0,
+            height: 12.0,
+            y: 700.0 - 12.0,
+            ..column_seg("1.1.1 Pictogrammen in het installatievoorschrift", 72.0, 170.0, 700.0)
+        };
+        let callout = SegmentData {
+            is_bold: true,
+            font_size: 12.0,
+            height: 12.0,
+            y: 684.0 - 12.0,
+            ..column_seg("VOORZICHTIG / BELANGRIJK", 72.0, 90.0, 684.0)
+        };
+        let body1 = SegmentData {
+            is_bold: true,
+            font_size: 12.0,
+            height: 12.0,
+            y: 668.0 - 12.0,
+            ..column_seg("Procedures die niet worden opgevolgd kunnen letsel", 72.0, 190.0, 668.0)
+        };
+        let body2 = SegmentData {
+            is_bold: true,
+            font_size: 12.0,
+            height: 12.0,
+            y: 652.0 - 12.0,
+            ..column_seg("of schade veroorzaken aan de installatie of de", 72.0, 190.0, 652.0)
+        };
+        let body3 = SegmentData {
+            is_bold: true,
+            font_size: 12.0,
+            height: 12.0,
+            y: 636.0 - 12.0,
+            ..column_seg("gebruiker van het toestel indien genegeerd", 72.0, 190.0, 636.0)
+        };
+
+        let paragraphs = segments_to_paragraphs(vec![heading, callout, body1, body2, body3], &[(12.0, None)], &[]);
+
+        assert_eq!(
+            paragraphs.len(),
+            2,
+            "the numbered heading must split from the callout and body text that follow it"
+        );
+        assert_eq!(
+            paragraph_segment_text(&paragraphs[0]),
+            "1.1.1 Pictogrammen in het installatievoorschrift",
+            "the heading must be its own element, not fused with the callout"
+        );
+        assert_eq!(
+            paragraph_segment_text(&paragraphs[1]),
+            "VOORZICHTIG / BELANGRIJK Procedures die niet worden opgevolgd kunnen letsel \
+             of schade veroorzaken aan de installatie of de gebruiker van het toestel indien genegeerd",
+            "the callout and following body text must survive as a separate element from the heading"
+        );
+    }
+
+    /// The wrap control for #1467: a numbered heading long enough to reach the
+    /// column's right edge, continuing onto a second, unnumbered physical line,
+    /// must stay ONE element -- splitting a heading from its own wrapped tail
+    /// would be worse than the original defect. This is what
+    /// `heading_wraps_onto` exists to rule out: without it, `follows_section`
+    /// would fire on every numbered heading regardless of whether the next line
+    /// is unrelated content or the heading's own continuation, and this
+    /// specific line pair -- same font, same weight, same one-line-height
+    /// spacing as the #1467 defect -- would be split into two paragraphs.
+    #[test]
+    fn heading_wrapping_onto_its_next_line_stays_one_paragraph() {
+        let heading_start = column_seg(
+            "1.1.1 Een Zeer Lange Sectietitel Die Helemaal Doorloopt Tot De",
+            72.0,
+            460.0,
+            700.0,
+        );
+        let heading_continuation = column_seg("Rechterkantlijn Van Deze Kolom", 72.0, 450.0, 684.0);
+
+        let paragraphs = segments_to_paragraphs(vec![heading_start, heading_continuation], &[(11.0, None)], &[]);
+
+        assert_eq!(
+            paragraphs.len(),
+            1,
+            "a heading wrapping onto its own next line must not be split from itself"
+        );
+    }
+
+    /// The prose control for #1467: three ordinary wrapped lines with no
+    /// numbering and no sentence terminator must stay ONE paragraph, exactly as
+    /// before this change -- `follows_section` never fires here because
+    /// `is_numbered_section_heading` is false for all three lines.
+    #[test]
+    fn wrapped_prose_lines_without_a_terminator_stay_one_paragraph() {
+        let segments = vec![
+            body_line_seg("The committee reviewed the annual budget", 700.0),
+            body_line_seg("report and discussed the proposed changes", 686.0),
+            body_line_seg("before adjourning the meeting for the day", 672.0),
+        ];
+
+        let paragraphs = segments_to_paragraphs(segments, &[(11.0, None)], &[]);
+
+        assert_eq!(
+            paragraphs.len(),
+            1,
+            "wrapped prose with no sentence terminator must stay one paragraph"
+        );
+        assert_eq!(
+            paragraph_segment_text(&paragraphs[0]),
+            "The committee reviewed the annual budget report and discussed the proposed changes \
+             before adjourning the meeting for the day"
         );
     }
 
