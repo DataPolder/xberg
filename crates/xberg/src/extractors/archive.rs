@@ -240,7 +240,13 @@ async fn build_archive_doc(
             let mut child_config = config.clone();
             child_config.max_archive_depth = config.max_archive_depth.saturating_sub(current_depth + 1);
 
-            match crate::core::extractor::extract_bytes(bytes, &file_mime, &child_config).await {
+            // Boxed: this is the recursive arm (build_archive_doc -> extract_bytes ->
+            // build_archive_doc), so an unboxed child future is stored inline in this
+            // one and every nesting level adds its whole size to the stack frame. A
+            // single nested ZIP was already enough to overflow the stack in a debug
+            // build. Heap-allocating the child keeps the per-level stack cost constant,
+            // matching how every other recursive await in core::extractor is written.
+            match Box::pin(crate::core::extractor::extract_bytes(bytes, &file_mime, &child_config)).await {
                 Ok(result) => {
                     children.push(crate::types::ArchiveEntry {
                         path: path.clone(),
