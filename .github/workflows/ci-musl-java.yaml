@@ -15,7 +15,7 @@ name: CI Musl Java Native
 # backstop against Alpine package drift the path filter cannot see.
 on:
   push:
-    branches: [main]
+    branches: [main, chore/alef-fixes]
     paths: &musl-java-paths
       - "docker/Dockerfile.musl-ffi"
       - "scripts/ci/smoke-test-musl-java-ffi.sh"

@@ -2,7 +2,7 @@ name: CI Docker
 
 on:
   push:
-    branches: [main]
+    branches: [main, chore/alef-fixes]
     paths: &docker-paths
       - "docker/**"
       - "scripts/ci/docker/**"

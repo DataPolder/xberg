@@ -2,7 +2,7 @@ name: CI Integrations
 
 on:
   push:
-    branches: [main]
+    branches: [main, chore/alef-fixes]
     paths:
       - "integrations/**"
       - "crates/xberg/**"
