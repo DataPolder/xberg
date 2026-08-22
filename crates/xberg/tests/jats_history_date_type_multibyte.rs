@@ -15,6 +15,13 @@
 //! `extract_bytes` with the default config, with no gate and no `catch_unwind`
 //! anywhere upstream, so a crafted JATS/XML article aborts the calling process.
 
+// The JATS extractor is `#[cfg(feature = "xml")] pub mod jats;`
+// (crates/xberg/src/extractors/mod.rs), and `office` does NOT imply `xml`. Without this
+// gate the file still compiles and runs everywhere, but means nothing: MEASURED under
+// `--features office`, the panic test passes VACUOUSLY (its `catch_unwind` wraps an
+// extraction that never reaches JATS) while the positive control fails outright on its
+// `.expect(...)`. Gate the whole target so it either runs for real or does not run at all.
+#![cfg(feature = "xml")]
 // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)]
 
