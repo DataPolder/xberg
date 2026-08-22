@@ -126,6 +126,23 @@ jobs:
       # AND the generated manifest both carry the formats. ~keep
       - name: Verify the native FFI build still selects every document format
         run: task alef:verify:ffi-formats
+      # GH#1443: per-target feature aggregates in crates/xberg/Cargo.toml (windows-target,
+      # formats-no-heic, full-no-heic, macos-intel-target, windows-gnu-target) are hand-maintained
+      # supersets/subsets of `full` and silently drift when a feature is added to `full` without
+      # updating them -- windows-target lost nine code-bearing features this way before
+      # `45bbd99088` restored them by hand. Nothing else in CI compiles both sides to compare
+      # them, so this only catches it statically, before the next silent regression ships. ~keep
+      - name: Verify per-target feature aggregates match `full`
+        run: task verify:feature-parity
+      # Every image failed to build for weeks because `.dockerignore` excludes everything and
+      # re-includes an allowlist: a new workspace member gained its Dockerfile `COPY` but no
+      # allowlist entry, so buildx aborted with `not found` before compiling. The Docker workflow
+      # triggers on paths that commit did not touch, so nothing caught it. This asserts the three
+      # properties together -- every member is COPYd, every COPYd crates/ path is a real member,
+      # and every COPYd path survives .dockerignore -- because coverage alone was green
+      # throughout the outage. ~keep
+      - name: Verify every workspace crate survives .dockerignore
+        run: task verify:docker-crates
       # docs-site/src/content/docs/changelog.md is a hand-maintained copy of
       # CHANGELOG.md -- nothing generates it and nothing synced it, so it silently
       # fell a full release behind (repo at 1.1.0, published docs still at 1.0.14).
