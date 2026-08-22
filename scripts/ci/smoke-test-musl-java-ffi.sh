@@ -34,18 +34,24 @@ EXPECTED_TEXT="XBERG MUSL SMOKE 490"
 [ -f "$SMOKE_JAVA" ] || die "smoke-test program missing: $SMOKE_JAVA"
 [ -f "$POM" ] || die "packages/java/pom.xml missing: $POM"
 
-LIB_FILE="$(find "$BUILD_OUTPUT_DIR" -maxdepth 1 -name 'libxberg_ffi.so' | head -n1)"
-[ -n "$LIB_FILE" ] || die "no libxberg_ffi.so found under $BUILD_OUTPUT_DIR"
+find "$BUILD_OUTPUT_DIR" -maxdepth 1 -name 'libxberg_ffi.so' | grep -q . || die "no libxberg_ffi.so found under $BUILD_OUTPUT_DIR"
 
 # alpine:3.21 matches docker/Dockerfile.musl-ffi's build image, so this is the
 # same musl libc family the library was cross-compiled for. maven resolves
 # io.xberg's compile-scope dependencies (jackson, jspecify) from Maven
 # Central inside the container -- normal network access for a CI runner, not
 # for this script's author.
+#
+# The whole directory is mounted (not just libxberg_ffi.so) so the vendored
+# ONNX Runtime / image-codec closure Dockerfile.musl-ffi bundles beside it is
+# present for the musl loader to resolve via libxberg_ffi.so's $ORIGIN
+# RUNPATH -- mounting only the .so file left every bundled dependency behind
+# and made a missing-transitive-library failure look like a generic
+# "FFI call failed" with no library name attached (xberg #1280).
 docker run --rm \
   -v "$REPO_ROOT/packages/java:/repo/packages/java:ro" \
   -v "$SMOKE_JAVA:/smoke/Smoke.java:ro" \
-  -v "$LIB_FILE:/native/libxberg_ffi.so:ro" \
+  -v "$BUILD_OUTPUT_DIR:/native:ro" \
   -v "$FIXTURE:/fixture.pdf:ro" \
   -e EXPECTED_TEXT="$EXPECTED_TEXT" \
   -e XBERG_FFI_LIB_PATH="/native/libxberg_ffi.so" \

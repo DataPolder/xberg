@@ -16,12 +16,12 @@ set -euo pipefail
 log() { echo "smoke-test-musl-elixir-nif: $*" >&2; }
 die() { log "$*"; exit 1; }
 
-NIF_SO="${1:?usage: $0 <path-to-libxberg_nif.so>}"
-[ -f "$NIF_SO" ] || die "NIF shared library not found: $NIF_SO"
+NATIVE_DIR="${1:?usage: $0 <dir-containing-libxberg_nif.so-and-vendored-.so-closure>}"
+[ -d "$NATIVE_DIR" ] || die "native asset directory not found: $NATIVE_DIR"
 # `docker -v` rejects a relative source as a volume NAME ("includes invalid
-# characters for a local volume name"), so the caller's path must be absolute
-# here even though every other mount below is already rooted at REPO_ROOT. ~keep
-NIF_SO="$(cd "$(dirname "$NIF_SO")" && pwd)/$(basename "$NIF_SO")"
+# characters for a local volume name"), so this must be absolute before the
+# mount below. Matches smoke-test-musl-python-wheel.sh, which already does it. ~keep
+NATIVE_DIR="$(cd "$NATIVE_DIR" && pwd)"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 FIXTURE="$REPO_ROOT/scripts/ci/fixtures/musl-python-smoke.pdf"
@@ -30,11 +30,18 @@ EXPECTED_TEXT="XBERG MUSL SMOKE 490"
 
 [ -f "$FIXTURE" ] || die "smoke-test fixture missing: $FIXTURE"
 [ -f "$SMOKE_SCRIPT" ] || die "smoke-test script missing: $SMOKE_SCRIPT"
+find "$NATIVE_DIR" -maxdepth 1 -name 'libxberg_nif.so' | grep -q . || die "no libxberg_nif.so found under $NATIVE_DIR"
 
 # alpine:3.21 matches docker/Dockerfile.musl-rustler's build image, so this is
-# the same musl libc family the NIF was cross-compiled for.
+# the same musl libc family the NIF was cross-compiled for. The whole
+# directory is mounted (not just libxberg_nif.so) so the vendored ONNX
+# Runtime / image-codec closure Dockerfile.musl-rustler now bundles beside it
+# is present for the musl loader to resolve via libxberg_nif.so's $ORIGIN
+# RUNPATH -- mounting only the .so file left every bundled dependency behind
+# and made a missing-transitive-library failure look like a NIF load failure
+# with no name attached (xberg #1280).
 docker run --rm \
-  -v "$NIF_SO:/native/libxberg_nif.so:ro" \
+  -v "$NATIVE_DIR:/native:ro" \
   -v "$FIXTURE:/fixture.pdf:ro" \
   -v "$SMOKE_SCRIPT:/smoke/smoke_test_elixir_nif.exs:ro" \
   -e XBERG_NIF_PATH="/native/libxberg_nif" \
