@@ -224,7 +224,10 @@ mod tests {
 
     #[test]
     fn test_confined_path_returns_normalised_relative_path_unchanged() {
-        assert_eq!(entry("folder/document.pdf").confined_path(), Some("folder/document.pdf".to_string()));
+        assert_eq!(
+            entry("folder/document.pdf").confined_path(),
+            Some("folder/document.pdf".to_string())
+        );
     }
 
     #[test]
@@ -244,7 +247,10 @@ mod tests {
         // A leading `/` is treated the same as any other empty segment here (unlike the
         // OOXML/EPUB `resolve_container_entry`, an archive entry has no "container root"
         // concept to redirect to): stripping it still leaves a normal relative path.
-        assert_eq!(entry("/tmp/malicious.txt").confined_path(), Some("tmp/malicious.txt".to_string()));
+        assert_eq!(
+            entry("/tmp/malicious.txt").confined_path(),
+            Some("tmp/malicious.txt".to_string())
+        );
     }
 
     #[test]
@@ -1322,6 +1328,140 @@ mod tests {
             Some(true),
             "expected a replaced_characters=true field on the warning, got {:?}",
             events[0]
+        );
+    }
+
+    /// Regression for the "declared size bounds nothing" defect: `zip` 2.4.2's decompressing
+    /// `Read` impl has no `Take` on the decompressed side, so `extract_zip_text_content` used to
+    /// call `file.read_to_end()` completely unbounded and only measure the result afterwards.
+    /// Against the unfixed code this member is fully decompressed (200_000 bytes) before the
+    /// aggregate `total_content_size` check fires, producing an error that reports the full
+    /// decompressed total and never names the offending member (the aggregate check has no
+    /// per-member identity once several members have been summed). Against the fixed code the
+    /// read is capped at `max_content_size`, so the *member-scoped* error fires first and names
+    /// the member. `--features archives` (the `#[cfg(test)]` module here compiles only under
+    /// that feature, since `zip`/`tar`/`sevenz-rust2` are optional deps gated by it).
+    #[test]
+    fn test_zip_text_member_exceeding_content_cap_is_rejected_by_member_not_only_aggregate() {
+        let mut cursor = Cursor::new(Vec::new());
+        {
+            let mut zip = ZipWriter::new(&mut cursor);
+            let options = FileOptions::<'_, ()>::default();
+            zip.start_file("huge.txt", options).unwrap();
+            // Highly compressible filler large enough to dwarf a tiny cap without needing a
+            // gigabyte-scale allocation in the test process.
+            zip.write_all(&vec![b'A'; 200_000]).unwrap();
+            zip.finish().unwrap();
+        }
+        let bytes = cursor.into_inner();
+        let limits = SecurityLimits {
+            max_content_size: 1_000,
+            ..SecurityLimits::default()
+        };
+
+        let result = extract_zip_text_content(&bytes, &limits);
+
+        let error = result.expect_err("a member whose decompressed size dwarfs max_content_size must be rejected");
+        let message = error.to_string();
+        assert!(
+            message.contains("huge.txt"),
+            "the read must be capped per-member (surfacing an error that names the member) \
+             instead of decompressing it fully and only detecting the overage in the aggregate \
+             total, whose error never names a member: {message}"
+        );
+    }
+
+    /// Same defect, different call: `extract_zip_file_bytes` also called `read_to_end()` with
+    /// only a `Vec::with_capacity` hint (`size().min(max_archive_size)`) bounding nothing.
+    /// `--features archives`.
+    #[test]
+    fn test_zip_file_bytes_member_exceeding_archive_cap_is_rejected_by_member_not_only_aggregate() {
+        let mut cursor = Cursor::new(Vec::new());
+        {
+            let mut zip = ZipWriter::new(&mut cursor);
+            let options = FileOptions::<'_, ()>::default();
+            zip.start_file("huge.bin", options).unwrap();
+            zip.write_all(&vec![0xABu8; 200_000]).unwrap();
+            zip.finish().unwrap();
+        }
+        let bytes = cursor.into_inner();
+        let limits = SecurityLimits {
+            max_archive_size: 1_000,
+            ..SecurityLimits::default()
+        };
+
+        let result = extract_zip_file_bytes(&bytes, &limits);
+
+        let error = result.expect_err("a member whose decompressed size dwarfs max_archive_size must be rejected");
+        let message = error.to_string();
+        assert!(
+            message.contains("huge.bin"),
+            "the read must be capped per-member instead of decompressing it fully and only \
+             detecting the overage in the aggregate total, whose error never names a member: {message}"
+        );
+    }
+
+    /// TAR analogue of the ZIP text-content regression: `entry.size()` was used only as a
+    /// `Vec::with_capacity` hint, never as an actual bound, so a header declaring a large member
+    /// was read into memory in full before `total_content_size` caught it. `--features archives`.
+    #[test]
+    fn test_tar_text_member_exceeding_content_cap_is_rejected_by_member_not_only_aggregate() {
+        let mut cursor = Cursor::new(Vec::new());
+        {
+            let mut tar = TarBuilder::new(&mut cursor);
+            let data = vec![b'B'; 200_000];
+            let mut header = ::tar::Header::new_gnu();
+            header.set_path("huge.txt").unwrap();
+            header.set_size(data.len() as u64);
+            header.set_cksum();
+            tar.append(&header, &data[..]).unwrap();
+            tar.finish().unwrap();
+        }
+        let bytes = cursor.into_inner();
+        let limits = SecurityLimits {
+            max_content_size: 1_000,
+            ..SecurityLimits::default()
+        };
+
+        let result = extract_tar_text_content(&bytes, &limits);
+
+        let error = result.expect_err("a member whose declared size dwarfs max_content_size must be rejected");
+        let message = error.to_string();
+        assert!(
+            message.contains("huge.txt"),
+            "the read must be capped per-member instead of reading it fully and only detecting \
+             the overage in the aggregate total, whose error never names a member: {message}"
+        );
+    }
+
+    /// TAR analogue of the ZIP file-bytes regression. `--features archives`.
+    #[test]
+    fn test_tar_file_bytes_member_exceeding_archive_cap_is_rejected_by_member_not_only_aggregate() {
+        let mut cursor = Cursor::new(Vec::new());
+        {
+            let mut tar = TarBuilder::new(&mut cursor);
+            let data = vec![0xCDu8; 200_000];
+            let mut header = ::tar::Header::new_gnu();
+            header.set_path("huge.bin").unwrap();
+            header.set_size(data.len() as u64);
+            header.set_cksum();
+            tar.append(&header, &data[..]).unwrap();
+            tar.finish().unwrap();
+        }
+        let bytes = cursor.into_inner();
+        let limits = SecurityLimits {
+            max_archive_size: 1_000,
+            ..SecurityLimits::default()
+        };
+
+        let result = extract_tar_file_bytes(&bytes, &limits);
+
+        let error = result.expect_err("a member whose declared size dwarfs max_archive_size must be rejected");
+        let message = error.to_string();
+        assert!(
+            message.contains("huge.bin"),
+            "the read must be capped per-member instead of reading it fully and only detecting \
+             the overage in the aggregate total, whose error never names a member: {message}"
         );
     }
 
