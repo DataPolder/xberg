@@ -247,21 +247,39 @@ mod tests {
         let result = extract_file(&file_path, Some("application/pdf"), &config).await;
 
         // `Some("application/pdf")` skips detection entirely (`detect_or_validate` only
-        // validates a caller-supplied MIME, it never sniffs against it), so the PDF
-        // extractor runs directly on ten bytes of plain text with no `%PDF` header;
-        // `NativeDocument::open_bytes_with_passwords` (crates/xberg/src/pdf/native/mod.rs)
-        // wraps `xberg_native_pdf`'s parse failure as `XbergError::Parsing`. See
-        // `security_validation.rs::assert_rejected_as_invalid_pdf` for the same contract.
+        // validates a caller-supplied MIME, it never sniffs against it). Which error comes
+        // back therefore depends on whether a PDF extractor is registered at all, so the
+        // assertion is split by feature rather than asserting one build's behaviour
+        // unconditionally -- a `--no-default-features --features excel` leg registers no PDF
+        // extractor and returns `UnsupportedFormat` long before any parser runs.
         let error = result.expect_err("plain text has no PDF structure, extraction must fail");
         use crate::XbergError;
-        assert!(
-            matches!(error, XbergError::Parsing { .. }),
-            "expected a Parsing error, got: {error:?}"
-        );
-        assert!(
-            error.to_string().contains("xberg_native_pdf"),
-            "error must name the failing parser, got: {error}"
-        );
+
+        // With `pdf`: the PDF extractor runs directly on ten bytes of plain text with no
+        // `%PDF` header, and `NativeDocument::open_bytes_with_passwords`
+        // (crates/xberg/src/pdf/native/mod.rs) wraps `xberg_native_pdf`'s parse failure as
+        // `XbergError::Parsing`. See `security_validation.rs::assert_rejected_as_invalid_pdf`
+        // for the same contract.
+        #[cfg(feature = "pdf")]
+        {
+            assert!(
+                matches!(error, XbergError::Parsing { .. }),
+                "expected a Parsing error, got: {error:?}"
+            );
+            assert!(
+                error.to_string().contains("xberg_native_pdf"),
+                "error must name the failing parser, got: {error}"
+            );
+        }
+
+        // Without `pdf`: no extractor claims the MIME, so the registry rejects it by name.
+        #[cfg(not(feature = "pdf"))]
+        {
+            assert!(
+                matches!(&error, XbergError::UnsupportedFormat(mime) if mime == "application/pdf"),
+                "expected UnsupportedFormat naming the overridden MIME, got: {error:?}"
+            );
+        }
     }
 
     #[tokio::test]

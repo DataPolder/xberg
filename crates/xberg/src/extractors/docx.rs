@@ -1536,6 +1536,11 @@ mod tests {
         zip.finish().unwrap().into_inner()
     }
 
+    /// `crate::core::batch_mode` is itself gated on `tokio-runtime`
+    /// (`core/mod.rs:31`), so without this cfg the whole lib test target fails to COMPILE
+    /// under `--no-default-features --features office` with E0433, not merely fail at run
+    /// time.
+    #[cfg(feature = "tokio-runtime")]
     #[tokio::test]
     async fn should_match_single_extraction_in_batch_mode() {
         let data = build_test_docx(TRACK_CHANGES_XML);

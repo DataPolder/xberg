@@ -892,6 +892,10 @@ mod tests {
         );
     }
 
+    /// `process_image_file`'s default impl returns `Other("File-based OCR processing
+    /// requires the tokio-runtime feature")` without that feature, so this test can only
+    /// assert the real behaviour in a build that has it.
+    #[cfg(feature = "tokio-runtime")]
     #[tokio::test]
     async fn test_ocr_backend_process_image_file_default_impl() {
         use std::io::Write;
