@@ -722,6 +722,7 @@ pub(crate) fn validate_csv_delimiter(delimiter: &str) -> Result<()> {
 /// assert!(!layout_wastes_plain_output(true, &OutputFormat::Markdown));
 /// assert!(!layout_wastes_plain_output(false, &OutputFormat::Plain));
 /// ```
+#[cfg_attr(alef, alef(skip))]
 pub fn layout_wastes_plain_output(layout_enabled: bool, output_format: &crate::OutputFormat) -> bool {
     layout_enabled && *output_format == crate::OutputFormat::Plain
 }
