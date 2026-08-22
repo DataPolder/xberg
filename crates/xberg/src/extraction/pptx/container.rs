@@ -12,6 +12,7 @@ use super::elements::{Slide, SlideElement};
 use super::image_handling::get_full_image_path;
 use crate::core::diagnostics::push_warning;
 use crate::error::{Result, XbergError};
+use crate::extractors::security::{SecurityLimits, ZipBombValidator};
 use crate::types::ProcessingWarning;
 
 /// Maximum bytes read from a single PPTX zip member (slide XML, relationship
@@ -35,9 +36,16 @@ pub(super) struct PptxContainer<R: Read + Seek> {
 }
 
 impl PptxContainer<std::fs::File> {
-    /// `max_entries` is the caller's configured `SecurityLimits::max_files_in_archive`
-    /// (see `PptxExtractionOptions::max_files_in_archive`), not a hardcoded ceiling.
-    pub(super) fn open<P: AsRef<Path>>(path: P, max_entries: usize) -> Result<Self> {
+    /// `limits` is the caller's configured `SecurityLimits` (see
+    /// `PptxExtractionOptions::security_limits`), not hardcoded ceilings.
+    ///
+    /// `check_entry_count` and [`ZipBombValidator::validate`] both run here, once per
+    /// open. They are not redundant: `check_entry_count` produces the specific
+    /// entry-count error message existing callers assert on, while `ZipBombValidator`
+    /// additionally bounds aggregate declared uncompressed size and compression ratio,
+    /// neither of which PPTX checked before (GH gap: PPTX had no ratio/size check at
+    /// all, unlike ODT/ODP -- see `extractors::odt`/`extractors::odp`).
+    pub(super) fn open<P: AsRef<Path>>(path: P, limits: &SecurityLimits) -> Result<Self> {
         // IO errors must bubble up unchanged - file access issues need user reports ~keep
         let file = std::fs::File::open(path)?;
 
@@ -51,7 +59,8 @@ impl PptxContainer<std::fs::File> {
                 )));
             }
         };
-        check_entry_count(&archive, max_entries)?;
+        check_entry_count(&archive, limits.max_files_in_archive)?;
+        ZipBombValidator::new(limits.clone()).validate(&mut archive)?;
 
         let slide_paths = Self::find_slide_paths(&mut archive)?;
 
@@ -60,9 +69,12 @@ impl PptxContainer<std::fs::File> {
 }
 
 impl PptxContainer<Cursor<Vec<u8>>> {
-    /// `max_entries` is the caller's configured `SecurityLimits::max_files_in_archive`
-    /// (see `PptxExtractionOptions::max_files_in_archive`), not a hardcoded ceiling.
-    pub(super) fn from_bytes(data: &[u8], max_entries: usize) -> Result<Self> {
+    /// `limits` is the caller's configured `SecurityLimits` (see
+    /// `PptxExtractionOptions::security_limits`), not hardcoded ceilings.
+    ///
+    /// See `PptxContainer::open` (the file-based constructor above) for why both
+    /// `check_entry_count` and `ZipBombValidator::validate` run here.
+    pub(super) fn from_bytes(data: &[u8], limits: &SecurityLimits) -> Result<Self> {
         let cursor = Cursor::new(data.to_vec());
 
         let mut archive = match ZipArchive::new(cursor) {
@@ -75,7 +87,8 @@ impl PptxContainer<Cursor<Vec<u8>>> {
                 )));
             }
         };
-        check_entry_count(&archive, max_entries)?;
+        check_entry_count(&archive, limits.max_files_in_archive)?;
+        ZipBombValidator::new(limits.clone()).validate(&mut archive)?;
 
         let slide_paths = Self::find_slide_paths(&mut archive)?;
 
@@ -363,7 +376,11 @@ mod tests {
     #[test]
     fn test_from_bytes_rejects_too_many_entries_under_configured_limit() {
         let data = build_zip_with_entries(5);
-        let result = PptxContainer::from_bytes(&data, 3);
+        let limits = SecurityLimits {
+            max_files_in_archive: 3,
+            ..Default::default()
+        };
+        let result = PptxContainer::from_bytes(&data, &limits);
         assert!(
             result.is_err(),
             "5 entries must be rejected against a configured limit of 3"
@@ -413,7 +430,12 @@ mod tests {
         zip.write_all(&payload).unwrap();
         let data = zip.finish().unwrap().into_inner();
 
-        let mut container = PptxContainer::from_bytes(&data, 10).expect("archive under the entry-count limit opens");
+        let limits = SecurityLimits {
+            max_files_in_archive: 10,
+            ..Default::default()
+        };
+        let mut container =
+            PptxContainer::from_bytes(&data, &limits).expect("archive under the entry-count limit opens");
         let contents = container
             .read_file("ppt/slides/oversized.bin")
             .expect("a truncated read must still succeed, not error");

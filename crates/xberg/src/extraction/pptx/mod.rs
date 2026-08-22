@@ -76,10 +76,12 @@ pub struct PptxExtractionOptions {
     pub include_structure: bool,
     /// Whether to emit `![alt](target)` references in markdown output.
     pub inject_placeholders: bool,
-    /// Maximum number of ZIP entries the container may declare, from
-    /// `ExtractionConfig.security_limits.max_files_in_archive`. Defaults to
-    /// `SecurityLimits::default().max_files_in_archive` when unset.
-    pub max_files_in_archive: usize,
+    /// Security limits applied at container open: entry count
+    /// (`max_files_in_archive`), aggregate uncompressed size (`max_archive_size`),
+    /// and compression ratio (`max_compression_ratio`), from
+    /// `ExtractionConfig.security_limits`. Defaults to `SecurityLimits::default()`
+    /// when unset.
+    pub security_limits: crate::extractors::security::SecurityLimits,
     /// Maximum number of slides the presentation may contain, from
     /// `ExtractionConfig.security_limits.max_pages` (#1451). `None` (the
     /// default) means unlimited.
@@ -112,7 +114,7 @@ impl Default for PptxExtractionOptions {
             plain: false,
             include_structure: false,
             inject_placeholders: true,
-            max_files_in_archive: crate::extractors::security::SecurityLimits::default().max_files_in_archive,
+            security_limits: crate::extractors::security::SecurityLimits::default(),
             max_pages: crate::extractors::security::SecurityLimits::default().max_pages,
         }
     }
@@ -168,7 +170,7 @@ pub(crate) fn extract_pptx_from_path_with_slide_contents(
     options: &PptxExtractionOptions,
     warnings: &mut Vec<ProcessingWarning>,
 ) -> Result<PptxInternalExtraction> {
-    let container = PptxContainer::open(path, options.max_files_in_archive)?;
+    let container = PptxContainer::open(path, &options.security_limits)?;
     extract_pptx_from_container(container, options, warnings)
 }
 
@@ -196,7 +198,7 @@ pub(crate) fn extract_pptx_from_bytes_with_slide_contents(
     options: &PptxExtractionOptions,
     warnings: &mut Vec<ProcessingWarning>,
 ) -> Result<PptxInternalExtraction> {
-    let container = PptxContainer::from_bytes(data, options.max_files_in_archive)?;
+    let container = PptxContainer::from_bytes(data, &options.security_limits)?;
     extract_pptx_from_container(container, options, warnings)
 }
 
