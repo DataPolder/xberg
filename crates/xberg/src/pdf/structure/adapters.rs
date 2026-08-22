@@ -3006,6 +3006,87 @@ mod tests {
         assert!(!paragraphs[1].is_code_block);
     }
 
+    /// GH#793: a `Picture` hint's bounding box commonly clips a fraction of an
+    /// adjacent paragraph -- a figure caption, or (as here) a long centered
+    /// title/author/affiliation block sitting just above or overlapping a detected
+    /// picture region. Before the `MAX_FURNITURE_HINT_TEXT_CHARS` guard in
+    /// `matches_hint_text`, `apply_hint_to_paragraph`'s `Picture` arm suppressed
+    /// *any* matched paragraph unconditionally, regardless of length, silently
+    /// discarding real body content. Exercised through `ocr_doc_to_layout_paragraphs`
+    /// (not `apply_hint_to_paragraph` directly) so a later stage -- the
+    /// element/block regrouping this function also runs -- cannot quietly re-apply
+    /// or paper over a broken guard: the assertion is on what this function hands
+    /// back to the caller, the same value `assemble_ocr_page_paragraphs` forwards to
+    /// rendering.
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn test_picture_hint_does_not_suppress_long_prose_paragraph() {
+        let author_block = "Christoph Auer Maksym Lysak Ahmed Nassar Michele Dolfi Nikolaos Livathinos Panos \
+                             Vagenas Cesar Berrospi Ramis Matteo Omenetti Fabian Lindlbauer Kasper Dinkla Lokesh \
+                             Mishra Yusik Kim Shubham Gupta Rafael Teixeira de Lima Valery Weber Lucas Morin \
+                             Ingmar Meijer Viktor Kuropiatnyk Peter W. J. Staar";
+        assert!(
+            author_block.chars().count() > 200,
+            "fixture must exceed the furniture-suppression length bound"
+        );
+        let doc = layout_line_document(&[(author_block, 100.0, 100.0, 500.0, 120.0)]);
+        let hints = [layout_test_hint(types::LayoutHintClass::Picture, 860.0, 900.0)];
+
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
+
+        assert_eq!(paragraphs.len(), 1);
+        assert_eq!(paragraphs[0].text, author_block);
+        assert!(
+            !paragraphs[0].is_page_furniture,
+            "a long author/title block overlapping a Picture hint must not be discarded as furniture"
+        );
+    }
+
+    /// GH#793 counterpart for `PageHeader`: a running-header detection box can clip
+    /// a centered title/author block sitting at the top of a page. The same length
+    /// guard must protect it there too.
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn test_page_header_hint_does_not_suppress_long_prose_paragraph() {
+        let title_block = "Docling Technical Report: An Easy to Use, Self-Contained, MIT-Licensed Open-Source \
+                            Package for PDF Document Conversion Powered by State-of-the-Art Layout Analysis Models \
+                            for Layout Detection and Table Structure Recognition, Version 1.0";
+        assert!(
+            title_block.chars().count() > 200,
+            "fixture must exceed the furniture-suppression length bound"
+        );
+        let doc = layout_line_document(&[(title_block, 100.0, 100.0, 500.0, 120.0)]);
+        let hints = [layout_test_hint(types::LayoutHintClass::PageHeader, 860.0, 900.0)];
+
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
+
+        assert_eq!(paragraphs.len(), 1);
+        assert_eq!(paragraphs[0].text, title_block);
+        assert!(
+            !paragraphs[0].is_page_furniture,
+            "a long title block overlapping a PageHeader hint must not be discarded as furniture"
+        );
+    }
+
+    /// Positive control for GH#793: a genuinely short, high-confidence `PageHeader`
+    /// match -- a real running header -- must still be suppressed. The length guard
+    /// introduced above must not blanket-disable furniture suppression.
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn test_page_header_hint_still_suppresses_short_running_header() {
+        let running_header = "Acme Corp Annual Report 2026";
+        let doc = layout_line_document(&[(running_header, 100.0, 100.0, 500.0, 120.0)]);
+        let hints = [layout_test_hint(types::LayoutHintClass::PageHeader, 860.0, 900.0)];
+
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
+
+        assert_eq!(paragraphs.len(), 1);
+        assert!(
+            paragraphs[0].is_page_furniture,
+            "a short, high-confidence running header must still be suppressed"
+        );
+    }
+
     #[cfg(feature = "layout-detection")]
     #[test]
     fn test_wrapped_list_item_lines_under_same_hint_merge() {
