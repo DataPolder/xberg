@@ -122,7 +122,7 @@ impl<R: Read + Seek> PptxContainer<R> {
 
     pub(super) fn read_file(&mut self, path: &str) -> Result<Vec<u8>> {
         match self.archive.by_name(path) {
-            Ok(mut file) => {
+            Ok(file) => {
                 let mut contents = Vec::new();
                 // IO errors must bubble up - file read issues need user reports ~keep
                 file.take(MAX_PPTX_MEMBER_SIZE).read_to_end(&mut contents)?;
@@ -175,7 +175,7 @@ impl<R: Read + Seek> PptxContainer<R> {
     }
 
     fn read_file_from_archive(archive: &mut ZipArchive<R>, path: &str) -> Result<Vec<u8>> {
-        let mut file = match archive.by_name(path) {
+        let file = match archive.by_name(path) {
             Ok(f) => f,
             Err(zip::result::ZipError::Io(io_err)) => return Err(io_err.into()), // Bubble up IO errors ~keep
             Err(e) => {
