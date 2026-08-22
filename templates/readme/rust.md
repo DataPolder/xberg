@@ -33,7 +33,7 @@ xberg = "{{ version }}"
 tokio = { version = "1", features = ["rt", "macros"] }
 ```
 
-Xberg uses a pure-Rust PDF backend (`pdf_oxide`) — no PDFium, no system libraries, and no
+Xberg uses a pure-Rust PDF backend (`xberg-native-pdf`) — no PDFium, no system libraries, and no
 linking configuration required. For the full list of Cargo feature flags, see the
 [Xberg documentation](https://docs.xberg.io).
 
@@ -262,7 +262,7 @@ xberg = { version = "{{ version }}", features = ["cli"] }
 
 ## PDF Support
 
-Xberg uses **pdf_oxide** — a pure-Rust PDF library with no system dependencies.
+Xberg uses **xberg-native-pdf** — a pure-Rust PDF library with no system dependencies.
 Enable PDF extraction with the `pdf` feature:
 
 ```toml

@@ -1,4 +1,4 @@
-//! Issue #291 / GH#1364: a structurally invalid `/Font` resource makes `pdf_oxide`
+//! Issue #291 / GH#1364: a structurally invalid `/Font` resource makes `xberg_native_pdf`
 //! drop every glyph painted with that font while the page still renders `Ok`. Asserts
 //! the dropped glyphs surface as one deduped `ProcessingWarning` per distinct cause,
 //! with a resolvable-font case as the negative control.
@@ -6,11 +6,11 @@
 #![cfg(feature = "pdf")]
 
 use xberg::ProcessingWarning;
-use xberg::pdf::render::{install_pdf_render_diagnostics, render_pdf_page_to_png, take_pdf_oxide_render_warnings};
+use xberg::pdf::render::{install_pdf_render_diagnostics, render_pdf_page_to_png, take_xberg_native_pdf_render_warnings};
 
 /// Build a minimal one-page PDF whose `/Resources /Font /F1` entry points at
 /// object 5, which is a PDF string (`(NotAFontDict)`) rather than a font
-/// dictionary. `pdf_oxide`'s `PageRenderer::load_resources`
+/// dictionary. `xberg_native_pdf`'s `PageRenderer::load_resources`
 /// (`page_renderer.rs`) resolves every `/Font` resource through
 /// `PdfDocument::get_or_load_font_for_rendering`, which requires the
 /// resolved object to be a dictionary; here it fails with `Error::ParseError
@@ -21,7 +21,7 @@ use xberg::pdf::render::{install_pdf_render_diagnostics, render_pdf_page_to_png,
 /// font may render incorrectly.", ...)` and continues, so every glyph the
 /// content stream later paints with `/F1` is dropped (the renderer has no
 /// font to shape it with) while the page still renders `Ok`. Unlike a
-/// missing font *name* (which `pdf_oxide` best-effort substitutes via
+/// missing font *name* (which `xberg_native_pdf` best-effort substitutes via
 /// `fontdb` system-font matching and may or may not warn about depending on
 /// which fonts happen to be installed), a structurally invalid font
 /// **resource** always fails to parse regardless of the host's installed
@@ -151,14 +151,14 @@ fn build_pdf_with_resolvable_font() -> Vec<u8> {
 /// invalid renders successfully (as it must — a broken font resource must
 /// not fail the whole page) but drops every glyph drawn with it. Before this
 /// fix nothing surfaced that: `RenderedImage` has no diagnostic field, and
-/// pdf_oxide's own warning had no subscriber installed to receive it, so the
+/// xberg_native_pdf's own warning had no subscriber installed to receive it, so the
 /// drop was invisible twice over. (It reported through `log::warn!` then and
 /// through `tracing::warn!` since the 1.0.1 fork migration — the second time
 /// this went dark, the target was unchanged and only the transport moved.)
 ///
 /// This asserts the xberg-side capture end to end: rendering the *same* page
 /// twice (e.g. once for a preview and once for OCR, or a retry) hits the
-/// identical pdf_oxide cause both times, so the two `tracing::warn!` records
+/// identical xberg_native_pdf cause both times, so the two `tracing::warn!` records
 /// must dedup into exactly one `ProcessingWarning`, sourced `"pdf-render"`
 /// and naming the page — not one warning per render call.
 #[test]
@@ -177,7 +177,7 @@ fn test_dropped_glyphs_from_malformed_font_produce_one_deduped_warning() {
 
     // Drain any residual state from a previous render on this thread so the
     // assertion below is exact, not "at least".
-    let _ = take_pdf_oxide_render_warnings();
+    let _ = take_xberg_native_pdf_render_warnings();
 
     let pdf = build_pdf_with_malformed_font_resource();
 
@@ -189,7 +189,7 @@ fn test_dropped_glyphs_from_malformed_font_produce_one_deduped_warning() {
         render_pdf_page_to_png(&pdf, 0, Some(150), None).expect("re-rendering the same page must also succeed");
     assert!(!second_png.is_empty(), "renderer must still produce page bytes");
 
-    let warnings = take_pdf_oxide_render_warnings();
+    let warnings = take_xberg_native_pdf_render_warnings();
     assert_eq!(
         warnings.len(),
         1,
@@ -209,21 +209,21 @@ fn test_dropped_glyphs_from_malformed_font_produce_one_deduped_warning() {
     );
     assert!(
         warning.message.contains("glyph"),
-        "warning must describe glyph loss, not just repeat the raw pdf_oxide log line, got: {}",
+        "warning must describe glyph loss, not just repeat the raw xberg_native_pdf log line, got: {}",
         warning.message
     );
     assert!(
         warning.message.contains("Failed to parse font"),
-        "warning must carry pdf_oxide's own diagnosis of the cause, got: {}",
+        "warning must carry xberg_native_pdf's own diagnosis of the cause, got: {}",
         warning.message
     );
 
     // A second drain on the same thread must come back empty: warnings are
     // consumed, not accumulated forever across unrelated render calls.
-    let drained_again = take_pdf_oxide_render_warnings();
+    let drained_again = take_xberg_native_pdf_render_warnings();
     assert!(
         drained_again.is_empty(),
-        "take_pdf_oxide_render_warnings must drain, not peek: got {drained_again:?}"
+        "take_xberg_native_pdf_render_warnings must drain, not peek: got {drained_again:?}"
     );
 }
 
@@ -238,20 +238,20 @@ fn test_resolvable_font_page_produces_no_glyph_drop_warning() {
     // armed — a test that passes when the code is broken.
     //
     // ★ That guard is necessary but NOT sufficient, and this test is the standing example:
-    // when the capture went dark on the pdf_oxide 1.0.1 log->tracing migration it kept
+    // when the capture went dark on the xberg_native_pdf 1.0.1 log->tracing migration it kept
     // passing, because an empty buffer satisfies `warnings.is_empty()` just as well as a
     // working sink that found nothing. Only the positive tests caught the regression.
     assert!(
         install_pdf_render_diagnostics(),
         "no other component should own the tracing dispatcher in this test binary"
     );
-    let _ = take_pdf_oxide_render_warnings();
+    let _ = take_xberg_native_pdf_render_warnings();
 
     let pdf = build_pdf_with_resolvable_font();
     let png = render_pdf_page_to_png(&pdf, 0, Some(150), None).expect("page with a resolvable font must render");
     assert!(!png.is_empty(), "renderer must still produce page bytes");
 
-    let warnings: Vec<ProcessingWarning> = take_pdf_oxide_render_warnings();
+    let warnings: Vec<ProcessingWarning> = take_xberg_native_pdf_render_warnings();
     assert!(
         warnings.is_empty(),
         "a page whose font resolves cleanly must not produce a glyph-drop warning, got: {warnings:?}"

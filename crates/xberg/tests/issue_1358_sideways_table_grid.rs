@@ -4,9 +4,9 @@
 //! (rows and columns scrambled or transposed).
 //!
 //! The cell-text half of this defect (word order within a rotated cell) is
-//! already fixed upstream: `xberg-pdf-oxide`'s `table_extractor.rs` now reads
+//! already fixed upstream: `xberg-native`'s `table_extractor.rs` now reads
 //! `rotation_degrees: block.rotation_degrees` (previously a hard-coded
-//! `0.0`), and that fix ships in the published `xberg-pdf-oxide` 1.0.1 that
+//! `0.0`), and that fix ships in the published `xberg-native` 1.0.1 that
 //! this crate's `Cargo.lock` resolves. What is NOT independently verified is
 //! grid bucketing: whether a state's row keeps its own numbers together, and
 //! whether the header row stays distinct from the data rows.

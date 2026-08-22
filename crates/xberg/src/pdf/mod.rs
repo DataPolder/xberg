@@ -1,10 +1,10 @@
-//! Pure-Rust PDF document processing via the `pdf-oxide` backend.
+//! Pure-Rust PDF document processing via the `native` backend.
 //!
 //! Used internally by the PDF extractor plugin. Requires the `pdf` feature.
 //!
 //! # Features
 //!
-//! - **Text extraction**: Extract text content from PDFs using `pdf_oxide`
+//! - **Text extraction**: Extract text content from PDFs using `xberg_native_pdf`
 //! - **Metadata extraction**: Parse PDF metadata (title, author, creation date, etc.)
 //! - **Image extraction**: Extract embedded images from PDF pages
 //! - **Error handling**: Comprehensive PDF-specific error types

@@ -1,4 +1,4 @@
-//! pdf_oxide backend for PDF extraction.
+//! xberg_native_pdf backend for PDF extraction.
 //!
 //! Provides text extraction,
 //! metadata parsing, annotation extraction, image extraction, table detection,
@@ -16,10 +16,10 @@ pub(crate) mod text;
 use crate::Result;
 use crate::error::XbergError;
 
-/// Run a synchronous `pdf_oxide` operation under [`std::panic::catch_unwind`],
+/// Run a synchronous `xberg_native_pdf` operation under [`std::panic::catch_unwind`],
 /// converting a panic into an ordinary error produced by `on_panic`.
 ///
-/// `pdf_oxide`'s reading-order span sort — and the tategaki table strategy —
+/// `xberg_native_pdf`'s reading-order span sort — and the tategaki table strategy —
 /// can panic with *"user-provided comparison function does not correctly
 /// implement a total order"* on PDFs whose glyph geometry yields NaN or
 /// non-antisymmetric comparison keys (xberg #1198). Because these calls run
@@ -30,7 +30,7 @@ use crate::error::XbergError;
 /// empty result while preserving the page text.
 ///
 /// The closure is wrapped in [`std::panic::AssertUnwindSafe`]: the caught panic
-/// originates in a self-contained `pdf_oxide` sort over a local `Vec`, so the
+/// originates in a self-contained `xberg_native_pdf` sort over a local `Vec`, so the
 /// borrowed `PdfDocument` is not left in an observably-inconsistent state.
 pub(crate) fn guard_oxide_panic<T, E>(
     op: impl FnOnce() -> std::result::Result<T, E>,
@@ -53,10 +53,10 @@ fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
     }
 }
 
-/// Wraps a [`pdf_oxide::PdfDocument`] with convenient constructors that map
-/// pdf_oxide errors into [`XbergError::Parsing`].
+/// Wraps a [`xberg_native_pdf::PdfDocument`] with convenient constructors that map
+/// xberg_native_pdf errors into [`XbergError::Parsing`].
 pub(crate) struct OxideDocument {
-    pub doc: pdf_oxide::PdfDocument,
+    pub doc: xberg_native_pdf::PdfDocument,
 }
 
 impl OxideDocument {
@@ -71,7 +71,7 @@ impl OxideDocument {
     /// Open a PDF from in-memory bytes, trying each candidate password for
     /// encrypted documents.
     ///
-    /// pdf_oxide auto-authenticates with the empty password (the common default
+    /// xberg_native_pdf auto-authenticates with the empty password (the common default
     /// for lightly-encrypted PDFs). When that fails and the document is
     /// user-password protected, extraction previously returned an empty success
     /// because `PdfConfig.passwords` was never consulted (xberg-io/xberg#1223).
@@ -79,8 +79,8 @@ impl OxideDocument {
     /// the document is encrypted and none work, an error is returned rather than
     /// silently yielding empty text.
     pub(crate) fn open_bytes_with_passwords(bytes: &[u8], passwords: &[String]) -> Result<Self> {
-        let doc = pdf_oxide::PdfDocument::from_bytes(bytes.to_vec()).map_err(|e| XbergError::Parsing {
-            message: format!("pdf_oxide: failed to load bytes: {e}"),
+        let doc = xberg_native_pdf::PdfDocument::from_bytes(bytes.to_vec()).map_err(|e| XbergError::Parsing {
+            message: format!("xberg_native_pdf: failed to load bytes: {e}"),
             source: None,
         })?;
 

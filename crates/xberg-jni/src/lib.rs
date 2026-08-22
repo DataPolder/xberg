@@ -961,7 +961,7 @@ pub unsafe extern "system" fn Java_io_xberg_XbergBridge_nativeTakePdfOxideRender
     let mut __jni_attach_guard = unsafe { jni::AttachGuard::from_unowned(env.as_raw()) };
     let env = __jni_attach_guard.borrow_env_mut();
     let Some(__jni_result) = run_or_throw(env, |env| {
-        let v = core_crate::pdf::render::take_pdf_oxide_render_warnings();
+        let v = core_crate::pdf::render::take_engine_render_warnings();
         let s = match serde_json::to_string(&v) {
             Ok(s) => s,
             Err(e) => {

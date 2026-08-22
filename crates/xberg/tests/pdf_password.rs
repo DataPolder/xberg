@@ -15,8 +15,8 @@ const MARKER: &str = "PINEAPPLE42";
 /// Build an AES-256 encrypted single-page PDF whose text contains `MARKER`,
 /// protected by user password "secret123". Returns the encrypted bytes.
 fn encrypted_pdf() -> Vec<u8> {
-    use pdf_oxide::geometry::Rect;
-    use pdf_oxide::writer::{DocumentBuilder, TextAlign};
+    use xberg_native_pdf::geometry::Rect;
+    use xberg_native_pdf::writer::{DocumentBuilder, TextAlign};
 
     let mut doc = DocumentBuilder::new();
     doc.a4_page()

@@ -11,20 +11,20 @@ use serde::{Deserialize, Serialize};
 ///
 /// Controls which engine parses and renders PDF documents. Wire format is
 /// snake_case in all serializers (JSON, TOML, YAML). Defaults to
-/// [`PdfBackend::PdfOxide`] -- selecting anything else never changes behavior
+/// [`PdfBackend::Native`] -- selecting anything else never changes behavior
 /// for a caller who does not opt in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PdfBackend {
-    /// pdf_oxide (default) -- the pure-Rust PDF engine xberg ships today.
+    /// xberg's own pure-Rust PDF engine (default), `crates/xberg-native-pdf`.
     #[default]
-    PdfOxide,
+    Native,
     /// pdfium -- Google's PDFium engine, gated behind the `pdf-pdfium` Cargo
     /// feature (#700 added the selection level; #702 added the extraction
     /// engine, `extractors::pdf::pdfium_engine`, deliberately smaller in scope
-    /// than `PdfOxide` -- see that module's doc comment for exactly what it
+    /// than `Native` -- see that module's doc comment for exactly what it
     /// extracts). A build without the `pdf-pdfium` feature rejects this at the
-    /// CLI validation layer rather than silently falling back to `PdfOxide`.
+    /// CLI validation layer rather than silently falling back to `Native`.
     /// A build *with* the feature still enforces the selection at extraction
     /// time (`extractors::pdf::PdfExtractor::extract_core`), because that is
     /// the one dispatch point every caller -- CLI, library use, API/MCP
@@ -39,9 +39,11 @@ impl std::str::FromStr for PdfBackend {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_ascii_lowercase().replace('-', "_").as_str() {
-            "pdf_oxide" => Ok(Self::PdfOxide),
+            // No alias for the pre-1.1.0 spelling: the rename is deliberate and a silently
+            // accepted old name would keep it alive in configs indefinitely. ~keep
+            "native" => Ok(Self::Native),
             "pdfium" => Ok(Self::Pdfium),
-            other => Err(format!("unknown PDF backend '{other}'; expected: pdf-oxide, pdfium")),
+            other => Err(format!("unknown PDF backend '{other}'; expected: native, pdfium")),
         }
     }
 }
@@ -49,7 +51,7 @@ impl std::str::FromStr for PdfBackend {
 impl fmt::Display for PdfBackend {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            PdfBackend::PdfOxide => write!(f, "pdf_oxide"),
+            PdfBackend::Native => write!(f, "native"),
             PdfBackend::Pdfium => write!(f, "pdfium"),
         }
     }
@@ -65,7 +67,7 @@ pub struct PdfConfig {
 
     /// Extract tables from PDF.
     ///
-    /// When `true` (default), runs pdf_oxide's native grid detector and, if it
+    /// When `true` (default), runs the native engine's grid detector and, if it
     /// finds nothing, falls back to the heuristic text-layer reconstruction in
     /// `pdf::oxide::table::extract_tables_heuristic`. Set to `false` to skip
     /// both passes — `tables` will then be empty in the result.
@@ -147,7 +149,7 @@ pub struct PdfConfig {
 
     /// Which engine parses and renders this PDF.
     ///
-    /// Defaults to [`PdfBackend::PdfOxide`] -- the only backend with an
+    /// Defaults to [`PdfBackend::Native`] -- the only backend with an
     /// extraction implementation today. Selecting [`PdfBackend::Pdfium`]
     /// requires the `pdf-pdfium` feature and is rejected otherwise; see
     /// [`PdfBackend`].
@@ -260,7 +262,7 @@ mod tests {
             ocr_inline_images: false,
             extract_form_fields: true,
             reading_order: false,
-            backend: PdfBackend::PdfOxide,
+            backend: PdfBackend::Native,
         };
         assert_eq!(config.top_margin_fraction, Some(0.10));
         assert_eq!(config.bottom_margin_fraction, Some(0.08));
@@ -305,14 +307,14 @@ mod tests {
 
     #[test]
     #[cfg(feature = "pdf")]
-    fn pdf_config_omitting_backend_defaults_to_pdf_oxide() {
+    fn pdf_config_omitting_backend_defaults_to_native() {
         use super::*;
         let json = r#"{"extract_tables": true, "extract_metadata": true}"#;
         let config: PdfConfig = serde_json::from_str(json).unwrap();
         assert_eq!(
             config.backend,
-            PdfBackend::PdfOxide,
-            "omitted backend must default to pdf_oxide -- no build's behavior may change unless a caller opts in"
+            PdfBackend::Native,
+            "omitted backend must default to native -- no build's behavior may change unless a caller opts in"
         );
     }
 
@@ -335,20 +337,37 @@ mod tests {
     }
 
     #[test]
-    fn pdf_backend_from_str_accepts_hyphen_and_underscore_forms() {
+    fn pdf_backend_from_str_is_case_insensitive() {
         use super::*;
-        assert_eq!("pdf-oxide".parse::<PdfBackend>().unwrap(), PdfBackend::PdfOxide);
-        assert_eq!("pdf_oxide".parse::<PdfBackend>().unwrap(), PdfBackend::PdfOxide);
-        assert_eq!("PDF-OXIDE".parse::<PdfBackend>().unwrap(), PdfBackend::PdfOxide);
+        assert_eq!("native".parse::<PdfBackend>().unwrap(), PdfBackend::Native);
+        assert_eq!("NATIVE".parse::<PdfBackend>().unwrap(), PdfBackend::Native);
         assert_eq!("pdfium".parse::<PdfBackend>().unwrap(), PdfBackend::Pdfium);
         assert_eq!("PDFium".parse::<PdfBackend>().unwrap(), PdfBackend::Pdfium);
+    }
+
+    /// The pre-1.1.0 spelling must be REJECTED, not silently accepted.
+    ///
+    /// This is a breaking change made on purpose: an alias would keep the old name alive in
+    /// user configs forever, which is the opposite of the rename's point. A caller who set
+    /// `backend = "pdf_oxide"` gets an error naming the valid values rather than a silent
+    /// behaviour they did not ask for.
+    #[test]
+    fn pdf_backend_from_str_rejects_the_pre_rename_spelling() {
+        use super::*;
+        for old in ["pdf_oxide", "pdf-oxide", "PDF-OXIDE"] {
+            let error = old.parse::<PdfBackend>().unwrap_err();
+            assert!(
+                error.contains("native"),
+                "rejecting {old} must point at the new name, got: {error}"
+            );
+        }
     }
 
     #[test]
     fn pdf_backend_from_str_rejects_unknown_value_and_lists_valid_ones() {
         use super::*;
         let error = "xyz".parse::<PdfBackend>().unwrap_err();
-        assert!(error.contains("pdf-oxide"), "error must list pdf-oxide, got: {error}");
+        assert!(error.contains("native"), "error must list native, got: {error}");
         assert!(error.contains("pdfium"), "error must list pdfium, got: {error}");
     }
 
@@ -358,7 +377,7 @@ mod tests {
     /// someone reasonably guessing the field is called `pdf_backend`, mirroring the
     /// top-level CLI flag and JSON key, rather than the actual wire name `backend` --
     /// silently parses and the setting never applies; `backend` quietly stays at its
-    /// default (`PdfOxide`) with no warning. This test is a regression net: if `PdfConfig`
+    /// default (`Native`) with no warning. This test is a regression net: if `PdfConfig`
     /// ever gains `deny_unknown_fields`, this assertion starts failing (the typo becomes a
     /// hard parse error) and should be deleted in the same change.
     #[test]
@@ -369,7 +388,7 @@ mod tests {
         let config: PdfConfig = serde_json::from_value(json).expect("an unknown key must not be a parse error today");
         assert_eq!(
             config.backend,
-            PdfBackend::PdfOxide,
+            PdfBackend::Native,
             "the wrong key 'pdf_backend' (the correct wire name is 'backend') must be silently \
              ignored, leaving backend at its default"
         );

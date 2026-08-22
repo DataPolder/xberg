@@ -1,4 +1,4 @@
-//! Regression test for xberg #1198 — pdf_oxide's tategaki
+//! Regression test for xberg #1198 — xberg_native_pdf's tategaki
 //! (vertical-writing) reading-order sort panicked with *"user-provided
 //! comparison function does not correctly implement a total order"* on pages
 //! whose vertical-mode span X-centers chain closer together than the
@@ -7,7 +7,7 @@
 //!
 //! The `guard_oxide_panic` wrapper already keeps the panic from aborting the
 //! whole extraction, but the page's text is lost. This test asserts the real
-//! fix (yfedoseev/pdf_oxide#808): extraction must SUCCEED and return the
+//! fix (yfedoseev/xberg_native_pdf#808): extraction must SUCCEED and return the
 //! page's text, not merely survive.
 //!
 //! The PDF is hand-built (no third-party fixture): one page, an `Identity-V`
@@ -15,7 +15,7 @@
 //! positions step by 0.8 pt. The extracted spans carry `wmode = 1` with a
 //! ~1 pt median width, so the tategaki sort sees a long chain of
 //! "same column" neighbors spanning far more than the tolerance — the
-//! intransitive case that panicked pdf_oxide ≤ 0.3.72.
+//! intransitive case that panicked xberg_native_pdf ≤ 0.3.72.
 
 #![cfg(feature = "pdf")]
 
@@ -110,7 +110,7 @@ fn make_identity_v_chained_pdf() -> Vec<u8> {
 }
 
 /// A vertical-majority page with chained X-centers must extract its text —
-/// not panic (pdf_oxide ≤ 0.3.72) and not fall back to a guarded per-page
+/// not panic (xberg_native_pdf ≤ 0.3.72) and not fall back to a guarded per-page
 /// error that drops the content.
 #[test]
 fn test_identity_v_chained_centers_extracts_text() {

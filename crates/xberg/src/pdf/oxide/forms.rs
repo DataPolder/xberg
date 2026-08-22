@@ -1,6 +1,6 @@
-//! PDF form field extraction using the pdf_oxide backend.
+//! PDF form field extraction using the xberg_native_pdf backend.
 //!
-//! Maps pdf_oxide's `FormField` types to Xberg's `PdfFormField` model,
+//! Maps xberg_native_pdf's `FormField` types to Xberg's `PdfFormField` model,
 //! extracting field names, types, values, bounding boxes, and metadata.
 //!
 //! Supports both **AcroForm and XFA forms**. When a document contains both, AcroForm
@@ -10,11 +10,11 @@
 use super::OxideDocument;
 use crate::types::{BoundingBox, FormFieldType, PdfFormField, ProcessingWarning};
 
-/// Extract form fields from a PDF document using pdf_oxide.
+/// Extract form fields from a PDF document using xberg_native_pdf.
 ///
 /// Extracts from both AcroForm and XFA layers:
 /// 1. AcroForm extraction via `FormExtractor::extract_fields`
-/// 2. XFA extraction via the `pdf_oxide::xfa` parser
+/// 2. XFA extraction via the `xberg_native_pdf::xfa` parser
 ///
 /// When both layers are present, AcroForm fields take priority (canonical layer per PDF spec);
 /// only XFA fields whose names are not already present in the AcroForm set are appended, so
@@ -37,7 +37,7 @@ pub(crate) fn extract_form_fields(doc: &mut OxideDocument) -> (Vec<PdfFormField>
     let mut fields = Vec::new();
     let mut warnings = Vec::new();
 
-    match pdf_oxide::extractors::forms::FormExtractor::extract_fields(&doc.doc) {
+    match xberg_native_pdf::extractors::forms::FormExtractor::extract_fields(&doc.doc) {
         Ok(oxide_fields) => {
             fields.extend(oxide_fields.into_iter().map(map_form_field));
             tracing::debug!("extracted {} AcroForm fields", fields.len());
@@ -70,19 +70,19 @@ pub(crate) fn extract_form_fields(doc: &mut OxideDocument) -> (Vec<PdfFormField>
     (fields, warnings)
 }
 
-/// pdf_oxide reports "no AcroForm"/"no XFA entry" as an `Err(Error::InvalidPdf(..))` with
+/// xberg_native_pdf reports "no AcroForm"/"no XFA entry" as an `Err(Error::InvalidPdf(..))` with
 /// one of these exact messages — the overwhelmingly common case, since most PDFs have no
 /// XFA layer at all. Any other error means XFA was present but malformed/undecodable.
 const XFA_ABSENT_MESSAGES: [&str; 2] = ["No AcroForm in document", "No XFA entry in AcroForm"];
 
 /// Extract form fields from XFA layer (if present).
 ///
-/// Attempts to detect, parse, and convert XFA form data using pdf_oxide's XFA module.
+/// Attempts to detect, parse, and convert XFA form data using xberg_native_pdf's XFA module.
 /// Returns `Ok(None)` if XFA is not present. Returns `Err(warning)` if XFA is present but
 /// extraction or parsing failed (issue #73), so the caller can surface the failure instead
 /// of silently treating it the same as "no XFA form".
 fn extract_xfa_fields(doc: &mut OxideDocument) -> Result<Option<Vec<PdfFormField>>, ProcessingWarning> {
-    let xfa_data = match pdf_oxide::xfa::XfaExtractor::extract_xfa(&mut doc.doc) {
+    let xfa_data = match xberg_native_pdf::xfa::XfaExtractor::extract_xfa(&mut doc.doc) {
         Ok(data) => data,
         Err(e) => {
             let message = e.to_string();
@@ -100,7 +100,7 @@ fn extract_xfa_fields(doc: &mut OxideDocument) -> Result<Option<Vec<PdfFormField
         }
     };
 
-    let mut parser = pdf_oxide::xfa::XfaParser::new();
+    let mut parser = xberg_native_pdf::xfa::XfaParser::new();
     let xfa_form = match parser.parse(&xfa_data) {
         Ok(form) => form,
         Err(e) => {
@@ -124,11 +124,11 @@ fn extract_xfa_fields(doc: &mut OxideDocument) -> Result<Option<Vec<PdfFormField
     Ok(Some(fields))
 }
 
-/// Maps a single pdf_oxide FormField to a Xberg PdfFormField.
+/// Maps a single xberg_native_pdf FormField to a Xberg PdfFormField.
 ///
 /// Converts all field properties including type, value, bounds, and metadata.
 /// Type mapping and value extraction handle various field subtypes (text, checkbox, radio, choice, signature, button).
-fn map_form_field(oxide_field: pdf_oxide::extractors::forms::FormField) -> PdfFormField {
+fn map_form_field(oxide_field: xberg_native_pdf::extractors::forms::FormField) -> PdfFormField {
     let field_type = map_field_type(&oxide_field.field_type, oxide_field.flags);
     let value = map_field_value(&oxide_field.value);
     let default_value = oxide_field.default_value.as_ref().and_then(map_field_value);
@@ -153,7 +153,7 @@ fn map_form_field(oxide_field: pdf_oxide::extractors::forms::FormField) -> PdfFo
     }
 }
 
-/// Maps pdf_oxide's `FieldType` to Xberg's `FormFieldType`.
+/// Maps xberg_native_pdf's `FieldType` to Xberg's `FormFieldType`.
 ///
 /// Matches the PDF form field type hierarchy:
 /// - Button (/Btn) includes checkboxes, radio buttons, and push buttons
@@ -166,8 +166,8 @@ fn map_form_field(oxide_field: pdf_oxide::extractors::forms::FormField) -> PdfFo
 /// - PUSH_BUTTON (bit 16): returns `Button`
 /// - RADIO (bit 15): returns `Radio`
 /// - Neither: returns `Checkbox` (default button subtype)
-fn map_field_type(oxide_type: &pdf_oxide::extractors::forms::FieldType, flags: Option<u32>) -> FormFieldType {
-    use pdf_oxide::extractors::forms::{FieldType, field_flags};
+fn map_field_type(oxide_type: &xberg_native_pdf::extractors::forms::FieldType, flags: Option<u32>) -> FormFieldType {
+    use xberg_native_pdf::extractors::forms::{FieldType, field_flags};
     match oxide_type {
         FieldType::Button => {
             if let Some(f) = flags {
@@ -189,7 +189,7 @@ fn map_field_type(oxide_type: &pdf_oxide::extractors::forms::FieldType, flags: O
     }
 }
 
-/// Maps pdf_oxide's `FieldValue` to a String representation.
+/// Maps xberg_native_pdf's `FieldValue` to a String representation.
 ///
 /// Handles:
 /// - Text: returned as-is
@@ -197,8 +197,8 @@ fn map_field_type(oxide_type: &pdf_oxide::extractors::forms::FieldType, flags: O
 /// - Name: value returned as-is (e.g., radio Name("Opt") → "Opt", dropdown selections)
 /// - Array: values joined with ", " (multi-select list boxes)
 /// - None: returns None
-fn map_field_value(oxide_value: &pdf_oxide::extractors::forms::FieldValue) -> Option<String> {
-    use pdf_oxide::extractors::forms::FieldValue;
+fn map_field_value(oxide_value: &xberg_native_pdf::extractors::forms::FieldValue) -> Option<String> {
+    use xberg_native_pdf::extractors::forms::FieldValue;
     match oxide_value {
         FieldValue::Text(s) => Some(s.clone()),
         FieldValue::Boolean(b) => Some(b.to_string()),
@@ -214,7 +214,7 @@ fn map_field_value(oxide_value: &pdf_oxide::extractors::forms::FieldValue) -> Op
     }
 }
 
-/// Maps a pdf_oxide XfaFieldType to Xberg's FormFieldType.
+/// Maps a xberg_native_pdf XfaFieldType to Xberg's FormFieldType.
 ///
 /// Handles the XFA field type taxonomy:
 /// - Text/Numeric/DateTime → Text
@@ -224,8 +224,8 @@ fn map_field_value(oxide_value: &pdf_oxide::extractors::forms::FieldValue) -> Op
 /// - Signature → Signature
 /// - Button → Button
 /// - Everything else → Unknown
-fn map_xfa_field_type(xfa_type: &pdf_oxide::xfa::XfaFieldType) -> FormFieldType {
-    use pdf_oxide::xfa::XfaFieldType;
+fn map_xfa_field_type(xfa_type: &xberg_native_pdf::xfa::XfaFieldType) -> FormFieldType {
+    use xberg_native_pdf::xfa::XfaFieldType;
     match xfa_type {
         XfaFieldType::Text | XfaFieldType::Numeric | XfaFieldType::DateTime => FormFieldType::Text,
         XfaFieldType::Checkbox => FormFieldType::Checkbox,
@@ -237,12 +237,12 @@ fn map_xfa_field_type(xfa_type: &pdf_oxide::xfa::XfaFieldType) -> FormFieldType 
     }
 }
 
-/// Maps a pdf_oxide XfaField (from XFA parsing) to a Xberg PdfFormField.
+/// Maps a xberg_native_pdf XfaField (from XFA parsing) to a Xberg PdfFormField.
 ///
 /// Extracts field type, name, value, and layout information from the parsed XFA field.
 /// XFA fields contain all necessary metadata: name, field type, current value, default value,
 /// dimensions, and tooltip/caption text.
-fn map_xfa_field_direct(xfa_field: &pdf_oxide::xfa::XfaField) -> PdfFormField {
+fn map_xfa_field_direct(xfa_field: &xberg_native_pdf::xfa::XfaField) -> PdfFormField {
     let field_type = map_xfa_field_type(&xfa_field.field_type);
 
     let value = xfa_field.value.clone().or_else(|| xfa_field.default_value.clone());
@@ -276,18 +276,18 @@ fn map_xfa_field_direct(xfa_field: &pdf_oxide::xfa::XfaField) -> PdfFormField {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pdf_oxide::extractors::forms::{FieldType, FieldValue};
+    use xberg_native_pdf::extractors::forms::{FieldType, FieldValue};
 
     #[test]
     fn test_map_field_type_button_push_button() {
-        use pdf_oxide::extractors::forms::field_flags;
+        use xberg_native_pdf::extractors::forms::field_flags;
         let flags = field_flags::PUSH_BUTTON;
         assert_eq!(map_field_type(&FieldType::Button, Some(flags)), FormFieldType::Button);
     }
 
     #[test]
     fn test_map_field_type_button_radio() {
-        use pdf_oxide::extractors::forms::field_flags;
+        use xberg_native_pdf::extractors::forms::field_flags;
         let flags = field_flags::RADIO;
         assert_eq!(map_field_type(&FieldType::Button, Some(flags)), FormFieldType::Radio);
     }
@@ -391,7 +391,7 @@ mod tests {
 
     #[test]
     fn test_radio_field_classification_and_value() {
-        use pdf_oxide::extractors::forms::field_flags;
+        use xberg_native_pdf::extractors::forms::field_flags;
         let field_type = map_field_type(&FieldType::Button, Some(field_flags::RADIO));
         let value = map_field_value(&FieldValue::Name("Choice".to_string()));
         assert_eq!(field_type, FormFieldType::Radio);
@@ -400,88 +400,88 @@ mod tests {
 
     #[test]
     fn test_push_button_field_classification() {
-        use pdf_oxide::extractors::forms::field_flags;
+        use xberg_native_pdf::extractors::forms::field_flags;
         let field_type = map_field_type(&FieldType::Button, Some(field_flags::PUSH_BUTTON));
         assert_eq!(field_type, FormFieldType::Button);
     }
 
     #[test]
     fn test_map_xfa_field_type_text() {
-        let xfa_type = pdf_oxide::xfa::XfaFieldType::Text;
+        let xfa_type = xberg_native_pdf::xfa::XfaFieldType::Text;
         assert_eq!(map_xfa_field_type(&xfa_type), FormFieldType::Text);
     }
 
     #[test]
     fn test_map_xfa_field_type_numeric() {
-        let xfa_type = pdf_oxide::xfa::XfaFieldType::Numeric;
+        let xfa_type = xberg_native_pdf::xfa::XfaFieldType::Numeric;
         assert_eq!(map_xfa_field_type(&xfa_type), FormFieldType::Text);
     }
 
     #[test]
     fn test_map_xfa_field_type_datetime() {
-        let xfa_type = pdf_oxide::xfa::XfaFieldType::DateTime;
+        let xfa_type = xberg_native_pdf::xfa::XfaFieldType::DateTime;
         assert_eq!(map_xfa_field_type(&xfa_type), FormFieldType::Text);
     }
 
     #[test]
     fn test_map_xfa_field_type_checkbox() {
-        let xfa_type = pdf_oxide::xfa::XfaFieldType::Checkbox;
+        let xfa_type = xberg_native_pdf::xfa::XfaFieldType::Checkbox;
         assert_eq!(map_xfa_field_type(&xfa_type), FormFieldType::Checkbox);
     }
 
     #[test]
     fn test_map_xfa_field_type_radio_group() {
-        let xfa_type = pdf_oxide::xfa::XfaFieldType::RadioGroup;
+        let xfa_type = xberg_native_pdf::xfa::XfaFieldType::RadioGroup;
         assert_eq!(map_xfa_field_type(&xfa_type), FormFieldType::Radio);
     }
 
     #[test]
     fn test_map_xfa_field_type_dropdown() {
-        let xfa_type = pdf_oxide::xfa::XfaFieldType::DropDown;
+        let xfa_type = xberg_native_pdf::xfa::XfaFieldType::DropDown;
         assert_eq!(map_xfa_field_type(&xfa_type), FormFieldType::Choice);
     }
 
     #[test]
     fn test_map_xfa_field_type_listbox() {
-        let xfa_type = pdf_oxide::xfa::XfaFieldType::ListBox;
+        let xfa_type = xberg_native_pdf::xfa::XfaFieldType::ListBox;
         assert_eq!(map_xfa_field_type(&xfa_type), FormFieldType::Choice);
     }
 
     #[test]
     fn test_map_xfa_field_type_signature() {
-        let xfa_type = pdf_oxide::xfa::XfaFieldType::Signature;
+        let xfa_type = xberg_native_pdf::xfa::XfaFieldType::Signature;
         assert_eq!(map_xfa_field_type(&xfa_type), FormFieldType::Signature);
     }
 
     #[test]
     fn test_map_xfa_field_type_button() {
-        let xfa_type = pdf_oxide::xfa::XfaFieldType::Button;
+        let xfa_type = xberg_native_pdf::xfa::XfaFieldType::Button;
         assert_eq!(map_xfa_field_type(&xfa_type), FormFieldType::Button);
     }
 
     #[test]
     fn test_map_xfa_field_type_image() {
-        let xfa_type = pdf_oxide::xfa::XfaFieldType::Image;
+        let xfa_type = xberg_native_pdf::xfa::XfaFieldType::Image;
         assert_eq!(map_xfa_field_type(&xfa_type), FormFieldType::Unknown);
     }
 
     #[test]
     fn test_map_xfa_field_type_barcode() {
-        let xfa_type = pdf_oxide::xfa::XfaFieldType::Barcode;
+        let xfa_type = xberg_native_pdf::xfa::XfaFieldType::Barcode;
         assert_eq!(map_xfa_field_type(&xfa_type), FormFieldType::Unknown);
     }
 
     #[test]
     fn test_map_xfa_field_type_unknown() {
-        let xfa_type = pdf_oxide::xfa::XfaFieldType::Unknown("CustomType".to_string());
+        let xfa_type = xberg_native_pdf::xfa::XfaFieldType::Unknown("CustomType".to_string());
         assert_eq!(map_xfa_field_type(&xfa_type), FormFieldType::Unknown);
     }
 
     #[test]
     fn test_map_xfa_field_direct_text_with_value() {
-        let xfa_field = pdf_oxide::xfa::XfaField::new("username", "form.username[0]");
+        let xfa_field = xberg_native_pdf::xfa::XfaField::new("username", "form.username[0]");
         let mut xfa_field = xfa_field;
-        xfa_field.field_type = pdf_oxide::xfa::XfaFieldType::Text;
+        xfa_field.field_type = xberg_native_pdf::xfa::XfaFieldType::Text;
         xfa_field.value = Some("john_doe".to_string());
 
         let mapped = map_xfa_field_direct(&xfa_field);
@@ -493,9 +493,9 @@ mod tests {
 
     #[test]
     fn test_map_xfa_field_direct_checkbox_checked() {
-        let xfa_field = pdf_oxide::xfa::XfaField::new("agree", "form.agree[0]");
+        let xfa_field = xberg_native_pdf::xfa::XfaField::new("agree", "form.agree[0]");
         let mut xfa_field = xfa_field;
-        xfa_field.field_type = pdf_oxide::xfa::XfaFieldType::Checkbox;
+        xfa_field.field_type = xberg_native_pdf::xfa::XfaFieldType::Checkbox;
         xfa_field.value = Some("Yes".to_string());
 
         let mapped = map_xfa_field_direct(&xfa_field);
@@ -506,9 +506,9 @@ mod tests {
 
     #[test]
     fn test_map_xfa_field_direct_with_bbox() {
-        let xfa_field = pdf_oxide::xfa::XfaField::new("name_field", "form.name[0]");
+        let xfa_field = xberg_native_pdf::xfa::XfaField::new("name_field", "form.name[0]");
         let mut xfa_field = xfa_field;
-        xfa_field.field_type = pdf_oxide::xfa::XfaFieldType::Text;
+        xfa_field.field_type = xberg_native_pdf::xfa::XfaFieldType::Text;
         xfa_field.x = Some(72.0);
         xfa_field.y = Some(700.0);
         xfa_field.width = Some(200.0);
@@ -524,9 +524,9 @@ mod tests {
 
     #[test]
     fn test_map_xfa_field_direct_with_tooltip() {
-        let xfa_field = pdf_oxide::xfa::XfaField::new("email", "form.email[0]");
+        let xfa_field = xberg_native_pdf::xfa::XfaField::new("email", "form.email[0]");
         let mut xfa_field = xfa_field;
-        xfa_field.field_type = pdf_oxide::xfa::XfaFieldType::Text;
+        xfa_field.field_type = xberg_native_pdf::xfa::XfaFieldType::Text;
         xfa_field.tooltip = Some("Enter your email address".to_string());
 
         let mapped = map_xfa_field_direct(&xfa_field);
@@ -535,9 +535,9 @@ mod tests {
 
     #[test]
     fn test_map_xfa_field_direct_tooltip_fallback_to_caption() {
-        let xfa_field = pdf_oxide::xfa::XfaField::new("phone", "form.phone[0]");
+        let xfa_field = xberg_native_pdf::xfa::XfaField::new("phone", "form.phone[0]");
         let mut xfa_field = xfa_field;
-        xfa_field.field_type = pdf_oxide::xfa::XfaFieldType::Text;
+        xfa_field.field_type = xberg_native_pdf::xfa::XfaFieldType::Text;
         xfa_field.caption = Some("Phone Number".to_string());
 
         let mapped = map_xfa_field_direct(&xfa_field);
@@ -546,9 +546,9 @@ mod tests {
 
     #[test]
     fn test_map_xfa_field_direct_max_length() {
-        let xfa_field = pdf_oxide::xfa::XfaField::new("zip", "form.zip[0]");
+        let xfa_field = xberg_native_pdf::xfa::XfaField::new("zip", "form.zip[0]");
         let mut xfa_field = xfa_field;
-        xfa_field.field_type = pdf_oxide::xfa::XfaFieldType::Numeric;
+        xfa_field.field_type = xberg_native_pdf::xfa::XfaFieldType::Numeric;
         xfa_field.max_length = Some(5);
 
         let mapped = map_xfa_field_direct(&xfa_field);
@@ -557,9 +557,9 @@ mod tests {
 
     #[test]
     fn test_map_xfa_field_direct_value_prefers_current() {
-        let xfa_field = pdf_oxide::xfa::XfaField::new("status", "form.status[0]");
+        let xfa_field = xberg_native_pdf::xfa::XfaField::new("status", "form.status[0]");
         let mut xfa_field = xfa_field;
-        xfa_field.field_type = pdf_oxide::xfa::XfaFieldType::Text;
+        xfa_field.field_type = xberg_native_pdf::xfa::XfaFieldType::Text;
         xfa_field.value = Some("Active".to_string());
         xfa_field.default_value = Some("Inactive".to_string());
 
@@ -570,9 +570,9 @@ mod tests {
 
     #[test]
     fn test_map_xfa_field_direct_value_fallback_to_default() {
-        let xfa_field = pdf_oxide::xfa::XfaField::new("priority", "form.priority[0]");
+        let xfa_field = xberg_native_pdf::xfa::XfaField::new("priority", "form.priority[0]");
         let mut xfa_field = xfa_field;
-        xfa_field.field_type = pdf_oxide::xfa::XfaFieldType::Text;
+        xfa_field.field_type = xberg_native_pdf::xfa::XfaFieldType::Text;
         xfa_field.default_value = Some("Normal".to_string());
 
         let mapped = map_xfa_field_direct(&xfa_field);

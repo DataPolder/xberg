@@ -1,9 +1,9 @@
 //! Span orientation predicates and upright-frame geometry shared by the
-//! pdf_oxide span pipeline.
+//! xberg_native_pdf span pipeline.
 //!
 //! # Why rotated spans need their own frame
 //!
-//! pdf_oxide reports the content-stream text-matrix rotation of every run in
+//! xberg_native_pdf reports the content-stream text-matrix rotation of every run in
 //! [`TextSpan::rotation_degrees`]. For such a run:
 //!
 //! * `bbox.x` / `bbox.y` are **page-space** coordinates of the run origin, and
@@ -11,7 +11,7 @@
 //!   `width` is the sum of the glyph advances along the rotated baseline and
 //!   `height` is the font extent perpendicular to it.
 //!
-//! pdf_oxide states this itself (`document.rs`: "a rotated run's glyphs advance
+//! xberg_native_pdf states this itself (`document.rs`: "a rotated run's glyphs advance
 //! along a rotated axis, but the span bbox flattens them onto the x-axis
 //! (width = Σ glyph advances, height = font)") and relies on it in
 //! `order_rotated_blocks`, which rotates each origin by `-rotation_degrees`
@@ -27,7 +27,7 @@
 //! For unrotated spans every function here is the identity on `bbox`, so
 //! rotation-0 pages (the overwhelming majority) are byte-identical.
 
-use pdf_oxide::layout::TextSpan;
+use xberg_native_pdf::layout::TextSpan;
 
 /// True when the span is drawn with an upright (unrotated) text matrix.
 pub(crate) fn is_unrotated(span: &TextSpan) -> bool {
@@ -64,7 +64,7 @@ pub(crate) fn is_horizontal_ltr(span: &TextSpan) -> bool {
 /// The span origin rotated back into the span's own upright reading frame.
 ///
 /// Returns `(advance_axis, cross_axis)`. Mirrors the `-rotation_degrees`
-/// rotation pdf_oxide's `order_rotated_blocks` applies before sorting, so
+/// rotation xberg_native_pdf's `order_rotated_blocks` applies before sorting, so
 /// ordering and separator decisions agree with the order spans arrive in.
 pub(crate) fn upright_origin(span: &TextSpan) -> (f32, f32) {
     if is_unrotated(span) {
@@ -96,7 +96,7 @@ pub(crate) fn upright_cross_extent(span: &TextSpan) -> (f32, f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pdf_oxide::geometry::Rect;
+    use xberg_native_pdf::geometry::Rect;
 
     fn rotated_span(x: f32, y: f32, width: f32, height: f32, rotation_degrees: f32) -> TextSpan {
         TextSpan {

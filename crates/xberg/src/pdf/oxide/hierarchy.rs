@@ -1,6 +1,6 @@
-//! Font metrics extraction for heading hierarchy detection using the pdf_oxide backend.
+//! Font metrics extraction for heading hierarchy detection using the xberg_native_pdf backend.
 //!
-//! Uses pdf_oxide's span extraction to get font_size, font_weight, is_italic,
+//! Uses xberg_native_pdf's span extraction to get font_size, font_weight, is_italic,
 //! and font_name, converting them to `SegmentData` for the backend-agnostic
 //! clustering pipeline that assigns heading levels (H1-H6) to text blocks.
 //!
@@ -51,7 +51,7 @@ struct ScriptAttachment {
     insertion_index: usize,
 }
 
-fn is_usable_span(span: &pdf_oxide::layout::TextSpan) -> bool {
+fn is_usable_span(span: &xberg_native_pdf::layout::TextSpan) -> bool {
     span.artifact_type.is_none()
         && !span.text.trim().is_empty()
         && span.bbox.x.is_finite()
@@ -62,7 +62,7 @@ fn is_usable_span(span: &pdf_oxide::layout::TextSpan) -> bool {
         && span.bbox.height > 0.0
 }
 
-fn content_bounds(spans: &[&pdf_oxide::layout::TextSpan]) -> Option<(f32, f32)> {
+fn content_bounds(spans: &[&xberg_native_pdf::layout::TextSpan]) -> Option<(f32, f32)> {
     let min = spans.iter().map(|span| span.bbox.x).fold(f32::INFINITY, f32::min);
     let max = spans
         .iter()
@@ -71,7 +71,7 @@ fn content_bounds(spans: &[&pdf_oxide::layout::TextSpan]) -> Option<(f32, f32)> 
     (min.is_finite() && max.is_finite() && max > min).then_some((min, max))
 }
 
-fn detect_gutter_x(spans: &[&pdf_oxide::layout::TextSpan]) -> Option<f32> {
+fn detect_gutter_x(spans: &[&xberg_native_pdf::layout::TextSpan]) -> Option<f32> {
     if spans.len() < MIN_COLUMN_SIDE_SPANS * 2 {
         return None;
     }
@@ -130,7 +130,7 @@ fn prose_like(text: &str, monospace_spans: usize, span_count: usize) -> bool {
         && alpha_chars as f32 / alphanumeric_chars.max(1) as f32 >= MIN_PROSE_ALPHA_RATIO
 }
 
-fn side_support(spans: Vec<&pdf_oxide::layout::TextSpan>) -> SideSupport {
+fn side_support(spans: Vec<&xberg_native_pdf::layout::TextSpan>) -> SideSupport {
     let mut prose_line_ys: Vec<_> = spans
         .into_iter()
         .filter(|span| prose_like(&span.text, usize::from(span.is_monospace), 1))
@@ -161,11 +161,11 @@ fn has_balanced_vertical_support(left: &SideSupport, right: &SideSupport) -> boo
 }
 
 fn select_reading_order(
-    spans: &[pdf_oxide::layout::TextSpan],
+    spans: &[xberg_native_pdf::layout::TextSpan],
     page_width: f32,
     page_height: f32,
-) -> pdf_oxide::document::ReadingOrder {
-    use pdf_oxide::document::ReadingOrder;
+) -> xberg_native_pdf::document::ReadingOrder {
+    use xberg_native_pdf::document::ReadingOrder;
 
     if !page_width.is_finite() || page_width <= 0.0 || !page_height.is_finite() || page_height <= 0.0 {
         return ReadingOrder::TopToBottom;
@@ -206,7 +206,7 @@ fn select_reading_order(
 /// own conservative gates (minimum content width, per-line gutter agreement,
 /// a minimum span count per column per band, and a prose/table region gate —
 /// see its doc comment), so once it reports success the page's reading order
-/// is already correct. pdf_oxide's own `ColumnAware` XY-Cut pass is then
+/// is already correct. xberg_native_pdf's own `ColumnAware` XY-Cut pass is then
 /// skipped entirely: XY-Cut re-orders the whole span list from scratch and
 /// would otherwise silently discard the band order just applied. This
 /// matters because XY-Cut's own valley detection can miss exactly the narrow
@@ -219,7 +219,7 @@ fn select_reading_order(
 /// heuristic-selected XY-Cut fallback runs exactly as before, so non-dense
 /// pages are unaffected.
 fn reorder_page_reading_order(
-    spans: &mut Vec<pdf_oxide::layout::TextSpan>,
+    spans: &mut Vec<xberg_native_pdf::layout::TextSpan>,
     page_width: f32,
     page_height: f32,
     page_index: usize,
@@ -231,21 +231,21 @@ fn reorder_page_reading_order(
     apply_xy_cut_if_column_aware(spans, page_width, page_height, page_index);
 }
 
-/// Run pdf_oxide's `ColumnAware` XY-Cut pass when `select_reading_order`
+/// Run xberg_native_pdf's `ColumnAware` XY-Cut pass when `select_reading_order`
 /// judges the page a balanced two-column prose layout.
 ///
 /// A failed XY-Cut pass is logged and leaves `spans` in top-to-bottom order
 /// (the pre-existing fallback behavior).
 fn apply_xy_cut_if_column_aware(
-    spans: &mut Vec<pdf_oxide::layout::TextSpan>,
+    spans: &mut Vec<xberg_native_pdf::layout::TextSpan>,
     page_width: f32,
     page_height: f32,
     page_index: usize,
 ) {
-    use pdf_oxide::pipeline::{ReadingOrderContext, ReadingOrderStrategy, XYCutStrategy};
+    use xberg_native_pdf::pipeline::{ReadingOrderContext, ReadingOrderStrategy, XYCutStrategy};
 
     let order = select_reading_order(spans.as_slice(), page_width, page_height);
-    if order != pdf_oxide::document::ReadingOrder::ColumnAware {
+    if order != xberg_native_pdf::document::ReadingOrder::ColumnAware {
         return;
     }
     let context = ReadingOrderContext::new().with_page(page_index as u32);
@@ -253,12 +253,12 @@ fn apply_xy_cut_if_column_aware(
         Ok(ordered) => *spans = ordered.into_iter().map(|item| item.span).collect(),
         Err(error) => tracing::debug!(
             page = page_index,
-            "pdf_oxide column-aware hierarchy ordering failed; retaining top-to-bottom order: {error}"
+            "xberg_native_pdf column-aware hierarchy ordering failed; retaining top-to-bottom order: {error}"
         ),
     }
 }
 
-fn rejoin_inline_scripts(spans: Vec<pdf_oxide::layout::TextSpan>) -> Vec<pdf_oxide::layout::TextSpan> {
+fn rejoin_inline_scripts(spans: Vec<xberg_native_pdf::layout::TextSpan>) -> Vec<xberg_native_pdf::layout::TextSpan> {
     let mut by_base: HashMap<usize, Vec<ScriptAttachment>> = HashMap::new();
     let mut attached = vec![false; spans.len()];
     for script_index in 0..spans.len() {
@@ -293,7 +293,7 @@ fn rejoin_inline_scripts(spans: Vec<pdf_oxide::layout::TextSpan>) -> Vec<pdf_oxi
 }
 
 fn find_inline_script_base(
-    spans: &[pdf_oxide::layout::TextSpan],
+    spans: &[xberg_native_pdf::layout::TextSpan],
     attached: &[bool],
     script_index: usize,
 ) -> Option<(usize, usize)> {
@@ -327,8 +327,8 @@ fn find_inline_script_base(
 }
 
 fn inline_script_insertion(
-    base: &pdf_oxide::layout::TextSpan,
-    script: &pdf_oxide::layout::TextSpan,
+    base: &xberg_native_pdf::layout::TextSpan,
+    script: &xberg_native_pdf::layout::TextSpan,
     immediately_follows: bool,
 ) -> Option<usize> {
     if base.artifact_type.is_some()
@@ -375,7 +375,7 @@ fn inline_script_insertion(
     character_origins(base).map(|origins| origins.partition_point(|origin| *origin < script.bbox.x))
 }
 
-fn is_compact_horizontal_ascii_span(span: &pdf_oxide::layout::TextSpan) -> bool {
+fn is_compact_horizontal_ascii_span(span: &xberg_native_pdf::layout::TextSpan) -> bool {
     let char_count = span.text.chars().count();
     char_count > 0
         && char_count <= INLINE_SCRIPT_MAX_CHARS
@@ -388,7 +388,7 @@ fn is_compact_horizontal_ascii_span(span: &pdf_oxide::layout::TextSpan) -> bool 
         && is_horizontal_ltr(span)
 }
 
-fn has_valid_span_geometry(span: &pdf_oxide::layout::TextSpan) -> bool {
+fn has_valid_span_geometry(span: &xberg_native_pdf::layout::TextSpan) -> bool {
     span.bbox.x.is_finite()
         && span.bbox.y.is_finite()
         && span.bbox.width.is_finite()
@@ -399,7 +399,7 @@ fn has_valid_span_geometry(span: &pdf_oxide::layout::TextSpan) -> bool {
         && span.font_size > 0.0
 }
 
-fn character_origins(span: &pdf_oxide::layout::TextSpan) -> Option<Vec<f32>> {
+fn character_origins(span: &xberg_native_pdf::layout::TextSpan) -> Option<Vec<f32>> {
     let char_count = span.text.chars().count();
     let bbox_right = span.bbox.x + span.bbox.width;
     if span.char_x_offsets.len() == char_count
@@ -436,7 +436,7 @@ fn character_origins(span: &pdf_oxide::layout::TextSpan) -> Option<Vec<f32>> {
     )
 }
 
-fn horizontal_attachment_distance(base: &pdf_oxide::layout::TextSpan, script: &pdf_oxide::layout::TextSpan) -> f32 {
+fn horizontal_attachment_distance(base: &xberg_native_pdf::layout::TextSpan, script: &xberg_native_pdf::layout::TextSpan) -> f32 {
     let base_right = base.bbox.x + base.bbox.width;
     if script.bbox.x <= base_right {
         0.0
@@ -446,10 +446,10 @@ fn horizontal_attachment_distance(base: &pdf_oxide::layout::TextSpan, script: &p
 }
 
 fn emit_base_with_scripts(
-    base: &pdf_oxide::layout::TextSpan,
+    base: &xberg_native_pdf::layout::TextSpan,
     mut scripts: Vec<ScriptAttachment>,
-    spans: &[pdf_oxide::layout::TextSpan],
-    output: &mut Vec<pdf_oxide::layout::TextSpan>,
+    spans: &[xberg_native_pdf::layout::TextSpan],
+    output: &mut Vec<xberg_native_pdf::layout::TextSpan>,
 ) {
     scripts.sort_by(|left, right| {
         left.insertion_index.cmp(&right.insertion_index).then_with(|| {
@@ -484,7 +484,7 @@ fn emit_base_with_scripts(
     }
 }
 
-fn append_span_text(target: &mut pdf_oxide::layout::TextSpan, suffix: &pdf_oxide::layout::TextSpan) {
+fn append_span_text(target: &mut xberg_native_pdf::layout::TextSpan, suffix: &xberg_native_pdf::layout::TextSpan) {
     target.text.push_str(&suffix.text);
     let target_right = target.bbox.x + target.bbox.width;
     let suffix_right = suffix.bbox.x + suffix.bbox.width;
@@ -493,7 +493,7 @@ fn append_span_text(target: &mut pdf_oxide::layout::TextSpan, suffix: &pdf_oxide
     target.char_widths.clear();
 }
 
-fn split_span(span: &pdf_oxide::layout::TextSpan, start: usize, end: usize) -> Option<pdf_oxide::layout::TextSpan> {
+fn split_span(span: &xberg_native_pdf::layout::TextSpan, start: usize, end: usize) -> Option<xberg_native_pdf::layout::TextSpan> {
     if start >= end {
         return None;
     }
@@ -517,9 +517,9 @@ fn split_span(span: &pdf_oxide::layout::TextSpan, start: usize, end: usize) -> O
 }
 
 fn normalize_script_span(
-    script: &pdf_oxide::layout::TextSpan,
-    base: &pdf_oxide::layout::TextSpan,
-) -> pdf_oxide::layout::TextSpan {
+    script: &xberg_native_pdf::layout::TextSpan,
+    base: &xberg_native_pdf::layout::TextSpan,
+) -> xberg_native_pdf::layout::TextSpan {
     let mut normalized = script.clone();
     normalized.bbox.y = base.bbox.y;
     normalized.bbox.height = base.bbox.height;
@@ -535,7 +535,7 @@ fn normalize_script_span(
     normalized
 }
 
-/// Extract text segments with font metrics from a PDF page using pdf_oxide.
+/// Extract text segments with font metrics from a PDF page using xberg_native_pdf.
 ///
 /// Returns `SegmentData` objects containing text, position, and font metadata
 /// (size, bold, italic, monospace). These feed into the existing backend-agnostic
@@ -567,13 +567,13 @@ fn extract_segments_from_page_inner(
 ) -> Result<Vec<SegmentData>> {
     let mut page_text_data = match doc
         .doc
-        .extract_page_text_with_options(page_index, pdf_oxide::document::ReadingOrder::TopToBottom)
+        .extract_page_text_with_options(page_index, xberg_native_pdf::document::ReadingOrder::TopToBottom)
     {
         Ok(data) => data,
         Err(e) => {
             tracing::debug!(
                 page = page_index,
-                "pdf_oxide extract_page_text_with_options failed for hierarchy: {e}"
+                "xberg_native_pdf extract_page_text_with_options failed for hierarchy: {e}"
             );
             return Ok(Vec::new());
         }
@@ -595,7 +595,7 @@ fn extract_segments_from_page_inner(
             !span.text.trim().is_empty()
         })
         .map(|span| {
-            let is_bold = span.font_weight == pdf_oxide::layout::text_block::FontWeight::Bold;
+            let is_bold = span.font_weight == xberg_native_pdf::layout::text_block::FontWeight::Bold;
             let bbox = &span.bbox;
 
             let pdf_baseline_y = bbox.y;
@@ -678,7 +678,7 @@ fn extract_segments_with_structure_tree(doc: &mut OxideDocument) -> Result<(Vec<
     let mark_info = match doc.doc.mark_info() {
         Ok(mi) => mi,
         Err(e) => {
-            tracing::debug!("pdf_oxide: mark_info() failed, skipping structure tree: {e}");
+            tracing::debug!("xberg_native_pdf: mark_info() failed, skipping structure tree: {e}");
             return Ok((Vec::new(), false));
         }
     };
@@ -687,7 +687,7 @@ fn extract_segments_with_structure_tree(doc: &mut OxideDocument) -> Result<(Vec<
         tracing::debug!(
             marked = mark_info.marked,
             suspects = mark_info.suspects,
-            "pdf_oxide: structure tree not reliable, falling back to font-size clustering"
+            "xberg_native_pdf: structure tree not reliable, falling back to font-size clustering"
         );
         return Ok((Vec::new(), false));
     }
@@ -695,16 +695,16 @@ fn extract_segments_with_structure_tree(doc: &mut OxideDocument) -> Result<(Vec<
     let struct_tree = match doc.doc.structure_tree() {
         Ok(Some(tree)) => tree,
         Ok(None) => {
-            tracing::debug!("pdf_oxide: no structure tree found despite marked=true");
+            tracing::debug!("xberg_native_pdf: no structure tree found despite marked=true");
             return Ok((Vec::new(), false));
         }
         Err(e) => {
-            tracing::debug!("pdf_oxide: structure_tree() failed: {e}");
+            tracing::debug!("xberg_native_pdf: structure_tree() failed: {e}");
             return Ok((Vec::new(), false));
         }
     };
 
-    let all_page_content = pdf_oxide::structure::traverse_structure_tree_all_pages(&struct_tree);
+    let all_page_content = xberg_native_pdf::structure::traverse_structure_tree_all_pages(&struct_tree);
 
     let heading_count: usize = all_page_content
         .values()
@@ -715,13 +715,13 @@ fn extract_segments_with_structure_tree(doc: &mut OxideDocument) -> Result<(Vec<
     if heading_count < 3 {
         tracing::debug!(
             heading_count,
-            "pdf_oxide: structure tree has too few heading elements (< 3), falling back to font-size clustering"
+            "xberg_native_pdf: structure tree has too few heading elements (< 3), falling back to font-size clustering"
         );
         return Ok((Vec::new(), false));
     }
 
     let page_count = doc.doc.page_count().map_err(|e| {
-        crate::pdf::error::PdfError::TextExtractionFailed(format!("pdf_oxide: failed to get page count: {e}"))
+        crate::pdf::error::PdfError::TextExtractionFailed(format!("xberg_native_pdf: failed to get page count: {e}"))
     })?;
 
     let mut all_pages: Vec<Vec<SegmentData>> = Vec::with_capacity(page_count);
@@ -746,13 +746,13 @@ fn extract_segments_with_structure_tree(doc: &mut OxideDocument) -> Result<(Vec<
     tracing::debug!(
         page_count,
         total_role_assigned,
-        "pdf_oxide: structure tree heading detection complete"
+        "xberg_native_pdf: structure tree heading detection complete"
     );
 
     Ok((all_pages, true))
 }
 
-/// Extract text segments from all pages of a PDF document using pdf_oxide.
+/// Extract text segments from all pages of a PDF document using xberg_native_pdf.
 ///
 /// Attempts structure tree extraction first for tagged PDFs. Falls back to
 /// plain font-metric extraction when the structure tree is unavailable or
@@ -775,7 +775,7 @@ pub(crate) fn extract_all_segments(doc: &mut OxideDocument) -> Result<(Vec<Vec<S
     }
 
     let page_count = doc.doc.page_count().map_err(|e| {
-        crate::pdf::error::PdfError::TextExtractionFailed(format!("pdf_oxide: failed to get page count: {e}"))
+        crate::pdf::error::PdfError::TextExtractionFailed(format!("xberg_native_pdf: failed to get page count: {e}"))
     })?;
 
     let mut all_pages: Vec<Vec<SegmentData>> = Vec::with_capacity(page_count);
@@ -804,10 +804,10 @@ pub(crate) fn extract_all_segments(doc: &mut OxideDocument) -> Result<(Vec<Vec<S
 ///
 /// # Implementation note
 ///
-/// This walks the raw `/StructTreeRoot` dictionary directly via `pdf_oxide`'s
+/// This walks the raw `/StructTreeRoot` dictionary directly via `xberg_native_pdf`'s
 /// low-level `Object`/`ObjectRef` accessors rather than `PdfDocument::structure_tree()`.
 /// The latter is built for reading-order/heading detection and deliberately skips
-/// parsing `/A` and `/Alt` (pdf_oxide's `structure::parser` module never populates
+/// parsing `/A` and `/Alt` (xberg_native_pdf's `structure::parser` module never populates
 /// `StructElem::alt_text`), so it cannot be used here.
 pub(crate) fn extract_figure_alt_text_by_page(doc: &mut OxideDocument) -> HashMap<u32, Vec<Option<String>>> {
     let mut by_page: HashMap<u32, Vec<Option<String>>> = HashMap::new();
@@ -845,12 +845,12 @@ const MAX_PDF_OBJECT_TREE_DEPTH: usize = 128;
 
 /// Resolve `obj` to its underlying value if it is an indirect reference,
 /// otherwise clone it. Unresolvable references degrade to `Object::Null`.
-fn resolve_pdf_object(doc: &OxideDocument, obj: &pdf_oxide::object::Object) -> pdf_oxide::object::Object {
+fn resolve_pdf_object(doc: &OxideDocument, obj: &xberg_native_pdf::object::Object) -> xberg_native_pdf::object::Object {
     match obj.as_reference() {
         Some(object_ref) => doc
             .doc
             .load_object(object_ref)
-            .unwrap_or(pdf_oxide::object::Object::Null),
+            .unwrap_or(xberg_native_pdf::object::Object::Null),
         None => obj.clone(),
     }
 }
@@ -862,7 +862,7 @@ fn resolve_pdf_object(doc: &OxideDocument, obj: &pdf_oxide::object::Object) -> p
 /// share the same object id per ISO 32000-1:2008 §7.3.10).
 fn build_page_id_map(
     doc: &OxideDocument,
-    catalog_dict: &HashMap<String, pdf_oxide::object::Object>,
+    catalog_dict: &HashMap<String, xberg_native_pdf::object::Object>,
 ) -> HashMap<u32, u32> {
     let mut map = HashMap::new();
     let Some(pages_obj) = catalog_dict.get("Pages") else {
@@ -880,7 +880,7 @@ fn build_page_id_map(
 
 fn walk_pages_tree(
     doc: &OxideDocument,
-    node_ref: pdf_oxide::object::ObjectRef,
+    node_ref: xberg_native_pdf::object::ObjectRef,
     map: &mut HashMap<u32, u32>,
     index: &mut u32,
     visited: &mut std::collections::HashSet<u32>,
@@ -897,7 +897,7 @@ fn walk_pages_tree(
     };
 
     match node_dict.get("Kids").map(|kids_obj| resolve_pdf_object(doc, kids_obj)) {
-        Some(pdf_oxide::object::Object::Array(kids)) => {
+        Some(xberg_native_pdf::object::Object::Array(kids)) => {
             for kid in &kids {
                 if let Some(kid_ref) = kid.as_reference() {
                     walk_pages_tree(doc, kid_ref, map, index, visited, depth + 1);
@@ -918,7 +918,7 @@ fn walk_pages_tree(
 /// entries (dicts carrying `/S`) are descended into.
 fn walk_struct_kids(
     doc: &OxideDocument,
-    k_obj: &pdf_oxide::object::Object,
+    k_obj: &xberg_native_pdf::object::Object,
     page_id_map: &HashMap<u32, u32>,
     inherited_page: Option<u32>,
     by_page: &mut HashMap<u32, Vec<Option<String>>>,
@@ -928,12 +928,12 @@ fn walk_struct_kids(
         return;
     }
     match resolve_pdf_object(doc, k_obj) {
-        pdf_oxide::object::Object::Array(items) => {
+        xberg_native_pdf::object::Object::Array(items) => {
             for item in &items {
                 walk_struct_elem(doc, item, page_id_map, inherited_page, by_page, depth + 1);
             }
         }
-        resolved @ pdf_oxide::object::Object::Dictionary(_) => {
+        resolved @ xberg_native_pdf::object::Object::Dictionary(_) => {
             walk_struct_elem_resolved(doc, &resolved, page_id_map, inherited_page, by_page, depth + 1);
         }
         _ => {}
@@ -942,7 +942,7 @@ fn walk_struct_kids(
 
 fn walk_struct_elem(
     doc: &OxideDocument,
-    elem_obj: &pdf_oxide::object::Object,
+    elem_obj: &xberg_native_pdf::object::Object,
     page_id_map: &HashMap<u32, u32>,
     inherited_page: Option<u32>,
     by_page: &mut HashMap<u32, Vec<Option<String>>>,
@@ -957,7 +957,7 @@ fn walk_struct_elem(
 /// omit their own `/Pg` (ISO 32000-1:2008 §14.7.2, Table 323).
 fn walk_struct_elem_resolved(
     doc: &OxideDocument,
-    resolved: &pdf_oxide::object::Object,
+    resolved: &xberg_native_pdf::object::Object,
     page_id_map: &HashMap<u32, u32>,
     inherited_page: Option<u32>,
     by_page: &mut HashMap<u32, Vec<Option<String>>>,
@@ -998,9 +998,9 @@ fn walk_struct_elem_resolved(
 
 #[cfg(test)]
 mod tests {
-    use pdf_oxide::document::ReadingOrder;
-    use pdf_oxide::geometry::Rect;
-    use pdf_oxide::layout::TextSpan;
+    use xberg_native_pdf::document::ReadingOrder;
+    use xberg_native_pdf::geometry::Rect;
+    use xberg_native_pdf::layout::TextSpan;
 
     use super::SegmentData;
 
@@ -1102,8 +1102,8 @@ mod tests {
     /// Eight-row two-column prose page (GH#1397) with a gutter that clears
     /// `reorder_dense_two_column_page`'s own floor
     /// (`max(page_width * 0.02, 10.0)` = 12.24pt at `GH1397_PAGE_WIDTH`) but
-    /// sits under pdf_oxide XY-Cut's default 15pt `min_valley_width`
-    /// (`pdf_oxide::pipeline::XYCutStrategy::default().min_valley_width`) —
+    /// sits under xberg_native_pdf XY-Cut's default 15pt `min_valley_width`
+    /// (`xberg_native_pdf::pipeline::XYCutStrategy::default().min_valley_width`) —
     /// the shape that let the reported document's `ColumnAware` and
     /// `TopToBottom` reading orders come out byte-identical: XY-Cut's own
     /// valley search never found a gutter this narrow.
@@ -1150,7 +1150,7 @@ mod tests {
     /// via `reorder_page_reading_order`) must apply the same dense
     /// two-column band-split repair the plain-text path already used
     /// (`super::text::reorder_dense_two_column_page`), not rely solely on
-    /// pdf_oxide's own `ColumnAware` XY-Cut pass.
+    /// xberg_native_pdf's own `ColumnAware` XY-Cut pass.
     ///
     /// Revert check: reverting `reorder_page_reading_order` to its pre-fix
     /// form (drop the `reorder_dense_two_column_page` call and unconditionally
@@ -1195,7 +1195,7 @@ mod tests {
     /// lines beside monospace code, from `single_column_code_gutter_uses_top_to_bottom`
     /// above) must come out of `reorder_page_reading_order` byte-identical to
     /// its input order. `reorder_dense_two_column_page`'s own gate rejects it
-    /// (pdf_oxide's region classifier does not treat monospace code as a
+    /// (xberg_native_pdf's region classifier does not treat monospace code as a
     /// reorderable prose column), and `select_reading_order` already returns
     /// `TopToBottom` for this shape, so XY-Cut is never invoked either.
     #[test]
@@ -1490,14 +1490,14 @@ mod tests {
     fn should_never_attach_or_leak_artifact_spans() {
         let base = positioned_span("Unit", 100.0, 200.0, 20.0, 10.0, vec![]);
         let mut artifact_script = positioned_span("2", 120.1, 198.4, 3.0, 6.7, vec![120.1]);
-        artifact_script.artifact_type = Some(pdf_oxide::extractors::text::ArtifactType::Layout);
+        artifact_script.artifact_type = Some(xberg_native_pdf::extractors::text::ArtifactType::Layout);
         let repaired = super::rejoin_inline_scripts(vec![base, artifact_script]);
         assert_eq!(repaired[0].text, "Unit");
         assert_eq!(repaired[1].text, "2");
         assert!(repaired[1].artifact_type.is_some());
 
         let mut artifact_base = positioned_span("Unit", 100.0, 200.0, 20.0, 10.0, vec![]);
-        artifact_base.artifact_type = Some(pdf_oxide::extractors::text::ArtifactType::Layout);
+        artifact_base.artifact_type = Some(xberg_native_pdf::extractors::text::ArtifactType::Layout);
         let script = positioned_span("2", 120.1, 198.4, 3.0, 6.7, vec![120.1]);
         let repaired = super::rejoin_inline_scripts(vec![artifact_base, script]);
         assert_eq!(repaired.len(), 2);
@@ -1541,7 +1541,7 @@ mod tests {
     fn should_normalize_hierarchy_metadata_to_the_base() {
         let mut base = positioned_span("H SO", 100.0, 200.0, 20.0, 10.0, vec![100.0, 105.0, 110.0, 115.0]);
         base.font_name = "BaseFont".to_string();
-        base.font_weight = pdf_oxide::layout::text_block::FontWeight::Bold;
+        base.font_weight = xberg_native_pdf::layout::text_block::FontWeight::Bold;
         base.is_italic = true;
         base.is_monospace = true;
         base.mcid = Some(7);
@@ -1551,7 +1551,7 @@ mod tests {
         let repaired = super::rejoin_inline_scripts(vec![base, script]);
         let normalized = &repaired[1];
         assert_eq!(normalized.font_name, "BaseFont");
-        assert_eq!(normalized.font_weight, pdf_oxide::layout::text_block::FontWeight::Bold);
+        assert_eq!(normalized.font_weight, xberg_native_pdf::layout::text_block::FontWeight::Bold);
         assert!(normalized.is_italic);
         assert!(normalized.is_monospace);
         assert_eq!(normalized.mcid, Some(7));

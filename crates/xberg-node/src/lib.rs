@@ -12131,7 +12131,7 @@ pub fn doctor(config: Option<JsExtractionConfig>) -> JsDoctorReport {
 /// claims it. If something else already holds it — an application wiring
 /// `tracing_subscriber.fmt()...try_init()`, which is what `xberg-cli` does in `main()` —
 /// `set_global_default` fails and this is a no-op, so the engine's glyph-drop records go to
-/// that other subscriber and `take_pdf_oxide_render_warnings` stays empty. This function is
+/// that other subscriber and `take_engine_render_warnings` stays empty. This function is
 /// the fallback for embedders that have no subscriber at all; composing the layer is what
 /// works when they do.
 ///
@@ -12192,8 +12192,8 @@ pub fn install_pdf_render_diagnostics() -> bool {
 /// caller in `extractors.pdf.mod` to merge, so layout-path glyph drops are
 /// no longer silently lost.
 #[napi(js_name = "takePdfOxideRenderWarnings")]
-pub fn take_pdf_oxide_render_warnings() -> Vec<JsProcessingWarning> {
-    xberg::pdf::render::take_pdf_oxide_render_warnings()
+pub fn take_engine_render_warnings() -> Vec<JsProcessingWarning> {
+    xberg::pdf::render::take_engine_render_warnings()
         .into_iter()
         .map(Into::into)
         .collect()

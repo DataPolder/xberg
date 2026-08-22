@@ -21,10 +21,10 @@ ZIP archive → Security validation → XML parsing → Text + tables + metadata
 ## PDF
 
 ```text
-Bytes → pdf_oxide → Per-page text + OCR fallback → Tables → Metadata
+Bytes → xberg_native_pdf → Per-page text + OCR fallback → Tables → Metadata
 ```
 
-1. `pdf_oxide::PdfDocument::from_bytes(content)?`
+1. `xberg_native_pdf::PdfDocument::from_bytes(content)?`
 2. Check if needs OCR: `config.force_ocr || !has_searchable_text()`
 3. Extract text per page, tables if `config.pages` enabled
 4. Feature-gated: `#[cfg(feature = "pdf")]`

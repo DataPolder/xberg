@@ -8,6 +8,7 @@ members = [
     "crates/xberg-jni",
     "crates/xberg-libheif",
     "crates/xberg-libwpd",
+    "crates/xberg-native-pdf",
     "crates/xberg-node",
     "crates/xberg-paddle-ocr",
     "crates/xberg-pdfium-render",
@@ -96,14 +97,14 @@ once_cell = "1.21.4"
 
 ort = { version = "2.0.0-rc.13", default-features = false, features = ["std", "api-18"] }
 parking_lot = "0.12.5"
-# Our fork of PDFOxide. `package =` keeps the extern crate name `pdf_oxide`, so the
-# ~530 `use pdf_oxide::...` call sites are untouched. The 1.0.1 fork made every
-# capability that used to sit behind `rendering`/`legacy-crypto`/`icc` unconditional
-# (its own `[features]` table is now just `default = []` plus two opt-in CJK font
-# extras), so no feature list belongs here anymore. Resolves from crates.io as of
-# 2026-08-20; the [patch.crates-io] override that pointed at the sibling fork
-# checkout is gone.
-pdf_oxide = { package = "xberg-pdf-oxide", version = "1.0.1" }
+# The native PDF engine, vendored into this workspace at crates/xberg-native-pdf. It began as
+# a fork of a third-party project; see ATTRIBUTIONS.md, which is now the ONLY place in this
+# repo that names the upstream. There is deliberately no `package =` alias: the extern crate
+# name is the real one, so `use xberg_native_pdf::...` at every call site, and the tracing log
+# target (`module_path!()`, rooted at `[lib] name`) matches the crate you are reading. An alias
+# hiding a different lib name is what cost twelve days of dropped font warnings in GH#697.
+# Path dependency inside the workspace; needs no [patch.crates-io] entry.
+xberg-native-pdf = { path = "./crates/xberg-native-pdf", version = "1.0.0" }
 # Our fork of pdfium-render. `package =` keeps the extern crate name `pdfium_render`
 # (matches the `[lib] name = "pdfium_render"` in crates/xberg-pdfium-render/Cargo.toml),
 # so any `use pdfium_render::...` call site is unaffected. Path dependency inside the
@@ -169,20 +170,26 @@ xberg = { path = "./crates/xberg", version = "1.1.0", default-features = false }
 xberg-gliner = { path = "./crates/xberg-gliner", version = "1.1.0", default-features = false }
 
 [patch.crates-io]
-# NO out-of-tree sibling checkouts remain. Both third-party overrides are gone as of
-# 2026-08-20, so `cargo publish` -- which IGNORES [patch] -- now resolves exactly what a
-# local build does, and the standing "do not release while a patch entry is present"
-# blocker is discharged:
-#   * xberg-pdf-oxide 1.0.1 is published; the pin
-#     `pdf_oxide = { package = "xberg-pdf-oxide", version = "1.0.1" }` above resolves from
-#     the registry. The registry copy is the PACKAGED file set, which `include` filters --
-#     it is not byte-identical to the fork checkout.
-#   * sceptre is published and confirmed live; the pin was bumped 0.6.0 -> 0.7.0 in the same
-#     commit that removed its override. Bumping without removing (or removing without
-#     bumping) would have silently resolved a sceptre lacking the width_ths and MSRV work, so
-#     the two MUST stay together. Now at 0.7.1 (the region-ordering fix), which resolves from
-#     the registry -- editing ../sceptre changes nothing in an xberg build.
+# ONE out-of-tree sibling override is active, so the standing "do not release while a patch
+# entry is present" rule is armed again. `cargo publish` IGNORES [patch], so a release cut
+# with this entry in place would resolve the registry's liter-llm instead of the sibling and
+# would not compile.
 #
+#   * liter-llm: the in-flight provider-request limiter (GH#1465) landed in liter-llm 1.18.0,
+#     which is NOT published yet. The requirement above deliberately stays at the published
+#     1.17.3 -- a caret range already admits the local 1.18.0, so the patch applies while the
+#     manifest still names something that exists on crates.io. REMOVAL CONDITION: when
+#     liter-llm 1.18.0 is on crates.io, bump the requirement to 1.18.0 and delete this entry
+#     in the SAME commit. Bumping without removing, or removing without bumping, silently
+#     resolves a liter-llm with no `in_flight_limit` field -- the sceptre 0.6->0.7 lesson.
+#   * A blanket `cargo upgrade` can disarm this by rewriting the requirement past what the
+#     sibling satisfies. 1.18.0 covers any caret 1.x, so it holds today; it would stop holding
+#     the moment liter-llm publishes 1.19.0 and a sweep rewrites the requirement. ~keep
+#
+# The native PDF engine needs no entry: it is a workspace member at crates/xberg-native-pdf
+# and resolves by path (see the note above that dependency).
+liter-llm = { path = "../liter-llm/crates/liter-llm" }
+
 # The five entries below are self-patches of our own workspace members, which are already
 # declared as `path = ..., version = ...` deps -- so path resolution wins locally with or
 # without them. They only bite if some third-party crates.io dependency ever depends on

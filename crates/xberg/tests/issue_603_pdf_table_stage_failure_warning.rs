@@ -36,22 +36,22 @@
 //! (`pdf/oxide/text.rs`), so that Err arm cannot be reached through the public
 //! API without corrupting the document's internal state between calls, which is
 //! not something a test can do without either a production-code seam or a
-//! pdf_oxide-internal PDF corpus this repository does not have. The same applies
+//! xberg_native_pdf-internal PDF corpus this repository does not have. The same applies
 //! to the heuristic pass's hierarchy-extraction `Err` arm
 //! (`pdf/oxide/hierarchy.rs`) for its `page_count()` fallback. These are noted
 //! as untestable through the public API rather than left silently uncovered.
 //!
 //! The "whole-document" panic-guard path used to be exercised here too, driving
 //! `test_documents/pdf/total_order_panic_1198_tables_path.pdf` through the public
-//! API and asserting a real `pdf_oxide` panic and its resulting `pdf_tables`
-//! warning. That fixture no longer panics: the `xberg-pdf-oxide` fork's commit
+//! API and asserting a real `xberg_native_pdf` panic and its resulting `pdf_tables`
+//! warning. That fixture no longer panics: the `xberg-native` fork's commit
 //! `9b0f9c99` ("Fix reading-order sort panics on scanned/malformed PDFs (#807)")
 //! replaced the non-transitive pairwise tategaki column comparator with
 //! `sort_vertical_tategaki`, a genuine total order, at all three call sites, and
-//! `9b0f9c99` is an ancestor of the `xberg-pdf-oxide` 1.0.1 version this crate now
+//! `9b0f9c99` is an ancestor of the `xberg-native` 1.0.1 version this crate now
 //! consumes (see `Cargo.lock`). No fixture in `test_documents/` still reaches a
-//! real `pdf_oxide` panic through the table-detection stage (the sibling
-//! `pdf_oxide_total_order_panic_1198.rs::tables_path_repro_extracts_without_panic`
+//! real `xberg_native_pdf` panic through the table-detection stage (the sibling
+//! `xberg_native_pdf_total_order_panic_1198.rs::tables_path_repro_extracts_without_panic`
 //! already documents this same fixture as extracting cleanly). The message-format
 //! coverage now lives as a direct unit test,
 //! `table_stage_failure_warning_formats_the_message_it_promises` in

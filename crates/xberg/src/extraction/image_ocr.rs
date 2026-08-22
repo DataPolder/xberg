@@ -13,9 +13,17 @@
 //! # Concurrency
 //!
 //! Image OCR tasks within one extraction operation are processed with a bounded
-//! concurrency limit derived from the VLM request limit, when configured, or the
-//! general thread budget otherwise to prevent resource exhaustion when documents
-//! contain many embedded images.
+//! concurrency limit derived from the general thread budget
+//! (`core::config::concurrency::resolve_thread_budget`) to prevent resource
+//! exhaustion when documents contain many embedded images.
+//!
+//! This limit is deliberately *not* derived from any VLM-specific request limit
+//! (e.g. `OcrConfig::vlm_config::max_concurrency`), even when the configured backend
+//! or fallback policy can reach a VLM: this call site mixes CPU-bound raster/OCR work
+//! with potential remote requests, and a per-extraction VLM knob would still leave
+//! aggregate provider concurrency across concurrent extractions unbounded (see #1465).
+//! A real, global provider-side limit is enforced once per shared LLM client instead —
+//! see [`crate::llm::client::create_client`].
 
 use crate::types::{ExtractedDocument, ExtractedImage};
 
@@ -36,10 +44,10 @@ use crate::types::{ExtractedDocument, ExtractedImage};
 ///
 /// # Concurrency
 ///
-/// Concurrency within the current extraction is bounded by the configured VLM
-/// request limit (falling back to the thread budget) using a replenished task set,
-/// so queued images do not create an unbounded number of futures. Concurrent
-/// document extractions each enforce their own limit.
+/// Concurrency within the current extraction is bounded by the general thread
+/// budget (never a VLM-specific request limit — see the module docs) using a
+/// replenished task set, so queued images do not create an unbounded number of
+/// futures. Concurrent document extractions each enforce their own limit.
 #[cfg(all(feature = "ocr", feature = "tokio-runtime"))]
 pub(crate) async fn process_images_with_ocr(
     mut images: Vec<ExtractedImage>,
@@ -57,7 +65,7 @@ pub(crate) async fn process_images_with_ocr(
     use std::collections::VecDeque;
     use tokio::task::JoinSet;
 
-    let max_tasks = crate::core::config::concurrency::resolve_ocr_concurrency(ocr_config, config.concurrency.as_ref());
+    let max_tasks = crate::core::config::concurrency::resolve_thread_budget(config.concurrency.as_ref());
 
     type OcrTaskResult = (usize, crate::Result<ExtractedDocument>);
     type PendingOcrTask = (usize, bytes::Bytes, crate::core::config::OcrConfig);
@@ -149,13 +157,13 @@ mod tests {
 
     use async_trait::async_trait;
     use bytes::Bytes;
-    use tokio::sync::Barrier;
+    use tokio::sync::Notify;
 
     use super::*;
     use crate::core::config::{ConcurrencyConfig, LlmConfig, OcrConfig, VlmFallbackPolicy};
     use crate::plugins::{OcrBackend, OcrBackendType, Plugin};
 
-    const BACKEND_NAME: &str = "vlm-concurrency-test-backend";
+    const BACKEND_NAME: &str = "thread-budget-concurrency-test-backend";
 
     struct RegistrationGuard;
 
@@ -165,14 +173,21 @@ mod tests {
         }
     }
 
-    struct MeasuringBackend {
-        active: Arc<AtomicUsize>,
-        peak: Arc<AtomicUsize>,
+    /// An OCR backend that counts every call that starts, then parks forever on a
+    /// [`Notify`] the test never fires.
+    ///
+    /// `process_images_with_ocr` spawns exactly `min(max_tasks, images.len())` tasks in a
+    /// synchronous loop before its first `.await` point (the `while join_set.len() <
+    /// max_tasks` loop), and only spawns a replacement task once an existing one
+    /// completes. Since every call here blocks forever, no replacement is ever spawned, so
+    /// the final call count is a deterministic fact about `max_tasks` — not a race won by
+    /// however many tasks happen to be "in flight" at some observed instant.
+    struct GatedBackend {
         calls: Arc<AtomicUsize>,
-        first_wave: Arc<Barrier>,
+        gate: Arc<Notify>,
     }
 
-    impl Plugin for MeasuringBackend {
+    impl Plugin for GatedBackend {
         fn name(&self) -> &str {
             BACKEND_NAME
         }
@@ -191,21 +206,13 @@ mod tests {
     }
 
     #[async_trait]
-    impl OcrBackend for MeasuringBackend {
+    impl OcrBackend for GatedBackend {
         async fn process_image(&self, _image_bytes: &[u8], _config: &OcrConfig) -> crate::Result<ExtractedDocument> {
-            let call_index = self.calls.fetch_add(1, Ordering::SeqCst);
-            let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
-            self.peak.fetch_max(active, Ordering::SeqCst);
-
-            // The first two calls meet here. A regression that permits only one task
-            // times out; one that launches more than two is captured by `peak`.
-            if call_index < 2 {
-                self.first_wave.wait().await;
-            }
-
-            self.active.fetch_sub(1, Ordering::SeqCst);
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            // Never notified: this call parks here for the rest of the test.
+            self.gate.notified().await;
             Ok(ExtractedDocument {
-                content: format!("image {call_index}"),
+                content: "unreachable".to_string(),
                 mime_type: Cow::Borrowed("text/plain"),
                 ..Default::default()
             })
@@ -220,18 +227,24 @@ mod tests {
         }
     }
 
+    /// Regression test for GH#1465.
+    ///
+    /// Before the fix, image OCR concurrency was `resolve_ocr_concurrency`, which prefers
+    /// `OcrConfig::vlm_config::max_concurrency` over the general thread budget whenever
+    /// `vlm_fallback` is not `Disabled` — even though this call site mixes CPU-bound OCR
+    /// work with, at most, occasional remote VLM requests (see the module docs). A small
+    /// general thread budget (2) paired with a much larger VLM limit (6) must now bound
+    /// concurrency at 2, not 6: the general thread budget governs this CPU-bound batch
+    /// size unconditionally.
     #[tokio::test]
-    async fn per_llm_limit_bounds_actual_in_flight_image_ocr_requests() {
-        let active = Arc::new(AtomicUsize::new(0));
-        let peak = Arc::new(AtomicUsize::new(0));
+    async fn general_thread_budget_bounds_image_ocr_batch_not_vlm_max_concurrency() {
         let calls = Arc::new(AtomicUsize::new(0));
-        crate::plugins::register_ocr_backend(Arc::new(MeasuringBackend {
-            active: Arc::clone(&active),
-            peak: Arc::clone(&peak),
+        let gate = Arc::new(Notify::new());
+        crate::plugins::register_ocr_backend(Arc::new(GatedBackend {
             calls: Arc::clone(&calls),
-            first_wave: Arc::new(Barrier::new(2)),
+            gate: Arc::clone(&gate),
         }))
-        .expect("register measuring OCR backend");
+        .expect("register gated OCR backend");
         let _registration = RegistrationGuard;
 
         let config = crate::core::config::ExtractionConfig {
@@ -240,12 +253,12 @@ mod tests {
                 vlm_fallback: VlmFallbackPolicy::Always,
                 vlm_config: Some(LlmConfig {
                     model: "test/model".to_string(),
-                    max_concurrency: Some(2),
+                    max_concurrency: Some(6),
                     ..Default::default()
                 }),
                 ..Default::default()
             }),
-            concurrency: Some(ConcurrencyConfig { max_threads: Some(8) }),
+            concurrency: Some(ConcurrencyConfig { max_threads: Some(2) }),
             ..Default::default()
         };
         let images = (0..6)
@@ -256,17 +269,21 @@ mod tests {
             .collect();
         let mut warnings = Vec::new();
 
-        let processed = tokio::time::timeout(
-            Duration::from_secs(5),
+        // None of the 6 spawned tasks can ever complete (the gate is never notified), so
+        // this always times out. The timeout only gives the runtime a chance to run every
+        // task that was actually spawned before the test inspects `calls`; dropping the
+        // timed-out future aborts them via `JoinSet`'s `Drop` impl.
+        let _ = tokio::time::timeout(
+            Duration::from_millis(200),
             process_images_with_ocr(images, &config, &mut warnings),
         )
-        .await
-        .expect("configured concurrency should allow the first wave to run")
-        .expect("image OCR should succeed");
+        .await;
 
-        assert_eq!(calls.load(Ordering::SeqCst), 6);
-        assert_eq!(peak.load(Ordering::SeqCst), 2);
-        assert!(warnings.is_empty());
-        assert!(processed.iter().all(|image| image.ocr_result.is_some()));
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            2,
+            "expected the general thread budget (2), not the larger VLM max_concurrency (6), \
+             to bound the number of image OCR tasks started concurrently"
+        );
     }
 }

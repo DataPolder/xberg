@@ -359,7 +359,7 @@ pub fn list_supported_formats() -> Vec<SupportedFormat>;
 
 ## PDF Rendering
 
-Requires the `pdf` feature. Renders PDF pages to PNG bytes using the bundled `pdf-oxide` renderer.
+Requires the `pdf` feature. Renders PDF pages to PNG bytes using the bundled `xberg-native-pdf` renderer.
 
 ```rust
 pub fn render_pdf_page_to_png(

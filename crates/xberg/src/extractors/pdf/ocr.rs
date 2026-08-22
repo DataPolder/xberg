@@ -947,8 +947,8 @@ pub(crate) fn render_selected_pages_for_ocr(
 }
 
 #[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
-fn open_pdf_for_page_ocr(content: &[u8]) -> crate::Result<(pdf_oxide::PdfDocument, usize, Vec<u32>)> {
-    let doc = pdf_oxide::PdfDocument::from_bytes(content.to_vec()).map_err(|e| crate::XbergError::Parsing {
+fn open_pdf_for_page_ocr(content: &[u8]) -> crate::Result<(xberg_native_pdf::PdfDocument, usize, Vec<u32>)> {
+    let doc = xberg_native_pdf::PdfDocument::from_bytes(content.to_vec()).map_err(|e| crate::XbergError::Parsing {
         message: format!("Failed to open PDF for rendering: {}", e),
         source: None,
     })?;
@@ -971,15 +971,15 @@ fn open_pdf_for_page_ocr(content: &[u8]) -> crate::Result<(pdf_oxide::PdfDocumen
 /// two-line MediaBox read to convert OCR pixel bboxes back into the PDF page's own
 /// coordinate space (#1423).
 #[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
-fn page_dimensions_pt(doc: &pdf_oxide::PdfDocument, page_index: usize) -> (f32, f32) {
+fn page_dimensions_pt(doc: &xberg_native_pdf::PdfDocument, page_index: usize) -> (f32, f32) {
     doc.get_page_media_box(page_index)
         .map(|(llx, lly, urx, ury)| ((urx - llx).abs(), (ury - lly).abs()))
         .unwrap_or((612.0, 792.0))
 }
 
 #[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
-fn open_pdf_for_full_ocr(content: &[u8]) -> crate::Result<(pdf_oxide::PdfDocument, usize, Vec<u32>)> {
-    let doc = pdf_oxide::PdfDocument::from_bytes(content.to_vec()).map_err(|e| crate::XbergError::Parsing {
+fn open_pdf_for_full_ocr(content: &[u8]) -> crate::Result<(xberg_native_pdf::PdfDocument, usize, Vec<u32>)> {
+    let doc = xberg_native_pdf::PdfDocument::from_bytes(content.to_vec()).map_err(|e| crate::XbergError::Parsing {
         message: format!("Failed to open PDF for OCR streaming: {:?}", e),
         source: None,
     })?;
@@ -1025,7 +1025,7 @@ const MAX_INK_PROBE_TEXT_CHARS: usize = 200;
 
 /// Whether the rendered page raster carries essentially no ink.
 ///
-/// Issue #1444: when pdf_oxide cannot draw a page's image XObjects it substitutes a
+/// Issue #1444: when xberg_native_pdf cannot draw a page's image XObjects it substitutes a
 /// blank white bitmap, and a chatty backend then answers with a *description* of that
 /// blankness rather than empty text — which [`is_page_text_blank`] accepts as content,
 /// suppressing the XObject fallback. Looking at the pixels the backend was actually
@@ -1108,7 +1108,7 @@ struct XObjectRecoveryOutcome {
 #[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
 async fn recover_page_text_from_image_xobjects(
     backend: &std::sync::Arc<dyn crate::plugins::OcrBackend>,
-    render_doc: &pdf_oxide::PdfDocument,
+    render_doc: &xberg_native_pdf::PdfDocument,
     page_idx: usize,
     ocr_config: &crate::core::config::OcrConfig,
 ) -> Option<XObjectRecoveryOutcome> {
@@ -1181,9 +1181,9 @@ fn xobject_fallback_warning(page_idx: usize, attempted: usize) -> crate::types::
 /// case pays nothing.
 #[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
 fn fallback_render_document<'a>(
-    memo: &'a mut Option<Option<pdf_oxide::PdfDocument>>,
+    memo: &'a mut Option<Option<xberg_native_pdf::PdfDocument>>,
     content: Option<&[u8]>,
-) -> Option<&'a pdf_oxide::PdfDocument> {
+) -> Option<&'a xberg_native_pdf::PdfDocument> {
     memo.get_or_insert_with(|| {
         let bytes = content?;
         match open_pdf_for_full_ocr(bytes) {
@@ -1199,7 +1199,7 @@ fn fallback_render_document<'a>(
 
 #[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
 fn render_full_pdf_ocr_batch(
-    doc: &pdf_oxide::PdfDocument,
+    doc: &xberg_native_pdf::PdfDocument,
     page_rotations: &[u32],
     page_range: std::ops::Range<usize>,
 ) -> crate::Result<Vec<EncodedPage>> {
@@ -1247,7 +1247,7 @@ fn valid_page_indices(page_indices: &[usize], page_count: usize) -> Vec<usize> {
 
 #[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
 fn render_selected_pages_from_document(
-    doc: &pdf_oxide::PdfDocument,
+    doc: &xberg_native_pdf::PdfDocument,
     page_rotations: &[u32],
     page_indices: &[usize],
 ) -> crate::Result<Vec<(usize, image::DynamicImage)>> {
@@ -1652,7 +1652,7 @@ fn build_mixed_ocr_page_document(
 #[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
 fn formula_bbox_to_page_points(
     formula: &mut crate::types::Formula,
-    doc: &pdf_oxide::PdfDocument,
+    doc: &xberg_native_pdf::PdfDocument,
     page_idx: usize,
     metadata: Option<&crate::types::Metadata>,
     rendered_w: u32,
@@ -1961,8 +1961,7 @@ pub(crate) async fn extract_mixed_ocr_native(
         ocr_config_resolved.acceleration = config.acceleration.clone();
     }
 
-    let batch_size =
-        crate::core::config::concurrency::resolve_ocr_concurrency(&ocr_config_resolved, config.concurrency.as_ref());
+    let batch_size = crate::core::config::concurrency::resolve_thread_budget(config.concurrency.as_ref());
 
     let capture_rasters = config.images.as_ref().is_some_and(|c| c.include_page_rasters);
     let ocr_config_owned = ensure_elements_enabled(&ocr_config_resolved);
@@ -3535,13 +3534,13 @@ fn transform_ocr_elements_to_render_space(
 ///
 /// Requires the PDF document this OCR pass rendered from (`lazy_pdf_render_state`);
 /// when that is unavailable — the caller supplied pre-rendered `images` directly, so
-/// there is no `pdf_oxide::PdfDocument` in hand to read a MediaBox from — falls back
+/// there is no `xberg_native_pdf::PdfDocument` in hand to read a MediaBox from — falls back
 /// to `1.0` (pixels treated as points). That degrades the absolute-gap term of the
 /// heading heuristic back toward today's behavior for that call path only; the
 /// ratio-based term, which dominates in practice, is scale-invariant and unaffected.
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 fn ocr_points_per_pixel(
-    #[cfg(feature = "pdf")] lazy_pdf_render_state: Option<&(pdf_oxide::PdfDocument, usize, Vec<u32>)>,
+    #[cfg(feature = "pdf")] lazy_pdf_render_state: Option<&(xberg_native_pdf::PdfDocument, usize, Vec<u32>)>,
     page_idx: usize,
     page_height_px: u32,
 ) -> f32 {
@@ -3698,7 +3697,7 @@ fn fill_unstructured_ocr_pages(
 
 /// Run the document-global heading/list heuristic
 /// (`pdf::structure::extract_document_structure_from_segments`, the same font-clustering
-/// pass the native pdf_oxide path uses) over already-built OCR paragraphs.
+/// pass the native xberg_native_pdf path uses) over already-built OCR paragraphs.
 ///
 /// The heuristic is document-global: `build_heading_map` clusters font sizes across
 /// every page, and `sparse_multi_page_heading_map` needs at least two pages in hand.
@@ -3911,7 +3910,7 @@ fn recognized_table_to_public_table(
 /// layout-aware markdown assembly for structured output. Otherwise, when
 /// `config.output_format` is not [`OutputFormat::Plain`], structure (headings, list
 /// items) is instead recovered document-wide by the same font-clustering heuristic
-/// the native pdf_oxide path uses
+/// the native xberg_native_pdf path uses
 /// (`pdf::structure::pipeline::extract_document_structure_from_segments`), fed from
 /// segments harvested out of the per-page OCR paragraphs
 /// (`pdf::structure::adapters::segments_from_ocr_pages`). Under `Plain`, or when that
@@ -4146,8 +4145,7 @@ async fn extract_with_ocr_for_page(
     #[cfg(all(feature = "tokio-runtime", not(target_arch = "wasm32")))]
     use tokio::task::JoinSet;
 
-    let configured_batch_size =
-        crate::core::config::concurrency::resolve_ocr_concurrency(ocr_config, config.concurrency.as_ref());
+    let configured_batch_size = crate::core::config::concurrency::resolve_thread_budget(config.concurrency.as_ref());
 
     let batch_size = if images.is_none() {
         adapt_batch_size_to_memory(configured_batch_size, content.map(|b| b.len()).unwrap_or(0))
@@ -4200,7 +4198,7 @@ async fn extract_with_ocr_for_page(
     let mut conf_sum: f64 = 0.0;
     let mut conf_count: usize = 0;
     // Warnings from the force_ocr image-XObject fallback (#1355): a page rendered
-    // blank by pdf_oxide but carrying image XObjects the renderer couldn't paint.
+    // blank by xberg_native_pdf but carrying image XObjects the renderer couldn't paint.
     #[cfg(feature = "pdf")]
     let mut image_fallback_warnings: Vec<crate::types::ProcessingWarning> = Vec::new();
 
@@ -4215,7 +4213,7 @@ async fn extract_with_ocr_for_page(
 
     // Opened on first blank page only; see `fallback_render_document`.
     #[cfg(feature = "pdf")]
-    let mut fallback_pdf_state: Option<Option<pdf_oxide::PdfDocument>> = None;
+    let mut fallback_pdf_state: Option<Option<xberg_native_pdf::PdfDocument>> = None;
 
     // Judged per page just before the OCR text is accepted, so a drawing page contributes
     // nothing instead of contributing invented words. See `is_ocr_recognition_noise`.
@@ -4450,7 +4448,7 @@ async fn extract_with_ocr_for_page(
                 accumulated_formulas.push(formula);
             }
 
-            // force_ocr image-XObject fallback (#1355): pdf_oxide can catch an
+            // force_ocr image-XObject fallback (#1355): xberg_native_pdf can catch an
             // image-decode error internally and substitute a blank white bitmap for
             // the whole-page render, so the page comes back from OCR as blank with no
             // indication anything was wrong. When that happens and the page actually
@@ -10331,7 +10329,7 @@ Name: ___
     }
 
     /// #530 — on a page with `/Rotate` 90 or 270 the OCR bbox conversion must still land
-    /// inside the page. `pdf_oxide` renders such a page in *displayed* orientation (with
+    /// inside the page. `xberg_native_pdf` renders such a page in *displayed* orientation (with
     /// width and height swapped relative to the MediaBox), but every OCR route rasterizes
     /// through `normalize_rendered_page_for_ocr`, which applies the inverse quarter turn
     /// and hands OCR a raster back in raw MediaBox orientation — the same convention
@@ -10351,7 +10349,7 @@ Name: ___
             let (_, image) = rendered.first().expect("page 0 must be rendered");
             let (raster_width_px, raster_height_px) = (image.width(), image.height());
 
-            let document = pdf_oxide::PdfDocument::from_bytes(bytes.clone()).expect("fixture PDF must open");
+            let document = xberg_native_pdf::PdfDocument::from_bytes(bytes.clone()).expect("fixture PDF must open");
             let (page_width_pt, page_height_pt) = page_dimensions_pt(&document, 0);
             assert_eq!(
                 (page_width_pt, page_height_pt),
@@ -11598,7 +11596,7 @@ Name: ___
         crate::plugins::register_ocr_backend(Arc::new(DescribesBlankPageBackend)).unwrap();
 
         // Stands in for what layout detection hands the OCR loop: an already-rendered page
-        // image. All white, i.e. exactly what pdf_oxide substitutes for a page whose image
+        // image. All white, i.e. exactly what xberg_native_pdf substitutes for a page whose image
         // XObjects it could not draw.
         let blank_page = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(200, 260, image::Rgb([255; 3])));
         let pdf_bytes = single_xobject_fixture_bytes();

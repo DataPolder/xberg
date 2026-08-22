@@ -11,7 +11,7 @@
 //! annotation-to-`PdfAnnotation` mapping, no AcroForm/XFA field values, no
 //! embedded-file extraction, and no OCR fallback path. None of that runs here.
 //! Every call appends a `ProcessingWarning` naming the gap so a caller diffing
-//! pdfium output against `pdf_oxide` output is never left assuming parity
+//! pdfium output against `xberg_native_pdf` output is never left assuming parity
 //! silently.
 //!
 //! # The pdfium library binding is process-global and happens once
@@ -139,7 +139,7 @@ fn read_common_metadata(document: &PdfDocument<'_>) -> CommonMetadata {
 
 /// Opens `content` with pdfium, trying each configured password in turn if the
 /// document is encrypted and no password (or the wrong one) was supplied.
-/// Mirrors the intent of `pdf_oxide`'s multi-password support without pulling
+/// Mirrors the intent of `xberg_native_pdf`'s multi-password support without pulling
 /// in its retry plumbing -- pdfium only accepts one password per open attempt.
 fn open_document<'a>(pdfium: &'a Pdfium, content: &'a [u8], passwords: &[String]) -> Result<PdfDocument<'a>> {
     match pdfium.load_pdf_from_byte_slice(content, None) {
@@ -235,7 +235,7 @@ fn extract_blocking(content: &[u8], mime_type: &str, passwords: &[String]) -> Re
             "the pdfium backend currently extracts text, page count, and Info-dictionary \
              metadata only; tables, images, annotations, form fields, embedded files, and OCR \
              fallback are not implemented for this backend (issue #702). Select the default \
-             pdf-oxide backend if the document needs those.",
+             native backend if the document needs those.",
         ),
     });
 

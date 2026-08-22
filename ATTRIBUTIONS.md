@@ -392,6 +392,58 @@ author and copyright are recorded in this file, which is distributed with the so
 
 ---
 
+## PDFOxide
+
+Pure-Rust PDF parsing, extraction and rendering — xberg's default PDF engine, forked and vendored:
+
+- **Source**: <https://github.com/yfedoseev/pdf_oxide>
+- **License**: MIT OR Apache-2.0 upstream; this fork elects the MIT arm and is redistributed
+  under MIT, retaining the upstream copyright notice below.
+- **Author**: Yury Fedoseev, Copyright (c) 2025-present
+- **Forked Version**: forked pre-1.0, published independently as `xberg-pdf-oxide` 1.0.1 on
+  crates.io, then vendored here from that repository's `development` branch at commit
+  `196ec71a1cfd6e818e1498053584ff93c794bde1`. No git history was carried across, so that SHA
+  is the provenance link; the source repository has since been retired.
+- **Location**: `crates/xberg-native-pdf/` (crate `xberg-native-pdf`, lib `xberg_native_pdf`)
+- **Purpose**: text extraction, reading order, tables, forms, annotations, XFA, encryption and
+  page rendering — everything behind `PdfBackend::Native`
+
+### Modifications
+
+- Renamed to `xberg-native-pdf` on vendoring. Upstream's trademark policy permits describing
+  this crate as a fork of PDFOxide but not using upstream's names as the name of a
+  distribution, so the rename is a compliance improvement as well as a naming one. **This file
+  is the only place in the repository that names the upstream project**; the identifier
+  `pdf_oxide` survives elsewhere in exactly three places, each load-bearing and commented:
+  a `/Producer` allowlist entry that matches PDFs already written by the older lineages, an
+  environment-variable back-compatibility chain, and a verbatim quotation of a third-party
+  tool's error message in a test.
+- Stripped upstream's language bindings, CLI, MCP server, and its OCR, ML, digital-signature,
+  WASM, barcode, HTML/CSS-to-PDF and PDF/A subsystems
+- Replaced `ttf-parser` with the fontations/`skrifa` stack
+- Migrated diagnostics from the `log` facade to `tracing`; the target root is exported as
+  `xberg_native_pdf::LOG_TARGET_ROOT` so consumers filter on a value rather than a literal
+- Rust 2024 edition and workspace conventions
+- Per-release detail in `crates/xberg-native-pdf/CHANGELOG.md`
+
+### Vendored and bundled third-party code
+
+`crates/xberg-native-pdf/ATTRIBUTIONS.md` is the authoritative record and ships with the crate.
+It covers `src/vendor/fontdb/` (derived from fontdb 0.24.0, Yevhenii Reizner, MIT) and the fonts
+embedded via `include_bytes!` under `src/fonts/assets/`: DejaVuSans and DejaVuSans-Bold
+(Bitstream Vera / DejaVu licence), DroidSansFallbackFull.ttf (Apache-2.0) and
+NotoEmoji-Regular.ttf (SIL OFL 1.1), the latter two behind the `cjk-form-fonts` feature. The
+DejaVu licence requires renaming modified fonts; these are unmodified and must stay so.
+
+### License Compatibility
+
+Electing the MIT arm of an MIT-OR-Apache-2.0 dual offer is permitted by both licences. The
+upstream copyright notice is preserved verbatim at `crates/xberg-native-pdf/LICENSE`, which is
+distributed with the source. No endorsement by or affiliation with the upstream project is
+implied.
+
+---
+
 ## libwpd + librevenge
 
 Native WordPerfect document libraries built from source and statically linked

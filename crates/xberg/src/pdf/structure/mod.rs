@@ -1,6 +1,6 @@
 //! PDF-to-structure renderer using segment-level font analysis.
 //!
-//! Converts PDF documents into structured `InternalDocument` by analyzing pdf_oxide
+//! Converts PDF documents into structured `InternalDocument` by analyzing xberg_native_pdf
 //! text segments to reconstruct headings, paragraphs, inline formatting, and list items.
 
 pub(crate) mod adapters;

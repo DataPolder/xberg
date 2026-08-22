@@ -1375,7 +1375,7 @@ mod tests {
     }
 
     /// Regression test for issue #762: image links must appear in markdown when image
-    /// data is available via pdf_oxide extraction (non-empty `data` field).
+    /// data is available via xberg_native_pdf extraction (non-empty `data` field).
     #[test]
     fn test_image_with_data_renders_link() {
         use crate::types::ExtractedImage;

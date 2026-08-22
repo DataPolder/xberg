@@ -1,15 +1,15 @@
-//! Native table detection using the pdf_oxide backend.
+//! Native table detection using the xberg_native_pdf backend.
 //!
 //! Three entry points:
 //!
-//! - [`extract_tables_native`] — pdf_oxide's built-in `extract_tables_with_config`
+//! - [`extract_tables_native`] — xberg_native_pdf's built-in `extract_tables_with_config`
 //!   in strict mode. High precision, requires explicit table grid with 3+ columns.
 //! - [`extract_tables_bordered`] — relaxed Lines-strategy pass for bordered tables
 //!   with 2+ columns. Catches 2-column data tables (label/value) whose cells are
 //!   delimited by stroke lines that `strict()` skips due to `min_table_columns=3`.
 //! - [`extract_tables_heuristic`] — text-layer fallback that reuses the same
 //!   spatial reconstruction the layout-detection path uses, but without
-//!   requiring layout hints. Catches tables that pdf_oxide's grid detector
+//!   requiring layout hints. Catches tables that xberg_native_pdf's grid detector
 //!   misses (e.g. invoice line items, financial tables without ruling lines).
 //!
 //! The default extraction flow in `extractors::pdf::extraction` runs all three
@@ -86,7 +86,7 @@ enum HeuristicTableRejection {
     EmptyMarkdown,
 }
 
-/// Extract tables from all pages using pdf_oxide's native table detection.
+/// Extract tables from all pages using xberg_native_pdf's native table detection.
 ///
 /// Uses `TableDetectionConfig::strict()` to reduce false positives from
 /// paragraph text being misidentified as tables.
@@ -106,9 +106,9 @@ pub(crate) fn extract_tables_native(doc: &mut OxideDocument) -> Result<(Vec<Tabl
     let page_count = doc
         .doc
         .page_count()
-        .map_err(|e| PdfError::MetadataExtractionFailed(format!("pdf_oxide: failed to get page count: {e}")))?;
+        .map_err(|e| PdfError::MetadataExtractionFailed(format!("xberg_native_pdf: failed to get page count: {e}")))?;
 
-    let config = pdf_oxide::structure::spatial_table_detector::TableDetectionConfig::strict();
+    let config = xberg_native_pdf::structure::spatial_table_detector::TableDetectionConfig::strict();
     let mut all_tables = Vec::new();
     let mut warnings = Vec::new();
 
@@ -117,7 +117,7 @@ pub(crate) fn extract_tables_native(doc: &mut OxideDocument) -> Result<(Vec<Tabl
         let extracted = match doc.doc.extract_tables_with_config(page_idx, config.clone()) {
             Ok(tables) => tables,
             Err(e) => {
-                tracing::warn!(page = page_idx, "pdf_oxide extract_tables failed: {e}");
+                tracing::warn!(page = page_idx, "xberg_native_pdf extract_tables failed: {e}");
                 warnings.push(native_table_extraction_failure_warning(page_number, &e));
                 continue;
             }
@@ -167,7 +167,7 @@ pub(crate) fn extract_tables_native(doc: &mut OxideDocument) -> Result<(Vec<Tabl
 /// Build the `ProcessingWarning` for a page whose native (strict-mode) table detection
 /// failed (issue #74). Named per page and cause so the warning is actionable without
 /// leaking internal file paths or system details.
-fn native_table_extraction_failure_warning(page_number: u32, error: &pdf_oxide::Error) -> ProcessingWarning {
+fn native_table_extraction_failure_warning(page_number: u32, error: &xberg_native_pdf::Error) -> ProcessingWarning {
     ProcessingWarning {
         source: std::borrow::Cow::Borrowed("pdf_tables"),
         message: std::borrow::Cow::Owned(format!(
@@ -201,12 +201,12 @@ pub(crate) fn extract_tables_bordered(
     doc: &mut OxideDocument,
     skip_pages: &HashSet<u32>,
 ) -> Result<(Vec<Table>, Vec<ProcessingWarning>)> {
-    use pdf_oxide::structure::spatial_table_detector::{TableDetectionConfig, TableStrategy};
+    use xberg_native_pdf::structure::spatial_table_detector::{TableDetectionConfig, TableStrategy};
 
     let page_count = doc
         .doc
         .page_count()
-        .map_err(|e| PdfError::MetadataExtractionFailed(format!("pdf_oxide: failed to get page count: {e}")))?;
+        .map_err(|e| PdfError::MetadataExtractionFailed(format!("xberg_native_pdf: failed to get page count: {e}")))?;
 
     let config = TableDetectionConfig {
         enabled: true,
@@ -235,7 +235,7 @@ pub(crate) fn extract_tables_bordered(
         let extracted = match doc.doc.extract_tables_with_config(page_idx, config.clone()) {
             Ok(tables) => tables,
             Err(e) => {
-                tracing::warn!(page = page_idx, "pdf_oxide bordered extract_tables failed: {e}");
+                tracing::warn!(page = page_idx, "xberg_native_pdf bordered extract_tables failed: {e}");
                 warnings.push(bordered_table_extraction_failure_warning(page_number, &e));
                 continue;
             }
@@ -285,7 +285,7 @@ pub(crate) fn extract_tables_bordered(
 /// Build the `ProcessingWarning` for a page whose bordered (relaxed Lines-strategy)
 /// table detection failed (issue #74). Named per page and cause so the warning is
 /// actionable without leaking internal file paths or system details.
-fn bordered_table_extraction_failure_warning(page_number: u32, error: &pdf_oxide::Error) -> ProcessingWarning {
+fn bordered_table_extraction_failure_warning(page_number: u32, error: &xberg_native_pdf::Error) -> ProcessingWarning {
     ProcessingWarning {
         source: std::borrow::Cow::Borrowed("pdf_tables"),
         message: std::borrow::Cow::Owned(format!(
@@ -329,14 +329,14 @@ pub(crate) struct HeuristicTableExtraction {
 /// what catches columned articles and similar false positives.
 ///
 /// `skip_pages` (1-indexed, matching `Table.page_number`) lets the caller
-/// suppress heuristic work on pages where pdf_oxide's native grid detector
+/// suppress heuristic work on pages where xberg_native_pdf's native grid detector
 /// already produced results — those tables are higher precision than
 /// anything the heuristic can derive, so we keep native and only fill in
 /// the gaps. Pass an empty set to run on every page.
 ///
 /// This is invoked by `extractors::pdf::extraction` as a per-page fallback
 /// alongside [`extract_tables_native`] — typically for text-layer PDFs
-/// whose tables aren't drawn with explicit rule lines that pdf_oxide's grid
+/// whose tables aren't drawn with explicit rule lines that xberg_native_pdf's grid
 /// detector can lock onto.
 ///
 /// Returns the detected tables together with ownership of the exact hierarchy
@@ -351,14 +351,14 @@ pub(crate) fn extract_tables_heuristic(
     let (per_page_segments, used_structure_tree) =
         crate::pdf::oxide::hierarchy::extract_all_segments(doc).map_err(|e| {
             PdfError::TextExtractionFailed(format!(
-                "pdf_oxide hierarchy extraction failed for heuristic tables: {e}"
+                "xberg_native_pdf hierarchy extraction failed for heuristic tables: {e}"
             ))
         })?;
 
     let page_count = doc
         .doc
         .page_count()
-        .map_err(|e| PdfError::MetadataExtractionFailed(format!("pdf_oxide: failed to get page count: {e}")))?;
+        .map_err(|e| PdfError::MetadataExtractionFailed(format!("xberg_native_pdf: failed to get page count: {e}")))?;
 
     let mut tables = Vec::new();
 
@@ -1784,7 +1784,7 @@ fn is_numeric_word(text: &str) -> bool {
 /// increases left-to-right. We sort by the span's own upright-frame cross
 /// axis descending (top-to-bottom) then advance axis ascending (left-to-right)
 /// to recover natural reading order regardless of the order in which
-/// pdf_oxide yields spans.
+/// xberg_native_pdf yields spans.
 ///
 /// [`super::span_geometry::upright_origin`] rotates a span's page-space origin
 /// back into its own reading frame before comparison, so this is correct both
@@ -1794,19 +1794,19 @@ fn is_numeric_word(text: &str) -> bool {
 /// `TableCell::spans` carry non-zero `rotation_degrees`), where sorting by
 /// raw page-space X/Y instead of the run's own advance axis reads the cell's
 /// words out of order. `TableCell::spans` carries real rotation data both when
-/// pdf_oxide's geometric table detector (`grid_to_table`) clones the original
-/// page spans into the cell, and on pdf_oxide's tagged-PDF/MCID path
+/// xberg_native_pdf's geometric table detector (`grid_to_table`) clones the original
+/// page spans into the cell, and on xberg_native_pdf's tagged-PDF/MCID path
 /// (`extract_cell`), which synthesizes its own per-MCID spans but carries the
 /// source block's `rotation_degrees` forward rather than hardcoding `0.0`.
 ///
 /// Embedded newlines inside span text are collapsed to spaces to produce
 /// clean single-line cell strings.
-fn cell_text_in_reading_order(cell: &pdf_oxide::structure::table_extractor::TableCell) -> String {
+fn cell_text_in_reading_order(cell: &xberg_native_pdf::structure::table_extractor::TableCell) -> String {
     if cell.spans.is_empty() {
         return cell.text.trim().replace('\n', " ").to_string();
     }
 
-    let mut sorted: Vec<&pdf_oxide::layout::TextSpan> = cell.spans.iter().collect();
+    let mut sorted: Vec<&xberg_native_pdf::layout::TextSpan> = cell.spans.iter().collect();
     sorted.sort_by(|a, b| {
         let (advance_a, cross_a) = super::span_geometry::upright_origin(a);
         let (advance_b, cross_b) = super::span_geometry::upright_origin(b);
@@ -1825,14 +1825,14 @@ fn cell_text_in_reading_order(cell: &pdf_oxide::structure::table_extractor::Tabl
     joined
 }
 
-/// Convert a pdf_oxide `ExtractedTable` to xberg's cell grid and markdown.
+/// Convert a xberg_native_pdf `ExtractedTable` to xberg's cell grid and markdown.
 ///
 /// Maps rows/cells from the native table structure to a 2D `Vec<Vec<String>>`
 /// grid and builds a markdown representation with proper header separators.
 ///
 /// Cell text is reconstructed from span positions in reading order (see
 /// [`cell_text_in_reading_order`]) when span data is available.
-fn convert_extracted_table(table: &pdf_oxide::structure::table_extractor::Table) -> (Vec<Vec<String>>, String) {
+fn convert_extracted_table(table: &xberg_native_pdf::structure::table_extractor::Table) -> (Vec<Vec<String>>, String) {
     let mut cells: Vec<Vec<String>> = Vec::with_capacity(table.rows.len());
     let mut markdown = String::new();
     let mut found_header = false;
@@ -1869,7 +1869,7 @@ mod tests {
 
     #[test]
     fn test_convert_extracted_table_basic() {
-        use pdf_oxide::structure::table_extractor::{Table as ExtractedTable, TableCell, TableRow};
+        use xberg_native_pdf::structure::table_extractor::{Table as ExtractedTable, TableCell, TableRow};
 
         let table = ExtractedTable {
             rows: vec![
@@ -1936,7 +1936,7 @@ mod tests {
 
     #[test]
     fn test_convert_extracted_table_no_header() {
-        use pdf_oxide::structure::table_extractor::{Table as ExtractedTable, TableCell, TableRow};
+        use xberg_native_pdf::structure::table_extractor::{Table as ExtractedTable, TableCell, TableRow};
 
         let table = ExtractedTable {
             rows: vec![
@@ -1977,7 +1977,7 @@ mod tests {
 
     #[test]
     fn test_convert_extracted_table_empty() {
-        use pdf_oxide::structure::table_extractor::Table as ExtractedTable;
+        use xberg_native_pdf::structure::table_extractor::Table as ExtractedTable;
 
         let table = ExtractedTable {
             rows: vec![],
@@ -1994,10 +1994,10 @@ mod tests {
     /// Build a synthetic TextSpan for position-order tests.
     ///
     /// `x` and `y` are the span's PDF-coordinate origin (y=0 at bottom of page).
-    fn make_span(text: &str, x: f32, y: f32) -> pdf_oxide::layout::TextSpan {
-        pdf_oxide::layout::TextSpan {
+    fn make_span(text: &str, x: f32, y: f32) -> xberg_native_pdf::layout::TextSpan {
+        xberg_native_pdf::layout::TextSpan {
             text: text.to_string(),
-            bbox: pdf_oxide::geometry::Rect {
+            bbox: xberg_native_pdf::geometry::Rect {
                 x,
                 y,
                 width: 50.0,
@@ -2005,10 +2005,10 @@ mod tests {
             },
             font_name: "Helvetica".to_string(),
             font_size: 10.0,
-            font_weight: pdf_oxide::layout::FontWeight::Normal,
+            font_weight: xberg_native_pdf::layout::FontWeight::Normal,
             is_italic: false,
             is_monospace: false,
-            color: pdf_oxide::layout::Color::default(),
+            color: xberg_native_pdf::layout::Color::default(),
             mcid: None,
             sequence: 0,
             split_boundary_before: false,
@@ -2021,7 +2021,7 @@ mod tests {
             char_widths: vec![],
             heading_level: None,
             rotation_degrees: 0.0,
-            ..pdf_oxide::layout::TextSpan::default()
+            ..xberg_native_pdf::layout::TextSpan::default()
         }
     }
 
@@ -2029,7 +2029,7 @@ mod tests {
     /// Reading order must place the top span (higher Y in PDF coords) first.
     #[test]
     fn test_cell_text_in_reading_order_sorts_by_y_descending() {
-        use pdf_oxide::structure::table_extractor::TableCell;
+        use xberg_native_pdf::structure::table_extractor::TableCell;
 
         let cell = TableCell {
             text: "wrong order".to_string(),
@@ -2051,7 +2051,7 @@ mod tests {
     /// Within the same Y row, spans must be ordered left-to-right (X ascending).
     #[test]
     fn test_cell_text_in_reading_order_sorts_same_y_by_x_ascending() {
-        use pdf_oxide::structure::table_extractor::TableCell;
+        use xberg_native_pdf::structure::table_extractor::TableCell;
 
         let cell = TableCell {
             text: "wrong order".to_string(),
@@ -2071,13 +2071,13 @@ mod tests {
     }
 
     /// Build a synthetic rotated TextSpan for the GH#1358 sideways-table
-    /// tests. `x`/`y` are the span's page-space origin (as pdf_oxide reports
+    /// tests. `x`/`y` are the span's page-space origin (as xberg_native_pdf reports
     /// for a rotated run: origin in page coordinates, width/height flattened
     /// onto the run's own rotated axis).
-    fn make_rotated_span(text: &str, x: f32, y: f32, rotation_degrees: f32) -> pdf_oxide::layout::TextSpan {
-        pdf_oxide::layout::TextSpan {
+    fn make_rotated_span(text: &str, x: f32, y: f32, rotation_degrees: f32) -> xberg_native_pdf::layout::TextSpan {
+        xberg_native_pdf::layout::TextSpan {
             text: text.to_string(),
-            bbox: pdf_oxide::geometry::Rect {
+            bbox: xberg_native_pdf::geometry::Rect {
                 x,
                 y,
                 width: 50.0,
@@ -2085,10 +2085,10 @@ mod tests {
             },
             font_name: "Helvetica".to_string(),
             font_size: 10.0,
-            font_weight: pdf_oxide::layout::FontWeight::Normal,
+            font_weight: xberg_native_pdf::layout::FontWeight::Normal,
             is_italic: false,
             is_monospace: false,
-            color: pdf_oxide::layout::Color::default(),
+            color: xberg_native_pdf::layout::Color::default(),
             mcid: None,
             sequence: 0,
             split_boundary_before: false,
@@ -2101,15 +2101,15 @@ mod tests {
             char_widths: vec![],
             heading_level: None,
             rotation_degrees,
-            ..pdf_oxide::layout::TextSpan::default()
+            ..xberg_native_pdf::layout::TextSpan::default()
         }
     }
 
-    /// GH#1358: a table cell from pdf_oxide's geometric detector
+    /// GH#1358: a table cell from xberg_native_pdf's geometric detector
     /// (`grid_to_table`, which clones the original page spans and so
     /// preserves their real `rotation_degrees`) whose spans carry a
     /// 90-degree text-matrix rotation, delivered in the scrambled order
-    /// pdf_oxide reports fragments in (reversed from reading order — the
+    /// xberg_native_pdf reports fragments in (reversed from reading order — the
     /// exact shape of the reported defect, `"the meet only need oil
     /// Engine"`). A plain page-space X/Y sort reads this out of order because
     /// a rotated run's reading direction is the run's own advance axis
@@ -2118,7 +2118,7 @@ mod tests {
     /// X) must resolve the tie once the axes are corrected.
     #[test]
     fn test_cell_text_in_reading_order_sorts_rotated_spans_by_advance_axis() {
-        use pdf_oxide::structure::table_extractor::TableCell;
+        use xberg_native_pdf::structure::table_extractor::TableCell;
 
         let cell = TableCell {
             text: "wrong order".to_string(),
@@ -3370,7 +3370,7 @@ mod tests {
 
     #[test]
     fn test_cell_text_in_reading_order_fallback_to_cell_text() {
-        use pdf_oxide::structure::table_extractor::TableCell;
+        use xberg_native_pdf::structure::table_extractor::TableCell;
 
         let cell = TableCell {
             text: "  hello\nworld  ".to_string(),
@@ -3392,10 +3392,10 @@ mod tests {
     /// Build a minimal single-page PDF with a 2-column stroke-bordered table.
     ///
     /// 5 rows × 2 columns. Every cell boundary is drawn with stroke_rect/stroke_line
-    /// so pdf_oxide's detect_tables_with_lines can lock onto the paths.
+    /// so xberg_native_pdf's detect_tables_with_lines can lock onto the paths.
     fn build_two_column_bordered_table_pdf() -> Vec<u8> {
-        use pdf_oxide::geometry::Rect;
-        use pdf_oxide::writer::{DocumentBuilder, LineStyle, TextAlign};
+        use xberg_native_pdf::geometry::Rect;
+        use xberg_native_pdf::writer::{DocumentBuilder, LineStyle, TextAlign};
 
         let style = LineStyle::new(1.0, 0.0, 0.0, 0.0);
 
@@ -3489,12 +3489,12 @@ mod tests {
     }
 
     /// `native_table_extraction_failure_warning` must name the operation
-    /// ("table extraction"), the exact page number, and embed the underlying pdf_oxide
+    /// ("table extraction"), the exact page number, and embed the underlying xberg_native_pdf
     /// error, so a per-page native-detection failure is visible to callers instead of
     /// being indistinguishable from a page that simply has no table.
     #[test]
     fn native_table_extraction_failure_warning_names_page_and_cause() {
-        let error = pdf_oxide::Error::InvalidPdf("corrupt content stream".to_string());
+        let error = xberg_native_pdf::Error::InvalidPdf("corrupt content stream".to_string());
         let warning = native_table_extraction_failure_warning(3, &error);
         assert_eq!(warning.source.as_ref(), "pdf_tables");
         assert_eq!(
@@ -3506,10 +3506,10 @@ mod tests {
 
     /// `bordered_table_extraction_failure_warning` must name the operation
     /// ("bordered table extraction"), the exact page number, and embed the underlying
-    /// pdf_oxide error.
+    /// xberg_native_pdf error.
     #[test]
     fn bordered_table_extraction_failure_warning_names_page_and_cause() {
-        let error = pdf_oxide::Error::InvalidPdf("malformed table grid".to_string());
+        let error = xberg_native_pdf::Error::InvalidPdf("malformed table grid".to_string());
         let warning = bordered_table_extraction_failure_warning(7, &error);
         assert_eq!(warning.source.as_ref(), "pdf_tables");
         assert_eq!(

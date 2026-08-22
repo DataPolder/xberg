@@ -1,7 +1,7 @@
 //! PDF document extractor.
 //!
 //! Provides extraction of text, metadata, tables, and images from PDF documents
-//! using pdf_oxide (pure Rust). Supports both native text extraction and OCR fallback.
+//! using xberg_native_pdf (pure Rust). Supports both native text extraction and OCR fallback.
 
 mod extraction;
 #[cfg(feature = "layout-detection")]
@@ -43,7 +43,7 @@ fn contains_pdf_marker(content: &[u8], marker: &[u8]) -> bool {
 }
 
 #[cfg(feature = "pdf")]
-fn catalog_needs_lopdf_compatibility_pass(catalog: Option<&pdf_oxide::object::Object>) -> bool {
+fn catalog_needs_lopdf_compatibility_pass(catalog: Option<&xberg_native_pdf::object::Object>) -> bool {
     let Some(catalog) = catalog else {
         return true;
     };
@@ -61,20 +61,20 @@ fn raw_pdf_needs_lopdf_compatibility_pass(content: &[u8]) -> bool {
 /// Reject a document whose page count exceeds `security_limits.max_pages` before any
 /// per-page work (layout detection, OCR, rendering) begins (#1451).
 ///
-/// Counts pages with `pdf_oxide` first and falls back to `lopdf` when that cannot
+/// Counts pages with `xberg_native_pdf` first and falls back to `lopdf` when that cannot
 /// open the document at all.
 ///
-/// The fallback exists because the `pdf_oxide` open is the sole gate on this cap, and
+/// The fallback exists because the `xberg_native_pdf` open is the sole gate on this cap, and
 /// `raw_pdf_needs_lopdf_compatibility_pass` below documents that some structures only
-/// `lopdf` can walk — so without it, a document `pdf_oxide` rejects skips the cap
+/// `lopdf` can walk — so without it, a document `xberg_native_pdf` rejects skips the cap
 /// entirely and is then handed to an extraction path that may still recover it. That
 /// is the shape a hostile input would take against a security limit.
 ///
 /// Measured, so the comment does not outlive the fact: over the 488 PDFs in
-/// `test_documents/`, exactly one defeats the `pdf_oxide` count — `corrupt_truncated.pdf`,
+/// `test_documents/`, exactly one defeats the `xberg_native_pdf` count — `corrupt_truncated.pdf`,
 /// which `lopdf` also cannot read and which fails extraction anyway. Encrypted documents
 /// are *not* among the failures: a PDF's page tree is structure, not string or stream
-/// data, so `pdf_oxide` counts an AES-256 document's pages without ever authenticating.
+/// data, so `xberg_native_pdf` counts an AES-256 document's pages without ever authenticating.
 /// No password handling is needed here, and adding it would buy nothing.
 ///
 /// A document neither parser can count is let through rather than rejected. `max_pages`
@@ -99,17 +99,17 @@ fn enforce_page_limit(content: &[u8], config: &ExtractionConfig) -> Result<()> {
     )?)
 }
 
-/// Page count via `pdf_oxide`. `None` when it cannot open or count the document,
+/// Page count via `xberg_native_pdf`. `None` when it cannot open or count the document,
 /// in which case the caller falls back to [`lopdf_page_count`].
 #[cfg(feature = "pdf")]
 fn oxide_page_count(content: &[u8]) -> Option<usize> {
-    pdf_oxide::PdfDocument::from_bytes(content.to_vec())
+    xberg_native_pdf::PdfDocument::from_bytes(content.to_vec())
         .ok()?
         .page_count()
         .ok()
 }
 
-/// Page count via `lopdf`, for documents `pdf_oxide` could not open or count.
+/// Page count via `lopdf`, for documents `xberg_native_pdf` could not open or count.
 #[cfg(feature = "pdf")]
 fn lopdf_page_count(content: &[u8]) -> Option<usize> {
     let document = lopdf::Document::load_mem(content).ok()?;
@@ -123,7 +123,7 @@ fn parsed_pdf_needs_lopdf_compatibility_pass(document: &crate::pdf::oxide::Oxide
         Err(error) => {
             tracing::debug!(
                 error = %error,
-                "pdf_oxide catalog inspection failed; retaining lopdf compatibility pass"
+                "xberg_native_pdf catalog inspection failed; retaining lopdf compatibility pass"
             );
             catalog_needs_lopdf_compatibility_pass(None)
         }
@@ -693,7 +693,7 @@ async fn run_ocr_with_layout(
     #[cfg(not(all(feature = "pdf", feature = "layout-detection")))]
     let layout_warning = None;
 
-    // `pdf_oxide` glyph-drop warnings captured while the layout pass rendered
+    // `xberg_native_pdf` glyph-drop warnings captured while the layout pass rendered
     // its pages (#353); populated only on the layout-detection path, since
     // that is the only render call site routed through `spawn_blocking`.
     #[cfg(all(feature = "pdf", feature = "layout-detection"))]
@@ -1097,7 +1097,7 @@ fn formula_synthesis_allowed(has_region_geometry: bool, formula_slot_count: usiz
 /// documented fallback for pages whose geometry is unavailable.
 #[cfg(all(feature = "formula-recognition", feature = "layout-detection"))]
 fn pdf_page_sizes_pt(content: &[u8], page_count: usize) -> Option<Vec<(f32, f32)>> {
-    let doc = pdf_oxide::PdfDocument::from_bytes(content.to_vec()).ok()?;
+    let doc = xberg_native_pdf::PdfDocument::from_bytes(content.to_vec()).ok()?;
     Some(
         (0..page_count)
             .map(|index| crate::pdf::render::get_page_dimensions_pt(&doc, index))
@@ -1285,7 +1285,7 @@ fn wants_dot_output(config: &ExtractionConfig) -> bool {
     matches!(&config.output_format, crate::core::config::OutputFormat::Custom(name) if name == "dot")
 }
 
-/// PDF document extractor using pdf_oxide.
+/// PDF document extractor using xberg_native_pdf.
 #[cfg_attr(alef, alef(skip))]
 pub struct PdfExtractor;
 
@@ -1364,7 +1364,7 @@ impl PdfExtractor {
     /// `ExtractionConfig` directly (library use, the API/MCP servers, or a language
     /// binding) sets `PdfConfig::backend` without ever going through CLI validation.
     /// Without an enforcement point here, such a caller selecting
-    /// `PdfBackend::Pdfium` would have silently gotten `pdf_oxide` output mislabeled
+    /// `PdfBackend::Pdfium` would have silently gotten `xberg_native_pdf` output mislabeled
     /// as pdfium.
     async fn extract_core(
         &self,
@@ -1382,7 +1382,7 @@ impl PdfExtractor {
                 .map(|options| options.backend)
                 .unwrap_or_default();
             match backend {
-                crate::core::config::PdfBackend::PdfOxide => {
+                crate::core::config::PdfBackend::Native => {
                     self.extract_core_oxide(content, mime_type, config, path).await
                 }
                 crate::core::config::PdfBackend::Pdfium => {
@@ -1398,7 +1398,7 @@ impl PdfExtractor {
     ///
     /// Without the `pdf-pdfium` Cargo feature, `crates/xberg-pdfium-render` is not
     /// even compiled in, so this fails loudly rather than falling back to
-    /// `extract_core_oxide`: silently reusing `pdf_oxide` output under a caller's
+    /// `extract_core_oxide`: silently reusing `xberg_native_pdf` output under a caller's
     /// `PdfBackend::Pdfium` selection would produce a document the caller believes
     /// came from pdfium, which is worse than an error.
     #[cfg(all(feature = "pdf", not(feature = "pdf-pdfium")))]
@@ -1412,7 +1412,7 @@ impl PdfExtractor {
         Err(crate::XbergError::validation(
             "PDF extraction requested backend 'pdfium', but this build was compiled \
              without the 'pdf-pdfium' Cargo feature, so no pdfium extraction engine is \
-             available. Use the default 'pdf-oxide' backend instead, or rebuild with \
+             available. Use the default 'native' backend instead, or rebuild with \
              --features pdf-pdfium to enable pdfium extraction.",
         ))
     }
@@ -1439,7 +1439,7 @@ impl PdfExtractor {
         pdfium_engine::extract(content, mime_type, config).await
     }
 
-    /// Core extraction via the pdf_oxide backend.
+    /// Core extraction via the xberg_native_pdf backend.
     ///
     /// Runs text + metadata, tables, and annotation extraction through the oxide
     /// modules, then builds an `InternalDocument` using the same post-processing
@@ -1487,7 +1487,7 @@ impl PdfExtractor {
             Some(data) => Some(data),
             None if parsed_pdf_needs_lopdf_compatibility_pass(&oxide_document) => {
                 // Avoid holding both parser object graphs at once. Compressed
-                // catalog outlines are rare, so reopen pdf_oxide for this path. ~keep
+                // catalog outlines are rare, so reopen xberg_native_pdf for this path. ~keep
                 drop(oxide_document);
                 let data = extract_lopdf_compatibility_data(content);
                 oxide_document = crate::pdf::oxide::OxideDocument::open_bytes_with_passwords(content, passwords)?;
@@ -2086,7 +2086,7 @@ impl PdfExtractor {
 
         doc.processing_warnings.append(&mut pdf_extraction_warnings);
 
-        // #340: drain any pdf_oxide glyph-drop warnings captured while this
+        // #340: drain any xberg_native_pdf glyph-drop warnings captured while this
         // document's pages were rendered on *this* thread (OCR rasterization
         // and any other call routed through `render_page_capturing_glyph_drops`
         // in `crate::pdf::render` that runs inline on the extracting task's
@@ -2097,7 +2097,7 @@ impl PdfExtractor {
         // `pdf::render` for why), so this buffer stays empty for every caller
         // that has not opted in and this loop is a no-op `Vec::is_empty`
         // check. Deduped because a multi-page document can hit the identical
-        // pdf_oxide cause on many pages.
+        // xberg_native_pdf cause on many pages.
         //
         // Layout-detection rasterization runs inside `tokio::task::spawn_blocking`
         // on a different OS thread, so this drain never sees those warnings —
@@ -2106,7 +2106,7 @@ impl PdfExtractor {
         // value instead (#353); they are merged below via
         // `markdown_layout_glyph_drop_warnings` (markdown path) and were
         // already folded into `ocr_fallback_warnings` above (OCR path). ~keep
-        for pdf_render_warning in crate::pdf::render::take_pdf_oxide_render_warnings() {
+        for pdf_render_warning in crate::pdf::render::take_xberg_native_pdf_render_warnings() {
             crate::core::diagnostics::push_warning_deduped(&mut doc.processing_warnings, pdf_render_warning);
         }
 
@@ -2118,7 +2118,7 @@ impl PdfExtractor {
             crate::core::diagnostics::push_warning_deduped(&mut doc.processing_warnings, warning);
         }
 
-        // #353: merge `pdf_oxide` glyph-drop warnings captured while the
+        // #353: merge `xberg_native_pdf` glyph-drop warnings captured while the
         // markdown layout pass rendered its pages off-thread inside
         // `spawn_blocking` (see the drain comment above).
         #[cfg(all(feature = "pdf", feature = "layout-detection"))]
@@ -2661,9 +2661,9 @@ mod tests {
 
     #[cfg(feature = "pdf")]
     fn catalog(
-        entries: impl IntoIterator<Item = (&'static str, pdf_oxide::object::Object)>,
-    ) -> pdf_oxide::object::Object {
-        pdf_oxide::object::Object::Dictionary(
+        entries: impl IntoIterator<Item = (&'static str, xberg_native_pdf::object::Object)>,
+    ) -> xberg_native_pdf::object::Object {
+        xberg_native_pdf::object::Object::Dictionary(
             entries
                 .into_iter()
                 .map(|(key, value)| (key.to_string(), value))
@@ -2699,7 +2699,7 @@ mod tests {
     #[cfg(feature = "pdf")]
     #[test]
     fn lopdf_compatibility_pass_keeps_parsed_catalog_outline() {
-        let catalog = catalog([("Outlines", pdf_oxide::object::Object::Null)]);
+        let catalog = catalog([("Outlines", xberg_native_pdf::object::Object::Null)]);
 
         assert!(catalog_needs_lopdf_compatibility_pass(Some(&catalog)));
     }
@@ -3154,7 +3154,7 @@ mod tests {
         assert!(
             markdown.contains("# ANNUAL REPORT OVERVIEW"),
             "OCR document-global heading structure must reach the rendered markdown even when \
-             native pdf_oxide extraction produced no structured document: {markdown:?}"
+             native xberg_native_pdf extraction produced no structured document: {markdown:?}"
         );
     }
 
@@ -3716,7 +3716,7 @@ mod tests {
         let Ok(content) = std::fs::read(&pdf_path) else {
             return;
         };
-        let real_page_count = pdf_oxide::PdfDocument::from_bytes(content.clone())
+        let real_page_count = xberg_native_pdf::PdfDocument::from_bytes(content.clone())
             .expect("fixture must parse")
             .page_count()
             .expect("fixture must expose a page count");
@@ -3793,10 +3793,10 @@ mod tests {
     /// too, and it is kept because the behaviour is worth pinning, not because it catches
     /// anything.
     ///
-    /// It was originally written believing `pdf_oxide` refuses to count an unauthenticated
+    /// It was originally written believing `xberg_native_pdf` refuses to count an unauthenticated
     /// document's pages, so an encrypted PDF would skip the cap. That is false, and measuring
     /// it is what settled the design: a PDF's page tree is structure, not string or stream
-    /// data, so `pdf_oxide::PdfDocument::from_bytes(..).page_count()` returns 3 for this
+    /// data, so `xberg_native_pdf::PdfDocument::from_bytes(..).page_count()` returns 3 for this
     /// AES-256/R6 fixture with no password at all. A sweep of all 488 PDFs in
     /// `test_documents/` found exactly one document the unauthenticated count cannot handle
     /// (`corrupt_truncated.pdf`), which `lopdf` also cannot read and which fails extraction
@@ -3848,7 +3848,7 @@ mod tests {
         let Ok(content) = std::fs::read(&pdf_path) else {
             return;
         };
-        let real_page_count = pdf_oxide::PdfDocument::from_bytes(content.clone())
+        let real_page_count = xberg_native_pdf::PdfDocument::from_bytes(content.clone())
             .expect("fixture must parse")
             .page_count()
             .expect("fixture must expose a page count");
@@ -3901,7 +3901,7 @@ mod tests {
     ///
     /// Fails against unfixed code: `extract_core` unconditionally calls
     /// `extract_core_oxide` and never reads `PdfConfig::backend`, so `content`
-    /// gets handed straight to `pdf_oxide`. The oxide parser rejects the garbage
+    /// gets handed straight to `xberg_native_pdf`. The oxide parser rejects the garbage
     /// bytes with an `XbergError::Parsing` whose message describes a corrupt/invalid
     /// PDF and never contains the word "pdfium" -- the
     /// `message.contains("pdfium")` assertion below fails.
@@ -3923,21 +3923,21 @@ mod tests {
             .extract_content(b"not a real pdf", "application/pdf", &config)
             .await;
 
-        let error = result.expect_err("selecting pdfium must fail, not silently extract via pdf_oxide");
+        let error = result.expect_err("selecting pdfium must fail, not silently extract via xberg_native_pdf");
         let message = error.to_string();
         assert!(
             message.contains("pdfium"),
             "error must name the requested backend 'pdfium', got: {message}"
         );
         assert!(
-            message.contains("pdf-oxide"),
-            "error must tell the caller what to do (use pdf-oxide instead), got: {message}"
+            message.contains("native"),
+            "error must tell the caller what to do (use native instead), got: {message}"
         );
     }
 
     /// Proves there is no silent fallback (#702's core danger): given a document
-    /// `pdf_oxide` can extract perfectly well, selecting `PdfBackend::Pdfium` must
-    /// still fail rather than quietly returning `pdf_oxide`'s output mislabeled as
+    /// `xberg_native_pdf` can extract perfectly well, selecting `PdfBackend::Pdfium` must
+    /// still fail rather than quietly returning `xberg_native_pdf`'s output mislabeled as
     /// pdfium. Uses a real, valid multi-page PDF specifically to rule out "it failed
     /// because the input was bad" as an explanation for the error.
     ///
@@ -3953,7 +3953,7 @@ mod tests {
     /// only holds for the stub.
     #[tokio::test]
     #[cfg(all(feature = "pdf", not(feature = "pdf-pdfium")))]
-    async fn pdfium_backend_never_silently_falls_back_to_pdf_oxide_output() {
+    async fn pdfium_backend_never_silently_falls_back_to_xberg_native_pdf_output() {
         let pdf_path = pdf_test_document("multi_page.pdf");
         let Ok(content) = std::fs::read(&pdf_path) else {
             return;
@@ -3969,13 +3969,13 @@ mod tests {
         let result = extractor.extract_content(&content, "application/pdf", &config).await;
         assert!(
             result.is_err(),
-            "pdfium selected on a document pdf_oxide could extract fine must still error, \
-             not silently return pdf_oxide's output under the caller's pdfium selection"
+            "pdfium selected on a document xberg_native_pdf could extract fine must still error, \
+             not silently return xberg_native_pdf's output under the caller's pdfium selection"
         );
     }
 
     /// Proves the `pdf-pdfium` engine (#702) actually extracts text and metadata
-    /// through pdfium rather than reusing `pdf_oxide` output. `multi_page.pdf` is a
+    /// through pdfium rather than reusing `xberg_native_pdf` output. `multi_page.pdf` is a
     /// 5-page document whose first page's text is known ahead of time (verified
     /// with `pdftotext` against the fixture).
     ///
@@ -4911,7 +4911,7 @@ mod tests {
         );
     }
 
-    /// Regression for #1355: when `force_ocr` renders a page blank (as pdf_oxide does
+    /// Regression for #1355: when `force_ocr` renders a page blank (as xberg_native_pdf does
     /// for a page whose only visible content is an image XObject it silently failed to
     /// decode) but the page actually carries image XObjects, OCR must be retried on the
     /// embedded image bytes and the recovery must be surfaced as a `ProcessingWarning`.
@@ -5300,7 +5300,7 @@ mod tests {
     /// AtomicBool needed.
     ///
     /// Fixture note: with_images.pdf is used here (not embedded_images_tables.pdf)
-    /// because pdf_oxide reliably extracts its single raster XObject.
+    /// because xberg_native_pdf reliably extracts its single raster XObject.
     #[tokio::test]
     #[cfg(all(feature = "pdf", feature = "ocr"))]
     #[serial]
@@ -5333,7 +5333,7 @@ mod tests {
         assert!(
             !result.images.is_empty(),
             "with_images.pdf must yield at least one embedded image; \
-             fixture may need replacing if pdf_oxide no longer extracts from it"
+             fixture may need replacing if xberg_native_pdf no longer extracts from it"
         );
 
         let images_with_ocr: Vec<_> = result.images.iter().filter(|img| img.ocr_result.is_some()).collect();

@@ -199,35 +199,6 @@ pub(crate) fn resolve_llm_concurrency(
         .max(1)
 }
 
-/// Resolve the request limit for OCR work that can reach a VLM.
-///
-/// Explicit OCR pipelines own their stage configuration, so only VLM stages in
-/// that pipeline participate. Otherwise the top-level VLM configuration is
-/// used when the selected backend or fallback policy can issue VLM requests.
-#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
-pub(crate) fn resolve_ocr_concurrency(
-    ocr_config: &crate::core::config::OcrConfig,
-    concurrency: Option<&ConcurrencyConfig>,
-) -> usize {
-    let configured_limit = if let Some(pipeline) = ocr_config.pipeline.as_ref() {
-        pipeline
-            .stages
-            .iter()
-            .filter(|stage| stage.backend == "vlm")
-            .filter_map(|stage| stage.vlm_config.as_ref()?.max_concurrency)
-            .min()
-    } else if ocr_config.backend == "vlm" || ocr_config.vlm_fallback != crate::core::config::VlmFallbackPolicy::Disabled
-    {
-        ocr_config.vlm_config.as_ref().and_then(|config| config.max_concurrency)
-    } else {
-        None
-    };
-
-    configured_limit
-        .unwrap_or_else(|| resolve_thread_budget(concurrency))
-        .max(1)
-}
-
 /// Pure core of [`resolve_thread_budget`], parameterized on the host CPU
 /// count and any detected cgroup quota so tests can exercise every branch
 /// deterministically regardless of the machine actually running the tests.
@@ -466,32 +437,6 @@ mod tests {
         let general = ConcurrencyConfig { max_threads: Some(5) };
 
         assert_eq!(resolve_llm_concurrency(&llm, Some(&general)), 5);
-    }
-
-    #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
-    #[test]
-    fn ocr_concurrency_uses_explicit_vlm_pipeline_stage_limit() {
-        let ocr = crate::core::config::OcrConfig {
-            pipeline: Some(crate::core::config::OcrPipelineConfig {
-                stages: vec![crate::core::config::OcrPipelineStage {
-                    backend: "vlm".to_string(),
-                    priority: 100,
-                    language: None,
-                    tesseract_config: None,
-                    paddle_ocr_config: None,
-                    vlm_config: Some(crate::core::config::LlmConfig {
-                        max_concurrency: Some(2),
-                        ..Default::default()
-                    }),
-                    backend_options: None,
-                }],
-                quality_thresholds: Default::default(),
-            }),
-            ..Default::default()
-        };
-        let general = ConcurrencyConfig { max_threads: Some(8) };
-
-        assert_eq!(resolve_ocr_concurrency(&ocr, Some(&general)), 2);
     }
 
     /// A tracing `Layer` that records the level of every emitted event.

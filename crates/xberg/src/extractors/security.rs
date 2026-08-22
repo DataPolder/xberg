@@ -62,7 +62,7 @@ pub struct SecurityLimits {
     /// legitimate large documents; callers that want a ceiling set this
     /// explicitly.
     ///
-    /// Enforced for: PDF (`extractors::pdf`, page count via `pdf_oxide`/`lopdf`),
+    /// Enforced for: PDF (`extractors::pdf`, page count via `xberg_native_pdf`/`lopdf`),
     /// PPTX (`extraction::pptx`, slide count from the archive's slide parts),
     /// Keynote (`extractors::iwork::keynote`, slide count from `Index/Slide-*.iwa`
     /// entry names), ODP (`extractors::odp`, `draw:page` count in `content.xml`),

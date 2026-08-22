@@ -74,7 +74,7 @@ fn table_stage_failure_warning(stage: &str, error: &impl std::fmt::Display) -> c
     }
 }
 
-/// Extract text, metadata, tables, and annotations from a PDF document using the pdf_oxide backend.
+/// Extract text, metadata, tables, and annotations from a PDF document using the xberg_native_pdf backend.
 ///
 /// Accepts an authenticated `OxideDocument`, then delegates to each oxide extraction module.
 /// The return type is `PdfExtractionPhaseResult` so callers can switch transparently between
@@ -102,13 +102,13 @@ pub(crate) fn extract_all_from_oxide_document(
         &crate::core::config::acceleration::AccelerationConfig,
     >,
 ) -> Result<PdfExtractionPhaseResult> {
-    let _span = tracing::debug_span!("extract_pdf_oxide").entered();
+    let _span = tracing::debug_span!("extract_xberg_native_pdf").entered();
 
     #[cfg_attr(not(feature = "layout-detection"), allow(unused_mut))]
     let (mut native_text, mut boundaries, mut page_contents, mut pdf_metadata) =
         crate::pdf::oxide::text::extract_text_and_metadata(&mut doc, Some(config)).map_err(|e| {
             crate::error::XbergError::Parsing {
-                message: format!("pdf_oxide text extraction failed: {e}"),
+                message: format!("xberg_native_pdf text extraction failed: {e}"),
                 source: None,
             }
         })?;
@@ -172,14 +172,14 @@ pub(crate) fn extract_all_from_oxide_document(
                 let mut warnings = Vec::new();
                 let (mut combined, native_warnings) =
                     crate::pdf::oxide::table::extract_tables_native(&mut doc).unwrap_or_else(|e| {
-                        tracing::warn!("pdf_oxide native table extraction failed, skipping tables: {e}");
+                        tracing::warn!("xberg_native_pdf native table extraction failed, skipping tables: {e}");
                         (Vec::new(), vec![table_stage_failure_warning("native", &e)])
                     });
                 warnings.extend(native_warnings);
                 let native_pages: std::collections::HashSet<u32> = combined.iter().map(|t| t.page_number).collect();
                 let (bordered, bordered_warnings) =
                     crate::pdf::oxide::table::extract_tables_bordered(&mut doc, &native_pages).unwrap_or_else(|e| {
-                        tracing::warn!("pdf_oxide bordered table extraction failed, skipping tables: {e}");
+                        tracing::warn!("xberg_native_pdf bordered table extraction failed, skipping tables: {e}");
                         (Vec::new(), vec![table_stage_failure_warning("bordered", &e)])
                     });
                 combined.extend(bordered);
@@ -195,7 +195,7 @@ pub(crate) fn extract_all_from_oxide_document(
                         retain_hierarchy_segments.then_some(extraction.hierarchy_segments)
                     }
                     Err(error) => {
-                        tracing::warn!("pdf_oxide heuristic table extraction failed, skipping tables: {error}");
+                        tracing::warn!("xberg_native_pdf heuristic table extraction failed, skipping tables: {error}");
                         warnings.push(table_stage_failure_warning("heuristic", &error));
                         None
                     }
@@ -211,12 +211,12 @@ pub(crate) fn extract_all_from_oxide_document(
                 Ok((combined, hierarchy_segments, warnings))
             },
             |panic| crate::error::XbergError::Parsing {
-                message: format!("pdf_oxide panicked during table extraction: {panic}"),
+                message: format!("xberg_native_pdf panicked during table extraction: {panic}"),
                 source: None,
             },
         )
         .unwrap_or_else(|e| {
-            tracing::warn!("pdf_oxide table extraction panicked, skipping tables: {e}");
+            tracing::warn!("xberg_native_pdf table extraction panicked, skipping tables: {e}");
             (Vec::new(), None, vec![table_stage_failure_warning("whole-document", &e)])
         })
     } else {
@@ -240,7 +240,7 @@ pub(crate) fn extract_all_from_oxide_document(
         let (extracted, image_warnings) =
             crate::pdf::oxide::images::extract_images_with_data(&mut doc, max_images, config.cancel_token.as_ref())
                 .map_err(|e| crate::error::XbergError::Parsing {
-                    message: format!("pdf_oxide image extraction failed: {e}"),
+                    message: format!("xberg_native_pdf image extraction failed: {e}"),
                     source: None,
                 })?;
         extraction_warnings.extend(image_warnings);
@@ -294,7 +294,7 @@ pub(crate) fn extract_all_from_oxide_document(
             Some(segments) => (segments.pages, segments.used_structure_tree),
             None => crate::pdf::oxide::hierarchy::extract_all_segments(&mut doc).map_err(|e| {
                 crate::error::XbergError::Parsing {
-                    message: format!("pdf_oxide hierarchy extraction failed: {e}"),
+                    message: format!("xberg_native_pdf hierarchy extraction failed: {e}"),
                     source: None,
                 }
             })?,
@@ -550,29 +550,29 @@ mod tests {
     use crate::core::config::OutputFormat;
 
     /// Characterises `table_stage_failure_warning`'s message format only — it constructs the
-    /// error directly rather than driving a real pdf_oxide failure, so it does NOT prove any
+    /// error directly rather than driving a real xberg_native_pdf failure, so it does NOT prove any
     /// table-extraction pass can fail or panic. That coverage used to live in
     /// `crates/xberg/tests/issue_603_pdf_table_stage_failure_warning.rs` as
     /// `should_emit_pdf_tables_warning_when_whole_document_table_pass_panics`, driven through the
     /// public API against `test_documents/pdf/total_order_panic_1198_tables_path.pdf`. That
-    /// fixture stopped panicking once the `xberg-pdf-oxide` fork picked up upstream commit
+    /// fixture stopped panicking once the `xberg-native` fork picked up upstream commit
     /// `9b0f9c99` ("Fix reading-order sort panics on scanned/malformed PDFs (#807)"), which
     /// replaced the non-transitive pairwise tategaki column comparator with
     /// `sort_vertical_tategaki`, a genuine total order — `9b0f9c99` is an ancestor of the
-    /// `xberg-pdf-oxide` 1.0.1 version this crate now consumes. No fixture in `test_documents/`
-    /// still reaches a real `pdf_oxide` panic through the table-detection stage, so the old test
+    /// `xberg-native` 1.0.1 version this crate now consumes. No fixture in `test_documents/`
+    /// still reaches a real `xberg_native_pdf` panic through the table-detection stage, so the old test
     /// asserted a panic-recovery warning against code that no longer panics. Do not re-add a
     /// test that asserts a panic on this fixture.
     #[test]
     fn table_stage_failure_warning_formats_the_message_it_promises() {
-        let cause = "pdf_oxide panicked during table extraction: boom";
+        let cause = "xberg_native_pdf panicked during table extraction: boom";
         let warning = table_stage_failure_warning("whole-document", &cause);
 
         assert_eq!(warning.source, "pdf_tables");
         let message = warning.message.as_ref();
         assert_eq!(
             message,
-            "whole-document table extraction failed for the document: pdf_oxide panicked during table \
+            "whole-document table extraction failed for the document: xberg_native_pdf panicked during table \
              extraction: boom; tables from this pass were skipped"
         );
     }

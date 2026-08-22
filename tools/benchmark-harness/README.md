@@ -410,7 +410,7 @@ benchmark-harness compare -f fixtures/ \
 Guardrail contracts may include a `relative_order` array of exact text anchors. The comparison
 fails unless every anchor is present in the listed order, allowing focused reading-order checks
 that are independent of aggregate SF1 thresholds. The known `681693`
-`pdf-oxide+layout+reading-order` sequence is installed when guardrails are loaded or generated,
+`native+layout+reading-order` sequence is installed when guardrails are loaded or generated,
 including for legacy guardrail files without `relative_order`.
 
 ### `pipeline-benchmark` -- 6-path extraction matrix

@@ -79,6 +79,7 @@ packages/ruby/vendor/
 # PHP
 vendor/
 !crates/xberg-candle-ocr/src/vendor/
+!crates/xberg-native-pdf/src/vendor/
 !crates/xberg-libwpd/vendor/
 # The vendored WordPerfect source archives are committed on purpose; re-include
 # them past the global `*.tar.gz` rule above (a dir negation alone won't).

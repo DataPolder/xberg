@@ -12,7 +12,7 @@ Xberg uses a high-performance Rust core with one registry-backed extraction path
 
 - **Native Rust Extractors**: Fast, memory-efficient extractors for all supported formats
 
-PDF extraction uses the pdf_oxide provider. Legacy `.doc` and `.ppt` extraction no longer requires LibreOffice; those formats are parsed through native OLE/CFB extractors.
+PDF extraction uses the xberg-native-pdf provider. Legacy `.doc` and `.ppt` extraction no longer requires LibreOffice; those formats are parsed through native OLE/CFB extractors.
 
 Call `list_supported_formats()` in SDKs or the REST/API layer to inspect the runtime registry, including extensions and MIME types.
 
@@ -24,7 +24,7 @@ All formats support async/await and batch processing. Image formats and PDFs sup
 
 | Format                   | Extensions                                                                  | MIME Type                                                                   | Extraction Method       | OCR Support               | Special Features                                            |
 | ------------------------ | --------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ----------------------- | ------------------------- | ----------------------------------------------------------- |
-| PDF                      | `.pdf`                                                                      | `application/pdf`                                                           | Native Rust (pdf_oxide) | Yes                       | Metadata extraction, image extraction, text layer detection |
+| PDF                      | `.pdf`                                                                      | `application/pdf`                                                           | Native Rust (xberg-native-pdf) | Yes                       | Metadata extraction, image extraction, text layer detection |
 | Excel                    | `.xlsx`, `.xlsm`, `.xlsb`, `.xls`, `.xlam`, `.xla`, `.xltx`, `.xlt`, `.ods` | Various Excel MIME types                                                    | Native Rust (calamine)  | No                        | Multi-sheet support, formula preservation                   |
 | PowerPoint               | `.pptx`, `.pptm`, `.ppsx`                                                   | `application/vnd.openxmlformats-officedocument.presentationml.presentation` | Native Rust (roxmltree) | Yes (for embedded images) | Slide extraction, image OCR, table detection                |
 | PowerPoint Template      | `.potx`, `.potm`, `.pot`                                                    | Various PowerPoint template MIME types                                      | Native Rust (roxmltree) | Yes (for embedded images) | Template slide extraction                                   |
@@ -219,7 +219,7 @@ Xberg uses Cargo feature flags to enable optional format and processing support.
 
 | Feature Flag | Enables |
 | ------------ | ------- |
-| `pdf`        | PDF extraction through pdf_oxide, PDF images, PDF rendering helpers |
+| `pdf`        | PDF extraction through xberg-native-pdf, PDF images, PDF rendering helpers |
 | `excel` / `excel-wasm` | Excel spreadsheets through calamine |
 | `office`     | DOCX/PPTX, legacy `.doc`/`.ppt`, OpenDocument, dBASE, academic citation formats |
 | `hwp` / `hwpx` | Hangul Word Processor formats |

@@ -1,4 +1,4 @@
-//! PDF text extraction using the pdf_oxide backend.
+//! PDF text extraction using the xberg_native_pdf backend.
 
 use super::OxideDocument;
 use super::span_geometry::{
@@ -10,7 +10,7 @@ use crate::pdf::metadata::PdfExtractionMetadata;
 use crate::pdf::structure::constants::{COALESCE_THRESHOLD, MAX_GLYPH_JITTER_PT, MIN_DISORDER_COUNT};
 use crate::pdf::text::{contains_html_markup, fix_pdf_control_chars};
 use crate::types::{PageBoundary, PageContent};
-use pdf_oxide::document::ReadingOrder;
+use xberg_native_pdf::document::ReadingOrder;
 use std::borrow::Cow;
 
 /// Result type for PDF text extraction with optional page tracking.
@@ -63,17 +63,17 @@ pub(crate) fn extract_text_and_metadata(
 /// This is used by reading-order reconstruction to project spans onto layout regions.
 #[cfg(feature = "layout-detection")]
 pub(crate) fn extract_spans_from_page(
-    doc: &mut pdf_oxide::PdfDocument,
+    doc: &mut xberg_native_pdf::PdfDocument,
     page_index: usize,
 ) -> Result<(Vec<crate::extractors::pdf::rotation::TextSpan>, bool)> {
-    use pdf_oxide::document::ReadingOrder;
+    use xberg_native_pdf::document::ReadingOrder;
 
     let mut page_text_data = super::guard_oxide_panic(
         || {
             doc.extract_page_text_with_options(page_index, ReadingOrder::ColumnAware)
                 .map_err(|e| PdfError::TextExtractionFailed(format!("Failed to extract page text: {}", e)))
         },
-        |panic| PdfError::TextExtractionFailed(format!("Page text extraction panicked in pdf_oxide: {}", panic)),
+        |panic| PdfError::TextExtractionFailed(format!("Page text extraction panicked in xberg_native_pdf: {}", panic)),
     )?;
     let reordered_sparse_columns = reorder_sparse_two_column_page(&mut page_text_data.spans, page_text_data.page_width);
 
@@ -82,7 +82,7 @@ pub(crate) fn extract_spans_from_page(
     Ok((spans, reordered_sparse_columns))
 }
 
-/// Extract text from a pdf_oxide document with optional page boundary tracking.
+/// Extract text from a xberg_native_pdf document with optional page boundary tracking.
 ///
 /// Mirrors the signature and behaviour of `extract_text_from_pdf_document`.
 ///
@@ -127,7 +127,7 @@ fn extract_text_fast_path(doc: &mut OxideDocument) -> Result<PdfTextExtractionRe
     // Issue #67: default-off optional-content (OCG/layer) groups per
     // `/OCProperties/D` (ISO 32000-1:2008 §8.11.4). Computed once per
     // document; empty for the common case of no `/OCProperties`.
-    let excluded_layers = pdf_oxide::optional_content::compute_default_off_ocgs(&doc.doc);
+    let excluded_layers = xberg_native_pdf::optional_content::compute_default_off_ocgs(&doc.doc);
 
     let mut content = String::new();
     let mut total_sample_size = 0usize;
@@ -172,7 +172,7 @@ fn extract_text_with_tracking(doc: &mut OxideDocument, config: &PageConfig) -> R
         .map_err(|e| PdfError::TextExtractionFailed(format!("Failed to get page count: {}", e)))?;
 
     // Issue #67: see `extract_text_fast_path` for rationale.
-    let excluded_layers = pdf_oxide::optional_content::compute_default_off_ocgs(&doc.doc);
+    let excluded_layers = xberg_native_pdf::optional_content::compute_default_off_ocgs(&doc.doc);
 
     let mut content = String::new();
     let mut boundaries = Vec::with_capacity(page_count);
@@ -254,13 +254,13 @@ fn extract_text_with_tracking(doc: &mut OxideDocument, config: &PageConfig) -> R
 /// Empty values and annotations without a `/V` entry are excluded. This function is
 /// intentionally infallible: a failed `get_annotations` call is logged at DEBUG level
 /// and returns an empty list so that the rest of the extraction path is unaffected.
-fn collect_widget_field_values(doc: &pdf_oxide::PdfDocument, page_index: usize) -> Vec<(f64, String)> {
+fn collect_widget_field_values(doc: &xberg_native_pdf::PdfDocument, page_index: usize) -> Vec<(f64, String)> {
     let annotations = match doc.get_annotations(page_index) {
         Ok(a) => a,
         Err(e) => {
             tracing::debug!(
                 page = page_index,
-                "pdf_oxide: could not read annotations for widget values: {e}"
+                "xberg_native_pdf: could not read annotations for widget values: {e}"
             );
             return Vec::new();
         }
@@ -268,7 +268,7 @@ fn collect_widget_field_values(doc: &pdf_oxide::PdfDocument, page_index: usize) 
 
     let mut widgets: Vec<(f64, String)> = annotations
         .into_iter()
-        .filter(|a| a.subtype_enum == pdf_oxide::AnnotationSubtype::Widget)
+        .filter(|a| a.subtype_enum == xberg_native_pdf::AnnotationSubtype::Widget)
         .filter_map(|a| {
             let value = a.field_value?.trim().to_string();
             if value.is_empty() {
@@ -320,7 +320,7 @@ fn append_missing_widget_values(text: &mut String, widgets: &[(f64, String)]) {
 ///
 /// See `crate::pdf::structure::constants` for the threshold values and their justification.
 ///
-/// pdf_oxide's ColumnAware reading order groups all spans at one y-level before moving
+/// xberg_native_pdf's ColumnAware reading order groups all spans at one y-level before moving
 /// to the next. For Word-exported PDFs where each glyph has its own BT…ET block with a
 /// sinusoidal y-jitter, this produces groups ordered by y-level rather than by reading
 /// order: "et" (y=703) appears before "H" (y=700) even though "H" comes first visually.
@@ -333,7 +333,7 @@ fn append_missing_widget_values(text: &mut String, widgets: &[(f64, String)]) {
 ///    significantly leftward — indicating a new y-group started mid-reading-order.
 ///
 /// ≥ MIN_DISORDER_COUNT such events means position-based reconstruction is needed.
-fn is_fragmented_span_list(spans: &[pdf_oxide::layout::TextSpan]) -> bool {
+fn is_fragmented_span_list(spans: &[xberg_native_pdf::layout::TextSpan]) -> bool {
     let mut disorder_count = 0;
     for window in spans.windows(2) {
         let prev = &window[0];
@@ -371,15 +371,15 @@ fn is_fragmented_span_list(spans: &[pdf_oxide::layout::TextSpan]) -> bool {
 /// 3. Within each group sort by x-ascending (left-to-right reading order).
 /// 4. Concatenate, inserting a space wherever the x-gap between adjacent spans
 ///    exceeds font_size * 0.5.
-fn rebuild_text_from_fragmented_spans(spans: &[pdf_oxide::layout::TextSpan]) -> String {
+fn rebuild_text_from_fragmented_spans(spans: &[xberg_native_pdf::layout::TextSpan]) -> String {
     if spans.is_empty() {
         return String::new();
     }
 
-    let mut sorted: Vec<&pdf_oxide::layout::TextSpan> = spans.iter().collect();
+    let mut sorted: Vec<&xberg_native_pdf::layout::TextSpan> = spans.iter().collect();
     sorted.sort_by(|a, b| b.bbox.y.partial_cmp(&a.bbox.y).unwrap_or(std::cmp::Ordering::Equal));
 
-    let mut groups: Vec<Vec<&pdf_oxide::layout::TextSpan>> = Vec::new();
+    let mut groups: Vec<Vec<&xberg_native_pdf::layout::TextSpan>> = Vec::new();
     for span in sorted {
         let belongs = groups.last().is_some_and(|g| {
             let prev_y = g.last().unwrap().bbox.y;
@@ -419,7 +419,7 @@ const ROW_RESET_MIN_BACKTRACK_EMS: f32 = 4.0;
 
 #[derive(Clone, Copy)]
 struct OrderedSpan<'a> {
-    span: &'a pdf_oxide::layout::TextSpan,
+    span: &'a xberg_native_pdf::layout::TextSpan,
     glue_to_previous: bool,
 }
 
@@ -429,13 +429,13 @@ struct OrderedSpan<'a> {
 /// whose shared baseline is a page-x column rather than a page-y row, is still
 /// recognised as one line. Identical to the previous page-y test for unrotated
 /// spans. Only meaningful for spans of equal rotation; callers check that.
-fn spans_overlap_on_cross_axis(first: &pdf_oxide::layout::TextSpan, second: &pdf_oxide::layout::TextSpan) -> bool {
+fn spans_overlap_on_cross_axis(first: &xberg_native_pdf::layout::TextSpan, second: &xberg_native_pdf::layout::TextSpan) -> bool {
     let (first_low, first_high) = upright_cross_extent(first);
     let (second_low, second_high) = upright_cross_extent(second);
     first_high.min(second_high) > first_low.max(second_low)
 }
 
-fn is_short_inline_fragment(span: &pdf_oxide::layout::TextSpan) -> bool {
+fn is_short_inline_fragment(span: &xberg_native_pdf::layout::TextSpan) -> bool {
     let mut chars = span.text.chars();
     let Some(first) = chars.next() else {
         return false;
@@ -449,7 +449,7 @@ fn is_short_inline_fragment(span: &pdf_oxide::layout::TextSpan) -> bool {
 
 fn has_rtl_or_bidi_content(text: &str) -> bool {
     text.chars()
-        .any(|character| pdf_oxide::text::is_rtl_text(character as u32))
+        .any(|character| xberg_native_pdf::text::is_rtl_text(character as u32))
 }
 
 /// Find the parent word a short detached fragment should rejoin.
@@ -462,7 +462,7 @@ fn has_rtl_or_bidi_content(text: &str) -> bool {
 /// fragment, and all gap arithmetic runs in that rotation's upright frame.
 fn find_inline_fragment_anchor(
     index: usize,
-    spans: &[pdf_oxide::layout::TextSpan],
+    spans: &[xberg_native_pdf::layout::TextSpan],
     anchors: &[Option<usize>],
 ) -> Option<usize> {
     let span = &spans[index];
@@ -498,7 +498,7 @@ fn find_inline_fragment_anchor(
         .map(|(candidate_index, _)| candidate_index)
 }
 
-fn order_spans_with_inline_fragments(spans: &[pdf_oxide::layout::TextSpan]) -> Vec<OrderedSpan<'_>> {
+fn order_spans_with_inline_fragments(spans: &[xberg_native_pdf::layout::TextSpan]) -> Vec<OrderedSpan<'_>> {
     let mut anchors = vec![None; spans.len()];
     for index in 0..spans.len() {
         anchors[index] = find_inline_fragment_anchor(index, spans, &anchors);
@@ -541,7 +541,7 @@ fn order_spans_with_inline_fragments(spans: &[pdf_oxide::layout::TextSpan]) -> V
 
 fn append_span_separator(
     text: &mut String,
-    previous: &pdf_oxide::layout::TextSpan,
+    previous: &xberg_native_pdf::layout::TextSpan,
     current: OrderedSpan<'_>,
     paragraph_gap_threshold: f32,
     allow_ltr_row_resets: bool,
@@ -552,7 +552,7 @@ fn append_span_separator(
 
     let span = current.span;
 
-    // A change of text-matrix rotation is a hard block boundary. pdf_oxide lifts
+    // A change of text-matrix rotation is a hard block boundary. xberg_native_pdf lifts
     // rotated runs out of the horizontal flow and appends them as their own
     // blocks, and the two bboxes are flattened onto different axes, so no gap
     // arithmetic across the boundary is meaningful. This is also what keeps an
@@ -603,7 +603,7 @@ fn append_span_separator(
     }
 }
 
-fn assemble_page_text(spans: &[pdf_oxide::layout::TextSpan]) -> String {
+fn assemble_page_text(spans: &[xberg_native_pdf::layout::TextSpan]) -> String {
     let mut heights: Vec<f32> = spans.iter().map(|span| span.bbox.height).collect();
     heights.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let median_height = if heights.is_empty() {
@@ -625,7 +625,7 @@ fn assemble_page_text(spans: &[pdf_oxide::layout::TextSpan]) -> String {
         .iter()
         .any(|span| span.rtl_draw_logical || has_rtl_or_bidi_content(&span.text));
     let mut text = String::with_capacity(spans.len() * 20);
-    let mut prev_span: Option<&pdf_oxide::layout::TextSpan> = None;
+    let mut prev_span: Option<&xberg_native_pdf::layout::TextSpan> = None;
 
     for current in ordered {
         let span = current.span;
@@ -639,7 +639,7 @@ fn assemble_page_text(spans: &[pdf_oxide::layout::TextSpan]) -> String {
     text
 }
 
-// pdf_oxide's XY-Cut does not split regions with fewer than five spans.
+// xberg_native_pdf's XY-Cut does not split regions with fewer than five spans.
 // These guards cover the issue #1345 four-span sentence without reclassifying
 // sparse tables or forms as prose columns.
 const MIN_SPARSE_COLUMN_GUTTER_FRACTION: f32 = 0.05;
@@ -652,7 +652,7 @@ const MIN_SPARSE_COLUMN_ALPHA_RATIO: f32 = 0.55;
 const MIN_SPARSE_COLUMN_VERTICAL_OVERLAP: f32 = 0.5;
 const XY_CUT_MIN_SPANS_FOR_SPLIT: usize = 5;
 
-fn is_sparse_column_prose(span: &pdf_oxide::layout::TextSpan) -> bool {
+fn is_sparse_column_prose(span: &xberg_native_pdf::layout::TextSpan) -> bool {
     let alpha_chars = span.text.chars().filter(|character| character.is_alphabetic()).count();
     let non_whitespace_chars = span.text.chars().filter(|character| !character.is_whitespace()).count();
     let word_count = span.text.split_whitespace().count();
@@ -672,8 +672,8 @@ fn is_sparse_column_prose(span: &pdf_oxide::layout::TextSpan) -> bool {
         && alpha_chars as f32 / non_whitespace_chars.max(1) as f32 >= MIN_SPARSE_COLUMN_ALPHA_RATIO
 }
 
-fn sparse_columns_overlap(left: &[&pdf_oxide::layout::TextSpan], right: &[&pdf_oxide::layout::TextSpan]) -> bool {
-    let extent = |side: &[&pdf_oxide::layout::TextSpan]| {
+fn sparse_columns_overlap(left: &[&xberg_native_pdf::layout::TextSpan], right: &[&xberg_native_pdf::layout::TextSpan]) -> bool {
+    let extent = |side: &[&xberg_native_pdf::layout::TextSpan]| {
         side.iter()
             .map(|span| span.bbox.y)
             .fold((f32::INFINITY, f32::NEG_INFINITY), |(low, high), y| {
@@ -689,26 +689,26 @@ fn sparse_columns_overlap(left: &[&pdf_oxide::layout::TextSpan], right: &[&pdf_o
 }
 
 fn sparse_columns_continue_one_sentence(
-    left: &[&pdf_oxide::layout::TextSpan],
-    right: &[&pdf_oxide::layout::TextSpan],
+    left: &[&xberg_native_pdf::layout::TextSpan],
+    right: &[&xberg_native_pdf::layout::TextSpan],
 ) -> bool {
     let mut left_by_y = left.to_vec();
     let mut right_by_y = right.to_vec();
     left_by_y.sort_by(|first, second| second.bbox.y.total_cmp(&first.bbox.y));
     right_by_y.sort_by(|first, second| second.bbox.y.total_cmp(&first.bbox.y));
-    let starts_lowercase = |span: &&pdf_oxide::layout::TextSpan| {
+    let starts_lowercase = |span: &&xberg_native_pdf::layout::TextSpan| {
         span.text
             .chars()
             .find(|character| character.is_alphabetic())
             .is_some_and(char::is_lowercase)
     };
-    let starts_uppercase = |span: &&pdf_oxide::layout::TextSpan| {
+    let starts_uppercase = |span: &&xberg_native_pdf::layout::TextSpan| {
         span.text
             .chars()
             .find(|character| character.is_alphabetic())
             .is_some_and(char::is_uppercase)
     };
-    let has_terminal = |span: &&pdf_oxide::layout::TextSpan| span.text.trim_end().ends_with(['.', '!', '?']);
+    let has_terminal = |span: &&xberg_native_pdf::layout::TextSpan| span.text.trim_end().ends_with(['.', '!', '?']);
     let continuations = [&left_by_y[1], &right_by_y[0], &right_by_y[1]];
     let all_spans = left_by_y.iter().chain(&right_by_y);
 
@@ -718,13 +718,13 @@ fn sparse_columns_continue_one_sentence(
         && has_terminal(&right_by_y[1])
 }
 
-fn is_sparse_column_split(spans: &[pdf_oxide::layout::TextSpan], split_x: f32, min_gutter: f32) -> bool {
+fn is_sparse_column_split(spans: &[xberg_native_pdf::layout::TextSpan], split_x: f32, min_gutter: f32) -> bool {
     let left: Vec<_> = spans.iter().filter(|span| span.bbox.x < split_x).collect();
     let right: Vec<_> = spans.iter().filter(|span| span.bbox.x >= split_x).collect();
     if left.len() != 2 || right.len() != 2 {
         return false;
     }
-    let word_count = |side: &[&pdf_oxide::layout::TextSpan]| {
+    let word_count = |side: &[&xberg_native_pdf::layout::TextSpan]| {
         side.iter()
             .map(|span| span.text.split_whitespace().count())
             .sum::<usize>()
@@ -742,7 +742,7 @@ fn is_sparse_column_split(spans: &[pdf_oxide::layout::TextSpan], split_x: f32, m
         && sparse_columns_continue_one_sentence(&left, &right)
 }
 
-fn sparse_column_split(spans: &[pdf_oxide::layout::TextSpan], page_width: f32) -> Option<f32> {
+fn sparse_column_split(spans: &[xberg_native_pdf::layout::TextSpan], page_width: f32) -> Option<f32> {
     let has_sparse_prose_shape =
         spans.len() == XY_CUT_MIN_SPANS_FOR_SPLIT - 1 && spans.iter().all(is_sparse_column_prose);
     let content_left = spans.iter().map(|span| span.bbox.x).fold(f32::INFINITY, f32::min);
@@ -768,7 +768,7 @@ fn sparse_column_split(spans: &[pdf_oxide::layout::TextSpan], page_width: f32) -
 /// Returns `true` only when the sparse prose classifier matched and reordered
 /// the spans. Callers use this signal to preserve the result across a broad
 /// single layout hint.
-pub(crate) fn reorder_sparse_two_column_page(spans: &mut [pdf_oxide::layout::TextSpan], page_width: f32) -> bool {
+pub(crate) fn reorder_sparse_two_column_page(spans: &mut [xberg_native_pdf::layout::TextSpan], page_width: f32) -> bool {
     let Some(split_x) = sparse_column_split(spans, page_width) else {
         return false;
     };
@@ -784,7 +784,7 @@ pub(crate) fn reorder_sparse_two_column_page(spans: &mut [pdf_oxide::layout::Tex
 }
 
 // Issue #1397: a dense two-column body (a full page of prose, not the guarded
-// four-span sentence above) is never split by pdf_oxide's own `ColumnAware`
+// four-span sentence above) is never split by xberg_native_pdf's own `ColumnAware`
 // XY-Cut on some documents, so xberg's span-level assembler falls through to
 // full-page-width Y order — welding left- and right-column lines at the same
 // height into one interleaved element, mid-sentence, and welding distinct
@@ -843,7 +843,7 @@ type SpanLine = Vec<usize>;
 /// This is the single global sort the rest of `reorder_dense_two_column_page`
 /// is built on: line grouping, per-line gutter detection, and band bucketing
 /// below all walk this order without re-sorting the whole page again.
-fn spans_sorted_top_to_bottom(spans: &[pdf_oxide::layout::TextSpan]) -> Vec<usize> {
+fn spans_sorted_top_to_bottom(spans: &[xberg_native_pdf::layout::TextSpan]) -> Vec<usize> {
     let mut order: Vec<usize> = (0..spans.len()).collect();
     order.sort_by(|&a, &b| {
         spans[b]
@@ -864,7 +864,7 @@ fn spans_sorted_top_to_bottom(spans: &[pdf_oxide::layout::TextSpan]) -> Vec<usiz
 /// re-sorted left-to-right on its own (a handful of spans at most) so that
 /// two spans on the same line with slightly different `y` cannot leave the
 /// line out of x-order, which the per-line gutter sweep below requires.
-fn group_into_lines(spans: &[pdf_oxide::layout::TextSpan], order: &[usize]) -> Vec<SpanLine> {
+fn group_into_lines(spans: &[xberg_native_pdf::layout::TextSpan], order: &[usize]) -> Vec<SpanLine> {
     let mut lines: Vec<SpanLine> = Vec::new();
     let mut anchor_y = f32::NAN;
     for &index in order {
@@ -906,7 +906,7 @@ fn widest_gap_midpoint(mut edges: impl Iterator<Item = (f32, f32)>, min_gutter: 
 
 /// True if any span on `line` is full-width furniture by
 /// `FULL_WIDTH_FURNITURE_FRACTION` (the pre-existing, width-only signal).
-fn line_has_width_furniture(spans: &[pdf_oxide::layout::TextSpan], line: &SpanLine, furniture_width: f32) -> bool {
+fn line_has_width_furniture(spans: &[xberg_native_pdf::layout::TextSpan], line: &SpanLine, furniture_width: f32) -> bool {
     line.iter().any(|&index| spans[index].bbox.width >= furniture_width)
 }
 
@@ -926,7 +926,7 @@ fn line_has_width_furniture(spans: &[pdf_oxide::layout::TextSpan], line: &SpanLi
 /// returns their median split point, robust to the rare line whose own gap
 /// sits a little off from the rest (e.g. a heading whose two sides are
 /// narrower than the body columns beneath it).
-fn detect_split_x(spans: &[pdf_oxide::layout::TextSpan], lines: &[SpanLine], page_width: f32) -> Option<f32> {
+fn detect_split_x(spans: &[xberg_native_pdf::layout::TextSpan], lines: &[SpanLine], page_width: f32) -> Option<f32> {
     let min_gutter = (page_width * MIN_DENSE_COLUMN_GUTTER_FRACTION).max(MIN_DENSE_COLUMN_GUTTER_PTS);
     let furniture_width = page_width * FULL_WIDTH_FURNITURE_FRACTION;
 
@@ -970,7 +970,7 @@ enum Band {
 /// catches furniture narrower than the width threshold that a single
 /// whole-page projection could not tell apart from real column content.
 fn line_is_boundary(
-    spans: &[pdf_oxide::layout::TextSpan],
+    spans: &[xberg_native_pdf::layout::TextSpan],
     line: &SpanLine,
     furniture_width: f32,
     split_x: f32,
@@ -986,7 +986,7 @@ fn line_is_boundary(
 /// each boundary line becomes its own single-line `Boundary` band in place,
 /// so it stays between the band above it and the band below it.
 fn build_bands(
-    spans: &[pdf_oxide::layout::TextSpan],
+    spans: &[xberg_native_pdf::layout::TextSpan],
     lines: &[SpanLine],
     furniture_width: f32,
     split_x: f32,
@@ -1017,14 +1017,14 @@ fn build_bands(
 /// too few spans on either side, or that fails the prose/reference
 /// classification, stays in its existing order — a table or form band is not
 /// corrupted by a prose band elsewhere on the same page.
-fn reorder_band_columns(spans: &[pdf_oxide::layout::TextSpan], band: &[usize], split_x: f32) -> Option<Vec<usize>> {
+fn reorder_band_columns(spans: &[xberg_native_pdf::layout::TextSpan], band: &[usize], split_x: f32) -> Option<Vec<usize>> {
     let (left, right): (Vec<usize>, Vec<usize>) =
         band.iter().copied().partition(|&index| spans[index].bbox.x < split_x);
     if left.len() < MIN_DENSE_COLUMN_SPANS_PER_SIDE || right.len() < MIN_DENSE_COLUMN_SPANS_PER_SIDE {
         return None;
     }
-    let left_class = pdf_oxide::layout::classify_region(spans, &left);
-    let right_class = pdf_oxide::layout::classify_region(spans, &right);
+    let left_class = xberg_native_pdf::layout::classify_region(spans, &left);
+    let right_class = xberg_native_pdf::layout::classify_region(spans, &right);
     if !left_class.is_reorderable_column() || !right_class.is_reorderable_column() {
         return None;
     }
@@ -1041,7 +1041,7 @@ fn reorder_band_columns(spans: &[pdf_oxide::layout::TextSpan], band: &[usize], s
 /// position. Returns `None` if not a single band qualified for the column
 /// reorder, so the caller can leave `spans` completely untouched rather than
 /// apply a no-op permutation.
-fn emit_band_order(spans: &[pdf_oxide::layout::TextSpan], bands: Vec<Band>, split_x: f32) -> Option<Vec<usize>> {
+fn emit_band_order(spans: &[xberg_native_pdf::layout::TextSpan], bands: Vec<Band>, split_x: f32) -> Option<Vec<usize>> {
     let mut any_reordered = false;
     let mut order = Vec::new();
     for band in bands {
@@ -1061,15 +1061,15 @@ fn emit_band_order(spans: &[pdf_oxide::layout::TextSpan], bands: Vec<Band>, spli
 
 /// Reorder `spans` in place to match `order`, a permutation of
 /// `0..spans.len()`.
-fn apply_span_order(spans: &mut [pdf_oxide::layout::TextSpan], order: &[usize]) {
-    let mut taken: Vec<Option<pdf_oxide::layout::TextSpan>> =
+fn apply_span_order(spans: &mut [xberg_native_pdf::layout::TextSpan], order: &[usize]) {
+    let mut taken: Vec<Option<xberg_native_pdf::layout::TextSpan>> =
         spans.iter_mut().map(|span| Some(std::mem::take(span))).collect();
     for (slot, &source) in spans.iter_mut().zip(order) {
         *slot = taken[source].take().expect("each source index is used exactly once");
     }
 }
 
-/// Reorder a dense two-column page (issue #1397) that pdf_oxide's own
+/// Reorder a dense two-column page (issue #1397) that xberg_native_pdf's own
 /// `ColumnAware` reading order fails to split.
 ///
 /// Unlike `reorder_sparse_two_column_page` above (which repairs a single
@@ -1104,7 +1104,7 @@ fn apply_span_order(spans: &mut [pdf_oxide::layout::TextSpan], order: &[usize]) 
 /// body lines are not row-aligned at all (no line ever has spans from both
 /// sides within `LINE_Y_TOLERANCE_PTS`) can starve `detect_split_x` of the
 /// per-line evidence it needs.
-pub(crate) fn reorder_dense_two_column_page(spans: &mut [pdf_oxide::layout::TextSpan], page_width: f32) -> bool {
+pub(crate) fn reorder_dense_two_column_page(spans: &mut [xberg_native_pdf::layout::TextSpan], page_width: f32) -> bool {
     let content_left = spans.iter().map(|span| span.bbox.x).fold(f32::INFINITY, f32::min);
     let content_right = spans
         .iter()
@@ -1137,14 +1137,14 @@ pub(crate) fn reorder_dense_two_column_page(spans: &mut [pdf_oxide::layout::Text
 /// visible; a default-OFF `/OCProperties` layer that mirrors the page's content
 /// (a common PDF-authoring pattern for redlines/translations/print-vs-screen
 /// variants) then contributes a second, hidden-in-every-viewer copy of the page
-/// text. When `excluded_layers` is non-empty, this instead calls pdf_oxide's
+/// text. When `excluded_layers` is non-empty, this instead calls xberg_native_pdf's
 /// filtered span extraction so the surfaced text matches what any viewer
 /// actually renders. An empty set is byte-identical to the unfiltered call.
 fn page_text_with_options_excluding_layers(
-    doc: &pdf_oxide::PdfDocument,
+    doc: &xberg_native_pdf::PdfDocument,
     page_index: usize,
     excluded_layers: &std::collections::HashSet<String>,
-) -> pdf_oxide::error::Result<pdf_oxide::layout::PageText> {
+) -> xberg_native_pdf::error::Result<xberg_native_pdf::layout::PageText> {
     if excluded_layers.is_empty() {
         return doc.extract_page_text_with_options(page_index, ReadingOrder::ColumnAware);
     }
@@ -1155,10 +1155,10 @@ fn page_text_with_options_excluding_layers(
         excluded_layers.clone(),
         Default::default(),
     )?;
-    let chars: Vec<pdf_oxide::layout::TextChar> = spans.iter().flat_map(|s| s.to_chars()).collect();
+    let chars: Vec<xberg_native_pdf::layout::TextChar> = spans.iter().flat_map(|s| s.to_chars()).collect();
     let (_, _, page_width, page_height) = doc.get_page_media_box(page_index)?;
 
-    Ok(pdf_oxide::layout::PageText {
+    Ok(xberg_native_pdf::layout::PageText {
         spans,
         chars,
         page_width,
@@ -1171,7 +1171,7 @@ fn page_text_with_options_excluding_layers(
 /// Applies sparse-column and glyph-fragmentation repairs before assembling the
 /// page text.
 fn extract_page_text_column_aware(
-    doc: &mut pdf_oxide::PdfDocument,
+    doc: &mut xberg_native_pdf::PdfDocument,
     page_index: usize,
     excluded_layers: &std::collections::HashSet<String>,
 ) -> Result<String> {
@@ -1185,7 +1185,7 @@ fn extract_page_text_column_aware(
         },
         |panic| {
             PdfError::TextExtractionFailed(format!(
-                "Page {} text extraction panicked in pdf_oxide: {}",
+                "Page {} text extraction panicked in xberg_native_pdf: {}",
                 page_index + 1,
                 panic
             ))
@@ -1218,7 +1218,7 @@ fn extract_page_text_column_aware(
     Ok(text)
 }
 
-fn rotation_span(span: &pdf_oxide::layout::TextSpan) -> crate::extractors::pdf::rotation::TextSpan {
+fn rotation_span(span: &xberg_native_pdf::layout::TextSpan) -> crate::extractors::pdf::rotation::TextSpan {
     crate::extractors::pdf::rotation::TextSpan {
         text: span.text.clone(),
         x: span.bbox.x,
@@ -1249,8 +1249,8 @@ fn apply_text_cleanup(text: &str) -> Cow<'_, str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pdf_oxide::geometry::Rect;
-    use pdf_oxide::layout::TextSpan;
+    use xberg_native_pdf::geometry::Rect;
+    use xberg_native_pdf::layout::TextSpan;
 
     fn span(text: &str, x: f32, y: f32, height: f32, font_size: f32) -> TextSpan {
         span_with_width(text, x, y, font_size * 0.6, height, font_size)
@@ -1436,7 +1436,7 @@ mod tests {
     }
 
     /// A span painted with a rotated text matrix. `x`/`y` stay page-space (that
-    /// is what pdf_oxide reports); `width` is the glyph-advance run along the
+    /// is what xberg_native_pdf reports); `width` is the glyph-advance run along the
     /// rotated baseline and `height` the font extent across it.
     fn rotated_span(text: &str, x: f32, y: f32, width: f32, height: f32, rotation_degrees: f32) -> TextSpan {
         let mut span = span_with_width(text, x, y, width, height, height);

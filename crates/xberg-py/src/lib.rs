@@ -21444,8 +21444,8 @@ py.detach(xberg::pdf::render::install_pdf_render_diagnostics)
 }
 
 
-#[pyfunction]    #[pyo3(signature = ())]pub fn take_pdf_oxide_render_warnings(py: Python<'_>, ) -> Vec<ProcessingWarning> {
-py.detach(xberg::pdf::render::take_pdf_oxide_render_warnings).into_iter().map(Into::into).collect()
+#[pyfunction]    #[pyo3(signature = ())]pub fn take_engine_render_warnings(py: Python<'_>, ) -> Vec<ProcessingWarning> {
+py.detach(xberg::pdf::render::take_engine_render_warnings).into_iter().map(Into::into).collect()
 }
 
 
@@ -27751,7 +27751,7 @@ pub fn _xberg(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(max_sim_rank, m)?)?;
     m.add_function(wrap_pyfunction!(doctor, m)?)?;
     m.add_function(wrap_pyfunction!(install_pdf_render_diagnostics, m)?)?;
-    m.add_function(wrap_pyfunction!(take_pdf_oxide_render_warnings, m)?)?;
+    m.add_function(wrap_pyfunction!(take_engine_render_warnings, m)?)?;
     m.add_function(wrap_pyfunction!(build_decoder_prompt_tokens, m)?)?;
     m.add_function(wrap_pyfunction!(timestamp_token_to_ms, m)?)?;
     m.add_function(wrap_pyfunction!(register_ocr_backend, m)?)?;

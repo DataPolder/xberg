@@ -203,7 +203,7 @@ pub fn create_xberg_adapter(
     }
 
     args.push("--pdf-backend".to_string());
-    args.push("pdf-oxide".to_string());
+    args.push("native".to_string());
 
     let format_slug = match output_format {
         OutputFormat::Markdown => "markdown",

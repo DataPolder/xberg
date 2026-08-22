@@ -12,23 +12,31 @@ use tracing_subscriber::EnvFilter;
 /// These are added as *fallback* directives: if `RUST_LOG` or `level_override`
 /// already contain a per-target rule for any of these crates it takes precedence,
 /// so the user can still do `RUST_LOG=ureq=debug` to restore full transport logs.
-const QUIET_DIRECTIVES: &[&str] = &[
-    "ureq=warn",
-    "ureq_proto=warn",
-    "rustls=warn",
-    "hyper_util=warn",
-    "hf_hub=info",
-    // `EnvFilter` matches directives by TARGET PREFIX, not by crate identity. The PDF engine
-    // is our fork of PDFOxide; its `[lib] name = "xberg_pdf_oxide"` means its `tracing`
-    // targets are `xberg_pdf_oxide::...`, which does not start with `pdf_oxide`. Both entries
-    // are kept (mirrors the same belt-and-braces match in
-    // `crates/xberg/src/pdf/render.rs::is_pdf_engine_target`): `xberg_pdf_oxide=warn` for the
-    // fork as it actually compiles today, `pdf_oxide=warn` in case upstream `pdf_oxide` still
-    // surfaces in some build. Dropping either one silently un-suppresses that engine's warnings.
-    "xberg_pdf_oxide=warn",
-    "pdf_oxide=warn",
-    "tower_http=info",
-];
+static QUIET_DIRECTIVES: std::sync::LazyLock<Vec<String>> = std::sync::LazyLock::new(|| {
+    let mut directives: Vec<String> = [
+        "ureq=warn",
+        "ureq_proto=warn",
+        "rustls=warn",
+        "hyper_util=warn",
+        "hf_hub=info",
+        "tower_http=info",
+    ]
+    .iter()
+    .map(|directive| (*directive).to_string())
+    .collect();
+
+    // `EnvFilter` matches by TARGET PREFIX, and a crate's target prefix is its `[lib] name`,
+    // not the dependency key anyone writes. This entry is therefore DERIVED from the engine's
+    // own exported `module_path!()` rather than spelled out: in GH#697 it was a literal, the
+    // engine's lib name moved, the literal stopped matching, and the engine's font warnings
+    // were silently un-suppressed with nothing failing to compile. A derived value cannot
+    // drift. This is also why the list is a `LazyLock<Vec<String>>` and not a `const` array.
+    // ~keep
+    #[cfg(feature = "pdf-surface")]
+    directives.push(format!("{}=warn", xberg::pdf::render::ENGINE_LOG_TARGET_ROOT));
+
+    directives
+});
 
 /// Extract the target crate name from a directive string like `"ureq=warn"`.
 ///
@@ -69,7 +77,7 @@ pub fn build_env_filter(level_override: Option<&str>) -> EnvFilter {
     QUIET_DIRECTIVES
         .iter()
         .filter(|directive| {
-            directive_target(directive)
+            directive_target(directive.as_str())
                 .map(|target| !existing_targets.contains(target))
                 .unwrap_or(true)
         })
@@ -158,7 +166,7 @@ mod tests {
 
     #[test]
     fn all_quiet_directives_are_valid() {
-        for directive in super::QUIET_DIRECTIVES {
+        for directive in super::QUIET_DIRECTIVES.iter() {
             directive
                 .parse::<tracing_subscriber::filter::Directive>()
                 .expect("built-in directive is invalid");
@@ -196,30 +204,33 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "pdf-surface")]
     #[test]
-    fn pdf_oxide_suppressed_at_default() {
+    fn pdf_engine_suppressed_at_default() {
+        let engine = xberg::pdf::render::ENGINE_LOG_TARGET_ROOT;
         let directives = filter_directives(&build_env_filter(None));
         assert!(
-            directives.contains("pdf_oxide=warn"),
-            "pdf_oxide must be suppressed to warn by default; got: {directives}"
+            directives.contains(&format!("{engine}=warn")),
+            "{engine} must be suppressed to warn by default; got: {directives}"
         );
     }
 
+    #[cfg(feature = "pdf-surface")]
     #[test]
-    fn pdf_oxide_user_override_wins() {
-        let directives = filter_directives(&build_env_filter(Some("info,pdf_oxide=debug")));
-        // Exact-token comparison, not `str::contains`: `"xberg_pdf_oxide=warn"` (a distinct,
-        // still-active suppression for the fork's real target) contains `"pdf_oxide=warn"` as a
-        // literal substring, so a naive `contains` check here would false-negative on the very
-        // presence this test exists to rule out.
+    fn pdf_engine_user_override_wins() {
+        let engine = xberg::pdf::render::ENGINE_LOG_TARGET_ROOT;
+        let directives = filter_directives(&build_env_filter(Some(&format!("info,{engine}=debug"))));
+        // Exact-token comparison rather than `str::contains`: directive strings are prefixes of
+        // one another often enough that a substring check false-negatives on the very presence
+        // this test exists to rule out.
         let tokens: Vec<&str> = directives.split(',').map(str::trim).collect();
         assert!(
-            tokens.contains(&"pdf_oxide=debug"),
-            "user-supplied pdf_oxide=debug must be preserved; got: {directives}"
+            tokens.contains(&format!("{engine}=debug").as_str()),
+            "user-supplied {engine}=debug must be preserved; got: {directives}"
         );
         assert!(
-            !tokens.contains(&"pdf_oxide=warn"),
-            "default pdf_oxide suppression must not replace a user override; got: {directives}"
+            !tokens.contains(&format!("{engine}=warn").as_str()),
+            "default {engine} suppression must not replace a user override; got: {directives}"
         );
     }
 
@@ -266,12 +277,12 @@ mod tests {
         }
     }
 
-    /// Behavioural regression test for the `pdf_oxide` -> `xberg_pdf_oxide` rename.
+    /// Behavioural regression test for GH#697, where the engine crate was renamed.
     ///
     /// The tests above assert on the *directive string* -- they would have kept passing while
-    /// `QUIET_DIRECTIVES` listed only `"pdf_oxide=warn"`, even though `EnvFilter` matches by
-    /// target prefix and the fork's real targets are `xberg_pdf_oxide::...`, which does not
-    /// start with `pdf_oxide`. That is exactly why the suppression went dead unnoticed: the
+    /// `QUIET_DIRECTIVES` held a stale literal, even though `EnvFilter` matches by target
+    /// prefix and the engine's real targets are rooted at its `[lib] name`, which the stale
+    /// literal no longer matched. That is exactly why the suppression went dead unnoticed: the
     /// test checked the identifier, not the mechanism. This test builds the real `EnvFilter`
     /// `build_env_filter` returns, fires actual `tracing` events through it, and checks what
     /// a downstream layer actually observes.
@@ -284,7 +295,7 @@ mod tests {
     /// unique to this test function, so its interest is computed for the first time against the
     /// scoped subscriber installed by `with_default`, not against a stale global cache.
     #[test]
-    fn xberg_pdf_oxide_warn_target_is_filtered_out_by_default() {
+    fn pdf_engine_info_is_suppressed_while_its_warnings_survive() {
         use tracing_subscriber::layer::SubscriberExt as _;
 
         let filter = build_env_filter(None);
@@ -293,12 +304,19 @@ mod tests {
         let subscriber = tracing_subscriber::registry().with(filter).with(recorder);
 
         tracing::subscriber::with_default(subscriber, || {
-            // Should be suppressed: the fork's real target after the `[lib] name` rename.
-            // Against unfixed code (only `"pdf_oxide=warn"` in QUIET_DIRECTIVES), this target
-            // does not match that directive's prefix, the root level stays "info", and a WARN
-            // event always passes an "info" root filter -- so this event WOULD be captured and
-            // the first assertion below WOULD fail.
-            tracing::warn!(target: "xberg_pdf_oxide::fonts", "noisy fork warning");
+            // Suppressed: an INFO at the engine's target. `xberg_native_pdf=warn` caps that
+            // target at WARN, so INFO is dropped -- while the root level is "info", so the
+            // same event at any OTHER target would pass. That asymmetry is what makes this
+            // sensitive to a stale prefix: if the directive stopped matching, this INFO would
+            // fall through to the root filter and be captured.
+            //
+            // Deliberately NOT a WARN. `target=warn` PERMITS warnings; it quiets a noisy crate
+            // down to warnings, it does not silence them. The previous version of this test
+            // emitted a WARN and asserted it was suppressed, which the filter was never going
+            // to do -- it had been failing on main.
+            tracing::info!(target: "xberg_native_pdf::fonts", "chatty engine info");
+            // Still passes at the same target: warnings are the level this directive keeps.
+            tracing::warn!(target: "xberg_native_pdf::fonts", "engine warning worth seeing");
             // Positive control: an unrelated target at the same level must still pass, so this
             // test cannot pass by accidentally filtering everything out.
             tracing::warn!(target: "xberg::extract", "should still be observed");
@@ -306,8 +324,14 @@ mod tests {
 
         let captured = targets.lock().expect("recording layer mutex poisoned");
         assert!(
-            !captured.iter().any(|target| target == "xberg_pdf_oxide::fonts"),
-            "xberg_pdf_oxide::fonts WARN event must be suppressed by the default filter; \
+            captured
+                .iter()
+                .filter(|target| *target == "xberg_native_pdf::fonts")
+                .count()
+                == 1,
+            "exactly one event at the engine target must survive: the INFO suppressed by \
+             `=warn`, the WARN kept. Two means the directive did not match (stale prefix); \
+             zero means the filter is dropping warnings it should keep; \
              captured targets: {captured:?}"
         );
         assert!(

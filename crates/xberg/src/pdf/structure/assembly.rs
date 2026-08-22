@@ -1737,7 +1737,7 @@ mod tests {
 
     #[test]
     fn test_image_without_bbox_falls_back_to_append_after_text() {
-        // No bounding_box on the image (as when pdf_oxide's capped fast path is used, or on
+        // No bounding_box on the image (as when xberg_native_pdf's capped fast path is used, or on
         // the pure-heuristic path with no spatial data) must reproduce the pre-existing
         // append-after-text behavior exactly, and must never panic.
         let pages = vec![vec![

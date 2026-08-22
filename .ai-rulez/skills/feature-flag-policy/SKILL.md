@@ -45,7 +45,7 @@ The `no-ort-target` aggregate is the shared no-ORT base used by both `wasm-targe
 
 ## PDF Backend
 
-- `pdf` — the canonical PDF feature, backed by the pure-Rust `pdf_oxide` crate. This is the primary/default PDF extraction pipeline; there is no separate `pdf-oxide` feature. Included in `formats`, `full`, `no-ort-target`, and `wasm-target`.
+- `pdf` — the canonical PDF feature, backed by the pure-Rust `xberg-native-pdf` crate. This is the primary/default PDF extraction pipeline; there is no separate `xberg-native-pdf` feature. Included in `formats`, `full`, `no-ort-target`, and `wasm-target`.
 
 ## ORT Variants (Mutually Exclusive)
 

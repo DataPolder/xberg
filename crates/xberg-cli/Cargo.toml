@@ -62,7 +62,7 @@ pdf-surface = ["xberg/pdf"]
 # implementation exists yet (#702), so `xberg::extractors::pdf::PdfExtractor`
 # itself rejects `PdfBackend::Pdfium` at extraction time with an actionable
 # error, regardless of this feature. That core-level rejection is what
-# actually prevents a silent fallback to pdf-oxide: CLI validation alone only
+# actually prevents a silent fallback to pdf-native: CLI validation alone only
 # covers `xberg-cli`, not library callers, the API/MCP servers, or other
 # language bindings that build `ExtractionConfig` directly.
 pdf-pdfium-surface = ["pdf-surface", "xberg/pdf-pdfium"]

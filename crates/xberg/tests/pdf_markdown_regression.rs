@@ -293,15 +293,15 @@ const PDFIUM_GROUND_TRUTH: &[(&str, f64)] = &[
 // relaxed — the thresholds remain as the historic floor for when extraction is fixed.
 // They are skipped so unrelated xberg work can continue while the fix lands.
 //
-// Tracking issue: https://github.com/yfedoseev/pdf_oxide/issues/484
+// Tracking issue: https://github.com/yfedoseev/xberg_native_pdf/issues/484
 //   ("Extraction failures, near-empty output, and quality regressions
 //   on a calibrated 166-PDF set")
 //
-// As of pdf_oxide 0.3.66, 9 of the originally-listed docs recovered and were
+// As of xberg_native_pdf 0.3.66, 9 of the originally-listed docs recovered and were
 // re-enabled (annotations*, pdfa_039, pr-136-example, table-curves-example,
 // nougat_026, pdfa_001). nics-background-checks also recovered but only to
 // 0.922 vs its 0.92 floor — kept skipped pending cross-platform confirmation.
-// After each pdf_oxide bump, re-measure every entry below and remove the ones
+// After each xberg_native_pdf bump, re-measure every entry below and remove the ones
 // that clear all three gates. Of the six post-calibration regressions tracked by
 // #1406, the native-coverage safeguard restored four (issue-1147-example,
 // nougat_004, pdfa_045, pr-136-example) and they are enabled again. The other two
@@ -319,11 +319,11 @@ const PDFIUM_GROUND_TRUTH: &[(&str, f64)] = &[
 
 const PDFIUM_KNOWN_REGRESSIONS: &[&str] = &[
     // ── 1. UNSUPPORTED: hard extraction failure, not a quality regression ──
-    "pr-138-example", // requires pdf_oxide legacy-crypto feature (R=4 PDF)
+    "pr-138-example", // requires xberg_native_pdf legacy-crypto feature (R=4 PDF)
     // ── 2. BROKEN: F1 quality regressions vs calibrated floor (md / plain F1),
-    //    surviving at pdf_oxide 0.3.66; recovered docs were removed at that bump ──
-    "right_to_left_02",                       // md 0.423 < 0.43 (RTL drift — pdf_oxide #484)
-    "right_to_left_03",  // md 0.122 < 0.31 (RTL: pdf_oxide CID/Type0 decode drops ~92% of body; #484)
+    //    surviving at xberg_native_pdf 0.3.66; recovered docs were removed at that bump ──
+    "right_to_left_02",                       // md 0.423 < 0.43 (RTL drift — xberg_native_pdf #484)
+    "right_to_left_03",  // md 0.122 < 0.31 (RTL: xberg_native_pdf CID/Type0 decode drops ~92% of body; #484)
     "hello_structure",   // md 0.778 < 0.93
     "issue-336-example", // md 0.522 < 0.74
     "issue-466-example", // md 0.833 / plain 0.806 < 0.93

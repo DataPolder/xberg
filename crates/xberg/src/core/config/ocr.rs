@@ -223,9 +223,9 @@ pub struct OcrQualityThresholds {
     #[serde(default = "default_min_undecodable_ratio")]
     pub min_undecodable_ratio: f64,
 
-    /// Whether to route a page to OCR when pdf_oxide reports that a high
+    /// Whether to route a page to OCR when xberg_native_pdf reports that a high
     /// fraction of its text was fabricated rather than read from the file
-    /// (`MappingProvenance::Fallback`, pdf_oxide 0.3.75+, issue #1254). This is
+    /// (`MappingProvenance::Fallback`, xberg_native_pdf 0.3.75+, issue #1254). This is
     /// a direct fact from the extractor's ISO 32000-1 §9.10.2 mapping cascade,
     /// distinct from the character-heuristic proxy behind `min_undecodable_ratio`.
     /// Defaults to `true`.
@@ -340,7 +340,7 @@ fn default_min_undecodable_ratio() -> f64 {
     0.5
 }
 /// Provenance-based fabricated-text OCR routing is on by default: it is a
-/// direct fact from pdf_oxide 0.3.75+, not a heuristic, so false positives are
+/// direct fact from xberg_native_pdf 0.3.75+, not a heuristic, so false positives are
 /// rare (issue #1254).
 fn default_enable_provenance_ocr_routing() -> bool {
     true

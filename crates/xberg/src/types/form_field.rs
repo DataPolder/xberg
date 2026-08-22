@@ -6,7 +6,7 @@ use super::extraction::BoundingBox;
 
 /// Kind of a PDF form field.
 ///
-/// Mirrors `pdf_oxide`'s widget field taxonomy without leaking the upstream
+/// Mirrors `xberg_native_pdf`'s widget field taxonomy without leaking the upstream
 /// type across the binding surface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "api", derive(utoipa::ToSchema))]

@@ -396,7 +396,7 @@ pub struct ExtractionOverrides {
     #[arg(long)]
     pub pdf_extract_images: Option<bool>,
 
-    /// Extract tables from PDF (pdf_oxide native grid + heuristic text-layer fallback).
+    /// Extract tables from PDF (native engine grid + heuristic text-layer fallback).
     /// Default: true.
     #[cfg(feature = "pdf-surface")]
     #[arg(long)]
@@ -412,13 +412,13 @@ pub struct ExtractionOverrides {
     #[arg(long)]
     pub pdf_extract_metadata: Option<bool>,
 
-    /// PDF extraction backend to use: "pdf-oxide" (default, the only
+    /// PDF extraction backend to use: "native" (default, the only
     /// implemented backend) or "pdfium".
     ///
     /// "pdfium" requires the CLI to be built with the `pdf-pdfium-surface`
     /// feature; no pdfium extraction implementation exists yet, so selecting
     /// it on a build without that feature is rejected with an error rather
-    /// than silently falling back to pdf-oxide.
+    /// than silently falling back to native.
     #[cfg(feature = "pdf-surface")]
     #[arg(long, value_name = "BACKEND")]
     pub pdf_backend: Option<String>,
@@ -588,7 +588,7 @@ impl ExtractionOverrides {
         #[cfg(feature = "pdf-surface")]
         if let Some(ref backend) = self.pdf_backend {
             match backend.parse::<PdfBackend>() {
-                Ok(PdfBackend::PdfOxide) => {}
+                Ok(PdfBackend::Native) => {}
                 #[cfg(feature = "pdf-pdfium-surface")]
                 Ok(PdfBackend::Pdfium) => {}
                 #[cfg(not(feature = "pdf-pdfium-surface"))]
@@ -600,7 +600,7 @@ impl ExtractionOverrides {
                     );
                 }
                 Err(_) => {
-                    bail!("Invalid PDF backend '{}'. Valid values: pdf-oxide, pdfium.", backend);
+                    bail!("Invalid PDF backend '{}'. Valid values: native, pdfium.", backend);
                 }
             }
         }
@@ -3251,7 +3251,7 @@ mod tests {
     // -- --pdf-backend (#700) ------------------------------------------------------
 
     /// Before this change, `apply_pdf`'s `has_pdf_flag` disjunction never checked
-    /// `pdf_backend`, so a bare `--pdf-backend pdf-oxide` with no other PDF flag left
+    /// `pdf_backend`, so a bare `--pdf-backend native` with no other PDF flag left
     /// `config.pdf_options` at `None` -- the flag was applied to nothing. This does not
     /// need `xberg::PdfBackend` to compile, so it exercises today's actual bug directly:
     /// this assertion fails against unfixed code (`pdf_options` stays `None`).
@@ -3260,7 +3260,7 @@ mod tests {
     fn test_pdf_backend_flag_alone_populates_pdf_options() {
         let mut config = ExtractionConfig::default();
         let overrides = ExtractionOverrides {
-            pdf_backend: Some("pdf-oxide".to_string()),
+            pdf_backend: Some("native".to_string()),
             ..default_overrides()
         };
         overrides.apply(&mut config);
@@ -3289,15 +3289,15 @@ mod tests {
     /// New surface, same reason as above -- `xberg::PdfBackend` does not exist today.
     #[cfg(feature = "pdf-surface")]
     #[test]
-    fn test_pdf_backend_default_applied_is_pdf_oxide() {
+    fn test_pdf_backend_default_applied_is_native() {
         let mut config = ExtractionConfig::default();
         let overrides = ExtractionOverrides {
-            pdf_backend: Some("pdf-oxide".to_string()),
+            pdf_backend: Some("native".to_string()),
             ..default_overrides()
         };
         overrides.apply(&mut config);
         let pdf = config.pdf_options.expect("pdf_options must be populated");
-        assert_eq!(pdf.backend, xberg::PdfBackend::PdfOxide);
+        assert_eq!(pdf.backend, xberg::PdfBackend::Native);
     }
 
     #[cfg(feature = "pdf-surface")]
@@ -3309,13 +3309,13 @@ mod tests {
         };
         let error = overrides.validate().expect_err("unknown backend must fail");
         assert!(
-            error.to_string().contains("pdf-oxide"),
-            "error should mention 'pdf-oxide', got: {error}"
+            error.to_string().contains("native"),
+            "error should mention 'native', got: {error}"
         );
     }
 
     /// Fails today: the old validator's message is "Invalid PDF backend '<x>'. Only
-    /// 'pdf-oxide' is currently supported." for *any* value other than "pdf-oxide",
+    /// 'native' is currently supported." for *any* value other than "native",
     /// including "pdfium" -- it does not name a rebuild feature, so
     /// `contains("pdf-pdfium-surface")` is false against unfixed code. It becomes true
     /// only once the validator gains the feature-gated actionable-error branch this

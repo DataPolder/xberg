@@ -1,15 +1,15 @@
-//! Annotation extraction using the pdf_oxide backend.
+//! Annotation extraction using the xberg_native_pdf backend.
 //!
-//! Maps pdf_oxide's `Annotation` types to Xberg's `PdfAnnotation` model,
+//! Maps xberg_native_pdf's `Annotation` types to Xberg's `PdfAnnotation` model,
 //! extracting content text, bounding boxes, and link URIs.
 
 use super::OxideDocument;
 use crate::types::{BoundingBox, PdfAnnotation, PdfAnnotationType, ProcessingWarning};
 
-/// Extract annotations from all pages of a PDF document using pdf_oxide.
+/// Extract annotations from all pages of a PDF document using xberg_native_pdf.
 ///
 /// Iterates over every page and every annotation on each page, mapping
-/// pdf_oxide annotation subtypes to [`PdfAnnotationType`] and collecting
+/// xberg_native_pdf annotation subtypes to [`PdfAnnotationType`] and collecting
 /// content text and bounding boxes where available.
 ///
 /// Widget (form field) and Popup annotations are skipped as they are not
@@ -29,7 +29,7 @@ pub(crate) fn extract_annotations(doc: &mut OxideDocument) -> (Vec<PdfAnnotation
     let page_count = match doc.doc.page_count() {
         Ok(count) => count,
         Err(e) => {
-            tracing::debug!("pdf_oxide: failed to get page count for annotations: {e}");
+            tracing::debug!("xberg_native_pdf: failed to get page count for annotations: {e}");
             return (Vec::new(), vec![page_count_failure_warning(&e)]);
         }
     };
@@ -43,7 +43,7 @@ pub(crate) fn extract_annotations(doc: &mut OxideDocument) -> (Vec<PdfAnnotation
         let page_annotations = match doc.doc.get_annotations(page_index) {
             Ok(annots) => annots,
             Err(e) => {
-                tracing::debug!(page = page_index, "pdf_oxide: failed to get annotations: {e}");
+                tracing::debug!(page = page_index, "xberg_native_pdf: failed to get annotations: {e}");
                 warnings.push(page_annotations_failure_warning(page_number, &e));
                 continue;
             }
@@ -52,7 +52,7 @@ pub(crate) fn extract_annotations(doc: &mut OxideDocument) -> (Vec<PdfAnnotation
         for annot in page_annotations {
             if matches!(
                 annot.subtype_enum,
-                pdf_oxide::AnnotationSubtype::Widget | pdf_oxide::AnnotationSubtype::Popup
+                xberg_native_pdf::AnnotationSubtype::Widget | xberg_native_pdf::AnnotationSubtype::Popup
             ) {
                 continue;
             }
@@ -101,13 +101,13 @@ pub(crate) fn extract_annotations(doc: &mut OxideDocument) -> (Vec<PdfAnnotation
 
 /// Whether an annotation subtype marks up existing page text via `/QuadPoints`
 /// (Highlight, Underline, StrikeOut, Squiggly).
-fn is_text_markup(subtype: pdf_oxide::AnnotationSubtype) -> bool {
+fn is_text_markup(subtype: xberg_native_pdf::AnnotationSubtype) -> bool {
     matches!(
         subtype,
-        pdf_oxide::AnnotationSubtype::Highlight
-            | pdf_oxide::AnnotationSubtype::Underline
-            | pdf_oxide::AnnotationSubtype::StrikeOut
-            | pdf_oxide::AnnotationSubtype::Squiggly
+        xberg_native_pdf::AnnotationSubtype::Highlight
+            | xberg_native_pdf::AnnotationSubtype::Underline
+            | xberg_native_pdf::AnnotationSubtype::StrikeOut
+            | xberg_native_pdf::AnnotationSubtype::Squiggly
     )
 }
 
@@ -130,15 +130,15 @@ fn quad_to_bounding_box(quad: &[f64; 8]) -> BoundingBox {
 /// boxes, one per marked line/run, joined with a single space.
 ///
 /// Returns `None` when no box yields any text (e.g. the region only covers
-/// whitespace, or `pdf_oxide` fails to extract text for every box).
-fn extract_marked_text(doc: &pdf_oxide::PdfDocument, page_index: usize, boxes: &[BoundingBox]) -> Option<String> {
+/// whitespace, or `xberg_native_pdf` fails to extract text for every box).
+fn extract_marked_text(doc: &xberg_native_pdf::PdfDocument, page_index: usize, boxes: &[BoundingBox]) -> Option<String> {
     let mut pieces = Vec::with_capacity(boxes.len());
 
     for bbox in boxes {
         let region =
-            pdf_oxide::geometry::Rect::from_points(bbox.x0 as f32, bbox.y0 as f32, bbox.x1 as f32, bbox.y1 as f32);
+            xberg_native_pdf::geometry::Rect::from_points(bbox.x0 as f32, bbox.y0 as f32, bbox.x1 as f32, bbox.y1 as f32);
 
-        match doc.extract_text_in_rect(page_index, region, pdf_oxide::layout::RectFilterMode::Intersects) {
+        match doc.extract_text_in_rect(page_index, region, xberg_native_pdf::layout::RectFilterMode::Intersects) {
             Ok(text) => {
                 let trimmed = text.trim();
                 if !trimmed.is_empty() {
@@ -148,7 +148,7 @@ fn extract_marked_text(doc: &pdf_oxide::PdfDocument, page_index: usize, boxes: &
             Err(e) => {
                 tracing::debug!(
                     page = page_index,
-                    "pdf_oxide: failed to extract marked text for annotation: {e}"
+                    "xberg_native_pdf: failed to extract marked text for annotation: {e}"
                 );
             }
         }
@@ -184,7 +184,7 @@ fn color_to_hex(components: &[f64]) -> Option<String> {
 
 /// Build the warning for issue #72's document-wide failure mode: the page count
 /// itself could not be determined, so no page could even be attempted.
-fn page_count_failure_warning(error: &pdf_oxide::Error) -> ProcessingWarning {
+fn page_count_failure_warning(error: &xberg_native_pdf::Error) -> ProcessingWarning {
     ProcessingWarning {
         source: std::borrow::Cow::Borrowed("pdf_annotations"),
         message: std::borrow::Cow::Owned(format!(
@@ -195,7 +195,7 @@ fn page_count_failure_warning(error: &pdf_oxide::Error) -> ProcessingWarning {
 
 /// Build the warning for issue #72's per-page failure mode: annotations on one
 /// page could not be read, but the rest of the document is still processed.
-fn page_annotations_failure_warning(page_number: u32, error: &pdf_oxide::Error) -> ProcessingWarning {
+fn page_annotations_failure_warning(page_number: u32, error: &xberg_native_pdf::Error) -> ProcessingWarning {
     ProcessingWarning {
         source: std::borrow::Cow::Borrowed("pdf_annotations"),
         message: std::borrow::Cow::Owned(format!(
@@ -204,40 +204,40 @@ fn page_annotations_failure_warning(page_number: u32, error: &pdf_oxide::Error) 
     }
 }
 
-/// Map a pdf_oxide annotation subtype to Xberg's `PdfAnnotationType`.
-fn map_annotation_subtype(subtype: pdf_oxide::AnnotationSubtype) -> PdfAnnotationType {
+/// Map a xberg_native_pdf annotation subtype to Xberg's `PdfAnnotationType`.
+fn map_annotation_subtype(subtype: xberg_native_pdf::AnnotationSubtype) -> PdfAnnotationType {
     match subtype {
-        pdf_oxide::AnnotationSubtype::Text | pdf_oxide::AnnotationSubtype::FreeText => PdfAnnotationType::Text,
-        pdf_oxide::AnnotationSubtype::Highlight => PdfAnnotationType::Highlight,
-        pdf_oxide::AnnotationSubtype::Link => PdfAnnotationType::Link,
-        pdf_oxide::AnnotationSubtype::Stamp => PdfAnnotationType::Stamp,
-        pdf_oxide::AnnotationSubtype::Underline => PdfAnnotationType::Underline,
-        pdf_oxide::AnnotationSubtype::StrikeOut => PdfAnnotationType::StrikeOut,
-        pdf_oxide::AnnotationSubtype::Squiggly => PdfAnnotationType::Squiggly,
-        pdf_oxide::AnnotationSubtype::Ink => PdfAnnotationType::Ink,
-        pdf_oxide::AnnotationSubtype::Square => PdfAnnotationType::Square,
-        pdf_oxide::AnnotationSubtype::Circle => PdfAnnotationType::Circle,
-        pdf_oxide::AnnotationSubtype::Polygon => PdfAnnotationType::Polygon,
-        pdf_oxide::AnnotationSubtype::PolyLine => PdfAnnotationType::PolyLine,
-        pdf_oxide::AnnotationSubtype::Line => PdfAnnotationType::Line,
-        pdf_oxide::AnnotationSubtype::Caret => PdfAnnotationType::Caret,
-        pdf_oxide::AnnotationSubtype::FileAttachment => PdfAnnotationType::FileAttachment,
-        pdf_oxide::AnnotationSubtype::Sound => PdfAnnotationType::Sound,
-        pdf_oxide::AnnotationSubtype::Movie => PdfAnnotationType::Movie,
+        xberg_native_pdf::AnnotationSubtype::Text | xberg_native_pdf::AnnotationSubtype::FreeText => PdfAnnotationType::Text,
+        xberg_native_pdf::AnnotationSubtype::Highlight => PdfAnnotationType::Highlight,
+        xberg_native_pdf::AnnotationSubtype::Link => PdfAnnotationType::Link,
+        xberg_native_pdf::AnnotationSubtype::Stamp => PdfAnnotationType::Stamp,
+        xberg_native_pdf::AnnotationSubtype::Underline => PdfAnnotationType::Underline,
+        xberg_native_pdf::AnnotationSubtype::StrikeOut => PdfAnnotationType::StrikeOut,
+        xberg_native_pdf::AnnotationSubtype::Squiggly => PdfAnnotationType::Squiggly,
+        xberg_native_pdf::AnnotationSubtype::Ink => PdfAnnotationType::Ink,
+        xberg_native_pdf::AnnotationSubtype::Square => PdfAnnotationType::Square,
+        xberg_native_pdf::AnnotationSubtype::Circle => PdfAnnotationType::Circle,
+        xberg_native_pdf::AnnotationSubtype::Polygon => PdfAnnotationType::Polygon,
+        xberg_native_pdf::AnnotationSubtype::PolyLine => PdfAnnotationType::PolyLine,
+        xberg_native_pdf::AnnotationSubtype::Line => PdfAnnotationType::Line,
+        xberg_native_pdf::AnnotationSubtype::Caret => PdfAnnotationType::Caret,
+        xberg_native_pdf::AnnotationSubtype::FileAttachment => PdfAnnotationType::FileAttachment,
+        xberg_native_pdf::AnnotationSubtype::Sound => PdfAnnotationType::Sound,
+        xberg_native_pdf::AnnotationSubtype::Movie => PdfAnnotationType::Movie,
         _ => PdfAnnotationType::Other,
     }
 }
 
-/// Extract content text from a pdf_oxide annotation.
+/// Extract content text from a xberg_native_pdf annotation.
 ///
 /// For Link annotations, attempts to retrieve the URI from the associated
 /// action. Falls back to the generic `contents` field for all types.
-fn extract_annotation_content(annot: &pdf_oxide::Annotation) -> Option<String> {
-    if annot.subtype_enum == pdf_oxide::AnnotationSubtype::Link
+fn extract_annotation_content(annot: &xberg_native_pdf::Annotation) -> Option<String> {
+    if annot.subtype_enum == xberg_native_pdf::AnnotationSubtype::Link
         && let Some(ref action) = annot.action
     {
         match action {
-            pdf_oxide::LinkAction::Uri(uri) if !uri.is_empty() => {
+            xberg_native_pdf::LinkAction::Uri(uri) if !uri.is_empty() => {
                 return Some(uri.clone());
             }
             _ => {}
@@ -256,7 +256,7 @@ mod tests {
     /// never see) naming the root cause.
     #[test]
     fn test_page_count_failure_warning_names_root_cause() {
-        let error = pdf_oxide::Error::InvalidPdf("corrupt xref".to_string());
+        let error = xberg_native_pdf::Error::InvalidPdf("corrupt xref".to_string());
         let warning = page_count_failure_warning(&error);
 
         assert_eq!(warning.source.as_ref(), "pdf_annotations");
@@ -271,7 +271,7 @@ mod tests {
     /// `ProcessingWarning` naming that page, while extraction continues.
     #[test]
     fn test_page_annotations_failure_warning_names_page() {
-        let error = pdf_oxide::Error::InvalidPdf("malformed /Annots array".to_string());
+        let error = xberg_native_pdf::Error::InvalidPdf("malformed /Annots array".to_string());
         let warning = page_annotations_failure_warning(3, &error);
 
         assert_eq!(warning.source.as_ref(), "pdf_annotations");
@@ -285,7 +285,7 @@ mod tests {
     #[test]
     fn test_map_annotation_subtype_text() {
         assert_eq!(
-            map_annotation_subtype(pdf_oxide::AnnotationSubtype::Text),
+            map_annotation_subtype(xberg_native_pdf::AnnotationSubtype::Text),
             PdfAnnotationType::Text
         );
     }
@@ -293,7 +293,7 @@ mod tests {
     #[test]
     fn test_map_annotation_subtype_free_text() {
         assert_eq!(
-            map_annotation_subtype(pdf_oxide::AnnotationSubtype::FreeText),
+            map_annotation_subtype(xberg_native_pdf::AnnotationSubtype::FreeText),
             PdfAnnotationType::Text
         );
     }
@@ -301,7 +301,7 @@ mod tests {
     #[test]
     fn test_map_annotation_subtype_highlight() {
         assert_eq!(
-            map_annotation_subtype(pdf_oxide::AnnotationSubtype::Highlight),
+            map_annotation_subtype(xberg_native_pdf::AnnotationSubtype::Highlight),
             PdfAnnotationType::Highlight
         );
     }
@@ -309,7 +309,7 @@ mod tests {
     #[test]
     fn test_map_annotation_subtype_link() {
         assert_eq!(
-            map_annotation_subtype(pdf_oxide::AnnotationSubtype::Link),
+            map_annotation_subtype(xberg_native_pdf::AnnotationSubtype::Link),
             PdfAnnotationType::Link
         );
     }
@@ -317,7 +317,7 @@ mod tests {
     #[test]
     fn test_map_annotation_subtype_stamp() {
         assert_eq!(
-            map_annotation_subtype(pdf_oxide::AnnotationSubtype::Stamp),
+            map_annotation_subtype(xberg_native_pdf::AnnotationSubtype::Stamp),
             PdfAnnotationType::Stamp
         );
     }
@@ -325,7 +325,7 @@ mod tests {
     #[test]
     fn test_map_annotation_subtype_underline() {
         assert_eq!(
-            map_annotation_subtype(pdf_oxide::AnnotationSubtype::Underline),
+            map_annotation_subtype(xberg_native_pdf::AnnotationSubtype::Underline),
             PdfAnnotationType::Underline
         );
     }
@@ -333,7 +333,7 @@ mod tests {
     #[test]
     fn test_map_annotation_subtype_strikeout() {
         assert_eq!(
-            map_annotation_subtype(pdf_oxide::AnnotationSubtype::StrikeOut),
+            map_annotation_subtype(xberg_native_pdf::AnnotationSubtype::StrikeOut),
             PdfAnnotationType::StrikeOut
         );
     }
@@ -341,15 +341,15 @@ mod tests {
     #[test]
     fn test_map_annotation_subtype_other() {
         assert_eq!(
-            map_annotation_subtype(pdf_oxide::AnnotationSubtype::Screen),
+            map_annotation_subtype(xberg_native_pdf::AnnotationSubtype::Screen),
             PdfAnnotationType::Other
         );
         assert_eq!(
-            map_annotation_subtype(pdf_oxide::AnnotationSubtype::Watermark),
+            map_annotation_subtype(xberg_native_pdf::AnnotationSubtype::Watermark),
             PdfAnnotationType::Other
         );
         assert_eq!(
-            map_annotation_subtype(pdf_oxide::AnnotationSubtype::Redact),
+            map_annotation_subtype(xberg_native_pdf::AnnotationSubtype::Redact),
             PdfAnnotationType::Other
         );
     }
@@ -359,47 +359,47 @@ mod tests {
     #[test]
     fn test_map_annotation_subtype_previously_collapsed_variants() {
         assert_eq!(
-            map_annotation_subtype(pdf_oxide::AnnotationSubtype::Ink),
+            map_annotation_subtype(xberg_native_pdf::AnnotationSubtype::Ink),
             PdfAnnotationType::Ink
         );
         assert_eq!(
-            map_annotation_subtype(pdf_oxide::AnnotationSubtype::Square),
+            map_annotation_subtype(xberg_native_pdf::AnnotationSubtype::Square),
             PdfAnnotationType::Square
         );
         assert_eq!(
-            map_annotation_subtype(pdf_oxide::AnnotationSubtype::Circle),
+            map_annotation_subtype(xberg_native_pdf::AnnotationSubtype::Circle),
             PdfAnnotationType::Circle
         );
         assert_eq!(
-            map_annotation_subtype(pdf_oxide::AnnotationSubtype::Polygon),
+            map_annotation_subtype(xberg_native_pdf::AnnotationSubtype::Polygon),
             PdfAnnotationType::Polygon
         );
         assert_eq!(
-            map_annotation_subtype(pdf_oxide::AnnotationSubtype::PolyLine),
+            map_annotation_subtype(xberg_native_pdf::AnnotationSubtype::PolyLine),
             PdfAnnotationType::PolyLine
         );
         assert_eq!(
-            map_annotation_subtype(pdf_oxide::AnnotationSubtype::Squiggly),
+            map_annotation_subtype(xberg_native_pdf::AnnotationSubtype::Squiggly),
             PdfAnnotationType::Squiggly
         );
         assert_eq!(
-            map_annotation_subtype(pdf_oxide::AnnotationSubtype::Caret),
+            map_annotation_subtype(xberg_native_pdf::AnnotationSubtype::Caret),
             PdfAnnotationType::Caret
         );
         assert_eq!(
-            map_annotation_subtype(pdf_oxide::AnnotationSubtype::FileAttachment),
+            map_annotation_subtype(xberg_native_pdf::AnnotationSubtype::FileAttachment),
             PdfAnnotationType::FileAttachment
         );
         assert_eq!(
-            map_annotation_subtype(pdf_oxide::AnnotationSubtype::Sound),
+            map_annotation_subtype(xberg_native_pdf::AnnotationSubtype::Sound),
             PdfAnnotationType::Sound
         );
         assert_eq!(
-            map_annotation_subtype(pdf_oxide::AnnotationSubtype::Movie),
+            map_annotation_subtype(xberg_native_pdf::AnnotationSubtype::Movie),
             PdfAnnotationType::Movie
         );
         assert_eq!(
-            map_annotation_subtype(pdf_oxide::AnnotationSubtype::Line),
+            map_annotation_subtype(xberg_native_pdf::AnnotationSubtype::Line),
             PdfAnnotationType::Line
         );
     }
@@ -438,10 +438,10 @@ mod tests {
 
     #[test]
     fn test_extract_annotation_content_uri() {
-        let annot = pdf_oxide::Annotation {
+        let annot = xberg_native_pdf::Annotation {
             annotation_type: "Annot".to_string(),
             subtype: Some("Link".to_string()),
-            subtype_enum: pdf_oxide::AnnotationSubtype::Link,
+            subtype_enum: xberg_native_pdf::AnnotationSubtype::Link,
             contents: None,
             rect: None,
             author: None,
@@ -449,11 +449,11 @@ mod tests {
             modification_date: None,
             subject: None,
             destination: None,
-            action: Some(pdf_oxide::LinkAction::Uri("https://example.com".to_string())),
+            action: Some(xberg_native_pdf::LinkAction::Uri("https://example.com".to_string())),
             quad_points: None,
             color: None,
             opacity: None,
-            flags: pdf_oxide::AnnotationFlags::empty(),
+            flags: xberg_native_pdf::AnnotationFlags::empty(),
             border: None,
             interior_color: None,
             field_type: None,
@@ -472,10 +472,10 @@ mod tests {
 
     #[test]
     fn test_extract_annotation_content_fallback() {
-        let annot = pdf_oxide::Annotation {
+        let annot = xberg_native_pdf::Annotation {
             annotation_type: "Annot".to_string(),
             subtype: Some("Text".to_string()),
-            subtype_enum: pdf_oxide::AnnotationSubtype::Text,
+            subtype_enum: xberg_native_pdf::AnnotationSubtype::Text,
             contents: Some("A note".to_string()),
             rect: None,
             author: None,
@@ -487,7 +487,7 @@ mod tests {
             quad_points: None,
             color: None,
             opacity: None,
-            flags: pdf_oxide::AnnotationFlags::empty(),
+            flags: xberg_native_pdf::AnnotationFlags::empty(),
             border: None,
             interior_color: None,
             field_type: None,

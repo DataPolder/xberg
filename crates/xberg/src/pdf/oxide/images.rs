@@ -1,6 +1,6 @@
-//! Image extraction using the pdf_oxide backend.
+//! Image extraction using the xberg_native_pdf backend.
 //!
-//! Extracts embedded images from PDF pages via pdf_oxide, including
+//! Extracts embedded images from PDF pages via xberg_native_pdf, including
 //! actual image data and metadata.
 
 use super::OxideDocument;
@@ -44,7 +44,7 @@ fn extract_n_images_from_page_handles(
     doc: &OxideDocument,
     page_idx: usize,
     limit: usize,
-) -> Result<Vec<pdf_oxide::extractors::PdfImage>> {
+) -> Result<Vec<xberg_native_pdf::extractors::PdfImage>> {
     let handles = doc.doc.page_image_handles(page_idx).map_err(|error| {
         PdfError::ExtractionFailed(format!(
             "enumerating image handles for PDF page {}: {error}",
@@ -66,15 +66,15 @@ fn extract_n_images_from_page_handles(
 
 /// Re-encode raw PDF pixel data as a PNG buffer.
 ///
-/// pdf_oxide emits `ImageData::Raw` without self-describing headers. Re-encoding
+/// xberg_native_pdf emits `ImageData::Raw` without self-describing headers. Re-encoding
 /// to PNG makes the buffer probeable by `load_image_for_ocr`,
 /// `extract_image_metadata`, VLM pipelines, etc.
 ///
 /// Returns `Err` if the pixel buffer length does not match `w × h × bpp` or if
 /// PNG encoding fails.
-fn raw_pixels_to_png(w: u32, h: u32, format: &pdf_oxide::extractors::PixelFormat, pixels: &[u8]) -> Result<Bytes> {
+fn raw_pixels_to_png(w: u32, h: u32, format: &xberg_native_pdf::extractors::PixelFormat, pixels: &[u8]) -> Result<Bytes> {
     let dynamic = match *format {
-        pdf_oxide::extractors::PixelFormat::Grayscale => {
+        xberg_native_pdf::extractors::PixelFormat::Grayscale => {
             let buf = image::GrayImage::from_raw(w, h, pixels.to_vec()).ok_or_else(|| {
                 PdfError::ExtractionFailed(format!(
                     "grayscale pixel buffer ({} bytes) does not fit {}×{} image",
@@ -85,7 +85,7 @@ fn raw_pixels_to_png(w: u32, h: u32, format: &pdf_oxide::extractors::PixelFormat
             })?;
             DynamicImage::ImageLuma8(buf)
         }
-        pdf_oxide::extractors::PixelFormat::RGB => {
+        xberg_native_pdf::extractors::PixelFormat::RGB => {
             let buf = image::RgbImage::from_raw(w, h, pixels.to_vec()).ok_or_else(|| {
                 PdfError::ExtractionFailed(format!(
                     "RGB pixel buffer ({} bytes) does not fit {}×{} image",
@@ -96,7 +96,7 @@ fn raw_pixels_to_png(w: u32, h: u32, format: &pdf_oxide::extractors::PixelFormat
             })?;
             DynamicImage::ImageRgb8(buf)
         }
-        pdf_oxide::extractors::PixelFormat::CMYK => {
+        xberg_native_pdf::extractors::PixelFormat::CMYK => {
             let mut rgb = Vec::with_capacity((pixels.len() / 4) * 3);
             for chunk in pixels.chunks_exact(4) {
                 let c = chunk[0] as f32 / 255.0;
@@ -182,7 +182,7 @@ pub(crate) struct PageFallbackImage {
 /// image (issue #1355).
 ///
 /// `page_image_handles` is a cheap content-stream/CTM pass that succeeds even when the
-/// renderer could not paint an image (e.g. an unsupported codec that pdf_oxide's page
+/// renderer could not paint an image (e.g. an unsupported codec that xberg_native_pdf's page
 /// renderer silently substitutes with a blank page). For each handle:
 /// - `decode()` success → re-encode raw pixels to PNG, or pass the embedded JPEG through
 ///   as-is.
@@ -197,7 +197,7 @@ pub(crate) struct PageFallbackImage {
 // `crate::extractors::pdf::ocr` are gated `any(ocr, ocr-pipeline)`, and the `binstall`
 // CLI profile pulls `ocr-pipeline` (via `liter-llm`) without `ocr`. ~keep
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
-pub(crate) fn page_ocr_fallback_image_bytes(doc: &pdf_oxide::PdfDocument, page_idx: usize) -> Vec<PageFallbackImage> {
+pub(crate) fn page_ocr_fallback_image_bytes(doc: &xberg_native_pdf::PdfDocument, page_idx: usize) -> Vec<PageFallbackImage> {
     let handles = match doc.page_image_handles(page_idx) {
         Ok(h) => h,
         Err(error) => {
@@ -213,12 +213,12 @@ pub(crate) fn page_ocr_fallback_image_bytes(doc: &pdf_oxide::PdfDocument, page_i
     for handle in &handles {
         match handle.decode() {
             Ok(img) => match img.data() {
-                pdf_oxide::extractors::ImageData::Jpeg(jpeg_bytes) => out.push(PageFallbackImage {
+                xberg_native_pdf::extractors::ImageData::Jpeg(jpeg_bytes) => out.push(PageFallbackImage {
                     bytes: Bytes::copy_from_slice(jpeg_bytes),
                     format: "jpeg",
                     recovery: XObjectRecovery::EmbeddedJpeg,
                 }),
-                pdf_oxide::extractors::ImageData::Raw { pixels, format } => {
+                xberg_native_pdf::extractors::ImageData::Raw { pixels, format } => {
                     match raw_pixels_to_png(img.width(), img.height(), format, pixels) {
                         Ok(bytes) => out.push(PageFallbackImage {
                             bytes,
@@ -234,7 +234,7 @@ pub(crate) fn page_ocr_fallback_image_bytes(doc: &pdf_oxide::PdfDocument, page_i
             Err(decode_err) => {
                 let passthrough = matches!(
                     handle.filter_chain.last(),
-                    Some(pdf_oxide::PdfFilter::DCTDecode) | Some(pdf_oxide::PdfFilter::JPXDecode)
+                    Some(xberg_native_pdf::PdfFilter::DCTDecode) | Some(xberg_native_pdf::PdfFilter::JPXDecode)
                 );
                 if passthrough {
                     match handle.raw_compressed_bytes() {
@@ -306,7 +306,7 @@ pub(crate) fn extract_images_with_data(
     let page_count = doc
         .doc
         .page_count()
-        .map_err(|e| PdfError::MetadataExtractionFailed(format!("pdf_oxide: failed to get page count: {e}")))?;
+        .map_err(|e| PdfError::MetadataExtractionFailed(format!("xberg_native_pdf: failed to get page count: {e}")))?;
 
     let mut all_images = Vec::new();
     let mut warnings = Vec::new();
@@ -339,7 +339,7 @@ pub(crate) fn extract_images_with_data(
                     match doc.doc.extract_images(page_idx) {
                         Ok(imgs) => imgs.into_iter().take(limit).collect(),
                         Err(e) => {
-                            tracing::debug!(page = page_idx, "pdf_oxide: failed to extract images (fallback): {e}");
+                            tracing::debug!(page = page_idx, "xberg_native_pdf: failed to extract images (fallback): {e}");
                             continue;
                         }
                     }
@@ -348,7 +348,7 @@ pub(crate) fn extract_images_with_data(
             None => match doc.doc.extract_images(page_idx) {
                 Ok(imgs) => imgs,
                 Err(e) => {
-                    tracing::debug!(page = page_idx, "pdf_oxide: failed to extract images: {e}");
+                    tracing::debug!(page = page_idx, "xberg_native_pdf: failed to extract images: {e}");
                     continue;
                 }
             },
@@ -362,12 +362,12 @@ pub(crate) fn extract_images_with_data(
                 .and_then(|alts| alts.get(page_image_position))
                 .and_then(|alt| alt.clone());
             let (data, format) = match oxide_img.data() {
-                pdf_oxide::extractors::ImageData::Jpeg(jpeg_bytes) => {
+                xberg_native_pdf::extractors::ImageData::Jpeg(jpeg_bytes) => {
                     let data_bytes = Bytes::copy_from_slice(jpeg_bytes);
                     let actual_format = detect_image_format_from_bytes(data_bytes.as_ref());
                     (data_bytes, Cow::Borrowed(actual_format))
                 }
-                pdf_oxide::extractors::ImageData::Raw { pixels, format } => {
+                xberg_native_pdf::extractors::ImageData::Raw { pixels, format } => {
                     match raw_pixels_to_png(oxide_img.width(), oxide_img.height(), format, pixels) {
                         Ok(bytes) => (bytes, Cow::Borrowed("png")),
                         Err(e) => {
@@ -429,7 +429,7 @@ mod tests {
     #[test]
     fn test_raw_pixels_to_png_grayscale() {
         let pixels: Vec<u8> = vec![0x00, 0x80, 0xc0, 0xff];
-        let result = raw_pixels_to_png(2, 2, &pdf_oxide::extractors::PixelFormat::Grayscale, &pixels);
+        let result = raw_pixels_to_png(2, 2, &xberg_native_pdf::extractors::PixelFormat::Grayscale, &pixels);
         let bytes = result.expect("grayscale 2×2 must encode without error");
         assert!(
             bytes.starts_with(PNG_MAGIC),
@@ -441,7 +441,7 @@ mod tests {
     #[test]
     fn test_raw_pixels_to_png_rgb() {
         let pixels: Vec<u8> = vec![0xff, 0x00, 0x00, 0x00, 0xff, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff];
-        let result = raw_pixels_to_png(2, 2, &pdf_oxide::extractors::PixelFormat::RGB, &pixels);
+        let result = raw_pixels_to_png(2, 2, &xberg_native_pdf::extractors::PixelFormat::RGB, &pixels);
         let bytes = result.expect("RGB 2×2 must encode without error");
         assert!(
             bytes.starts_with(PNG_MAGIC),
@@ -453,7 +453,7 @@ mod tests {
     #[test]
     fn test_raw_pixels_to_png_cmyk_converts_to_rgb_png() {
         let pixels: Vec<u8> = vec![0x00, 0x00, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00];
-        let result = raw_pixels_to_png(1, 2, &pdf_oxide::extractors::PixelFormat::CMYK, &pixels);
+        let result = raw_pixels_to_png(1, 2, &xberg_native_pdf::extractors::PixelFormat::CMYK, &pixels);
         let bytes = result.expect("CMYK 1×2 must encode without error");
         assert!(
             bytes.starts_with(PNG_MAGIC),
@@ -468,7 +468,7 @@ mod tests {
     #[test]
     fn test_raw_pixels_to_png_size_mismatch_returns_error() {
         let pixels: Vec<u8> = vec![0x00, 0x80, 0xc0, 0xff];
-        let result = raw_pixels_to_png(4, 4, &pdf_oxide::extractors::PixelFormat::Grayscale, &pixels);
+        let result = raw_pixels_to_png(4, 4, &xberg_native_pdf::extractors::PixelFormat::Grayscale, &pixels);
         assert!(
             result.is_err(),
             "mismatched buffer size must return Err, not Ok or panic"
@@ -478,14 +478,14 @@ mod tests {
     #[test]
     fn test_raw_pixels_to_png_rgb_size_mismatch_returns_error() {
         let pixels: Vec<u8> = vec![0xff; 9];
-        let result = raw_pixels_to_png(2, 2, &pdf_oxide::extractors::PixelFormat::RGB, &pixels);
+        let result = raw_pixels_to_png(2, 2, &xberg_native_pdf::extractors::PixelFormat::RGB, &pixels);
         assert!(result.is_err(), "mismatched RGB buffer must return Err");
     }
 
     #[test]
     fn test_raw_pixels_to_png_cmyk_odd_length_returns_error() {
         let pixels: Vec<u8> = vec![0x00, 0x00, 0x00];
-        let result = raw_pixels_to_png(1, 1, &pdf_oxide::extractors::PixelFormat::CMYK, &pixels);
+        let result = raw_pixels_to_png(1, 1, &xberg_native_pdf::extractors::PixelFormat::CMYK, &pixels);
         assert!(
             result.is_err(),
             "CMYK buffer whose length is not a multiple of 4 must return Err, not panic"
@@ -498,7 +498,7 @@ mod tests {
     #[test]
     fn test_unencodable_image_warning_names_index_and_page() {
         let pixels: Vec<u8> = vec![0x00, 0x80, 0xc0, 0xff];
-        let error = raw_pixels_to_png(4, 4, &pdf_oxide::extractors::PixelFormat::Grayscale, &pixels)
+        let error = raw_pixels_to_png(4, 4, &xberg_native_pdf::extractors::PixelFormat::Grayscale, &pixels)
             .expect_err("4x4 grayscale from a 4-byte buffer must fail to re-encode");
 
         let warning = unencodable_image_warning(3, 2, &error);
@@ -665,7 +665,7 @@ mod tests {
         assert!(
             result.iter().all(|img| img.bounding_box.is_some()),
             "every image extracted via the default (uncapped) path must carry a bounding_box \
-             from pdf_oxide's CTM-tracked extract_images(); got: {:?}",
+             from xberg_native_pdf's CTM-tracked extract_images(); got: {:?}",
             result.iter().map(|img| img.bounding_box).collect::<Vec<_>>()
         );
     }
@@ -695,7 +695,7 @@ mod tests {
     }
 
     /// Verify that `detect_image_format_from_bytes` correctly identifies formats from magic bytes.
-    /// This test ensures that even if pdf_oxide returns data labeled as JPEG but lacking proper
+    /// This test ensures that even if xberg_native_pdf returns data labeled as JPEG but lacking proper
     /// headers, we can detect the actual format.
     #[test]
     fn test_detect_image_format_from_bytes() {
@@ -768,7 +768,7 @@ mod tests {
     /// #1444: the recovery mode each image XObject took must survive the call, so the
     /// OCR fallback can record provenance on the recovered page's `ExtractedImage`
     /// instead of throwing the distinction away. The fixture's page 0 image is a
-    /// DCTDecode stream pdf_oxide decodes successfully, so it must come back tagged
+    /// DCTDecode stream xberg_native_pdf decodes successfully, so it must come back tagged
     /// `EmbeddedJpeg` with format `jpeg`.
     #[cfg(feature = "ocr")]
     #[test]

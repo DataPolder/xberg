@@ -75894,7 +75894,7 @@ pub unsafe extern "C" fn xberg_doctor(config: AlefHandle) -> AlefHandle {
 /// claims it. If something else already holds it â an application wiring
 /// `tracing_subscriber::fmt()...try_init()`, which is what `xberg-cli` does in `main()` â
 /// `set_global_default` fails and this is a no-op, so the engine's glyph-drop records go to
-/// that other subscriber and `take_pdf_oxide_render_warnings` stays empty. This function is
+/// that other subscriber and `take_engine_render_warnings` stays empty. This function is
 /// the fallback for embedders that have no subscriber at all; composing the layer is what
 /// works when they do.
 ///
@@ -75976,25 +75976,25 @@ pub unsafe extern "C" fn xberg_install_pdf_render_diagnostics() -> i32 {
 /// freed with the appropriate free function.
 #[cfg(feature = "pdf")]
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn xberg_take_pdf_oxide_render_warnings() -> *mut std::ffi::c_char {
+pub unsafe extern "C" fn xberg_take_engine_render_warnings() -> *mut std::ffi::c_char {
     clear_last_error();
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        set_last_return_len("xberg_take_pdf_oxide_render_warnings", 0);
-        let result = xberg::pdf::render::take_pdf_oxide_render_warnings();
+        set_last_return_len("xberg_take_engine_render_warnings", 0);
+        let result = xberg::pdf::render::take_engine_render_warnings();
         {
             match serde_json::to_string(&result) {
                 Ok(__alef_return) => match CString::new(__alef_return) {
                     Ok(cs) => {
-                        set_last_return_len("xberg_take_pdf_oxide_render_warnings", cs.as_bytes().len());
+                        set_last_return_len("xberg_take_engine_render_warnings", cs.as_bytes().len());
                         cs.into_raw()
                     }
                     Err(_) => {
-                        set_last_return_len("xberg_take_pdf_oxide_render_warnings", 0);
+                        set_last_return_len("xberg_take_engine_render_warnings", 0);
                         std::ptr::null_mut()
                     }
                 },
                 Err(_) => {
-                    set_last_return_len("xberg_take_pdf_oxide_render_warnings", 0);
+                    set_last_return_len("xberg_take_engine_render_warnings", 0);
                     std::ptr::null_mut()
                 }
             }
@@ -76015,15 +76015,15 @@ pub unsafe extern "C" fn xberg_take_pdf_oxide_render_warnings() -> *mut std::ffi
 }
 
 /// Return the byte length of the C string most recently returned by
-/// `xberg_take_pdf_oxide_render_warnings` on this thread. Returns 0 when the primary call returned null
+/// `xberg_take_engine_render_warnings` on this thread. Returns 0 when the primary call returned null
 /// or failed before producing a string. Enables safe slice construction in Zig and Java FFM Panama
 /// without a NUL-scan.
 /// \note SAFETY: Pointer arguments are ignored and are present only to keep the companion ABI aligned
-/// with `xberg_take_pdf_oxide_render_warnings`.
+/// with `xberg_take_engine_render_warnings`.
 #[cfg(feature = "pdf")]
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn xberg_take_pdf_oxide_render_warnings_len() -> usize {
-    catch_ffi_panic_preserving_error(0, || last_return_len("xberg_take_pdf_oxide_render_warnings"))
+pub unsafe extern "C" fn xberg_take_engine_render_warnings_len() -> usize {
+    catch_ffi_panic_preserving_error(0, || last_return_len("xberg_take_engine_render_warnings"))
 }
 
 /// Build the four (or three) token Whisper decoder prompt.

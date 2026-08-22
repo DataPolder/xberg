@@ -532,7 +532,7 @@ fn test_chunk_image_indices_are_valid_when_images_extracted() {
 /// After the fix:
 /// - When extract_images=false, NO decompression occurs at all (the main hang fix).
 /// - When extract_images=true, a single pass runs and the cap is respected in output.
-///   The per-page decompression cost for images beyond the cap is a pdf_oxide
+///   The per-page decompression cost for images beyond the cap is a xberg_native_pdf
 ///   upstream limitation: `extract_images()` is eager.  Eliminating that
 ///   remaining cost requires a count-limited API upstream.
 #[test]

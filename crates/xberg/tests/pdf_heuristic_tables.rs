@@ -4,7 +4,7 @@
 //!   1. `PdfConfig.extract_tables = false` truly suppresses all tables
 //!      (native and heuristic), matching the documented contract.
 //!   2. With the default `extract_tables = true`, a text-layer PDF that
-//!      pdf_oxide's native grid detector can't read still produces
+//!      xberg_native_pdf's native grid detector can't read still produces
 //!      `result.tables` populated by the heuristic fallback.
 //!   3. The composition rule (per-page merge) does not drop tables that
 //!      native already found.
@@ -57,7 +57,7 @@ fn test_extract_tables_flag_false_suppresses_all_tables() {
 }
 
 /// Default config (`extract_tables = true`) on a text-layer table PDF should
-/// produce at least one well-formed table. If pdf_oxide's native detector
+/// produce at least one well-formed table. If xberg_native_pdf's native detector
 /// hits it, fine; otherwise the heuristic fallback fills in. Either way,
 /// the contract from #897 — "result.tables should be populated on
 /// text-layer table PDFs without needing 12 GB of ONNX models" — must hold.
@@ -94,8 +94,8 @@ fn test_default_config_populates_tables_on_text_layer_pdf() {
 }
 
 /// Minimal PDFs must not panic the heuristic path. We don't make assertions
-/// about whether pdf_oxide's native detector finds 0 or 1 spurious tables —
-/// that's a separate concern and may vary across pdf_oxide versions.
+/// about whether xberg_native_pdf's native detector finds 0 or 1 spurious tables —
+/// that's a separate concern and may vary across xberg_native_pdf versions.
 /// The point is just: heuristic + composition both survive the input.
 #[test]
 fn test_minimal_pdf_does_not_panic() {
@@ -114,8 +114,8 @@ fn test_minimal_pdf_does_not_panic() {
 /// this test exercises the full public API path: `extract_bytes_document_blocking` with default config.
 #[test]
 fn test_bordered_two_column_table_detected_via_pipeline() {
-    use pdf_oxide::geometry::Rect;
-    use pdf_oxide::writer::{DocumentBuilder, LineStyle, TextAlign};
+    use xberg_native_pdf::geometry::Rect;
+    use xberg_native_pdf::writer::{DocumentBuilder, LineStyle, TextAlign};
 
     let style = LineStyle::new(1.0, 0.0, 0.0, 0.0);
     let mut doc = DocumentBuilder::new();
@@ -161,14 +161,14 @@ fn test_bordered_two_column_table_detected_via_pipeline() {
 /// Integration test for xberg-io/xberg#1213: a 3-column grid whose vertical
 /// rules are drawn as ~1pt segments stroked with a table-height line width
 /// (the rendered geometry is a full-height vertical bar, but the path's
-/// geometric bounding box is a speck). pdf_oxide 0.3.74 accounts for stroke
+/// geometric bounding box is a speck). xberg_native_pdf 0.3.74 accounts for stroke
 /// width in path bounding boxes, so the native tier detects this through the
 /// full public API path with row associations intact, and the heuristic tier
 /// does not add competing tables on that page.
 #[test]
 fn test_stroke_width_vertical_rules_table_detected_via_pipeline() {
-    use pdf_oxide::geometry::Rect;
-    use pdf_oxide::writer::{DocumentBuilder, LineStyle, TextAlign};
+    use xberg_native_pdf::geometry::Rect;
+    use xberg_native_pdf::writer::{DocumentBuilder, LineStyle, TextAlign};
 
     let thin = LineStyle::new(1.0, 0.0, 0.0, 0.0);
     let rows: [[&str; 3]; 6] = [

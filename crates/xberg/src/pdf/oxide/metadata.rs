@@ -1,4 +1,4 @@
-//! PDF metadata extraction using the pdf_oxide backend.
+//! PDF metadata extraction using the xberg_native_pdf backend.
 //!
 //! Extracts document info dictionary fields (title, author, keywords, dates,
 //! producer, creator) and PDF-specific properties (version, encryption, dimensions,
@@ -88,7 +88,7 @@ fn extract_pdf_specific_metadata(
             .collect()
     });
 
-    // A page whose text layer pdf_oxide could not read from the file (issue
+    // A page whose text layer xberg_native_pdf could not read from the file (issue
     // #1254) has low image coverage and is never selected by `detect` above, so
     // it is unioned in separately here. ~keep
     if ocr_quality_thresholds.enable_provenance_ocr_routing {
@@ -183,12 +183,12 @@ fn non_empty(value: Option<String>) -> Option<String> {
 /// Returns `None` when the document has no `/Metadata` entry, the XMP packet
 /// could not be parsed, or it parsed but carried no recognized fields — all
 /// non-error outcomes; XMP is optional and most PDFs of any age lack it.
-fn extract_xmp_metadata(doc: &pdf_oxide::PdfDocument) -> Option<pdf_oxide::extractors::xmp::XmpMetadata> {
-    match pdf_oxide::extractors::xmp::XmpExtractor::extract(doc) {
+fn extract_xmp_metadata(doc: &xberg_native_pdf::PdfDocument) -> Option<xberg_native_pdf::extractors::xmp::XmpMetadata> {
+    match xberg_native_pdf::extractors::xmp::XmpExtractor::extract(doc) {
         Ok(Some(xmp)) if !xmp.is_empty() => Some(xmp),
         Ok(_) => None,
         Err(e) => {
-            tracing::debug!("pdf_oxide: XMP extraction failed: {e}");
+            tracing::debug!("xberg_native_pdf: XMP extraction failed: {e}");
             None
         }
     }
@@ -207,10 +207,10 @@ pub(crate) fn extract_page_labels_all(doc: &mut OxideDocument) -> Result<Option<
         .page_count()
         .map_err(|e| PdfError::MetadataExtractionFailed(format!("Failed to get page count for page labels: {}", e)))?;
 
-    let ranges = match pdf_oxide::extractors::page_labels::PageLabelExtractor::extract(&doc.doc) {
+    let ranges = match xberg_native_pdf::extractors::page_labels::PageLabelExtractor::extract(&doc.doc) {
         Ok(ranges) => ranges,
         Err(e) => {
-            tracing::debug!("pdf_oxide: page label extraction failed: {e}");
+            tracing::debug!("xberg_native_pdf: page label extraction failed: {e}");
             return Ok(None);
         }
     };
@@ -220,7 +220,7 @@ pub(crate) fn extract_page_labels_all(doc: &mut OxideDocument) -> Result<Option<
     }
 
     Ok(Some(
-        pdf_oxide::extractors::page_labels::PageLabelExtractor::get_all_labels(&ranges, page_count),
+        xberg_native_pdf::extractors::page_labels::PageLabelExtractor::get_all_labels(&ranges, page_count),
     ))
 }
 
@@ -229,7 +229,7 @@ pub(crate) fn extract_page_labels_all(doc: &mut OxideDocument) -> Result<Option<
 /// Accesses the trailer `/Info` reference, resolves it, then looks up the given
 /// key. Returns `None` if the Info dict is absent, the key is missing, or the
 /// value cannot be decoded as a string.
-fn get_info_string(doc: &mut pdf_oxide::PdfDocument, key: &str) -> Option<String> {
+fn get_info_string(doc: &mut xberg_native_pdf::PdfDocument, key: &str) -> Option<String> {
     let trailer = doc.trailer().clone();
     let info_ref_obj = trailer.as_dict()?.get("Info")?.clone();
 
@@ -243,8 +243,8 @@ fn get_info_string(doc: &mut pdf_oxide::PdfDocument, key: &str) -> Option<String
     let value = info_dict.get(key)?;
 
     match value {
-        pdf_oxide::object::Object::String(bytes) => decode_pdf_string(bytes),
-        pdf_oxide::object::Object::Name(name) => {
+        xberg_native_pdf::object::Object::String(bytes) => decode_pdf_string(bytes),
+        xberg_native_pdf::object::Object::Name(name) => {
             let trimmed = name.trim().to_string();
             if trimmed.is_empty() { None } else { Some(trimmed) }
         }

@@ -1248,7 +1248,7 @@ pub(crate) fn reorder_segments_by_layout(
 /// Rotate a span's page-space origin into its own upright reading frame.
 ///
 /// Mirrors [`crate::pdf::oxide::span_geometry::upright_origin`] (which
-/// operates on `pdf_oxide::layout::TextSpan`) for the simpler geometry this
+/// operates on `xberg_native_pdf::layout::TextSpan`) for the simpler geometry this
 /// module works with. Returns `(advance, cross)`: `advance` is the position
 /// along the span's own reading direction and `cross` is the position along
 /// the axis lines stack on. For unrotated spans (`rotation_degrees == 0`,
@@ -3213,7 +3213,7 @@ mod tests {
     // of walking them. `reading_order_key`/`upright_reading_origin` rotate a
     // span's origin into its own reading frame before comparing, so ordering
     // follows the table's real row/column structure regardless of the
-    // text-matrix rotation pdf_oxide reports.
+    // text-matrix rotation xberg_native_pdf reports.
     mod issue_292_rotated_reading_order {
         use super::*;
 
