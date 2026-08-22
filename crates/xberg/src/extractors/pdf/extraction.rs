@@ -369,7 +369,10 @@ pub(crate) fn extract_all_from_native_document(
                 None
             }
             Err(e) => {
-                tracing::warn!("native structure: rendering failed: {:?}, falling back to plain text", e);
+                tracing::warn!(
+                    "native structure: rendering failed: {:?}, falling back to plain text",
+                    e
+                );
                 None
             }
         }

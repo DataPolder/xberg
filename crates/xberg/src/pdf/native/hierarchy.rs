@@ -852,7 +852,10 @@ const MAX_PDF_OBJECT_TREE_DEPTH: usize = 128;
 
 /// Resolve `obj` to its underlying value if it is an indirect reference,
 /// otherwise clone it. Unresolvable references degrade to `Object::Null`.
-fn resolve_pdf_object(doc: &NativeDocument, obj: &xberg_native_pdf::object::Object) -> xberg_native_pdf::object::Object {
+fn resolve_pdf_object(
+    doc: &NativeDocument,
+    obj: &xberg_native_pdf::object::Object,
+) -> xberg_native_pdf::object::Object {
     match obj.as_reference() {
         Some(object_ref) => doc
             .doc
