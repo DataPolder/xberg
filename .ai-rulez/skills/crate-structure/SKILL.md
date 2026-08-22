@@ -43,7 +43,7 @@ Two members live outside `crates/`: `packages/dart/rust` and `packages/swift/rus
 ## Tools (`tools/`)
 
 `benchmark-harness` (the only workspace member here), `generate_test_fixtures`, `ocr-measure`,
-`perf`, `snippet-runner`.
+`perf`.
 
 There is no `tools/e2e-generator` — e2e generation is `alef e2e generate`, configured in
 `alef.toml` `[crates.e2e]`. See the `alef-generated-bindings` skill.
