@@ -868,8 +868,6 @@ mod tests {
         );
     }
 
-    // -- GH advisory: unclamped `file.size()` used as a `Vec::with_capacity` hint --
-
     /// Direct, allocation-free test of the clamp itself: a forged multi-terabyte declared
     /// size (an attacker-controlled ZIP central-directory uncompressed-size field) must be
     /// clamped down to the configured cap, never passed through as-is.
