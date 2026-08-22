@@ -214,6 +214,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Repinned to alef 0.65.0 and regenerated every binding. Picks up `is_empty` fixes across
+  Swift/Elixir/Dart/Kotlin/Java, TypeScript/node internally-tagged enum nesting, C/doc-snippet
+  optional-argument sentinel selection, pyo3 snippet imports and streaming stub signatures, C#
+  streaming e2e iteration, and rustler/extendr emission order-invariance. `packages/dart/pubspec.yaml`'s
+  `freezed` dependency is pinned back to `^3.2.5`: a prior `task upgrade` bumped it to the
+  prerelease `^4.0.0-dev.3`, which `flutter_rust_bridge_codegen` 2.12.0's own version gate rejects
+  even though pub resolves it fine.
 - **BREAKING.** The PDF backend is selected with `"native"` instead of `"pdf_oxide"`, and the Rust
   enum variant is `PdfBackend::Native`. This affects `pdf_options.backend` in a config file, the
   `--pdf-backend` CLI flag, and the equivalent field in every binding. There is deliberately no
@@ -391,6 +398,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The musl smoke-test images (C#, Java, Node, Elixir) now bundle the FULL transitive shared-lib
+  closure of the vendored ONNX Runtime, not a hand-picked allowlist. `libonnxruntime.so.1` on
+  Alpine transitively needs `libprotobuf-lite` plus roughly forty `libabsl_*`/`libre2`/`libicu*`
+  libraries; `Dockerfile.musl-ffi` bundled only `libonnxruntime`/`libheif`/`libde265`/etc. beside
+  `libxberg_ffi.so`, and `Dockerfile.musl-rustler` bundled nothing at all for `libxberg_nif.so`.
+  Both now reuse `scripts/ci/vendor-native-closure.sh` (already used by the Node and Python musl
+  builds), which walks `ldd` recursively and hard-fails the build if anything is still unresolved
+  after vendoring. Separately, `smoke-test-musl-elixir-nif.sh` and `smoke-test-musl-java-ffi.sh`
+  each mounted only the bare `.so` file into the smoke-test container, discarding the vendored
+  closure sitting beside it and turning a missing-transitive-library failure into a nameless
+  NIF-load / FFI-call failure; both now mount the whole native directory, matching the C# and
+  Node scripts.
 - Documents whose XML is not UTF-8 still extract instead of failing outright. The `quick-xml` 0.42
   reader validates UTF-8 as it parses, so bytes in any other encoding abort the read rather than
   degrading to a lossy decode as they did when each extractor decoded for itself. `parse_xml` and
