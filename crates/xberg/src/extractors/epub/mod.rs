@@ -30,10 +30,10 @@ use std::borrow::Cow;
 use std::io::{Cursor, Read};
 use zip::ZipArchive;
 
-use crate::extractors::security::SecurityBudget;
+use crate::extractors::security::{SecurityBudget, ZipBombValidator};
 use content::{extract_text_from_xhtml, extract_text_from_xhtml_budgeted, looks_like_navigation_document};
 use metadata::{build_additional_metadata, parse_opf};
-use parsing::{parse_container_xml, read_file_from_zip, resolve_path};
+use parsing::{MAX_EPUB_MEMBER_SIZE, parse_container_xml, read_file_from_zip, resolve_path};
 
 const MARKUP_SWITCH_NAMESPACES: &[&str] = &[content::XHTML_NAMESPACE, content::MATHML_NAMESPACE];
 const PLAIN_SWITCH_NAMESPACES: &[&str] = &[content::XHTML_NAMESPACE];
@@ -240,8 +240,8 @@ impl EpubExtractor {
             && !Self::spine_references_asset(spine_documents, cover_path)
         {
             let mut buf = Vec::new();
-            if let Ok(mut entry) = archive.by_name(cover_path) {
-                let _ = entry.read_to_end(&mut buf);
+            if let Ok(entry) = archive.by_name(cover_path) {
+                let _ = entry.take(MAX_EPUB_MEMBER_SIZE).read_to_end(&mut buf);
             }
             if !buf.is_empty() {
                 let fmt = cover_path
@@ -431,7 +431,12 @@ impl EpubExtractor {
                             let image_data = src.as_ref().and_then(|img_src| {
                                 let resolved = resolve_path(xhtml_dir, img_src).ok()?;
                                 let mut buf = Vec::new();
-                                archive.by_name(&resolved.path).ok()?.read_to_end(&mut buf).ok()?;
+                                archive
+                                    .by_name(&resolved.path)
+                                    .ok()?
+                                    .take(MAX_EPUB_MEMBER_SIZE)
+                                    .read_to_end(&mut buf)
+                                    .ok()?;
                                 if buf.is_empty() {
                                     return None;
                                 }
@@ -567,7 +572,19 @@ impl EpubExtractor {
     }
 }
 
+/// `ProcessingWarning::source` for every warning this module emits.
+#[cfg(feature = "office")]
+const EPUB_WARNING_SOURCE: &str = "epub";
+
 /// Extract URIs from document structure annotations (link annotations).
+///
+/// `ann.start`/`ann.end` are byte offsets recorded by
+/// `extraction::html::structure` against the *raw* text buffer (see
+/// `structure.rs:749`), but `text` here has already gone through
+/// `normalize_whitespace` (`structure.rs:824`), which collapses whitespace runs
+/// and trims. That shifts every recorded offset left of where it was taken, so a
+/// mid-codepoint landing on a non-ASCII document is routine, not exotic -- the
+/// length guard below does not imply the offsets are trustworthy.
 #[cfg(feature = "office")]
 fn collect_annotation_uris(
     annotations: &[crate::types::document_structure::TextAnnotation],
@@ -580,12 +597,30 @@ fn collect_annotation_uris(
         if let AnnotationKind::Link { url, .. } = &ann.kind
             && !url.is_empty()
         {
-            let label = if ann.start < ann.end && (ann.end as usize) <= text.len() {
-                let slice = &text[ann.start as usize..ann.end as usize];
-                if slice.is_empty() {
-                    None
+            let start = ann.start as usize;
+            let end = ann.end as usize;
+            let label = if ann.start < ann.end && end <= text.len() {
+                if text.is_char_boundary(start) && text.is_char_boundary(end) {
+                    let slice = &text[start..end];
+                    if slice.is_empty() {
+                        None
+                    } else {
+                        Some(slice.to_string())
+                    }
                 } else {
-                    Some(slice.to_string())
+                    // A non-ASCII chapter can have an annotation span whose byte
+                    // offsets land mid-codepoint (see the offset-drift note above);
+                    // slicing on that would panic. Degrade gracefully instead: drop
+                    // the label but keep the URI.
+                    builder.add_warning(crate::core::diagnostics::warning(
+                        EPUB_WARNING_SOURCE,
+                        format!(
+                            "A link annotation ({start}..{end}) did not align with a character \
+                             boundary in the source text; its label text was dropped, though the \
+                             link URL was preserved"
+                        ),
+                    ));
+                    None
                 }
             } else {
                 None
@@ -680,6 +715,11 @@ impl InternalDocumentExtractor for EpubExtractor {
             message: format!("Failed to open EPUB as ZIP: {}", e),
             source: None,
         })?;
+
+        let security_limits = config.security_limits.clone().unwrap_or_default();
+        ZipBombValidator::new(security_limits)
+            .validate(&mut archive)
+            .map_err(|e| crate::XbergError::validation(e.to_string()))?;
 
         let container_xml = read_file_from_zip(&mut archive, "META-INF/container.xml")?;
         let opf_path = parse_container_xml(&container_xml)?;

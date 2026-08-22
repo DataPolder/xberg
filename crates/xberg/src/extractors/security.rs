@@ -8,7 +8,7 @@
 //! - Entity length validation
 //! - Path traversal detection
 
-#[cfg(any(feature = "archives", feature = "hwpx", feature = "iwork"))]
+#[cfg(any(feature = "archives", feature = "hwpx", feature = "iwork", feature = "office"))]
 use std::io::{Read, Seek};
 
 /// Configuration for security limits across extractors.
@@ -286,13 +286,13 @@ pub(crate) fn enforce_page_count(count: usize, max_pages: Option<usize>) -> Resu
 }
 
 /// Helper struct for validating ZIP archives for security issues.
-#[cfg(any(feature = "archives", feature = "hwpx", feature = "iwork"))]
+#[cfg(any(feature = "archives", feature = "hwpx", feature = "iwork", feature = "office"))]
 #[cfg_attr(alef, alef(skip))]
 pub struct ZipBombValidator {
     limits: SecurityLimits,
 }
 
-#[cfg(any(feature = "archives", feature = "hwpx", feature = "iwork"))]
+#[cfg(any(feature = "archives", feature = "hwpx", feature = "iwork", feature = "office"))]
 impl ZipBombValidator {
     /// Create a new ZIP bomb validator.
     pub(crate) fn new(limits: SecurityLimits) -> Self {

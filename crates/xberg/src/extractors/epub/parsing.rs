@@ -8,6 +8,23 @@ use roxmltree;
 use std::io::Cursor;
 use zip::ZipArchive;
 
+/// Maximum bytes read from any single ZIP member (container.xml, the OPF, a spine
+/// XHTML document, or an embedded image), mirroring the `.take()` precedent set by
+/// DOCX (`crate::extraction::docx::MAX_UNCOMPRESSED_FILE_SIZE`).
+///
+/// `ZipBombValidator::validate` (called once at archive open, see
+/// `EpubExtractor::extract_content`) already bounds every entry's *declared*
+/// uncompressed size via the central directory -- but it trusts that header
+/// completely, never decompressing anything itself. This constant instead bounds
+/// the actual bytes read via `.take()`, so a member whose real decompressed stream
+/// exceeds what its header claims (a lying header, not just an honest large file)
+/// still cannot exhaust memory.
+///
+/// 16 MiB is generous for any real EPUB: a spine XHTML chapter is normally tens of
+/// KB of text, and even an unusually large embedded cover image rarely exceeds a
+/// few MB. No legitimate EPUB member is expected to approach this ceiling.
+pub(super) const MAX_EPUB_MEMBER_SIZE: u64 = 16 * 1024 * 1024;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct CanonicalHref {
     pub(super) path: String,
@@ -54,9 +71,10 @@ pub(super) fn read_file_from_zip(archive: &mut ZipArchive<Cursor<Vec<u8>>>, path
     };
     let path: &str = &path;
     match archive.by_name(path) {
-        Ok(mut file) => {
+        Ok(file) => {
             let mut content = String::new();
-            match std::io::Read::read_to_string(&mut file, &mut content) {
+            let mut bounded = std::io::Read::take(file, MAX_EPUB_MEMBER_SIZE);
+            match std::io::Read::read_to_string(&mut bounded, &mut content) {
                 Ok(_) => Ok(content),
                 Err(e) => Err(crate::XbergError::Parsing {
                     message: format!("Failed to read file from EPUB: {}", e),
