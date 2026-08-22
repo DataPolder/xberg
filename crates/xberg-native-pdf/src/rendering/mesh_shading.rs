@@ -46,6 +46,15 @@ const MAX_PATCHES: usize = 500_000;
 const MAX_SUBDIV: usize = 10;
 /// Upper bound on the Type 1 domain sampling grid (N×N nodes).
 const MAX_TYPE1_GRID: usize = 128;
+/// Upper bound on `/VerticesPerRow` (Type 5 lattices). ISO 32000-2
+/// §8.7.4.5.6 gives no upper bound, but a legitimate lattice mesh never
+/// approaches this. Without a cap here, `decode_type5_stream` sizes a
+/// `Vec::with_capacity` row buffer directly from the dictionary value — a
+/// `/VerticesPerRow` near `i64::MAX` aborts the process with a "capacity
+/// overflow" panic before the per-stream `MAX_TRIANGLES` budget ever gets a
+/// chance to bound anything, bypassing the "every count is capped" invariant
+/// this module documents at the top of the file.
+const MAX_VERTICES_PER_ROW: i64 = 1_000_000;
 
 /// A colour resolver: maps colour-space components (already in the
 /// shading's `/ColorSpace`) to straight-alpha RGBA. Supplied by the
@@ -231,7 +240,15 @@ impl MeshParams {
             .get("VerticesPerRow")
             .and_then(|o| o.as_integer())
             .unwrap_or(0)
-            .max(0) as usize;
+            .max(0);
+        // Matches the bits_per_coord/bits_per_comp/bits_per_flag bound just
+        // above: reject a hostile value here rather than let it reach the
+        // `Vec::with_capacity` in `decode_type5_stream`, which is not itself
+        // fallible. ~keep
+        if vertices_per_row > MAX_VERTICES_PER_ROW {
+            return None;
+        }
+        let vertices_per_row = vertices_per_row as usize;
         Some(Self {
             bits_per_flag,
             bits_per_coord,
@@ -1245,6 +1262,79 @@ mod tests {
         let tris = decode_type5_stream(&bytes, &params, 100);
         // (vpr-1) cells × 2 triangles = 4. ~keep
         assert_eq!(tris.len(), 4);
+    }
+
+    /// Build a minimal Type 5 shading dictionary, varying only
+    /// `/VerticesPerRow`, for the `MeshParams::parse` guard tests below.
+    fn type5_shading_dict(vertices_per_row: i64) -> HashMap<String, Object> {
+        let mut shading = HashMap::new();
+        shading.insert("BitsPerCoordinate".to_string(), Object::Integer(8));
+        shading.insert("BitsPerComponent".to_string(), Object::Integer(8));
+        shading.insert("BitsPerFlag".to_string(), Object::Integer(8));
+        shading.insert(
+            "Decode".to_string(),
+            Object::Array(vec![
+                Object::Real(0.0),
+                Object::Real(1.0),
+                Object::Real(0.0),
+                Object::Real(1.0),
+                Object::Real(0.0),
+                Object::Real(1.0),
+            ]),
+        );
+        shading.insert("VerticesPerRow".to_string(), Object::Integer(vertices_per_row));
+        shading
+    }
+
+    /// Positive control: an ordinary `/VerticesPerRow` (well below the guard
+    /// cap) must still parse to the exact declared value. A cap set too
+    /// tight would silently break every real Type 5 lattice mesh, so this
+    /// is the more important half of the guard test pair.
+    #[test]
+    fn parse_accepts_an_ordinary_vertices_per_row() {
+        let shading = type5_shading_dict(3);
+
+        let params = MeshParams::parse(&shading).expect("an ordinary VerticesPerRow must parse");
+
+        assert_eq!(params.vertices_per_row, 3);
+    }
+
+    /// The guard's own upper bound must still be accepted — only values
+    /// past it are rejected.
+    #[test]
+    fn parse_accepts_vertices_per_row_at_the_guard_cap() {
+        let shading = type5_shading_dict(MAX_VERTICES_PER_ROW);
+
+        let params = MeshParams::parse(&shading).expect("VerticesPerRow at the cap must still parse");
+
+        assert_eq!(params.vertices_per_row, MAX_VERTICES_PER_ROW as usize);
+    }
+
+    /// A `/VerticesPerRow` one past the cap must be rejected via `None`,
+    /// not merely at some higher value: the parser draws a hard line, not a
+    /// fuzzy one.
+    #[test]
+    fn parse_rejects_vertices_per_row_one_past_the_guard_cap() {
+        let shading = type5_shading_dict(MAX_VERTICES_PER_ROW + 1);
+
+        assert!(
+            MeshParams::parse(&shading).is_none(),
+            "VerticesPerRow one past the cap must be rejected"
+        );
+    }
+
+    /// A hostile `/VerticesPerRow` near `i64::MAX` must be rejected by
+    /// `parse` before it ever reaches `decode_type5_stream`'s
+    /// `Vec::with_capacity`, which is not itself fallible and would abort
+    /// the process with a "capacity overflow" panic.
+    #[test]
+    fn parse_rejects_a_vertices_per_row_that_would_abort_the_allocator() {
+        let shading = type5_shading_dict(i64::MAX);
+
+        assert!(
+            MeshParams::parse(&shading).is_none(),
+            "an i64::MAX VerticesPerRow must be rejected, not passed through to the allocator"
+        );
     }
 
     /// Barycentric colour interpolation: a triangle with red/green/blue

@@ -2038,6 +2038,34 @@ fn save_raw_as_jpeg(
     }
 }
 
+/// Bound the pixel buffer a JBIG2 decode will need before allocating it.
+///
+/// `/Width` and `/Height` come straight from the image dictionary with no
+/// upper bound, and hayro-jbig2 decodes the embedded codestream using its
+/// OWN internal header — a tiny valid codestream paired with astronomical
+/// declared dimensions decodes fine and then sizes the pixel buffer from the
+/// dictionary alone. `width * height` in `u32` panics on overflow in debug
+/// and silently wraps to a too-small capacity in release, after which
+/// `push_pixel`/`next_line` grow the buffer unbounded to make up the
+/// difference. Bound it the same 256 MiB cap `samples_to_decoded_bytes` and
+/// `expand_indexed_to_rgb_with_transform` use for their own dictionary-driven
+/// allocations. ~keep
+fn checked_jbig2_pixel_capacity(width: u32, height: u32) -> Result<usize> {
+    const MAX_JBIG2_PIXEL_BYTES: usize = 256 * 1024 * 1024;
+    let pixel_count = (width as usize).checked_mul(height as usize).ok_or_else(|| {
+        Error::Image(format!(
+            "JBIG2 image pixel-count overflow: {width} × {height} exceeds usize"
+        ))
+    })?;
+    if pixel_count > MAX_JBIG2_PIXEL_BYTES {
+        return Err(Error::Image(format!(
+            "JBIG2 image would decode to {pixel_count} pixel bytes, exceeds guard limit of \
+             {MAX_JBIG2_PIXEL_BYTES} bytes (width={width}, height={height})"
+        )));
+    }
+    Ok(pixel_count)
+}
+
 /// Decode a JBIG2-compressed PDF image stream into raw grayscale pixels.
 fn decode_jbig2_image(
     xobject: &crate::object::Object,
@@ -2047,6 +2075,14 @@ fn decode_jbig2_image(
     width: u32,
     height: u32,
 ) -> Result<ImageData> {
+    // Bound the declared dimensions before decoding a single byte of the
+    // codestream: hayro-jbig2 reads its own internal header, so a tiny valid
+    // stream can carry an astronomical `/Width` × `/Height` and still decode
+    // "successfully", after which nothing else in this function would have
+    // caught the size before allocating. Fail fast on the dictionary values
+    // alone rather than doing wasted decode work first. ~keep
+    let pixel_count = checked_jbig2_pixel_capacity(width, height)?;
+
     // The Jbig2Decoder in src/decoders/jbig2.rs is a pass-through: it returns
     // the raw compressed bitstream unchanged, which is exactly what hayro-jbig2
     // needs as input. ~keep
@@ -2092,7 +2128,7 @@ fn decode_jbig2_image(
     }
 
     let mut collector = PixelCollector {
-        pixels: Vec::with_capacity((width * height) as usize),
+        pixels: Vec::with_capacity(pixel_count),
         row_buf: Vec::with_capacity(width as usize),
     };
 
@@ -2104,6 +2140,39 @@ fn decode_jbig2_image(
         pixels: collector.pixels,
         format: PixelFormat::Grayscale,
     })
+}
+
+#[cfg(test)]
+mod jbig2_pixel_capacity_tests {
+    use super::checked_jbig2_pixel_capacity;
+
+    #[test]
+    fn should_accept_an_ordinary_scanned_page_size() {
+        // A typical 300 DPI US Letter scan: well under the 256 MiB cap. ~keep
+        let capacity = checked_jbig2_pixel_capacity(2550, 3300).expect("an ordinary page size must not be rejected");
+
+        assert_eq!(capacity, 2550 * 3300);
+    }
+
+    #[test]
+    fn should_reject_dimensions_whose_pixel_count_exceeds_the_guard_cap() {
+        // 20_000 x 20_000 = 400_000_000 pixel bytes, over the 256 MiB (268_435_456
+        // byte) cap; the tiny declared codestream size this stands in for is
+        // exactly the shape a hostile JBIG2 XObject uses. ~keep
+        let result = checked_jbig2_pixel_capacity(20_000, 20_000);
+
+        assert!(result.is_err(), "oversized JBIG2 image must be rejected, not decoded");
+    }
+
+    #[test]
+    fn should_reject_dimensions_whose_product_overflows_usize() {
+        let result = checked_jbig2_pixel_capacity(u32::MAX, u32::MAX);
+
+        assert!(
+            result.is_err(),
+            "overflowing width * height must be rejected, not panic"
+        );
+    }
 }
 
 /// Decode a JBIG2 `/ImageMask` into packed 1-bit rows in PDF *sample* convention.
@@ -2133,7 +2202,7 @@ pub(crate) fn decode_jbig2_image_mask_bits(
         ));
     };
 
-    Ok(pack_image_mask_rows(&pixels, width, height))
+    pack_image_mask_rows(&pixels, width, height)
 }
 
 /// Pack one grayscale byte per pixel into MSB-first 1-bit rows in PDF *sample*
@@ -2144,9 +2213,33 @@ pub(crate) fn decode_jbig2_image_mask_bits(
 /// background must *set* it. Pixels missing from a short decode are treated as
 /// background: leaving a region unpainted is recoverable, painting spurious ink over
 /// the page is not.
-fn pack_image_mask_rows(pixels: &[u8], width: u32, height: u32) -> Vec<u8> {
+fn pack_image_mask_rows(pixels: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
+    // `/Width` and `/Height` come straight from the image dictionary with no
+    // upper bound. A JBIG2 `/ImageMask` decodes its codestream using
+    // hayro-jbig2's own embedded header, so a tiny valid stream can still
+    // declare astronomical dimensions here, sizing both this allocation and
+    // the nested per-pixel loop below from the dictionary alone. Bound the
+    // packed output the same 256 MiB cap `expand_indexed_to_rgb_with_transform`
+    // and `samples_to_decoded_bytes` use for their own dictionary-driven
+    // allocations: `row_bytes * height` bounded this way also bounds the
+    // `y * width + x` index arithmetic in the loop, so no separate overflow
+    // check is needed there. ~keep
+    const MAX_MASK_OUTPUT_BYTES: usize = 256 * 1024 * 1024;
+
     let row_bytes = (width as usize).div_ceil(8);
-    let mut packed = vec![0u8; row_bytes * height as usize];
+    let packed_len = row_bytes.checked_mul(height as usize).ok_or_else(|| {
+        Error::Image(format!(
+            "ImageMask row-bytes overflow: {row_bytes} × {height} exceeds usize"
+        ))
+    })?;
+    if packed_len > MAX_MASK_OUTPUT_BYTES {
+        return Err(Error::Image(format!(
+            "ImageMask decode would produce {packed_len} bytes, exceeds guard limit of \
+             {MAX_MASK_OUTPUT_BYTES} bytes (width={width}, height={height})"
+        )));
+    }
+
+    let mut packed = vec![0u8; packed_len];
     for y in 0..height as usize {
         for x in 0..width as usize {
             let is_background = pixels.get(y * width as usize + x).is_none_or(|&pixel| pixel >= 128);
@@ -2155,7 +2248,7 @@ fn pack_image_mask_rows(pixels: &[u8], width: u32, height: u32) -> Vec<u8> {
             }
         }
     }
-    packed
+    Ok(packed)
 }
 
 /// Decode a JPEG 2000 (`/JPXDecode`) image stream into raw interleaved samples.
@@ -3924,7 +4017,7 @@ mod image_mask_packing_tests {
             INK, BACKGROUND, INK, BACKGROUND, BACKGROUND, BACKGROUND, BACKGROUND, BACKGROUND,
         ];
 
-        let packed = pack_image_mask_rows(&pixels, 8, 1);
+        let packed = pack_image_mask_rows(&pixels, 8, 1).expect("decode within the guard cap must not error");
 
         // MSB-first: bit 7 is x=0. Ink clears, background sets => 0b0101_1111. ~keep
         assert_eq!(packed, vec![0b0101_1111]);
@@ -3937,7 +4030,7 @@ mod image_mask_packing_tests {
         // Row 0 all ink, row 1 all background. ~keep
         let pixels = [[INK; 9], [BACKGROUND; 9]].concat();
 
-        let packed = pack_image_mask_rows(&pixels, 9, 2);
+        let packed = pack_image_mask_rows(&pixels, 9, 2).expect("decode within the guard cap must not error");
 
         assert_eq!(packed.len(), 4, "2 rows x 2 bytes");
         assert_eq!(packed[0], 0b0000_0000, "row 0 px 0-7: ink");
@@ -3955,7 +4048,7 @@ mod image_mask_packing_tests {
         // spurious ink over the page is not. ~keep
         let pixels = [INK, INK];
 
-        let packed = pack_image_mask_rows(&pixels, 8, 1);
+        let packed = pack_image_mask_rows(&pixels, 8, 1).expect("decode within the guard cap must not error");
 
         assert_eq!(packed, vec![0b0011_1111], "only the 2 decoded pixels are ink");
     }
@@ -3965,7 +4058,7 @@ mod image_mask_packing_tests {
         // The predicate is `>= 128`; 127 is ink, 128 is background. ~keep
         let pixels = [127, 128, 127, 128, 128, 128, 128, 128];
 
-        let packed = pack_image_mask_rows(&pixels, 8, 1);
+        let packed = pack_image_mask_rows(&pixels, 8, 1).expect("decode within the guard cap must not error");
 
         assert_eq!(packed, vec![0b0101_1111]);
     }
@@ -3974,15 +4067,36 @@ mod image_mask_packing_tests {
     fn should_produce_a_fully_set_buffer_when_every_pixel_is_background() {
         // The blank-page shape: nothing paints, which is exactly what a dropped mask
         // used to look like. Distinguishing this from ink is the whole point. ~keep
-        let packed = pack_image_mask_rows(&[BACKGROUND; 16], 16, 1);
+        let packed =
+            pack_image_mask_rows(&[BACKGROUND; 16], 16, 1).expect("decode within the guard cap must not error");
 
         assert_eq!(packed, vec![0xFF, 0xFF]);
     }
 
     #[test]
     fn should_produce_a_fully_cleared_buffer_when_every_pixel_is_ink() {
-        let packed = pack_image_mask_rows(&[INK; 16], 16, 1);
+        let packed = pack_image_mask_rows(&[INK; 16], 16, 1).expect("decode within the guard cap must not error");
 
         assert_eq!(packed, vec![0x00, 0x00]);
+    }
+
+    #[test]
+    fn should_reject_dimensions_whose_packed_size_exceeds_the_guard_cap() {
+        // 100_000 x 100_000 packs to ~1.16 GiB, comfortably over the 256 MiB
+        // cap, and the source pixel slice is empty — proving the guard
+        // triggers before any pixel is read, not merely after a slow scan. ~keep
+        let result = pack_image_mask_rows(&[], 100_000, 100_000);
+
+        assert!(result.is_err(), "oversized ImageMask must be rejected, not decoded");
+    }
+
+    #[test]
+    fn should_reject_dimensions_whose_row_byte_product_overflows_usize() {
+        let result = pack_image_mask_rows(&[], u32::MAX, u32::MAX);
+
+        assert!(
+            result.is_err(),
+            "overflowing row_bytes * height must be rejected, not panic"
+        );
     }
 }
