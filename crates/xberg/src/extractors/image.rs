@@ -2060,11 +2060,67 @@ fn enforce_image_page_limit(content: &[u8], mime_type: &str, config: &Extraction
     )?)
 }
 
+/// Guards the one-time "max_pages is unenforced for TIFF" warning so it fires
+/// at most once per process, not once per extraction — same idiom as
+/// `DEFAULT_CAP_WARNED` in `core::config::concurrency`.
+#[cfg(not(feature = "ocr"))]
+static UNENFORCED_TIFF_PAGE_LIMIT_WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Emit the "`max_pages` is unenforced for TIFF in this build" warning at most
+/// once per `already_warned` guard.
+///
+/// The guard is a parameter rather than a direct read of
+/// [`UNENFORCED_TIFF_PAGE_LIMIT_WARNED`] so the once-per-process property can be
+/// tested against a guard the test owns, following
+/// `warn_default_thread_cap_once` in `core::config::concurrency`: asserting on
+/// the real global from more than one test would be unfixably racy.
+#[cfg(not(feature = "ocr"))]
+fn warn_unenforced_tiff_page_limit_once(already_warned: &std::sync::atomic::AtomicBool, max_pages: usize) {
+    if already_warned
+        .compare_exchange(
+            false,
+            true,
+            std::sync::atomic::Ordering::SeqCst,
+            std::sync::atomic::Ordering::SeqCst,
+        )
+        .is_ok()
+    {
+        tracing::warn!(
+            max_pages,
+            "security_limits.max_pages is set but cannot be enforced on TIFF images in this \
+             build: counting TIFF frames requires the `ocr` feature, which this build does not \
+             have enabled. TIFF page limits are silently unenforced until the binary is rebuilt \
+             with `--features ocr`."
+        );
+    }
+}
+
 /// No-op stub for builds without the `ocr` feature: there is no `tiff` crate
 /// dependency available to count frames, so `max_pages` is not enforced on TIFF
-/// images at all in these builds (see `SecurityLimits::max_pages`'s doc comment).
+/// images at all in these builds (see `SecurityLimits::max_pages`'s doc
+/// comment). A one-shot warning surfaces the gap instead of silently ignoring
+/// a limit the caller explicitly set.
 #[cfg(not(feature = "ocr"))]
-fn enforce_image_page_limit(_content: &[u8], _mime_type: &str, _config: &ExtractionConfig) -> Result<()> {
+fn enforce_image_page_limit(_content: &[u8], mime_type: &str, config: &ExtractionConfig) -> Result<()> {
+    enforce_image_page_limit_stub_with_guard(mime_type, config, &UNENFORCED_TIFF_PAGE_LIMIT_WARNED)
+}
+
+/// Pure core of the `not(feature = "ocr")` [`enforce_image_page_limit`], parameterized on the
+/// one-shot warning guard so tests can exercise it without touching process-global state.
+#[cfg(not(feature = "ocr"))]
+fn enforce_image_page_limit_stub_with_guard(
+    mime_type: &str,
+    config: &ExtractionConfig,
+    already_warned: &std::sync::atomic::AtomicBool,
+) -> Result<()> {
+    let max_pages = config.security_limits.as_ref().and_then(|limits| limits.max_pages);
+    let Some(max_pages) = max_pages else {
+        return Ok(());
+    };
+    if !mime_type.to_lowercase().contains("tiff") {
+        return Ok(());
+    }
+    warn_unenforced_tiff_page_limit_once(already_warned, max_pages);
     Ok(())
 }
 
@@ -4161,5 +4217,177 @@ mod tests {
             3,
             "all 3 regions should be OCR'd when nothing is cancelled"
         );
+    }
+
+    // -- enforce_image_page_limit stub (not(feature = "ocr")) -------------------
+    //
+    // The `ocr`-enabled sibling counts real TIFF frames and is exercised
+    // elsewhere; these tests cover the no-op stub compiled when the `tiff`
+    // crate isn't available, which instead emits a one-shot warning so a
+    // caller-set `max_pages` going unenforced is discoverable (#1451-adjacent).
+    //
+    // `warn_unenforced_tiff_page_limit_once` takes its "already warned" guard
+    // as a parameter rather than reading `UNENFORCED_TIFF_PAGE_LIMIT_WARNED`
+    // directly, mirroring `warn_default_thread_cap_once` in
+    // `core::config::concurrency`: a shared process-global guard can only be
+    // asserted from a single test without the assertion racing every other
+    // test in the binary that reaches the same code path. Three of the four
+    // tests below use a guard they own, so they are independent of each other
+    // and of test execution order; only the "fires" test below exercises the
+    // real global-backed entry point (`enforce_image_page_limit`), and it is
+    // the only test in this binary that does so.
+    #[cfg(not(feature = "ocr"))]
+    mod enforce_image_page_limit_stub {
+        use std::sync::atomic::AtomicBool;
+        use std::sync::{Arc, Mutex};
+
+        use tracing_subscriber::layer::SubscriberExt as _;
+        use tracing_subscriber::{EnvFilter, Layer};
+
+        use super::super::{
+            ExtractionConfig, enforce_image_page_limit, enforce_image_page_limit_stub_with_guard,
+        };
+        use crate::extractors::security::SecurityLimits;
+
+        /// A tracing `Layer` that records the level of every emitted event.
+        #[derive(Clone, Default)]
+        struct EventCapture {
+            levels: Arc<Mutex<Vec<tracing::Level>>>,
+        }
+
+        impl<S> Layer<S> for EventCapture
+        where
+            S: tracing::Subscriber,
+        {
+            fn on_event(&self, event: &tracing::Event<'_>, _ctx: tracing_subscriber::layer::Context<'_, S>) {
+                self.levels.lock().unwrap().push(*event.metadata().level());
+            }
+        }
+
+        fn warn_event_count(capture: &EventCapture) -> usize {
+            capture
+                .levels
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|level| **level == tracing::Level::WARN)
+                .count()
+        }
+
+        fn config_with_max_pages(max_pages: usize) -> ExtractionConfig {
+            ExtractionConfig {
+                security_limits: Some(SecurityLimits {
+                    max_pages: Some(max_pages),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }
+        }
+
+        /// Changing this to `_content.is_empty()` (as opposed to inspecting
+        /// `mime_type`) would make this test pass for the wrong reason; the
+        /// content bytes are irrelevant to the stub, which is the point.
+        const TIFF_MIME: &str = "image/tiff";
+
+        /// The real, process-global-backed entry point warns exactly once
+        /// across repeated calls when `max_pages` is set on a TIFF. Bundled
+        /// into a single test (rather than a separate "fires" and "fires
+        /// once" test) because both assertions read the same global guard;
+        /// splitting them would make the pass/fail outcome depend on which
+        /// test the harness happens to run first.
+        ///
+        /// Fails if: the `if !mime_type...contains("tiff")` check in
+        /// `enforce_image_page_limit_stub_with_guard` is removed or inverted;
+        /// the `let Some(max_pages) = max_pages else { return Ok(()) };` guard
+        /// is removed; `warn_unenforced_tiff_page_limit_once` is changed to
+        /// unconditionally warn (no longer once); or the call to
+        /// `warn_unenforced_tiff_page_limit_once` is deleted altogether.
+        #[test]
+        fn fires_exactly_once_for_tiff_with_max_pages_set_across_repeated_calls() {
+            let capture = EventCapture::default();
+            let subscriber = tracing_subscriber::registry()
+                .with(EnvFilter::new("warn"))
+                .with(capture.clone());
+            let config = config_with_max_pages(3);
+
+            tracing::subscriber::with_default(subscriber, || {
+                for _ in 0..5 {
+                    let result = enforce_image_page_limit(b"unused", TIFF_MIME, &config);
+                    assert!(result.is_ok(), "the stub warns but never rejects extraction");
+                }
+            });
+
+            assert_eq!(
+                warn_event_count(&capture),
+                1,
+                "expected exactly one WARN across repeated calls, got {:?}",
+                capture.levels.lock().unwrap()
+            );
+        }
+
+        /// Fails if: the `let Some(max_pages) = max_pages else { return
+        /// Ok(()) };` early return in `enforce_image_page_limit_stub_with_guard`
+        /// is removed (or its condition inverted), causing an unset
+        /// `max_pages` to warn anyway.
+        #[test]
+        fn does_not_fire_when_max_pages_is_unset() {
+            let already_warned = AtomicBool::new(false);
+            let capture = EventCapture::default();
+            let subscriber = tracing_subscriber::registry()
+                .with(EnvFilter::new("warn"))
+                .with(capture.clone());
+            let config = ExtractionConfig::default();
+            assert!(config.security_limits.is_none());
+
+            let result = tracing::subscriber::with_default(subscriber, || {
+                enforce_image_page_limit_stub_with_guard(TIFF_MIME, &config, &already_warned)
+            });
+
+            assert!(result.is_ok());
+            assert_eq!(warn_event_count(&capture), 0);
+        }
+
+        /// Fails if: the `if !mime_type.to_lowercase().contains("tiff") {
+        /// return Ok(()); }` guard in `enforce_image_page_limit_stub_with_guard`
+        /// is removed (or its condition inverted), causing a non-TIFF mime type
+        /// to warn.
+        #[test]
+        fn does_not_fire_for_non_tiff_mime() {
+            let already_warned = AtomicBool::new(false);
+            let capture = EventCapture::default();
+            let subscriber = tracing_subscriber::registry()
+                .with(EnvFilter::new("warn"))
+                .with(capture.clone());
+            let config = config_with_max_pages(3);
+
+            let result = tracing::subscriber::with_default(subscriber, || {
+                enforce_image_page_limit_stub_with_guard("image/png", &config, &already_warned)
+            });
+
+            assert!(result.is_ok());
+            assert_eq!(warn_event_count(&capture), 0);
+        }
+
+        /// A second, independently-guarded call for a TIFF with `max_pages`
+        /// set still succeeds and still warns — proving the "does not fire"
+        /// tests above are silent because their inputs don't qualify, not
+        /// because the warning path is broken. Fails under the same mutations
+        /// as `fires_exactly_once_for_tiff_with_max_pages_set_across_repeated_calls`.
+        #[test]
+        fn fires_when_max_pages_is_set_and_mime_is_tiff_with_a_fresh_guard() {
+            let already_warned = AtomicBool::new(false);
+            let capture = EventCapture::default();
+            let subscriber = tracing_subscriber::registry()
+                .with(EnvFilter::new("warn"))
+                .with(capture.clone());
+            let config = config_with_max_pages(3);
+
+            let result = tracing::subscriber::with_default(subscriber, || {
+                enforce_image_page_limit_stub_with_guard(TIFF_MIME, &config, &already_warned)
+            });
+
+            assert!(result.is_ok());
+            assert_eq!(warn_event_count(&capture), 1);
+        }
     }
 }
