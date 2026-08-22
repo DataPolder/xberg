@@ -929,6 +929,15 @@ impl InternalDocumentExtractor for DocxExtractor {
             }
         };
 
+        // This is a second, independent open of the same archive (the first happened
+        // inside `parse_docx_core` above, for text/table extraction). It must run the
+        // same ZIP-bomb/resource-exhaustion checks as the first open
+        // (`extraction::docx::parser::validate_archive_security`) instead of reading
+        // metadata parts from an unvalidated archive.
+        crate::extraction::docx::parser::validate_archive_security(&mut archive, max_files_in_archive).map_err(
+            |e| crate::error::XbergError::parsing(format!("DOCX metadata archive validation failed: {}", e)),
+        )?;
+
         let mut metadata_map = AHashMap::new();
         let mut parsed_keywords: Option<Vec<String>> = None;
         let mut docx_core_properties = None;

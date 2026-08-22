@@ -419,7 +419,12 @@ impl Document {
                 visited += 1;
                 if let Some(style_def) = catalog.styles.get(id) {
                     if let Some(level) = style_def.paragraph_properties.outline_level {
-                        return Some((level + 1).min(6));
+                        // `outline_level` is a document-controlled `u8` (styles.xml's
+                        // `w:outlineLvl w:val`) that can legally be as high as 255; a
+                        // plain `level + 1` overflows when `level == 255` (panics under
+                        // overflow-checks, wraps to 0 otherwise). `saturating_add` keeps
+                        // this branch's result pinned at the `.min(6)` ceiling either way.
+                        return Some(level.saturating_add(1).min(6));
                     }
                     if let Some(ref name) = style_def.name
                         && (name == "Title" || name == "title")
@@ -1361,6 +1366,30 @@ fn push_format_revision(
     });
 }
 
+/// Maximum indentation depth honoured for a `w:ilvl` (list nesting level).
+///
+/// Word's own list-formatting UI caps nesting at 9 levels (`w:ilvl` 0-8); this is also
+/// the practical ceiling for `Paragraph::to_markdown`'s two-space-per-level indent and
+/// for the internal-document builder's per-level `push_list` loop
+/// (`extractors/docx.rs::build_internal_document`). `w:ilvl` is a bare `.parse::<i64>()`
+/// of document-controlled text with no sign check or upper bound, so without this clamp
+/// a crafted `w:val="-1"` turns into `usize::MAX` in the indent's `"  ".repeat(level as
+/// usize)` (capacity-overflow panic), and `w:val="10000000000"` turns into a ~20 GB
+/// allocation attempt (uncatchable `handle_alloc_error` abort) or, via the list-depth
+/// loop, billions of `push_list` calls.
+const MAX_LIST_NESTING_LEVEL: i64 = 8;
+
+/// Clamp a raw `w:ilvl` value into the plausible `0..=MAX_LIST_NESTING_LEVEL` range.
+///
+/// A negative or absurdly large indentation level is malformed input, not a list depth
+/// to be honoured verbatim: this clamps rather than rejecting the whole paragraph, so a
+/// document with one garbage `w:ilvl` still extracts its text and list structure (just
+/// pinned to the nearest valid depth), matching the crate's "preserve partial results on
+/// failure" extraction-safety rule instead of discarding an otherwise-good paragraph.
+fn clamp_numbering_level(level: i64) -> i64 {
+    level.clamp(0, MAX_LIST_NESTING_LEVEL)
+}
+
 /// Apply paragraph-level properties from a `<w:pStyle>`, `<w:ilvl>`, or `<w:numId>` element.
 ///
 /// Resolves the correct paragraph (table context vs top-level) automatically.
@@ -1378,7 +1407,7 @@ fn apply_paragraph_property(
     if let Some(para) = para {
         match e.name().as_ref() as &[u8] {
             b"w:pStyle" => para.style = get_val_attr_string(e),
-            b"w:ilvl" => para.numbering_level = get_val_attr(e),
+            b"w:ilvl" => para.numbering_level = get_val_attr(e).map(clamp_numbering_level),
             b"w:numId" => para.numbering_id = get_val_attr(e),
             _ => {}
         }
@@ -1789,7 +1818,12 @@ fn apply_symbol(e: &BytesStart, current_run: &mut Option<Run>, warnings: &mut Ve
 ///   10,000 by default; see `SecurityBudget::from_config`/`from_limits` for how a
 ///   caller-supplied `ExtractionConfig` overrides the default)
 /// - Maximum total uncompressed size (500 MB default)
-fn validate_archive_security(
+///
+/// `pub(crate)` so the second, metadata-only archive open in
+/// `extractors/docx.rs::extract_content` can run the same checks the first (parsing)
+/// open does — that second open used to bypass validation entirely (GH security
+/// review: unvalidated second archive open).
+pub(crate) fn validate_archive_security(
     archive: &mut zip::ZipArchive<impl Read + Seek>,
     max_entries: usize,
 ) -> Result<(), DocxParseError> {
@@ -3124,7 +3158,7 @@ impl<R: Read + Seek> DocxParser<R> {
 }
 
 #[derive(Debug, thiserror::Error)]
-enum DocxParseError {
+pub(crate) enum DocxParseError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
@@ -5759,5 +5793,31 @@ mod tests {
         let md = doc.to_markdown(false);
         assert!(!md.contains("!["), "Should NOT contain image placeholder, got: {md}");
         assert!(md.contains("Hello world"), "Text content must be preserved");
+    }
+
+    /// `w:ilvl` is a bare `.parse::<i64>()` of an attacker-controlled attribute, and the
+    /// value reaches `"  ".repeat(level as usize)`. `-1 as usize` is `usize::MAX`, so the
+    /// repeat's internal `len().checked_mul(n)` panics with "capacity overflow"; a large
+    /// positive value asks for an allocation big enough to abort the process outright.
+    /// These pin the clamp directly, because the end-to-end DOCX tests cannot: a list
+    /// starting at a non-zero level renders flat today, so every level above 0 produces
+    /// identical markdown there regardless of the cap.
+    #[test]
+    fn clamp_numbering_level_floors_a_negative_level_at_zero() {
+        assert_eq!(clamp_numbering_level(-1), 0);
+        assert_eq!(clamp_numbering_level(i64::MIN), 0);
+    }
+
+    #[test]
+    fn clamp_numbering_level_caps_an_oversized_level_at_the_nesting_ceiling() {
+        assert_eq!(clamp_numbering_level(10_000_000_000), MAX_LIST_NESTING_LEVEL);
+        assert_eq!(clamp_numbering_level(i64::MAX), MAX_LIST_NESTING_LEVEL);
+    }
+
+    #[test]
+    fn clamp_numbering_level_leaves_every_level_word_itself_permits_untouched() {
+        for level in 0..=MAX_LIST_NESTING_LEVEL {
+            assert_eq!(clamp_numbering_level(level), level, "level {level} is within Word's own range");
+        }
     }
 }

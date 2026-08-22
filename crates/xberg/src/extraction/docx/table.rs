@@ -366,6 +366,28 @@ pub(crate) fn parse_row_properties(
     Ok(props)
 }
 
+/// Maximum plausible `w:gridSpan` value for a single table cell.
+///
+/// Word's UI caps a table at 63 columns; this ceiling is set well above that (1,024) so
+/// wide, tooling-generated tables (spreadsheet exports and similar) still round-trip,
+/// while a value that could not correspond to any real document is rejected. Every unit
+/// of `gridSpan` becomes one cloned copy of the cell's text at each of the four
+/// consumption sites (`extractors/docx.rs` x2, `extraction/docx/parser.rs` x2), so an
+/// unclamped `w:val="4294967295"` would attempt roughly 4 billion `String` clones.
+const MAX_CELL_GRID_SPAN: u32 = 1024;
+
+/// Reject a `w:gridSpan` value outside the plausible `1..=MAX_CELL_GRID_SPAN` range.
+///
+/// Rather than silently truncating a corrupt value down into range (which would
+/// fabricate a plausible-looking but wrong column count), an out-of-range span is
+/// dropped back to `None`, so the cell falls back to its unspanned default of 1 column
+/// (`unwrap_or(1)` at every consumption site). This mirrors `parse_width_element`'s
+/// existing convention for this module: an unparseable/invalid property value degrades
+/// to "not specified" rather than erroring the whole document.
+fn validate_grid_span(span: Option<u32>) -> Option<u32> {
+    span.filter(|&value| (1..=MAX_CELL_GRID_SPAN).contains(&value))
+}
+
 /// Parse cell-level properties from streaming XML reader.
 ///
 /// Expects the reader to be positioned just after the `<w:tcPr>` start tag.
@@ -391,7 +413,7 @@ pub(crate) fn parse_cell_properties(
                         props.width = parse_width_element(&e);
                     }
                     b"gridSpan" => {
-                        props.grid_span = get_attribute_u32(&e, b"val");
+                        props.grid_span = validate_grid_span(get_attribute_u32(&e, b"val"));
                     }
                     b"vMerge" => {
                         props.v_merge = Some(parse_vmerge(&e));
@@ -431,7 +453,7 @@ pub(crate) fn parse_cell_properties(
                         props.width = parse_width_element(&e);
                     }
                     b"gridSpan" => {
-                        props.grid_span = get_attribute_u32(&e, b"val");
+                        props.grid_span = validate_grid_span(get_attribute_u32(&e, b"val"));
                     }
                     b"vMerge" => {
                         props.v_merge = Some(parse_vmerge(&e));
