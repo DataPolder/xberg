@@ -11,6 +11,7 @@
 //!        `"capacity overflow"`.
 //!      - `w:val="10000000000"` -> a ~20 GB allocation attempt, which aborts the process
 //!        via `handle_alloc_error` rather than panicking catchably.
+//!
 //!    Fixed by `extraction/docx/parser.rs::clamp_numbering_level`, applied where
 //!    `w:ilvl` is parsed, clamping into `0..=MAX_LIST_NESTING_LEVEL` (8, matching Word's
 //!    own 9-level list-nesting UI cap).

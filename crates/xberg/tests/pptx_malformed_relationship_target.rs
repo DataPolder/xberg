@@ -6,11 +6,11 @@
 //! it does not prove a third byte exists, nor that byte 3 lands on a UTF-8 char
 //! boundary. Two attacker-controlled shapes reach the slice and panic:
 //!
-//!   - `Target=".."`   -> the string is exactly 2 bytes long, so `s[3..]` is out
-//!                        of bounds ("byte index 3 is out of bounds").
-//!   - `Target="..é"`  -> `é` is a 2-byte UTF-8 sequence, so the string is 4 bytes
-//!                        long but byte index 3 falls inside `é`'s encoding
-//!                        ("byte index 3 is not a char boundary").
+//! - `Target=".."` -> the string is exactly 2 bytes long, so `s[3..]` is out of
+//!   bounds ("byte index 3 is out of bounds").
+//! - `Target="..é"` -> `é` is a 2-byte UTF-8 sequence, so the string is 4 bytes
+//!   long but byte index 3 falls inside `é`'s encoding ("byte index 3 is not a
+//!   char boundary").
 //!
 //! `Target` is a verbatim, unfiltered XML attribute read from a relationship part
 //! inside the PPTX ZIP (`pptx/parser.rs::parse_slide_rels`), so a crafted `.pptx`
