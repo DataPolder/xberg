@@ -3,10 +3,14 @@
 //! Text rendered as garbled symbols when system fonts are missing.
 //! The font parsing failure was silent, and the fallback font list
 //! lacked common Linux alternatives.
+//!
+//! Two save-roundtrip tests (`test_text_preserved_after_save_roundtrip`,
+//! `test_font_resources_preserved_after_save`) exercised
+//! `DocumentEditor::save_with_options(SaveOptions::full_rewrite())` and were
+//! removed along with the editor; the read-only extraction test below is
+//! unaffected.
 
-use tempfile::tempdir;
 use xberg_native_pdf::document::PdfDocument;
-use xberg_native_pdf::editor::{DocumentEditor, EditableDocument, SaveOptions};
 
 /// Create a minimal PDF with a Type1 font and text content.
 fn create_text_pdf() -> Vec<u8> {
@@ -59,49 +63,5 @@ fn test_text_extraction_with_standard_font() {
         text.contains("Sample text"),
         "Should extract readable text, got: '{}'",
         text
-    );
-}
-
-#[test]
-fn test_text_preserved_after_save_roundtrip() {
-    let dir = tempdir().unwrap();
-    let original_path = dir.path().join("text_rt.pdf");
-    let saved_path = dir.path().join("text_rt_saved.pdf");
-
-    std::fs::write(&original_path, create_text_pdf()).unwrap();
-
-    let mut editor = DocumentEditor::open(&original_path).unwrap();
-    editor
-        .save_with_options(&saved_path, SaveOptions::full_rewrite())
-        .unwrap();
-
-    let saved_bytes = std::fs::read(&saved_path).unwrap();
-    let saved_doc = PdfDocument::from_bytes(saved_bytes).unwrap();
-    let text = saved_doc.extract_text(0).unwrap_or_default();
-    assert!(
-        text.contains("Sample text"),
-        "Text should be preserved after roundtrip save, got: '{}'",
-        text
-    );
-}
-
-#[test]
-fn test_font_resources_preserved_after_save() {
-    let dir = tempdir().unwrap();
-    let original_path = dir.path().join("font_res.pdf");
-    let saved_path = dir.path().join("font_res_saved.pdf");
-
-    std::fs::write(&original_path, create_text_pdf()).unwrap();
-
-    let mut editor = DocumentEditor::open(&original_path).unwrap();
-    editor
-        .save_with_options(&saved_path, SaveOptions::full_rewrite())
-        .unwrap();
-
-    let saved_bytes = std::fs::read(&saved_path).unwrap();
-    let saved_content = String::from_utf8_lossy(&saved_bytes);
-    assert!(
-        saved_content.contains("Helvetica"),
-        "Saved PDF should preserve font references"
     );
 }

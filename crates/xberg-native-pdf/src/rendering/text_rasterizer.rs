@@ -895,29 +895,6 @@ impl TextRasterizer {
         Ok(total_advance)
     }
 
-    /// Get font info for a specific font name from resources.
-    #[allow(dead_code)]
-    fn get_font_info(&self, doc: &PdfDocument, resources: &Object, font_name: &str) -> Result<crate::fonts::FontInfo> {
-        if let Object::Dictionary(res_dict) = resources {
-            if let Some(Object::Dictionary(fonts)) = res_dict.get("Font") {
-                if let Some(font_ref) = fonts.get(font_name) {
-                    let font_obj = doc.resolve_object(font_ref)?;
-                    let info = crate::fonts::FontInfo::from_dict(&font_obj, doc)?;
-                    tracing::trace!(
-                        "Resolved font '{}': subtype={}, encoding={:?}, has_to_unicode={}, has_embedded={}",
-                        info.base_font,
-                        info.subtype,
-                        info.encoding,
-                        info.to_unicode.is_some(),
-                        info.embedded_font_data.is_some()
-                    );
-                    return Ok(info);
-                }
-            }
-        }
-        Err(Error::InvalidPdf(format!("Font {} not found", font_name)))
-    }
-
     /// Find and load font data from system. Returns a `fontdb::ID` alongside
     /// the `Arc`-wrapped bytes so callers can look up the parsed-face cache.
     fn load_font_data(&self, pdf_font_name: &str) -> Option<(fontdb::ID, Arc<Vec<u8>>, u32)> {

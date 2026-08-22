@@ -2,13 +2,22 @@
 //!
 //! Tests the export of form field data to FDF (Forms Data Format) and
 //! XFDF (XML Forms Data Format) per ISO 32000-1:2008 Section 12.7.7.
+//!
+//! The `FdfWriter`/`XfdfWriter` unit tests below have no editor/writer
+//! dependency at all -- `crate::fdf` is a read-adjacent export module used
+//! by `extractors::forms::FormExtractor::export_fdf`/`export_xfdf`
+//! (`src/extractors/forms.rs`), which is a live, non-editor entry point.
+//! The end-to-end export tests previously drove that same code through
+//! `DocumentEditor::export_form_data_fdf`/`export_form_data_xfdf`, filling
+//! the source PDF's fields via the (now-removed) writer first; they are
+//! rewritten here onto `FormExtractor::export_fdf`/`export_xfdf` against a
+//! hand-built AcroForm PDF (merged field+widget objects, ISO 32000-1
+//! §12.7.4.1), matching the pattern in `tests/test_form_extraction.rs`.
 
 use tempfile::tempdir;
-use xberg_native_pdf::api::Pdf;
-use xberg_native_pdf::editor::{DocumentEditor, EditableDocument};
+use xberg_native_pdf::document::PdfDocument;
+use xberg_native_pdf::extractors::forms::FormExtractor;
 use xberg_native_pdf::fdf::{FdfField, FdfValue, FdfWriter, XfdfWriter};
-use xberg_native_pdf::geometry::Rect;
-use xberg_native_pdf::writer::form_fields::{CheckboxWidget, ChoiceOption, ComboBoxWidget, TextFieldWidget};
 
 #[test]
 fn test_fdf_writer_basic() {
@@ -186,29 +195,62 @@ fn test_xfdf_write_to_file() {
     assert!(content.contains("<field name=\"test\">"));
 }
 
+/// Build a one-page AcroForm PDF (merged field+widget objects, ISO
+/// 32000-1 §12.7.4.1) with a filled text field and a checked checkbox.
+/// Hand-built rather than via the (now-removed) writer/editor -- see
+/// `tests/test_form_extraction.rs` for the same technique.
+fn form_pdf_with_fields() -> Vec<u8> {
+    let objs: [String; 5] = [
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 6 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [4 0 R 5 0 R] >>".to_string(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (username) /V (test_user) \
+         /Rect [100 700 300 720] /P 3 0 R /DA (/Helv 12 Tf 0 g) >>"
+            .to_string(),
+        "<< /Type /Annot /Subtype /Widget /FT /Btn /T (agree) /V /Yes \
+         /Rect [100 660 120 680] /P 3 0 R >>"
+            .to_string(),
+    ];
+    let acroform = "<< /Fields [4 0 R 5 0 R] /DA (/Helv 12 Tf 0 g) \
+         /DR << /Font << /Helv << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> >>";
+
+    let mut buf: Vec<u8> = b"%PDF-1.7\n".to_vec();
+    let mut offsets = vec![0usize];
+    for body in &objs {
+        offsets.push(buf.len());
+        buf.extend_from_slice(format!("{} 0 obj\n{}\nendobj\n", offsets.len() - 1, body).as_bytes());
+    }
+    offsets.push(buf.len());
+    buf.extend_from_slice(format!("{} 0 obj\n{}\nendobj\n", offsets.len() - 1, acroform).as_bytes());
+
+    let xref_pos = buf.len();
+    buf.extend_from_slice(format!("xref\n0 {}\n", offsets.len()).as_bytes());
+    buf.extend_from_slice(b"0000000000 65535 f \n");
+    for &off in &offsets[1..] {
+        buf.extend_from_slice(format!("{off:010} 00000 n \n").as_bytes());
+    }
+    buf.extend_from_slice(
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n",
+            offsets.len(),
+            xref_pos
+        )
+        .as_bytes(),
+    );
+    buf
+}
+
+fn plain_pdf_without_forms() -> Vec<u8> {
+    std::fs::read("tests/fixtures/simple.pdf").expect("simple.pdf fixture")
+}
+
 #[test]
-fn test_export_fdf_from_editor() {
+fn test_export_fdf_via_form_extractor() {
     let temp_dir = tempdir().unwrap();
-    let pdf_path = temp_dir.path().join("form.pdf");
     let fdf_path = temp_dir.path().join("export.fdf");
 
-    let mut editor = DocumentEditor::open("tests/fixtures/simple.pdf").unwrap();
-    editor
-        .add_form_field(
-            0,
-            TextFieldWidget::new("username", Rect::new(100.0, 700.0, 200.0, 20.0)).with_value("test_user"),
-        )
-        .unwrap();
-    editor
-        .add_form_field(
-            0,
-            CheckboxWidget::new("agree", Rect::new(100.0, 660.0, 20.0, 20.0)).checked(),
-        )
-        .unwrap();
-    editor.save(&pdf_path).unwrap();
-
-    let mut editor = DocumentEditor::open(&pdf_path).unwrap();
-    editor.export_form_data_fdf(&fdf_path).unwrap();
+    let doc = PdfDocument::from_bytes(form_pdf_with_fields()).unwrap();
+    FormExtractor::export_fdf(&doc, &fdf_path).unwrap();
 
     let content = String::from_utf8_lossy(&std::fs::read(&fdf_path).unwrap()).to_string();
     assert!(content.contains("%FDF-1.2"));
@@ -216,22 +258,12 @@ fn test_export_fdf_from_editor() {
 }
 
 #[test]
-fn test_export_xfdf_from_editor() {
+fn test_export_xfdf_via_form_extractor() {
     let temp_dir = tempdir().unwrap();
-    let pdf_path = temp_dir.path().join("form.pdf");
     let xfdf_path = temp_dir.path().join("export.xfdf");
 
-    let mut editor = DocumentEditor::open("tests/fixtures/simple.pdf").unwrap();
-    editor
-        .add_form_field(
-            0,
-            TextFieldWidget::new("email", Rect::new(100.0, 700.0, 200.0, 20.0)).with_value("test@example.com"),
-        )
-        .unwrap();
-    editor.save(&pdf_path).unwrap();
-
-    let mut editor = DocumentEditor::open(&pdf_path).unwrap();
-    editor.export_form_data_xfdf(&xfdf_path).unwrap();
+    let doc = PdfDocument::from_bytes(form_pdf_with_fields()).unwrap();
+    FormExtractor::export_xfdf(&doc, &xfdf_path).unwrap();
 
     let content = std::fs::read_to_string(&xfdf_path).unwrap();
     assert!(content.contains("<?xml version=\"1.0\""));
@@ -245,10 +277,10 @@ fn test_export_from_pdf_without_forms() {
     let fdf_path = temp_dir.path().join("empty.fdf");
     let xfdf_path = temp_dir.path().join("empty.xfdf");
 
-    let mut editor = DocumentEditor::open("tests/fixtures/simple.pdf").unwrap();
+    let doc = PdfDocument::from_bytes(plain_pdf_without_forms()).unwrap();
 
-    editor.export_form_data_fdf(&fdf_path).unwrap();
-    editor.export_form_data_xfdf(&xfdf_path).unwrap();
+    FormExtractor::export_fdf(&doc, &fdf_path).unwrap();
+    FormExtractor::export_xfdf(&doc, &xfdf_path).unwrap();
 
     assert!(fdf_path.exists());
     assert!(xfdf_path.exists());
@@ -263,80 +295,17 @@ fn test_export_from_pdf_without_forms() {
 }
 
 #[test]
-fn test_pdf_api_export_fdf() {
-    let temp_dir = tempdir().unwrap();
-    let pdf_path = temp_dir.path().join("form.pdf");
-    let fdf_path = temp_dir.path().join("export.fdf");
-
-    let mut editor = DocumentEditor::open("tests/fixtures/simple.pdf").unwrap();
-    editor
-        .add_form_field(
-            0,
-            TextFieldWidget::new("name", Rect::new(100.0, 700.0, 200.0, 20.0)).with_value("Test Name"),
-        )
-        .unwrap();
-    editor.save(&pdf_path).unwrap();
-
-    let mut pdf = Pdf::open(&pdf_path).unwrap();
-    pdf.export_form_data_fdf(&fdf_path).unwrap();
-
-    assert!(fdf_path.exists());
-}
-
-#[test]
-fn test_pdf_api_export_xfdf() {
-    let temp_dir = tempdir().unwrap();
-    let pdf_path = temp_dir.path().join("form.pdf");
-    let xfdf_path = temp_dir.path().join("export.xfdf");
-
-    let mut editor = DocumentEditor::open("tests/fixtures/simple.pdf").unwrap();
-    editor
-        .add_form_field(
-            0,
-            ComboBoxWidget::new("country", Rect::new(100.0, 700.0, 150.0, 20.0))
-                .with_choice_options(vec![
-                    ChoiceOption::new("USA"),
-                    ChoiceOption::new("Canada"),
-                    ChoiceOption::new("UK"),
-                ])
-                .with_value("USA"),
-        )
-        .unwrap();
-    editor.save(&pdf_path).unwrap();
-
-    let mut pdf = Pdf::open(&pdf_path).unwrap();
-    pdf.export_form_data_xfdf(&xfdf_path).unwrap();
-
-    assert!(xfdf_path.exists());
-}
-
-#[test]
 fn test_fdf_round_trip_consistency() {
     let temp_dir = tempdir().unwrap();
-    let pdf_path = temp_dir.path().join("form.pdf");
     let fdf_path1 = temp_dir.path().join("export1.fdf");
     let fdf_path2 = temp_dir.path().join("export2.fdf");
 
-    let mut editor = DocumentEditor::open("tests/fixtures/simple.pdf").unwrap();
-    editor
-        .add_form_field(
-            0,
-            TextFieldWidget::new("text_field", Rect::new(100.0, 700.0, 200.0, 20.0)).with_value("Hello World"),
-        )
-        .unwrap();
-    editor
-        .add_form_field(
-            0,
-            CheckboxWidget::new("checkbox", Rect::new(100.0, 660.0, 20.0, 20.0)).checked(),
-        )
-        .unwrap();
-    editor.save(&pdf_path).unwrap();
+    let bytes = form_pdf_with_fields();
+    let doc1 = PdfDocument::from_bytes(bytes.clone()).unwrap();
+    let doc2 = PdfDocument::from_bytes(bytes).unwrap();
 
-    let mut editor1 = DocumentEditor::open(&pdf_path).unwrap();
-    editor1.export_form_data_fdf(&fdf_path1).unwrap();
-
-    let mut editor2 = DocumentEditor::open(&pdf_path).unwrap();
-    editor2.export_form_data_fdf(&fdf_path2).unwrap();
+    FormExtractor::export_fdf(&doc1, &fdf_path1).unwrap();
+    FormExtractor::export_fdf(&doc2, &fdf_path2).unwrap();
 
     let content1 = String::from_utf8_lossy(&std::fs::read(&fdf_path1).unwrap()).to_string();
     let content2 = String::from_utf8_lossy(&std::fs::read(&fdf_path2).unwrap()).to_string();
@@ -346,30 +315,15 @@ fn test_fdf_round_trip_consistency() {
 #[test]
 fn test_xfdf_round_trip_consistency() {
     let temp_dir = tempdir().unwrap();
-    let pdf_path = temp_dir.path().join("form.pdf");
     let xfdf_path1 = temp_dir.path().join("export1.xfdf");
     let xfdf_path2 = temp_dir.path().join("export2.xfdf");
 
-    let mut editor = DocumentEditor::open("tests/fixtures/simple.pdf").unwrap();
-    editor
-        .add_form_field(
-            0,
-            TextFieldWidget::new("field1", Rect::new(100.0, 700.0, 200.0, 20.0)).with_value("Value1"),
-        )
-        .unwrap();
-    editor
-        .add_form_field(
-            0,
-            TextFieldWidget::new("field2", Rect::new(100.0, 660.0, 200.0, 20.0)).with_value("Value2"),
-        )
-        .unwrap();
-    editor.save(&pdf_path).unwrap();
+    let bytes = form_pdf_with_fields();
+    let doc1 = PdfDocument::from_bytes(bytes.clone()).unwrap();
+    let doc2 = PdfDocument::from_bytes(bytes).unwrap();
 
-    let mut editor1 = DocumentEditor::open(&pdf_path).unwrap();
-    editor1.export_form_data_xfdf(&xfdf_path1).unwrap();
-
-    let mut editor2 = DocumentEditor::open(&pdf_path).unwrap();
-    editor2.export_form_data_xfdf(&xfdf_path2).unwrap();
+    FormExtractor::export_xfdf(&doc1, &xfdf_path1).unwrap();
+    FormExtractor::export_xfdf(&doc2, &xfdf_path2).unwrap();
 
     let content1 = std::fs::read_to_string(&xfdf_path1).unwrap();
     let content2 = std::fs::read_to_string(&xfdf_path2).unwrap();

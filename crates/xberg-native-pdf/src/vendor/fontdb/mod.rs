@@ -14,8 +14,8 @@
 //! CSS Fonts Level 4 style matching, system-font directory discovery, and
 //! (on Linux) fontconfig-driven generic-family + directory configuration.
 //!
-//! This is not a full port. Only what `crate::writer::font_discovery` and
-//! `crate::rendering::text_rasterizer` actually call is vendored:
+//! This is not a full port. Only what `crate::rendering::text_rasterizer`
+//! actually calls is vendored:
 //!
 //! - `Database`, `ID`, `Query`, `Family`, `Style`, `Stretch`, `Weight`,
 //!   `Source`, `FaceInfo` — same names and shapes as upstream fontdb 0.24,
@@ -285,6 +285,12 @@ pub(crate) struct Query<'a> {
 
 /// A [font family](https://www.w3.org/TR/2018/REC-css-fonts-3-20180920/#propdef-font-family).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+// `Cursive`/`Fantasy`/`Monospace` are unconstructed here: this crate only ever asks for a
+// concrete `Name` or the two generics it maps PDF base-14 fonts onto. They are part of
+// upstream fontdb's public `Family` API and are kept verbatim so this vendored copy stays
+// diffable against upstream -- deleting them would diverge the file for no gain. This is a
+// deliberate allow, not a stale one. ~keep
+#[allow(dead_code)]
 pub(crate) enum Family<'a> {
     /// The name of a font family of choice.
     Name(&'a str),

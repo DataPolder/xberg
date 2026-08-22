@@ -2,12 +2,14 @@
 //!
 //! This replaces a test that previously built its fixture through
 //! `crate::ffi::pdf_document_builder_*`, the C FFI builder API. That module
-//! (`src/ffi.rs`) has been removed from this fork, so the fixtures here are
-//! built directly with `xberg_native_pdf::api::Pdf`. The subject under test is
-//! unchanged: `PdfDocument`'s internal `Mutex`-guarded reader
-//! (`lock_or_recover`, see `src/document.rs`) must make concurrent access to
-//! one shared handle safe, whether that handle is reached through the C ABI
-//! or, as here, directly through `Arc<PdfDocument>` on the Rust API.
+//! (`src/ffi.rs`) has been removed from this fork; a second migration moved
+//! the fixtures onto `xberg_native_pdf::api::Pdf`; with the PDF writer/editor
+//! stack removed, they are now built as raw hand-written PDF bytes (see
+//! `tests/common`). The subject under test is unchanged: `PdfDocument`'s
+//! internal `Mutex`-guarded reader (`lock_or_recover`, see `src/document.rs`)
+//! must make concurrent access to one shared handle safe, whether that
+//! handle is reached through the C ABI or, as here, directly through
+//! `Arc<PdfDocument>` on the Rust API.
 //!
 //! * `concurrent_document_reads_no_panic` — 8 threads each open their own
 //!   handle from shared bytes and extract text.
@@ -17,17 +19,69 @@
 //!   threads call `render_page_fit` on a single *shared* `PdfDocument`,
 //!   exercising the same internal reader-lock serialization that the C ABI
 //!   depends on.
-//! * `concurrent_render_embedded_font_no_spurious_parse` — same shared-handle
-//!   pattern, but against a PDF with an embedded font (markdown-rendered),
-//!   which exercises the embedded-font cmap classifier under concurrency.
+//! * `concurrent_render_multi_page_no_spurious_parse` — same shared-handle
+//!   pattern, but against a 3-page PDF. NOTE: the original version of this
+//!   test used a markdown-rendered PDF with an embedded TrueType font to
+//!   exercise the embedded-font cmap classifier under concurrency; that
+//!   fixture required the (now-removed) writer to produce a real subset
+//!   font (FontFile2/CIDToGIDMap/W array), which cannot be hand-built
+//!   without either running the writer or committing a generated binary
+//!   fixture. This version only exercises the built-in Standard-14 path
+//!   across multiple pages -- the embedded-font-specific concurrency
+//!   coverage is a known gap; see the removal report for `xberg-native-pdf`.
+
+mod common;
 
 use std::sync::Arc;
-use xberg_native_pdf::api::Pdf;
 use xberg_native_pdf::document::PdfDocument;
+
+fn build_single_page_pdf(text: &str) -> Vec<u8> {
+    let content = common::text_run_op(text, 72.0, 700.0, "Helvetica", 12.0);
+    common::build_pdf_with_standard_fonts(content.as_bytes(), b"/Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]")
+}
+
+/// Build an N-page PDF, each page showing one line of Standard-14 text.
+fn build_multi_page_pdf(pages_text: &[&str]) -> Vec<u8> {
+    let n = pages_text.len();
+    let font_obj = 3 + 2 * n;
+
+    let mut objs: Vec<String> = Vec::with_capacity(2 + 2 * n + 1);
+    objs.push("<< /Type /Catalog /Pages 2 0 R >>".to_string());
+
+    let kids: String = (0..n).map(|i| format!("{} 0 R ", 3 + i)).collect();
+    objs.push(format!("<< /Type /Pages /Kids [{}] /Count {n} >>", kids.trim_end()));
+
+    for i in 0..n {
+        let content_id = 3 + n + i;
+        objs.push(format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {content_id} 0 R \
+             /Resources << /Font << /Helvetica {font_obj} 0 R >> >> >>"
+        ));
+    }
+
+    for text in pages_text {
+        let content = common::text_run_op(text, 72.0, 700.0, "Helvetica", 12.0);
+        objs.push(format!(
+            "<< /Length {} >>\nstream\n{}\nendstream",
+            content.len(),
+            content
+        ));
+    }
+
+    objs.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_string());
+
+    let mut buf = b"%PDF-1.4\n".to_vec();
+    let mut offsets = vec![0usize];
+    for (i, body) in objs.iter().enumerate() {
+        offsets.push(buf.len());
+        buf.extend_from_slice(format!("{} 0 obj\n{}\nendobj\n", i + 1, body).as_bytes());
+    }
+    common::finalize_pdf(buf, &offsets)
+}
 
 #[test]
 fn concurrent_document_reads_no_panic() {
-    let pdf_bytes: Arc<Vec<u8>> = Arc::new(Pdf::from_text("Concurrent read test").expect("build PDF").into_bytes());
+    let pdf_bytes: Arc<Vec<u8>> = Arc::new(build_single_page_pdf("Concurrent read test"));
 
     let handles: Vec<_> = (0..8)
         .map(|_| {
@@ -52,11 +106,7 @@ fn concurrent_document_reads_no_panic() {
 fn concurrent_renders_no_panic() {
     use xberg_native_pdf::rendering::RenderOptions;
 
-    let bytes: Arc<Vec<u8>> = Arc::new(
-        Pdf::from_text("Concurrent render test")
-            .expect("build PDF")
-            .into_bytes(),
-    );
+    let bytes: Arc<Vec<u8>> = Arc::new(build_single_page_pdf("Concurrent render test"));
     let opts = Arc::new(RenderOptions::with_dpi(72));
 
     let handles: Vec<_> = (0..8)
@@ -90,9 +140,7 @@ fn concurrent_render_page_fit_one_shared_handle_no_spurious_parse() {
     const THREADS: usize = 8;
     const ITERS: usize = 16;
 
-    let bytes = Pdf::from_text("Shared-handle render race regression")
-        .expect("build PDF")
-        .into_bytes();
+    let bytes = build_single_page_pdf("Shared-handle render race regression");
     let doc = Arc::new(PdfDocument::from_bytes(bytes).expect("open_from_bytes failed"));
     let opts = Arc::new(RenderOptions::default());
 
@@ -133,23 +181,22 @@ fn concurrent_render_page_fit_one_shared_handle_no_spurious_parse() {
     assert!(failures.is_empty(), "shared-handle render race: {failures:?}");
 }
 
-/// Same shared-handle pattern as above, but against a PDF with an embedded
-/// font (produced via markdown rendering), which exercises the embedded-font
-/// cmap classifier under concurrency rather than the built-in Helvetica path.
+/// Same shared-handle pattern as above, but against a 3-page PDF, exercising
+/// per-page state reset (font/color-space caches, etc.) under concurrency.
+/// See the module doc comment for the embedded-font coverage this test used
+/// to carry and no longer does.
 #[test]
-fn concurrent_render_embedded_font_no_spurious_parse() {
+fn concurrent_render_multi_page_no_spurious_parse() {
     use xberg_native_pdf::rendering::{RenderOptions, render_page, render_page_fit};
 
     const THREADS: usize = 8;
     const ITERS: usize = 16;
 
-    let bytes = Pdf::from_markdown("# Thread Safety\n\nPage 1.\n\n---\n\nPage 2.\n\n---\n\nPage 3.")
-        .expect("build markdown PDF")
-        .into_bytes();
+    let bytes = build_multi_page_pdf(&["Page 1.", "Page 2.", "Page 3."]);
     let doc = Arc::new(PdfDocument::from_bytes(bytes).expect("open_from_bytes failed"));
     let opts = Arc::new(RenderOptions::default());
     let pages = doc.page_count().expect("page_count failed");
-    assert!(pages >= 1, "expected at least one page, got {pages}");
+    assert_eq!(pages, 3, "expected 3 pages, got {pages}");
 
     let barrier = Arc::new(std::sync::Barrier::new(THREADS));
     let handles: Vec<_> = (0..THREADS)
@@ -190,6 +237,6 @@ fn concurrent_render_embedded_font_no_spurious_parse() {
 
     assert!(
         failures.is_empty(),
-        "embedded-font shared-handle render race: {failures:?}"
+        "multi-page shared-handle render race: {failures:?}"
     );
 }

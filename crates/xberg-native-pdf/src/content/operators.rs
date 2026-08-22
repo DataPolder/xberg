@@ -938,7 +938,6 @@ mod tests {
     #[test]
     fn test_operator_enum_size() {
         let size = std::mem::size_of::<Operator>();
-        eprintln!("Operator enum size: {} bytes", size);
         // After boxing BeginMarkedContentDict.properties, InlineImage.dict,
         // Other.operands, SetFillColorN/SetStrokeColorN.name:
         // largest variant is now SetFillColorN/SetStrokeColorN at Vec<f32>(24) + Option<Box<String>>(8) = 32 bytes

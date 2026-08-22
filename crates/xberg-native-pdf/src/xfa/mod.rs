@@ -8,24 +8,17 @@
 //!
 //! - Parse XFA template and datasets
 //! - Extract field definitions and values
-//! - Convert static XFA to AcroForm
+//! - Analyze XFA form structure (field count, page count, field types)
 //!
 //! # Limitations
 //!
-//! This implementation supports **static conversion only**:
-//! - Extracts field definitions and current values
-//! - Converts fields to equivalent AcroForm types
-//! - Uses simple vertical stacking layout
-//!
-//! **NOT supported:**
-//! - Dynamic XFA features (scripts, calculations, conditional logic)
-//! - Complex layouts (tables, grids, repeating sections)
-//! - XFA-specific UI elements (subforms with special behavior)
+//! This module is read-only: it parses and reports on XFA form structure,
+//! it does not convert XFA to AcroForm or write PDFs.
 //!
 //! # Example
 //!
 //! ```ignore
-//! use xberg_native_pdf::xfa::{XfaExtractor, XfaParser, XfaConverter};
+//! use xberg_native_pdf::xfa::{XfaExtractor, XfaParser};
 //! use xberg_native_pdf::PdfDocument;
 //!
 //! let mut doc = PdfDocument::open("form.pdf")?;
@@ -37,22 +30,14 @@
 //!
 //!     let mut parser = XfaParser::new();
 //!     let form = parser.parse(&xfa_data)?;
-//!
-//!     // Convert to AcroForm
-//!     let converter = XfaConverter::new();
-//!     let result = converter.convert(&form)?;
-//!     println!("Converted {} fields", result.field_count);
+//!     println!("Parsed {} fields", form.field_count());
 //! }
 //! ```
 
-mod converter;
+mod analysis;
 mod extractor;
-mod integration;
 mod parser;
 
-pub use converter::{ConvertedField, ConvertedPage, XfaConversionOptions, XfaConversionResult, XfaConverter};
+pub use analysis::{XfaAnalysis, analyze_xfa_document};
 pub use extractor::XfaExtractor;
-pub use integration::{
-    XfaAnalysis, add_converted_field, add_converted_page, analyze_xfa_document, convert_xfa_document,
-};
 pub use parser::{XfaField, XfaFieldType, XfaForm, XfaOption, XfaPage, XfaParser, is_xfa_data};

@@ -33,21 +33,8 @@
 //! - **Reading Order**: 4 pluggable strategies (XY-Cut, Structure Tree, Geometric, Simple)
 //! - **Complex Scripts**: RTL (Arabic/Hebrew), CJK (Japanese/Korean/Chinese), Devanagari, Thai
 //! - **Image Extraction**: Content streams, Form XObjects, inline images
-//! - **Forms & Annotations**: Read/write form fields, all annotation types, bookmarks
+//! - **Forms & Annotations**: Read form fields, all annotation types, bookmarks
 //! - **Text Search**: Regex and case-insensitive search with page-level results
-//!
-//! ### Writing & Creation
-//! - **PDF Generation**: Fluent DocumentBuilder API for programmatic PDF creation
-//! - **Advanced Graphics**: Path operations, image embedding, table generation
-//! - **Font Embedding**: Automatic font subsetting for compact output
-//! - **Interactive Forms**: Fillable forms with text fields, checkboxes, radio buttons, dropdowns
-//!
-//! ### Editing
-//! - **DOM-like API**: Query and modify PDF content with strongly-typed wrappers
-//! - **Element Modification**: Find and replace text, modify images, paths, tables
-//! - **Page Operations**: Add, remove, reorder, merge, rotate, crop pages
-//! - **Encryption**: AES-256, password protection
-//! - **Incremental Saves**: Efficient appending without full rewrite
 //!
 //! ## Quick Start
 //!
@@ -187,13 +174,9 @@ pub mod converters;
 
 pub mod pipeline;
 
-pub mod writer;
-
 pub mod fdf;
 
 pub mod xfa;
-
-pub mod editor;
 
 pub mod search;
 

@@ -1,10 +1,11 @@
-//! Integration tests for hierarchical PDF content extraction and editing.
+//! Unit tests for the hierarchical `StructureElement`/`ContentElement`
+//! data model (`crate::elements`) used to represent tagged-PDF structure.
 //!
-//! Tests the full round-trip workflow:
-//! - Extract hierarchical content from PDF pages
-//! - Modify content via DocumentEditor API
-//! - Save changes and verify structure preservation
-//! - Handle both tagged and untagged PDFs
+//! Three tests that exercised the (now-removed) writer/editor stack --
+//! content-stream generation from a structure element and MCID allocation
+//! via `writer::ContentStreamBuilder`, and resource registration via
+//! `editor::ResourceManager` -- were removed; everything else here only
+//! constructs and inspects the surviving read-side data types.
 
 #[cfg(test)]
 mod hierarchical_integration_tests {
@@ -75,7 +76,9 @@ mod hierarchical_integration_tests {
         assert_eq!(structure.language, Some("en".to_string()));
     }
 
-    /// Test DocumentEditor content modification API.
+    /// `StructureElement`'s own bbox fields round-trip through construction
+    /// unchanged (despite the historical name, this never touched
+    /// `DocumentEditor` -- see the module doc comment). ~keep
     #[test]
     fn test_editor_content_modification() {
         let structure = StructureElement {
@@ -90,44 +93,6 @@ mod hierarchical_integration_tests {
         assert_eq!(structure.structure_type, "Document");
         assert_eq!(structure.bbox.width, 612.0);
         assert_eq!(structure.bbox.height, 792.0);
-    }
-
-    /// Test content stream generation from structure elements.
-    #[test]
-    fn test_content_stream_generation() {
-        use xberg_native_pdf::writer::ContentStreamBuilder;
-
-        let structure = StructureElement {
-            structure_type: "P".to_string(),
-            bbox: Rect::new(100.0, 700.0, 200.0, 50.0),
-            children: vec![],
-            reading_order: None,
-            alt_text: None,
-            language: None,
-        };
-
-        let mut builder = ContentStreamBuilder::new();
-        builder.add_structure_element(&structure);
-
-        let bytes = builder.build().unwrap();
-        assert!(!bytes.is_empty());
-
-        let content = String::from_utf8_lossy(&bytes);
-        assert!(content.contains("BDC"));
-        assert!(content.contains("EMC"));
-    }
-
-    /// Test MCID allocation during content stream generation.
-    #[test]
-    fn test_mcid_allocation() {
-        use xberg_native_pdf::writer::ContentStreamBuilder;
-
-        let mut builder = ContentStreamBuilder::new();
-
-        assert_eq!(builder.next_mcid(), 0);
-        assert_eq!(builder.next_mcid(), 1);
-        assert_eq!(builder.next_mcid(), 2);
-        assert_eq!(builder.next_mcid(), 3);
     }
 
     /// Test multiple pages with different structures.
@@ -233,30 +198,6 @@ mod hierarchical_integration_tests {
         }
 
         assert_eq!(depth, 6);
-    }
-
-    /// Test resource manager functionality.
-    #[test]
-    fn test_resource_manager() {
-        use xberg_native_pdf::editor::ResourceManager;
-
-        let mut manager = ResourceManager::new();
-
-        let font1 = manager.register_font("Helvetica");
-        let font2 = manager.register_font("Times-Roman");
-        let font3 = manager.register_font("Helvetica");
-
-        assert_eq!(font1, "/F1");
-        assert_eq!(font2, "/F2");
-        assert_eq!(font3, "/F1");
-
-        let img1 = manager.register_image();
-        let img2 = manager.register_image();
-
-        assert_eq!(img1, "/Im1");
-        assert_eq!(img2, "/Im2");
-
-        assert_eq!(manager.resource_count(), 4);
     }
 
     /// Test synthetic structure generation configuration.

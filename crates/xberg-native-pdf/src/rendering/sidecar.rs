@@ -201,17 +201,6 @@ impl BlendModeClass {
     }
 }
 
-// `spot_names` and the spot tint planes are populated by the
-// discovery pre-pass at page setup; the per-paint operator writes
-// land in round 2. Round 1 only exposes them through the
-// `test-support` feature accessors on `PageRenderer`, so without
-// `test-support` the fields and the readers are dead.
-//
-// We allow `dead_code` on the impl rather than `#[cfg(feature = ...)]`
-// on each method because round 2 will wire these into the renderer's
-// hot path unconditionally; gating them on `test-support` now would
-// just be churn to undo. ~keep
-#[allow(dead_code)]
 /// Per-page CMYK + spot-ink compositing sidecar.
 ///
 /// Allocated once at the top of [`super::PageRenderer::render_page_with_options`]
@@ -252,7 +241,6 @@ pub(crate) struct CmykSidecar {
     spots: Vec<u8>,
 }
 
-#[allow(dead_code)]
 impl CmykSidecar {
     /// Allocate the sidecar for a page of `(width, height)` pixels
     /// and the given set of spot ink names.

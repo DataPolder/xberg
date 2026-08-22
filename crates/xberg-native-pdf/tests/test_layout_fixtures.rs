@@ -7,47 +7,29 @@
 //! scattered-fragment layouts that previously routed through XY-cut
 //! and produced reversed or column-major output.
 //!
-//! All fixtures are built in-process via the low-level [`PdfWriter`]
-//! API. PDF coordinate origin is bottom-left; Letter page = 612 × 792
-//! pt; default body is 12 pt with 14.4 pt line height unless a fixture
-//! sets otherwise.
+//! All fixtures are built as raw PDF bytes (see `tests/common`). PDF
+//! coordinate origin is bottom-left; Letter page = 612 × 792 pt; default
+//! body is 12 pt with 14.4 pt line height unless a fixture sets otherwise.
 //!
-//! BT/ET separation: between consecutive `add_text` calls we insert a
-//! zero-size `draw_rect(0, 0, 0, 0)` which forces an `ET` marker so
-//! the next `add_text` starts a fresh `BT`. Without this the writer
-//! keeps one open BT block across all calls and the extractor merges
-//! adjacent text into a single wide span, which would defeat any
-//! multi-column assertion.
+//! BT/ET separation: [`text_run_op`] wraps every text placement in its own
+//! `BT ... ET` block, followed by a zero-size `re S` no-op. Without that
+//! separation the extractor would see one open text object across all
+//! placements and merge adjacent text into a single wide span, which would
+//! defeat any multi-column assertion.
 
-use xberg_native_pdf::document::PdfDocument;
-use xberg_native_pdf::writer::{PageBuilder, PdfWriter};
+mod common;
+use common::{build_and_extract_page0, text_run_op};
 
 const PAGE_H: f32 = 792.0;
 const MARGIN: f32 = 72.0;
 const BODY: f32 = 12.0;
 const LH: f32 = BODY * 1.2;
 
-/// Add one text fragment and force a BT/ET boundary so the next text
-/// fragment starts a fresh text object (otherwise the extractor merges
-/// adjacent text on the same baseline into one span).
-fn put(page: &mut PageBuilder<'_>, text: &str, x: f32, y: f32, font: &str, size: f32) {
-    page.add_text(text, x, y, font, size);
-    page.draw_rect(0.0, 0.0, 0.0, 0.0);
-}
-
-fn build_and_extract(build_fn: impl FnOnce(&mut PdfWriter)) -> String {
-    let mut writer = PdfWriter::new();
-    build_fn(&mut writer);
-    let bytes = writer.finish().expect("build PDF");
-    let doc = PdfDocument::from_bytes(bytes).expect("open PDF");
-    doc.extract_text(0).expect("extract page 0")
-}
-
 /// Place body-text lines top-down at column x, starting from y_top.
-fn place_column(page: &mut PageBuilder<'_>, x: f32, y_top: f32, lines: &[String]) {
+fn place_column(content: &mut String, x: f32, y_top: f32, lines: &[String]) {
     let mut y = y_top;
     for line in lines {
-        put(page, line, x, y, "Helvetica", BODY);
+        content.push_str(&text_run_op(line, x, y, "Helvetica", BODY));
         y -= LH;
     }
 }
@@ -59,10 +41,9 @@ fn fixture_body_single_column_preserves_order() {
     let lines: Vec<String> = (1..=30)
         .map(|i| format!("Body line number {i:02} reads top to bottom in a single column."))
         .collect();
-    let out = build_and_extract(|w| {
-        let mut page = w.add_letter_page();
-        place_column(&mut page, MARGIN, PAGE_H - MARGIN, &lines);
-    });
+    let mut content = String::new();
+    place_column(&mut content, MARGIN, PAGE_H - MARGIN, &lines);
+    let out = build_and_extract_page0(&content);
 
     let mut last_pos = 0usize;
     for line in &lines {
@@ -85,11 +66,10 @@ fn fixture_body_two_column_no_interleave() {
     let left: Vec<String> = (1..=30).map(|i| format!("Left{i:02} short body text")).collect();
     let right: Vec<String> = (1..=30).map(|i| format!("Right{i:02} other body text")).collect();
 
-    let out = build_and_extract(|w| {
-        let mut page = w.add_letter_page();
-        place_column(&mut page, MARGIN, PAGE_H - MARGIN, &left);
-        place_column(&mut page, 360.0, PAGE_H - MARGIN, &right);
-    });
+    let mut content = String::new();
+    place_column(&mut content, MARGIN, PAGE_H - MARGIN, &left);
+    place_column(&mut content, 360.0, PAGE_H - MARGIN, &right);
+    let out = build_and_extract_page0(&content);
 
     let last_left = out.find(left.last().unwrap().as_str()).expect("last-left missing");
     let first_right = out.find(right.first().unwrap().as_str()).expect("first-right missing");
@@ -132,13 +112,12 @@ fn fixture_body_two_column_narrow_gutter_still_splits() {
         .map(|i| format!("R{i:02} extended other text spanning whole column"))
         .collect();
 
-    let out = build_and_extract(|w| {
-        let mut page = w.add_letter_page();
-        place_column(&mut page, MARGIN, PAGE_H - MARGIN, &left_wide);
-        // Left text is ~250pt wide (42 chars × 6pt) → ends at ~322.
-        // Right at 340 → 18pt gutter (~1.5 em at 12pt body). ~keep
-        place_column(&mut page, 340.0, PAGE_H - MARGIN, &right_wide);
-    });
+    let mut content = String::new();
+    place_column(&mut content, MARGIN, PAGE_H - MARGIN, &left_wide);
+    // Left text is ~250pt wide (42 chars × 6pt) → ends at ~322.
+    // Right at 340 → 18pt gutter (~1.5 em at 12pt body). ~keep
+    place_column(&mut content, 340.0, PAGE_H - MARGIN, &right_wide);
+    let out = build_and_extract_page0(&content);
 
     let last_left = out.find(left_wide.last().unwrap().as_str()).expect("last-left missing");
     let first_right = out
@@ -165,19 +144,18 @@ fn fixture_mixed_size_columns_dominant_em_picks_mode() {
     let left: Vec<String> = (1..=30).map(|i| format!("Left12pt{i:02} body text content")).collect();
     let right: Vec<String> = (1..=22).map(|i| format!("Right10pt{i:02} smaller body text")).collect();
 
-    let out = build_and_extract(|w| {
-        let mut page = w.add_letter_page();
-        let mut y = PAGE_H - MARGIN;
-        for line in &left {
-            put(&mut page, line, MARGIN, y, "Helvetica", 12.0);
-            y -= 14.4;
-        }
-        let mut y = PAGE_H - MARGIN;
-        for line in &right {
-            put(&mut page, line, 360.0, y, "Helvetica", 10.0);
-            y -= 12.0;
-        }
-    });
+    let mut content = String::new();
+    let mut y = PAGE_H - MARGIN;
+    for line in &left {
+        content.push_str(&text_run_op(line, MARGIN, y, "Helvetica", 12.0));
+        y -= 14.4;
+    }
+    let mut y = PAGE_H - MARGIN;
+    for line in &right {
+        content.push_str(&text_run_op(line, 360.0, y, "Helvetica", 10.0));
+        y -= 12.0;
+    }
+    let out = build_and_extract_page0(&content);
 
     let last_left = out.find(left.last().unwrap().as_str()).expect("last-left missing");
     let first_right = out.find(right.first().unwrap().as_str()).expect("first-right missing");
@@ -213,11 +191,10 @@ fn fixture_two_column_accompa_nying_no_interleave() {
     right.push("This line is independent text.".to_string());
     right.extend((15..=30).map(|i| format!("RightPad{i:02} other text")));
 
-    let out = build_and_extract(|w| {
-        let mut page = w.add_letter_page();
-        place_column(&mut page, MARGIN, PAGE_H - MARGIN, &left);
-        place_column(&mut page, 360.0, PAGE_H - MARGIN, &right);
-    });
+    let mut content = String::new();
+    place_column(&mut content, MARGIN, PAGE_H - MARGIN, &left);
+    place_column(&mut content, 360.0, PAGE_H - MARGIN, &right);
+    let out = build_and_extract_page0(&content);
 
     for bad in &["accompaally", "accompareally", "accompathis", "accompanyingreally"] {
         assert!(
@@ -246,11 +223,10 @@ fn fixture_two_column_correla_tion_no_interleave() {
     right.push("This line is independent text.".to_string());
     right.extend((13..=30).map(|i| format!("RightPad{i:02} other text")));
 
-    let out = build_and_extract(|w| {
-        let mut page = w.add_letter_page();
-        place_column(&mut page, MARGIN, PAGE_H - MARGIN, &left);
-        place_column(&mut page, 360.0, PAGE_H - MARGIN, &right);
-    });
+    let mut content = String::new();
+    place_column(&mut content, MARGIN, PAGE_H - MARGIN, &left);
+    place_column(&mut content, 360.0, PAGE_H - MARGIN, &right);
+    let out = build_and_extract_page0(&content);
 
     for bad in &["correlaanonymous", "correlathis", "correlaall"] {
         assert!(
@@ -296,11 +272,10 @@ fn fixture_legal_style_columns_no_section_marker_interleave() {
     ];
     right.extend((9..=32).map(|i| format!("RightPad{i:02} body text")));
 
-    let out = build_and_extract(|w| {
-        let mut page = w.add_letter_page();
-        place_column(&mut page, MARGIN, PAGE_H - MARGIN, &left);
-        place_column(&mut page, 360.0, PAGE_H - MARGIN, &right);
-    });
+    let mut content = String::new();
+    place_column(&mut content, MARGIN, PAGE_H - MARGIN, &left);
+    place_column(&mut content, 360.0, PAGE_H - MARGIN, &right);
+    let out = build_and_extract_page0(&content);
 
     for bad in &["certi-A.1", "certified A.1", "Office shall re- move", "Officemove"] {
         assert!(
@@ -439,16 +414,15 @@ fn fixture_fax_scattered_fragments_no_reversal() {
         ],
     ];
 
-    let out = build_and_extract(|w| {
-        let mut page = w.add_letter_page();
-        let mut y = PAGE_H - MARGIN;
-        for line_frags in lines {
-            for (x, word) in line_frags.iter() {
-                put(&mut page, word, *x, y, "Helvetica", 8.0);
-            }
-            y -= 11.0;
+    let mut content = String::new();
+    let mut y = PAGE_H - MARGIN;
+    for line_frags in lines {
+        for (x, word) in line_frags.iter() {
+            content.push_str(&text_run_op(word, *x, y, "Helvetica", 8.0));
         }
-    });
+        y -= 11.0;
+    }
+    let out = build_and_extract_page0(&content);
 
     for bad in &[
         "WORDFIVEWORDFOURWORDTHREE",
@@ -514,14 +488,13 @@ fn fixture_table_3x3_cells_not_concatenated() {
     let cols = [120.0_f32, 250.0, 380.0];
     let rows = [PAGE_H - MARGIN, PAGE_H - MARGIN - 30.0, PAGE_H - MARGIN - 60.0];
 
-    let out = build_and_extract(|w| {
-        let mut page = w.add_letter_page();
-        for &x in &cols {
-            for &y in &rows {
-                put(&mut page, cell_text, x, y, "Helvetica", BODY);
-            }
+    let mut content = String::new();
+    for &x in &cols {
+        for &y in &rows {
+            content.push_str(&text_run_op(cell_text, x, y, "Helvetica", BODY));
         }
-    });
+    }
+    let out = build_and_extract_page0(&content);
 
     assert!(
         !out.contains("instancesinstancesinstances"),
@@ -550,11 +523,10 @@ fn fixture_two_column_hyphen_rejoin() {
     right.push("collateralized in detail.".to_string());
     right.extend((13..=30).map(|i| format!("RightPad{i:02} other text")));
 
-    let out = build_and_extract(|w| {
-        let mut page = w.add_letter_page();
-        place_column(&mut page, MARGIN, PAGE_H - MARGIN, &left);
-        place_column(&mut page, 360.0, PAGE_H - MARGIN, &right);
-    });
+    let mut content = String::new();
+    place_column(&mut content, MARGIN, PAGE_H - MARGIN, &left);
+    place_column(&mut content, 360.0, PAGE_H - MARGIN, &right);
+    let out = build_and_extract_page0(&content);
 
     let comp_joined = out.contains("comprehensive") || out.contains("compre-hensive");
     let cross_joined = out.contains("crosscollateralized") || out.contains("cross-collateralized");
@@ -584,21 +556,20 @@ fn fixture_figure_caption_not_merged_into_body() {
         "demonstrates the expected behaviour in this setting.",
     ];
 
-    let out = build_and_extract(|w| {
-        let mut page = w.add_letter_page();
-        let mut y = PAGE_H - MARGIN;
-        for line in &body_lines_pre {
-            put(&mut page, line, MARGIN, y, "Helvetica", 12.0);
-            y -= 14.4;
-        }
-        y -= 8.0;
-        put(&mut page, caption_line, MARGIN, y, "Helvetica-Oblique", 9.0);
-        y -= 14.0;
-        for line in &body_lines_post {
-            put(&mut page, line, MARGIN, y, "Helvetica", 12.0);
-            y -= 14.4;
-        }
-    });
+    let mut content = String::new();
+    let mut y = PAGE_H - MARGIN;
+    for line in &body_lines_pre {
+        content.push_str(&text_run_op(line, MARGIN, y, "Helvetica", 12.0));
+        y -= 14.4;
+    }
+    y -= 8.0;
+    content.push_str(&text_run_op(caption_line, MARGIN, y, "Helvetica-Oblique", 9.0));
+    y -= 14.0;
+    for line in &body_lines_post {
+        content.push_str(&text_run_op(line, MARGIN, y, "Helvetica", 12.0));
+        y -= 14.4;
+    }
+    let out = build_and_extract_page0(&content);
 
     for bad in &[
         "conceptFigure",

@@ -4,11 +4,10 @@
 //! decompressing streams, and that `decode()` / `raw_compressed_bytes()`
 //! materialise the image on demand.
 
+mod common;
+
 use xberg_native_pdf::PdfDocument;
-use xberg_native_pdf::elements::{ContentElement, ImageContent, ImageFormat};
 use xberg_native_pdf::extractors::images::PdfFilter;
-use xberg_native_pdf::geometry::Rect;
-use xberg_native_pdf::writer::{PdfWriter, PdfWriterConfig};
 
 const MINIMAL_JPEG: &[u8] = &[
     0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
@@ -21,18 +20,73 @@ const MINIMAL_JPEG: &[u8] = &[
     0x0A, 0x0B, 0xFF, 0xD9,
 ];
 
+/// Build a minimal PDF whose page paints the given JPEG placements
+/// (`(x, y, width, height)` -- the on-page display rectangle) as Image
+/// XObjects `Im0..Im{n-1}`, in content-stream order. Each XObject
+/// dictionary declares `/Width 1 /Height 1` (MINIMAL_JPEG's true decoded
+/// dimensions, per its own SOF marker) -- the placement `width`/`height`
+/// only scale the `cm` transform used to paint it. This mirrors how the
+/// (now-removed) writer's JPEG-embedding path re-derived the declared
+/// XObject dimensions from the JPEG's own header rather than from any
+/// caller-supplied `ImageContent::new(..., width, height)` size --
+/// `page_image_handles_returns_one_handle_for_single_jpeg` below asserts
+/// exactly that: it places a 100x80 rect but still expects a 1x1 handle.
+fn build_pdf_with_jpegs(placements: &[(f32, f32, f32, f32)]) -> Vec<u8> {
+    let mut content = String::new();
+    for (i, (x, y, w, h)) in placements.iter().enumerate() {
+        content.push_str(&format!("q {w} 0 0 {h} {x} {y} cm /Im{i} Do Q\n"));
+    }
+
+    let mut xobject_entries = String::new();
+    for i in 0..placements.len() {
+        xobject_entries.push_str(&format!("/Im{i} {} 0 R ", 5 + i));
+    }
+
+    let mut pdf = b"%PDF-1.4\n".to_vec();
+    let mut offsets = vec![0usize];
+
+    offsets.push(pdf.len());
+    pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+
+    offsets.push(pdf.len());
+    pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+
+    offsets.push(pdf.len());
+    pdf.extend_from_slice(
+        format!(
+            "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] \
+             /Contents 4 0 R /Resources << /XObject << {xobject_entries}>> >> >>\nendobj\n"
+        )
+        .as_bytes(),
+    );
+
+    offsets.push(pdf.len());
+    pdf.extend_from_slice(format!("4 0 obj\n<< /Length {} >>\nstream\n", content.len()).as_bytes());
+    pdf.extend_from_slice(content.as_bytes());
+    pdf.extend_from_slice(b"\nendstream\nendobj\n");
+
+    for i in 0..placements.len() {
+        debug_assert_eq!(offsets.len(), 5 + i);
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(
+            format!(
+                "{} 0 obj\n<< /Type /XObject /Subtype /Image /Width 1 /Height 1 \
+                 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {} >>\nstream\n",
+                5 + i,
+                MINIMAL_JPEG.len()
+            )
+            .as_bytes(),
+        );
+        pdf.extend_from_slice(MINIMAL_JPEG);
+        pdf.extend_from_slice(b"\nendstream\nendobj\n");
+    }
+
+    common::finalize_pdf(pdf, &offsets)
+}
+
 /// Build a minimal PDF containing a single JPEG image on page 0.
 fn build_pdf_with_jpeg(width: u32, height: u32) -> Vec<u8> {
-    let mut writer = PdfWriter::with_config(PdfWriterConfig::default());
-
-    let bbox = Rect::new(0.0, 0.0, width as f32, height as f32);
-    let image_content = ImageContent::new(bbox, ImageFormat::Jpeg, MINIMAL_JPEG.to_vec(), width, height);
-
-    let mut page = writer.add_a4_page();
-    page.add_element(&ContentElement::Image(image_content));
-    page.finish();
-
-    writer.finish().expect("PDF write failed")
+    build_pdf_with_jpegs(&[(0.0, 0.0, width as f32, height as f32)])
 }
 
 #[test]
@@ -112,9 +166,7 @@ fn page_image_handles_filter_then_decode_skips_small_images() {
 
 #[test]
 fn page_image_handles_empty_page_returns_empty_vec() {
-    let mut writer = PdfWriter::with_config(PdfWriterConfig::default());
-    writer.add_a4_page().finish();
-    let pdf_bytes = writer.finish().expect("PDF write");
+    let pdf_bytes = common::build_minimal_pdf_raw(b"", b"/Type /Page /Parent 2 0 R /MediaBox [0 0 595 842]");
 
     let doc = PdfDocument::from_bytes(pdf_bytes).expect("open PDF");
     let handles = doc.page_image_handles(0).expect("page_image_handles");
@@ -213,16 +265,8 @@ fn form_xobject_does_not_produce_image_handle() {
 // ── Test B: N images → paint_order is [0, 1, 2] ────────────────────────────── ~keep
 
 fn build_pdf_with_n_jpegs(n: usize) -> Vec<u8> {
-    let mut writer = PdfWriter::with_config(PdfWriterConfig::default());
-    let mut page = writer.add_a4_page();
-    for i in 0..n {
-        let x = (i as f32) * 50.0;
-        let bbox = Rect::new(x, 0.0, 40.0, 40.0);
-        let img = ImageContent::new(bbox, ImageFormat::Jpeg, MINIMAL_JPEG.to_vec(), 1, 1);
-        page.add_element(&ContentElement::Image(img));
-    }
-    page.finish();
-    writer.finish().expect("PDF write failed")
+    let placements: Vec<(f32, f32, f32, f32)> = (0..n).map(|i| ((i as f32) * 50.0, 0.0, 40.0, 40.0)).collect();
+    build_pdf_with_jpegs(&placements)
 }
 
 #[test]

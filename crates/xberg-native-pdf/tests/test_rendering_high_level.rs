@@ -1,13 +1,22 @@
+mod common;
+
 mod tests {
-    use xberg_native_pdf::api::Pdf;
-    use xberg_native_pdf::rendering::{ImageFormat, RenderOptions};
+    use xberg_native_pdf::PdfDocument;
+    use xberg_native_pdf::rendering::{ImageFormat, RenderOptions, render_page};
+
+    use crate::common;
+
+    fn create_test_pdf(text: &str) -> Vec<u8> {
+        let content = common::text_run_op(text, 72.0, 700.0, "Helvetica", 12.0);
+        common::build_pdf_with_standard_fonts(content.as_bytes(), b"/Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]")
+    }
 
     #[test]
     fn test_render_page_high_level_api() {
-        let mut pdf = Pdf::from_text("Hello World").unwrap();
+        let doc = PdfDocument::from_bytes(create_test_pdf("Hello World")).unwrap();
 
         let options = RenderOptions::default();
-        let image = pdf.render_page(0, Some(&options)).unwrap();
+        let image = render_page(&doc, 0, &options).unwrap();
 
         assert!(image.width > 0);
         assert!(image.height > 0);
@@ -18,10 +27,10 @@ mod tests {
 
     #[test]
     fn test_render_page_jpeg_format() {
-        let mut pdf = Pdf::from_text("Hello JPEG").unwrap();
+        let doc = PdfDocument::from_bytes(create_test_pdf("Hello JPEG")).unwrap();
 
         let options = RenderOptions::with_dpi(72).as_jpeg(80);
-        let image = pdf.render_page(0, Some(&options)).unwrap();
+        let image = render_page(&doc, 0, &options).unwrap();
 
         assert_eq!(image.format, ImageFormat::Jpeg);
         assert!(!image.data.is_empty());

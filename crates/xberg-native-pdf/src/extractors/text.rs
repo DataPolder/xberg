@@ -2061,9 +2061,11 @@ pub enum PaginationSubtype {
 ///
 /// Tracks nested marked content tags to implement artifact filtering.
 /// When content is marked as `/Artifact`, it should be excluded from text extraction.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 struct MarkedContentContext {
+    /// Never read back — classification (`is_artifact`, `is_placed_pdf`, OCG checks) is
+    /// derived from the BMC/BDC operator's local `tag` binding, not this stored copy.
+    #[allow(dead_code)]
     tag: String,
     is_artifact: bool,
     /// Artifact type classification for filtered content (PDF Spec Section 14.8.2.2)
@@ -2083,6 +2085,10 @@ struct MarkedContentContext {
     /// Expansion text for abbreviations (PDF Spec Section 14.9.5)
     /// The /E entry provides the expansion of an abbreviation or acronym.
     /// e.g., "PDF" might expand to "Portable Document Format"
+    ///
+    /// Only ever read back from unit tests that inspect the stored context directly;
+    /// production code never consumes it after storing it here.
+    #[allow(dead_code)]
     expansion: Option<String>,
     /// Whether this marked content context is an excluded Optional Content Group (layer).
     ///
@@ -3037,55 +3043,6 @@ impl<'doc> TextExtractor<'doc> {
                 ctx.actual_text_emitted = true;
                 return;
             }
-        }
-    }
-
-    /// Calculate the average glyph width for a font.
-    ///
-    /// Computes the mean width of printable ASCII characters (codes 32-126)
-    /// in the given font, expressed in thousandths of em.
-    ///
-    /// # Fallback
-    ///
-    /// If the font doesn't have a widths array, uses the font's default width.
-    ///
-    /// # Performance
-    ///
-    /// This is relatively efficient, typically iterating over 95 ASCII characters.
-    /// In practice, most fonts have widths arrays, so this completes quickly.
-    #[allow(dead_code)]
-    fn calculate_average_glyph_width(&self, font: &FontInfo) -> f32 {
-        const PRINTABLE_ASCII_START: u32 = 32; // Space ~keep
-        const PRINTABLE_ASCII_END: u32 = 126; // Tilde ~keep
-
-        let Some(ref widths) = font.widths else {
-            return font.default_width;
-        };
-
-        let Some(first_char) = font.first_char else {
-            return font.default_width;
-        };
-        let Some(last_char) = font.last_char else {
-            return font.default_width;
-        };
-
-        let mut total_width = 0.0;
-        let mut count = 0;
-
-        for char_code in PRINTABLE_ASCII_START..=PRINTABLE_ASCII_END {
-            if char_code >= first_char && char_code <= last_char {
-                let index = (char_code - first_char) as usize;
-                if index < widths.len() {
-                    total_width += widths[index];
-                    count += 1;
-                }
-            }
-        }
-
-        if count > 0 {
-            total_width / count as f32
-        } else {
-            font.default_width
         }
     }
 
@@ -4758,125 +4715,6 @@ impl<'doc> TextExtractor<'doc> {
                 other => other,
             }
         });
-    }
-
-    /// Split fused words created by PDF authoring defects
-    ///
-    /// Some PDFs encode multiple words as a single TJ string without spacing:
-    /// - "theGeneral" instead of "the" + "General"
-    /// - "lengthThis" instead of "length" + "This"
-    /// - "helporganisationscraft" (partial fusion)
-    ///
-    /// This post-processor detects word fusions and splits them into separate spans.
-    ///
-    /// Uses two strategies:
-    /// 1. **CamelCase detection** (first priority): Detects lowercase->uppercase transitions
-    ///    - Example: "theGeneral" -> ["the", "General"]
-    /// 2. **Dictionary-based segmentation** (fallback): Uses Viterbi algorithm with word dictionary
-    ///    - Example: "helporganisationscraft" -> ["help", "organisations", "craft"]
-    ///
-    /// Per ISO 32000-1:2008 Section 9.4.4: "Text strings are as long as possible" - spaces
-    /// are positioning artifacts, so word fusions must be detected and reconstructed.
-    #[allow(dead_code)]
-    fn split_fused_words(&mut self) {
-        let mut split_spans = Vec::new();
-
-        for span in &self.spans {
-            // DEBUG: Log field values before cloning
-            tracing::trace!(
-                "split_fused_words() processing span '{}' (offset_semantic={}, split_boundary_before={})",
-                if span.text.len() <= 30 {
-                    &span.text
-                } else {
-                    "[whitespace or long text]"
-                },
-                span.offset_semantic,
-                span.split_boundary_before
-            );
-
-            let parts = self.split_on_camelcase(&span.text);
-
-            if parts.len() == 1 {
-                let cloned = span.clone();
-                tracing::trace!(
-                    "  → No split: cloned offset_semantic={} (text: '{}')",
-                    cloned.offset_semantic,
-                    if cloned.text.len() <= 30 {
-                        &cloned.text
-                    } else {
-                        "[whitespace or long text]"
-                    }
-                );
-                split_spans.push(cloned);
-            } else {
-                let total_chars = span.text.len() as f32;
-                let mut char_pos = 0;
-
-                for (i, part) in parts.iter().enumerate() {
-                    let part_len = part.len() as f32;
-                    let part_ratio = part_len / total_chars;
-
-                    let new_width = span.bbox.width * part_ratio;
-                    let new_x = span.bbox.x + (span.bbox.width * (char_pos as f32 / total_chars));
-
-                    let mut new_span = span.clone();
-                    new_span.text = part.clone();
-                    new_span.bbox.x = new_x;
-                    new_span.bbox.width = new_width;
-
-                    // Set split_boundary_before flag for all parts except the first
-                    // This prevents them from being re-merged during span merging ~keep
-                    if i > 0 {
-                        new_span.split_boundary_before = true;
-                    }
-
-                    tracing::trace!(
-                        "  → Split part {}: '{}' offset_semantic={} split_boundary_before={}",
-                        i,
-                        part,
-                        new_span.offset_semantic,
-                        new_span.split_boundary_before
-                    );
-                    split_spans.push(new_span);
-                    char_pos += part.len();
-                }
-            }
-        }
-
-        self.spans = split_spans;
-    }
-
-    /// Detect CamelCase boundaries and split text into parts
-    ///
-    /// Splits on lowercase->uppercase transitions:
-    /// - "theGeneral" -> ["the", "General"]
-    /// - "lengthThis" -> ["length", "This"]
-    /// - "helporganisationscraft" -> ["help", "organisations", "craft"]
-    #[allow(dead_code)]
-    fn split_on_camelcase(&self, text: &str) -> Vec<String> {
-        let mut parts = Vec::new();
-        let mut current_part = String::new();
-        let mut prev_is_lower = false;
-
-        for ch in text.chars() {
-            if prev_is_lower && ch.is_uppercase() {
-                if !current_part.is_empty() {
-                    parts.push(current_part.clone());
-                    current_part.clear();
-                }
-                current_part.push(ch);
-                prev_is_lower = false;
-            } else {
-                current_part.push(ch);
-                prev_is_lower = ch.is_lowercase();
-            }
-        }
-
-        if !current_part.is_empty() {
-            parts.push(current_part);
-        }
-
-        if parts.len() > 1 { parts } else { vec![text.to_string()] }
     }
 
     /// Execute a single operator.
@@ -10486,48 +10324,6 @@ mod tests {
     }
 
     #[test]
-    fn test_split_camelcase_basic() {
-        let extractor = TextExtractor::new();
-        let parts = extractor.split_on_camelcase("theGeneral");
-        assert_eq!(parts, vec!["the", "General"]);
-    }
-
-    #[test]
-    fn test_split_camelcase_multiple() {
-        let extractor = TextExtractor::new();
-        let parts = extractor.split_on_camelcase("lengthThisPage");
-        assert_eq!(parts, vec!["length", "This", "Page"]);
-    }
-
-    #[test]
-    fn test_split_camelcase_no_split_all_lower() {
-        let extractor = TextExtractor::new();
-        let parts = extractor.split_on_camelcase("lowercase");
-        assert_eq!(parts, vec!["lowercase"]);
-    }
-
-    #[test]
-    fn test_split_camelcase_no_split_all_upper() {
-        let extractor = TextExtractor::new();
-        let parts = extractor.split_on_camelcase("HTML");
-        assert_eq!(parts, vec!["HTML"]);
-    }
-
-    #[test]
-    fn test_split_camelcase_single_char() {
-        let extractor = TextExtractor::new();
-        let parts = extractor.split_on_camelcase("A");
-        assert_eq!(parts, vec!["A"]);
-    }
-
-    #[test]
-    fn test_split_camelcase_empty() {
-        let extractor = TextExtractor::new();
-        let parts = extractor.split_on_camelcase("");
-        assert_eq!(parts.len(), 1);
-    }
-
-    #[test]
     fn test_is_ligature_code() {
         assert!(TextExtractor::is_ligature_code(0xFB00)); // ff ~keep
         assert!(TextExtractor::is_ligature_code(0xFB01)); // fi ~keep
@@ -14195,129 +13991,6 @@ mod tests {
         assert_eq!(extractor.spans.len(), before + 1);
         assert_eq!(extractor.spans.last().unwrap().text, " ");
         assert!(extractor.spans.last().unwrap().offset_semantic);
-    }
-
-    #[test]
-    fn test_split_fused_words_camelcase() {
-        let mut extractor = TextExtractor::new();
-        extractor.spans = vec![TextSpan {
-            provenance: None,
-            text_rise: 0.0,
-            artifact_type: None,
-            text: "theGeneral".to_string(),
-            bbox: Rect::new(100.0, 700.0, 60.0, 12.0),
-            font_name: "F1".to_string(),
-            font_size: 12.0,
-            font_weight: FontWeight::Normal,
-            color: Color::black(),
-            mcid: None,
-            mcid_scope: None,
-            sequence: 0,
-            split_boundary_before: false,
-            offset_semantic: false,
-            is_italic: false,
-            is_monospace: false,
-            char_spacing: 0.0,
-            word_spacing: 0.0,
-            horizontal_scaling: 100.0,
-            primary_detected: false,
-            char_widths: vec![],
-            char_x_offsets: Vec::new(),
-            heading_level: None,
-            rotation_degrees: 0.0,
-            wmode: 0,
-            rtl_draw_logical: false,
-            mirrored: false,
-            page_rotation_applied: 0,
-        }];
-
-        extractor.split_fused_words();
-        assert_eq!(extractor.spans.len(), 2, "Should split theGeneral into two spans");
-        assert_eq!(extractor.spans[0].text, "the");
-        assert_eq!(extractor.spans[1].text, "General");
-        assert!(extractor.spans[1].split_boundary_before);
-    }
-
-    #[test]
-    fn test_split_fused_words_no_split() {
-        let mut extractor = TextExtractor::new();
-        extractor.spans = vec![TextSpan {
-            provenance: None,
-            text_rise: 0.0,
-            artifact_type: None,
-            text: "hello".to_string(),
-            bbox: Rect::new(100.0, 700.0, 30.0, 12.0),
-            font_name: "F1".to_string(),
-            font_size: 12.0,
-            font_weight: FontWeight::Normal,
-            color: Color::black(),
-            mcid: None,
-            mcid_scope: None,
-            sequence: 0,
-            split_boundary_before: false,
-            offset_semantic: false,
-            is_italic: false,
-            is_monospace: false,
-            char_spacing: 0.0,
-            word_spacing: 0.0,
-            horizontal_scaling: 100.0,
-            primary_detected: false,
-            char_widths: vec![],
-            char_x_offsets: Vec::new(),
-            heading_level: None,
-            rotation_degrees: 0.0,
-            wmode: 0,
-            rtl_draw_logical: false,
-            mirrored: false,
-            page_rotation_applied: 0,
-        }];
-
-        extractor.split_fused_words();
-        assert_eq!(extractor.spans.len(), 1, "No split needed for all-lowercase");
-        assert_eq!(extractor.spans[0].text, "hello");
-    }
-
-    #[test]
-    fn test_calculate_average_glyph_width_no_widths() {
-        let extractor = TextExtractor::new();
-        let font = create_test_font(); // No widths array ~keep
-        let avg = extractor.calculate_average_glyph_width(&font);
-        assert_eq!(avg, font.default_width);
-    }
-
-    #[test]
-    fn test_calculate_average_glyph_width_with_widths() {
-        let extractor = TextExtractor::new();
-        let mut font = create_test_font();
-        font.first_char = Some(32);
-        font.last_char = Some(126);
-        font.widths = Some(vec![500.0; 95]); // 95 printable chars ~keep
-
-        let avg = extractor.calculate_average_glyph_width(&font);
-        assert!((avg - 500.0).abs() < 0.01);
-    }
-
-    #[test]
-    fn test_calculate_average_glyph_width_no_first_char() {
-        let extractor = TextExtractor::new();
-        let mut font = create_test_font();
-        font.widths = Some(vec![500.0; 95]);
-        font.first_char = None;
-
-        let avg = extractor.calculate_average_glyph_width(&font);
-        assert_eq!(avg, font.default_width);
-    }
-
-    #[test]
-    fn test_calculate_average_glyph_width_no_last_char() {
-        let extractor = TextExtractor::new();
-        let mut font = create_test_font();
-        font.widths = Some(vec![500.0; 95]);
-        font.first_char = Some(32);
-        font.last_char = None;
-
-        let avg = extractor.calculate_average_glyph_width(&font);
-        assert_eq!(avg, font.default_width);
     }
 
     #[test]

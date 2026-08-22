@@ -196,32 +196,20 @@ impl ImageContent {
     ///
     /// Returns an error if the bytes do not start with a recognised image magic number.
     pub fn from_bytes(bbox: Rect, data: Vec<u8>) -> Result<Self, crate::error::Error> {
-        use crate::writer::{ColorSpace as HCS, ImageData, ImageFormat as HIF};
-        let parsed = ImageData::from_bytes(&data).map_err(|e| crate::error::Error::Image(e.to_string()))?;
-        let format = match parsed.format {
-            HIF::Jpeg => ImageFormat::Jpeg,
-            HIF::Png => ImageFormat::Png,
-            HIF::Raw => ImageFormat::Raw,
-        };
-        let color_space = match parsed.color_space {
-            HCS::DeviceGray => ColorSpace::Gray,
-            HCS::DeviceRGB => ColorSpace::RGB,
-            HCS::DeviceCMYK => ColorSpace::CMYK,
-        };
-        let soft_mask = parsed.soft_mask;
+        let parsed = parse_image_header(&data)?;
         let mut image = Self {
             bbox,
-            format,
+            format: parsed.format,
             data,
             width: parsed.width,
             height: parsed.height,
             bits_per_component: parsed.bits_per_component,
-            color_space,
+            color_space: parsed.color_space,
             reading_order: None,
             alt_text: None,
             horizontal_dpi: None,
             vertical_dpi: None,
-            soft_mask,
+            soft_mask: parsed.soft_mask,
             matrix: None,
             is_artifact: false,
         };
@@ -322,6 +310,178 @@ impl ColorSpace {
             ColorSpace::Lab => 3,
         }
     }
+}
+
+/// Parsed image header fields extracted by [`parse_image_header`].
+struct ParsedImageHeader {
+    width: u32,
+    height: u32,
+    bits_per_component: u8,
+    color_space: ColorSpace,
+    format: ImageFormat,
+    soft_mask: Option<Vec<u8>>,
+}
+
+/// Parse a JPEG or PNG image header, auto-detecting the format by magic number.
+///
+/// This extracts pixel dimensions, colour space, and (for PNG) an alpha
+/// channel encoded as a PDF-ready soft mask. The original encoded bytes are
+/// left untouched by the caller; this function only inspects them.
+///
+/// Returns an error if the bytes do not start with a recognised image magic
+/// number.
+fn parse_image_header(data: &[u8]) -> Result<ParsedImageHeader, crate::error::Error> {
+    if data.len() >= 2 && data[0] == 0xFF && data[1] == 0xD8 {
+        let (width, height, color_space) = parse_jpeg_dimensions(data).map_err(crate::error::Error::Image)?;
+        return Ok(ParsedImageHeader {
+            width,
+            height,
+            bits_per_component: 8,
+            color_space,
+            format: ImageFormat::Jpeg,
+            soft_mask: None,
+        });
+    }
+
+    if data.len() >= 8 && &data[0..8] == b"\x89PNG\r\n\x1a\n" {
+        return parse_png_header(data);
+    }
+
+    Err(crate::error::Error::Image("Unsupported image format".to_string()))
+}
+
+/// Parse a JPEG SOF marker to extract width, height, and colour space
+/// without decoding the compressed image data.
+fn parse_jpeg_dimensions(data: &[u8]) -> Result<(u32, u32, ColorSpace), String> {
+    if data.len() < 2 || data[0] != 0xFF || data[1] != 0xD8 {
+        return Err("Not a valid JPEG".to_string());
+    }
+
+    let mut pos = 2;
+    while pos < data.len() - 1 {
+        if data[pos] != 0xFF {
+            pos += 1;
+            continue;
+        }
+
+        let marker = data[pos + 1];
+        pos += 2;
+
+        if marker == 0xFF || marker == 0x00 {
+            continue;
+        }
+
+        // SOF markers (Start of Frame) ~keep
+        if matches!(
+            marker,
+            0xC0 | 0xC1 | 0xC2 | 0xC3 | 0xC5 | 0xC6 | 0xC7 | 0xC9 | 0xCA | 0xCB | 0xCD | 0xCE | 0xCF
+        ) {
+            if pos + 7 > data.len() {
+                return Err("Truncated JPEG header".to_string());
+            }
+
+            let _precision = data[pos + 2];
+            let height = u16::from_be_bytes([data[pos + 3], data[pos + 4]]) as u32;
+            let width = u16::from_be_bytes([data[pos + 5], data[pos + 6]]) as u32;
+            let components = data[pos + 7];
+
+            let color_space = match components {
+                1 => ColorSpace::Gray,
+                3 => ColorSpace::RGB,
+                4 => ColorSpace::CMYK,
+                _ => ColorSpace::RGB,
+            };
+
+            return Ok((width, height, color_space));
+        }
+
+        if pos + 2 > data.len() {
+            break;
+        }
+        let length = u16::from_be_bytes([data[pos], data[pos + 1]]) as usize;
+        pos += length;
+    }
+
+    Err("Could not find JPEG dimensions".to_string())
+}
+
+/// Decode a PNG to extract width, height, colour space, and (if present) an
+/// alpha channel encoded as a PDF-ready soft mask.
+///
+/// Unlike the JPEG path this must fully decode the pixel data: PNG's alpha
+/// channel is interleaved with colour samples, so there is no header field
+/// to read the way JPEG's SOF marker gives dimensions directly.
+fn parse_png_header(data: &[u8]) -> Result<ParsedImageHeader, crate::error::Error> {
+    use image::GenericImageView;
+
+    let img = image::load_from_memory_with_format(data, image::ImageFormat::Png)
+        .map_err(|e| crate::error::Error::Image(e.to_string()))?;
+    let (width, height) = img.dimensions();
+
+    let (color_space, alpha): (ColorSpace, Option<Vec<u8>>) = match img.color() {
+        image::ColorType::L8 | image::ColorType::L16 => (ColorSpace::Gray, None),
+        image::ColorType::La8 | image::ColorType::La16 => {
+            let luma_alpha = img.to_luma_alpha8();
+            let alpha_channel = luma_alpha.pixels().map(|pixel| pixel.0[1]).collect();
+            (ColorSpace::Gray, Some(alpha_channel))
+        }
+        image::ColorType::Rgb8 | image::ColorType::Rgb16 => (ColorSpace::RGB, None),
+        image::ColorType::Rgba8 | image::ColorType::Rgba16 => {
+            let rgba = img.to_rgba8();
+            let alpha_channel = rgba.pixels().map(|pixel| pixel.0[3]).collect();
+            (ColorSpace::RGB, Some(alpha_channel))
+        }
+        _ => (ColorSpace::RGB, None),
+    };
+
+    // Alpha is 1 component (gray) per pixel. ~keep
+    let soft_mask = alpha.map(|a| compress_soft_mask(&a, width)).transpose()?;
+
+    Ok(ParsedImageHeader {
+        width,
+        height,
+        bits_per_component: 8,
+        color_space,
+        format: ImageFormat::Png,
+        soft_mask,
+    })
+}
+
+/// Compress a single-component (grayscale) alpha channel using Flate with a
+/// PNG None-filter byte (0x00) prepended to each scanline.
+///
+/// The PDF spec requires that when `FlateDecode` is used with
+/// `DecodeParms/Predictor=15` (PNG adaptive predictor), the decompressed
+/// byte stream must begin each row with a filter-type byte followed by the
+/// (possibly filtered) row samples. Filter type 0 = None means the samples
+/// are stored verbatim. Flate still compresses the whole stream, including
+/// the filter bytes, so LZ compression quality is unaffected.
+fn compress_soft_mask(pixels: &[u8], width: u32) -> Result<Vec<u8>, crate::error::Error> {
+    use std::io::Write;
+
+    use flate2::Compression;
+    use flate2::write::ZlibEncoder;
+
+    let row_bytes = width as usize;
+
+    if row_bytes == 0 || pixels.is_empty() {
+        let encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        return encoder.finish().map_err(|e| crate::error::Error::Image(e.to_string()));
+    }
+
+    // Pre-allocate: 1 filter byte per row + all pixel bytes. ~keep
+    let num_rows = pixels.len().div_ceil(row_bytes);
+    let mut filtered = Vec::with_capacity(pixels.len() + num_rows);
+    for row in pixels.chunks(row_bytes) {
+        filtered.push(0u8);
+        filtered.extend_from_slice(row);
+    }
+
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+    encoder
+        .write_all(&filtered)
+        .map_err(|e| crate::error::Error::Image(e.to_string()))?;
+    encoder.finish().map_err(|e| crate::error::Error::Image(e.to_string()))
 }
 
 #[cfg(test)]
@@ -431,5 +591,90 @@ mod tests {
         assert!(image.get_horizontal_dpi().is_some());
         assert!(image.get_vertical_dpi().is_some());
         assert!((image.get_horizontal_dpi().unwrap() - 300.0).abs() < 1.0);
+    }
+
+    fn encode_png(image: image::DynamicImage) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        image
+            .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
+            .expect("encode test PNG");
+        bytes
+    }
+
+    fn encode_jpeg(image: image::DynamicImage) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        image
+            .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Jpeg)
+            .expect("encode test JPEG");
+        bytes
+    }
+
+    #[test]
+    fn from_bytes_should_parse_rgb_png_header_without_soft_mask() {
+        let rgb = image::RgbImage::from_pixel(4, 3, image::Rgb([10, 20, 30]));
+        let png_bytes = encode_png(image::DynamicImage::ImageRgb8(rgb));
+
+        let image = ImageContent::from_bytes(Rect::new(0.0, 0.0, 72.0, 72.0), png_bytes.clone())
+            .expect("from_bytes should parse a valid PNG header");
+
+        assert_eq!(image.width, 4);
+        assert_eq!(image.height, 3);
+        assert_eq!(image.format, ImageFormat::Png);
+        assert_eq!(image.color_space, ColorSpace::RGB);
+        assert_eq!(image.bits_per_component, 8);
+        assert!(image.soft_mask.is_none());
+        // The original encoded bytes are preserved verbatim, not re-encoded. ~keep
+        assert_eq!(image.data, png_bytes);
+    }
+
+    #[test]
+    fn from_bytes_should_extract_soft_mask_from_rgba_png() {
+        let rgba = image::RgbaImage::from_pixel(2, 2, image::Rgba([1, 2, 3, 128]));
+        let png_bytes = encode_png(image::DynamicImage::ImageRgba8(rgba));
+
+        let image = ImageContent::from_bytes(Rect::new(0.0, 0.0, 72.0, 72.0), png_bytes)
+            .expect("from_bytes should parse an RGBA PNG header");
+
+        assert_eq!(image.width, 2);
+        assert_eq!(image.height, 2);
+        assert_eq!(image.color_space, ColorSpace::RGB);
+        assert!(image.soft_mask.is_some(), "RGBA PNG must produce a soft mask");
+    }
+
+    #[test]
+    fn from_bytes_should_parse_grayscale_png_header() {
+        let gray = image::GrayImage::from_pixel(5, 6, image::Luma([42]));
+        let png_bytes = encode_png(image::DynamicImage::ImageLuma8(gray));
+
+        let image = ImageContent::from_bytes(Rect::new(0.0, 0.0, 72.0, 72.0), png_bytes)
+            .expect("from_bytes should parse a grayscale PNG header");
+
+        assert_eq!(image.width, 5);
+        assert_eq!(image.height, 6);
+        assert_eq!(image.color_space, ColorSpace::Gray);
+        assert!(image.soft_mask.is_none());
+    }
+
+    #[test]
+    fn from_bytes_should_parse_jpeg_header_via_sof_marker() {
+        let rgb = image::RgbImage::from_pixel(16, 8, image::Rgb([200, 100, 50]));
+        let jpeg_bytes = encode_jpeg(image::DynamicImage::ImageRgb8(rgb));
+
+        let image = ImageContent::from_bytes(Rect::new(0.0, 0.0, 72.0, 72.0), jpeg_bytes.clone())
+            .expect("from_bytes should parse a valid JPEG SOF marker");
+
+        assert_eq!(image.width, 16);
+        assert_eq!(image.height, 8);
+        assert_eq!(image.format, ImageFormat::Jpeg);
+        assert_eq!(image.color_space, ColorSpace::RGB);
+        assert_eq!(image.bits_per_component, 8);
+        assert!(image.soft_mask.is_none());
+        assert_eq!(image.data, jpeg_bytes);
+    }
+
+    #[test]
+    fn from_bytes_should_reject_unrecognised_magic_number() {
+        let result = ImageContent::from_bytes(Rect::new(0.0, 0.0, 72.0, 72.0), vec![0u8; 16]);
+        assert!(result.is_err(), "non-image bytes must not parse as an image header");
     }
 }

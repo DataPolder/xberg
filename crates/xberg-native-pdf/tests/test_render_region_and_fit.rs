@@ -1,12 +1,15 @@
 //! Exercise the `rendering::render_page_region` and
 //! `rendering::render_page_fit` entry points.
 
-use xberg_native_pdf::api::Pdf;
+mod common;
+
 use xberg_native_pdf::document::PdfDocument;
 use xberg_native_pdf::rendering::{RenderOptions, render_page, render_page_fit, render_page_region};
 
 fn setup() -> PdfDocument {
-    let bytes = Pdf::from_text("region fit probe").unwrap().into_bytes();
+    let content = common::text_run_op("region fit probe", 72.0, 700.0, "Helvetica", 12.0);
+    let bytes =
+        common::build_pdf_with_standard_fonts(content.as_bytes(), b"/Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]");
     PdfDocument::from_bytes(bytes).unwrap()
 }
 

@@ -7089,23 +7089,6 @@ impl PageRenderer {
         Ok(())
     }
 
-    /// Apply extended graphics state parameters.
-    #[allow(dead_code)]
-    fn apply_ext_g_state(
-        &self,
-        gs: &mut GraphicsState,
-        dict_name: &str,
-        resources: &Object,
-        doc: &PdfDocument,
-    ) -> Result<()> {
-        // Retained as a thin wrapper for any external caller; the operator
-        // loop in `execute_operators` uses the cached fast path via
-        // `parse_ext_g_state` instead. ~keep
-        let parsed = parse_ext_g_state(dict_name, resources, doc).unwrap_or_default();
-        parsed.apply(gs);
-        Ok(())
-    }
-
     /// Render annotations for a page.
     fn render_annotations(
         &mut self,
@@ -8582,34 +8565,6 @@ fn build_logical_color<'a>(
             }
         }
     }
-}
-
-/// Resolve the named ExtGState entry from `resources` and parse the fields we
-/// need. Kept as a thin wrapper that re-resolves the resource dict per call —
-/// the hot path in `execute_operators` uses `parse_ext_g_state_inner` against
-/// a pre-resolved resource dict (the per-form ExtGState dict has 10 000+
-/// entries on heavy vector figures and deep-cloning it on every `gs` op was
-/// the previous bottleneck).
-fn parse_ext_g_state(dict_name: &str, resources: &Object, doc: &PdfDocument) -> Result<ParsedExtGState> {
-    let out = ParsedExtGState::default();
-    let res_dict = match resources {
-        Object::Dictionary(d) => d,
-        _ => return Ok(out),
-    };
-    let ext_gs_obj = match res_dict.get("ExtGState") {
-        Some(o) => o,
-        None => return Ok(out),
-    };
-    let ext_gs_resolved = doc.resolve_object(ext_gs_obj)?;
-    let ext_g_states = match ext_gs_resolved.as_dict() {
-        Some(d) => d,
-        None => return Ok(out),
-    };
-    let state_obj = match ext_g_states.get(dict_name) {
-        Some(o) => o,
-        None => return Ok(out),
-    };
-    parse_ext_g_state_inner(state_obj, doc)
 }
 
 /// Resize an RGBA (straight-alpha) byte buffer using SIMD-accelerated bilinear filtering.

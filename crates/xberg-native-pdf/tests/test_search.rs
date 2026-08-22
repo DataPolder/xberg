@@ -1,13 +1,15 @@
 //! Tests for the text search functionality.
 
+mod common;
+
 use xberg_native_pdf::PdfDocument;
-use xberg_native_pdf::api::Pdf;
 use xberg_native_pdf::search::{SearchOptions, TextSearcher};
 
-/// Helper function to create a test PDF with searchable text.
+/// Helper function to create a test PDF with searchable text, shown as a
+/// single line on page 0.
 fn create_test_pdf_with_text(text: &str) -> Vec<u8> {
-    let pdf = Pdf::from_text(text).expect("Failed to create PDF");
-    pdf.into_bytes()
+    let content = common::text_run_op(text, 72.0, 700.0, "Helvetica", 12.0);
+    common::build_pdf_with_standard_fonts(content.as_bytes(), b"/Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]")
 }
 
 mod search_options {
@@ -214,94 +216,11 @@ mod text_search {
     }
 }
 
-mod api_integration {
-    use super::*;
-
-    #[test]
-    fn test_pdf_search_api() {
-        let bytes = create_test_pdf_with_text("API search test. Find this text easily.");
-
-        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
-        let temp_path = temp_dir.path().join("test_api_search.pdf");
-        std::fs::write(&temp_path, &bytes).expect("Failed to write temp PDF");
-
-        let mut pdf = Pdf::open(&temp_path).expect("Failed to open PDF");
-
-        let results = pdf.search("search").expect("Search failed");
-
-        assert!(!results.is_empty(), "Should find 'search' in the document");
-
-        let _ = std::fs::remove_file(&temp_path);
-    }
-
-    #[test]
-    fn test_pdf_search_with_options_api() {
-        let bytes = create_test_pdf_with_text("SEARCH Search search");
-
-        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
-        let temp_path = temp_dir.path().join("test_api_search_opts.pdf");
-        std::fs::write(&temp_path, &bytes).expect("Failed to write temp PDF");
-
-        let mut pdf = Pdf::open(&temp_path).expect("Failed to open PDF");
-
-        let options = SearchOptions::case_insensitive();
-        let results = pdf.search_with_options("search", options).expect("Search failed");
-
-        assert!(
-            !results.is_empty(),
-            "Should find at least one match with case insensitive search"
-        );
-
-        let _ = std::fs::remove_file(&temp_path);
-    }
-
-    #[test]
-    fn test_pdf_search_page_api() {
-        let bytes = create_test_pdf_with_text("Page specific search test.");
-
-        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
-        let temp_path = temp_dir.path().join("test_api_search_page.pdf");
-        std::fs::write(&temp_path, &bytes).expect("Failed to write temp PDF");
-
-        let mut pdf = Pdf::open(&temp_path).expect("Failed to open PDF");
-
-        let results = pdf.search_page(0, "specific").expect("Search failed");
-
-        for result in &results {
-            assert_eq!(result.page, 0, "All results should be from page 0");
-        }
-
-        let _ = std::fs::remove_file(&temp_path);
-    }
-}
-
-mod highlight_integration {
-    use super::*;
-
-    #[test]
-    fn test_highlight_matches() {
-        let bytes = create_test_pdf_with_text("Highlight this word. And also this word.");
-
-        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
-        let temp_path = temp_dir.path().join("test_highlight_input.pdf");
-        let output_path = temp_dir.path().join("test_highlight_output.pdf");
-        std::fs::write(&temp_path, &bytes).expect("Failed to write temp PDF");
-
-        let mut pdf = Pdf::open(&temp_path).expect("Failed to open PDF");
-
-        let results = pdf.search("word").expect("Search failed");
-
-        if !results.is_empty() {
-            pdf.highlight_matches(&results, [1.0, 1.0, 0.0])
-                .expect("Highlight failed");
-
-            pdf.save(&output_path).expect("Save failed");
-
-            assert!(output_path.exists(), "Highlighted PDF should be created");
-
-            let _ = std::fs::remove_file(&output_path);
-        }
-
-        let _ = std::fs::remove_file(&temp_path);
-    }
-}
+// `api_integration` and `highlight_integration` used to exercise the
+// `xberg_native_pdf::api::Pdf` convenience wrapper's `search`/
+// `search_with_options`/`search_page`/`highlight_matches`/`save` methods.
+// The search-only wrappers were thin pass-throughs over
+// `TextSearcher::search`, already covered directly by `mod text_search`
+// above. `highlight_matches` + `save` required minting a new annotated PDF
+// -- a write-path capability that went away with the PDF writer/editor;
+// there is no replacement here.

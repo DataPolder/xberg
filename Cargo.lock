@@ -12056,13 +12056,11 @@ version = "1.1.0"
 dependencies = [
  "aes 0.9.2",
  "base64 0.23.1",
- "bitflags 2.13.1",
  "brotli",
  "byteorder",
  "bytes",
  "cbc 0.2.1",
  "chrono",
- "crc32fast",
  "encoding_rs",
  "fast_image_resize",
  "fax 0.3.0",

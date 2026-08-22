@@ -3,9 +3,13 @@
 //! these behaviors with its own idiomatic API. (Search is a binding-level
 //! convenience and has no single Rust-core method, so it is covered in the
 //! bindings, not here.)
+//!
+//! PDF-creation and write-side encryption ("create_pdf", "encrypt_roundtrip",
+//! plus the `from_bytes_page_count` test built on the same fixture) were
+//! removed along with the PDF writer/editor stack -- there is no longer a
+//! Rust-core creation API for this suite to exercise.
 
 use xberg_native_pdf::PdfDocument;
-use xberg_native_pdf::writer::DocumentBuilder;
 
 fn fixture_bytes() -> Vec<u8> {
     std::fs::read("tests/fixtures/simple.pdf").expect("simple.pdf fixture")
@@ -13,18 +17,6 @@ fn fixture_bytes() -> Vec<u8> {
 
 fn open() -> PdfDocument {
     PdfDocument::from_bytes(fixture_bytes()).expect("open simple.pdf")
-}
-
-fn build_bytes() -> Vec<u8> {
-    let mut b = DocumentBuilder::new();
-    b.letter_page()
-        .font("Helvetica", 12.0)
-        .at(72.0, 720.0)
-        .heading(1, "Core Parity")
-        .at(72.0, 690.0)
-        .paragraph("Functional parity across all language bindings.")
-        .done();
-    b.build().expect("build pdf")
 }
 
 #[test]
@@ -40,30 +32,6 @@ fn extract_text() {
 #[test]
 fn structured() {
     let _ = open().extract_structured(0).unwrap();
-}
-
-#[test]
-fn create_pdf() {
-    assert!(build_bytes().starts_with(b"%PDF"));
-}
-
-#[test]
-fn from_bytes_page_count() {
-    assert_eq!(PdfDocument::from_bytes(build_bytes()).unwrap().page_count().unwrap(), 1);
-}
-
-#[test]
-fn encrypt_roundtrip() {
-    let plain = build_bytes();
-    let mut b = DocumentBuilder::new();
-    b.letter_page()
-        .font("Helvetica", 12.0)
-        .at(72.0, 720.0)
-        .paragraph("secret")
-        .done();
-    let enc = b.to_bytes_encrypted("user123", "owner123").unwrap();
-    assert!(enc.starts_with(b"%PDF"));
-    assert_ne!(enc, plain, "encryption must change the bytes");
 }
 
 #[test]

@@ -3389,36 +3389,83 @@ mod tests {
         );
     }
 
-    /// Build a minimal single-page PDF with a 2-column stroke-bordered table.
+    /// Build a 2-column, 5-row stroke-bordered table (outer rect + one
+    /// vertical divider + four horizontal dividers) as raw PDF bytes.
     ///
-    /// 5 rows × 2 columns. Every cell boundary is drawn with stroke_rect/stroke_line
-    /// so xberg_native_pdf's detect_tables_with_lines can lock onto the paths.
+    /// Hand-built rather than via the (now-removed) `DocumentBuilder`
+    /// writer: the two tests below assert on the GRID structure derived
+    /// from the stroked lines (row/column counts), not on exact text
+    /// placement, so a minimal `re`/`m`/`l`/`S` content stream reproduces
+    /// the same geometry the writer used to emit. Coordinates match the
+    /// original writer-built fixture exactly: outer border
+    /// `50,550` to `400,750` (350x200), vertical divider at `x=200`,
+    /// horizontal dividers at `y=710,670,630,590`.
     fn build_two_column_bordered_table_pdf() -> Vec<u8> {
-        use xberg_native_pdf::geometry::Rect;
-        use xberg_native_pdf::writer::{DocumentBuilder, LineStyle, TextAlign};
+        let rows: [(f32, &str, &str); 5] = [
+            (710.0, "Item", "Status"),
+            (670.0, "8", "Not correct"),
+            (630.0, "27", "Incomplete"),
+            (590.0, "29,30", "Missing data"),
+            (550.0, "45", "Fixed"),
+        ];
 
-        let style = LineStyle::new(1.0, 0.0, 0.0, 0.0);
+        let mut content = String::new();
+        content.push_str("1 w\n0 0 0 RG\n");
+        content.push_str("50 550 350 200 re S\n");
+        content.push_str("200 550 m 200 750 l S\n");
+        for y in [710.0_f32, 670.0, 630.0, 590.0] {
+            content.push_str(&format!("50 {y} m 400 {y} l S\n"));
+        }
+        content.push_str("BT /Helvetica 10 Tf\n");
+        for (row_bottom, left_text, right_text) in rows {
+            let baseline = row_bottom + 20.0 - 4.0;
+            content.push_str(&format!("1 0 0 1 55 {baseline} Tm ({left_text}) Tj\n"));
+            content.push_str(&format!("1 0 0 1 205 {baseline} Tm ({right_text}) Tj\n"));
+        }
+        content.push_str("ET\n");
 
-        let mut doc = DocumentBuilder::new();
-        doc.a4_page()
-            .stroke_rect(50.0, 550.0, 350.0, 200.0, style.clone())
-            .stroke_line(200.0, 550.0, 200.0, 750.0, style.clone())
-            .stroke_line(50.0, 710.0, 400.0, 710.0, style.clone())
-            .stroke_line(50.0, 670.0, 400.0, 670.0, style.clone())
-            .stroke_line(50.0, 630.0, 400.0, 630.0, style.clone())
-            .stroke_line(50.0, 590.0, 400.0, 590.0, style.clone())
-            .text_in_rect(Rect::new(50.0, 710.0, 150.0, 40.0), "Item", TextAlign::Left)
-            .text_in_rect(Rect::new(200.0, 710.0, 200.0, 40.0), "Status", TextAlign::Left)
-            .text_in_rect(Rect::new(50.0, 670.0, 150.0, 40.0), "8", TextAlign::Left)
-            .text_in_rect(Rect::new(200.0, 670.0, 200.0, 40.0), "Not correct", TextAlign::Left)
-            .text_in_rect(Rect::new(50.0, 630.0, 150.0, 40.0), "27", TextAlign::Left)
-            .text_in_rect(Rect::new(200.0, 630.0, 200.0, 40.0), "Incomplete", TextAlign::Left)
-            .text_in_rect(Rect::new(50.0, 590.0, 150.0, 40.0), "29,30", TextAlign::Left)
-            .text_in_rect(Rect::new(200.0, 590.0, 200.0, 40.0), "Missing data", TextAlign::Left)
-            .text_in_rect(Rect::new(50.0, 550.0, 150.0, 40.0), "45", TextAlign::Left)
-            .text_in_rect(Rect::new(200.0, 550.0, 200.0, 40.0), "Fixed", TextAlign::Left)
-            .done();
-        doc.build().expect("DocumentBuilder must produce valid PDF bytes")
+        let mut pdf = b"%PDF-1.4\n".to_vec();
+        let mut offsets = vec![0usize];
+
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(
+            b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] \
+              /Contents 4 0 R /Resources << /Font << /Helvetica 5 0 R >> >> >>\nendobj\n",
+        );
+
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(format!("4 0 obj\n<< /Length {} >>\nstream\n", content.len()).as_bytes());
+        pdf.extend_from_slice(content.as_bytes());
+        pdf.extend_from_slice(b"\nendstream\nendobj\n");
+
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(
+            b"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica \
+              /Encoding /WinAnsiEncoding >>\nendobj\n",
+        );
+
+        let xref_pos = pdf.len();
+        pdf.extend_from_slice(format!("xref\n0 {}\n", offsets.len()).as_bytes());
+        pdf.extend_from_slice(b"0000000000 65535 f \n");
+        for &off in &offsets[1..] {
+            pdf.extend_from_slice(format!("{off:010} 00000 n \n").as_bytes());
+        }
+        pdf.extend_from_slice(
+            format!(
+                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n",
+                offsets.len(),
+                xref_pos
+            )
+            .as_bytes(),
+        );
+
+        pdf
     }
 
     /// `extract_tables_native` (strict, min_table_columns=3) must NOT detect a

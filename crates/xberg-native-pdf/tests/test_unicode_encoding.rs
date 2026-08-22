@@ -12,7 +12,6 @@
 //! file as the single byte 0xE9, not as the two-byte UTF-8 sequence 0xC3 0xA9.
 
 use xberg_native_pdf::object::encode_pdf_text_string;
-use xberg_native_pdf::writer::{DocumentBuilder, DocumentMetadata};
 
 #[test]
 fn encode_ascii_is_identity() {
@@ -98,110 +97,14 @@ fn encode_null_byte_boundary() {
     assert_eq!(bytes, &[0x00]);
 }
 
-/// Extract the raw bytes of a built PDF and verify the accent encoding.
-///
-/// The strategy: build a minimal PDF whose title (metadata) contains "é",
-/// then search the raw output for the UTF-8 multi-byte encoding of "é"
-/// (0xC3 0xA9).  If the bug is present this sequence appears; if fixed it
-/// must NOT appear.  Instead we expect the single byte 0xE9.
-#[test]
-fn metadata_title_with_accents_uses_pdfdocencoding_not_utf8() {
-    let builder = DocumentBuilder::new().metadata(
-        DocumentMetadata::new()
-            .title("Título")
-            .author("Ångström")
-            .subject("Ação"),
-    );
-    let mut builder = builder;
-    builder.a4_page().done();
-
-    let pdf_bytes = builder.build().expect("DocumentBuilder::build should succeed");
-
-    // UTF-8 encoding of é is 0xC3 0xA9 — must NOT appear ~keep
-    let utf8_e_acute: &[u8] = &[0xC3, 0xA9];
-    let utf8_i_tilde: &[u8] = &[0xC3, 0xAD];
-    let utf8_a_tilde: &[u8] = &[0xC3, 0xA3];
-    let utf8_angstrom_a: &[u8] = &[0xC3, 0x85];
-
-    fn contains_subslice(haystack: &[u8], needle: &[u8]) -> bool {
-        haystack.windows(needle.len()).any(|w| w == needle)
-    }
-
-    assert!(
-        !contains_subslice(&pdf_bytes, utf8_e_acute),
-        "PDF contains raw UTF-8 bytes for 'é' (0xC3 0xA9) — encoding bug still present"
-    );
-    assert!(
-        !contains_subslice(&pdf_bytes, utf8_i_tilde),
-        "PDF contains raw UTF-8 bytes for 'í' (0xC3 0xAD) — encoding bug still present"
-    );
-    assert!(
-        !contains_subslice(&pdf_bytes, utf8_a_tilde),
-        "PDF contains raw UTF-8 bytes for 'ã' — encoding bug still present"
-    );
-    assert!(
-        !contains_subslice(&pdf_bytes, utf8_angstrom_a),
-        "PDF contains raw UTF-8 bytes for 'Å' — encoding bug still present"
-    );
-}
-
-#[test]
-fn content_stream_latin1_text_uses_single_byte_not_utf8() {
-    let mut builder = DocumentBuilder::new();
-    builder.a4_page().at(72.0, 700.0).text("Lógico").done();
-
-    let pdf_bytes = builder.build().expect("build should succeed");
-
-    // ó in UTF-8 is 0xC3 0xB3 — this pair must NOT appear in the content stream ~keep
-    let utf8_o_acute: &[u8] = &[0xC3, 0xB3];
-
-    fn contains_subslice(haystack: &[u8], needle: &[u8]) -> bool {
-        haystack.windows(needle.len()).any(|w| w == needle)
-    }
-
-    assert!(
-        !contains_subslice(&pdf_bytes, utf8_o_acute),
-        "Content stream contains raw UTF-8 bytes for 'ó' (0xC3 0xB3) — write_escaped_string bug"
-    );
-
-    assert!(
-        pdf_bytes.contains(&0xF3),
-        "Expected WinAnsi byte 0xF3 for 'ó' to be present in the PDF"
-    );
-}
-
-#[test]
-fn metadata_with_cjk_title_uses_utf16be_bom() {
-    let builder = DocumentBuilder::new().metadata(DocumentMetadata::new().title("PDF文書"));
-    let mut builder = builder;
-    builder.a4_page().done();
-
-    let pdf_bytes = builder.build().expect("build should succeed");
-
-    let hex_bom = b"FEFF";
-    fn contains_subslice(haystack: &[u8], needle: &[u8]) -> bool {
-        haystack.windows(needle.len()).any(|w| w == needle)
-    }
-    assert!(
-        contains_subslice(&pdf_bytes, hex_bom),
-        "Hex-encoded BOM 'FEFF' not found in PDF — CJK metadata title not properly UTF-16BE encoded"
-    );
-}
-
-#[test]
-fn content_stream_chars_above_ff_replaced_with_question_mark() {
-    let mut builder = DocumentBuilder::new();
-    builder.a4_page().at(72.0, 700.0).text("中文").done();
-
-    let pdf_bytes = builder.build().expect("build should succeed");
-
-    // UTF-8 encoding of 中 is 0xE4 0xB8 0xAD — this multi-byte sequence must not appear ~keep
-    let utf8_zhong: &[u8] = &[0xE4, 0xB8, 0xAD];
-    fn contains_subslice(haystack: &[u8], needle: &[u8]) -> bool {
-        haystack.windows(needle.len()).any(|w| w == needle)
-    }
-    assert!(
-        !contains_subslice(&pdf_bytes, utf8_zhong),
-        "Raw UTF-8 bytes for '中' found in PDF — write_escaped_string bug"
-    );
-}
+// `metadata_title_with_accents_uses_pdfdocencoding_not_utf8`,
+// `content_stream_latin1_text_uses_single_byte_not_utf8`,
+// `metadata_with_cjk_title_uses_utf16be_bom`, and
+// `content_stream_chars_above_ff_replaced_with_question_mark` used to build a
+// PDF via `writer::DocumentBuilder`/`DocumentMetadata` and grep the output
+// bytes to verify the WRITER correctly applied `encode_pdf_text_string`
+// (metadata) and `write_escaped_string` (content-stream `Tj` strings) when
+// emitting non-ASCII text. Both were writer-internal encoding paths; with
+// the writer removed there is nothing left to build or grep. The primitive
+// itself (`encode_pdf_text_string`, above) is unaffected and still fully
+// covered.

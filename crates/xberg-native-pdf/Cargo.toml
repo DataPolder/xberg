@@ -25,12 +25,11 @@ include = [
   "/README.md",
   "/ATTRIBUTIONS.md",
   "/CHANGELOG.md",
-  "/rustfmt.toml",
   "/tests/fixtures/jpx/sample_gray.jp2",
   "/tests/fixtures/encrypted_needs_password.pdf",
   "/tests/fixtures/encrypted_cid_truetype.pdf",
   "/tests/fixtures/encrypted_objstm.pdf",
-  "/tests/fixtures/adobe_cmyk_10x11_white.jpg",
+  "/tests/fixtures/simple.pdf",
   "/tests/fixtures/fonts/StandardSymbolsPS.otf",
 ]
 
@@ -64,7 +63,6 @@ cjk-render-fallback = []
 [dependencies]
 aes = "0.9"
 base64 = "0.23"
-bitflags = "2"
 brotli = "8"
 byteorder = "1.5"
 bytes = "1.12"
@@ -118,7 +116,6 @@ fontconfig-parser = { version = "0.5", default-features = false }
 [dev-dependencies]
 aes = "0.9"
 cbc = "0.2"
-crc32fast = "1.5"
 hex-literal = "1.1.0"
 jpeg-encoder = "0.7.1"
 sha2 = "0.11"

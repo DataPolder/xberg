@@ -10,30 +10,24 @@
 //! both wrong and non-deterministic. A digit whose nearest preceding glyph is a
 //! minus/hyphen sign is a signed exponent and must be left as ASCII.
 
-use xberg_native_pdf::document::PdfDocument;
-use xberg_native_pdf::writer::{PageBuilder, PdfWriter};
+mod common;
+use common::{build_and_extract_page0, text_run_op};
 
-fn put(page: &mut PageBuilder<'_>, text: &str, x: f32, y: f32, font: &str, size: f32) {
-    page.add_text(text, x, y, font, size);
-    page.draw_rect(0.0, 0.0, 0.0, 0.0);
-}
-
-fn build_and_extract(build_fn: impl FnOnce(&mut PdfWriter)) -> String {
-    let mut writer = PdfWriter::new();
-    build_fn(&mut writer);
-    let bytes = writer.finish().expect("build PDF");
-    let doc = PdfDocument::from_bytes(bytes).expect("open PDF");
-    doc.extract_text(0).expect("extract page 0")
+fn build_and_extract(runs: &[(&str, f32, f32, &str, f32)]) -> String {
+    let mut content = String::new();
+    for &(text, x, y, font, size) in runs {
+        content.push_str(&text_run_op(text, x, y, font, size));
+    }
+    build_and_extract_page0(&content)
 }
 
 #[test]
 fn signed_unit_exponent_stays_ascii() {
-    let out = build_and_extract(|w| {
-        let mut page = w.add_letter_page();
-        put(&mut page, "s", 100.0, 200.0, "Helvetica", 14.0);
-        put(&mut page, "-1", 110.0, 197.0, "Helvetica", 9.0);
-        put(&mut page, "s", 124.0, 200.0, "Helvetica", 14.0);
-    });
+    let out = build_and_extract(&[
+        ("s", 100.0, 200.0, "Helvetica", 14.0),
+        ("-1", 110.0, 197.0, "Helvetica", 9.0),
+        ("s", 124.0, 200.0, "Helvetica", 14.0),
+    ]);
 
     let collapsed: String = out.split_whitespace().collect();
     assert!(
@@ -50,12 +44,11 @@ fn signed_unit_exponent_stays_ascii() {
 fn chemistry_subscript_still_substitutes() {
     // Guard must NOT regress the real subscript case: `H2O` → `H₂O`. The digit's
     // preceding glyph is the letter `H`, not a sign. ~keep
-    let out = build_and_extract(|w| {
-        let mut page = w.add_letter_page();
-        put(&mut page, "H", 100.0, 200.0, "Helvetica", 14.0);
-        put(&mut page, "2", 112.0, 197.0, "Helvetica", 9.0);
-        put(&mut page, "O", 122.0, 200.0, "Helvetica", 14.0);
-    });
+    let out = build_and_extract(&[
+        ("H", 100.0, 200.0, "Helvetica", 14.0),
+        ("2", 112.0, 197.0, "Helvetica", 9.0),
+        ("O", 122.0, 200.0, "Helvetica", 14.0),
+    ]);
 
     let collapsed: String = out.split_whitespace().collect();
     assert_eq!(collapsed, "H\u{2082}O", "chemistry subscript regressed: {collapsed:?}");

@@ -155,7 +155,7 @@ impl ParserOptions {
     }
 
     /// Check if we should continue parsing after an error
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn should_continue(&self, error_count: usize) -> bool {
         if self.strict {
             return false;
