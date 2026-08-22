@@ -14,6 +14,21 @@ use crate::core::diagnostics::push_warning;
 use crate::error::{Result, XbergError};
 use crate::types::ProcessingWarning;
 
+/// Maximum bytes read from a single PPTX zip member (slide XML, relationship
+/// XML, chart/diagram part, or embedded image).
+///
+/// The pinned `zip` crate (`zip-2.4.2/src/read.rs:444`) wraps a decompressed entry in
+/// `Crc32Reader::new(Decompressor::new(..), crc32, ..)` with no `Take` on the
+/// decompressed side -- only the *compressed* stream is bounded, and the CRC is
+/// checked at EOF, i.e. after the whole entry is already in memory. A member's
+/// declared uncompressed size (what `ZipBombValidator`/`check_entry_count` see from
+/// the central directory) is therefore not a bound on what reading it actually
+/// produces: deflate can expand a small compressed payload by roughly 1032:1. Bounding
+/// every `read_to_end` call with `Read::take` (the same pattern as
+/// `docx::MAX_UNCOMPRESSED_FILE_SIZE` and `hwpx::MAX_HWPX_MEMBER_SIZE`) is what actually
+/// caps memory here.
+const MAX_PPTX_MEMBER_SIZE: u64 = 100 * 1024 * 1024;
+
 pub(super) struct PptxContainer<R: Read + Seek> {
     pub(super) archive: ZipArchive<R>,
     slide_paths: Vec<String>,
@@ -97,7 +112,7 @@ impl<R: Read + Seek> PptxContainer<R> {
             Ok(mut file) => {
                 let mut contents = Vec::new();
                 // IO errors must bubble up - file read issues need user reports ~keep
-                file.read_to_end(&mut contents)?;
+                file.take(MAX_PPTX_MEMBER_SIZE).read_to_end(&mut contents)?;
                 Ok(contents)
             }
             Err(zip::result::ZipError::FileNotFound) => {
@@ -156,7 +171,7 @@ impl<R: Read + Seek> PptxContainer<R> {
         };
         let mut contents = Vec::new();
         // IO errors must bubble up - file read issues need user reports ~keep
-        file.read_to_end(&mut contents)?;
+        file.take(MAX_PPTX_MEMBER_SIZE).read_to_end(&mut contents)?;
         Ok(contents)
     }
 }
@@ -372,6 +387,49 @@ mod tests {
         assert!(
             check_entry_count(&archive, 10).is_ok(),
             "5 entries must pass against a configured limit of 10"
+        );
+    }
+
+    /// `check_entry_count` only inspects the ZIP central directory (entry sizes as
+    /// *declared*, never decompressed); it has no way to bound what a single member
+    /// actually expands to when read. This builds one oversized member (padded past
+    /// `MAX_PPTX_MEMBER_SIZE` with a marker after the cap) and proves `read_file`
+    /// itself stops at the cap: without `Read::take(MAX_PPTX_MEMBER_SIZE)` in
+    /// `read_file`, the whole member -- including the post-cap marker -- would come
+    /// back.
+    #[test]
+    fn test_read_file_bounds_an_oversized_member() {
+        let marker_before = b"BEFORE-CAP";
+        let marker_after = b"AFTER-CAP-MARKER";
+        let padding_len = MAX_PPTX_MEMBER_SIZE as usize + 4096 - marker_before.len() - marker_after.len();
+        let mut payload = Vec::with_capacity(MAX_PPTX_MEMBER_SIZE as usize + 4096);
+        payload.extend_from_slice(marker_before);
+        payload.extend(vec![b'x'; padding_len]);
+        payload.extend_from_slice(marker_after);
+
+        let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        let options = zip::write::FileOptions::<()>::default().compression_method(zip::CompressionMethod::Stored);
+        zip.start_file("ppt/slides/oversized.bin", options).unwrap();
+        zip.write_all(&payload).unwrap();
+        let data = zip.finish().unwrap().into_inner();
+
+        let mut container = PptxContainer::from_bytes(&data, 10).expect("archive under the entry-count limit opens");
+        let contents = container
+            .read_file("ppt/slides/oversized.bin")
+            .expect("a truncated read must still succeed, not error");
+
+        assert_eq!(
+            contents.len(),
+            MAX_PPTX_MEMBER_SIZE as usize,
+            "read_file must stop at exactly MAX_PPTX_MEMBER_SIZE bytes"
+        );
+        assert!(
+            contents.starts_with(marker_before),
+            "content before the cap must be preserved"
+        );
+        assert!(
+            !contents.ends_with(marker_after.as_slice()),
+            "content after the cap must never be read; finding the marker means the read was not bounded"
         );
     }
 }

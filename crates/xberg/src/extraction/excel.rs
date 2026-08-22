@@ -55,6 +55,20 @@ const MAX_BOUNDING_BOX_CELLS: u64 = 100_000_000;
 /// user-configurable limit.
 const MAX_METADATA_ENTRIES_PER_SHEET: usize = 200;
 
+/// Maximum bytes read from a single auxiliary ZIP member inside an XLSX/XLSM/XLTM
+/// archive (`xl/revisions/revisionHeaders.xml`, `xl/comments*.xml`).
+///
+/// The pinned `zip` crate (`zip-2.4.2/src/read.rs:444`) wraps a decompressed entry as
+/// `Crc32Reader::new(Decompressor::new(..), crc32, ..)` with no `Take` on the
+/// decompressed side -- only the *compressed* stream is bounded, and the CRC is
+/// verified at EOF, i.e. after the whole entry is already in memory. `check_zip_entry_count`
+/// (above) only counts entries from the central directory and never inspects declared
+/// sizes, so nothing here bounds what a single crafted member expands to when read.
+/// Bounding every `read_to_end` call with `Read::take` (the same pattern as
+/// `docx::MAX_UNCOMPRESSED_FILE_SIZE` and `hwpx::MAX_HWPX_MEMBER_SIZE`) is what actually
+/// caps memory here.
+const MAX_EXCEL_ZIP_MEMBER_SIZE: u64 = 100 * 1024 * 1024;
+
 #[cfg(feature = "office")]
 use crate::extraction::office_metadata::{
     app_properties::{DOC_SECURITY_KEY, decode_doc_security_flags},
@@ -1330,7 +1344,7 @@ fn extract_xlsx_revisions_from_archive<R: Read + Seek>(
             }
         };
         let mut buf = Vec::new();
-        if entry.read_to_end(&mut buf).is_err() {
+        if entry.take(MAX_EXCEL_ZIP_MEMBER_SIZE).read_to_end(&mut buf).is_err() {
             return None;
         }
         buf
@@ -1442,7 +1456,7 @@ fn extract_xlsx_comments_from_archive<R: Read + Seek>(archive: &mut zip::ZipArch
                 Err(_) => continue,
             };
             let mut buf = Vec::new();
-            if entry.read_to_end(&mut buf).is_err() {
+            if entry.take(MAX_EXCEL_ZIP_MEMBER_SIZE).read_to_end(&mut buf).is_err() {
                 continue;
             }
             buf
@@ -2139,6 +2153,46 @@ mod tests {
         assert_eq!(revisions[0].author.as_deref(), Some("Carol"));
     }
 
+    /// `check_zip_entry_count` only counts entries; it never inspects declared sizes,
+    /// so nothing before `extract_xlsx_revisions_from_archive` bounds a single member's
+    /// *actual* decompressed length. This pads `xl/revisions/revisionHeaders.xml` with
+    /// an XML comment past `MAX_EXCEL_ZIP_MEMBER_SIZE`, followed by a real `<header>`
+    /// element. Without `Read::take(MAX_EXCEL_ZIP_MEMBER_SIZE)` on the entry read, the
+    /// whole member is read, the comment closes, and the trailing `<header>` parses
+    /// into `Some(vec![..])`. With the cap, the read is truncated mid-comment, the XML
+    /// is no longer well-formed, and `roxmltree::Document::parse` fails, so the
+    /// function returns `None`.
+    #[test]
+    fn test_revisions_read_is_bounded_for_oversized_member() {
+        let padding_len = MAX_EXCEL_ZIP_MEMBER_SIZE as usize + 4096;
+        let mut xml = String::from(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+             <headers xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">\n<!--",
+        );
+        xml.push_str(&"x".repeat(padding_len));
+        xml.push_str(
+            "-->\n<header guid=\"{DEADBEEF-0000-0000-0000-000000000099}\" \
+             dateTime=\"2024-01-01T00:00:00Z\" userName=\"Late\" maxSheetId=\"1\"/>\n</headers>",
+        );
+
+        let mut buffer = Vec::new();
+        {
+            use std::io::Write as _;
+            let mut zip = zip::ZipWriter::new(Cursor::new(&mut buffer));
+            let opts = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+            zip.start_file("xl/revisions/revisionHeaders.xml", opts).unwrap();
+            zip.write_all(xml.as_bytes()).unwrap();
+            zip.finish().unwrap();
+        }
+
+        let result = extract_xlsx_revisions_from_bytes(&buffer);
+        assert!(
+            result.is_none(),
+            "a header sitting after MAX_EXCEL_ZIP_MEMBER_SIZE must never be reached; an \
+             unbounded read would find it and return Some(..) instead of None, got {result:?}"
+        );
+    }
+
     /// Build a minimal in-memory `.xlsx` zip from a caller-supplied `<workbook>`
     /// inner body (the `<sheets>`/`<definedNames>` elements) and workbook-rels
     /// relationships, plus any additional zip parts (worksheet XML, worksheet
@@ -2501,6 +2555,46 @@ mod tests {
         assert_eq!(
             workbook.metadata.get("comments").map(String::as_str),
             Some("A1: Check this")
+        );
+    }
+
+    /// Sibling of `test_revisions_read_is_bounded_for_oversized_member` for the
+    /// `xl/comments*.xml` read path. `extract_xlsx_comments_from_archive` only lists
+    /// entry names before reading -- it never looks at declared sizes -- so a single
+    /// `xl/comments1.xml` member is the only thing that can bound its own decompressed
+    /// length. The comment element sits after a `MAX_EXCEL_ZIP_MEMBER_SIZE`-sized XML
+    /// comment: without `Read::take` on the entry, the whole member is read and the
+    /// comment text is found; with the cap, the read truncates mid-comment, parsing
+    /// fails, and the part contributes nothing.
+    #[test]
+    fn test_comments_read_is_bounded_for_oversized_member() {
+        let padding_len = MAX_EXCEL_ZIP_MEMBER_SIZE as usize + 4096;
+        let mut xml = String::from(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+             <comments xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">\n\
+             <authors><author>Alice</author></authors>\n<commentList>\n<!--",
+        );
+        xml.push_str(&"x".repeat(padding_len));
+        xml.push_str(
+            "-->\n<comment ref=\"Z99\" authorId=\"0\"><text><r><t>Late comment</t></r></text></comment>\n\
+             </commentList>\n</comments>",
+        );
+
+        let mut buffer = Vec::new();
+        {
+            use std::io::Write as _;
+            let mut zip = zip::ZipWriter::new(Cursor::new(&mut buffer));
+            let opts = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+            zip.start_file("xl/comments1.xml", opts).unwrap();
+            zip.write_all(xml.as_bytes()).unwrap();
+            zip.finish().unwrap();
+        }
+
+        let result = extract_xlsx_comments_from_bytes(&buffer);
+        assert!(
+            result.is_none(),
+            "a comment sitting after MAX_EXCEL_ZIP_MEMBER_SIZE must never be reached; an \
+             unbounded read would find 'Late comment' and return Some(..) instead of None, got {result:?}"
         );
     }
 

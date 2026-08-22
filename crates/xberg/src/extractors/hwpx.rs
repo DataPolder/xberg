@@ -21,6 +21,17 @@ use crate::types::internal_builder::InternalDocumentBuilder;
 /// `ProcessingWarning::source` for every warning this extractor emits (#171).
 const HWPX_WARNING_SOURCE: &str = "hwpx";
 
+/// Maximum bytes read from a single HWPX zip member's section XML.
+///
+/// `ZipBombValidator::validate` (called before any member is read) only checks
+/// the *declared* compressed/uncompressed sizes and ratio from the zip central
+/// directory -- it never decompresses. A crafted entry can under-declare its
+/// size while its deflate stream expands far past that declaration, so the
+/// entry's declared size cannot be trusted as an upper bound on what reading it
+/// actually produces. Bounding the read itself with `Read::take` (the same
+/// pattern as `odt::MAX_ODT_MEMBER_SIZE`) is what actually caps memory.
+const MAX_HWPX_MEMBER_SIZE: u64 = 100 * 1024 * 1024;
+
 /// Extractor for Hangul Word Processor XML (.hwpx) files.
 ///
 /// Supports HWPX (Open HWPML), the ZIP-based XML successor to the binary HWP 5.0 format.
@@ -127,7 +138,7 @@ fn collect_section_formulas<R: Read + Seek>(archive: &mut zip::ZipArchive<R>) ->
         if archive
             .by_name(&name)
             .ok()
-            .and_then(|mut part| part.read_to_string(&mut xml).ok())
+            .and_then(|part| part.take(MAX_HWPX_MEMBER_SIZE).read_to_string(&mut xml).ok())
             .is_none()
         {
             continue;
@@ -714,6 +725,35 @@ mod tests {
             latex,
             unhwp::equation::to_latex("bmatrix { 1  2 # 3  4 }").trim(),
             "a dropped reference must not produce the same LaTeX"
+        );
+    }
+
+    /// `ZipBombValidator::validate` only checks the *declared* central-directory
+    /// sizes; it never decompresses. `collect_section_formulas` must bound its own
+    /// read of a member's content with `Read::take(MAX_HWPX_MEMBER_SIZE)` rather
+    /// than trusting the declared size, or a section whose entry decompresses to
+    /// far more than declared can still exhaust memory. An XML comment (ignored by
+    /// the parser, so it does not disturb element nesting) padded past the cap
+    /// proves the bound: an equation entirely before the cap is found, one that
+    /// only starts after it is not, and the scan completes without hanging or
+    /// panicking on the oversized member.
+    #[test]
+    fn test_scan_bounds_the_read_of_an_oversized_section_member() {
+        let before = r#"<hp:p><hp:run><hp:equation><hp:script>a OVER b</hp:script></hp:equation></hp:run></hp:p>"#;
+        let padding = "x".repeat(MAX_HWPX_MEMBER_SIZE as usize + 4096);
+        let after = r#"<hp:p><hp:run><hp:equation><hp:script>p OVER q</hp:script></hp:equation></hp:run></hp:p>"#;
+        let xml = format!(
+            "<hs:sec xmlns:hp=\"http://www.hancom.co.kr/hwpml/2011/paragraph\">{before}<!--{padding}-->{after}</hs:sec>"
+        );
+
+        let found = scan(&hwpx_package(&[("Contents/section0.xml", &xml)]));
+
+        let formulas = found.get(&0).expect("the equation before the cap is found");
+        assert_eq!(
+            formulas.as_slice(),
+            &[(0usize, "\\frac{a}{b}".to_string())][..],
+            "only the equation entirely within the first MAX_HWPX_MEMBER_SIZE bytes must be found; \
+             finding the second equation would mean the read was not actually bounded"
         );
     }
 
