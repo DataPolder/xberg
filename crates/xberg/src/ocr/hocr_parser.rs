@@ -50,6 +50,22 @@ struct HocrBlockExtent {
 ///
 /// Page numbers come from the `ppageno` title property (converted to 1-indexed).
 pub(crate) fn parse_hocr_to_internal_document(hocr_html: &str) -> InternalDocument {
+    parse_hocr_to_internal_document_with_dictionary_filter(hocr_html, None)
+}
+
+/// Same as [`parse_hocr_to_internal_document`], with an optional per-line
+/// dictionary-invalid noise filter (#783). See [`DictionaryLineFilter`] for why this must
+/// run here -- before a paragraph's `ocr_line` groups are joined into its `\n`-joined
+/// `text` -- rather than against either of that text's two independent downstream
+/// consumers.
+///
+/// Kept as a separate function (rather than adding a parameter to
+/// [`parse_hocr_to_internal_document`] directly) so the ~30 existing call sites that only
+/// ever want the unfiltered parse -- almost all of them tests -- do not need to change.
+pub(crate) fn parse_hocr_to_internal_document_with_dictionary_filter(
+    hocr_html: &str,
+    dictionary_filter: Option<&DictionaryLineFilter<'_>>,
+) -> InternalDocument {
     let mut doc = InternalDocument::new("ocr");
     doc.mime_type = "application/x-hocr".to_string();
 
@@ -111,8 +127,14 @@ pub(crate) fn parse_hocr_to_internal_document(hocr_html: &str) -> InternalDocume
                 .next()
                 .unwrap_or("p")
                 .to_ascii_lowercase();
-            let (paragraph, end_pos) =
-                parse_paragraph(hocr_html, pos, last_page.unwrap_or(1), element_index, &par_tag_name);
+            let (paragraph, end_pos) = parse_paragraph(
+                hocr_html,
+                pos,
+                last_page.unwrap_or(1),
+                element_index,
+                &par_tag_name,
+                dictionary_filter,
+            );
             pos = end_pos;
 
             if let Some(mut elem) = paragraph {
@@ -306,6 +328,102 @@ struct HocrLineInfo {
     baseline: Option<(f64, i32)>,
 }
 
+/// Per-line dictionary-invalid noise filter, threaded through hOCR parsing (#783).
+///
+/// Applied while a paragraph's `ocr_line` groups are still separate physical lines —
+/// before their words are joined into the paragraph's `\n`-joined `text` — so every
+/// consumer of that text sees the same, already-filtered lines. That matters because
+/// there are two such consumers built from the same `InternalElement.text`:
+/// `flatten_hocr_elements_to_text` (feeding the flat OCR page string) and
+/// `pdf::structure::adapters::ocr_doc_to_paragraphs` / `ocr_doc_to_layout_paragraphs`
+/// (feeding the rendered document's paragraphs). Filtering later, against either
+/// rendering independently, risks the two silently drifting apart: a prior attempt at
+/// this fix (reverted as `29738a1f29`) stripped noise lines only from the flat text
+/// string, which never changed the rendered document for any page that also produced
+/// structured paragraphs — exactly the elevations-page case this filter targets.
+pub(crate) struct DictionaryLineFilter<'a> {
+    /// Dictionary membership test, e.g. `TesseractAPI::is_valid_word`. `Some(true)` =
+    /// valid, `Some(false)` = invalid, `None` = the lookup itself failed or was
+    /// unavailable (never counted as evidence either way).
+    pub is_valid_word: &'a dyn Fn(&str) -> Option<bool>,
+    /// A line is dropped when its dictionary-checkable words' invalid fraction is
+    /// STRICTLY GREATER than this. See [`DEFAULT_DICT_INVALID_LINE_RATIO`] for how the
+    /// default value was derived.
+    pub max_invalid_ratio: f64,
+}
+
+/// Minimum letters a word must have before a dictionary lookup on it is meaningful.
+/// Mirrors `ocr::processor::execution::MIN_WORD_LEN_FOR_DICT_CHECK` — both filter the
+/// same class of noise (an OCR fragment too short for the dictionary to judge either
+/// way), kept as a separate constant here rather than a shared import so this module
+/// does not need `ocr::processor::execution` to be `pub(crate)`.
+const MIN_WORD_LEN_FOR_DICT_CHECK: usize = 3;
+
+/// Minimum dictionary-checkable words a single hOCR line must contain before
+/// [`is_dictionary_noise_line`] scores it at all.
+///
+/// A physical line is short (a title-block label, a heading), so a high floor would
+/// silence this signal for nearly every line on a drawing page. Two independently
+/// checkable words distinguish "every word on this line is nonsense" from "one unusual
+/// term stands alone on this line" — the latter is exactly the shape of a real proper
+/// noun or technical term (a plant genus, a part number) that must not be flagged from a
+/// single data point. The blast radius of a wrong per-line call is only that one line,
+/// not the whole page, which is what makes a lower floor than a page-level check safe.
+pub(crate) const MIN_DICT_CANDIDATES_FOR_LINE: usize = 2;
+
+/// Default [`DictionaryLineFilter::max_invalid_ratio`] (#783).
+///
+/// Not a config field: [`OcrQualityThresholds`](crate::core::config::OcrQualityThresholds)
+/// is part of xberg's alef-generated multi-language binding surface, and every field on it
+/// is regenerated into ~15 language bindings, so adding one requires a full `alef
+/// generate` pass this fix does not perform. This constant is the internal default until
+/// that threading is done deliberately, as its own change with its own binding regen.
+///
+/// `0.6`, derived directly from two measured examples (2026-08-22), not picked as a round
+/// number:
+/// - The motivating noise line, "OWATS DNDEVET OPMENT", scores 2 invalid of 3
+///   dictionary-checkable candidates (0.667) even though Tesseract's DAWG lookup itself
+///   falsely reports "OPMENT" as a valid word -- counting that false positive as valid
+///   still leaves the line above 0.6.
+/// - The plant-list guard line, "Ligustrum, Photinia, Azalea, Indian Hawthorne", scores 2
+///   invalid of 5 (0.4) and must survive untouched.
+///
+/// 0.6 sits roughly the same distance below the first number as above the second, and
+/// matches the existing `max_fragmented_word_ratio` convention in
+/// `OcrQualityThresholds`. Unlike that struct's page-level
+/// `max_ocr_output_dict_invalid_word_ratio` (disabled by default at `1.01` pending a
+/// corpus-wide calibration), this is enabled from the start: the blast radius of a wrong
+/// call here is exactly one line, never a whole page, so the acceptable cost of a false
+/// positive is far lower.
+pub(crate) const DEFAULT_DICT_INVALID_LINE_RATIO: f64 = 0.6;
+
+/// Whether `line`'s dictionary-checkable words are, on balance, not real words.
+///
+/// Returns `false` (never noise) for a line with fewer than
+/// [`MIN_DICT_CANDIDATES_FOR_LINE`] checkable words — see that constant's doc comment.
+fn is_dictionary_noise_line(line: &HocrLineInfo, filter: &DictionaryLineFilter<'_>) -> bool {
+    let mut candidates = 0usize;
+    let mut invalid = 0usize;
+    for word in &line.words {
+        let text = word.text.trim();
+        if text.chars().count() < MIN_WORD_LEN_FOR_DICT_CHECK || !text.chars().all(|c| c.is_alphabetic()) {
+            continue;
+        }
+        match (filter.is_valid_word)(text) {
+            Some(true) => candidates += 1,
+            Some(false) => {
+                candidates += 1;
+                invalid += 1;
+            }
+            None => {}
+        }
+    }
+    if candidates < MIN_DICT_CANDIDATES_FOR_LINE {
+        return false;
+    }
+    (invalid as f64 / candidates as f64) > filter.max_invalid_ratio
+}
+
 /// Attribute key holding the paragraph's average word font size (points, as a
 /// decimal string). Consumed by markdown assembly to promote large-font
 /// paragraphs to headings (#185).
@@ -435,6 +553,7 @@ fn parse_paragraph(
     page: u32,
     element_index: u32,
     par_tag: &str,
+    dictionary_filter: Option<&DictionaryLineFilter<'_>>,
 ) -> (Option<InternalElement>, usize) {
     let bytes = html.as_bytes();
     let mut pos = start;
@@ -523,6 +642,20 @@ fn parse_paragraph(
 
         if tag_name == par_tag {
             depth += 1;
+        }
+    }
+
+    if let Some(filter) = dictionary_filter {
+        let lines_before = lines.len();
+        lines.retain(|line| !is_dictionary_noise_line(line, filter));
+        let removed_line_count = lines_before - lines.len();
+        if removed_line_count > 0 {
+            tracing::warn!(
+                page,
+                removed_line_count,
+                max_invalid_ratio = filter.max_invalid_ratio,
+                "removed OCR line(s) whose dictionary-checkable words are mostly not real words"
+            );
         }
     }
 
@@ -1770,5 +1903,211 @@ mod tests {
         // no line-level x_size (second field empty, position preserved).
         assert_eq!(attrs.get(HOCR_LINE_FONT_SIZES_ATTRIBUTE), Some(&"24,20".to_string()));
         assert_eq!(attrs.get(HOCR_LINE_X_HEIGHTS_ATTRIBUTE), Some(&"28,".to_string()));
+    }
+
+    /// Coverage for the per-line dictionary-invalid noise filter (#783).
+    ///
+    /// Named-import trap check: the reverted prior attempt (`29738a1f29`) added its tests
+    /// to a module that imported by name (`use super::{...}`), and the new function was
+    /// never added to that list, so the tests silently never compiled. This module uses
+    /// `use super::*;` (see the top of `mod tests`), so that specific failure mode cannot
+    /// recur here.
+    mod dictionary_line_filter_tests {
+        use super::*;
+
+        /// Elevations-page hOCR, reconstructed directly from the recorded GH#783 defect:
+        /// a correctly-read heading line, a fully garbled title-block line, and a second
+        /// correctly-read heading line, all in one `ocr_par` block (Tesseract commonly
+        /// groups a title block's short lines into a single paragraph).
+        const ELEVATIONS_PAGE_HOCR: &str = r#"<div class="ocr_page" title="ppageno 0">
+            <p class="ocr_par">
+                <span class="ocr_line">
+                    <span class="ocrx_word" title="bbox 10 10 100 40">RIGHT</span>
+                    <span class="ocrx_word" title="bbox 110 10 260 40">ELEVATION</span>
+                </span>
+                <span class="ocr_line">
+                    <span class="ocrx_word" title="bbox 10 50 100 80">OWATS</span>
+                    <span class="ocrx_word" title="bbox 110 50 220 80">DNDEVET</span>
+                    <span class="ocrx_word" title="bbox 230 50 320 80">OPMENT</span>
+                </span>
+                <span class="ocr_line">
+                    <span class="ocrx_word" title="bbox 10 90 100 120">LEFT</span>
+                    <span class="ocrx_word" title="bbox 110 90 260 120">ELEVATION</span>
+                </span>
+            </p>
+        </div>"#;
+
+        /// Dictionary lookup matching the real measurement recorded against GH#783:
+        /// "OWATS" and "DNDEVET" are invalid, "OPMENT" is a Tesseract DAWG false
+        /// positive (reported valid), and the two "ELEVATION"/"RIGHT"/"LEFT" words are
+        /// genuinely valid. Every test in this module uses this exact table so the
+        /// scenario matches the measured behavior, not an idealized dictionary.
+        fn measured_is_valid_word(word: &str) -> Option<bool> {
+            Some(!matches!(word, "OWATS" | "DNDEVET"))
+        }
+
+        /// 0.6, matching [`DEFAULT_DICT_INVALID_LINE_RATIO`] -- duplicated here as a
+        /// literal (rather than referencing the constant directly) because what this
+        /// module tests is the *filtering mechanism* at a fixed, known threshold, not
+        /// that the production default stays at any particular value.
+        const TEST_THRESHOLD: f64 = 0.6;
+
+        /// The exact defect from #783: with the real (imperfect) dictionary behavior,
+        /// the garbage line is still removed -- 2 invalid of 3 candidates (0.667) clears
+        /// the 0.6 threshold even though "OPMENT" is counted as valid -- while both
+        /// correctly-read heading lines survive untouched.
+        ///
+        /// This is checked on `doc.elements[0].text` rather than on
+        /// `ocr::processor::execution::flatten_hocr_elements_to_text`'s output (private to
+        /// that module, not reachable from here) -- but that is exactly the point being
+        /// proven: `flatten_hocr_elements_to_text` only ever concatenates/transforms
+        /// element text that is already present, so a line filtered out here, before any
+        /// `InternalElement` is constructed, cannot resurface in that flattening OR in the
+        /// `PdfParagraph`s `pdf::structure::adapters` builds from these same elements. One
+        /// filtered `text` field feeds both downstream renderings; there is no second
+        /// place for the two to drift apart.
+        #[test]
+        fn removes_the_garbage_line_but_keeps_both_real_headings() {
+            let filter = DictionaryLineFilter {
+                is_valid_word: &measured_is_valid_word,
+                max_invalid_ratio: TEST_THRESHOLD,
+            };
+            let doc = parse_hocr_to_internal_document_with_dictionary_filter(ELEVATIONS_PAGE_HOCR, Some(&filter));
+
+            assert_eq!(
+                doc.elements.len(),
+                1,
+                "the paragraph survives: two of its three lines are real text"
+            );
+            let text = &doc.elements[0].text;
+            assert!(!text.contains("OWATS"), "the noise line must be gone: {text:?}");
+            assert!(!text.contains("DNDEVET"), "the noise line must be gone: {text:?}");
+            assert_eq!(
+                text, "RIGHT ELEVATION\nLEFT ELEVATION",
+                "exactly the two real lines remain, in order"
+            );
+        }
+
+        /// A line with only ONE dictionary-checkable word must never be scored, even when
+        /// that word is invalid -- a lone proper noun or a truncated title-block fragment
+        /// standing alone on its own line must not be flagged from a single data point.
+        #[test]
+        fn a_single_candidate_line_is_never_flagged() {
+            let hocr = r#"<div class="ocr_page" title="ppageno 0">
+                <p class="ocr_par">
+                    <span class="ocr_line">
+                        <span class="ocrx_word" title="bbox 10 10 100 40">Ligustrum</span>
+                    </span>
+                </p>
+            </div>"#;
+            let always_invalid = |_: &str| Some(false);
+            let filter = DictionaryLineFilter {
+                is_valid_word: &always_invalid,
+                max_invalid_ratio: 0.0,
+            };
+
+            let doc = parse_hocr_to_internal_document_with_dictionary_filter(hocr, Some(&filter));
+
+            assert_eq!(
+                doc.elements.len(),
+                1,
+                "a single-candidate line must survive regardless of the ratio"
+            );
+            assert_eq!(doc.elements[0].text, "Ligustrum");
+        }
+
+        /// A mixed line at or below the threshold survives -- the plant-list guard from
+        /// the original #783 report ("Ligustrum, Photinia, Azalea, Indian Hawthorne" mixes
+        /// recognized words with unrecognized botanical genus names, 2 invalid of 5 =
+        /// 0.4), reconstructed here as a single hOCR line.
+        #[test]
+        fn a_mixed_line_below_threshold_survives_verbatim() {
+            let hocr = r#"<div class="ocr_page" title="ppageno 0">
+                <p class="ocr_par">
+                    <span class="ocr_line">
+                        <span class="ocrx_word" title="bbox 10 10 100 40">Ligustrum</span>
+                        <span class="ocrx_word" title="bbox 110 10 220 40">Photinia</span>
+                        <span class="ocrx_word" title="bbox 230 10 320 40">Azalea</span>
+                        <span class="ocrx_word" title="bbox 330 10 420 40">Indian</span>
+                        <span class="ocrx_word" title="bbox 430 10 560 40">Hawthorne</span>
+                    </span>
+                </p>
+            </div>"#;
+            let is_valid = |word: &str| Some(matches!(word, "Azalea" | "Indian" | "Hawthorne"));
+            let filter = DictionaryLineFilter {
+                is_valid_word: &is_valid,
+                max_invalid_ratio: TEST_THRESHOLD,
+            };
+
+            let doc = parse_hocr_to_internal_document_with_dictionary_filter(hocr, Some(&filter));
+
+            assert_eq!(doc.elements.len(), 1);
+            assert_eq!(doc.elements[0].text, "Ligustrum Photinia Azalea Indian Hawthorne");
+        }
+
+        /// A ratio exactly AT the threshold must survive -- the check is strictly
+        /// greater-than, matching the page-level `is_dictionary_invalid_noise` convention
+        /// (`extractors::pdf::ocr`).
+        #[test]
+        fn a_line_exactly_at_the_threshold_is_not_removed() {
+            let hocr = r#"<div class="ocr_page" title="ppageno 0">
+                <p class="ocr_par">
+                    <span class="ocr_line">
+                        <span class="ocrx_word" title="bbox 10 10 100 40">Photinia</span>
+                        <span class="ocrx_word" title="bbox 110 10 220 40">Ligustrum</span>
+                    </span>
+                </p>
+            </div>"#;
+            let always_invalid = |_: &str| Some(false);
+            let filter = DictionaryLineFilter {
+                is_valid_word: &always_invalid,
+                max_invalid_ratio: 1.0,
+            };
+
+            let doc = parse_hocr_to_internal_document_with_dictionary_filter(hocr, Some(&filter));
+
+            assert_eq!(
+                doc.elements.len(),
+                1,
+                "ratio 1.0 is not > threshold 1.0, so the line must survive"
+            );
+        }
+
+        /// A paragraph whose every line is noise disappears from the document entirely --
+        /// the same "no words survived" path an all-empty paragraph already takes,
+        /// exercised here via dictionary filtering rather than empty text.
+        #[test]
+        fn a_paragraph_left_with_no_lines_produces_no_element() {
+            let hocr = r#"<div class="ocr_page" title="ppageno 0">
+                <p class="ocr_par">
+                    <span class="ocr_line">
+                        <span class="ocrx_word" title="bbox 10 10 100 40">OWATS</span>
+                        <span class="ocrx_word" title="bbox 110 10 220 40">DNDEVET</span>
+                    </span>
+                </p>
+            </div>"#;
+            let always_invalid = |_: &str| Some(false);
+            let filter = DictionaryLineFilter {
+                is_valid_word: &always_invalid,
+                max_invalid_ratio: TEST_THRESHOLD,
+            };
+
+            let doc = parse_hocr_to_internal_document_with_dictionary_filter(hocr, Some(&filter));
+
+            assert!(
+                doc.elements.is_empty(),
+                "a paragraph with no surviving lines must not appear at all"
+            );
+        }
+
+        /// No filter at all (the plain [`parse_hocr_to_internal_document`] entry point,
+        /// what every other test in this file uses) must behave exactly as before this
+        /// feature existed: nothing is removed, no matter how garbled the text is.
+        #[test]
+        fn no_filter_leaves_every_line_untouched() {
+            let doc = parse_hocr_to_internal_document(ELEVATIONS_PAGE_HOCR);
+            assert_eq!(doc.elements.len(), 1);
+            assert!(doc.elements[0].text.contains("OWATS DNDEVET OPMENT"));
+        }
     }
 }

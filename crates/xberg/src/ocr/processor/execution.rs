@@ -13,7 +13,7 @@ use crate::image::normalize_image_dpi_owned;
 use crate::ocr::cache::OcrCache;
 use crate::ocr::conversion::{TsvRow, iterator_word_to_element, tsv_row_to_element};
 use crate::ocr::error::OcrError;
-use crate::ocr::hocr_parser::parse_hocr_to_internal_document;
+use crate::ocr::hocr_parser::{DictionaryLineFilter, parse_hocr_to_internal_document_with_dictionary_filter};
 #[cfg(feature = "pdf")]
 use crate::ocr::table::post_process_table;
 use crate::ocr::table::{extract_words_from_tsv, reconstruct_table, table_to_markdown};
@@ -1225,7 +1225,21 @@ pub(super) fn perform_ocr(
                 .get_hocr_text(0)
                 .map_err(|e| OcrError::ProcessingFailed(format!("Failed to extract hOCR: {}", e)))?;
 
-            let internal_doc = parse_hocr_to_internal_document(&hocr);
+            // Per-line dictionary-invalid noise filter (#783). Built here, immediately
+            // before parsing, using `hocr_parser::DEFAULT_DICT_INVALID_LINE_RATIO` -- see
+            // that constant's doc comment for why this is not yet a configurable
+            // `OcrQualityThresholds` field.
+            let is_valid_word = |text: &str| match api.is_valid_word(text) {
+                Ok(0) => Some(false),
+                Ok(_) => Some(true),
+                Err(_) => None,
+            };
+            let dictionary_filter = DictionaryLineFilter {
+                is_valid_word: &is_valid_word,
+                max_invalid_ratio: crate::ocr::hocr_parser::DEFAULT_DICT_INVALID_LINE_RATIO,
+            };
+
+            let internal_doc = parse_hocr_to_internal_document_with_dictionary_filter(&hocr, Some(&dictionary_filter));
             let content = flatten_hocr_elements_to_text(&internal_doc.elements);
             hocr_document = Some(internal_doc);
 
