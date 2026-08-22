@@ -140,6 +140,21 @@ fn validate_image_buffer(
     Ok(())
 }
 
+/// Converts Leptonica's `boxa->n` element count (a C `int`) into a `usize`.
+///
+/// `boxaGetCount` returns the raw `c_int` field of a Leptonica `Boxa`. It is
+/// documented to be non-negative for a valid `Boxa`, but that is an invariant
+/// enforced by the C library, not by this FFI signature: a corrupted or
+/// exhausted `Boxa` handed back across the boundary could carry a negative
+/// count. A bare `as usize` cast wraps a negative value into a huge `usize`,
+/// which panics with "capacity overflow" the moment it reaches
+/// `Vec::with_capacity`. Treat a negative count the same as zero, matching the
+/// empty result every caller already returns for a null `boxa`.
+#[cfg(any(feature = "build-tesseract", feature = "build-tesseract-wasm"))]
+fn boxa_count_to_usize(count: c_int) -> usize {
+    usize::try_from(count).unwrap_or(0)
+}
+
 #[cfg(any(feature = "build-tesseract", feature = "build-tesseract-wasm"))]
 impl TesseractAPI {
     /// Creates a new instance of the Tesseract API.
@@ -1426,7 +1441,7 @@ impl TesseractAPI {
             });
         }
         let count = unsafe { boxaGetCount(boxa) };
-        let mut boxes = Vec::with_capacity(count as usize);
+        let mut boxes = Vec::with_capacity(boxa_count_to_usize(count));
         for i in 0..count {
             let mut x = 0_i32;
             let mut y = 0_i32;
@@ -1480,7 +1495,7 @@ impl TesseractAPI {
             });
         }
         let count = unsafe { boxaGetCount(boxa) };
-        let mut boxes = Vec::with_capacity(count as usize);
+        let mut boxes = Vec::with_capacity(boxa_count_to_usize(count));
         for i in 0..count {
             let mut x = 0_i32;
             let mut y = 0_i32;
@@ -1542,7 +1557,7 @@ impl TesseractAPI {
             });
         }
         let count = unsafe { boxaGetCount(boxa) };
-        let n = count as usize;
+        let n = boxa_count_to_usize(count);
         let mut boxes = Vec::with_capacity(n);
         let mut block_ids_vec: Option<Vec<i32>> = if blockids_ptr.is_null() {
             None
@@ -1633,7 +1648,7 @@ impl TesseractAPI {
             });
         }
         let count = unsafe { boxaGetCount(boxa) };
-        let n = count as usize;
+        let n = boxa_count_to_usize(count);
         let mut boxes = Vec::with_capacity(n);
         let mut block_ids_vec: Option<Vec<i32>> = if blockids_ptr.is_null() {
             None
@@ -2146,5 +2161,32 @@ mod set_image_validation_tests {
             validate_image_buffer(0, 10, 10, -3, 30),
             Err(TesseractError::InvalidBytesPerPixel)
         ));
+    }
+}
+
+#[cfg(all(test, any(feature = "build-tesseract", feature = "build-tesseract-wasm")))]
+mod boxa_count_tests {
+    use super::*;
+
+    /// Positive control: an ordinary non-negative count must convert exactly,
+    /// unchanged from the plain `as usize` cast it replaces.
+    #[test]
+    fn converts_non_negative_count_exactly() {
+        assert_eq!(boxa_count_to_usize(0), 0);
+        assert_eq!(boxa_count_to_usize(42), 42);
+        assert_eq!(boxa_count_to_usize(c_int::MAX), c_int::MAX as usize);
+    }
+
+    /// Against the unfixed `count as usize` cast, a negative `boxaGetCount`
+    /// result wraps to a `usize` near `usize::MAX` (e.g. `-1i32 as usize` is
+    /// `18446744073709551615` on 64-bit targets), which panics with "capacity
+    /// overflow" the moment it reaches `Vec::with_capacity`. The fixed
+    /// conversion must instead treat any negative count as empty, matching
+    /// the empty `BoundingBoxArray` every caller already returns for a null
+    /// `boxa`.
+    #[test]
+    fn treats_negative_count_as_zero() {
+        assert_eq!(boxa_count_to_usize(-1), 0);
+        assert_eq!(boxa_count_to_usize(c_int::MIN), 0);
     }
 }
