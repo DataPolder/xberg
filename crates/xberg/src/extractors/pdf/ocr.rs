@@ -3565,6 +3565,7 @@ fn ocr_points_per_pixel(
 fn assemble_ocr_page_paragraphs(
     doc: &crate::types::internal::InternalDocument,
     page_height: u32,
+    page_width: u32,
     detection: Option<&crate::layout::DetectionResult>,
     points_per_pixel: f32,
     // The page's PDF `/Rotate` value (0/90/180/270), or `0` when unknown (e.g. no
@@ -3587,6 +3588,7 @@ fn assemble_ocr_page_paragraphs(
         let mut paragraphs = crate::pdf::structure::adapters::ocr_doc_to_layout_paragraphs(
             doc,
             page_height,
+            page_width,
             &hints,
             0.5,
             0.2,
@@ -3608,7 +3610,7 @@ fn assemble_ocr_page_paragraphs(
         return paragraphs;
     }
     #[cfg(not(feature = "ocr"))]
-    let _ = detection;
+    let _ = (detection, page_width);
 
     crate::pdf::structure::adapters::ocr_doc_to_paragraphs(doc, page_height, font_size_scale)
 }
@@ -4523,7 +4525,7 @@ async fn extract_with_ocr_for_page(
                 let ocr_render_height = encoded_batch[offset].3;
                 let render_scaled_detection =
                     detection.map(|det| scale_detection_to_dimensions(det, ocr_render_width, ocr_render_height));
-                let (_, ocr_layout_height) =
+                let (ocr_layout_width, ocr_layout_height) =
                     resolved_ocr_layout_dimensions(&ocr_result.metadata, ocr_render_width, ocr_render_height);
                 let points_per_pixel = points_per_pixel_override.unwrap_or_else(|| {
                     ocr_points_per_pixel(
@@ -4599,6 +4601,7 @@ async fn extract_with_ocr_for_page(
                     let paragraphs = assemble_ocr_page_paragraphs(
                         ocr_doc,
                         ocr_layout_height,
+                        ocr_layout_width,
                         ocr_scaled_detection.as_ref(),
                         points_per_pixel,
                         page_rotation_degrees,
