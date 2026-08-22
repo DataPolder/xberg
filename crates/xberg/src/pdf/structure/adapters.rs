@@ -116,7 +116,7 @@ pub(crate) fn ocr_doc_to_paragraphs(
         previous_block_id = block_id;
     }
 
-    trace_conversion(doc, &result);
+    trace_conversion("ocr_doc_to_paragraphs", doc, &result);
     result
 }
 
@@ -610,7 +610,7 @@ pub(crate) fn ocr_doc_to_layout_paragraphs(
     }
 
     let result = regroup_layout_lines_by_element(all_lines, all_hint_indices, element_indices, block_ids);
-    trace_conversion(doc, &result);
+    trace_conversion("ocr_doc_to_layout_paragraphs", doc, &result);
     result
 }
 
@@ -839,16 +839,51 @@ fn promote_second_line_to_title(lines: &mut [types::PdfParagraph], hint_indices:
 }
 
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
-fn trace_conversion(doc: &crate::types::internal::InternalDocument, result: &[types::PdfParagraph]) {
+fn trace_conversion(
+    route: &'static str,
+    doc: &crate::types::internal::InternalDocument,
+    result: &[types::PdfParagraph],
+) {
+    // GH#793 A/B instrumentation. Off by default (tracing target must be enabled to
+    // see it): the two call sites (`ocr_doc_to_paragraphs` -- non-layout -- and
+    // `ocr_doc_to_layout_paragraphs` -- layout) pass a distinct `route` so the exact
+    // same fields can be diffed side by side to find where the two arms' word counts
+    // diverge for a single document. `furniture_paragraphs`/`furniture_words` count
+    // paragraphs this call marked `is_page_furniture` -- the only route-exclusive
+    // classification of the two (the non-layout route never runs a layout hint, so
+    // it is structurally always 0 there). A furniture paragraph still SURVIVES this
+    // function (it is a normal entry in `result`, text intact) -- it is excluded
+    // later, at render time, by `rendering::common::is_body_element` keeping only
+    // `ContentLayer::Body` -- so a non-zero count here does not yet prove the text
+    // was lost, only that it is now at risk of being layered out of the default
+    // (Body-only) text/markdown output. Correlate against the final rendered output
+    // to confirm.
+    let input_elements = doc
+        .elements
+        .iter()
+        .filter(|element| matches!(element.kind, crate::types::internal::ElementKind::OcrText { .. }));
+    let input_word_count: usize = input_elements
+        .clone()
+        .map(|element| element.text.split_whitespace().count())
+        .sum();
+    let output_word_count: usize = result.iter().map(|paragraph| paragraph.word_count).sum();
+    let furniture_paragraphs = result.iter().filter(|paragraph| paragraph.is_page_furniture).count();
+    let furniture_words: usize = result
+        .iter()
+        .filter(|paragraph| paragraph.is_page_furniture)
+        .map(|paragraph| paragraph.word_count)
+        .sum();
     tracing::debug!(
-        input_elements = doc
-            .elements
-            .iter()
-            .filter(|element| matches!(element.kind, crate::types::internal::ElementKind::OcrText { .. }))
-            .count(),
+        target: "xberg::pdf::structure::adapters::ocr_conversion",
+        route,
+        input_elements = input_elements.count(),
+        input_word_count,
         output_paragraphs = result.len(),
+        output_word_count,
+        furniture_paragraphs,
+        furniture_words,
         total_text_chars = result.iter().map(|paragraph| paragraph.text.len()).sum::<usize>(),
-        "ocr_doc_to_paragraphs"
+        "ocr paragraph conversion"
     );
 }
 
@@ -1309,6 +1344,17 @@ fn join_body_segment_text(lines: &[types::PdfParagraph]) -> String {
 fn build_body_paragraph(lines: Vec<types::PdfParagraph>) -> Option<types::PdfParagraph> {
     let text = join_body_segment_text(&lines);
     if text.trim().is_empty() {
+        // GH#793 instrumentation: a body segment whose lines were all already blank
+        // (see `make_ocr_line_paragraph`'s empty-text branch). Shared by both routes
+        // -- the layout route via `push_body_group`, the non-layout route via
+        // `make_ocr_block_paragraphs`'s >= MIN_LIST_MARKERS_TO_SPLIT path -- so a
+        // nonzero count here is not route-exclusive and is not expected to explain a
+        // layout-only loss; recorded for completeness of the site enumeration.
+        tracing::trace!(
+            target: "xberg::pdf::structure::adapters::ocr_conversion",
+            dropped_lines = lines.len(),
+            "ocr paragraph conversion: body segment empty after join"
+        );
         return None;
     }
     let bbox = union_bboxes(&lines);
@@ -1328,7 +1374,22 @@ fn build_body_paragraph(lines: Vec<types::PdfParagraph>) -> Option<types::PdfPar
 #[cfg(all(feature = "ocr", feature = "layout-detection"))]
 fn merge_structural_group(lines: Vec<types::PdfParagraph>) -> Option<types::PdfParagraph> {
     let lines = trim_blank_boundaries(lines);
-    let template = lines.iter().find(|line| has_structural_override(line))?.clone();
+    let Some(template) = lines.iter().find(|line| has_structural_override(line)).cloned() else {
+        // GH#793 instrumentation: layout-route-only. The caller
+        // (`regroup_layout_lines_by_element`) only routes a group here after
+        // confirming `group.lines.iter().any(has_structural_override)` pre-trim, and
+        // `has_structural_override` requires non-empty text, which `trim_blank_boundaries`
+        // never removes -- so this should be unreachable. A nonzero count here would mean
+        // that invariant broke and the WHOLE group's lines (not just the furniture
+        // fraction) were silently dropped -- worth ruling out explicitly rather than
+        // assuming from the source read.
+        tracing::trace!(
+            target: "xberg::pdf::structure::adapters::ocr_conversion",
+            dropped_lines = lines.len(),
+            "ocr paragraph conversion: structural group had no override line (should be unreachable)"
+        );
+        return None;
+    };
     let text = lines
         .iter()
         .map(|line| line.text.as_str())

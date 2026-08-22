@@ -370,6 +370,24 @@ pub(super) fn infer_heading_level_from_text(text: &str, hint_class: LayoutHintCl
     }
 }
 
+/// GH#793 instrumentation: a paragraph was just marked `is_page_furniture = true` by
+/// a spatial hint match. It still reaches the output of `ocr_doc_to_layout_paragraphs`
+/// (see `trace_conversion`'s doc comment) -- this fires strictly earlier, at the
+/// classification decision itself, so the hint's class/confidence/containment can be
+/// read off directly instead of inferred from the paragraph afterward. Off by default;
+/// enable `target = "xberg::pdf::structure::layout_classify::furniture"` at `trace`
+/// level.
+fn trace_furniture_tagged(hint: &LayoutHint, para_text: &str) {
+    tracing::trace!(
+        target: "xberg::pdf::structure::layout_classify::furniture",
+        hint_class = ?hint.class_name,
+        confidence = hint.confidence,
+        word_count = para_text.split_whitespace().count(),
+        text = %para_text.trim().chars().take(60).collect::<String>(),
+        "paragraph marked page furniture by layout hint"
+    );
+}
+
 /// Apply a single hint's classification to a paragraph.
 ///
 /// `body_font_size`: when provided, used to guard against promoting body-text-sized
@@ -494,9 +512,23 @@ pub(super) fn apply_hint_to_paragraph(para: &mut PdfParagraph, hint: &LayoutHint
         // (GH#793). This function has no text of its own to re-check.
         LayoutHintClass::PageHeader | LayoutHintClass::PageFooter if para.heading_level.is_none() => {
             para.is_page_furniture = hint.confidence >= 0.8;
+            if para.is_page_furniture {
+                trace_furniture_tagged(hint, &para_text);
+            }
         }
+        // Unlike the PageHeader/PageFooter arm above, this has no confidence floor of
+        // its own beyond the caller's `min_confidence` eligibility gate on `hint` --
+        // `best_spatial_match` already required `hint.confidence >= min_confidence` and
+        // `containment >= min_containment` before this ever runs, but for the OCR
+        // layout route those are 0.5 / 0.2 respectively
+        // (`extractors::pdf::ocr::assemble_ocr_page_paragraphs`), so a Picture hint
+        // only 20% confident and only 20% overlapping a short (<=200
+        // char, `MAX_FURNITURE_HINT_TEXT_CHARS`) paragraph is enough to mark it
+        // furniture unconditionally. GH#793 candidate site: traced separately from the
+        // header/footer arm so the two can be told apart.
         LayoutHintClass::Picture if para.heading_level.is_none() => {
             para.is_page_furniture = true;
+            trace_furniture_tagged(hint, &para_text);
         }
         LayoutHintClass::Text | LayoutHintClass::Caption | LayoutHintClass::Footnote
             if !debug.no_demote
