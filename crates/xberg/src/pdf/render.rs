@@ -633,7 +633,7 @@ fn guard_render_panic(
     page_index: usize,
     render: impl FnOnce() -> std::result::Result<xberg_native_pdf::rendering::RenderedImage, xberg_native_pdf::Error>,
 ) -> std::result::Result<xberg_native_pdf::rendering::RenderedImage, xberg_native_pdf::Error> {
-    super::oxide::guard_oxide_panic(render, |message| {
+    super::native::guard_native_panic(render, |message| {
         xberg_native_pdf::Error::InvalidPdf(format!(
             "page {} could not be rasterized: the rasterizer panicked and was contained ({message})",
             page_index + 1

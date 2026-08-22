@@ -8,7 +8,7 @@
 //! * the native pass's `unwrap_or_else` (extraction.rs, `extract_tables_native` call)
 //! * the bordered pass's `unwrap_or_else` (extraction.rs, `extract_tables_bordered` call)
 //! * the heuristic pass's `Err` arm (extraction.rs, `extract_tables_heuristic` call)
-//! * the `guard_oxide_panic` fallback around the whole table-detection closure
+//! * the `guard_native_panic` fallback around the whole table-detection closure
 //!   (extraction.rs, "whole-document" stage)
 //!
 //! Before that commit, all four substituted `Vec::new()` for the warnings, so a
@@ -24,21 +24,21 @@
 //! table extraction failed for the document", "whole-document table extraction
 //! failed for the document") turned up no hits outside
 //! `crates/xberg/src/extractors/pdf/extraction.rs` and
-//! `crates/xberg/src/pdf/oxide/table.rs` themselves — nothing anywhere asserted on
+//! `crates/xberg/src/pdf/native/table.rs` themselves — nothing anywhere asserted on
 //! these warnings.
 //!
 //! Only the "whole-document" (panic-guard) path is exercised here with a real
 //! failure. The native and bordered passes only return `Err` when
-//! `OxideDocument::doc.page_count()` fails (`pdf/oxide/table.rs`), but
+//! `NativeDocument::doc.page_count()` fails (`pdf/native/table.rs`), but
 //! `extract_text_and_metadata` — which runs earlier in the same pipeline and
 //! whose own `?` would abort the whole extraction first — already calls
 //! `page_count()` successfully on the same document handle
-//! (`pdf/oxide/text.rs`), so that Err arm cannot be reached through the public
+//! (`pdf/native/text.rs`), so that Err arm cannot be reached through the public
 //! API without corrupting the document's internal state between calls, which is
 //! not something a test can do without either a production-code seam or a
 //! xberg_native_pdf-internal PDF corpus this repository does not have. The same applies
 //! to the heuristic pass's hierarchy-extraction `Err` arm
-//! (`pdf/oxide/hierarchy.rs`) for its `page_count()` fallback. These are noted
+//! (`pdf/native/hierarchy.rs`) for its `page_count()` fallback. These are noted
 //! as untestable through the public API rather than left silently uncovered.
 //!
 //! The "whole-document" panic-guard path used to be exercised here too, driving

@@ -129,7 +129,7 @@ fn page_signals(doc: &PdfDocument, page_index: usize) -> Option<PageScanSignals>
     }
 
     // Detection is advisory: a page that panics must not abort the extraction. ~keep
-    let classified = super::oxide::guard_oxide_panic(
+    let classified = super::native::guard_native_panic(
         || doc.classify_page(page_index).map_err(|error| error.to_string()),
         |message| message,
     )
@@ -199,7 +199,7 @@ fn fabricated_char_counts(spans: &[TextSpan]) -> (usize, usize) {
 /// that panics during extraction is reported as not fabricated rather than
 /// aborting the caller.
 fn page_has_fabricated_text(doc: &PdfDocument, page_index: usize, min_ratio: f64, min_chars: usize) -> bool {
-    let page_text = match super::oxide::guard_oxide_panic(
+    let page_text = match super::native::guard_native_panic(
         || {
             doc.extract_page_text_with_options(page_index, ReadingOrder::ColumnAware)
                 .map_err(|error| error.to_string())

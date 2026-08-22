@@ -723,7 +723,7 @@ impl ExtractionOverrides {
             // The mixed OCR route (`extract_mixed_ocr_native`) needs per-page byte boundaries
             // to locate a detected scan within the native text and splice OCR output back in.
             // Boundaries are only tracked by the PDF backend when `config.pages` is
-            // materialised (`pdf::oxide::text::extract_text_from_oxide_document`'s
+            // materialised (`pdf::native::text::extract_text_from_native_document`'s
             // `page_config` branch); without `--extract-pages`, `config.pages` stayed `None`,
             // so this route always hit its "no page boundaries available" fallback and
             // returned the native text untouched -- empty, for a scan, i.e. a zero-byte,
@@ -1414,7 +1414,7 @@ mod tests {
     /// Regression test for #656: `--ocr-scanned-pages` alone (no `--extract-pages`, no
     /// `--ocr true`, no other `--ocr-*` field flag) previously left `config.pages` as `None`.
     /// The PDF backend only tracks per-page byte boundaries when `config.pages` is `Some`
-    /// (`pdf::oxide::text::extract_text_from_oxide_document`'s `page_config` branch), and the
+    /// (`pdf::native::text::extract_text_from_native_document`'s `page_config` branch), and the
     /// mixed OCR route needs those boundaries to splice OCR text back into the native text
     /// (`extractors/pdf/mod.rs`). Without them, that route always fell back to "no page
     /// boundaries available; using native text" -- an empty result for a scan, i.e. a

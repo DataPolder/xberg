@@ -56,7 +56,7 @@ use super::hierarchy::SegmentData;
 /// columns along the wrong axes. [`SegmentData::upright_origin`] rotates the
 /// origin back into the segment's own reading frame (identity for the
 /// unrotated case, matching the plain x/y this replaced) so the row/column
-/// clustering downstream in `oxide::table::cluster_words_into_vertical_regions`
+/// clustering downstream in `native::table::cluster_words_into_vertical_regions`
 /// operates on the table's actual advance/cross axes instead of the page's.
 #[cfg(feature = "pdf")]
 pub(crate) fn segment_to_hocr_word(seg: &SegmentData, page_height: f32) -> HocrWord {
@@ -152,7 +152,7 @@ pub(crate) fn segments_to_words(segments: &[SegmentData], page_height: f32) -> V
 /// sub-lines into one header row here, and reused by
 /// [`super::structure::pipeline`]'s table-continuation stitching to collapse
 /// a whole table fragment (whose rows are word-wrapped sub-lines of a single
-/// logical row, once `oxide::table`'s row-gap clustering has split one
+/// logical row, once `native::table`'s row-gap clustering has split one
 /// physical table into several fragments) into one row when the fragments are
 /// stitched back together.
 pub(crate) fn merge_rows_columnwise(rows: &[Vec<String>], column_count: usize) -> Vec<String> {

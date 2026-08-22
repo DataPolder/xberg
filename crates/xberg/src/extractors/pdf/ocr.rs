@@ -1112,7 +1112,7 @@ async fn recover_page_text_from_image_xobjects(
     page_idx: usize,
     ocr_config: &crate::core::config::OcrConfig,
 ) -> Option<XObjectRecoveryOutcome> {
-    let fallback_images = crate::pdf::oxide::images::page_ocr_fallback_image_bytes(render_doc, page_idx);
+    let fallback_images = crate::pdf::native::images::page_ocr_fallback_image_bytes(render_doc, page_idx);
     if fallback_images.is_empty() {
         return None;
     }
@@ -8154,7 +8154,7 @@ Buffers:           50000 kB
 
     /// Root of the shared `test_documents` fixture corpus, resolved relative to this
     /// crate's manifest dir (mirrors the identically named helper in
-    /// `crate::pdf::oxide::images` test module).
+    /// `crate::pdf::native::images` test module).
     #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
     fn test_documents_dir() -> std::path::PathBuf {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -8488,7 +8488,7 @@ Buffers:           50000 kB
         // Single page, exactly one embedded (DCT/JPEG) image XObject -- verified via
         // `mutool info -I` and already relied on by
         // `test_page_ocr_fallback_image_bytes_recovers_real_image` in
-        // `crate::pdf::oxide::images`.
+        // `crate::pdf::native::images`.
         let pdf_path = test_documents_dir().join("pdf/embedded_images_tables.pdf");
         let pdf_bytes = std::fs::read(&pdf_path).expect("failed to read test PDF fixture");
 
@@ -11407,7 +11407,7 @@ Name: ___
 
     /// Single page carrying exactly one embedded DCT/JPEG image XObject; already relied on
     /// by `test_page_ocr_fallback_image_bytes_recovers_real_image` in
-    /// `crate::pdf::oxide::images`.
+    /// `crate::pdf::native::images`.
     #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
     fn single_xobject_fixture_bytes() -> Vec<u8> {
         let pdf_path = test_documents_dir().join("pdf/embedded_images_tables.pdf");

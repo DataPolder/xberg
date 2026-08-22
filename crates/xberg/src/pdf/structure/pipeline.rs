@@ -1,4 +1,4 @@
-//! Main PDF-to-Markdown pipeline orchestrator (oxide backend).
+//! Main PDF-to-Markdown pipeline orchestrator (native backend).
 
 use std::borrow::Cow;
 
@@ -2282,8 +2282,8 @@ fn is_structural_heading_word(text: &str) -> bool {
 
 /// Build a structured `InternalDocument` from pre-extracted per-page segments.
 ///
-/// This is the oxide-backend entry point. It accepts segments already extracted
-/// via `oxide::hierarchy::extract_all_segments` and runs the same font-clustering,
+/// This is the native-backend entry point. It accepts segments already extracted
+/// via `native::hierarchy::extract_all_segments` and runs the same font-clustering,
 /// heading-classification, paragraph-assembly, and post-processing stages without
 /// requiring a PDF document.
 ///
@@ -2369,7 +2369,7 @@ pub(crate) fn extract_document_structure_from_segments(
     tracing::debug!(
         page_count,
         used_structure_tree,
-        "oxide structure pipeline: starting from pre-extracted segments"
+        "native structure pipeline: starting from pre-extracted segments"
     );
 
     let struct_tree_results: Vec<Option<Vec<PdfParagraph>>> = vec![None; page_count];
@@ -2388,7 +2388,7 @@ pub(crate) fn extract_document_structure_from_segments(
             .map(|(size, _)| *size);
         tracing::debug!(
             heading_map_len = heading_map.len(),
-            "oxide structure pipeline: heading map from structure tree"
+            "native structure pipeline: heading map from structure tree"
         );
         (heading_map, doc_body_font_size)
     } else {
@@ -2427,7 +2427,7 @@ pub(crate) fn extract_document_structure_from_segments(
         #[allow(clippy::needless_range_loop)]
         for page_idx in 0..page_count {
             if cancel_token.is_some_and(|t| t.is_cancelled()) {
-                tracing::debug!(page_idx, "oxide structure pipeline: cancelled during table page prep");
+                tracing::debug!(page_idx, "native structure pipeline: cancelled during table page prep");
                 break;
             }
             let Some(hints) = hints_pages.get(page_idx) else {
@@ -2449,7 +2449,7 @@ pub(crate) fn extract_document_structure_from_segments(
             if words.is_empty() {
                 tracing::trace!(
                     page = page_idx,
-                    "oxide layout table extraction: no words from segments, skipping"
+                    "native layout table extraction: no words from segments, skipping"
                 );
                 continue;
             }
@@ -2473,7 +2473,7 @@ pub(crate) fn extract_document_structure_from_segments(
                     page = page_idx,
                     word_count = words.len(),
                     page_height,
-                    "oxide layout table extraction: page prepared"
+                    "native layout table extraction: page prepared"
                 );
                 table_pages.push(TablePageData {
                     page_idx,
@@ -2674,7 +2674,7 @@ pub(crate) fn extract_document_structure_from_segments(
                 } else {
                     for tp in &table_pages {
                         if cancel_token.is_some_and(|t| t.is_cancelled()) {
-                            tracing::debug!("oxide structure pipeline: cancelled during heuristic table extraction");
+                            tracing::debug!("native structure pipeline: cancelled during heuristic table extraction");
                             break;
                         }
                         let hints = &hints_pages[tp.page_idx];
@@ -2692,7 +2692,7 @@ pub(crate) fn extract_document_structure_from_segments(
             } else {
                 for tp in &table_pages {
                     if cancel_token.is_some_and(|t| t.is_cancelled()) {
-                        tracing::debug!("oxide structure pipeline: cancelled during heuristic table extraction");
+                        tracing::debug!("native structure pipeline: cancelled during heuristic table extraction");
                         break;
                     }
                     let hints = &hints_pages[tp.page_idx];
@@ -2712,7 +2712,7 @@ pub(crate) fn extract_document_structure_from_segments(
         #[cfg(not(feature = "layout-detection"))]
         for tp in &table_pages {
             if cancel_token.is_some_and(|t| t.is_cancelled()) {
-                tracing::debug!("oxide structure pipeline: cancelled during heuristic table extraction");
+                tracing::debug!("native structure pipeline: cancelled during heuristic table extraction");
                 break;
             }
             let hints = &hints_pages[tp.page_idx];
@@ -2734,7 +2734,7 @@ pub(crate) fn extract_document_structure_from_segments(
         // missed on otherwise Table-region-free pages.
         for (page_idx, words, page_height, synthetic_hints) in &geometric_table_pages {
             if cancel_token.is_some_and(|t| t.is_cancelled()) {
-                tracing::debug!("oxide structure pipeline: cancelled during geometric table fallback");
+                tracing::debug!("native structure pipeline: cancelled during geometric table fallback");
                 break;
             }
             let before = layout_tables.len();
@@ -2763,7 +2763,7 @@ pub(crate) fn extract_document_structure_from_segments(
 
     tracing::debug!(
         layout_tables_found = layout_tables.len(),
-        "oxide layout table extraction complete"
+        "native layout table extraction complete"
     );
 
     #[cfg(feature = "layout-detection")]
@@ -2778,7 +2778,7 @@ pub(crate) fn extract_document_structure_from_segments(
         native_tables = tables.len(),
         emitted_tables = emitted_tables.len(),
         pages_with_bboxes = extracted_table_bboxes_by_page.len(),
-        "oxide table bbox suppression map built"
+        "native table bbox suppression map built"
     );
 
     #[cfg(feature = "layout-detection")]
@@ -2797,7 +2797,7 @@ pub(crate) fn extract_document_structure_from_segments(
                                 .iter()
                                 .filter(|v| **v == super::regions::layout_validation::RegionValidation::Empty)
                                 .count(),
-                            "oxide layout validation: found empty regions"
+                            "native layout validation: found empty regions"
                         );
                     }
                     map.insert(page_idx, validations);
@@ -2933,7 +2933,7 @@ pub(crate) fn extract_document_structure_from_segments(
     tracing::debug!(
         total_paragraphs,
         heading_map_len = heading_map.len(),
-        "oxide structure pipeline: paragraph extraction complete, assembling document"
+        "native structure pipeline: paragraph extraction complete, assembling document"
     );
 
     let effective_image_positions = if inject_placeholders { image_positions } else { &[] };
@@ -2957,7 +2957,7 @@ pub(crate) fn extract_document_structure_from_segments(
 
     tracing::debug!(
         elements = doc.elements.len(),
-        "oxide structure pipeline: assembly complete"
+        "native structure pipeline: assembly complete"
     );
 
     Ok(doc)
@@ -2965,7 +2965,7 @@ pub(crate) fn extract_document_structure_from_segments(
 
 /// Maximum vertical gap (PDF points) between one fragment's bottom edge and the
 /// next fragment's top edge for the two to be considered the same physical
-/// table split by `oxide::table`'s row-gap clustering.
+/// table split by `native::table`'s row-gap clustering.
 const TABLE_STITCH_Y_GAP_TOLERANCE_PTS: f64 = 4.0;
 /// Maximum difference in a chain's shared left/right edge for two fragments to
 /// be considered the same table (rather than two unrelated tables that happen
@@ -2973,22 +2973,22 @@ const TABLE_STITCH_Y_GAP_TOLERANCE_PTS: f64 = 4.0;
 const TABLE_STITCH_X_TOLERANCE_PTS: f64 = 6.0;
 /// Bound on fragments merged into one stitched chain. Real continuation splits
 /// rarely exceed a handful of fragments; this caps the (already page-scoped,
-/// already `oxide::table::MAX_REGIONS_PER_PAGE`-bounded) chain walk.
+/// already `native::table::MAX_REGIONS_PER_PAGE`-bounded) chain walk.
 const TABLE_STITCH_MAX_CHAIN_FRAGMENTS: usize = 12;
 /// Bound on additional data rows the trailing-continuation recovery pass will
 /// attempt to pull from raw page segments below a stitched chain's last known
 /// fragment. Keeps the scan from reading arbitrarily far down the page.
 const TABLE_STITCH_TRAILING_RECOVERY_MAX_ROWS: usize = 6;
 /// Row-gap multiplier used to split recovered trailing words into per-entity
-/// bands. Mirrors `oxide::table::cluster_words_into_vertical_regions`'s
+/// bands. Mirrors `native::table::cluster_words_into_vertical_regions`'s
 /// `row_gap_split`; reimplemented here because that clustering helper is
-/// private to the `oxide::table` module, which this pass cannot depend on.
+/// private to the `native::table` module, which this pass cannot depend on.
 const TABLE_STITCH_TRAILING_ROW_GAP_MULTIPLIER: f32 = 1.8;
 
-/// Stitch table fragments that `oxide::table`'s row-gap region clustering split
+/// Stitch table fragments that `native::table`'s row-gap region clustering split
 /// out of one physical table back into a single table.
 ///
-/// `oxide::table::cluster_words_into_vertical_regions` splits a page's words
+/// `native::table::cluster_words_into_vertical_regions` splits a page's words
 /// into regions at any row-gap exceeding `median_height * 1.8`. A table whose
 /// header wraps onto several lines, or whose rows are visually separated by
 /// generous line spacing, can land in several such regions — each one then
@@ -3008,7 +3008,7 @@ const TABLE_STITCH_TRAILING_ROW_GAP_MULTIPLIER: f32 = 1.8;
 /// Bounded to avoid quadratic blowup: fragments are grouped by page first (an
 /// `O(n)` pass), and each page's fragment list is walked once after an
 /// `O(m log m)` sort, with the inner chain-adjacency check bounded by
-/// `TABLE_STITCH_MAX_CHAIN_FRAGMENTS`. `oxide::table::MAX_REGIONS_PER_PAGE`
+/// `TABLE_STITCH_MAX_CHAIN_FRAGMENTS`. `native::table::MAX_REGIONS_PER_PAGE`
 /// already caps how many fragments a single page can contribute.
 fn stitch_fragmented_tables(
     tables: Vec<crate::types::Table>,
@@ -3174,7 +3174,7 @@ fn merge_table_chain(chain: Vec<crate::types::Table>, all_page_segments: &[Vec<S
 
 /// Recover trailing data rows that never became their own table fragment.
 ///
-/// `oxide::table`'s region clustering sometimes merges the last entities of a
+/// `native::table`'s region clustering sometimes merges the last entities of a
 /// fragmented table into a region with unrelated following content (or drops
 /// them entirely when the merged region fails `post_process_table`
 /// validation), so those rows leak into the document as plain paragraph text
@@ -3681,7 +3681,7 @@ fn fused_text_repairs(text: &str) -> Cow<'_, str> {
 
 /// Deduplicate tables that overlap on the same page.
 ///
-/// When both native oxide detection and layout-based table extraction produce tables
+/// When both native detection and layout-based table extraction produce tables
 /// for the same region, they can overlap. Tables at index `< native_count` are native;
 /// the rest are layout (TATR/SLANeXT) tables. Complete side-by-side layout replacements
 /// are selected atomically before ordinary pairwise arbitration. Outside those replacements,

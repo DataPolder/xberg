@@ -8,15 +8,15 @@
 //!
 //! * `total_order_panic_1198_text_path.pdf` — panics in
 //!   `xberg_native_pdf::extractors::text::TextExtractor::extract_text_spans`, reached
-//!   via `xberg::pdf::oxide::text::extract_page_text_column_aware`.
+//!   via `xberg::pdf::native::text::extract_page_text_column_aware`.
 //! * `total_order_panic_1198_tables_path.pdf` — panics in
 //!   `xberg_native_pdf::pipeline::reading_order::tategaki::TategakiStrategy::apply`,
-//!   reached via the table-detection phase of `extract_all_from_oxide_document`.
+//!   reached via the table-detection phase of `extract_all_from_native_document`.
 //!
 //! Because these calls run synchronously on a Tokio worker, the uncaught panic
 //! unwound through the async boundary and surfaced to bindings as an opaque
 //! `RustPanic`, aborting the whole extraction. The fix wraps the xberg_native_pdf calls
-//! in `oxide::guard_oxide_panic` (`catch_unwind`): a text-path panic becomes a
+//! in `native::guard_native_panic` (`catch_unwind`): a text-path panic becomes a
 //! recoverable `Err`, and a table-path panic falls back to no tables while
 //! preserving the page text.
 //!
@@ -47,7 +47,7 @@ fn read_repro(name: &str) -> Option<Vec<u8>> {
 }
 
 /// The text-path repro must not abort with a raw panic. xberg_native_pdf (through 0.3.72)
-/// still trips the total-order sort on this file, but `guard_oxide_panic` contains
+/// still trips the total-order sort on this file, but `guard_native_panic` contains
 /// it: the panic surfaces as a recoverable `Err` (skip-and-log the file) instead of
 /// unwinding through the async boundary. Reaching past the extraction call at all
 /// proves containment — an uncaught panic would abort the test thread inside
@@ -66,7 +66,7 @@ fn text_path_repro_is_contained_not_a_raw_panic() {
             let message = error.to_string();
             assert!(
                 message.contains("panicked in xberg_native_pdf"),
-                "text-path panic must be contained by guard_oxide_panic, got: {message}"
+                "text-path panic must be contained by guard_native_panic, got: {message}"
             );
         }
     }

@@ -4,18 +4,18 @@
 //! producer, creator) and PDF-specific properties (version, encryption, dimensions,
 //! page count). Also builds `PageStructure` from page boundaries.
 
-use super::OxideDocument;
+use super::NativeDocument;
 use crate::pdf::error::{PdfError, Result};
 use crate::pdf::metadata::{CommonPdfMetadata, PdfExtractionMetadata, PdfMetadata};
 use crate::types::{PageBoundary, PageInfo, PageStructure, PageUnitType};
 
-/// Extract complete PDF metadata from an oxide document.
+/// Extract complete PDF metadata from a native document.
 ///
 /// Combines common metadata (title, authors, dates, etc.) with PDF-specific
 /// metadata (version, encryption, dimensions) and optional page structure.
-/// This is the oxide equivalent of `extract_metadata_from_document_impl`.
-pub(crate) fn extract_metadata_from_oxide_document(
-    doc: &mut OxideDocument,
+/// This is the native equivalent of `extract_metadata_from_document_impl`.
+pub(crate) fn extract_metadata_from_native_document(
+    doc: &mut NativeDocument,
     page_boundaries: Option<&[PageBoundary]>,
     content: &str,
     scanned_min_confidence: f64,
@@ -45,7 +45,7 @@ pub(crate) fn extract_metadata_from_oxide_document(
 
 /// Extract only PDF-specific metadata (version, producer, encryption, dimensions, page count).
 fn extract_pdf_specific_metadata(
-    doc: &mut OxideDocument,
+    doc: &mut NativeDocument,
     scanned_min_confidence: f64,
     ocr_quality_thresholds: &crate::core::config::OcrQualityThresholds,
 ) -> Result<PdfMetadata> {
@@ -131,7 +131,7 @@ fn extract_pdf_specific_metadata(
 /// authoritative metadata in the XMP packet instead (ISO 32000-1:2008
 /// §14.3.2). Only fields absent from the Info dict are filled from XMP, so a
 /// document's Info dict always wins where both are present.
-fn extract_common_metadata(doc: &mut OxideDocument) -> Result<CommonPdfMetadata> {
+fn extract_common_metadata(doc: &mut NativeDocument) -> Result<CommonPdfMetadata> {
     let title = get_info_string(&mut doc.doc, "Title");
     let subject = get_info_string(&mut doc.doc, "Subject");
     let created_by = get_info_string(&mut doc.doc, "Creator");
@@ -201,7 +201,7 @@ fn extract_xmp_metadata(doc: &xberg_native_pdf::PdfDocument) -> Option<xberg_nat
 /// Returns `None` when the document defines no `/PageLabels` (the common
 /// case), in which case every page uses its plain 1-based number, which
 /// callers already have via `page_count`/`PageBoundary::page_number`.
-pub(crate) fn extract_page_labels_all(doc: &mut OxideDocument) -> Result<Option<Vec<String>>> {
+pub(crate) fn extract_page_labels_all(doc: &mut NativeDocument) -> Result<Option<Vec<String>>> {
     let page_count = doc
         .doc
         .page_count()
@@ -257,7 +257,7 @@ fn get_info_string(doc: &mut xberg_native_pdf::PdfDocument, key: &str) -> Option
 /// Handles UTF-16BE encoding (BOM: 0xFE 0xFF) and falls back to Latin-1
 /// (PDFDocEncoding) for byte strings without a BOM.
 ///
-/// `pub(crate)` so other oxide submodules (e.g. `hierarchy`'s `/Alt` text
+/// `pub(crate)` so other native submodules (e.g. `hierarchy`'s `/Alt` text
 /// reader, issue #62) can reuse this decoding instead of duplicating it.
 pub(crate) fn decode_pdf_string(bytes: &[u8]) -> Option<String> {
     if bytes.is_empty() {
@@ -291,12 +291,12 @@ pub(crate) fn decode_pdf_string(bytes: &[u8]) -> Option<String> {
     }
 }
 
-/// Build a `PageStructure` from an oxide document and page boundaries.
+/// Build a `PageStructure` from a native document and page boundaries.
 ///
 /// Mirrors `build_page_structure` in the pdf metadata module: validates
 /// boundary count against page count, collects per-page dimensions from
 /// MediaBox, and determines blank status from content slices.
-fn build_page_structure(doc: &mut OxideDocument, boundaries: &[PageBoundary], content: &str) -> Result<PageStructure> {
+fn build_page_structure(doc: &mut NativeDocument, boundaries: &[PageBoundary], content: &str) -> Result<PageStructure> {
     let total_count = doc
         .doc
         .page_count()

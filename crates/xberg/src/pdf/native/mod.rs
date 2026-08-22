@@ -32,7 +32,7 @@ use crate::error::XbergError;
 /// The closure is wrapped in [`std::panic::AssertUnwindSafe`]: the caught panic
 /// originates in a self-contained `xberg_native_pdf` sort over a local `Vec`, so the
 /// borrowed `PdfDocument` is not left in an observably-inconsistent state.
-pub(crate) fn guard_oxide_panic<T, E>(
+pub(crate) fn guard_native_panic<T, E>(
     op: impl FnOnce() -> std::result::Result<T, E>,
     on_panic: impl FnOnce(String) -> E,
 ) -> std::result::Result<T, E> {
@@ -55,11 +55,11 @@ fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
 
 /// Wraps a [`xberg_native_pdf::PdfDocument`] with convenient constructors that map
 /// xberg_native_pdf errors into [`XbergError::Parsing`].
-pub(crate) struct OxideDocument {
+pub(crate) struct NativeDocument {
     pub doc: xberg_native_pdf::PdfDocument,
 }
 
-impl OxideDocument {
+impl NativeDocument {
     /// Open a PDF from in-memory bytes with no password. Test-only convenience;
     /// production opens through `open_bytes_with_passwords` so configured
     /// passwords are always consulted.

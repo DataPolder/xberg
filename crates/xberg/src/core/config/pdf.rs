@@ -69,7 +69,7 @@ pub struct PdfConfig {
     ///
     /// When `true` (default), runs the native engine's grid detector and, if it
     /// finds nothing, falls back to the heuristic text-layer reconstruction in
-    /// `pdf::oxide::table::extract_tables_heuristic`. Set to `false` to skip
+    /// `pdf::native::table::extract_tables_heuristic`. Set to `false` to skip
     /// both passes — `tables` will then be empty in the result.
     #[serde(default = "default_true")]
     pub extract_tables: bool,

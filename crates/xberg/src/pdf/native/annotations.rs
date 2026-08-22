@@ -3,7 +3,7 @@
 //! Maps xberg_native_pdf's `Annotation` types to Xberg's `PdfAnnotation` model,
 //! extracting content text, bounding boxes, and link URIs.
 
-use super::OxideDocument;
+use super::NativeDocument;
 use crate::types::{BoundingBox, PdfAnnotation, PdfAnnotationType, ProcessingWarning};
 
 /// Extract annotations from all pages of a PDF document using xberg_native_pdf.
@@ -17,7 +17,7 @@ use crate::types::{BoundingBox, PdfAnnotation, PdfAnnotationType, ProcessingWarn
 ///
 /// # Arguments
 ///
-/// * `doc` - Mutable reference to the oxide document
+/// * `doc` - Mutable reference to the native document
 ///
 /// # Returns
 ///
@@ -25,7 +25,7 @@ use crate::types::{BoundingBox, PdfAnnotation, PdfAnnotationType, ProcessingWarn
 /// `Vec<ProcessingWarning>` describing any pages whose annotations could not be
 /// read (issue #72). When the document's page count itself cannot be determined,
 /// annotations are empty and a single warning is returned.
-pub(crate) fn extract_annotations(doc: &mut OxideDocument) -> (Vec<PdfAnnotation>, Vec<ProcessingWarning>) {
+pub(crate) fn extract_annotations(doc: &mut NativeDocument) -> (Vec<PdfAnnotation>, Vec<ProcessingWarning>) {
     let page_count = match doc.doc.page_count() {
         Ok(count) => count,
         Err(e) => {

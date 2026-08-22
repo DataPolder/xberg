@@ -412,12 +412,32 @@ Pure-Rust PDF parsing, extraction and rendering — xberg's default PDF engine, 
 
 - Renamed to `xberg-native-pdf` on vendoring. Upstream's trademark policy permits describing
   this crate as a fork of PDFOxide but not using upstream's names as the name of a
-  distribution, so the rename is a compliance improvement as well as a naming one. **This file
-  is the only place in the repository that names the upstream project**; the identifier
-  `pdf_oxide` survives elsewhere in exactly three places, each load-bearing and commented:
-  a `/Producer` allowlist entry that matches PDFs already written by the older lineages, an
-  environment-variable back-compatibility chain, and a verbatim quotation of a third-party
-  tool's error message in a test.
+  distribution, so the rename is a compliance improvement as well as a naming one. This file,
+  `crates/xberg-native-pdf/ATTRIBUTIONS.md`, and `crates/xberg-native-pdf/CHANGELOG.md` are the
+  places that document the upstream project by design. Beyond those, the identifier
+  `pdf_oxide` (or a variant spelling) survives, deliberately, in a small number of live,
+  commented, load-bearing spots — confirm with `grep -rlniE 'pdf[_-]?oxide' crates/`:
+  - `crates/xberg/src/core/config/pdf.rs` (`PdfBackend`'s rejection test): the old spelling
+    must appear verbatim so the test can assert it is rejected, not silently aliased.
+  - `crates/xberg-native-pdf/src/document.rs` (a `/Producer` allowlist entry): matches PDFs
+    already written by the `pdf_oxide`/`xberg-pdf-oxide` lineages, which are still arriving in
+    the wild, so recognizing them as trusted authoring tools is intentional.
+  - `crates/xberg-native-pdf/src/decoders/flate.rs` (an environment-variable
+    back-compatibility chain): `PDF_OXIDE_MAX_DECOMPRESS_MB` and
+    `XBERG_PDF_OXIDE_MAX_DECOMPRESS_MB` keep older deployments' env vars working.
+  - `crates/xberg-native-pdf/tests/test_signed_pdf_opens_and_renders.rs`: a verbatim quotation
+    of a third-party signing tool's own error message (`PdfOxide.Exceptions.SignatureException`),
+    not a reference to this codebase.
+
+  The same grep also turns up `crates/xberg-php/` and `crates/xberg-node/` (alef-generated
+  binding sources) and every `docs-site/src/content/docs/reference/api-*.md` /
+  `cli.md`/`configuration.md`/`types.md` page: these are mechanically generated from the Rust
+  doc comments above and were stale (pre-dating the `xberg-native-pdf` rename in the comments
+  they mirror) at the time of writing; they carry no independent attribution and refresh on the
+  next `alef generate`, not by hand-editing. Historical entries in the root `CHANGELOG.md` (and
+  its `docs-site/src/content/docs/changelog.md` mirror) also name `pdf_oxide`/`xberg-pdf-oxide`;
+  those describe releases from when the crate really was named that, and changelogs are an
+  append-only historical record, so they are left as written rather than retroactively edited.
 - Stripped upstream's language bindings, CLI, MCP server, and its OCR, ML, digital-signature,
   WASM, barcode, HTML/CSS-to-PDF and PDF/A subsystems
 - Replaced `ttf-parser` with the fontations/`skrifa` stack

@@ -232,7 +232,7 @@ fn test_pdf_structure_reading_order() {
         "'Titre du document' (top of page) must appear before 'Tableau' (bottom of page); \
          got title at byte {title_pos}, Tableau at byte {tableau_pos}. \
          This indicates a reading-order inversion — check PDF coordinate handling in \
-         crates/xberg/src/pdf/oxide/hierarchy.rs"
+         crates/xberg/src/pdf/native/hierarchy.rs"
     );
 }
 

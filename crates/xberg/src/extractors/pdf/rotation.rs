@@ -62,7 +62,7 @@ const ROTATED_LINE_CROSS_TOLERANCE_RATIO: f32 = 0.5;
 
 /// Rotate a span's page-space origin into its own upright reading frame.
 ///
-/// Mirrors [`crate::pdf::oxide::span_geometry::upright_origin`] (which
+/// Mirrors [`crate::pdf::native::span_geometry::upright_origin`] (which
 /// operates on `xberg_native_pdf::layout::TextSpan`) for the simpler geometry this
 /// module works with. Returns `(advance, cross)`: `advance` is the position
 /// along the span's own reading direction and `cross` is the position along
@@ -224,7 +224,7 @@ pub(crate) fn page_has_rotated_spans(spans: &[TextSpan]) -> bool {
 /// replaces the *entire page's* text via [`assemble_reading_order_text`],
 /// whose unrotated path is a legacy verbatim concatenation with no inserted
 /// separators at all (see [`append_run`]'s unrotated branch), unlike
-/// `assemble_page_text` in `pdf::oxide::text` (paragraph/line-break
+/// `assemble_page_text` in `pdf::native::text` (paragraph/line-break
 /// detection, RTL handling, glyph-fragmentation repair for #962). A page
 /// where rotation is a tiny minority — one rotated caption, axis label, or
 /// section-tab digit sitting on an otherwise entirely upright page — pays

@@ -10,7 +10,7 @@
 
 use std::collections::HashMap;
 
-use super::OxideDocument;
+use super::NativeDocument;
 // Inline-script rejoining measures baselines and character origins in raw page
 // coordinates, so it needs the strict page-axis predicate, not the
 // rotation-agnostic writing-mode one.
@@ -553,13 +553,13 @@ fn normalize_script_span(
 ///
 /// # Arguments
 ///
-/// * `doc` - Mutable reference to the oxide document
+/// * `doc` - Mutable reference to the native document
 /// * `page_index` - Zero-based page index
 ///
 /// # Returns
 ///
 /// Vector of `SegmentData` objects with font metrics for hierarchy detection.
-pub(crate) fn extract_segments_from_page(doc: &mut OxideDocument, page_index: usize) -> Result<Vec<SegmentData>> {
+pub(crate) fn extract_segments_from_page(doc: &mut NativeDocument, page_index: usize) -> Result<Vec<SegmentData>> {
     extract_segments_from_page_inner(doc, page_index, &HashMap::new())
 }
 
@@ -568,7 +568,7 @@ pub(crate) fn extract_segments_from_page(doc: &mut OxideDocument, page_index: us
 /// When `mcid_roles` is non-empty, spans with matching MCIDs receive pre-assigned
 /// heading levels from the PDF structure tree.
 fn extract_segments_from_page_inner(
-    doc: &mut OxideDocument,
+    doc: &mut NativeDocument,
     page_index: usize,
     mcid_roles: &HashMap<u32, Option<u8>>,
 ) -> Result<Vec<SegmentData>> {
@@ -681,7 +681,7 @@ fn dedupe_redrawn_segments(segments: Vec<SegmentData>) -> Vec<SegmentData> {
 ///
 /// Returns `(segments, used_structure_tree)`. When `used_structure_tree` is true,
 /// the caller should skip font-size clustering and use the pre-assigned roles.
-fn extract_segments_with_structure_tree(doc: &mut OxideDocument) -> Result<(Vec<Vec<SegmentData>>, bool)> {
+fn extract_segments_with_structure_tree(doc: &mut NativeDocument) -> Result<(Vec<Vec<SegmentData>>, bool)> {
     let mark_info = match doc.doc.mark_info() {
         Ok(mi) => mi,
         Err(e) => {
@@ -770,12 +770,12 @@ fn extract_segments_with_structure_tree(doc: &mut OxideDocument) -> Result<(Vec<
 ///
 /// # Arguments
 ///
-/// * `doc` - Mutable reference to the oxide document
+/// * `doc` - Mutable reference to the native document
 ///
 /// # Returns
 ///
 /// Tuple of (per-page segment vectors, structure-tree-used flag).
-pub(crate) fn extract_all_segments(doc: &mut OxideDocument) -> Result<(Vec<Vec<SegmentData>>, bool)> {
+pub(crate) fn extract_all_segments(doc: &mut NativeDocument) -> Result<(Vec<Vec<SegmentData>>, bool)> {
     let (tree_segments, used_tree) = extract_segments_with_structure_tree(doc)?;
     if used_tree && !tree_segments.is_empty() {
         return Ok((tree_segments, true));
@@ -816,7 +816,7 @@ pub(crate) fn extract_all_segments(doc: &mut OxideDocument) -> Result<(Vec<Vec<S
 /// The latter is built for reading-order/heading detection and deliberately skips
 /// parsing `/A` and `/Alt` (xberg_native_pdf's `structure::parser` module never populates
 /// `StructElem::alt_text`), so it cannot be used here.
-pub(crate) fn extract_figure_alt_text_by_page(doc: &mut OxideDocument) -> HashMap<u32, Vec<Option<String>>> {
+pub(crate) fn extract_figure_alt_text_by_page(doc: &mut NativeDocument) -> HashMap<u32, Vec<Option<String>>> {
     let mut by_page: HashMap<u32, Vec<Option<String>>> = HashMap::new();
 
     let Ok(catalog) = doc.doc.catalog() else {
@@ -852,7 +852,7 @@ const MAX_PDF_OBJECT_TREE_DEPTH: usize = 128;
 
 /// Resolve `obj` to its underlying value if it is an indirect reference,
 /// otherwise clone it. Unresolvable references degrade to `Object::Null`.
-fn resolve_pdf_object(doc: &OxideDocument, obj: &xberg_native_pdf::object::Object) -> xberg_native_pdf::object::Object {
+fn resolve_pdf_object(doc: &NativeDocument, obj: &xberg_native_pdf::object::Object) -> xberg_native_pdf::object::Object {
     match obj.as_reference() {
         Some(object_ref) => doc
             .doc
@@ -868,7 +868,7 @@ fn resolve_pdf_object(doc: &OxideDocument, obj: &xberg_native_pdf::object::Objec
 /// are ignored (a `/Pg` reference and the corresponding `/Pages` leaf always
 /// share the same object id per ISO 32000-1:2008 §7.3.10).
 fn build_page_id_map(
-    doc: &OxideDocument,
+    doc: &NativeDocument,
     catalog_dict: &HashMap<String, xberg_native_pdf::object::Object>,
 ) -> HashMap<u32, u32> {
     let mut map = HashMap::new();
@@ -886,7 +886,7 @@ fn build_page_id_map(
 }
 
 fn walk_pages_tree(
-    doc: &OxideDocument,
+    doc: &NativeDocument,
     node_ref: xberg_native_pdf::object::ObjectRef,
     map: &mut HashMap<u32, u32>,
     index: &mut u32,
@@ -924,7 +924,7 @@ fn walk_pages_tree(
 /// MCID integers, and marked-content-reference dicts. Only structure-element
 /// entries (dicts carrying `/S`) are descended into.
 fn walk_struct_kids(
-    doc: &OxideDocument,
+    doc: &NativeDocument,
     k_obj: &xberg_native_pdf::object::Object,
     page_id_map: &HashMap<u32, u32>,
     inherited_page: Option<u32>,
@@ -948,7 +948,7 @@ fn walk_struct_kids(
 }
 
 fn walk_struct_elem(
-    doc: &OxideDocument,
+    doc: &NativeDocument,
     elem_obj: &xberg_native_pdf::object::Object,
     page_id_map: &HashMap<u32, u32>,
     inherited_page: Option<u32>,
@@ -963,7 +963,7 @@ fn walk_struct_elem(
 /// then recurses into `/K` with the page inherited down for descendants that
 /// omit their own `/Pg` (ISO 32000-1:2008 §14.7.2, Table 323).
 fn walk_struct_elem_resolved(
-    doc: &OxideDocument,
+    doc: &NativeDocument,
     resolved: &xberg_native_pdf::object::Object,
     page_id_map: &HashMap<u32, u32>,
     inherited_page: Option<u32>,

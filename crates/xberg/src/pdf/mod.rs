@@ -27,9 +27,9 @@ pub(crate) mod layout_gate;
 /// PDF metadata types: document info dictionary and page structure.
 pub mod metadata;
 #[cfg(feature = "pdf")]
-pub(crate) mod oxide;
+pub(crate) mod native;
 #[cfg(all(feature = "pdf", feature = "tokio-runtime"))]
-pub(crate) mod oxide_text;
+pub(crate) mod native_text;
 #[cfg(feature = "pdf")]
 /// PDF page rendering to raster images.
 pub mod render;

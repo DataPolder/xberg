@@ -28,7 +28,7 @@ use async_trait::async_trait;
 #[cfg(feature = "tokio-runtime")]
 use std::path::Path;
 
-use extraction::extract_all_from_oxide_document;
+use extraction::extract_all_from_native_document;
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 use ocr::extract_with_ocr;
 
@@ -89,7 +89,7 @@ fn enforce_page_limit(content: &[u8], config: &ExtractionConfig) -> Result<()> {
         return Ok(());
     };
 
-    let Some(page_count) = oxide_page_count(content).or_else(|| lopdf_page_count(content)) else {
+    let Some(page_count) = native_page_count(content).or_else(|| lopdf_page_count(content)) else {
         return Ok(());
     };
 
@@ -102,7 +102,7 @@ fn enforce_page_limit(content: &[u8], config: &ExtractionConfig) -> Result<()> {
 /// Page count via `xberg_native_pdf`. `None` when it cannot open or count the document,
 /// in which case the caller falls back to [`lopdf_page_count`].
 #[cfg(feature = "pdf")]
-fn oxide_page_count(content: &[u8]) -> Option<usize> {
+fn native_page_count(content: &[u8]) -> Option<usize> {
     xberg_native_pdf::PdfDocument::from_bytes(content.to_vec())
         .ok()?
         .page_count()
@@ -117,7 +117,7 @@ fn lopdf_page_count(content: &[u8]) -> Option<usize> {
 }
 
 #[cfg(feature = "pdf")]
-fn parsed_pdf_needs_lopdf_compatibility_pass(document: &crate::pdf::oxide::OxideDocument) -> bool {
+fn parsed_pdf_needs_lopdf_compatibility_pass(document: &crate::pdf::native::NativeDocument) -> bool {
     match document.doc.catalog() {
         Ok(catalog) => catalog_needs_lopdf_compatibility_pass(Some(&catalog)),
         Err(error) => {
@@ -459,10 +459,10 @@ fn inject_unrepresented_table_elements(doc: &mut InternalDocument, allow_injecti
 ///
 /// `doc.form_fields` already reaches the typed `ExtractedDocument.form_fields`
 /// API, but nothing renders it into `content`. For the plain-text path this is
-/// usually harmless: `oxide::text`'s `append_missing_widget_values` already
+/// usually harmless: `native::text`'s `append_missing_widget_values` already
 /// splices Widget `/V` values into the flat native text before it is chopped
 /// into `Paragraph` elements. But the *structured* path (Markdown/HTML/Djot,
-/// built from `pdf::oxide::hierarchy`'s span segments) never sees that
+/// built from `pdf::native::hierarchy`'s span segments) never sees that
 /// splice — a filled, non-flattened form renders with none of its entered
 /// values.
 ///
@@ -991,7 +991,6 @@ mod formula_region_tests {
     fn overlap_ratio_is_intersection_over_smaller_area() {
         let big = pt_box(0.0, 0.0, 100.0, 100.0);
         let small = pt_box(50.0, 50.0, 150.0, 150.0);
-        // Intersection 50x50 = 2500; both areas 10000 -> 0.25.
         assert!((super::bbox_overlap_ratio(&big, &small) - 0.25).abs() < 1e-9);
         let contained = pt_box(10.0, 10.0, 20.0, 20.0);
         assert!((super::bbox_overlap_ratio(&big, &contained) - 1.0).abs() < 1e-9);
@@ -1334,13 +1333,13 @@ impl InternalDocumentExtractor for PdfExtractor {
     #[cfg(feature = "tokio-runtime")]
     async fn extract_path(&self, path: &Path, mime_type: &str, config: &ExtractionConfig) -> Result<InternalDocument> {
         #[cfg(feature = "pdf")]
-        crate::pdf::oxide_text::set_current_pdf_path(Some(path.to_path_buf()));
+        crate::pdf::native_text::set_current_pdf_path(Some(path.to_path_buf()));
         // Async on native (non-blocking tokio::fs); sync fallback on wasm32 where tokio's `fs`
         // feature is unavailable. See `core::io::read_file_async`. ~keep
         let bytes = crate::core::io::read_file_async(path).await?;
         let result = self.extract_core(&bytes, mime_type, config, Some(path)).await;
         #[cfg(feature = "pdf")]
-        crate::pdf::oxide_text::set_current_pdf_path(None);
+        crate::pdf::native_text::set_current_pdf_path(None);
         result
     }
 
@@ -1383,7 +1382,7 @@ impl PdfExtractor {
                 .unwrap_or_default();
             match backend {
                 crate::core::config::PdfBackend::Native => {
-                    self.extract_core_oxide(content, mime_type, config, path).await
+                    self.extract_core_native(content, mime_type, config, path).await
                 }
                 crate::core::config::PdfBackend::Pdfium => {
                     self.extract_core_pdfium(content, mime_type, config, path).await
@@ -1391,14 +1390,14 @@ impl PdfExtractor {
             }
         }
         #[cfg(not(feature = "pdf"))]
-        self.extract_core_oxide(content, mime_type, config, path).await
+        self.extract_core_native(content, mime_type, config, path).await
     }
 
     /// Dispatch target for `PdfBackend::Pdfium`.
     ///
     /// Without the `pdf-pdfium` Cargo feature, `crates/xberg-pdfium-render` is not
     /// even compiled in, so this fails loudly rather than falling back to
-    /// `extract_core_oxide`: silently reusing `xberg_native_pdf` output under a caller's
+    /// `extract_core_native`: silently reusing `xberg_native_pdf` output under a caller's
     /// `PdfBackend::Pdfium` selection would produce a document the caller believes
     /// came from pdfium, which is worse than an error.
     #[cfg(all(feature = "pdf", not(feature = "pdf-pdfium")))]
@@ -1421,7 +1420,7 @@ impl PdfExtractor {
     /// enabled (#702).
     ///
     /// Delegates to [`pdfium_engine::extract`], a deliberately smaller engine than
-    /// `extract_core_oxide`: see that module's doc comment for exactly what it
+    /// `extract_core_native`: see that module's doc comment for exactly what it
     /// extracts and what it does not (no tables, images, annotations, form fields,
     /// embedded files, or OCR fallback). Binding to the pdfium shared library is a
     /// runtime concern -- see `pdfium_engine::bind_once` -- so this can still fail
@@ -1441,11 +1440,11 @@ impl PdfExtractor {
 
     /// Core extraction via the xberg_native_pdf backend.
     ///
-    /// Runs text + metadata, tables, and annotation extraction through the oxide
+    /// Runs text + metadata, tables, and annotation extraction through the native
     /// modules, then builds an `InternalDocument` using the same post-processing
     /// pipeline (OCR evaluation, page assembly, image extraction, bookmarks, etc.).
     #[cfg(feature = "pdf")]
-    async fn extract_core_oxide(
+    async fn extract_core_native(
         &self,
         content: &[u8],
         mime_type: &str,
@@ -1481,16 +1480,16 @@ impl PdfExtractor {
             .unwrap_or(&[]);
         let raw_compatibility_signal = raw_pdf_needs_lopdf_compatibility_pass(content);
         let compatibility_data = raw_compatibility_signal.then(|| extract_lopdf_compatibility_data(content));
-        let mut oxide_document = crate::pdf::oxide::OxideDocument::open_bytes_with_passwords(content, passwords)?;
+        let mut native_document = crate::pdf::native::NativeDocument::open_bytes_with_passwords(content, passwords)?;
 
         let compatibility_data = match compatibility_data {
             Some(data) => Some(data),
-            None if parsed_pdf_needs_lopdf_compatibility_pass(&oxide_document) => {
+            None if parsed_pdf_needs_lopdf_compatibility_pass(&native_document) => {
                 // Avoid holding both parser object graphs at once. Compressed
                 // catalog outlines are rare, so reopen xberg_native_pdf for this path. ~keep
-                drop(oxide_document);
+                drop(native_document);
                 let data = extract_lopdf_compatibility_data(content);
-                oxide_document = crate::pdf::oxide::OxideDocument::open_bytes_with_passwords(content, passwords)?;
+                native_document = crate::pdf::native::NativeDocument::open_bytes_with_passwords(content, passwords)?;
                 Some(data)
             }
             None => None,
@@ -1505,7 +1504,7 @@ impl PdfExtractor {
         // every other renderer discards the result, so an ordinary ruled
         // report must not pay for it.
         let diagrams = if wants_dot_output(config) {
-            crate::extraction::diagram::pdf::recover(&mut oxide_document)
+            crate::extraction::diagram::pdf::recover(&mut native_document)
         } else {
             Vec::new()
         };
@@ -1524,8 +1523,8 @@ impl PdfExtractor {
             pdf_form_fields,
             mut pdf_extraction_warnings,
             pdf_page_labels,
-        ) = extract_all_from_oxide_document(
-            oxide_document,
+        ) = extract_all_from_native_document(
+            native_document,
             config,
             &outline_entries,
             layout_hints,
@@ -2178,7 +2177,7 @@ impl PdfExtractor {
 
         // Issue #64: surface filled field values in rendered content for
         // output shapes (Markdown/HTML/Djot) that the plain-text widget
-        // splice in `oxide::text` never touches.
+        // splice in `native::text` never touches.
         inject_unrepresented_form_field_elements(&mut doc, &pdf_form_fields);
         doc.form_fields = pdf_form_fields;
 
@@ -2385,7 +2384,7 @@ impl PdfExtractor {
             tables = doc.tables.len(),
             has_pages = doc.prebuilt_pages.is_some(),
             diagrams = doc.diagrams.len(),
-            "InternalDocument finalized (oxide path)"
+            "InternalDocument finalized (native path)"
         );
 
         #[cfg(all(feature = "liter-llm", feature = "layout-detection"))]
@@ -2429,7 +2428,7 @@ impl PdfExtractor {
 
     /// Fallback extraction path when pdf feature is not enabled.
     #[cfg(not(feature = "pdf"))]
-    async fn extract_core_oxide(
+    async fn extract_core_native(
         &self,
         _content: &[u8],
         mime_type: &str,
@@ -3894,14 +3893,14 @@ mod tests {
 
     /// Proves the `PdfBackend::Pdfium` dispatch branch in `extract_core` (#702):
     /// selecting pdfium must fail with a specific, actionable error naming the
-    /// backend and telling the caller what to do, rather than the oxide parser's
+    /// backend and telling the caller what to do, rather than the native parser's
     /// generic "corrupt file" error. Content is deliberately not a valid PDF --
     /// dispatch must happen before any parsing, so a real pdfium rejection never
     /// reaches the parser at all.
     ///
     /// Fails against unfixed code: `extract_core` unconditionally calls
-    /// `extract_core_oxide` and never reads `PdfConfig::backend`, so `content`
-    /// gets handed straight to `xberg_native_pdf`. The oxide parser rejects the garbage
+    /// `extract_core_native` and never reads `PdfConfig::backend`, so `content`
+    /// gets handed straight to `xberg_native_pdf`. The native parser rejects the garbage
     /// bytes with an `XbergError::Parsing` whose message describes a corrupt/invalid
     /// PDF and never contains the word "pdfium" -- the
     /// `message.contains("pdfium")` assertion below fails.
@@ -3942,7 +3941,7 @@ mod tests {
     /// because the input was bad" as an explanation for the error.
     ///
     /// Fails against unfixed code: `extract_core` ignores `PdfConfig::backend`
-    /// entirely and always calls `extract_core_oxide`, so `result.is_ok()` is `true`
+    /// entirely and always calls `extract_core_native`, so `result.is_ok()` is `true`
     /// pre-fix (the exact silent-fallback failure mode #702 exists to close) instead
     /// of the `false` asserted here.
     ///

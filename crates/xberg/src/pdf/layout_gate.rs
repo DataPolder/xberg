@@ -338,7 +338,7 @@ fn recurring_edge_clusters(rows: &[&Vec<&SpanBox>], edge: fn(&SpanBox) -> f32) -
 /// Failures are advisory (matching [`super::scan_detect`]): the caller maps
 /// `None` to [`GateReason::SignalsUnavailable`] and runs the model.
 fn page_signals(doc: &PdfDocument, page_index: usize) -> Option<PageGateSignals> {
-    let page_text = super::oxide::guard_oxide_panic(
+    let page_text = super::native::guard_native_panic(
         || {
             doc.extract_page_text_with_options(page_index, ReadingOrder::ColumnAware)
                 .map_err(|error| error.to_string())
@@ -367,7 +367,7 @@ fn page_signals(doc: &PdfDocument, page_index: usize) -> Option<PageGateSignals>
     // One content-stream path parse serves both the rule counter and the
     // vector-coverage signal; xberg_native_pdf's extract_lines would re-run
     // extract_paths internally. ~keep
-    let paths = super::oxide::guard_oxide_panic(
+    let paths = super::native::guard_native_panic(
         || doc.extract_paths(page_index).map_err(|error| error.to_string()),
         |message| message,
     )
@@ -413,7 +413,7 @@ fn graphics_coverage(
 }
 
 fn has_form_widgets(doc: &PdfDocument, page_index: usize) -> Option<bool> {
-    let annotations = super::oxide::guard_oxide_panic(
+    let annotations = super::native::guard_native_panic(
         || doc.get_annotations(page_index).map_err(|error| error.to_string()),
         |message| message,
     )

@@ -16,7 +16,7 @@
 //! per-page in priority order (native → bordered → heuristic), where each tier
 //! only runs on pages where the previous tier found nothing.
 
-use super::OxideDocument;
+use super::NativeDocument;
 use crate::pdf::error::{PdfError, Result};
 use crate::pdf::table_reconstruct::table_to_markdown;
 use crate::types::{BoundingBox, ProcessingWarning, Table};
@@ -93,7 +93,7 @@ enum HeuristicTableRejection {
 ///
 /// # Arguments
 ///
-/// * `doc` - Mutable reference to the oxide document
+/// * `doc` - Mutable reference to the native document
 ///
 /// # Returns
 ///
@@ -102,7 +102,7 @@ enum HeuristicTableRejection {
 /// failed (issue #74). A per-page failure is skipped rather than aborting the whole document,
 /// so without a warning that page would be silently indistinguishable from a page that simply
 /// has no table.
-pub(crate) fn extract_tables_native(doc: &mut OxideDocument) -> Result<(Vec<Table>, Vec<ProcessingWarning>)> {
+pub(crate) fn extract_tables_native(doc: &mut NativeDocument) -> Result<(Vec<Table>, Vec<ProcessingWarning>)> {
     let page_count = doc
         .doc
         .page_count()
@@ -198,7 +198,7 @@ fn native_table_extraction_failure_warning(page_number: u32, error: &xberg_nativ
 /// A `Vec<Table>` of detected bordered tables, together with a `Vec<ProcessingWarning>`
 /// describing any (non-skipped) pages whose bordered-table detection failed (issue #74).
 pub(crate) fn extract_tables_bordered(
-    doc: &mut OxideDocument,
+    doc: &mut NativeDocument,
     skip_pages: &HashSet<u32>,
 ) -> Result<(Vec<Table>, Vec<ProcessingWarning>)> {
     use xberg_native_pdf::structure::spatial_table_detector::{TableDetectionConfig, TableStrategy};
@@ -342,14 +342,14 @@ pub(crate) struct HeuristicTableExtraction {
 /// Returns the detected tables together with ownership of the exact hierarchy
 /// segments used for reconstruction.
 pub(crate) fn extract_tables_heuristic(
-    doc: &mut OxideDocument,
+    doc: &mut NativeDocument,
     allow_single_column: bool,
     skip_pages: &HashSet<u32>,
 ) -> Result<HeuristicTableExtraction> {
     use crate::pdf::table_reconstruct::{HocrWord, segments_to_words};
 
     let (per_page_segments, used_structure_tree) =
-        crate::pdf::oxide::hierarchy::extract_all_segments(doc).map_err(|e| {
+        crate::pdf::native::hierarchy::extract_all_segments(doc).map_err(|e| {
             PdfError::TextExtractionFailed(format!(
                 "xberg_native_pdf hierarchy extraction failed for heuristic tables: {e}"
             ))
@@ -402,7 +402,7 @@ pub(crate) fn extract_tables_heuristic(
         // One `extract_paths` call per page, reusing the layout gate's own rule
         // counter. A page whose paths cannot be read counts as unruled, which
         // is the conservative direction (the geometric gate still applies).
-        let horizontal_rules = super::guard_oxide_panic(
+        let horizontal_rules = super::guard_native_panic(
             || doc.doc.extract_paths(page_idx).map_err(|error| error.to_string()),
             |message| message,
         )
@@ -2667,7 +2667,7 @@ mod tests {
             return;
         }
         let bytes = std::fs::read(&path).expect("read tiny.pdf");
-        let mut doc = OxideDocument::open_bytes(&bytes).expect("open tiny.pdf");
+        let mut doc = NativeDocument::open_bytes(&bytes).expect("open tiny.pdf");
         let skip = HashSet::new();
         let extraction =
             extract_tables_heuristic(&mut doc, false, &skip).expect("heuristic must not error on minimal PDF");
@@ -2688,7 +2688,7 @@ mod tests {
             return;
         }
         let bytes = std::fs::read(&path).expect("read table_document.pdf");
-        let mut doc = OxideDocument::open_bytes(&bytes).expect("open table_document.pdf");
+        let mut doc = NativeDocument::open_bytes(&bytes).expect("open table_document.pdf");
 
         let skip = HashSet::new();
         let page_count = doc.doc.page_count().expect("table fixture page count");
@@ -2736,7 +2736,7 @@ mod tests {
             return;
         }
         let bytes = std::fs::read(&path).expect("read embedded table fixture");
-        let mut doc = OxideDocument::open_bytes(&bytes).expect("open embedded table fixture");
+        let mut doc = NativeDocument::open_bytes(&bytes).expect("open embedded table fixture");
 
         let tables = extract_tables_heuristic(&mut doc, false, &HashSet::new())
             .expect("heuristic extraction")
@@ -2779,7 +2779,7 @@ mod tests {
             return;
         }
         let bytes = std::fs::read(&path).expect("read ACN financial table fixture");
-        let mut doc = OxideDocument::open_bytes(&bytes).expect("open ACN financial table fixture");
+        let mut doc = NativeDocument::open_bytes(&bytes).expect("open ACN financial table fixture");
 
         let tables = extract_tables_heuristic(&mut doc, false, &HashSet::new())
             .expect("heuristic extraction")
@@ -2845,7 +2845,7 @@ mod tests {
             return;
         }
         let bytes = std::fs::read(&path).expect("read table_document.pdf");
-        let mut doc = OxideDocument::open_bytes(&bytes).expect("open table_document.pdf");
+        let mut doc = NativeDocument::open_bytes(&bytes).expect("open table_document.pdf");
 
         let baseline = extract_tables_heuristic(&mut doc, false, &HashSet::new())
             .expect("baseline heuristic")
@@ -3426,7 +3426,7 @@ mod tests {
     #[test]
     fn extract_tables_native_misses_two_column_bordered_table() {
         let bytes = build_two_column_bordered_table_pdf();
-        let mut doc = OxideDocument::open_bytes(&bytes).expect("open synthetic PDF");
+        let mut doc = NativeDocument::open_bytes(&bytes).expect("open synthetic PDF");
         let (tables, warnings) = extract_tables_native(&mut doc).expect("extract_tables_native must not error");
         assert!(
             tables.is_empty(),
@@ -3444,7 +3444,7 @@ mod tests {
     #[test]
     fn extract_tables_bordered_detects_two_column_bordered_table() {
         let bytes = build_two_column_bordered_table_pdf();
-        let mut doc = OxideDocument::open_bytes(&bytes).expect("open synthetic PDF");
+        let mut doc = NativeDocument::open_bytes(&bytes).expect("open synthetic PDF");
         let skip = HashSet::new();
         let (tables, warnings) =
             extract_tables_bordered(&mut doc, &skip).expect("extract_tables_bordered must not error");
@@ -3472,7 +3472,7 @@ mod tests {
     #[test]
     fn extract_tables_bordered_skip_pages_honored() {
         let bytes = build_two_column_bordered_table_pdf();
-        let mut doc = OxideDocument::open_bytes(&bytes).expect("open synthetic PDF");
+        let mut doc = NativeDocument::open_bytes(&bytes).expect("open synthetic PDF");
         let mut skip = HashSet::new();
         skip.insert(1u32);
         let (tables, warnings) =

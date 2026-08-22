@@ -2,11 +2,11 @@
 //!
 //! # Scope
 //!
-//! Deliberately smaller than [`super::PdfExtractor::extract_core_oxide`]: page
+//! Deliberately smaller than [`super::PdfExtractor::extract_core_native`]: page
 //! count, per-page plain text (via `PdfPageText::all()`), and Info-dictionary
 //! metadata (Title/Author/Subject/Keywords/Creator/Producer/CreationDate/
 //! ModificationDate). `xberg-pdfium-render`'s public API does not currently give
-//! this crate anything to build the rest of the oxide contract from -- no table
+//! this crate anything to build the rest of the native contract from -- no table
 //! detection, no diagram/DOT recovery, no layout-detection integration, no
 //! annotation-to-`PdfAnnotation` mapping, no AcroForm/XFA field values, no
 //! embedded-file extraction, and no OCR fallback path. None of that runs here.

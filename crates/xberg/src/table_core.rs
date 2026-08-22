@@ -514,7 +514,7 @@ mod tests {
     /// Build a `HocrWord` with a fixed confidence, for tests that only care
     /// about position/text (matches the `word`/`make_word`/`hocr_word_at`
     /// helper convention used by the other files in this module's blast
-    /// radius, e.g. `pdf::oxide::table` and `paddle_ocr::backend`).
+    /// radius, e.g. `pdf::native::table` and `paddle_ocr::backend`).
     fn word(text: &str, left: u32, top: u32, width: u32, height: u32) -> HocrWord {
         HocrWord {
             text: text.to_string(),
@@ -1092,7 +1092,7 @@ mod tests {
     /// `reconstruct_table_with_columns` must return column positions that
     /// stay index-correlated with the returned grid: `positions[i]`
     /// corresponds to `grid[row][i]` for every row. Callers like
-    /// `pdf::oxide::table::reconstruct_region_table_with_column_gap` rely on
+    /// `pdf::native::table::reconstruct_region_table_with_column_gap` rely on
     /// this to index `column_positions[column]` against `grid[row][column]`
     /// (xberg-io/xberg#688 blast-radius fix: `reconstruct_table` now detects
     /// columns from post-merge cell tokens, so a caller's own separate

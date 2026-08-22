@@ -5,7 +5,7 @@
 //! median span width (scanned pages with vertical `Identity-V` OCR layers,
 //! typeset tategaki books).
 //!
-//! The `guard_oxide_panic` wrapper already keeps the panic from aborting the
+//! The `guard_native_panic` wrapper already keeps the panic from aborting the
 //! whole extraction, but the page's text is lost. This test asserts the real
 //! fix (yfedoseev/xberg_native_pdf#808): extraction must SUCCEED and return the
 //! page's text, not merely survive.

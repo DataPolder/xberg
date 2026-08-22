@@ -2,7 +2,7 @@
 //!
 //! Shared by the adaptive layout pre-screen ([`super::layout_gate`], which is
 //! only compiled with the `layout-detection` feature) and the borderless
-//! heuristic table gate in [`super::oxide::table`], which is compiled whenever
+//! heuristic table gate in [`super::native::table`], which is compiled whenever
 //! `pdf` is. It lives here rather than in `layout_gate` so the heuristic gate's
 //! behaviour does not silently change with the `layout-detection` feature — a
 //! table admitted in one build and rejected in another would be worse than

@@ -1,6 +1,6 @@
 //! PDF text extraction using the xberg_native_pdf backend.
 
-use super::OxideDocument;
+use super::NativeDocument;
 use super::span_geometry::{
     has_same_rotation, is_horizontal_ltr, is_ltr_writing_mode, upright_advance_extent, upright_cross_extent,
 };
@@ -19,7 +19,7 @@ type PdfTextExtractionResult = (String, Option<Vec<PageBoundary>>, Option<Vec<Pa
 /// Result type for unified PDF text and metadata extraction.
 ///
 /// Contains text, optional page boundaries, optional per-page content, and metadata.
-pub type OxideUnifiedExtractionResult = (
+pub type NativeUnifiedExtractionResult = (
     String,
     Option<Vec<PageBoundary>>,
     Option<Vec<PageContent>>,
@@ -28,14 +28,14 @@ pub type OxideUnifiedExtractionResult = (
 
 /// Extract text and metadata from a PDF document in a single pass.
 ///
-/// This is the oxide equivalent of `extract_text_and_metadata_from_pdf_document`.
+/// This is the native equivalent of `extract_text_and_metadata_from_pdf_document`.
 /// It extracts both text and metadata in one pass through the document.
 pub(crate) fn extract_text_and_metadata(
-    doc: &mut OxideDocument,
+    doc: &mut NativeDocument,
     extraction_config: Option<&ExtractionConfig>,
-) -> Result<OxideUnifiedExtractionResult> {
+) -> Result<NativeUnifiedExtractionResult> {
     let page_config = extraction_config.and_then(|c| c.pages.as_ref());
-    let (text, boundaries, page_contents) = extract_text_from_oxide_document(doc, page_config, extraction_config)?;
+    let (text, boundaries, page_contents) = extract_text_from_native_document(doc, page_config, extraction_config)?;
 
     let scanned_min_confidence = extraction_config
         .map(|c| c.ocr_strategy.effective_min_confidence())
@@ -44,7 +44,7 @@ pub(crate) fn extract_text_and_metadata(
         .and_then(|c| c.ocr.as_ref())
         .and_then(|o| o.quality_thresholds.clone())
         .unwrap_or_default();
-    let metadata = super::metadata::extract_metadata_from_oxide_document(
+    let metadata = super::metadata::extract_metadata_from_native_document(
         doc,
         boundaries.as_deref(),
         &text,
@@ -68,7 +68,7 @@ pub(crate) fn extract_spans_from_page(
 ) -> Result<(Vec<crate::extractors::pdf::rotation::TextSpan>, bool)> {
     use xberg_native_pdf::document::ReadingOrder;
 
-    let mut page_text_data = super::guard_oxide_panic(
+    let mut page_text_data = super::guard_native_panic(
         || {
             doc.extract_page_text_with_options(page_index, ReadingOrder::ColumnAware)
                 .map_err(|e| PdfError::TextExtractionFailed(format!("Failed to extract page text: {}", e)))
@@ -95,8 +95,8 @@ pub(crate) fn extract_spans_from_page(
 /// mixed-OCR and quality-threshold codepaths receive the offsets they need.
 ///
 /// Otherwise the fast path is used (no per-page tracking).
-pub(crate) fn extract_text_from_oxide_document(
-    doc: &mut OxideDocument,
+pub(crate) fn extract_text_from_native_document(
+    doc: &mut NativeDocument,
     page_config: Option<&PageConfig>,
     extraction_config: Option<&ExtractionConfig>,
 ) -> Result<PdfTextExtractionResult> {
@@ -118,7 +118,7 @@ pub(crate) fn extract_text_from_oxide_document(
 /// Iterates pages one-by-one, applies control-char fixes and optional HTML
 /// conversion, and builds a single concatenated string. Pre-allocates capacity
 /// after sampling the first 5 pages.
-fn extract_text_fast_path(doc: &mut OxideDocument) -> Result<PdfTextExtractionResult> {
+fn extract_text_fast_path(doc: &mut NativeDocument) -> Result<PdfTextExtractionResult> {
     let page_count = doc
         .doc
         .page_count()
@@ -165,7 +165,7 @@ fn extract_text_fast_path(doc: &mut OxideDocument) -> Result<PdfTextExtractionRe
 /// Mirrors `extract_text_lazy_with_tracking`: tracks byte
 /// offsets for each page, optionally collects per-page `PageContent`, and inserts
 /// page markers when configured.
-fn extract_text_with_tracking(doc: &mut OxideDocument, config: &PageConfig) -> Result<PdfTextExtractionResult> {
+fn extract_text_with_tracking(doc: &mut NativeDocument, config: &PageConfig) -> Result<PdfTextExtractionResult> {
     let page_count = doc
         .doc
         .page_count()
@@ -1194,7 +1194,7 @@ fn extract_page_text_column_aware(
 ) -> Result<String> {
     let widgets = collect_widget_field_values(doc, page_index);
 
-    let mut page_text_data = super::guard_oxide_panic(
+    let mut page_text_data = super::guard_native_panic(
         || {
             page_text_with_options_excluding_layers(doc, page_index, excluded_layers).map_err(|e| {
                 PdfError::TextExtractionFailed(format!("Page {} text extraction failed: {}", page_index + 1, e))

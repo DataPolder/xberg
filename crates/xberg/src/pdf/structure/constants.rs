@@ -6,7 +6,7 @@
 // ~keep sinusoidal y-jitter (~3–5 pt amplitude, 6-glyph period). xberg_native_pdf's
 // ~keep ColumnAware reading order groups spans by y-level, scrambling reading
 // ~keep order for these documents. The constants below parameterise the
-// ~keep detection and reconstruction heuristic in `pdf::oxide::text`.
+// ~keep detection and reconstruction heuristic in `pdf::native::text`.
 
 /// Maximum y-gap (pt) between two spans that can still be considered "same
 /// line" under the glyph-fragmentation detection heuristic.

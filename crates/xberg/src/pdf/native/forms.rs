@@ -7,7 +7,7 @@
 //! fields are extracted first (canonical layer per PDF spec), and XFA-only fields are
 //! appended. XFA-only forms are fully extracted.
 
-use super::OxideDocument;
+use super::NativeDocument;
 use crate::types::{BoundingBox, FormFieldType, PdfFormField, ProcessingWarning};
 
 /// Extract form fields from a PDF document using xberg_native_pdf.
@@ -33,13 +33,13 @@ use crate::types::{BoundingBox, FormFieldType, PdfFormField, ProcessingWarning};
 /// failures (issue #73) that would otherwise make a form-bearing PDF indistinguishable from
 /// one with no form at all. A document with no AcroForm and no XFA (the common case) produces
 /// no warnings — only actual failures are reported.
-pub(crate) fn extract_form_fields(doc: &mut OxideDocument) -> (Vec<PdfFormField>, Vec<ProcessingWarning>) {
+pub(crate) fn extract_form_fields(doc: &mut NativeDocument) -> (Vec<PdfFormField>, Vec<ProcessingWarning>) {
     let mut fields = Vec::new();
     let mut warnings = Vec::new();
 
     match xberg_native_pdf::extractors::forms::FormExtractor::extract_fields(&doc.doc) {
-        Ok(oxide_fields) => {
-            fields.extend(oxide_fields.into_iter().map(map_form_field));
+        Ok(native_fields) => {
+            fields.extend(native_fields.into_iter().map(map_form_field));
             tracing::debug!("extracted {} AcroForm fields", fields.len());
         }
         Err(e) => {
@@ -81,7 +81,7 @@ const XFA_ABSENT_MESSAGES: [&str; 2] = ["No AcroForm in document", "No XFA entry
 /// Returns `Ok(None)` if XFA is not present. Returns `Err(warning)` if XFA is present but
 /// extraction or parsing failed (issue #73), so the caller can surface the failure instead
 /// of silently treating it the same as "no XFA form".
-fn extract_xfa_fields(doc: &mut OxideDocument) -> Result<Option<Vec<PdfFormField>>, ProcessingWarning> {
+fn extract_xfa_fields(doc: &mut NativeDocument) -> Result<Option<Vec<PdfFormField>>, ProcessingWarning> {
     let xfa_data = match xberg_native_pdf::xfa::XfaExtractor::extract_xfa(&mut doc.doc) {
         Ok(data) => data,
         Err(e) => {
@@ -128,11 +128,11 @@ fn extract_xfa_fields(doc: &mut OxideDocument) -> Result<Option<Vec<PdfFormField
 ///
 /// Converts all field properties including type, value, bounds, and metadata.
 /// Type mapping and value extraction handle various field subtypes (text, checkbox, radio, choice, signature, button).
-fn map_form_field(oxide_field: xberg_native_pdf::extractors::forms::FormField) -> PdfFormField {
-    let field_type = map_field_type(&oxide_field.field_type, oxide_field.flags);
-    let value = map_field_value(&oxide_field.value);
-    let default_value = oxide_field.default_value.as_ref().and_then(map_field_value);
-    let bbox = oxide_field.bounds.map(|bounds| BoundingBox {
+fn map_form_field(native_field: xberg_native_pdf::extractors::forms::FormField) -> PdfFormField {
+    let field_type = map_field_type(&native_field.field_type, native_field.flags);
+    let value = map_field_value(&native_field.value);
+    let default_value = native_field.default_value.as_ref().and_then(map_field_value);
+    let bbox = native_field.bounds.map(|bounds| BoundingBox {
         x0: bounds[0],
         y0: bounds[1],
         x1: bounds[2],
@@ -140,16 +140,16 @@ fn map_form_field(oxide_field: xberg_native_pdf::extractors::forms::FormField) -
     });
 
     PdfFormField {
-        name: oxide_field.name,
-        full_name: oxide_field.full_name,
+        name: native_field.name,
+        full_name: native_field.full_name,
         field_type,
         value,
         default_value,
-        flags: oxide_field.flags.unwrap_or(0),
+        flags: native_field.flags.unwrap_or(0),
         page: None,
         bbox,
-        max_length: oxide_field.max_length,
-        tooltip: oxide_field.tooltip,
+        max_length: native_field.max_length,
+        tooltip: native_field.tooltip,
     }
 }
 
@@ -166,9 +166,9 @@ fn map_form_field(oxide_field: xberg_native_pdf::extractors::forms::FormField) -
 /// - PUSH_BUTTON (bit 16): returns `Button`
 /// - RADIO (bit 15): returns `Radio`
 /// - Neither: returns `Checkbox` (default button subtype)
-fn map_field_type(oxide_type: &xberg_native_pdf::extractors::forms::FieldType, flags: Option<u32>) -> FormFieldType {
+fn map_field_type(native_type: &xberg_native_pdf::extractors::forms::FieldType, flags: Option<u32>) -> FormFieldType {
     use xberg_native_pdf::extractors::forms::{FieldType, field_flags};
-    match oxide_type {
+    match native_type {
         FieldType::Button => {
             if let Some(f) = flags {
                 if f & field_flags::PUSH_BUTTON != 0 {
@@ -197,9 +197,9 @@ fn map_field_type(oxide_type: &xberg_native_pdf::extractors::forms::FieldType, f
 /// - Name: value returned as-is (e.g., radio Name("Opt") → "Opt", dropdown selections)
 /// - Array: values joined with ", " (multi-select list boxes)
 /// - None: returns None
-fn map_field_value(oxide_value: &xberg_native_pdf::extractors::forms::FieldValue) -> Option<String> {
+fn map_field_value(native_value: &xberg_native_pdf::extractors::forms::FieldValue) -> Option<String> {
     use xberg_native_pdf::extractors::forms::FieldValue;
-    match oxide_value {
+    match native_value {
         FieldValue::Text(s) => Some(s.clone()),
         FieldValue::Boolean(b) => Some(b.to_string()),
         FieldValue::Name(n) => Some(n.clone()),

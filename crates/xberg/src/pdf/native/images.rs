@@ -3,7 +3,7 @@
 //! Extracts embedded images from PDF pages via xberg_native_pdf, including
 //! actual image data and metadata.
 
-use super::OxideDocument;
+use super::NativeDocument;
 use crate::cancellation::CancellationToken;
 use crate::pdf::error::{PdfError, Result};
 use bytes::Bytes;
@@ -41,7 +41,7 @@ fn detect_image_format_from_bytes(data: &[u8]) -> &'static str {
 /// the cap to be applied before image decompression while preserving bounding boxes,
 /// inline images, and images nested in Form XObjects.
 fn extract_n_images_from_page_handles(
-    doc: &OxideDocument,
+    doc: &NativeDocument,
     page_idx: usize,
     limit: usize,
 ) -> Result<Vec<xberg_native_pdf::extractors::PdfImage>> {
@@ -288,7 +288,7 @@ pub(crate) fn page_ocr_fallback_image_bytes(
 ///
 /// # Arguments
 ///
-/// * `doc` - Mutable reference to the oxide document
+/// * `doc` - Mutable reference to the native document
 /// * `max_images_per_page` - Optional limit on images per page
 /// * `cancel_token` - Optional cancellation token checked between pages
 ///
@@ -297,7 +297,7 @@ pub(crate) fn page_ocr_fallback_image_bytes(
 /// A `Vec<ExtractedImage>` containing all extracted images with their data, and a
 /// `Vec<ProcessingWarning>` describing any images that were skipped.
 pub(crate) fn extract_images_with_data(
-    doc: &mut OxideDocument,
+    doc: &mut NativeDocument,
     max_images_per_page: Option<u32>,
     cancel_token: Option<&CancellationToken>,
 ) -> Result<(Vec<crate::types::ExtractedImage>, Vec<crate::types::ProcessingWarning>)> {
@@ -306,7 +306,7 @@ pub(crate) fn extract_images_with_data(
     }
 
     tracing::debug!(
-        target: "xberg::pdf::oxide::images",
+        target: "xberg::pdf::native::images",
         event = "decompression_started",
         "extract_images_with_data entered"
     );
@@ -329,7 +329,7 @@ pub(crate) fn extract_images_with_data(
             break;
         }
 
-        let oxide_images = match max_images_per_page.map(|n| n as usize) {
+        let native_images = match max_images_per_page.map(|n| n as usize) {
             Some(limit) => {
                 let handle_images = match extract_n_images_from_page_handles(doc, page_idx, limit) {
                     Ok(images) => images,
@@ -367,19 +367,19 @@ pub(crate) fn extract_images_with_data(
 
         let page_number = (page_idx + 1) as u32;
         let page_alt_texts = alt_text_by_page.remove(&(page_idx as u32));
-        for (page_image_position, oxide_img) in oxide_images.iter().enumerate() {
+        for (page_image_position, native_img) in native_images.iter().enumerate() {
             let alt_text = page_alt_texts
                 .as_ref()
                 .and_then(|alts| alts.get(page_image_position))
                 .and_then(|alt| alt.clone());
-            let (data, format) = match oxide_img.data() {
+            let (data, format) = match native_img.data() {
                 xberg_native_pdf::extractors::ImageData::Jpeg(jpeg_bytes) => {
                     let data_bytes = Bytes::copy_from_slice(jpeg_bytes);
                     let actual_format = detect_image_format_from_bytes(data_bytes.as_ref());
                     (data_bytes, Cow::Borrowed(actual_format))
                 }
                 xberg_native_pdf::extractors::ImageData::Raw { pixels, format } => {
-                    match raw_pixels_to_png(oxide_img.width(), oxide_img.height(), format, pixels) {
+                    match raw_pixels_to_png(native_img.width(), native_img.height(), format, pixels) {
                         Ok(bytes) => (bytes, Cow::Borrowed("png")),
                         Err(e) => {
                             tracing::warn!(
@@ -399,14 +399,14 @@ pub(crate) fn extract_images_with_data(
                 format,
                 image_index: global_index,
                 page_number: Some(page_number),
-                width: Some(oxide_img.width()),
-                height: Some(oxide_img.height()),
-                colorspace: Some(format!("{:?}", oxide_img.color_space())),
-                bits_per_component: Some(oxide_img.bits_per_component() as u32),
+                width: Some(native_img.width()),
+                height: Some(native_img.height()),
+                colorspace: Some(format!("{:?}", native_img.color_space())),
+                bits_per_component: Some(native_img.bits_per_component() as u32),
                 is_mask: false,
                 description: alt_text,
                 ocr_result: None,
-                bounding_box: oxide_img.bbox().map(|r| crate::types::BoundingBox {
+                bounding_box: native_img.bbox().map(|r| crate::types::BoundingBox {
                     x0: r.x as f64,
                     y0: r.y as f64,
                     x1: (r.x + r.width) as f64,
@@ -544,7 +544,7 @@ mod tests {
         );
 
         let bytes = std::fs::read(&pdf_path).expect("failed to read test PDF");
-        let mut doc = crate::pdf::oxide::OxideDocument::open_bytes(&bytes).expect("failed to open PDF");
+        let mut doc = crate::pdf::native::NativeDocument::open_bytes(&bytes).expect("failed to open PDF");
 
         let (result, _warnings) = extract_images_with_data(&mut doc, Some(0), None).expect("cap=0 must not error");
 
@@ -580,7 +580,7 @@ mod tests {
 
         let bytes = std::fs::read(&pdf_path).expect("failed to read test PDF");
 
-        let mut doc_full = crate::pdf::oxide::OxideDocument::open_bytes(&bytes).expect("failed to open PDF");
+        let mut doc_full = crate::pdf::native::NativeDocument::open_bytes(&bytes).expect("failed to open PDF");
         let (full_result, _warnings) =
             extract_images_with_data(&mut doc_full, None, None).expect("uncancelled extraction must not error");
         let full_count = full_result.len();
@@ -598,7 +598,7 @@ mod tests {
             return;
         }
 
-        let mut doc_cancel = crate::pdf::oxide::OxideDocument::open_bytes(&bytes).expect("failed to open PDF");
+        let mut doc_cancel = crate::pdf::native::NativeDocument::open_bytes(&bytes).expect("failed to open PDF");
         let token = CancellationToken::new();
         let token_clone = token.clone();
 
@@ -639,7 +639,7 @@ mod tests {
         );
 
         let bytes = std::fs::read(&pdf_path).expect("failed to read test PDF");
-        let mut doc = crate::pdf::oxide::OxideDocument::open_bytes(&bytes).expect("failed to open PDF");
+        let mut doc = crate::pdf::native::NativeDocument::open_bytes(&bytes).expect("failed to open PDF");
 
         let token = CancellationToken::new();
         token.cancel();
@@ -668,7 +668,7 @@ mod tests {
         );
 
         let bytes = std::fs::read(&pdf_path).expect("failed to read test PDF");
-        let mut doc = crate::pdf::oxide::OxideDocument::open_bytes(&bytes).expect("failed to open PDF");
+        let mut doc = crate::pdf::native::NativeDocument::open_bytes(&bytes).expect("failed to open PDF");
 
         let (result, _warnings) = extract_images_with_data(&mut doc, None, None).expect("extraction must not error");
 
@@ -691,7 +691,7 @@ mod tests {
         );
 
         let bytes = std::fs::read(&pdf_path).expect("failed to read test PDF");
-        let mut doc = crate::pdf::oxide::OxideDocument::open_bytes(&bytes).expect("failed to open PDF");
+        let mut doc = crate::pdf::native::NativeDocument::open_bytes(&bytes).expect("failed to open PDF");
 
         let (result, _warnings) =
             extract_images_with_data(&mut doc, Some(50), None).expect("extraction must not error");
@@ -754,7 +754,7 @@ mod tests {
         );
 
         let bytes = std::fs::read(&pdf_path).expect("failed to read test PDF");
-        let doc = crate::pdf::oxide::OxideDocument::open_bytes(&bytes).expect("failed to open PDF");
+        let doc = crate::pdf::native::NativeDocument::open_bytes(&bytes).expect("failed to open PDF");
 
         let fallback_images = page_ocr_fallback_image_bytes(&doc.doc, 0);
 
@@ -786,7 +786,7 @@ mod tests {
     fn should_report_recovery_mode_for_each_recovered_xobject() {
         let pdf_path = test_documents_dir().join("pdf/embedded_images_tables.pdf");
         let bytes = std::fs::read(&pdf_path).expect("failed to read test PDF");
-        let doc = crate::pdf::oxide::OxideDocument::open_bytes(&bytes).expect("failed to open PDF");
+        let doc = crate::pdf::native::NativeDocument::open_bytes(&bytes).expect("failed to open PDF");
 
         let fallback_images = page_ocr_fallback_image_bytes(&doc.doc, 0);
         let first = fallback_images
@@ -805,7 +805,7 @@ mod tests {
     fn test_page_ocr_fallback_image_bytes_out_of_range_page_returns_empty() {
         let pdf_path = test_documents_dir().join("pdf/embedded_images_tables.pdf");
         let bytes = std::fs::read(&pdf_path).expect("failed to read test PDF");
-        let doc = crate::pdf::oxide::OxideDocument::open_bytes(&bytes).expect("failed to open PDF");
+        let doc = crate::pdf::native::NativeDocument::open_bytes(&bytes).expect("failed to open PDF");
 
         let fallback_images = page_ocr_fallback_image_bytes(&doc.doc, 9999);
 
@@ -830,7 +830,7 @@ mod tests {
         );
 
         let bytes = std::fs::read(&pdf_path).expect("failed to read test PDF");
-        let mut doc = crate::pdf::oxide::OxideDocument::open_bytes(&bytes).expect("failed to open PDF");
+        let mut doc = crate::pdf::native::NativeDocument::open_bytes(&bytes).expect("failed to open PDF");
 
         let (result, _warnings) = extract_images_with_data(&mut doc, None, None).expect("extraction must not error");
 

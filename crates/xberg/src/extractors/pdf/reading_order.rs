@@ -13,7 +13,7 @@
 //!
 //! Both repairs depend on layout hints being available for the page
 //! ([`reorder_spans_by_layout`]'s per-region path). When no hints are
-//! produced for a page, `extract_all_from_oxide_document` short-circuits to
+//! produced for a page, `extract_all_from_native_document` short-circuits to
 //! identity span order before this module's own geometric fallback
 //! ([`reorder_spans_geometric`]) ever runs, so that page's rotated runs are
 //! *not* repaired even with `reading_order` enabled. `reorder_spans_geometric`
@@ -1247,7 +1247,7 @@ pub(crate) fn reorder_segments_by_layout(
 
 /// Rotate a span's page-space origin into its own upright reading frame.
 ///
-/// Mirrors [`crate::pdf::oxide::span_geometry::upright_origin`] (which
+/// Mirrors [`crate::pdf::native::span_geometry::upright_origin`] (which
 /// operates on `xberg_native_pdf::layout::TextSpan`) for the simpler geometry this
 /// module works with. Returns `(advance, cross)`: `advance` is the position
 /// along the span's own reading direction and `cross` is the position along
