@@ -21,6 +21,26 @@ use crate::object::{Object, ObjectRef};
 use nom::IResult;
 use std::collections::HashMap;
 
+/// Maximum object nesting depth for `parse_object` <-> `parse_array` /
+/// `parse_dictionary` mutual recursion.
+///
+/// Without this bound, an object body such as `[[[[[...` or
+/// `<</A<</A<</A...` with tens of thousands of opening brackets recurses
+/// `parse_object` -> `parse_array`/`parse_dictionary` -> `parse_object` with
+/// no limit, which overflows the call stack. A stack overflow is a
+/// SIGSEGV/abort, not a catchable panic, so it takes down the whole host
+/// process — no `catch_unwind` at any extractor boundary can contain it.
+///
+/// NOTE: `ParserOptions::max_nesting` and `ParserOptions::max_recursion_depth`
+/// (see `parser_config.rs`) look like the natural home for this bound (both
+/// default to 100, same as this constant), but neither `parse_object`,
+/// `parse_array`, nor `parse_dictionary` takes a `ParserOptions` parameter.
+/// Threading one through would change `parse_object`'s public signature,
+/// which is called from `objstm.rs`, `xref.rs`, and `document.rs` outside
+/// this module — out of scope for this fix. Those two config fields remain
+/// dead; do not assume changing them affects this guard.
+const MAX_OBJECT_NESTING_DEPTH: usize = 100;
+
 /// Decode escape sequences in PDF literal strings.
 ///
 /// PDF literal strings (enclosed in parentheses) support escape sequences
@@ -166,6 +186,16 @@ pub fn decode_literal_string_escapes(raw: &[u8]) -> Vec<u8> {
 /// - Nested structures are malformed (unclosed arrays/dicts)
 /// - Hex strings contain invalid hex digits
 pub fn parse_object(input: &[u8]) -> IResult<&[u8], Object> {
+    parse_object_at_depth(input, 0)
+}
+
+/// Depth-tracking implementation behind [`parse_object`].
+///
+/// `depth` counts container nesting: it is 0 for a top-level object and
+/// increases by 1 each time `parse_array`/`parse_dictionary` recurse back
+/// into this function for an element/value. See [`MAX_OBJECT_NESTING_DEPTH`]
+/// for why this exists.
+fn parse_object_at_depth(input: &[u8], depth: usize) -> IResult<&[u8], Object> {
     let (input, tok) = token(input)?;
 
     match tok {
@@ -204,10 +234,10 @@ pub fn parse_object(input: &[u8]) -> IResult<&[u8], Object> {
 
         Token::Name(name) => Ok((input, Object::Name(name))),
 
-        Token::ArrayStart => parse_array(input),
+        Token::ArrayStart => parse_array(input, depth),
 
         Token::DictStart => {
-            let (remaining, dict_obj) = parse_dictionary(input)?;
+            let (remaining, dict_obj) = parse_dictionary(input, depth)?;
 
             if let Ok((stream_input, Token::StreamStart)) = token(remaining) {
                 let dict = match dict_obj {
@@ -394,7 +424,15 @@ fn find_endstream(input: &[u8]) -> Option<usize> {
 /// Returns `Err` if:
 /// - Array is not properly closed with `]`
 /// - Array contains malformed objects
-fn parse_array(input: &[u8]) -> IResult<&[u8], Object> {
+/// - Nesting depth exceeds [`MAX_OBJECT_NESTING_DEPTH`]
+fn parse_array(input: &[u8], depth: usize) -> IResult<&[u8], Object> {
+    if depth >= MAX_OBJECT_NESTING_DEPTH {
+        return Err(nom::Err::Failure(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::TooLarge,
+        )));
+    }
+
     let mut objects = Vec::new();
     let mut remaining = input;
 
@@ -409,7 +447,7 @@ fn parse_array(input: &[u8]) -> IResult<&[u8], Object> {
 
                 // Otherwise, we need to parse this as an object
                 // Put the token back by re-parsing from remaining ~keep
-                match parse_object(remaining) {
+                match parse_object_at_depth(remaining, depth + 1) {
                     Ok((inp, obj)) => {
                         objects.push(obj);
                         remaining = inp;
@@ -455,7 +493,15 @@ fn parse_array(input: &[u8]) -> IResult<&[u8], Object> {
 /// - Dictionary is not properly closed with `>>`
 /// - A key is not a name
 /// - Values are malformed
-fn parse_dictionary(input: &[u8]) -> IResult<&[u8], Object> {
+/// - Nesting depth exceeds [`MAX_OBJECT_NESTING_DEPTH`]
+fn parse_dictionary(input: &[u8], depth: usize) -> IResult<&[u8], Object> {
+    if depth >= MAX_OBJECT_NESTING_DEPTH {
+        return Err(nom::Err::Failure(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::TooLarge,
+        )));
+    }
+
     let mut dict = HashMap::new();
     let mut remaining = input;
 
@@ -472,7 +518,7 @@ fn parse_dictionary(input: &[u8]) -> IResult<&[u8], Object> {
                     Token::Name(key) => {
                         // Parse the value; fall back to lenient token for bare words
                         // (e.g. `OBJR` without a `/` prefix in malformed PDFs) ~keep
-                        let value_result = parse_object(inp).or_else(|_| {
+                        let value_result = parse_object_at_depth(inp, depth + 1).or_else(|_| {
                             token_lenient(inp).and_then(|(inp2, tok)| {
                                 if let Token::Name(name) = tok {
                                     Ok((inp2, Object::Name(name)))
