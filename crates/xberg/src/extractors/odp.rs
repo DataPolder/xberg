@@ -29,10 +29,10 @@ use crate::Result;
 use crate::core::config::ExtractionConfig;
 use crate::extraction::office_metadata;
 use crate::extractors::odt::{
-    build_internal_elements, build_list_style_map, build_style_map, extract_table_cells, pre_extract_formulas,
-    pre_extract_images,
+    MAX_ODT_MEMBER_SIZE, build_internal_elements, build_list_style_map, build_style_map, extract_table_cells,
+    pre_extract_formulas, pre_extract_images,
 };
-use crate::extractors::security::SecurityBudget;
+use crate::extractors::security::{SecurityBudget, ZipBombValidator};
 use crate::plugins::{InternalDocumentExtractor, Plugin};
 use crate::types::ExtractedImage;
 use crate::types::Metadata;
@@ -129,14 +129,15 @@ fn build_internal_document(
     budget: &mut SecurityBudget,
     max_pages: Option<usize>,
 ) -> crate::error::Result<InternalDocument> {
-    let image_data = pre_extract_images(archive);
+    let image_data = pre_extract_images(archive)?;
     let formula_data = pre_extract_formulas(archive, budget)?;
 
     let mut xml_content = String::new();
     match archive.by_name("content.xml") {
-        Ok(mut file) => {
+        Ok(file) => {
             use std::io::Read;
-            file.read_to_string(&mut xml_content)
+            file.take(MAX_ODT_MEMBER_SIZE)
+                .read_to_string(&mut xml_content)
                 .map_err(|e| crate::error::XbergError::parsing(format!("Failed to read content.xml: {}", e)))?;
         }
         Err(_) => {
@@ -335,10 +336,10 @@ fn extract_odp_master_page_text(archive: &mut zip::ZipArchive<Cursor<Vec<u8>>>, 
     use std::io::Read;
 
     let mut styles_xml = String::new();
-    let Ok(mut file) = archive.by_name("styles.xml") else {
+    let Ok(file) = archive.by_name("styles.xml") else {
         return;
     };
-    if file.read_to_string(&mut styles_xml).is_err() {
+    if file.take(MAX_ODT_MEMBER_SIZE).read_to_string(&mut styles_xml).is_err() {
         return;
     }
     let Ok(doc) = Document::parse(&styles_xml) else {
@@ -422,10 +423,12 @@ impl InternalDocumentExtractor for OdpExtractor {
     ) -> Result<InternalDocument> {
         tracing::debug!(format = "odp", size_bytes = content.len(), "extraction starting");
         let content_owned = content.to_vec();
+        let limits = config.security_limits.clone().unwrap_or_default();
 
         let cursor = Cursor::new(content_owned.clone());
         let mut archive = zip::ZipArchive::new(cursor)
             .map_err(|e| crate::error::XbergError::parsing(format!("Failed to open ZIP archive: {}", e)))?;
+        ZipBombValidator::new(limits.clone()).validate(&mut archive)?;
 
         let mut budget = SecurityBudget::from_config(config);
         let max_pages = config.security_limits.as_ref().and_then(|limits| limits.max_pages);
@@ -438,6 +441,9 @@ impl InternalDocumentExtractor for OdpExtractor {
         let mut meta_archive = zip::ZipArchive::new(meta_cursor).map_err(|e| {
             crate::error::XbergError::parsing(format!("Failed to open ZIP archive for metadata: {}", e))
         })?;
+        // Second, independent `ZipArchive::new` over the same bytes: needs its own
+        // validation call, the same gap DOCX has at `extractors/docx.rs:913`. ~keep
+        ZipBombValidator::new(limits).validate(&mut meta_archive)?;
 
         // ODP `meta.xml` uses the same ODF metadata schema as ODT. ~keep
         if let Ok(props) = office_metadata::extract_odt_properties(&mut meta_archive) {
