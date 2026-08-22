@@ -5,7 +5,7 @@
 use crate::Result;
 use crate::core::config::ExtractionConfig;
 use crate::extraction::{cells_to_markdown, office_metadata};
-use crate::extractors::security::SecurityBudget;
+use crate::extractors::security::{SecurityBudget, ZipBombValidator};
 use crate::plugins::{InternalDocumentExtractor, Plugin};
 use crate::types::ExtractedImage;
 use crate::types::internal::InternalDocument;
@@ -710,9 +710,9 @@ fn parse_docx_core(
     output_format: crate::core::config::OutputFormat,
     inject_placeholders: bool,
     mut budget: SecurityBudget,
-    max_files_in_archive: usize,
+    limits: crate::extractors::security::SecurityLimits,
 ) -> crate::error::Result<DocxParseResult> {
-    let mut doc = crate::extraction::docx::parser::parse_document(content, &mut budget, max_files_in_archive)?;
+    let mut doc = crate::extraction::docx::parser::parse_document(content, &mut budget, &limits)?;
     // `is_markdown` gates `to_markdown()` (which bakes `![desc](image_N)` placeholders into
     // the flat text) vs. `to_plain_text()`. That placeholder is what the image-to-page
     // association below (`text.find(&placeholder)`) relies on; without it every image
@@ -860,7 +860,7 @@ impl InternalDocumentExtractor for DocxExtractor {
 
         let inject_placeholders = config.images.as_ref().map(|i| i.inject_placeholders).unwrap_or(true);
         let budget = SecurityBudget::from_config(config);
-        let max_files_in_archive = config.security_limits.clone().unwrap_or_default().max_files_in_archive;
+        let limits = config.security_limits.clone().unwrap_or_default();
         let content_owned: Arc<[u8]> = Arc::from(content);
         let (text, tables, page_boundaries, drawings, image_rels, mut internal_doc) = {
             #[cfg(feature = "tokio-runtime")]
@@ -869,16 +869,11 @@ impl InternalDocumentExtractor for DocxExtractor {
                     return Err(crate::error::XbergError::Cancelled);
                 }
                 let parse_content = Arc::clone(&content_owned);
+                let parse_limits = limits.clone();
                 let span = tracing::Span::current();
                 tokio::task::spawn_blocking(move || {
                     let _guard = span.entered();
-                    parse_docx_core(
-                        &parse_content,
-                        output_format,
-                        inject_placeholders,
-                        budget,
-                        max_files_in_archive,
-                    )
+                    parse_docx_core(&parse_content, output_format, inject_placeholders, budget, parse_limits)
                 })
                 .await
                 .map_err(|e| crate::error::XbergError::parsing(format!("DOCX extraction task failed: {}", e)))??
@@ -888,7 +883,7 @@ impl InternalDocumentExtractor for DocxExtractor {
                     output_format,
                     inject_placeholders,
                     budget,
-                    max_files_in_archive,
+                    limits.clone(),
                 )?
             }
 
@@ -898,7 +893,7 @@ impl InternalDocumentExtractor for DocxExtractor {
                 output_format,
                 inject_placeholders,
                 budget,
-                max_files_in_archive,
+                limits.clone(),
             )?
         };
 
@@ -928,15 +923,15 @@ impl InternalDocumentExtractor for DocxExtractor {
                     .map_err(|e| crate::error::XbergError::parsing(format!("Failed to open ZIP archive: {}", e)))?
             }
         };
-
-        // This is a second, independent open of the same archive (the first happened
-        // inside `parse_docx_core` above, for text/table extraction). It must run the
-        // same ZIP-bomb/resource-exhaustion checks as the first open
-        // (`extraction::docx::parser::validate_archive_security`) instead of reading
-        // metadata parts from an unvalidated archive.
-        crate::extraction::docx::parser::validate_archive_security(&mut archive, max_files_in_archive).map_err(
-            |e| crate::error::XbergError::parsing(format!("DOCX metadata archive validation failed: {}", e)),
-        )?;
+        // A second, independent open of the same bytes `parse_docx_core` already
+        // validated -- but that validation lives on the other archive handle, so relying
+        // on it here would be relying on execution order rather than on this call site
+        // being checked. One call covers both: `validate_archive_security` now runs the
+        // entry-count and size checks AND delegates the compression-ratio check to
+        // `ZipBombValidator`, so this handle gets exactly what the parsing open gets.
+        crate::extraction::docx::parser::validate_archive_security(&mut archive, &limits).map_err(|e| {
+            crate::error::XbergError::parsing(format!("DOCX metadata archive validation failed: {}", e))
+        })?;
 
         let mut metadata_map = AHashMap::new();
         let mut parsed_keywords: Option<Vec<String>> = None;
@@ -3963,6 +3958,72 @@ mod tests {
             result.is_ok(),
             "a normal document must extract under the default archive entry limit: {:?}",
             result.err()
+        );
+    }
+
+    /// `validate_archive_security` checked per-file and total *declared* uncompressed size,
+    /// but never a compression ratio -- unlike every other OOXML/ODF container (XLSX, PPTX,
+    /// ODT, ODP, HWPX, EPUB, iWork), which routes its ratio check through
+    /// `ZipBombValidator`. A member well under both size limits can still be a compression
+    /// bomb by ratio: this part is 2,000,000 bytes of a single repeated byte -- far under the
+    /// 100 MB per-file / 500 MB total ceilings -- but compresses to a few hundred bytes,
+    /// comfortably past the default 100:1 `max_compression_ratio`. Against the unfixed code
+    /// this document extracts successfully (the ratio is never examined); against the fixed
+    /// code `ZipBombValidator::validate` rejects it before `word/document.xml` is even read.
+    #[tokio::test]
+    async fn test_docx_extract_content_rejects_high_compression_ratio_member() {
+        let document_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body><w:p><w:r><w:t>Hello</w:t></w:r></w:p></w:body>
+</w:document>"#;
+        let bomb_content = "A".repeat(2_000_000);
+        let data = build_test_docx_with_files(document_xml, &[("word/bomb.xml", &bomb_content)]);
+
+        let extractor = DocxExtractor::new();
+        let config = ExtractionConfig::default();
+
+        let result = extractor
+            .extract_content(
+                &data,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                &config,
+            )
+            .await;
+
+        assert!(
+            result.is_err(),
+            "a member whose compression ratio exceeds max_compression_ratio must be rejected"
+        );
+        let err_msg = result.unwrap_err().to_string().to_lowercase();
+        assert!(
+            err_msg.contains("bomb") || err_msg.contains("ratio"),
+            "error should mention the compression-ratio rejection, got: {}",
+            err_msg
+        );
+    }
+
+    /// Positive control for the ratio check above: a validator that rejects everything would
+    /// also pass a test that only checks `is_err()`, so this proves an ordinary DOCX -- built
+    /// the same way, with the default (deflate) compression that yields an unremarkable ratio
+    /// for short XML text -- still extracts, and still extracts the *same* text, unaffected by
+    /// the new check.
+    #[tokio::test]
+    async fn test_docx_extract_content_succeeds_for_ordinary_compression_ratio() {
+        let document_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body><w:p><w:r><w:t>Hello, ordinary ratio.</w:t></w:r></w:p></w:body>
+</w:document>"#;
+        let data = build_test_docx(document_xml);
+
+        let internal_doc = extract_docx_internal_document(&data).await;
+
+        assert!(
+            internal_doc
+                .elements
+                .iter()
+                .any(|e| e.text.contains("Hello, ordinary ratio.")),
+            "an ordinary DOCX with a normal compression ratio must extract its text unchanged: {:?}",
+            internal_doc.elements
         );
     }
 }
