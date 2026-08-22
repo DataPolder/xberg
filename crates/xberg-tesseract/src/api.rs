@@ -87,6 +87,59 @@ pub struct TesseractAPI {
 unsafe impl Send for TesseractAPI {}
 unsafe impl Sync for TesseractAPI {}
 
+/// Validates the arguments to [`TesseractAPI::set_image`] before they are
+/// handed to Tesseract's C API.
+///
+/// All products are computed in `i64`, not `i32`. `width`, `bytes_per_pixel`,
+/// `height`, and `bytes_per_line` are caller-supplied `i32` values, and
+/// `i32 * i32` can overflow: for example `width = 100_000` and
+/// `bytes_per_pixel = 100_000` produce a mathematical product of
+/// 10,000,000,000, which wraps to 1,410,065,408 as a 32-bit signed integer.
+/// A `bytes_per_line` at or above that wrapped value would then pass the
+/// `bytes_per_line < width * bytes_per_pixel` guard even though the real
+/// per-row byte count is far larger, so the buffer-length check below would
+/// under-validate `image_data` and Tesseract would read past its end using
+/// the original (un-wrapped) `width`/`height`/`bytes_per_line`. `i32::MAX`
+/// squared fits well within `i64::MAX`, so the `i64` products here cannot
+/// overflow for any `i32` input.
+///
+/// # Errors
+///
+/// Returns [`TesseractError::InvalidDimensions`] if `width` or `height` is
+/// not positive, [`TesseractError::InvalidBytesPerPixel`] if
+/// `bytes_per_pixel` is not positive, [`TesseractError::InvalidBytesPerLine`]
+/// if `bytes_per_line` is narrower than one row of pixel data, or
+/// [`TesseractError::InvalidImageData`] if `image_data_len` is smaller than
+/// `height * bytes_per_line` bytes.
+#[cfg(any(feature = "build-tesseract", feature = "build-tesseract-wasm"))]
+fn validate_image_buffer(
+    image_data_len: usize,
+    width: i32,
+    height: i32,
+    bytes_per_pixel: i32,
+    bytes_per_line: i32,
+) -> Result<()> {
+    if width <= 0 || height <= 0 {
+        return Err(TesseractError::InvalidDimensions);
+    }
+
+    if bytes_per_pixel <= 0 {
+        return Err(TesseractError::InvalidBytesPerPixel);
+    }
+
+    let min_bytes_per_line = i64::from(width) * i64::from(bytes_per_pixel);
+    if i64::from(bytes_per_line) < min_bytes_per_line {
+        return Err(TesseractError::InvalidBytesPerLine);
+    }
+
+    let expected_size = i64::from(height) * i64::from(bytes_per_line);
+    if (image_data_len as i64) < expected_size {
+        return Err(TesseractError::InvalidImageData);
+    }
+
+    Ok(())
+}
+
 #[cfg(any(feature = "build-tesseract", feature = "build-tesseract-wasm"))]
 impl TesseractAPI {
     /// Creates a new instance of the Tesseract API.
@@ -1170,22 +1223,7 @@ impl TesseractAPI {
         bytes_per_pixel: i32,
         bytes_per_line: i32,
     ) -> Result<()> {
-        if width <= 0 || height <= 0 {
-            return Err(TesseractError::InvalidDimensions);
-        }
-
-        if bytes_per_pixel <= 0 {
-            return Err(TesseractError::InvalidBytesPerPixel);
-        }
-
-        if bytes_per_line < width * bytes_per_pixel {
-            return Err(TesseractError::InvalidBytesPerLine);
-        }
-
-        let expected_size = (height * bytes_per_line) as usize;
-        if image_data.len() < expected_size {
-            return Err(TesseractError::InvalidImageData);
-        }
+        validate_image_buffer(image_data.len(), width, height, bytes_per_pixel, bytes_per_line)?;
 
         let handle = self.handle.lock().map_err(|_| TesseractError::MutexLockError)?;
 
@@ -1982,5 +2020,131 @@ mod live_engine_tests {
             TessBaseAPIDelete(addr as *mut c_void);
         }
         assert!(!is_registered(addr));
+    }
+}
+
+#[cfg(all(test, any(feature = "build-tesseract", feature = "build-tesseract-wasm")))]
+mod set_image_validation_tests {
+    use super::*;
+
+    /// Positive control: an ordinary tightly-packed RGB buffer (no row
+    /// padding) must still be accepted byte-for-byte the same as before the
+    /// overflow fix, since none of these values are anywhere near i32
+    /// overflow range.
+    #[test]
+    fn accepts_ordinary_tightly_packed_rgb_buffer() {
+        let width = 4;
+        let height = 4;
+        let bytes_per_pixel = 3;
+        let bytes_per_line = width * bytes_per_pixel;
+        let data = vec![0u8; (height * bytes_per_line) as usize];
+
+        assert!(validate_image_buffer(data.len(), width, height, bytes_per_pixel, bytes_per_line).is_ok());
+    }
+
+    /// Positive control: a padded row (`bytes_per_line` wider than
+    /// `width * bytes_per_pixel`, as the docs on `set_image` say is allowed)
+    /// must still be accepted, proving the fix didn't tighten the padded-row
+    /// case that ordinary callers rely on.
+    #[test]
+    fn accepts_padded_row_stride() {
+        let width = 4;
+        let height = 2;
+        let bytes_per_pixel = 3;
+        let min_bytes_per_line = width * bytes_per_pixel;
+        let bytes_per_line = min_bytes_per_line + 4; // padded to a 16-byte stride
+        let data = vec![0u8; (height * bytes_per_line) as usize];
+
+        assert!(validate_image_buffer(data.len(), width, height, bytes_per_pixel, bytes_per_line).is_ok());
+    }
+
+    /// Negative control: a buffer one byte short of what tightly-packed
+    /// dimensions require must still be rejected, proving the fix didn't
+    /// loosen the ordinary short-buffer case.
+    #[test]
+    fn rejects_buffer_one_byte_short() {
+        let width = 4;
+        let height = 4;
+        let bytes_per_pixel = 3;
+        let bytes_per_line = width * bytes_per_pixel;
+        let data = vec![0u8; (height * bytes_per_line) as usize - 1];
+
+        let result = validate_image_buffer(data.len(), width, height, bytes_per_pixel, bytes_per_line);
+        assert!(matches!(result, Err(TesseractError::InvalidImageData)));
+    }
+
+    /// `width * bytes_per_pixel` (100_000 * 100_000 = 10_000_000_000)
+    /// overflows `i32::MAX` (2_147_483_647) and wraps to 1_410_065_408 under
+    /// plain `i32` multiplication. Against the unfixed code this either
+    /// panics with "attempt to multiply with overflow" (debug/test builds,
+    /// which enable overflow checks by default) or, in a release build
+    /// (overflow checks off), silently wraps and lets a `bytes_per_line` of
+    /// 1 pass the `bytes_per_line < width * bytes_per_pixel` guard — the
+    /// exact FFI buffer-over-read this fix closes. The `i64` arithmetic used
+    /// here must instead cleanly return `InvalidBytesPerLine`.
+    #[test]
+    fn rejects_oversized_dimensions_without_overflow_panic() {
+        let width = 100_000;
+        let height = 1;
+        let bytes_per_pixel = 100_000;
+        let bytes_per_line = 1;
+        let data = vec![0u8; 1];
+
+        let result = validate_image_buffer(data.len(), width, height, bytes_per_pixel, bytes_per_line);
+        assert!(matches!(result, Err(TesseractError::InvalidBytesPerLine)));
+    }
+
+    /// Same overflow-magnitude inputs as above, but with `bytes_per_line`
+    /// itself set to the wrapped i32 value (1_410_065_408) that the unfixed
+    /// `i32 * i32` comparison would have produced. Under the unfixed code in
+    /// a release build this satisfies `bytes_per_line < width * bytes_per_pixel`
+    /// (comparing the wrapped value to itself) and then computes
+    /// `expected_size = height * bytes_per_line` with `height = 1`, which
+    /// also fits in `i32` here — so the buffer-length check alone would not
+    /// have caught it either. The fixed function must still reject it
+    /// because the true required row width (10_000_000_000 bytes) vastly
+    /// exceeds any real buffer.
+    #[test]
+    fn rejects_bytes_per_line_equal_to_wrapped_i32_product() {
+        let width = 100_000;
+        let height = 1;
+        let bytes_per_pixel = 100_000;
+        let wrapped_i32_product: i32 = 1_410_065_408;
+        // No real buffer is allocated: only the *length* participates in the
+        // arithmetic under test, and a genuine 1.4 GiB allocation would make
+        // this test needlessly slow/memory-hungry without exercising anything
+        // `wrapped_i32_product as usize` doesn't already cover.
+        let claimed_data_len = wrapped_i32_product as usize;
+
+        let result = validate_image_buffer(claimed_data_len, width, height, bytes_per_pixel, wrapped_i32_product);
+        assert!(matches!(result, Err(TesseractError::InvalidBytesPerLine)));
+    }
+
+    #[test]
+    fn rejects_non_positive_width_or_height() {
+        assert!(matches!(
+            validate_image_buffer(0, 0, 10, 3, 30),
+            Err(TesseractError::InvalidDimensions)
+        ));
+        assert!(matches!(
+            validate_image_buffer(0, 10, 0, 3, 30),
+            Err(TesseractError::InvalidDimensions)
+        ));
+        assert!(matches!(
+            validate_image_buffer(0, -1, 10, 3, 30),
+            Err(TesseractError::InvalidDimensions)
+        ));
+    }
+
+    #[test]
+    fn rejects_non_positive_bytes_per_pixel() {
+        assert!(matches!(
+            validate_image_buffer(0, 10, 10, 0, 30),
+            Err(TesseractError::InvalidBytesPerPixel)
+        ));
+        assert!(matches!(
+            validate_image_buffer(0, 10, 10, -3, 30),
+            Err(TesseractError::InvalidBytesPerPixel)
+        ));
     }
 }
