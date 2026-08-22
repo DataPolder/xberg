@@ -883,12 +883,19 @@ fn memchr(needle: u8, haystack: &[u8]) -> Option<usize> {
 fn has_class(tag_content: &str, cls: &str) -> bool {
     if let Some(class_start) = tag_content.find("class=") {
         let rest = &tag_content[class_start + 6..];
-        let quote = rest.as_bytes().first().copied().unwrap_or(b'"');
-        if quote == b'"' || quote == b'\'' {
-            let inner = &rest[1..];
-            if let Some(end) = inner.find(quote as char) {
-                let class_value = &inner[..end];
-                return class_value.split_whitespace().any(|c| c == cls);
+        // `rest` is empty when `class=` is the last thing in `tag_content` (a
+        // truncated or malformed tag). `.first()` (not `.unwrap_or(..)` on the
+        // whole byte) is required here: defaulting a missing byte to `b'"'`
+        // would make the `quote` check below pass on an empty `rest`, and the
+        // following `&rest[1..]` then panics slicing byte index 1 out of a
+        // 0-length string.
+        if let Some(quote) = rest.as_bytes().first().copied() {
+            if quote == b'"' || quote == b'\'' {
+                let inner = &rest[1..];
+                if let Some(end) = inner.find(quote as char) {
+                    let class_value = &inner[..end];
+                    return class_value.split_whitespace().any(|c| c == cls);
+                }
             }
         }
     }
@@ -911,11 +918,15 @@ fn extract_attribute(tag_content: &str, attribute: &str) -> Option<String> {
     let marker = format!("{attribute}=");
     if let Some(attribute_start) = tag_content.find(&marker) {
         let rest = &tag_content[attribute_start + marker.len()..];
-        let quote = rest.as_bytes().first().copied().unwrap_or(b'"');
-        if quote == b'"' || quote == b'\'' {
-            let inner = &rest[1..];
-            if let Some(end) = inner.find(quote as char) {
-                return Some(inner[..end].to_string());
+        // See the matching comment in `has_class`: `rest` can be empty when the
+        // attribute marker is the last thing in `tag_content`, and defaulting a
+        // missing byte to a quote char would make `&rest[1..]` panic below.
+        if let Some(quote) = rest.as_bytes().first().copied() {
+            if quote == b'"' || quote == b'\'' {
+                let inner = &rest[1..];
+                if let Some(end) = inner.find(quote as char) {
+                    return Some(inner[..end].to_string());
+                }
             }
         }
     }
@@ -1179,10 +1190,30 @@ mod tests {
         assert!(has_class(r#"span class="ocrx_word ocr_line""#, "ocr_line"));
     }
 
+    /// A tag whose `class=` marker is the very last thing in `tag_content` (no
+    /// quote, no value, nothing after it — e.g. produced by truncated or
+    /// malformed hOCR markup) used to panic: `rest` became an empty string,
+    /// `rest.as_bytes().first().copied().unwrap_or(b'"')` masked the empty
+    /// case by defaulting to a quote byte, and the following `&rest[1..]`
+    /// then sliced byte index 1 out of a 0-length string ("byte index 1 is
+    /// out of bounds of ``"). Must return `false`, not panic.
+    #[test]
+    fn has_class_returns_false_instead_of_panicking_when_class_marker_is_truncated() {
+        assert!(!has_class("span class=", "ocr_par"));
+    }
+
     #[test]
     fn test_extract_title_attr() {
         let title = extract_title_attr(r#"div class="ocr_page" title="bbox 0 0 100 200; ppageno 0""#);
         assert_eq!(title, "bbox 0 0 100 200; ppageno 0");
+    }
+
+    /// Same truncated-marker defect as `has_class`, exercised through
+    /// `extract_attribute`/`extract_title_attr`: a tag content ending in
+    /// `title=` with nothing after it must not panic.
+    #[test]
+    fn extract_title_attr_returns_empty_instead_of_panicking_when_title_marker_is_truncated() {
+        assert_eq!(extract_title_attr("span title="), "");
     }
 
     #[test]
