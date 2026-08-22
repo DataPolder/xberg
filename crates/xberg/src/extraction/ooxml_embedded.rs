@@ -921,8 +921,7 @@ mod tests {
     /// undetectable-MIME junk) is reported exactly like any other unidentifiable embedding.
     #[tokio::test]
     async fn test_forged_multi_terabyte_declared_size_does_not_overflow_allocation() {
-        let zip_bytes =
-            make_forged_zip64_entry("word/embeddings/huge.bin", UNDETECTABLE_MIME_BYTES, u64::MAX);
+        let zip_bytes = make_forged_zip64_entry("word/embeddings/huge.bin", UNDETECTABLE_MIME_BYTES, u64::MAX);
 
         let config = ExtractionConfig::default();
         let (children, warnings) =

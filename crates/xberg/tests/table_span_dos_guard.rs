@@ -149,9 +149,8 @@ Content-Type: text/html; charset=utf-8\r\n\
     /// which only exercises `extraction::grid_flatten`'s clamp.
     #[test]
     fn colspan_bomb_in_html_email_part_is_bounded() {
-        let cells = html_email_table_cells(
-            r#"<table><tr><td colspan="4294967295">bomb</td><td>next</td></tr></table>"#,
-        );
+        let cells =
+            html_email_table_cells(r#"<table><tr><td colspan="4294967295">bomb</td><td>next</td></tr></table>"#);
         assert_eq!(cells.len(), 1, "single row: {cells:?}");
         assert_eq!(
             cells[0].len(),
@@ -166,8 +165,7 @@ Content-Type: text/html; charset=utf-8\r\n\
     /// producing exactly the same grid it always has.
     #[test]
     fn ordinary_colspan_two_in_html_email_part_is_unaffected() {
-        let cells =
-            html_email_table_cells(r#"<table><tr><th colspan="2">Fuse</th><th>Circuit</th></tr></table>"#);
+        let cells = html_email_table_cells(r#"<table><tr><th colspan="2">Fuse</th><th>Circuit</th></tr></table>"#);
         assert_eq!(
             cells,
             vec![vec!["Fuse".to_string(), "".to_string(), "Circuit".to_string()]]

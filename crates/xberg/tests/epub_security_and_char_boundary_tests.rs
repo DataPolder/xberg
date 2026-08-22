@@ -239,7 +239,9 @@ async fn test_high_compression_ratio_member_is_rejected() {
             .expect("zip start_file failed");
         writer.write_all(container_xml().as_bytes()).expect("zip write failed");
 
-        writer.start_file("OEBPS/bomb.dat", options).expect("zip start_file failed");
+        writer
+            .start_file("OEBPS/bomb.dat", options)
+            .expect("zip start_file failed");
         writer.write_all(&bomb_payload).expect("zip write failed");
 
         writer.finish().expect("zip finish failed");

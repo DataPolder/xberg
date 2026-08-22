@@ -641,7 +641,10 @@ fn build_internal_document(
     if let Ok(styles_file) = archive.by_name("styles.xml") {
         use std::io::Read;
         let mut styles_xml = String::new();
-        if styles_file.take(MAX_ODT_MEMBER_SIZE).read_to_string(&mut styles_xml).is_ok()
+        if styles_file
+            .take(MAX_ODT_MEMBER_SIZE)
+            .read_to_string(&mut styles_xml)
+            .is_ok()
             && let Ok(styles_doc) = Document::parse(&styles_xml)
         {
             for (name, ordered) in build_list_style_map(styles_doc.root_element()) {

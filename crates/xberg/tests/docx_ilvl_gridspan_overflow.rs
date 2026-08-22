@@ -347,7 +347,11 @@ fn test_grid_span_at_cap_boundary_still_expands() {
 
     let table = result.tables.first().expect("a table must be extracted");
     let row = &table.cells[1];
-    assert_eq!(row.len(), 1025, "gridSpan=1024 plus the unspanned C2 cell must be 1025 columns");
+    assert_eq!(
+        row.len(),
+        1025,
+        "gridSpan=1024 plus the unspanned C2 cell must be 1025 columns"
+    );
     assert!(
         row[..1024].iter().all(|cell| cell == "Merged"),
         "all 1024 spanned columns must carry the merged cell's text"
