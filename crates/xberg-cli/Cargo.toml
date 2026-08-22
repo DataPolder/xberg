@@ -58,13 +58,19 @@ pdf-surface = ["xberg/pdf"]
 # Gates `--pdf-backend pdfium` (#700): PdfBackend::Pdfium always exists once
 # `pdf-surface` is on, but selecting it without this feature is rejected at
 # CLI validation time with an actionable rebuild hint. With this feature on,
-# CLI validation accepts the selection -- but no pdfium extraction
-# implementation exists yet (#702), so `xberg::extractors::pdf::PdfExtractor`
-# itself rejects `PdfBackend::Pdfium` at extraction time with an actionable
-# error, regardless of this feature. That core-level rejection is what
-# actually prevents a silent fallback to pdf-native: CLI validation alone only
-# covers `xberg-cli`, not library callers, the API/MCP servers, or other
-# language bindings that build `ExtractionConfig` directly.
+# `xberg::extractors::pdf::PdfExtractor` dispatches to the real pdfium engine
+# (#702, crates/xberg/src/extractors/pdf/pdfium_engine.rs). Without it, that
+# same dispatch point rejects `PdfBackend::Pdfium` at extraction time. That
+# core-level rejection is what actually prevents a silent fallback to
+# pdf-native: CLI validation alone only covers `xberg-cli`, not library
+# callers, the API/MCP servers, or other language bindings that build
+# `ExtractionConfig` directly.
+#
+# This feature only compiles the engine in. libpdfium itself is never linked
+# or bundled -- pdfium_engine::bind_once dlopen()s it at run time from
+# PDFIUM_DYNAMIC_LIB_PATH or the system library search path, so enabling this
+# adds the xberg-pdfium-render wrapper to the binary, not a ~10 MB shared
+# object. Deployments must supply libpdfium out of band.
 pdf-pdfium-surface = ["pdf-surface", "xberg/pdf-pdfium"]
 pdf-heuristic = ["pdf-surface"]
 pdf-ocr = ["pdf-heuristic", "ocr-surface", "xberg/ocr"]

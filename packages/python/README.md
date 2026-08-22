@@ -521,22 +521,25 @@ config = ExtractionConfig(
 )
 ```
 
-## PDFium Integration
+## PDF Backend
 
-PDF extraction is powered by PDFium, which is automatically bundled with this package. No system installation required.
+PDF extraction is powered by `xberg-native-pdf`, a pure-Rust backend compiled into the wheel. There
+is no PDFium, no system library to install, and no linking configuration — the same backend runs on
+every supported platform.
 
 ### Platform Support
 
-| Platform       | Status | Notes   |
-| -------------- | ------ | ------- |
-| Linux x86_64   | ✅     | Bundled |
-| macOS ARM64    | ✅     | Bundled |
-| macOS x86_64   | ✅     | Bundled |
-| Windows x86_64 | ✅     | Bundled |
+| Platform       | Status | Notes                     |
+| -------------- | ------ | ------------------------- |
+| Linux x86_64   | ✅     | Pure Rust, no system deps  |
+| macOS ARM64    | ✅     | Pure Rust, no system deps  |
+| macOS x86_64   | ✅     | Pure Rust, no system deps  |
+| Windows x86_64 | ✅     | Pure Rust, no system deps  |
 
-### Binary Size Impact
-
-PDFium adds approximately 8-15 MB to the package size depending on platform. This ensures consistent PDF extraction across all environments without external dependencies.
+An optional PDFium engine exists in the Rust crate behind the `pdf-pdfium` Cargo feature, but it is
+**not** compiled into the Python wheel: it is a narrow diagnostic backend (page count, per-page plain
+text, and Info-dictionary metadata only) that loads `libpdfium` at run time from the system library
+search path.
 
 ## Documentation
 

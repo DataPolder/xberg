@@ -1156,7 +1156,16 @@ visitor_callbacks = false
 # swift-bridge shim can depend on `xberg-ffi` with that feature — heic's
 # `libheif-sys` build.rs cannot cross-compile. Not part of the auto-generated
 # passthrough set, so it must be listed here.
-extra_features = ["full-no-heic"]
+#
+# `pdf-pdfium` is here for the same reason and must stay out of `default`: the
+# engine dlopen()s libpdfium at run time, so compiling it in by default would
+# hand every FFI consumer a backend that fails with MissingDependency unless
+# they install the library themselves. Declaring it here gives the go/csharp/
+# zig/java/C consumers who build libxberg_ffi themselves a documented opt-in at
+# zero cost to everyone else. `extra_features` exists only on `[crates.ffi]`
+# and `[crates.wasm]`, so the other bindings have no declare-only key and
+# cannot be given the same opt-in without an alef change. ~keep
+extra_features = ["full-no-heic", "pdf-pdfium"]
 # Feature list for the desktop `cfg(not(any(android,ios,windows,macos-x86_64)))`
 # core dep. Without this override the FFI crate inherits the global
 # `[[crates]].features`, whose first entry is `full` — that pulls `heic`

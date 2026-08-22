@@ -412,13 +412,18 @@ pub struct ExtractionOverrides {
     #[arg(long)]
     pub pdf_extract_metadata: Option<bool>,
 
-    /// PDF extraction backend to use: "native" (default, the only
-    /// implemented backend) or "pdfium".
+    /// PDF extraction backend to use: "native" (default) or "pdfium".
     ///
     /// "pdfium" requires the CLI to be built with the `pdf-pdfium-surface`
-    /// feature; no pdfium extraction implementation exists yet, so selecting
-    /// it on a build without that feature is rejected with an error rather
-    /// than silently falling back to native.
+    /// feature, and requires the pdfium shared library to be loadable at run
+    /// time (system library search path, or `PDFIUM_DYNAMIC_LIB_PATH`).
+    /// Selecting it on a build without that feature is rejected with an error
+    /// rather than silently falling back to native.
+    ///
+    /// The pdfium engine is deliberately narrower than native: page count,
+    /// per-page plain text, and Info-dictionary metadata only -- no tables,
+    /// layout detection, annotations, form fields, embedded files, or OCR
+    /// fallback. It is not a drop-in replacement for the native backend.
     #[cfg(feature = "pdf-surface")]
     #[arg(long, value_name = "BACKEND")]
     pub pdf_backend: Option<String>,
@@ -594,9 +599,11 @@ impl ExtractionOverrides {
                 #[cfg(not(feature = "pdf-pdfium-surface"))]
                 Ok(PdfBackend::Pdfium) => {
                     bail!(
-                        "--pdf-backend pdfium requires the pdf-pdfium-surface feature \
-                         (no pdfium extraction implementation exists yet). \
-                         Rebuild with --features pdf-pdfium-surface"
+                        "--pdf-backend pdfium requires the pdf-pdfium-surface feature, which this \
+                         binary was not built with. Rebuild with --features pdf-pdfium-surface. \
+                         Note that the pdfium engine also loads the pdfium shared library at run \
+                         time: install it on the system library search path, or point \
+                         PDFIUM_DYNAMIC_LIB_PATH at a directory containing it."
                     );
                 }
                 Err(_) => {
