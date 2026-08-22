@@ -919,7 +919,21 @@ impl FictionBookExtractor {
                     let trimmed: &str = normalized.as_ref();
                     if !trimmed.is_empty() {
                         if !text.is_empty() && !text.ends_with(' ') {
+                            // `normalize_whitespace` trims trailing whitespace off the
+                            // preceding text run (it rebuilds via `split_whitespace`), so the
+                            // joining space inserted here lands exactly at the byte offset any
+                            // still-open `format_stack` entry recorded as its annotation start.
+                            // Left unbumped, that entry's span swallows this space -- e.g.
+                            // `<code>` right after "Some " records start=4 for "Some", then this
+                            // push moves the real "code" text to byte 5, so the emitted Code
+                            // annotation covers " code" instead of "code" (#859).
+                            let join_pos = text.len() as u32;
                             text.push(' ');
+                            for (_, start) in format_stack.iter_mut() {
+                                if *start == join_pos {
+                                    *start += 1;
+                                }
+                            }
                         }
                         text.push_str(trimmed);
                     }
