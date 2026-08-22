@@ -360,11 +360,14 @@ fn render_djot_annotated(text: &str, annotations: &[crate::types::document_struc
                     }
                 }
                 AnnotationKind::Color { .. } | AnnotationKind::FontSize { .. } | AnnotationKind::Custom { .. } => {
-                    normalized
+                    normalized.into_owned()
                 }
             }
         },
-        normalize_inline_text,
+        // `render_annotated_text_with_plain` wants an owned `String` for the plain
+        // rendering, so the borrow `normalize_inline_text` can now return has to be
+        // materialised here rather than at every call site inside the closure above.
+        |text| normalize_inline_text(text).into_owned(),
     )
 }
 

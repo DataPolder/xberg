@@ -130,7 +130,7 @@ pub(crate) fn render_doctags(doc: &InternalDocument) -> String {
                     .filter(|desc| !desc.is_empty());
                 let caption = captions
                     .caption_payload(doc, index, &dims)
-                    .or_else(|| described.map(normalize_inline_text));
+                    .or_else(|| described.map(|desc| normalize_inline_text(desc).into_owned()));
                 push_element(&mut out, "picture", loc, "", caption.as_deref());
             }
             ElementKind::Code => {
@@ -453,7 +453,7 @@ impl Captions {
         }
         Some(match element_loc(elem, dims) {
             Some(loc) => format!("{}{}", loc, text),
-            None => text,
+            None => text.into_owned(),
         })
     }
 }

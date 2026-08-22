@@ -387,7 +387,13 @@ pub(crate) fn render_table_djot(cells: &[Vec<String>]) -> String {
 /// - Collapses multiple consecutive whitespace (spaces, tabs) into a single space
 /// - Replaces newlines with spaces (mid-paragraph line breaks from PDF extraction)
 /// - Strips control characters (< 0x20) except tab
-pub(crate) fn normalize_inline_text(text: &str) -> String {
+pub(crate) fn normalize_inline_text(text: &str) -> Cow<'_, str> {
+    let needs_normalization = text.as_bytes().windows(2).any(|w| w[0] == b' ' && w[1] == b' ')
+        || text.bytes().any(|b| b < 0x20 && b != b'\t');
+    if !needs_normalization {
+        return Cow::Borrowed(text);
+    }
+
     let mut result = String::with_capacity(text.len());
     let mut prev_space = false;
     for ch in text.chars() {
@@ -402,7 +408,7 @@ pub(crate) fn normalize_inline_text(text: &str) -> String {
             result.push(ch);
         }
     }
-    result
+    Cow::Owned(result)
 }
 
 /// Ensure the output has a trailing newline (but not doubled).
@@ -1030,7 +1036,19 @@ mod tests {
 
     #[test]
     fn test_normalize_inline_text_no_change() {
-        assert_eq!(normalize_inline_text("Hello world"), "Hello world");
+        let result = normalize_inline_text("Hello world");
+        assert!(matches!(result, Cow::Borrowed(_)), "should not allocate when unchanged");
+        assert_eq!(result, "Hello world");
+    }
+
+    #[test]
+    fn test_normalize_inline_text_collapses_spaces_allocates() {
+        let result = normalize_inline_text("Hello   world");
+        assert!(
+            matches!(result, Cow::Owned(_)),
+            "should allocate when spaces are collapsed"
+        );
+        assert_eq!(result, "Hello world");
     }
 
     #[test]

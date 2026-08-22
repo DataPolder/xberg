@@ -16,6 +16,8 @@
 //!         ocrx_word  →  word text with bbox and confidence
 //! ```
 
+use memchr::memchr;
+
 use crate::types::extraction::BoundingBox;
 use crate::types::internal::{ElementKind, InternalDocument, InternalElement};
 use crate::types::ocr_elements::{OcrBoundingGeometry, OcrConfidence, OcrElementLevel};
@@ -871,12 +873,6 @@ fn parse_paragraph(
     }
 
     (Some(elem), pos)
-}
-
-/// Fast single-byte search (equivalent to `memchr::memchr` but without the dependency).
-#[inline]
-fn memchr(needle: u8, haystack: &[u8]) -> Option<usize> {
-    haystack.iter().position(|&b| b == needle)
 }
 
 /// Check if a tag's class attribute contains the given class name.

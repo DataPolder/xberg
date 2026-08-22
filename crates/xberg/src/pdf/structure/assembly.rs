@@ -3,6 +3,8 @@
 //! Produces an `InternalDocument` from per-page `PdfParagraph` data with tables
 //! interleaved at their correct reading-order positions.
 
+use std::borrow::Cow;
+
 use super::lines::{needs_space_between, segments_need_space};
 use super::text_repair::finalize_hyphens;
 use super::types::{LayoutHintClass, LayoutRegionPath, LayoutRegionTag, PdfParagraph};
@@ -652,7 +654,7 @@ fn push_paragraph_element(builder: &mut InternalDocumentBuilder, para: &PdfParag
                 .iter()
                 .map(|l| {
                     let line_text = l.segments.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(" ");
-                    collapse_inner_spaces(&line_text)
+                    collapse_inner_spaces(&line_text).into_owned()
                 })
                 .collect::<Vec<_>>()
                 .join("\n")
@@ -930,12 +932,12 @@ fn should_dehyphenate(prev: &str, next: &str) -> bool {
 }
 
 /// Collapse runs of 2+ spaces inside a line while preserving leading indentation.
-fn collapse_inner_spaces(line: &str) -> String {
+fn collapse_inner_spaces(line: &str) -> Cow<'_, str> {
     let leading = line.len() - line.trim_start_matches(' ').len();
     let prefix = &line[..leading];
     let rest = &line[leading..];
     if !rest.contains("  ") {
-        return line.to_string();
+        return Cow::Borrowed(line);
     }
     let mut result = String::with_capacity(line.len());
     result.push_str(prefix);
@@ -951,7 +953,7 @@ fn collapse_inner_spaces(line: &str) -> String {
             result.push(ch);
         }
     }
-    result
+    Cow::Owned(result)
 }
 
 /// True when a list-item paragraph carries a numbered marker ("1." / "3)").
@@ -2317,5 +2319,24 @@ mod tests {
         assert!(texts.contains(&"HR 28"), "HR 28 missing; headings: {texts:?}");
         assert!(texts.contains(&"HR 28/24"), "HR 28/24 missing; headings: {texts:?}");
         assert!(texts.contains(&"HR 36/30"), "HR 36/30 missing; headings: {texts:?}");
+    }
+
+    #[test]
+    fn collapse_inner_spaces_borrows_when_no_double_space() {
+        let line = "  no double spaces here";
+        let result = collapse_inner_spaces(line);
+        assert!(matches!(result, Cow::Borrowed(_)), "should not allocate when unchanged");
+        assert_eq!(result, line);
+    }
+
+    #[test]
+    fn collapse_inner_spaces_allocates_and_collapses_when_double_space_present() {
+        let line = "  has   extra    spaces";
+        let result = collapse_inner_spaces(line);
+        assert!(
+            matches!(result, Cow::Owned(_)),
+            "should allocate when spaces are collapsed"
+        );
+        assert_eq!(result, "  has extra spaces");
     }
 }
