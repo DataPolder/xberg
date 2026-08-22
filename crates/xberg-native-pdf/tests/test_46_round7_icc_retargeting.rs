@@ -7,18 +7,18 @@
 //!
 //! Three-state matrix this round pins:
 //!   - `icc-lcms2` enabled                       → full retargeting through
-//!                                                  the destination profile's BToA
-//!                                                  (the round-7 closure path).
+//!     the destination profile's BToA
+//!     (the round-7 closure path).
 //!   - `icc-qcms` only (no `icc-lcms2`)          → the round-5 "natural-form"
-//!                                                  reading is preserved
-//!                                                  byte-identically.
+//!     reading is preserved
+//!     byte-identically.
 //!   - neither feature                            → §10.3.5 additive-clamp
-//!                                                  fallback fires at the
-//!                                                  consumer (renderer / image
-//!                                                  extractor); the
-//!                                                  process-paint extractor
-//!                                                  returns the natural form
-//!                                                  unchanged.
+//!     fallback fires at the
+//!     consumer (renderer / image
+//!     extractor); the
+//!     process-paint extractor
+//!     returns the natural form
+//!     unchanged.
 //!
 //! Spec citations:
 //!  - ISO 32000-1 §8.6.5.5 — ICCBased colour spaces (embedded profile

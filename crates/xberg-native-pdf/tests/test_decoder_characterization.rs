@@ -226,8 +226,8 @@ fn build_pdf(font_objects: &[String], content: &str, font: &[u8], font_obj_id: u
     buf.extend_from_slice(b"\nendstream\nendobj\n");
     let xref = buf.len();
     buf.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", n_objs + 1).as_bytes());
-    for id in 1..=n_objs {
-        buf.extend_from_slice(format!("{:010} 00000 n \n", off[id]).as_bytes());
+    for &offset in &off[1..=n_objs] {
+        buf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
     }
     buf.extend_from_slice(
         format!(

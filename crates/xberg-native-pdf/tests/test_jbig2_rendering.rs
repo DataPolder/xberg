@@ -10,6 +10,9 @@
 //! in `src/rendering/page_renderer.rs`. This file adds a render-level assertion against a
 //! real scanner PDF, which cannot be vendored here — see the constant below.
 
+// ~keep: test/bench binaries print by design; org logging policy exempts tests
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)]
+
 mod tests {
     use xberg_native_pdf::document::PdfDocument;
     use xberg_native_pdf::rendering::{RenderOptions, render_page};

@@ -141,8 +141,8 @@ fn build_pdf(content: &str, type0: Option<(&str, &str)>) -> Vec<u8> {
     }
     let xref = buf.len();
     buf.extend_from_slice(format!("xref\n0 {n}\n0000000000 65535 f \n").as_bytes());
-    for id in 1..n {
-        buf.extend_from_slice(format!("{:010} 00000 n \n", off[id]).as_bytes());
+    for &offset in &off[1..n] {
+        buf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
     }
     buf.extend_from_slice(format!("trailer\n<< /Size {n} /Root 1 0 R >>\nstartxref\n").as_bytes());
     buf.extend_from_slice(format!("{xref}\n%%EOF\n").as_bytes());

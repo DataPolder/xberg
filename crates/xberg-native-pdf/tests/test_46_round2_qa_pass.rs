@@ -1,3 +1,8 @@
+// Tests run under the workspace's `unsafe_code = "deny"`. These stream bodies carry
+// binary sample data, so they are not valid UTF-8 -- that is why the original used
+// `from_utf8_unchecked`. A test has no performance reason to skip validation, and the
+// assertions below only ever match ASCII substrings, so a lossy conversion is exact
+// for their purposes.
 //! Round-2 QA pass for spot-lane paint writes.
 //!
 //! These probes scrutinise the round-2 design+impl commit (`f5bdb9b`)
@@ -127,7 +132,11 @@ fn build_pdf_with_output_intent(
     content: &str,
     resources_inner: &str,
     icc_profile: &[u8],
-    extra_objs: &[&str],
+    // Raw object bytes, not `&str`: these streams carry binary payloads (ICC profiles,
+    // image-mask samples) that are not valid UTF-8. A `String` round-trip would either be
+    // UB (`from_utf8_unchecked`) or corrupt them (`from_utf8_lossy` rewrites each invalid
+    // byte as U+FFFD, changing the samples and desynchronising the `/Length` they declare).
+    extra_objs: &[&[u8]],
 ) -> Vec<u8> {
     let mut buf: Vec<u8> = Vec::new();
     buf.extend_from_slice(b"%PDF-1.4\n");
@@ -162,7 +171,7 @@ fn build_pdf_with_output_intent(
     let mut extra_offs: Vec<usize> = Vec::new();
     for obj in extra_objs {
         extra_offs.push(buf.len());
-        buf.extend_from_slice(obj.as_bytes());
+        buf.extend_from_slice(obj);
     }
 
     let xref_off = buf.len();
@@ -420,7 +429,7 @@ fn qa2_smask_alpha_uniform_half_modulates_spot_lane() {
          /ColorSpace << /CS_PMS [/Separation /InkA /DeviceCMYK {} ] >>",
         psfunc
     );
-    let pdf = build_pdf_with_output_intent(content, &resources, &icc, &[smask_form]);
+    let pdf = build_pdf_with_output_intent(content, &resources, &icc, &[smask_form.as_bytes()]);
     let doc = PdfDocument::from_bytes(pdf).expect("synthetic PDF parses");
     let mut renderer = PageRenderer::new(RenderOptions::with_dpi(72).as_raw());
     let _img = renderer.render_page(&doc, 0).expect("render succeeds");
@@ -492,7 +501,6 @@ fn qa3_image_do_aa_edge_gets_fractional_coverage_after_fix() {
     form_full.extend_from_slice(form_hdr.as_bytes());
     form_full.extend_from_slice(&mask_bytes);
     form_full.extend_from_slice(b"\nendstream\nendobj\n");
-    let form_str = unsafe { String::from_utf8_unchecked(form_full) };
     let content = "/Trig gs\n\
                    /CS_PMS cs\n1.0 scn\n\
                    q\n80 0 0 80 10 10 cm\n/Img Do\nQ\n";
@@ -502,7 +510,7 @@ fn qa3_image_do_aa_edge_gets_fractional_coverage_after_fix() {
          /ColorSpace << /CS_PMS [/Separation /InkA /DeviceCMYK {} ] >>",
         psfunc
     );
-    let pdf = build_pdf_with_output_intent(content, &resources, &icc, &[&form_str]);
+    let pdf = build_pdf_with_output_intent(content, &resources, &icc, &[&form_full]);
     let doc = PdfDocument::from_bytes(pdf).expect("synthetic PDF parses");
     let mut renderer = PageRenderer::new(RenderOptions::with_dpi(72).as_raw());
     let _img = renderer.render_page(&doc, 0).expect("render succeeds");
@@ -896,7 +904,7 @@ fn qa7_multi_spot_devicen_non_wp_bm_substitutes_normal_on_every_lane() {
     let resources = "/ExtGState << /Diff << /Type /ExtGState /BM /Difference >> >> \
                      /ColorSpace << /CS_DN [/DeviceN [/InkA /InkB] /DeviceCMYK 6 0 R] >>";
     let extra = format!("6 0 obj\n{}", psfunc4);
-    let pdf = build_pdf_with_output_intent(content, resources, &icc, &[&extra]);
+    let pdf = build_pdf_with_output_intent(content, resources, &icc, &[extra.as_bytes()]);
     let doc = PdfDocument::from_bytes(pdf).expect("synthetic PDF parses");
     let mut renderer = PageRenderer::new(RenderOptions::with_dpi(72).as_raw());
     let _img = renderer.render_page(&doc, 0).expect("render succeeds");
@@ -1041,7 +1049,7 @@ fn qa10_round4_cmyk_plane_byte_identity_preserved_through_round2() {
     let resources = "/ExtGState << /Mult << /Type /ExtGState /BM /Multiply >> >> \
                      /ColorSpace << /CS_DN [/DeviceN [/InkA] /DeviceCMYK 6 0 R] >>";
     let extra = format!("6 0 obj\n{}", psfunc4);
-    let pdf = build_pdf_with_output_intent(content, resources, &icc, &[&extra]);
+    let pdf = build_pdf_with_output_intent(content, resources, &icc, &[extra.as_bytes()]);
     let doc = PdfDocument::from_bytes(pdf).expect("synthetic PDF parses");
     let mut renderer = PageRenderer::new(RenderOptions::with_dpi(72).as_raw());
     let _img = renderer.render_page(&doc, 0).expect("render succeeds");
@@ -1135,7 +1143,7 @@ fn qa12_non_conforming_form_xobject_group_with_separation_cs_does_not_panic() {
     let content = "/Half gs\n/Form Do\n";
     let resources = "/ExtGState << /Half << /Type /ExtGState /ca 0.5 >> >> \
                      /XObject << /Form 6 0 R >>";
-    let pdf = build_pdf_with_output_intent(content, resources, &icc, &[&form]);
+    let pdf = build_pdf_with_output_intent(content, resources, &icc, &[form.as_bytes()]);
     let doc = PdfDocument::from_bytes(pdf).expect("synthetic PDF parses");
     let mut renderer = PageRenderer::new(RenderOptions::with_dpi(72).as_raw());
     let _result = renderer.render_page(&doc, 0);
@@ -1167,7 +1175,7 @@ fn qa13_knockout_group_spot_paint_keeps_only_last_tint() {
     let content = "/Half gs\n/Form Do\n";
     let resources = "/ExtGState << /Half << /Type /ExtGState /ca 1.0 /BM /Multiply >> >> \
                      /XObject << /Form 6 0 R >>";
-    let pdf = build_pdf_with_output_intent(content, resources, &icc, &[&form]);
+    let pdf = build_pdf_with_output_intent(content, resources, &icc, &[form.as_bytes()]);
     let doc = PdfDocument::from_bytes(pdf).expect("synthetic PDF parses");
     let mut renderer = PageRenderer::new(RenderOptions::with_dpi(72).as_raw());
     let _img = renderer.render_page(&doc, 0).expect("render succeeds");

@@ -107,6 +107,9 @@ fn build_pdf_shading_raw(
 
 /// Convenience wrapper for a Type 2 (axial) shading with a Type 2
 /// (exponential) function. Builds the shading dict from the parts.
+// test helper: each parameter is a separate literal spliced into the hand-built
+// shading dict; a wrapper struct would only rename the same positional list. ~keep
+#[allow(clippy::too_many_arguments)]
 fn build_pdf_axial_shading(
     content_ops: &str,
     space_str: &str,
@@ -128,6 +131,8 @@ fn build_pdf_axial_shading(
 
 /// Convenience wrapper for a Type 3 (radial) shading with a Type 2
 /// (exponential) function.
+// test helper: mirrors `build_pdf_axial_shading`'s positional parameter list. ~keep
+#[allow(clippy::too_many_arguments)]
 fn build_pdf_radial_shading(
     content_ops: &str,
     space_str: &str,

@@ -1,3 +1,8 @@
+// Tests run under the workspace's `unsafe_code = "deny"`. These stream bodies carry
+// binary sample data, so they are not valid UTF-8 -- that is why the original used
+// `from_utf8_unchecked`. A test has no performance reason to skip validation, and the
+// assertions below only ever match ASCII substrings, so a lossy conversion is exact
+// for their purposes.
 //! Transparency-correctness audit probes — composite (pixmap) render path.
 //!
 //! This suite enumerates ISO 32000-1:2008 §11.3.5 (blend modes), §11.4
@@ -127,7 +132,11 @@ pub const HONEST_GAP_SMASK_BC_MALFORMED_ARITY: &str = "HONEST_GAP_SMASK_BC_MALFO
 /// obj\n` and end with `\nendobj\n`. The xref entries are derived from
 /// the in-buffer offsets so misnumbered objects surface as a parse
 /// failure.
-fn build_pdf(content: &str, resources_inner: &str, extra_objs: &[&str]) -> Vec<u8> {
+// `extra_objs` are raw object bytes, not `&str`: image and SMask streams carry binary
+// sample data that is not valid UTF-8. Routing them through a `String` would either be
+// UB (`from_utf8_unchecked`) or corrupt them (`from_utf8_lossy` rewrites each invalid
+// byte as U+FFFD, changing both the samples and the byte count `/Length` declares).
+fn build_pdf(content: &str, resources_inner: &str, extra_objs: &[&[u8]]) -> Vec<u8> {
     let mut buf: Vec<u8> = Vec::new();
     buf.extend_from_slice(b"%PDF-1.4\n");
 
@@ -153,7 +162,7 @@ fn build_pdf(content: &str, resources_inner: &str, extra_objs: &[&str]) -> Vec<u
     let mut extra_offs: Vec<usize> = Vec::new();
     for obj in extra_objs {
         extra_offs.push(buf.len());
-        buf.extend_from_slice(obj.as_bytes());
+        buf.extend_from_slice(obj);
     }
 
     let xref_off = buf.len();
@@ -351,9 +360,7 @@ fn fixture_image_smask_diagonal() -> Vec<u8> {
                    q 60 0 0 60 20 20 cm /Im1 Do Q\n";
     let resources = "/XObject << /Im1 5 0 R >>";
 
-    let obj_5_str = unsafe { std::str::from_utf8_unchecked(&obj_5) };
-    let obj_6_str = unsafe { std::str::from_utf8_unchecked(&obj_6) };
-    build_pdf(content, resources, &[obj_5_str, obj_6_str])
+    build_pdf(content, resources, &[&obj_5, &obj_6])
 }
 
 /// Pin: a 2×2 red image with diagonal SMask paints diagonal red over
@@ -416,7 +423,7 @@ fn fixture_smask_form_alpha() -> Vec<u8> {
                    20 20 60 60 re\nf\n";
     let resources = "/ExtGState << /Sm << /Type /ExtGState \
                      /SMask << /Type /Mask /S /Alpha /G 5 0 R >> >> >>";
-    build_pdf(content, resources, &[&obj_5])
+    build_pdf(content, resources, &[obj_5.as_bytes()])
 }
 
 /// Regression sentry — `/SMask /S /Alpha` Form XObject implementation
@@ -458,7 +465,7 @@ fn fixture_smask_form_luminosity() -> Vec<u8> {
                    20 20 60 60 re\nf\n";
     let resources = "/ExtGState << /Sm << /Type /ExtGState \
                      /SMask << /Type /Mask /S /Luminosity /G 5 0 R >> >> >>";
-    build_pdf(content, resources, &[&obj_5])
+    build_pdf(content, resources, &[obj_5.as_bytes()])
 }
 
 /// Regression sentry — `/SMask /S /Luminosity` Form XObject per
@@ -506,7 +513,7 @@ fn fixture_smask_with_bc_backdrop() -> Vec<u8> {
                    20 20 60 60 re\nf\n";
     let resources = "/ExtGState << /Sm << /Type /ExtGState \
                      /SMask << /Type /Mask /S /Luminosity /G 5 0 R /BC [0.5] >> >> >>";
-    build_pdf(content, resources, &[&obj_5])
+    build_pdf(content, resources, &[obj_5.as_bytes()])
 }
 
 /// Regression sentry — `/SMask /BC` backdrop pre-fill for n=1
@@ -545,7 +552,7 @@ fn fixture_smask_with_tr_transfer() -> Vec<u8> {
                    20 20 60 60 re\nf\n";
     let resources = "/ExtGState << /Sm << /Type /ExtGState \
                      /SMask << /Type /Mask /S /Luminosity /G 5 0 R /TR 6 0 R >> >> >>";
-    build_pdf(content, resources, &[&obj_5, obj_6])
+    build_pdf(content, resources, &[obj_5.as_bytes(), obj_6.as_bytes()])
 }
 
 /// Regression sentry — `/SMask /TR` Type-2 exponential transfer per
@@ -589,7 +596,7 @@ fn fixture_smask_with_tr_type4_half() -> Vec<u8> {
                    20 20 60 60 re\nf\n";
     let resources = "/ExtGState << /Sm << /Type /ExtGState \
                      /SMask << /Type /Mask /S /Luminosity /G 5 0 R /TR 6 0 R >> >> >>";
-    build_pdf(content, resources, &[&obj_5, &obj_6])
+    build_pdf(content, resources, &[obj_5.as_bytes(), obj_6.as_bytes()])
 }
 
 /// `/SMask /TR` Type-4 PostScript calculator per §7.10.5. The Type 4
@@ -639,14 +646,13 @@ fn fixture_smask_with_tr_type0_inverted_ramp() -> Vec<u8> {
     .into_bytes();
     obj_6.extend_from_slice(&lut);
     obj_6.extend_from_slice(b"\nendstream\nendobj\n");
-    let obj_6_str = unsafe { std::str::from_utf8_unchecked(&obj_6) };
     let content = "1 1 1 rg\n0 0 100 100 re\nf\n\
                    /Sm gs\n\
                    1 0 0 rg\n\
                    20 20 60 60 re\nf\n";
     let resources = "/ExtGState << /Sm << /Type /ExtGState \
                      /SMask << /Type /Mask /S /Luminosity /G 5 0 R /TR 6 0 R >> >> >>";
-    build_pdf(content, resources, &[&obj_5, obj_6_str])
+    build_pdf(content, resources, &[obj_5.as_bytes(), &obj_6])
 }
 
 /// Fixture: SMask with a 5-component DeviceN /BC backdrop. The Form
@@ -679,7 +685,7 @@ fn fixture_smask_with_bc_devicen_5_components() -> Vec<u8> {
     let resources = "/ExtGState << /Sm << /Type /ExtGState \
                      /SMask << /Type /Mask /S /Luminosity /G 6 0 R \
                      /BC [0.5 0.5 0.5 0.5 0.5] >> >> >>";
-    build_pdf(content, resources, &[&obj_5, &obj_6])
+    build_pdf(content, resources, &[obj_5.as_bytes(), obj_6.as_bytes()])
 }
 
 /// `/SMask /BC` with n=5 (DeviceN) per §11.6.5.2 Table 144 + §8.6.6.5.
@@ -742,7 +748,7 @@ fn fixture_smask_bc_devicen_5_components_type0_sampled() -> Vec<u8> {
         let mut buf = header.into_bytes();
         buf.extend_from_slice(&sample_bytes);
         buf.extend_from_slice(b"\nendstream\nendobj\n");
-        unsafe { String::from_utf8_unchecked(buf) }
+        String::from_utf8_lossy(&buf).into_owned()
     };
     let cs_arr = "[/DeviceN [/Ink1 /Ink2 /Ink3 /Ink4 /Ink5] /DeviceCMYK 5 0 R]";
     let form_content = "% empty form\n";
@@ -761,7 +767,7 @@ fn fixture_smask_bc_devicen_5_components_type0_sampled() -> Vec<u8> {
     let resources = "/ExtGState << /Sm << /Type /ExtGState \
                      /SMask << /Type /Mask /S /Luminosity /G 6 0 R \
                      /BC [0.5 0.5 0.5 0.5 0.5] >> >> >>";
-    build_pdf(content, resources, &[obj_5.as_str(), &obj_6])
+    build_pdf(content, resources, &[obj_5.as_bytes(), obj_6.as_bytes()])
 }
 
 /// §7.10.2 + §11.6.5.2 /BC n=5 DeviceN with a Type 0 sampled tint
@@ -837,7 +843,7 @@ fn fixture_smask_bc_devicen_5_components_type3_stitching() -> Vec<u8> {
     let resources = "/ExtGState << /Sm << /Type /ExtGState \
                      /SMask << /Type /Mask /S /Luminosity /G 6 0 R \
                      /BC [0.6 0 0 0 0] >> >> >>";
-    build_pdf(content, resources, &[obj_5, &obj_6])
+    build_pdf(content, resources, &[obj_5.as_bytes(), obj_6.as_bytes()])
 }
 
 /// §7.10.4 + §11.6.5.2 /BC n=5 DeviceN with a Type 3 stitching tint
@@ -903,7 +909,7 @@ fn fixture_smask_bc_devicen_5_components_lab_alternate() -> Vec<u8> {
     let resources = "/ExtGState << /Sm << /Type /ExtGState \
                      /SMask << /Type /Mask /S /Luminosity /G 6 0 R \
                      /BC [0.5 0.5 0.5 0.5 0.5] >> >> >>";
-    build_pdf(content, resources, &[obj_5.as_str(), &obj_6])
+    build_pdf(content, resources, &[obj_5.as_bytes(), obj_6.as_bytes()])
 }
 
 /// §8.6.5.4 Lab → XYZ → sRGB closed-form projection on the /BC path.
@@ -965,7 +971,7 @@ fn fixture_smask_bc_devicen_5_components_calrgb_alternate() -> Vec<u8> {
     let resources = "/ExtGState << /Sm << /Type /ExtGState \
                      /SMask << /Type /Mask /S /Luminosity /G 6 0 R \
                      /BC [0.5 0.5 0.5 0.5 0.5] >> >> >>";
-    build_pdf(content, resources, &[obj_5.as_str(), &obj_6])
+    build_pdf(content, resources, &[obj_5.as_bytes(), obj_6.as_bytes()])
 }
 
 /// §8.6.5.3 CalRGB → linear XYZ → sRGB closed-form projection on the
@@ -1032,7 +1038,7 @@ fn fixture_smask_bc_devicen_5_components_calgray_alternate() -> Vec<u8> {
     let resources = "/ExtGState << /Sm << /Type /ExtGState \
                      /SMask << /Type /Mask /S /Luminosity /G 6 0 R \
                      /BC [0.5 0.5 0.5 0.5 0.5] >> >> >>";
-    build_pdf(content, resources, &[obj_5.as_str(), &obj_6])
+    build_pdf(content, resources, &[obj_5.as_bytes(), obj_6.as_bytes()])
 }
 
 /// §8.6.5.2 CalGray → linear XYZ → sRGB closed-form projection on the
@@ -1105,7 +1111,11 @@ fn fixture_smask_bc_devicen_5_components_iccbased_alternate() -> Vec<u8> {
     let resources = "/ExtGState << /Sm << /Type /ExtGState \
                      /SMask << /Type /Mask /S /Luminosity /G 6 0 R \
                      /BC [0.5 0.5 0.5 0.5 0.5] >> >> >>";
-    build_pdf(content, resources, &[obj_5.as_str(), &obj_6, icc_obj])
+    build_pdf(
+        content,
+        resources,
+        &[obj_5.as_bytes(), obj_6.as_bytes(), icc_obj.as_bytes()],
+    )
 }
 
 /// §8.6.5.5 ICCBased /BC alternate-space projection.
@@ -1215,7 +1225,7 @@ fn fixture_smask_tr_type3_two_type2_subfunctions() -> Vec<u8> {
                    20 20 60 60 re\nf\n";
     let resources = "/ExtGState << /Sm << /Type /ExtGState \
                      /SMask << /Type /Mask /S /Luminosity /G 5 0 R /TR 6 0 R >> >> >>";
-    build_pdf(content, resources, &[&obj_5, obj_6])
+    build_pdf(content, resources, &[obj_5.as_bytes(), obj_6.as_bytes()])
 }
 
 /// `/SMask /TR` Type 3 stitching with two Type 2 subfunctions per
@@ -1273,7 +1283,11 @@ fn fixture_smask_tr_type3_two_type4_subfunctions() -> Vec<u8> {
                    20 20 60 60 re\nf\n";
     let resources = "/ExtGState << /Sm << /Type /ExtGState \
                      /SMask << /Type /Mask /S /Luminosity /G 5 0 R /TR 8 0 R >> >> >>";
-    build_pdf(content, resources, &[&obj_5, &obj_6, &obj_7, obj_8])
+    build_pdf(
+        content,
+        resources,
+        &[obj_5.as_bytes(), obj_6.as_bytes(), obj_7.as_bytes(), obj_8.as_bytes()],
+    )
 }
 
 /// `/SMask /TR` Type 3 stitching with two Type 4 PostScript subfunctions
@@ -1334,7 +1348,7 @@ fn fixture_smask_tr_type3_clips_input_to_domain() -> Vec<u8> {
                    20 20 60 60 re\nf\n";
     let resources = "/ExtGState << /Sm << /Type /ExtGState \
                      /SMask << /Type /Mask /S /Luminosity /G 5 0 R /TR 6 0 R >> >> >>";
-    build_pdf(content, resources, &[&obj_5, obj_6])
+    build_pdf(content, resources, &[obj_5.as_bytes(), obj_6.as_bytes()])
 }
 
 /// `/SMask /TR` Type 3 stitching with /Domain [0.3 0.8] verifies the
@@ -1391,7 +1405,7 @@ fn fixture_smask_tr_type3_zero_width_subinterval() -> Vec<u8> {
                    20 20 60 60 re\nf\n";
     let resources = "/ExtGState << /Sm << /Type /ExtGState \
                      /SMask << /Type /Mask /S /Luminosity /G 5 0 R /TR 6 0 R >> >> >>";
-    build_pdf(content, resources, &[&obj_5, obj_6])
+    build_pdf(content, resources, &[obj_5.as_bytes(), obj_6.as_bytes()])
 }
 
 /// `/SMask /TR` Type 3 stitching with a zero-width subinterval per
@@ -1443,7 +1457,7 @@ fn fixture_isolated_group_alpha_red_over_blue() -> Vec<u8> {
     let content = "0 0 1 rg\n0 0 100 100 re\nf\n\
                    /Fm1 Do\n";
     let resources = "/XObject << /Fm1 5 0 R >>";
-    build_pdf(content, resources, &[&obj_5])
+    build_pdf(content, resources, &[obj_5.as_bytes()])
 }
 
 /// Pin: isolated transparency group composites internally then
@@ -1501,7 +1515,7 @@ fn fixture_knockout_group_two_overlapping_rects() -> Vec<u8> {
     let content = "1 1 1 rg\n0 0 100 100 re\nf\n\
                    /Fm1 Do\n";
     let resources = "/XObject << /Fm1 5 0 R >>";
-    build_pdf(content, resources, &[&obj_5])
+    build_pdf(content, resources, &[obj_5.as_bytes()])
 }
 
 /// Regression sentry — knockout group `/K true` per §11.4.6.2. Inside
@@ -1541,7 +1555,7 @@ fn fixture_form_with_group_dict_blue_over_white() -> Vec<u8> {
     let content = "1 1 1 rg\n0 0 100 100 re\nf\n\
                    /Fm1 Do\n";
     let resources = "/XObject << /Fm1 5 0 R >>";
-    build_pdf(content, resources, &[&obj_5])
+    build_pdf(content, resources, &[obj_5.as_bytes()])
 }
 
 #[test]
@@ -2129,7 +2143,7 @@ fn fixture_smask_form_alpha_offcentre_144dpi() -> Vec<u8> {
                    0 0 100 100 re\nf\n";
     let resources = "/ExtGState << /Sm << /Type /ExtGState \
                      /SMask << /Type /Mask /S /Alpha /G 5 0 R >> >> >>";
-    build_pdf(content, resources, &[&obj_5])
+    build_pdf(content, resources, &[obj_5.as_bytes()])
 }
 
 /// Render the synthetic PDF at a chosen DPI and assert the raster is the

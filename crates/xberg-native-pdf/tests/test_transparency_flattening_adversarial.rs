@@ -1,3 +1,8 @@
+// Tests run under the workspace's `unsafe_code = "deny"`. These stream bodies carry
+// binary sample data, so they are not valid UTF-8 -- that is why the original used
+// `from_utf8_unchecked`. A test has no performance reason to skip validation, and the
+// assertions below only ever match ASCII substrings, so a lossy conversion is exact
+// for their purposes.
 //! Adversarial probes for the round-eight closure work.
 //!
 //! Scope: independent verification that the five recent transparency
@@ -19,7 +24,11 @@
 use xberg_native_pdf::document::PdfDocument;
 use xberg_native_pdf::rendering::{ImageFormat, RenderOptions, render_page};
 
-fn build_pdf(content: &str, resources_inner: &str, extra_objs: &[&str]) -> Vec<u8> {
+// `extra_objs` are raw object bytes, not `&str`: image and SMask streams carry binary
+// sample data that is not valid UTF-8. Routing them through a `String` would either be
+// UB (`from_utf8_unchecked`) or corrupt them (`from_utf8_lossy` rewrites each invalid
+// byte as U+FFFD, changing both the samples and the byte count `/Length` declares).
+fn build_pdf(content: &str, resources_inner: &str, extra_objs: &[&[u8]]) -> Vec<u8> {
     let mut buf: Vec<u8> = Vec::new();
     buf.extend_from_slice(b"%PDF-1.4\n");
     let cat_off = buf.len();
@@ -40,7 +49,7 @@ fn build_pdf(content: &str, resources_inner: &str, extra_objs: &[&str]) -> Vec<u
     let mut extra_offs: Vec<usize> = Vec::new();
     for obj in extra_objs {
         extra_offs.push(buf.len());
-        buf.extend_from_slice(obj.as_bytes());
+        buf.extend_from_slice(obj);
     }
     let xref_off = buf.len();
     let total_objs = 4 + extra_objs.len();
@@ -127,7 +136,7 @@ fn fixture_smask_tr_type3_k4_bounds_three() -> Vec<u8> {
                    20 20 60 60 re\nf\n";
     let resources = "/ExtGState << /Sm << /Type /ExtGState \
                      /SMask << /Type /Mask /S /Luminosity /G 5 0 R /TR 6 0 R >> >> >>";
-    build_pdf(content, resources, &[&obj_5, obj_6])
+    build_pdf(content, resources, &[obj_5.as_bytes(), obj_6.as_bytes()])
 }
 
 #[test]
@@ -194,7 +203,7 @@ fn fixture_smask_tr_type3_boundary_right_belong() -> Vec<u8> {
                    20 20 60 60 re\nf\n";
     let resources = "/ExtGState << /Sm << /Type /ExtGState \
                      /SMask << /Type /Mask /S /Luminosity /G 5 0 R /TR 6 0 R >> >> >>";
-    build_pdf(content, resources, &[&obj_5, obj_6])
+    build_pdf(content, resources, &[obj_5.as_bytes(), obj_6.as_bytes()])
 }
 
 #[test]
@@ -269,7 +278,7 @@ fn fixture_smask_tr_type3_inverted_encode() -> Vec<u8> {
                    20 20 60 60 re\nf\n";
     let resources = "/ExtGState << /Sm << /Type /ExtGState \
                      /SMask << /Type /Mask /S /Luminosity /G 5 0 R /TR 6 0 R >> >> >>";
-    build_pdf(content, resources, &[&obj_5, obj_6])
+    build_pdf(content, resources, &[obj_5.as_bytes(), obj_6.as_bytes()])
 }
 
 #[test]
@@ -314,14 +323,13 @@ fn fixture_smask_tr_type0_bps16_fallback() -> Vec<u8> {
     .into_bytes();
     obj_6.extend_from_slice(&lut);
     obj_6.extend_from_slice(b"\nendstream\nendobj\n");
-    let obj_6_str = unsafe { std::str::from_utf8_unchecked(&obj_6) };
     let content = "1 1 1 rg\n0 0 100 100 re\nf\n\
                    /Sm gs\n\
                    1 0 0 rg\n\
                    20 20 60 60 re\nf\n";
     let resources = "/ExtGState << /Sm << /Type /ExtGState \
                      /SMask << /Type /Mask /S /Luminosity /G 5 0 R /TR 6 0 R >> >> >>";
-    build_pdf(content, resources, &[&obj_5, obj_6_str])
+    build_pdf(content, resources, &[obj_5.as_bytes(), &obj_6])
 }
 
 #[test]
@@ -365,14 +373,13 @@ fn fixture_smask_tr_type0_single_sample() -> Vec<u8> {
         .to_vec();
     obj_6.push(0u8);
     obj_6.extend_from_slice(b"\nendstream\nendobj\n");
-    let obj_6_str = unsafe { std::str::from_utf8_unchecked(&obj_6) };
     let content = "1 1 1 rg\n0 0 100 100 re\nf\n\
                    /Sm gs\n\
                    1 0 0 rg\n\
                    20 20 60 60 re\nf\n";
     let resources = "/ExtGState << /Sm << /Type /ExtGState \
                      /SMask << /Type /Mask /S /Luminosity /G 5 0 R /TR 6 0 R >> >> >>";
-    build_pdf(content, resources, &[&obj_5, obj_6_str])
+    build_pdf(content, resources, &[obj_5.as_bytes(), &obj_6])
 }
 
 #[test]
@@ -428,7 +435,7 @@ fn fixture_smask_tr_type4_div_by_zero() -> Vec<u8> {
                    20 20 60 60 re\nf\n";
     let resources = "/ExtGState << /Sm << /Type /ExtGState \
                      /SMask << /Type /Mask /S /Luminosity /G 5 0 R /TR 6 0 R >> >> >>";
-    build_pdf(content, resources, &[&obj_5, &obj_6])
+    build_pdf(content, resources, &[obj_5.as_bytes(), obj_6.as_bytes()])
 }
 
 #[test]
@@ -479,7 +486,7 @@ fn fixture_smask_bc_n5_over_devicergb_group() -> Vec<u8> {
     let resources = "/ExtGState << /Sm << /Type /ExtGState \
                      /SMask << /Type /Mask /S /Luminosity /G 5 0 R \
                      /BC [0.5 0.5 0.5 0.5 0.5] >> >> >>";
-    build_pdf(content, resources, &[&obj_5])
+    build_pdf(content, resources, &[obj_5.as_bytes()])
 }
 
 #[test]
@@ -537,7 +544,7 @@ fn fixture_smask_bc_n1_over_devicecmyk_group() -> Vec<u8> {
     let resources = "/ExtGState << /Sm << /Type /ExtGState \
                      /SMask << /Type /Mask /S /Luminosity /G 5 0 R \
                      /BC [0.5] >> >> >>";
-    build_pdf(content, resources, &[&obj_5])
+    build_pdf(content, resources, &[obj_5.as_bytes()])
 }
 
 #[test]

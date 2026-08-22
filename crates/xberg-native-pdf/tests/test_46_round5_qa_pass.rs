@@ -1,29 +1,34 @@
+// Tests run under the workspace's `unsafe_code = "deny"`. These stream bodies carry
+// binary sample data, so they are not valid UTF-8 -- that is why the original used
+// `from_utf8_unchecked`. A test has no performance reason to skip validation, and the
+// assertions below only ever match ASCII substrings, so a lossy conversion is exact
+// for their purposes.
 //! Round 5 QA pass probes for DeviceN /Process, image and pattern spot lanes.
 //!
 //! Adversarial scrutiny of round-5's three commits — covers the gaps
 //! the design+impl agent's own probes did not pin:
 //!
 //!  - A1-QA2: DeviceN /Process /ColorSpace [/ICCBased <N=3 stream>] —
-//!            exercises the round-5 ICCBased N=3 arm of
-//!            `extract_process_paint_cmyk`. A1 only pinned the N=4
-//!            path; N=3 follows the /DeviceRGB shape (§10.3.5 inverse
-//!            from RGB tints) and was untested.
+//!    exercises the round-5 ICCBased N=3 arm of
+//!    `extract_process_paint_cmyk`. A1 only pinned the N=4
+//!    path; N=3 follows the /DeviceRGB shape (§10.3.5 inverse
+//!    from RGB tints) and was untested.
 //!  - A1-QA3: DeviceN /Process /ColorSpace [/ICCBased <N=1 stream>] —
-//!            ICCBased N=1 arm (§10.3.5 inverse from a single grey
-//!            tint, K = 1 − g, C = M = Y = 0). Untested.
+//!    ICCBased N=1 arm (§10.3.5 inverse from a single grey
+//!    tint, K = 1 − g, C = M = Y = 0). Untested.
 //!  - A3-QA1: pure /Separation paint AFTER a DeviceCMYK paint —
-//!            verifies the round-4 stale-CMYK clear (in
-//!            `SetFillColorN`) combined with the round-5
-//!            `source_for_overprint` precedence flip routes through
-//!            SeparationOrDeviceN (preserve backdrop on process lanes),
-//!            NOT OtherProcess. A regression would dispatch as
-//!            OtherProcess and corrupt process plates with the stale
-//!            CMYK from the prior `k` operator.
+//!    verifies the round-4 stale-CMYK clear (in
+//!    `SetFillColorN`) combined with the round-5
+//!    `source_for_overprint` precedence flip routes through
+//!    SeparationOrDeviceN (preserve backdrop on process lanes),
+//!    NOT OtherProcess. A regression would dispatch as
+//!    OtherProcess and corrupt process plates with the stale
+//!    CMYK from the prior `k` operator.
 //!  - B1-QA1: ImageMask `/Decode [1 0]` override — verifies the §8.9.6.2
-//!            stencil-mask byte semantic flips correctly under the
-//!            non-default decode array (0 = no-paint, 1 = paint). B1
-//!            only covered the default decode; the inverted decode
-//!            tests the data-convention symmetry.
+//!    stencil-mask byte semantic flips correctly under the
+//!    non-default decode array (0 = no-paint, 1 = paint). B1
+//!    only covered the default decode; the inverted decode
+//!    tests the data-convention symmetry.
 //!
 //! Spec citations:
 //!  - ISO 32000-1 §8.6.6.5  — DeviceN /Process attribution; ICCBased
@@ -43,7 +48,11 @@ fn build_pdf_with_output_intent(
     content: &str,
     resources_inner: &str,
     icc_profile: &[u8],
-    extra_objs: &[&str],
+    // Raw object bytes, not `&str`: these streams carry binary payloads (ICC profiles,
+    // image-mask samples) that are not valid UTF-8. A `String` round-trip would either be
+    // UB (`from_utf8_unchecked`) or corrupt them (`from_utf8_lossy` rewrites each invalid
+    // byte as U+FFFD, changing the samples and desynchronising the `/Length` they declare).
+    extra_objs: &[&[u8]],
 ) -> Vec<u8> {
     let mut buf: Vec<u8> = Vec::new();
     buf.extend_from_slice(b"%PDF-1.4\n");
@@ -73,7 +82,7 @@ fn build_pdf_with_output_intent(
     let mut extra_offs: Vec<usize> = Vec::new();
     for obj in extra_objs {
         extra_offs.push(buf.len());
-        buf.extend_from_slice(obj.as_bytes());
+        buf.extend_from_slice(obj);
     }
 
     let xref_off = buf.len();
@@ -223,7 +232,7 @@ fn a1_qa2_devicen_process_iccbased_n3_overprint_byte_exact() {
          ] >>",
         psfunc
     );
-    let pdf = build_pdf_with_output_intent(content, &resources, &icc, &[process_icc_dict]);
+    let pdf = build_pdf_with_output_intent(content, &resources, &icc, &[process_icc_dict.as_bytes()]);
     let doc = PdfDocument::from_bytes(pdf).expect("parse");
     let plates = render_separations(&doc, 0, 72).expect("render");
 
@@ -302,7 +311,7 @@ fn a1_qa3_devicen_process_iccbased_n1_overprint_byte_exact() {
          ] >>",
         psfunc
     );
-    let pdf = build_pdf_with_output_intent(content, &resources, &icc, &[process_icc_dict]);
+    let pdf = build_pdf_with_output_intent(content, &resources, &icc, &[process_icc_dict.as_bytes()]);
     let doc = PdfDocument::from_bytes(pdf).expect("parse");
     let plates = render_separations(&doc, 0, 72).expect("render");
 
@@ -464,7 +473,6 @@ fn b1_qa1_imagemask_decode_inverted_no_paint_byte_exact() {
     let mut im_obj = Vec::from(im_hdr.as_bytes());
     im_obj.extend_from_slice(imgmask_data);
     im_obj.extend_from_slice(b"\nendstream\nendobj\n");
-    let im_obj_str = unsafe { String::from_utf8_unchecked(im_obj) };
 
     let content = "/K1 Do\n";
     let resources = format!(
@@ -472,7 +480,7 @@ fn b1_qa1_imagemask_decode_inverted_no_paint_byte_exact() {
          /XObject << /K1 6 0 R >>",
         tint_func
     );
-    let pdf = build_pdf_with_output_intent(content, &resources, &icc, &[form_obj.as_str(), im_obj_str.as_str()]);
+    let pdf = build_pdf_with_output_intent(content, &resources, &icc, &[form_obj.as_bytes(), &im_obj]);
     let doc = PdfDocument::from_bytes(pdf).expect("parse");
     let plates = render_separations(&doc, 0, 72).expect("render");
 

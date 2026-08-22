@@ -1,32 +1,37 @@
+// Tests run under the workspace's `unsafe_code = "deny"`. These stream bodies carry
+// binary sample data, so they are not valid UTF-8 -- that is why the original used
+// `from_utf8_unchecked`. A test has no performance reason to skip validation, and the
+// assertions below only ever match ASCII substrings, so a lossy conversion is exact
+// for their purposes.
 //! Group B probes for image, ImageMask and Pattern spot-lane paints.
 //!
 //!  - B1: Image/ImageMask Do under /K iteration replay. Round 3's
-//!        nested-Form fix only covered Form Do; Image / ImageMask Do
-//!        as paint elements inside a /K group need coverage too. The
-//!        knockout-group code path resets sidecar lanes before each
-//!        element's replay (§11.4.6.2); the round-2 spot mirror runs
-//!        on Do paint. This probe pins the byte-exact result for two
-//!        consecutive ImageMask paints with different /Separation
-//!        fills inside the same /K group: the second paint's spot
-//!        lane must reflect ONLY the second source (last-paint-wins
-//!        against group's initial backdrop), the first paint's spot
-//!        lane must reflect ONLY the first.
+//!    nested-Form fix only covered Form Do; Image / ImageMask Do
+//!    as paint elements inside a /K group need coverage too. The
+//!    knockout-group code path resets sidecar lanes before each
+//!    element's replay (§11.4.6.2); the round-2 spot mirror runs
+//!    on Do paint. This probe pins the byte-exact result for two
+//!    consecutive ImageMask paints with different /Separation
+//!    fills inside the same /K group: the second paint's spot
+//!    lane must reflect ONLY the second source (last-paint-wins
+//!    against group's initial backdrop), the first paint's spot
+//!    lane must reflect ONLY the first.
 //!
 //!  - B2: Pattern colour space with /Separation underlying. A paint
-//!        like `0.6 scn /MyPatt` under colour space `[/Pattern
-//!        [/Separation /PMS185 /DeviceCMYK <tint>]]` carries a spot
-//!        tint via the underlying space. Before round 5 the spot
-//!        extractor returned empty for Pattern; round 5 walks into
-//!        the underlying space.
+//!    like `0.6 scn /MyPatt` under colour space `[/Pattern
+//!    [/Separation /PMS185 /DeviceCMYK <tint>]]` carries a spot
+//!    tint via the underlying space. Before round 5 the spot
+//!    extractor returned empty for Pattern; round 5 walks into
+//!    the underlying space.
 //!
 //!  - B3: Composite preview output (RGB) from a /Separation-bearing
-//!        page. The visible RGB at a spot pixel must reflect the
-//!        tint-transform value, NOT just process-channel rendering
-//!        with spots dropped. Setup: /Separation /PMS185 paint with
-//!        an explicit tint transform that maps 0.5 → (0, 1, 0)
-//!        (pure green). With α<1 and an /SMask the composite RGB
-//!        must come from the tint-transform output composed against
-//!        backdrop.
+//!    page. The visible RGB at a spot pixel must reflect the
+//!    tint-transform value, NOT just process-channel rendering
+//!    with spots dropped. Setup: /Separation /PMS185 paint with
+//!    an explicit tint transform that maps 0.5 → (0, 1, 0)
+//!    (pure green). With α<1 and an /SMask the composite RGB
+//!    must come from the tint-transform output composed against
+//!    backdrop.
 //!
 //! Spec citations:
 //!  - ISO 32000-1 §8.6.6.3 / §8.6.6.4 — Separation colour space +
@@ -50,7 +55,11 @@ fn build_pdf_with_output_intent(
     content: &str,
     resources_inner: &str,
     icc_profile: &[u8],
-    extra_objs: &[&str],
+    // Raw object bytes, not `&str`: these streams carry binary payloads (ICC profiles,
+    // image-mask samples) that are not valid UTF-8. A `String` round-trip would either be
+    // UB (`from_utf8_unchecked`) or corrupt them (`from_utf8_lossy` rewrites each invalid
+    // byte as U+FFFD, changing the samples and desynchronising the `/Length` they declare).
+    extra_objs: &[&[u8]],
 ) -> Vec<u8> {
     let mut buf: Vec<u8> = Vec::new();
     buf.extend_from_slice(b"%PDF-1.4\n");
@@ -80,7 +89,7 @@ fn build_pdf_with_output_intent(
     let mut extra_offs: Vec<usize> = Vec::new();
     for obj in extra_objs {
         extra_offs.push(buf.len());
-        buf.extend_from_slice(obj.as_bytes());
+        buf.extend_from_slice(obj);
     }
 
     let xref_off = buf.len();
@@ -256,7 +265,6 @@ fn b1_imagemask_do_inside_k_knockout_last_paint_wins_byte_exact() {
     let mut im_obj = Vec::from(im_hdr.as_bytes());
     im_obj.extend_from_slice(imgmask_data);
     im_obj.extend_from_slice(b"\nendstream\nendobj\n");
-    let im_obj_str = unsafe { String::from_utf8_unchecked(im_obj) };
 
     let content = "/K1 Do\n";
     let resources = format!(
@@ -264,7 +272,7 @@ fn b1_imagemask_do_inside_k_knockout_last_paint_wins_byte_exact() {
          /XObject << /K1 6 0 R >>",
         tint_func
     );
-    let pdf = build_pdf_with_output_intent(content, &resources, &icc, &[form_obj.as_str(), im_obj_str.as_str()]);
+    let pdf = build_pdf_with_output_intent(content, &resources, &icc, &[form_obj.as_bytes(), &im_obj]);
     let doc = PdfDocument::from_bytes(pdf).expect("parse");
     let plates = render_separations(&doc, 0, 72).expect("render");
 
@@ -526,7 +534,7 @@ fn b2_pattern_with_separation_underlying_indirect_ref_byte_exact() {
     let resources = "/ExtGState << /Ov << /Type /ExtGState /ca 0.5 >> >> \
                      /ColorSpace << /CS_PA [/Pattern 6 0 R] >>"
         .to_string();
-    let pdf = build_pdf_with_output_intent(content, &resources, &icc, &[underlying_obj.as_str()]);
+    let pdf = build_pdf_with_output_intent(content, &resources, &icc, &[underlying_obj.as_bytes()]);
     let doc = PdfDocument::from_bytes(pdf).expect("parse");
     let plates = render_separations(&doc, 0, 72).expect("render");
     let pms185 = centre(plate(&plates, "PMS185"));

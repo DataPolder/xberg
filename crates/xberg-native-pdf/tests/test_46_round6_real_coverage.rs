@@ -1,3 +1,8 @@
+// Tests run under the workspace's `unsafe_code = "deny"`. These stream bodies carry
+// binary sample data, so they are not valid UTF-8 -- that is why the original used
+// `from_utf8_unchecked`. A test has no performance reason to skip validation, and the
+// assertions below only ever match ASCII substrings, so a lossy conversion is exact
+// for their purposes.
 //! Round-6 probes for real coverage rasterisation of text / Image Do /
 //! Shading sh spot-lane writes.
 //!
@@ -34,7 +39,11 @@ fn build_pdf_with_output_intent(
     content: &str,
     resources_inner: &str,
     icc_profile: &[u8],
-    extra_objs: &[&str],
+    // Raw object bytes, not `&str`: these streams carry binary payloads (ICC profiles,
+    // image-mask samples) that are not valid UTF-8. A `String` round-trip would either be
+    // UB (`from_utf8_unchecked`) or corrupt them (`from_utf8_lossy` rewrites each invalid
+    // byte as U+FFFD, changing the samples and desynchronising the `/Length` they declare).
+    extra_objs: &[&[u8]],
 ) -> Vec<u8> {
     let mut buf: Vec<u8> = Vec::new();
     buf.extend_from_slice(b"%PDF-1.4\n");
@@ -69,7 +78,7 @@ fn build_pdf_with_output_intent(
     let mut extra_offs: Vec<usize> = Vec::new();
     for obj in extra_objs {
         extra_offs.push(buf.len());
-        buf.extend_from_slice(obj.as_bytes());
+        buf.extend_from_slice(obj);
     }
 
     let xref_off = buf.len();
@@ -217,7 +226,6 @@ fn round6_p1_image_mask_do_real_coverage_writes_only_painted_pixels() {
     form_full.extend_from_slice(form_obj.as_bytes());
     form_full.extend_from_slice(&stream_body);
     form_full.extend_from_slice(b"\nendstream\nendobj\n");
-    let form_str = unsafe { String::from_utf8_unchecked(form_full) };
 
     // The content stream sets fill to /Separation /InkA tint 1.0,
     // positions and paints the ImageMask Do. /ca 0.99 fires the
@@ -233,7 +241,7 @@ fn round6_p1_image_mask_do_real_coverage_writes_only_painted_pixels() {
          /ColorSpace << /CS_PMS [/Separation /InkA /DeviceCMYK {} ] >>",
         psfunc
     );
-    let pdf = build_pdf_with_output_intent(content, &resources, &icc, &[&form_str]);
+    let pdf = build_pdf_with_output_intent(content, &resources, &icc, &[&form_full]);
     let doc = PdfDocument::from_bytes(pdf).expect("synthetic PDF parses");
     let mut renderer = PageRenderer::new(RenderOptions::with_dpi(72).as_raw());
     let _img = renderer.render_page(&doc, 0).expect("render succeeds");
@@ -323,7 +331,7 @@ fn round6_p2_text_identical_rgb_collision_writes_spot_lane() {
          /ColorSpace << /CS_PMS [/Separation /InkA /DeviceCMYK {} ] >>",
         psfunc
     );
-    let pdf = build_pdf_with_output_intent(content, &resources, &icc, &[font_obj]);
+    let pdf = build_pdf_with_output_intent(content, &resources, &icc, &[font_obj.as_bytes()]);
     let doc = PdfDocument::from_bytes(pdf).expect("synthetic PDF parses");
     let mut renderer = PageRenderer::new(RenderOptions::with_dpi(72).as_raw());
     let _img = renderer.render_page(&doc, 0).expect("render succeeds");
@@ -396,7 +404,6 @@ fn round6_p3_image_mask_identical_rgb_collision_writes_spot_lane() {
     form_full.extend_from_slice(form_hdr.as_bytes());
     form_full.extend_from_slice(&stream_body);
     form_full.extend_from_slice(b"\nendstream\nendobj\n");
-    let form_str = unsafe { String::from_utf8_unchecked(form_full) };
 
     let content = "/Trig gs\n\
                    0 0 0 0 k\n0 0 100 100 re\nf\n\
@@ -408,7 +415,7 @@ fn round6_p3_image_mask_identical_rgb_collision_writes_spot_lane() {
          /ColorSpace << /CS_PMS [/Separation /InkA /DeviceCMYK {} ] >>",
         psfunc
     );
-    let pdf = build_pdf_with_output_intent(content, &resources, &icc, &[&form_str]);
+    let pdf = build_pdf_with_output_intent(content, &resources, &icc, &[&form_full]);
     let doc = PdfDocument::from_bytes(pdf).expect("synthetic PDF parses");
     let mut renderer = PageRenderer::new(RenderOptions::with_dpi(72).as_raw());
     let _img = renderer.render_page(&doc, 0).expect("render succeeds");
@@ -460,7 +467,7 @@ fn round6_p4_shading_sh_real_coverage_writes_clipped_footprint() {
          /ColorSpace << /CS_PMS [/Separation /InkA /DeviceCMYK {} ] >>",
         psfunc
     );
-    let pdf = build_pdf_with_output_intent(content, &resources, &icc, &[&shading_obj]);
+    let pdf = build_pdf_with_output_intent(content, &resources, &icc, &[shading_obj.as_bytes()]);
     let doc = PdfDocument::from_bytes(pdf).expect("synthetic PDF parses");
     let mut renderer = PageRenderer::new(RenderOptions::with_dpi(72).as_raw());
     let _img = renderer.render_page(&doc, 0).expect("render succeeds");
@@ -523,7 +530,7 @@ fn round6_p5_shading_identical_rgb_collision_writes_spot_lane() {
          /ColorSpace << /CS_PMS [/Separation /InkA /DeviceCMYK {} ] >>",
         psfunc
     );
-    let pdf = build_pdf_with_output_intent(content, &resources, &icc, &[&shading_obj]);
+    let pdf = build_pdf_with_output_intent(content, &resources, &icc, &[shading_obj.as_bytes()]);
     let doc = PdfDocument::from_bytes(pdf).expect("synthetic PDF parses");
     let mut renderer = PageRenderer::new(RenderOptions::with_dpi(72).as_raw());
     let _img = renderer.render_page(&doc, 0).expect("render succeeds");

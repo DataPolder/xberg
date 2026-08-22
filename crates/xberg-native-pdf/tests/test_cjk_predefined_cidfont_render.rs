@@ -16,6 +16,8 @@
 //!   non-trivial ink, contrasting the blank-page failure mode that occurs when
 //!   the substitution is absent.
 
+// ~keep: test/bench binaries print by design; org logging policy exempts tests
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)]
 #![cfg(feature = "cjk-render-fallback")]
 
 use xberg_native_pdf::document::PdfDocument;

@@ -89,8 +89,8 @@ fn pdf_painting_an_image_mask(indirect_height: bool, indirect_width: bool) -> Ve
 
     let xref = buf.len();
     buf.extend_from_slice(b"xref\n0 8\n0000000000 65535 f \n");
-    for id in 1..=7 {
-        buf.extend_from_slice(format!("{:010} 00000 n \n", off[id]).as_bytes());
+    for &offset in &off[1..=7] {
+        buf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
     }
     buf.extend_from_slice(b"trailer\n<< /Size 8 /Root 1 0 R >>\nstartxref\n");
     buf.extend_from_slice(format!("{xref}\n%%EOF\n").as_bytes());

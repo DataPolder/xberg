@@ -67,8 +67,8 @@ end
     }
     let xref = out.len();
     out.extend_from_slice(b"xref\n0 9\n0000000000 65535 f \n");
-    for id in 1..=8 {
-        out.extend_from_slice(format!("{:010} 00000 n \n", offsets[id]).as_bytes());
+    for &offset in &offsets[1..=8] {
+        out.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
     }
     out.extend_from_slice(format!("trailer\n<< /Size 9 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes());
     out
@@ -120,8 +120,8 @@ fn build_rksj(content_stream: &[u8]) -> Vec<u8> {
     }
     let xref = out.len();
     out.extend_from_slice(b"xref\n0 8\n0000000000 65535 f \n");
-    for id in 1..=7 {
-        out.extend_from_slice(format!("{:010} 00000 n \n", offsets[id]).as_bytes());
+    for &offset in &offsets[1..=7] {
+        out.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
     }
     out.extend_from_slice(format!("trailer\n<< /Size 8 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes());
     out

@@ -181,6 +181,10 @@ fn remove_footers_preserves_real_prose_overlapping_band() {
     let doc = PdfDocument::from_bytes(bytes).unwrap();
     doc.remove_footers(0.5).unwrap();
 
+    // `page` is a page NUMBER, not merely an index: it is passed to `extract_text` and
+    // interpolated into the failure message. Iterating `excerpts` by reference would force
+    // `.enumerate()` just to recover it, which reads worse than the range. ~keep
+    #[allow(clippy::needless_range_loop)]
     for page in 0..5 {
         let text = doc.extract_text(page).unwrap();
         for line in excerpts[page] {

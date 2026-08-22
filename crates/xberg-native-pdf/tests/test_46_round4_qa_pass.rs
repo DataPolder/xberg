@@ -5,7 +5,7 @@
 //! mandatory adversarial cases:
 //!  - (a) DeviceN /Process subtype source-CS classification.
 //!  - (b) cross-path identity vs per-plate walker (synthetic transparency
-//!        trigger forces composite-then-decompose).
+//!    trigger forces composite-then-decompose).
 //!  - (c) OPM=1 scope for non-CMYK direct paints.
 //!  - (d) stale `fill_color_cmyk` clearing scope, incl. Pattern.
 //!  - (e) gray→CMYK conversion baseline.

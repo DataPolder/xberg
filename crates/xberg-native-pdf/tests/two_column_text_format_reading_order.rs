@@ -4,9 +4,9 @@
 //! Unlike the clean wide-gutter case in `two_column_reading_order.rs`, a
 //! reference Bible page has the three features that defeat geometric column
 //! detection at the whole-page level:
-//!   * a **full-width book-title line** that spans both columns and the gutter,
-//!   * a **narrow gutter** (≈30 pt), and
-//!   * **short, ragged verse lines** with leading marginal numerals.
+//! * a **full-width book-title line** that spans both columns and the gutter,
+//! * a **narrow gutter** (≈30 pt), and
+//! * **short, ragged verse lines** with leading marginal numerals.
 //!
 //! The left column (verses 1–6) must be read top-to-bottom before the right
 //! column (verses 14–19); a row-by-row scan across the gutter interleaves them
@@ -65,8 +65,8 @@ fn kjf_two_column_pdf() -> Vec<u8> {
 
     let xref = buf.len();
     buf.extend_from_slice(b"xref\n0 6\n0000000000 65535 f \n");
-    for id in 1..=5 {
-        buf.extend_from_slice(format!("{:010} 00000 n \n", off[id]).as_bytes());
+    for &offset in &off[1..=5] {
+        buf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
     }
     buf.extend_from_slice(b"trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n");
     buf.extend_from_slice(format!("{xref}\n%%EOF\n").as_bytes());

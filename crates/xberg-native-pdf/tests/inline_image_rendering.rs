@@ -41,8 +41,8 @@ fn pdf_with_full_page_inline_image(dict: &str, samples: &[u8]) -> Vec<u8> {
 
     let xref = buf.len();
     buf.extend_from_slice(b"xref\n0 5\n0000000000 65535 f \n");
-    for id in 1..=4 {
-        buf.extend_from_slice(format!("{:010} 00000 n \n", off[id]).as_bytes());
+    for &offset in &off[1..=4] {
+        buf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
     }
     buf.extend_from_slice(b"trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n");
     buf.extend_from_slice(format!("{xref}\n%%EOF\n").as_bytes());
@@ -103,8 +103,8 @@ fn inline_image_mask_paints_with_current_fill_colour() {
     buf.extend_from_slice(b"\nendstream\nendobj\n");
     let xref = buf.len();
     buf.extend_from_slice(b"xref\n0 5\n0000000000 65535 f \n");
-    for id in 1..=4 {
-        buf.extend_from_slice(format!("{:010} 00000 n \n", off[id]).as_bytes());
+    for &offset in &off[1..=4] {
+        buf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
     }
     buf.extend_from_slice(b"trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n");
     buf.extend_from_slice(format!("{xref}\n%%EOF\n").as_bytes());

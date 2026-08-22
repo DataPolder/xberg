@@ -47,6 +47,9 @@
 //! OCR/scan placement — פרק is drawn first (it sits physically to the
 //! left) and ביצה is drawn second (physically to the right).
 
+// ~keep: test/bench binaries print by design; org logging policy exempts tests
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)]
+
 use xberg_native_pdf::PdfDocument;
 
 /// Minimal untagged one-page PDF: a simple TrueType font (`/FirstChar 0`,
@@ -100,8 +103,8 @@ fn build_pdf(tounicode_bfchars: &str, widths: &str, last_char: usize, content_op
 
     let xref_off = buf.len();
     buf.extend_from_slice(b"xref\n0 7\n0000000000 65535 f \n");
-    for id in 1..=6 {
-        buf.extend_from_slice(format!("{:010} 00000 n \n", off[id]).as_bytes());
+    for &offset in &off[1..=6] {
+        buf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
     }
     buf.extend_from_slice(b"trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n");
     buf.extend_from_slice(format!("{xref_off}\n%%EOF\n").as_bytes());

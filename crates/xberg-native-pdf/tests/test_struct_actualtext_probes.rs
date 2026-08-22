@@ -15,6 +15,8 @@
 //!   - cross-path consistency at the structured surface
 //!   - mutability / per-call lifecycle
 
+// ~keep: test/bench binaries print by design; org logging policy exempts tests
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)]
 #![allow(clippy::useless_vec)]
 
 use xberg_native_pdf::converters::ConversionOptions;

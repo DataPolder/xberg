@@ -92,8 +92,8 @@ fn table_pdf(tagged: bool) -> Vec<u8> {
 
     let xref = buf.len();
     buf.extend_from_slice(b"xref\n0 21\n0000000000 65535 f \n");
-    for id in 1..=20 {
-        buf.extend_from_slice(format!("{:010} 00000 n \n", off[id]).as_bytes());
+    for offset in &off[1..=20] {
+        buf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
     }
     buf.extend_from_slice(b"trailer\n<< /Size 21 /Root 1 0 R >>\nstartxref\n");
     buf.extend_from_slice(format!("{xref}\n%%EOF\n").as_bytes());
@@ -185,8 +185,8 @@ fn tagged_pdf(content: &[u8], struct_objs: &[String]) -> Vec<u8> {
 
     let xref = buf.len();
     buf.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", last + 1).as_bytes());
-    for id in 1..=last {
-        buf.extend_from_slice(format!("{:010} 00000 n \n", off[id]).as_bytes());
+    for offset in &off[1..=last] {
+        buf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
     }
     buf.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n", last + 1).as_bytes());
     buf.extend_from_slice(format!("{xref}\n%%EOF\n").as_bytes());

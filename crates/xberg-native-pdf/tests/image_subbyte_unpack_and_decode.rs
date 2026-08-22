@@ -1,7 +1,7 @@
 //! Extracted raster pixels must match the image's decoded samples:
 //!
 //! * A sub-byte image (1/2/4 bits per component) must be unpacked to one
-//!    8-bit sample per pixel — `PixelFormat::Grayscale` promises
+//!   8-bit sample per pixel — `PixelFormat::Grayscale` promises
 //!   `width × height × bytes_per_pixel` bytes, and a packed buffer breaks
 //!   every consumer that builds an image from it.
 //! * A non-default `/Decode` array must be applied to the samples
@@ -38,8 +38,8 @@ fn build_pdf(image_dict: &str, image_data: &[u8]) -> Vec<u8> {
     }
     let xref = out.len();
     out.extend_from_slice(b"xref\n0 6\n0000000000 65535 f \n");
-    for id in 1..=5 {
-        out.extend_from_slice(format!("{:010} 00000 n \n", offsets[id]).as_bytes());
+    for offset in &offsets[1..=5] {
+        out.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
     }
     out.extend_from_slice(format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes());
     out

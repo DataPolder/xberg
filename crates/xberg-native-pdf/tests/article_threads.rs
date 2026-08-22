@@ -67,8 +67,8 @@ fn threaded_pdf() -> Vec<u8> {
 
     let xref_off = buf.len();
     buf.extend_from_slice(b"xref\n0 9\n0000000000 65535 f \n");
-    for id in 1..=8 {
-        buf.extend_from_slice(format!("{:010} 00000 n \n", off[id]).as_bytes());
+    for offset in &off[1..=8] {
+        buf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
     }
     buf.extend_from_slice(b"trailer\n<< /Size 9 /Root 1 0 R >>\nstartxref\n");
     buf.extend_from_slice(format!("{xref_off}\n%%EOF\n").as_bytes());
@@ -112,8 +112,8 @@ fn document_without_threads_yields_none() {
     );
     let xref_off = buf.len();
     buf.extend_from_slice(b"xref\n0 4\n0000000000 65535 f \n");
-    for id in 1..=3 {
-        buf.extend_from_slice(format!("{:010} 00000 n \n", off[id]).as_bytes());
+    for offset in &off[1..=3] {
+        buf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
     }
     buf.extend_from_slice(b"trailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n");
     buf.extend_from_slice(format!("{xref_off}\n%%EOF\n").as_bytes());

@@ -42,6 +42,30 @@ use xberg_native_pdf::rendering::{ImageFormat, RenderOptions, render_page};
 /// writes via this mutex keeps two tests' settings from colliding.
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
+/// Clear `NATIVE_PDF_RESOLUTION_PIPELINE` from the process environment.
+///
+/// # Safety
+/// `std::env::remove_var` is `unsafe` because mutating the process
+/// environment races with any other thread reading or writing it. Every
+/// call site in this file holds `ENV_LOCK` for the full
+/// clear/set/render/reset sequence, and this test binary is the only
+/// reader or writer of this specific variable, so no other thread can
+/// observe or race the mutation.
+#[allow(unsafe_code)]
+fn clear_pipeline_env_var() {
+    unsafe { std::env::remove_var("NATIVE_PDF_RESOLUTION_PIPELINE") };
+}
+
+/// Set `NATIVE_PDF_RESOLUTION_PIPELINE` to `value` in the process environment.
+///
+/// # Safety
+/// See [`clear_pipeline_env_var`]: every call site holds `ENV_LOCK` for the
+/// whole sequence and no other thread touches this variable.
+#[allow(unsafe_code)]
+fn set_pipeline_env_var(value: &str) {
+    unsafe { std::env::set_var("NATIVE_PDF_RESOLUTION_PIPELINE", value) };
+}
+
 /// Build a one-page PDF whose content stream is `content_ops`, with a
 /// fixed 100×100 MediaBox and the provided `/Resources` dict body.
 fn build_pdf(content_ops: &str, resources_dict: &str) -> Vec<u8> {
@@ -386,12 +410,11 @@ fn qa_wave5_env_var_one_is_inert() {
     let doc = PdfDocument::from_bytes(bytes).expect("PDF parses");
 
     let _guard = ENV_LOCK.lock().unwrap();
-    // SAFETY: env-var mutation across threads is normally UB; the
-    unsafe { std::env::remove_var("NATIVE_PDF_RESOLUTION_PIPELINE") };
+    clear_pipeline_env_var();
     let baseline = render(&doc);
-    unsafe { std::env::set_var("NATIVE_PDF_RESOLUTION_PIPELINE", "1") };
+    set_pipeline_env_var("1");
     let with_one = render(&doc);
-    unsafe { std::env::remove_var("NATIVE_PDF_RESOLUTION_PIPELINE") };
+    clear_pipeline_env_var();
 
     assert_eq!(
         baseline, with_one,
@@ -419,11 +442,11 @@ fn qa_wave5_env_var_zero_is_inert() {
     let doc = PdfDocument::from_bytes(bytes).expect("PDF parses");
 
     let _guard = ENV_LOCK.lock().unwrap();
-    unsafe { std::env::remove_var("NATIVE_PDF_RESOLUTION_PIPELINE") };
+    clear_pipeline_env_var();
     let baseline = render(&doc);
-    unsafe { std::env::set_var("NATIVE_PDF_RESOLUTION_PIPELINE", "0") };
+    set_pipeline_env_var("0");
     let with_zero = render(&doc);
-    unsafe { std::env::remove_var("NATIVE_PDF_RESOLUTION_PIPELINE") };
+    clear_pipeline_env_var();
 
     assert_eq!(
         baseline, with_zero,
@@ -452,15 +475,15 @@ fn qa_wave5_env_var_arbitrary_values_inert() {
     let doc = PdfDocument::from_bytes(bytes).expect("PDF parses");
 
     let _guard = ENV_LOCK.lock().unwrap();
-    unsafe { std::env::remove_var("NATIVE_PDF_RESOLUTION_PIPELINE") };
+    clear_pipeline_env_var();
     let baseline = render(&doc);
-    unsafe { std::env::set_var("NATIVE_PDF_RESOLUTION_PIPELINE", "true") };
+    set_pipeline_env_var("true");
     let with_true = render(&doc);
-    unsafe { std::env::set_var("NATIVE_PDF_RESOLUTION_PIPELINE", "FALSE") };
+    set_pipeline_env_var("FALSE");
     let with_false_caps = render(&doc);
-    unsafe { std::env::set_var("NATIVE_PDF_RESOLUTION_PIPELINE", "garbage-string") };
+    set_pipeline_env_var("garbage-string");
     let with_garbage = render(&doc);
-    unsafe { std::env::remove_var("NATIVE_PDF_RESOLUTION_PIPELINE") };
+    clear_pipeline_env_var();
 
     assert_eq!(baseline, with_true);
     assert_eq!(baseline, with_false_caps);

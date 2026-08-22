@@ -14,6 +14,9 @@
 //! resolution pipeline (the only paint path), and either compares the
 //! pixmap shape or samples specific pixels.
 
+// ~keep: test/bench binaries print by design; org logging policy exempts tests
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)]
+
 use xberg_native_pdf::document::PdfDocument;
 use xberg_native_pdf::rendering::{ImageFormat, RenderOptions, render_page};
 

@@ -1,40 +1,45 @@
+// Tests run under the workspace's `unsafe_code = "deny"`. These stream bodies carry
+// binary sample data, so they are not valid UTF-8 -- that is why the original used
+// `from_utf8_unchecked`. A test has no performance reason to skip validation, and the
+// assertions below only ever match ASCII substrings, so a lossy conversion is exact
+// for their purposes.
 //! Group A probes for DeviceN /Process polish.
 //!
 //! Closes the deferred items round 4 surfaced and adds spec coverage
 //! that no prior fixture exercised:
 //!
 //!  - A1: ICCBased /Process /ColorSpace overprint path. The fallback
-//!        documented as `HONEST_GAP_DEVICEN_PROCESS_ICC_OVERPRINT`
-//!        treated /Process /ColorSpace [/ICCBased <stream>] as
-//!        unresolved, falling through to a lossy §10.3.5 RGB inverse
-//!        and zeroing K. Round 5 reads the ICC profile's input-channel
-//!        count via the existing `IccProfile::parse` cross-check
-//!        infrastructure; when N=4, the source tints are accepted as
-//!        the destination CMYK directly (§8.6.6.5 "values associated
-//!        with the process components shall be stored in their natural
-//!        form"). When N=3 or N=1 the embedded profile's CMM converts
-//!        through sRGB and a §10.3.5 inverse recovers CMYK — same shape
-//!        as the inline /DeviceRGB / /DeviceGray /Process arms.
+//!    documented as `HONEST_GAP_DEVICEN_PROCESS_ICC_OVERPRINT`
+//!    treated /Process /ColorSpace [/ICCBased <stream>] as
+//!    unresolved, falling through to a lossy §10.3.5 RGB inverse
+//!    and zeroing K. Round 5 reads the ICC profile's input-channel
+//!    count via the existing `IccProfile::parse` cross-check
+//!    infrastructure; when N=4, the source tints are accepted as
+//!    the destination CMYK directly (§8.6.6.5 "values associated
+//!    with the process components shall be stored in their natural
+//!    form"). When N=3 or N=1 the embedded profile's CMM converts
+//!    through sRGB and a §10.3.5 inverse recovers CMYK — same shape
+//!    as the inline /DeviceRGB / /DeviceGray /Process arms.
 //!
 //!  - A2: /NChannel + /Process /DeviceRGB. No fixture pinned the
-//!        §8.6.6.5 RGB process attribution arm under /NChannel.
+//!    §8.6.6.5 RGB process attribution arm under /NChannel.
 //!
 //!  - A3: Mixed DeviceN with process prefix + spot tail. /Cyan
-//!        /Magenta /Yellow /Black process prefix + /PMS185 spot tail,
-//!        scn 5-arg. Verifies process and spot lanes both receive the
-//!        correct tints under overprint.
+//!    /Magenta /Yellow /Black process prefix + /PMS185 spot tail,
+//!    scn 5-arg. Verifies process and spot lanes both receive the
+//!    correct tints under overprint.
 //!
 //!  - A4: /DeviceN /Process initial colour per §8.6.8. `cs /CS_N` with
-//!        a /Process /CMYK + 4-component /Components must populate the
-//!        CMYK identity from the initial tint values (all 1.0) so an
-//!        overprint between `cs` and `scn` sees (1, 1, 1, 1) source
-//!        rather than the post-round-4 stale None.
+//!    a /Process /CMYK + 4-component /Components must populate the
+//!    CMYK identity from the initial tint values (all 1.0) so an
+//!    overprint between `cs` and `scn` sees (1, 1, 1, 1) source
+//!    rather than the post-round-4 stale None.
 //!
 //!  - A5: /Process /Components mismatched-names policy. When a
-//!        /Components name does not appear in /Names, the implementation
-//!        returns None and the call site falls through to the §10.3.5
-//!        RGB inverse. Round 5 pins this as a HONEST_GAP and emits a
-//!        log warning per the round-1 spot extraction precedent.
+//!    /Components name does not appear in /Names, the implementation
+//!    returns None and the call site falls through to the §10.3.5
+//!    RGB inverse. Round 5 pins this as a HONEST_GAP and emits a
+//!    log warning per the round-1 spot extraction precedent.
 //!
 //! Spec citations:
 //!  - ISO 32000-1 §8.6.5.5 — ICCBased colour spaces
@@ -135,7 +140,11 @@ fn build_pdf_with_output_intent(
     content: &str,
     resources_inner: &str,
     icc_profile: &[u8],
-    extra_objs: &[&str],
+    // Raw object bytes, not `&str`: these streams carry binary payloads (ICC profiles,
+    // image-mask samples) that are not valid UTF-8. A `String` round-trip would either be
+    // UB (`from_utf8_unchecked`) or corrupt them (`from_utf8_lossy` rewrites each invalid
+    // byte as U+FFFD, changing the samples and desynchronising the `/Length` they declare).
+    extra_objs: &[&[u8]],
 ) -> Vec<u8> {
     let mut buf: Vec<u8> = Vec::new();
     buf.extend_from_slice(b"%PDF-1.4\n");
@@ -165,7 +174,7 @@ fn build_pdf_with_output_intent(
     let mut extra_offs: Vec<usize> = Vec::new();
     for obj in extra_objs {
         extra_offs.push(buf.len());
-        buf.extend_from_slice(obj.as_bytes());
+        buf.extend_from_slice(obj);
     }
 
     let xref_off = buf.len();
@@ -321,8 +330,7 @@ fn a1_devicen_process_iccbased_n4_overprint_byte_exact() {
     let mut process_icc_obj_bytes = Vec::from(process_icc_obj.as_bytes());
     process_icc_obj_bytes.extend_from_slice(&process_icc);
     process_icc_obj_bytes.extend_from_slice(b"\nendstream\nendobj\n");
-    let process_icc_obj_str = unsafe { String::from_utf8_unchecked(process_icc_obj_bytes) };
-    let pdf = build_pdf_with_output_intent(content, &resources, &icc, &[process_icc_obj_str.as_str()]);
+    let pdf = build_pdf_with_output_intent(content, &resources, &icc, &[&process_icc_obj_bytes]);
     let doc = PdfDocument::from_bytes(pdf).expect("parse");
     let plates = render_separations(&doc, 0, 72).expect("render");
 

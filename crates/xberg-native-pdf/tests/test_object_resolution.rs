@@ -1,5 +1,8 @@
 //! Test object resolution and xref handling.
 
+// ~keep: test/bench binaries print by design; org logging policy exempts tests
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)]
+
 use std::fs;
 use std::path::PathBuf;
 use xberg_native_pdf::document::PdfDocument;

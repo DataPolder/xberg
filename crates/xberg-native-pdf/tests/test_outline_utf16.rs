@@ -2,6 +2,9 @@
 //! by default). `/Title` may be a UTF-16BE string with a `FEFF` BOM,
 //! expressed either as a literal `(...)` or hex `<...>` string.
 
+// ~keep: test/bench binaries print by design; org logging policy exempts tests
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)]
+
 use xberg_native_pdf::document::PdfDocument;
 
 /// Build a minimal one-page PDF whose outline has two bookmarks, both

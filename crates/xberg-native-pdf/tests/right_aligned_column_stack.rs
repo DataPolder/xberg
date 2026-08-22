@@ -76,8 +76,8 @@ fn right_aligned_stacks_pdf_at(scale: f32) -> Vec<u8> {
     );
     let xref = buf.len();
     buf.extend_from_slice(b"xref\n0 6\n0000000000 65535 f \n");
-    for id in 1..=5 {
-        buf.extend_from_slice(format!("{:010} 00000 n \n", off[id]).as_bytes());
+    for &offset in &off[1..=5] {
+        buf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
     }
     buf.extend_from_slice(b"trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n");
     buf.extend_from_slice(format!("{xref}\n%%EOF\n").as_bytes());

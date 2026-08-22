@@ -6,8 +6,8 @@
 //! and asserts the decoded bytes, so the two defects that made inline images
 //! silently vanish stay fixed end to end:
 //!
-//!   1. the implied `/Subtype /Image` (s8.9.7) the decoder requires;
-//!   2. the ABBREVIATED VALUES (Table 93/94): `/CS /RGB`, `/F /Fl`.
+//! 1. the implied `/Subtype /Image` (s8.9.7) the decoder requires;
+//! 2. the ABBREVIATED VALUES (Table 93/94): `/CS /RGB`, `/F /Fl`.
 //!
 //! Both were dropped by `if let Ok(..)` at the call sites, so the failure mode
 //! was not an error - it was an image that was simply not there.
@@ -47,8 +47,8 @@ fn pdf_with_inline_image(dict: &str, samples: &[u8]) -> Vec<u8> {
 
     let xref = buf.len();
     buf.extend_from_slice(b"xref\n0 5\n0000000000 65535 f \n");
-    for id in 1..=4 {
-        buf.extend_from_slice(format!("{:010} 00000 n \n", off[id]).as_bytes());
+    for &offset in &off[1..=4] {
+        buf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
     }
     buf.extend_from_slice(b"trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n");
     buf.extend_from_slice(format!("{xref}\n%%EOF\n").as_bytes());

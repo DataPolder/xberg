@@ -1341,6 +1341,9 @@ fn qa_image_mask_multiply_blend_mode_paints_against_white() {
 /// indirect Type 4 function (object 6) whose `Domain` accommodates a
 /// variable number of inputs (used for DeviceN). The Separation /
 /// DeviceN colour space is set via `resources_extra`.
+// test helper: every parameter is a distinct, independently varied piece of the
+// hand-built PDF; grouping them would only rename the same positional list. ~keep
+#[allow(clippy::too_many_arguments)]
 fn build_pdf_image_mask_with_devicen_type4(
     content_ops: &str,
     resources_extra: &str,

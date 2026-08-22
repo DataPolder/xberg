@@ -2,6 +2,9 @@
 //!
 //! Path Objects Extraction
 
+// ~keep: test/bench binaries print by design; org logging policy exempts tests
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)]
+
 use xberg_native_pdf::document::PdfDocument;
 use xberg_native_pdf::elements::{LineCap, LineJoin, PathContent, PathOperation};
 use xberg_native_pdf::extractors::paths::{FillRule, PathExtractor};

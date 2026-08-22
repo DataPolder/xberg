@@ -19,7 +19,8 @@
 //! single malformed relationship aborts (or previously would have aborted) the
 //! calling process.
 
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
+// ~keep: test/bench binaries print by design; org logging policy exempts tests
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)]
 
 mod helpers;
 use helpers::extract_bytes_document_blocking;

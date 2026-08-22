@@ -1,3 +1,5 @@
+// ~keep: test/bench binaries print by design; org logging policy exempts tests
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)]
 #![allow(clippy::field_reassign_with_default)]
 //! Performance profiling and baseline metrics for Word Boundary Enhancement (Phase 9)
 //!

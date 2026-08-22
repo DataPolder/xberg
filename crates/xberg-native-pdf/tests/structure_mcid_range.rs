@@ -24,8 +24,8 @@ fn stream(buf: &mut Vec<u8>, off: &mut [usize], id: usize, data: &[u8]) {
 fn finish(buf: &mut Vec<u8>, off: &[usize], max_id: usize) {
     let xref = buf.len();
     buf.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", max_id + 1).as_bytes());
-    for id in 1..=max_id {
-        buf.extend_from_slice(format!("{:010} 00000 n \n", off[id]).as_bytes());
+    for offset in &off[1..=max_id] {
+        buf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
     }
     buf.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n", max_id + 1).as_bytes());
     buf.extend_from_slice(format!("{xref}\n%%EOF\n").as_bytes());

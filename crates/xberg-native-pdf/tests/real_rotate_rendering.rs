@@ -39,8 +39,8 @@ fn rotated_pdf(rotate_literal: &str) -> Vec<u8> {
 
     let xref = buf.len();
     buf.extend_from_slice(b"xref\n0 5\n0000000000 65535 f \n");
-    for id in 1..=4 {
-        buf.extend_from_slice(format!("{:010} 00000 n \n", off[id]).as_bytes());
+    for &offset in &off[1..=4] {
+        buf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
     }
     buf.extend_from_slice(b"trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n");
     buf.extend_from_slice(format!("{xref}\n%%EOF\n").as_bytes());
