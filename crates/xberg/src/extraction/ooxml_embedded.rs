@@ -349,6 +349,10 @@ mod tests {
     /// Build a CFB (OLE compound file) with a single "Package" stream holding `payload`,
     /// the shape OLE object wrappers use to embed a modern Office (OPC/ZIP) document
     /// verbatim.
+    // Only consumer is `test_ole_package_stream_extracted_as_embedded_xlsx`, which is
+    // `#[cfg(feature = "excel")]` for the reason documented on it. Matching that gate here
+    // keeps an `office`-without-`excel` build warning-free.
+    #[cfg(feature = "excel")]
     fn make_ole_package(payload: &[u8]) -> Vec<u8> {
         let cursor = Cursor::new(Vec::new());
         let mut comp = cfb::CompoundFile::create(cursor).expect("create CFB container");
@@ -372,6 +376,7 @@ mod tests {
     }
 
     /// Path to the shared `test_documents/` corpus (two levels up from this crate).
+    #[cfg(feature = "excel")]
     fn test_documents_dir() -> std::path::PathBuf {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent()

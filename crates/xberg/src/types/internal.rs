@@ -97,22 +97,6 @@ impl InternalElementId {
         Self(buf)
     }
 
-    /// Create from a pre-computed ID string.
-    ///
-    /// The input must be exactly 15 bytes in `"ie-{12 hex}"` format.
-    /// Panics if the input length is not 15.
-    #[allow(dead_code)]
-    pub fn new(id: &str) -> Self {
-        assert!(
-            id.len() == 15,
-            "InternalElementId must be exactly 15 bytes, got {}",
-            id.len()
-        );
-        let mut buf = [0u8; 15];
-        buf.copy_from_slice(id.as_bytes());
-        Self(buf)
-    }
-
     /// Get the ID as a string slice.
     pub(crate) fn as_str(&self) -> &str {
         std::str::from_utf8(&self.0).unwrap()
