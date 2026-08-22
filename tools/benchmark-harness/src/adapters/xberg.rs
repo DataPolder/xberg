@@ -118,7 +118,12 @@ fn xberg_framework_name(
         XbergPdfBackend::Pdfium => "-pdfium",
     };
     if batch {
-        format!("xberg-{}-{}{}-batch", format_slug, pipeline.as_str(), pdf_backend_suffix)
+        format!(
+            "xberg-{}-{}{}-batch",
+            format_slug,
+            pipeline.as_str(),
+            pdf_backend_suffix
+        )
     } else {
         format!("xberg-{}-{}{}", format_slug, pipeline.as_str(), pdf_backend_suffix)
     }
@@ -520,9 +525,17 @@ mod tests {
     /// results under `tools/benchmark-harness/results/` stop being comparable to new runs.
     #[test]
     fn native_pdf_backend_keeps_todays_framework_name() {
-        for (batch, expected) in [(false, "xberg-markdown-baseline"), (true, "xberg-markdown-baseline-batch")] {
+        for (batch, expected) in [
+            (false, "xberg-markdown-baseline"),
+            (true, "xberg-markdown-baseline-batch"),
+        ] {
             assert_eq!(
-                xberg_framework_name(XbergPipeline::Baseline, OutputFormat::Markdown, batch, XbergPdfBackend::Native),
+                xberg_framework_name(
+                    XbergPipeline::Baseline,
+                    OutputFormat::Markdown,
+                    batch,
+                    XbergPdfBackend::Native
+                ),
                 expected
             );
         }
@@ -535,7 +548,12 @@ mod tests {
             (true, "xberg-markdown-baseline-pdfium-batch"),
         ] {
             assert_eq!(
-                xberg_framework_name(XbergPipeline::Baseline, OutputFormat::Markdown, batch, XbergPdfBackend::Pdfium),
+                xberg_framework_name(
+                    XbergPipeline::Baseline,
+                    OutputFormat::Markdown,
+                    batch,
+                    XbergPdfBackend::Pdfium
+                ),
                 expected
             );
         }
