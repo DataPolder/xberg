@@ -93,14 +93,10 @@ fn enforce_page_limit(content: &[u8], config: &ExtractionConfig) -> Result<()> {
         return Ok(());
     };
 
-    if page_count > max_pages {
-        return Err(crate::extractors::security::SecurityError::TooManyPages {
-            count: page_count,
-            max: max_pages,
-        }
-        .into());
-    }
-    Ok(())
+    Ok(crate::extractors::security::enforce_page_count(
+        page_count,
+        Some(max_pages),
+    )?)
 }
 
 /// Page count via `pdf_oxide`. `None` when it cannot open or count the document,
@@ -4056,11 +4052,8 @@ mod tests {
             }
         };
 
-        let result = crate::extraction::derive::derive_extraction_result(
-            doc,
-            true,
-            crate::core::config::OutputFormat::Plain,
-        );
+        let result =
+            crate::extraction::derive::derive_extraction_result(doc, true, crate::core::config::OutputFormat::Plain);
 
         assert!(
             result.content.contains("The Evolution of the Word Processor"),
@@ -4073,14 +4066,10 @@ mod tests {
             result.content
         );
 
-        let page_count = result
-            .metadata
-            .format
-            .as_ref()
-            .and_then(|format| match format {
-                crate::types::FormatMetadata::Pdf(pdf) => pdf.page_count,
-                _ => None,
-            });
+        let page_count = result.metadata.format.as_ref().and_then(|format| match format {
+            crate::types::FormatMetadata::Pdf(pdf) => pdf.page_count,
+            _ => None,
+        });
         assert_eq!(page_count, Some(5), "multi_page.pdf has 5 pages");
     }
 

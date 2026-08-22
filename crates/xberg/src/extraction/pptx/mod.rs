@@ -80,6 +80,10 @@ pub struct PptxExtractionOptions {
     /// `ExtractionConfig.security_limits.max_files_in_archive`. Defaults to
     /// `SecurityLimits::default().max_files_in_archive` when unset.
     pub max_files_in_archive: usize,
+    /// Maximum number of slides the presentation may contain, from
+    /// `ExtractionConfig.security_limits.max_pages` (#1451). `None` (the
+    /// default) means unlimited.
+    pub max_pages: Option<usize>,
 }
 
 /// Crate-internal PPTX extraction output.
@@ -109,8 +113,24 @@ impl Default for PptxExtractionOptions {
             include_structure: false,
             inject_placeholders: true,
             max_files_in_archive: crate::extractors::security::SecurityLimits::default().max_files_in_archive,
+            max_pages: crate::extractors::security::SecurityLimits::default().max_pages,
         }
     }
+}
+
+/// Reject a presentation whose slide count exceeds `options.max_pages` before any
+/// per-slide work (text rendering, chart/diagram resolution, image lookup) begins
+/// (#1451).
+///
+/// Unlike PDF, where the page count needs a fallback parser because some
+/// documents defeat the primary one (see `extractors::pdf::enforce_page_limit`),
+/// a PPTX's slide count has no such failure mode here: `PptxContainer::open`/
+/// `from_bytes` already resolve `slide_paths` (via
+/// `ppt/_rels/presentation.xml.rels`, falling back to scanning
+/// `ppt/slides/slideN.xml` names) before this function ever runs, so the count is
+/// exact by the time it is checked.
+fn enforce_slide_limit(slide_count: usize, max_pages: Option<usize>) -> Result<()> {
+    Ok(crate::extractors::security::enforce_page_count(slide_count, max_pages)?)
 }
 
 /// Join text runs with smart spacing: inserts a space between adjacent runs
@@ -185,6 +205,8 @@ fn extract_pptx_from_container<R: std::io::Read + std::io::Seek>(
     options: &PptxExtractionOptions,
     warnings: &mut Vec<ProcessingWarning>,
 ) -> Result<PptxInternalExtraction> {
+    enforce_slide_limit(container.slide_paths().len(), options.max_pages)?;
+
     let config = ParserConfig {
         extract_images: options.extract_images,
         plain: options.plain,
@@ -840,7 +862,7 @@ impl elements::Slide {
 pub(crate) mod tests {
     use super::*;
 
-    fn create_test_pptx_bytes(slides: Vec<&str>) -> Vec<u8> {
+    pub(crate) fn create_test_pptx_bytes(slides: Vec<&str>) -> Vec<u8> {
         use std::io::Write;
         use zip::write::{SimpleFileOptions, ZipWriter};
 

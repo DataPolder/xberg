@@ -415,7 +415,9 @@ impl InternalDocumentExtractor for PptxExtractor {
             .map(|img| img.inject_placeholders)
             .unwrap_or(true);
         let plain = matches!(config.output_format, crate::core::config::OutputFormat::Plain);
-        let max_files_in_archive = config.security_limits.clone().unwrap_or_default().max_files_in_archive;
+        let security_limits = config.security_limits.clone().unwrap_or_default();
+        let max_files_in_archive = security_limits.max_files_in_archive;
+        let max_pages = security_limits.max_pages;
 
         let mut pptx_warnings: Vec<crate::types::ProcessingWarning> = Vec::new();
 
@@ -434,6 +436,7 @@ impl InternalDocumentExtractor for PptxExtractor {
                         include_structure: false,
                         inject_placeholders,
                         max_files_in_archive,
+                        max_pages,
                     };
                     let span = tracing::Span::current();
                     let (result, warnings) = tokio::task::spawn_blocking(move || {
@@ -458,6 +461,7 @@ impl InternalDocumentExtractor for PptxExtractor {
                         include_structure: false,
                         inject_placeholders,
                         max_files_in_archive,
+                        max_pages,
                     };
                     crate::extraction::pptx::extract_pptx_from_bytes_with_slide_contents(
                         content,
@@ -476,6 +480,7 @@ impl InternalDocumentExtractor for PptxExtractor {
                     include_structure: false,
                     inject_placeholders,
                     max_files_in_archive,
+                    max_pages,
                 };
                 crate::extraction::pptx::extract_pptx_from_bytes_with_slide_contents(
                     content,
@@ -537,6 +542,7 @@ impl InternalDocumentExtractor for PptxExtractor {
             .map(|img| img.inject_placeholders)
             .unwrap_or(true);
         let plain = matches!(config.output_format, crate::core::config::OutputFormat::Plain);
+        let security_limits = config.security_limits.clone().unwrap_or_default();
 
         let options = crate::extraction::pptx::PptxExtractionOptions {
             extract_images,
@@ -544,7 +550,8 @@ impl InternalDocumentExtractor for PptxExtractor {
             plain,
             include_structure: false,
             inject_placeholders,
-            max_files_in_archive: config.security_limits.clone().unwrap_or_default().max_files_in_archive,
+            max_files_in_archive: security_limits.max_files_in_archive,
+            max_pages: security_limits.max_pages,
         };
         let mut pptx_warnings: Vec<crate::types::ProcessingWarning> = Vec::new();
         let pptx_internal = crate::extraction::pptx::extract_pptx_from_path_with_slide_contents(
@@ -1197,6 +1204,83 @@ mod tests {
         assert!(
             result.is_ok(),
             "a normal presentation must extract under the default archive entry limit: {:?}",
+            result.err()
+        );
+    }
+
+    /// #1451: `max_pages` must reject a presentation once its slide count is known,
+    /// before any per-slide work (text rendering, chart/diagram resolution) begins.
+    /// Against unfixed code `PptxExtractionOptions` has no `max_pages` field, so this
+    /// fails to compile; once the field exists but nothing reads it,
+    /// `extract_content` would return `Ok` with 3 slides instead of the expected
+    /// `SecurityError::TooManyPages`.
+    #[tokio::test]
+    async fn test_pptx_extract_content_rejects_presentation_exceeding_max_pages() {
+        use crate::core::config::ExtractionConfig;
+
+        let pptx = crate::extraction::pptx::tests::create_test_pptx_bytes(vec!["Slide 1", "Slide 2", "Slide 3"]);
+        let extractor = PptxExtractor::new();
+        let mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+        let config = ExtractionConfig {
+            security_limits: Some(crate::extractors::security::SecurityLimits {
+                max_pages: Some(2),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let result = extractor.extract_content(&pptx, mime, &config).await;
+        let error = result.expect_err("a presentation with more slides than max_pages must be rejected");
+        let message = error.to_string();
+        assert!(
+            message.contains("too many pages") || message.contains("max_pages"),
+            "error must name the limit that was hit: {message}"
+        );
+    }
+
+    /// A presentation exactly at the configured `max_pages` ceiling must extract in
+    /// full -- a limit that rejects the boundary case too is not the fix #1451 asked
+    /// for.
+    #[tokio::test]
+    async fn test_pptx_extract_content_succeeds_when_slide_count_is_at_max_pages() {
+        use crate::core::config::ExtractionConfig;
+
+        let pptx = crate::extraction::pptx::tests::create_test_pptx_bytes(vec!["Slide 1", "Slide 2", "Slide 3"]);
+        let extractor = PptxExtractor::new();
+        let mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+        let config = ExtractionConfig {
+            security_limits: Some(crate::extractors::security::SecurityLimits {
+                max_pages: Some(3),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let result = extractor.extract_content(&pptx, mime, &config).await;
+        let doc = result.expect("a presentation exactly at max_pages must extract fully, not be rejected");
+        assert!(
+            !doc.elements.is_empty(),
+            "extraction at the boundary must still produce content, not an empty truncated result"
+        );
+    }
+
+    /// The default `SecurityLimits` (no override) must extract a multi-slide
+    /// presentation exactly as before #1451: `max_pages` defaulting to anything
+    /// other than `None` (unlimited) would silently start rejecting existing
+    /// callers' presentations.
+    #[tokio::test]
+    async fn test_pptx_extract_content_succeeds_with_default_max_pages() {
+        use crate::core::config::ExtractionConfig;
+
+        let pptx = crate::extraction::pptx::tests::create_test_pptx_bytes(vec!["Slide 1", "Slide 2", "Slide 3"]);
+        let extractor = PptxExtractor::new();
+        let mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+        let config = ExtractionConfig::default();
+
+        let result = extractor.extract_content(&pptx, mime, &config).await;
+        assert!(
+            result.is_ok(),
+            "default security limits must not reject a normal multi-slide presentation: {:?}",
             result.err()
         );
     }

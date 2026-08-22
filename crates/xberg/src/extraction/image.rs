@@ -434,7 +434,7 @@ pub struct ImageOcrResult {
 /// # Returns
 /// Frame count if valid TIFF, error otherwise.
 #[cfg(feature = "ocr")]
-fn detect_tiff_frame_count(bytes: &[u8]) -> Result<usize> {
+pub(crate) fn detect_tiff_frame_count(bytes: &[u8]) -> Result<usize> {
     use tiff::decoder::Decoder;
     let mut decoder =
         Decoder::new(Cursor::new(bytes)).map_err(|e| XbergError::parsing(format!("TIFF decode: {}", e)))?;

@@ -28,7 +28,7 @@ pub struct SecurityLimits {
     /// Maximum number of files in archive (10,000)
     pub max_files_in_archive: usize,
 
-    /// Maximum nesting depth for structures (100)
+    /// Maximum nesting depth for structures (1024)
     pub max_nesting_depth: usize,
 
     /// Maximum length of any single XML entity / attribute / token (1 MiB).
@@ -44,21 +44,36 @@ pub struct SecurityLimits {
     /// Maximum iterations per operation
     pub max_iterations: usize,
 
-    /// Maximum XML depth (100 levels)
+    /// Maximum XML depth (1024 levels)
     pub max_xml_depth: usize,
 
     /// Maximum cells per table (100,000)
     pub max_table_cells: usize,
 
-    /// Maximum number of pages in a single document. `None` means unlimited.
+    /// Maximum number of pages (or slides, or frames) in a single document.
+    /// `None` means unlimited.
     ///
-    /// Checked once the page count is known and before any per-page work (OCR,
-    /// layout detection, rendering) starts. Byte-size limits do not bound page
-    /// count: a scanned page can compress to a few kilobytes, so a document well
-    /// under `max_content_size` or `max_archive_size` can still hold thousands of
-    /// pages of per-page work. Defaults to `None` (unlimited) because a real
-    /// ceiling here is workload-specific and a low default would silently reject
-    /// legitimate large documents; callers that want a ceiling set this explicitly.
+    /// Checked once the count is known and before any per-page work (OCR, layout
+    /// detection, rendering) starts. Byte-size limits do not bound page count: a
+    /// scanned page can compress to a few kilobytes, so a document well under
+    /// `max_content_size` or `max_archive_size` can still hold thousands of pages
+    /// of per-page work. Defaults to `None` (unlimited) because a real ceiling
+    /// here is workload-specific and a low default would silently reject
+    /// legitimate large documents; callers that want a ceiling set this
+    /// explicitly.
+    ///
+    /// Enforced for: PDF (`extractors::pdf`, page count via `pdf_oxide`/`lopdf`),
+    /// PPTX (`extraction::pptx`, slide count from the archive's slide parts),
+    /// Keynote (`extractors::iwork::keynote`, slide count from `Index/Slide-*.iwa`
+    /// entry names), ODP (`extractors::odp`, `draw:page` count in `content.xml`),
+    /// and multi-frame TIFF images built with the `ocr` feature
+    /// (`extractors::image`, frame count via the `tiff` crate). Not enforced for
+    /// any other format, including DOCX, ODT, XLSX, legacy PPT/DOC, Pages/Numbers,
+    /// and TIFF images when the `ocr` feature is disabled: those formats either
+    /// have no fixed "page" the crate can count without doing the expensive work
+    /// itself (DOCX/ODT page count is a layout outcome, not a stored value), or
+    /// have no per-page pipeline to gate at all. Setting `max_pages` on a
+    /// document of an unenforced format is silently a no-op, not a guarantee.
     // GH#764: modelled as `Option<usize>` rather than a `usize::MAX` sentinel, which had no
     // faithful representation in a generated binding -- alef reads `Default` impls into
     // concrete values, and a path expression it cannot fold yields the target language's zero,
@@ -240,6 +255,22 @@ impl std::fmt::Display for SecurityError {
 }
 
 impl std::error::Error for SecurityError {}
+
+/// Reject a document whose page count exceeds `max_pages`.
+///
+/// GH#1451. Every paginated format that can count cheaply before per-page work begins calls
+/// this: PDF pages, PPTX/ODP/Keynote slides, multi-frame TIFF. Counting is what differs
+/// between them; the comparison is not, and it had been copied verbatim into four modules.
+///
+/// `None` means unlimited, so an unset limit costs one branch and never rejects. The
+/// comparison is `>` rather than `>=` deliberately -- a document exactly at the ceiling is
+/// within it.
+pub(crate) fn enforce_page_count(count: usize, max_pages: Option<usize>) -> Result<(), SecurityError> {
+    match max_pages {
+        Some(max) if count > max => Err(SecurityError::TooManyPages { count, max }),
+        _ => Ok(()),
+    }
+}
 
 /// Helper struct for validating ZIP archives for security issues.
 #[cfg(any(feature = "archives", feature = "hwpx", feature = "iwork"))]

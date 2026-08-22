@@ -2029,6 +2029,45 @@ impl Plugin for ImageExtractor {
     }
 }
 
+/// Reject a multi-frame TIFF whose frame count exceeds `security_limits.max_pages`
+/// before per-frame OCR begins (#1451).
+///
+/// TIFF is the only image container this crate treats as multi-page: frames are
+/// OCR'd and their text tracked per page (see
+/// `crate::extraction::image::extract_text_from_image_with_ocr`), while an
+/// animated PNG/WebP/JPEG is always OCR'd as one whole image regardless of frame
+/// count. Counting is only possible under the `ocr` feature, the sole feature
+/// that pulls in the `tiff` crate `detect_tiff_frame_count` needs to walk IFDs
+/// without decoding any raster data; other OCR feature combinations
+/// (`ocr-wasm`, `ocr-pipeline` alone) have no way to count frames cheaply, so
+/// this is a no-op there and `max_pages` goes unenforced on TIFF in those
+/// builds.
+#[cfg(feature = "ocr")]
+fn enforce_image_page_limit(content: &[u8], mime_type: &str, config: &ExtractionConfig) -> Result<()> {
+    let max_pages = config.security_limits.as_ref().and_then(|limits| limits.max_pages);
+    let Some(max_pages) = max_pages else {
+        return Ok(());
+    };
+    if !mime_type.to_lowercase().contains("tiff") {
+        return Ok(());
+    }
+    let Ok(frame_count) = crate::extraction::image::detect_tiff_frame_count(content) else {
+        return Ok(());
+    };
+    Ok(crate::extractors::security::enforce_page_count(
+        frame_count,
+        Some(max_pages),
+    )?)
+}
+
+/// No-op stub for builds without the `ocr` feature: there is no `tiff` crate
+/// dependency available to count frames, so `max_pages` is not enforced on TIFF
+/// images at all in these builds (see `SecurityLimits::max_pages`'s doc comment).
+#[cfg(not(feature = "ocr"))]
+fn enforce_image_page_limit(_content: &[u8], _mime_type: &str, _config: &ExtractionConfig) -> Result<()> {
+    Ok(())
+}
+
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 impl InternalDocumentExtractor for ImageExtractor {
@@ -2039,6 +2078,7 @@ impl InternalDocumentExtractor for ImageExtractor {
         config: &ExtractionConfig,
     ) -> Result<InternalDocument> {
         tracing::debug!(format = "image", size_bytes = content.len(), "extraction starting");
+        enforce_image_page_limit(content, mime_type, config)?;
         let extraction_metadata = extract_image_metadata(content)?;
         // Computed against the original bytes (before any HEIC->PNG rebinding
         // below) so it reflects the same input `extract_image_metadata` saw. ~keep
@@ -3278,6 +3318,82 @@ mod tests {
 
         assert!(!source_is_single_frame);
         assert!(try_retain_canonical_whole_image_ocr(&whole, &detections, 200, 100, source_is_single_frame).is_none());
+    }
+
+    /// Build an in-memory, single-pixel-per-frame TIFF with `frame_count` frames.
+    #[cfg(feature = "ocr")]
+    fn build_multiframe_tiff(frame_count: usize) -> Vec<u8> {
+        let mut cursor = std::io::Cursor::new(Vec::new());
+        {
+            let mut encoder = tiff::encoder::TiffEncoder::new(&mut cursor).unwrap();
+            for i in 0..frame_count {
+                encoder
+                    .write_image::<tiff::encoder::colortype::Gray8>(1, 1, &[i as u8])
+                    .unwrap();
+            }
+        }
+        cursor.into_inner()
+    }
+
+    /// #1451: `max_pages` must reject a multi-frame TIFF once its frame count is
+    /// known, before per-frame OCR begins. Against unfixed code
+    /// `enforce_image_page_limit` does not exist at all, so this fails to compile;
+    /// once it exists but does not check frame count, it returns `Ok(())` for a
+    /// 3-frame TIFF under a configured limit of 2 instead of the expected
+    /// `SecurityError::TooManyPages`.
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn should_reject_tiff_exceeding_max_pages() {
+        let tiff_bytes = build_multiframe_tiff(3);
+        let config = ExtractionConfig {
+            security_limits: Some(crate::extractors::security::SecurityLimits {
+                max_pages: Some(2),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let error = enforce_image_page_limit(&tiff_bytes, "image/tiff", &config)
+            .expect_err("a TIFF with more frames than max_pages must be rejected");
+        let message = error.to_string();
+        assert!(
+            message.contains("too many pages") || message.contains("max_pages"),
+            "error must name the limit that was hit: {message}"
+        );
+    }
+
+    /// A TIFF exactly at the configured `max_pages` ceiling must not be rejected --
+    /// the off-by-one boundary case #1451 asked to get right.
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn should_accept_tiff_at_max_pages_boundary() {
+        let tiff_bytes = build_multiframe_tiff(3);
+        let config = ExtractionConfig {
+            security_limits: Some(crate::extractors::security::SecurityLimits {
+                max_pages: Some(3),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        assert!(
+            enforce_image_page_limit(&tiff_bytes, "image/tiff", &config).is_ok(),
+            "a TIFF exactly at max_pages must not be rejected"
+        );
+    }
+
+    /// The default `SecurityLimits` (`max_pages: None`) must never reject a
+    /// multi-frame TIFF: a real ceiling here is opt-in, not implied by #1451.
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn should_accept_tiff_under_default_max_pages() {
+        let tiff_bytes = build_multiframe_tiff(3);
+        let config = ExtractionConfig::default();
+
+        assert!(
+            enforce_image_page_limit(&tiff_bytes, "image/tiff", &config).is_ok(),
+            "default security limits (max_pages: None) must not reject a multi-frame TIFF"
+        );
     }
 
     #[cfg(all(feature = "layout-detection", feature = "ocr"))]
