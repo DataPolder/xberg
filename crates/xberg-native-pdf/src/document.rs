@@ -2936,12 +2936,25 @@ impl PdfDocument {
         // Holding one guard for seek+read prevents the split-lock race (Race A)
         // where a concurrent thread can re-seek the shared BufReader between our
         // seek() and read_until() calls. ~keep
+        // Cap a single header-line read so a CR-terminated PDF (legal per ISO
+        // 32000-1) whose next LF is far away — or absent for the rest of the
+        // file — cannot make one `read_until` call allocate without limit
+        // before any size check runs. MAX_BYTES on the body loop further down
+        // does not cover this: it only checks *between* calls, and both reads
+        // in this header phase had no cap of their own at all. A well-formed
+        // header is a handful of bytes, so this is comfortably above any
+        // legitimate header line while still bounding the pathological case.
+        // ~keep
+        const MAX_HEADER_LINE_BYTES: u64 = 64 * 1024; // 64 KB safety limit per header line ~keep
         let (header_bytes, full_header) = {
             let mut reader = self.reader.lock_or_recover();
             reader.seek(SeekFrom::Start(offset))?;
 
             let mut header_bytes = Vec::new();
-            let bytes_read = reader.read_until(b'\n', &mut header_bytes)?;
+            let bytes_read = reader
+                .by_ref()
+                .take(MAX_HEADER_LINE_BYTES)
+                .read_until(b'\n', &mut header_bytes)?;
 
             if bytes_read == 0 {
                 let msg = format!("Unexpected EOF while reading object {} header", obj_ref.id);
@@ -2964,9 +2977,16 @@ impl PdfDocument {
             let max_header_lines = 5;
             let mut lines_read = 1;
 
-            while !has_standalone_obj_keyword(&full_header) && lines_read < max_header_lines {
+            while !has_standalone_obj_keyword(full_header.as_bytes()) && lines_read < max_header_lines {
                 let mut next_bytes = Vec::new();
-                let next_read = reader.read_until(b'\n', &mut next_bytes)?;
+                // Same cap as the first header-line read above: without it, a
+                // CR-terminated stream with no standalone "obj" keyword would
+                // just move the unbounded single-call read from the first
+                // line to this continuation read instead of bounding it. ~keep
+                let next_read = reader
+                    .by_ref()
+                    .take(MAX_HEADER_LINE_BYTES)
+                    .read_until(b'\n', &mut next_bytes)?;
                 if next_read == 0 {
                     break;
                 }
@@ -19652,18 +19672,33 @@ fn validate_root_loadable<R: Read + Seek>(reader: &mut R, xref: &crate::xref::Cr
     validate_object_at_offset(reader, xref, root_ref)
 }
 
-/// Check if a string contains the standalone "obj" keyword (not "endobj").
+/// Check if a byte slice contains the standalone "obj" keyword (not "endobj").
 ///
 /// This is used during multi-line object header parsing to detect when we've
 /// accumulated enough lines to have a complete header. A naive `contains("obj")`
 /// would match "endobj" and cause the loop to exit prematurely.
-fn has_standalone_obj_keyword(s: &str) -> bool {
-    for (i, _) in s.match_indices("obj") {
-        if i >= 3 && &s[i - 3..i] == "end" {
+///
+/// Takes `&[u8]` rather than `&str`: the caller's header text comes from
+/// `String::from_utf8_lossy` over attacker-controlled bytes at an
+/// attacker-controlled xref offset, so it can legitimately decode to a
+/// `String` containing multi-byte UTF-8 characters (e.g. a 4-byte emoji)
+/// immediately followed by the ASCII bytes `obj`. Slicing that `&str` at a
+/// fixed byte offset (as the previous `&s[i - 3..i]` did) panics with "byte
+/// index N is not a char boundary" whenever the offset lands inside such a
+/// character — the same defect shape fixed for `fonts::cmap` in
+/// `29fdd59d69`. Operating on the raw bytes instead has no char-boundary
+/// concept to violate: any `i` satisfying the existing bounds checks below
+/// is always a valid slice index. ~keep
+fn has_standalone_obj_keyword(s: &[u8]) -> bool {
+    for (i, window) in s.windows(3).enumerate() {
+        if window != b"obj" {
+            continue;
+        }
+        if i >= 3 && &s[i - 3..i] == b"end" {
             continue;
         }
         // Must be at a word boundary: preceded by whitespace, digit, or start of string ~keep
-        if i == 0 || s.as_bytes()[i - 1].is_ascii_whitespace() || s.as_bytes()[i - 1].is_ascii_digit() {
+        if i == 0 || s[i - 1].is_ascii_whitespace() || s[i - 1].is_ascii_digit() {
             return true;
         }
     }
