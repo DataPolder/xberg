@@ -31,7 +31,19 @@
 /// after it landed, serving stale font-size data. `hash_config` now folds those variables
 /// into its own hash, but this bump is still needed to invalidate the entries that were
 /// already on disk before that fix.
-pub(crate) const CACHE_SCHEMA_VERSION: u32 = 3;
+///
+/// Bumped for #783: `hocr_parser::parse_hocr_to_internal_document_with_dictionary_filter`
+/// now drops per-line dictionary-invalid noise from the `InternalDocument`/`content` a
+/// Tesseract "markdown"-format OCR call produces, for an unchanged image hash and config
+/// hash (`hash_config` never covered this -- it is not a Tesseract engine variable, just a
+/// call-site decision in `ocr::processor::execution::perform_ocr`). A prior attempt at
+/// this exact fix (reverted as `29738a1f29`) was measured byte-identical with its new
+/// threshold on vs. off. Its confirmed cause was representation drift -- it stripped only
+/// `page_texts` while rendering reads paragraphs -- not this constant. But that commit
+/// also failed to bump it, so a stale entry would have hidden a working fix just as
+/// effectively, and the two are indistinguishable after the fact. Any A/B measuring this
+/// fix MUST run against a cold cache -- see `ocr::cache::OcrCache`.
+pub(crate) const CACHE_SCHEMA_VERSION: u32 = 4;
 
 /// Number of hex characters in the cache version tag.
 const VERSION_TAG_HEX_LEN: usize = 8;
