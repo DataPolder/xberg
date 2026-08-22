@@ -65,6 +65,68 @@ impl DecodeParams {
     pub fn pixel_bytes_per_row(&self) -> usize {
         (self.columns * self.colors * self.bits_per_component).div_ceil(8)
     }
+
+    /// Calculate the number of bytes of actual pixel data per row, validating
+    /// the dimensions first.
+    ///
+    /// `Columns`, `Colors`, and `BitsPerComponent` come straight from an
+    /// attacker-controlled `/DecodeParms` dictionary (see
+    /// `object.rs::extract_decode_params` and
+    /// `xref.rs::extract_decode_params`), which cast `as_integer().unwrap_or(n)
+    /// as usize` with no range checks — a declared `-1` silently becomes
+    /// `usize::MAX`. This is the single point both construction sites funnel
+    /// through before any row-sized `Vec` indexing or `chunks()` call, so it
+    /// is where the guard belongs.
+    ///
+    /// Rejects:
+    /// - any of the three fields being zero (a zero row size makes
+    ///   `data.chunks(0)` panic downstream, since `usize::is_multiple_of(0)`
+    ///   is vacuously true for empty data and so does not catch it)
+    /// - a product that overflows `usize` (the `-1 as usize` case above, and
+    ///   any other combination large enough to wrap)
+    pub fn checked_pixel_bytes_per_row(&self) -> Result<usize> {
+        if self.columns == 0 {
+            return Err(Error::Decode("Predictor /Columns must be non-zero".to_string()));
+        }
+        if self.colors == 0 {
+            return Err(Error::Decode("Predictor /Colors must be non-zero".to_string()));
+        }
+        if self.bits_per_component == 0 {
+            return Err(Error::Decode(
+                "Predictor /BitsPerComponent must be non-zero".to_string(),
+            ));
+        }
+
+        let sample_bits = self
+            .columns
+            .checked_mul(self.colors)
+            .and_then(|v| v.checked_mul(self.bits_per_component))
+            .ok_or_else(|| {
+                Error::Decode(format!(
+                    "Predictor row size overflow: Columns={} * Colors={} * BitsPerComponent={} exceeds platform limits",
+                    self.columns, self.colors, self.bits_per_component
+                ))
+            })?;
+
+        Ok(sample_bits.div_ceil(8))
+    }
+
+    /// Calculate the total bytes per row (including the PNG predictor tag byte
+    /// when `predictor >= 10`), validating the dimensions first.
+    ///
+    /// See [`DecodeParams::checked_pixel_bytes_per_row`] for what is rejected
+    /// and why.
+    pub fn checked_bytes_per_row(&self) -> Result<usize> {
+        let pixel_bytes = self.checked_pixel_bytes_per_row()?;
+
+        if self.predictor >= 10 {
+            pixel_bytes
+                .checked_add(1)
+                .ok_or_else(|| Error::Decode("Predictor row size overflow: PNG tag byte".to_string()))
+        } else {
+            Ok(pixel_bytes)
+        }
+    }
 }
 
 /// CCITT Group 3/4 Fax decode parameters.
@@ -147,8 +209,19 @@ pub fn decode_predictor(data: &[u8], params: &DecodeParams) -> Result<Vec<u8>> {
 ///
 /// TIFF Predictor 2 encodes the difference between adjacent samples in the same row.
 fn decode_tiff_predictor(data: &[u8], params: &DecodeParams) -> Result<Vec<u8>> {
-    let bytes_per_row = params.pixel_bytes_per_row();
+    let bytes_per_row = params.checked_pixel_bytes_per_row()?;
     let colors = params.colors;
+
+    // Each row starts with `colors` unchanged bytes (see the push loop below),
+    // so a row that is narrower than the declared component count would index
+    // past `row_data`'s end. E.g. `/Colors 4 /BitsPerComponent 1 /Columns 1`
+    // gives bytes_per_row = 1 but colors = 4. ~keep
+    if colors > bytes_per_row {
+        return Err(Error::Decode(format!(
+            "Predictor /Colors {colors} exceeds the {bytes_per_row}-byte row implied by /Columns and \
+             /BitsPerComponent"
+        )));
+    }
 
     if !data.len().is_multiple_of(bytes_per_row) {
         return Err(Error::Decode(format!(
@@ -181,8 +254,8 @@ fn decode_tiff_predictor(data: &[u8], params: &DecodeParams) -> Result<Vec<u8>> 
 /// PNG predictors can vary per row (when using predictor 15).
 /// Each row starts with a predictor tag byte indicating which algorithm to use.
 fn decode_png_predictor(data: &[u8], params: &DecodeParams) -> Result<Vec<u8>> {
-    let bytes_per_row = params.bytes_per_row();
-    let pixel_bytes = params.pixel_bytes_per_row();
+    let bytes_per_row = params.checked_bytes_per_row()?;
+    let pixel_bytes = params.checked_pixel_bytes_per_row()?;
 
     if !data.len().is_multiple_of(bytes_per_row) {
         return Err(Error::Decode(format!(

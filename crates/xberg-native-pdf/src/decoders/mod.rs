@@ -268,6 +268,15 @@ pub fn decode_stream_with_options(
 /// This function extends `decode_stream` by supporting decode parameters
 /// (e.g., PNG predictors) that are applied after the main filters.
 ///
+/// This is the entry point used by every production call site (object and
+/// xref-stream decoding), neither of which has a `ParserOptions` to thread
+/// through. It delegates to [`decode_stream_with_options`] with `options:
+/// None` so those callers still get the default decompression-bomb guard
+/// (100:1 ratio, 100 MB output cap) rather than none at all — without that,
+/// chained filters like `RunLengthDecode` or `LZWDecode` have no cap of their
+/// own and a few KB of input can expand by orders of magnitude before this
+/// function ever returns.
+///
 /// # Arguments
 ///
 /// * `data` - The raw stream data
@@ -276,23 +285,10 @@ pub fn decode_stream_with_options(
 ///
 /// # Returns
 ///
-/// The fully decoded data or an error if any filter fails.
+/// The fully decoded data or an error if any filter fails or the default
+/// decompression-bomb limits are exceeded.
 pub fn decode_stream_with_params(data: &[u8], filters: &[String], params: Option<&DecodeParams>) -> Result<Vec<u8>> {
-    let mut current = data.to_vec();
-
-    for filter_name in filters {
-        let decoder = create_decoder(filter_name)?;
-
-        current = decoder.decode(&current)?;
-    }
-
-    if let Some(params) = params
-        && params.predictor != 1
-    {
-        current = decode_predictor(&current, params)?;
-    }
-
-    Ok(current)
+    decode_stream_with_options(data, filters, params, None)
 }
 
 #[cfg(test)]
