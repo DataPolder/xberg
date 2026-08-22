@@ -149,10 +149,10 @@ pub struct PdfConfig {
 
     /// Which engine parses and renders this PDF.
     ///
-    /// Defaults to [`PdfBackend::Native`] -- the only backend with an
-    /// extraction implementation today. Selecting [`PdfBackend::Pdfium`]
-    /// requires the `pdf-pdfium` feature and is rejected otherwise; see
-    /// [`PdfBackend`].
+    /// Defaults to [`PdfBackend::Native`]. Selecting [`PdfBackend::Pdfium`]
+    /// requires the `pdf-pdfium` feature and is rejected otherwise; the
+    /// pdfium engine is also deliberately narrower in scope than `Native` --
+    /// see [`PdfBackend`] and `extractors::pdf::pdfium_engine` for details.
     #[serde(default)]
     pub backend: PdfBackend,
 }

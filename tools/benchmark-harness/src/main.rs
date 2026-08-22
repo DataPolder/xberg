@@ -914,13 +914,15 @@ async fn main() -> Result<()> {
                 };
             }
 
+            use benchmark_harness::XbergPdfBackend;
             use benchmark_harness::XbergPipeline;
             use benchmark_harness::adapters::create_xberg_adapter;
 
+            let has_explicit_frameworks = !frameworks.is_empty();
             let mut xberg_count = 0;
             let formats = [parsed_format];
             for pipeline in &XBERG_RUN_PIPELINES {
-                if !should_register_xberg_pipeline(*pipeline, !frameworks.is_empty()) {
+                if !should_register_xberg_pipeline(*pipeline, has_explicit_frameworks) {
                     continue;
                 }
                 if !ocr
@@ -938,41 +940,59 @@ async fn main() -> Result<()> {
                     continue;
                 }
                 for format in &formats {
-                    let format_slug = match format {
-                        OutputFormat::Markdown => "markdown",
-                        OutputFormat::Plaintext => "plaintext",
-                    };
-                    let base_name = format!("xberg-{}-{}", format_slug, pipeline.as_str());
-                    let framework_name = if batch_mode {
-                        format!("{base_name}-batch")
-                    } else {
-                        base_name
-                    };
-                    if should_init(&framework_name) {
-                        match create_xberg_adapter(*pipeline, *format, batch_mode, ocr)
-                            .map(|adapter| adapter.with_batch_workers(config.max_concurrent))
-                            .map(|adapter| match config.xberg_max_threads {
-                                Some(max_threads) => adapter.with_xberg_max_threads(max_threads),
-                                None => adapter,
-                            }) {
-                            Ok(adapter) => {
-                                if let Err(err) = registry.register(Arc::new(adapter)) {
+                    // `Pdfium` is a distinct cohort dimension, not a pipeline: it is opt-in only
+                    // (must be named explicitly via `--frameworks`, matching how `PaddleOcr` /
+                    // `SceptreTract` are opt-in above) and restricted to `Baseline`, since the
+                    // pdfium engine has no OCR fallback path of its own. It is never registered
+                    // by a default run: the pdfium shared library is not bundled in benchmark
+                    // images yet (#702).
+                    let pdf_backends: &[XbergPdfBackend] =
+                        if has_explicit_frameworks && matches!(pipeline, XbergPipeline::Baseline) {
+                            &[XbergPdfBackend::Native, XbergPdfBackend::Pdfium]
+                        } else {
+                            &[XbergPdfBackend::Native]
+                        };
+                    for pdf_backend in pdf_backends {
+                        let format_slug = match format {
+                            OutputFormat::Markdown => "markdown",
+                            OutputFormat::Plaintext => "plaintext",
+                        };
+                        let pdf_backend_suffix = match pdf_backend {
+                            XbergPdfBackend::Native => "",
+                            XbergPdfBackend::Pdfium => "-pdfium",
+                        };
+                        let base_name = format!("xberg-{}-{}{}", format_slug, pipeline.as_str(), pdf_backend_suffix);
+                        let framework_name = if batch_mode {
+                            format!("{base_name}-batch")
+                        } else {
+                            base_name
+                        };
+                        if should_init(&framework_name) {
+                            match create_xberg_adapter(*pipeline, *format, batch_mode, ocr, *pdf_backend)
+                                .map(|adapter| adapter.with_batch_workers(config.max_concurrent))
+                                .map(|adapter| match config.xberg_max_threads {
+                                    Some(max_threads) => adapter.with_xberg_max_threads(max_threads),
+                                    None => adapter,
+                                }) {
+                                Ok(adapter) => {
+                                    if let Err(err) = registry.register(Arc::new(adapter)) {
+                                        tracing::warn!(
+                                            framework = %framework_name,
+                                            error = %err,
+                                            "adapter registration failed"
+                                        );
+                                    } else {
+                                        tracing::info!(framework = %framework_name, "adapter registered");
+                                        xberg_count += 1;
+                                    }
+                                }
+                                Err(err) => {
                                     tracing::warn!(
                                         framework = %framework_name,
                                         error = %err,
-                                        "adapter registration failed"
+                                        "adapter initialization failed"
                                     );
-                                } else {
-                                    tracing::info!(framework = %framework_name, "adapter registered");
-                                    xberg_count += 1;
                                 }
-                            }
-                            Err(err) => {
-                                tracing::warn!(
-                                    framework = %framework_name,
-                                    error = %err,
-                                    "adapter initialization failed"
-                                );
                             }
                         }
                     }

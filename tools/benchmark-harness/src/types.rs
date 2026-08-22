@@ -173,6 +173,38 @@ impl FromStr for XbergPipeline {
     }
 }
 
+/// Xberg PDF extraction backend (`--pdf-backend`), a cohort dimension independent of
+/// [`XbergPipeline`]. `Native` is the harness default and must keep producing the same
+/// `--pdf-backend native` argument and framework name it always has, so existing committed
+/// results stay comparable. `Pdfium` is opt-in only: it is not registered by a default run and
+/// must be requested explicitly via `--frameworks`, because the pdfium shared library is not
+/// bundled in benchmark images yet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum XbergPdfBackend {
+    /// xberg's own pure-Rust PDF engine. Harness default.
+    #[default]
+    Native,
+    /// Google's PDFium engine (`pdf-pdfium` Cargo feature). Opt-in only.
+    Pdfium,
+}
+
+impl XbergPdfBackend {
+    /// Get the string representation of the backend, matching xberg's `--pdf-backend` values.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            XbergPdfBackend::Native => "native",
+            XbergPdfBackend::Pdfium => "pdfium",
+        }
+    }
+}
+
+impl std::fmt::Display for XbergPdfBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 /// OCR usage status for a benchmark extraction
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
