@@ -1106,14 +1106,12 @@ impl InternalDocumentExtractor for DocxExtractor {
                 // resolve; only a `..` that pops past the package root is rejected. A
                 // leading `/` re-roots to the package root, same as before.
                 && let Ok(zip_path) = crate::extractors::security::resolve_container_entry("word", target)
+                && let Ok(mut file) = archive.by_name(&zip_path)
+                && file.size() <= crate::extraction::docx::MAX_IMAGE_FILE_SIZE
             {
-                if let Ok(mut file) = archive.by_name(&zip_path)
-                    && file.size() <= crate::extraction::docx::MAX_IMAGE_FILE_SIZE
-                {
-                    let mut data = Vec::with_capacity(file.size() as usize);
-                    if std::io::Read::read_to_end(&mut file, &mut data).is_ok() {
-                        image_data = Some(data);
-                    }
+                let mut data = Vec::with_capacity(file.size() as usize);
+                if std::io::Read::read_to_end(&mut file, &mut data).is_ok() {
+                    image_data = Some(data);
                 }
             }
 

@@ -25,16 +25,13 @@ pub(super) fn get_full_image_path(slide_path: &str, image_target: &str) -> Strin
     // directory component at all (e.g. a synthetic or malformed part name).
     let base = slide_path.rsplit_once('/').map_or("ppt/slides", |(dir, _)| dir);
 
-    match crate::extractors::security::resolve_container_entry(base, image_target) {
-        Ok(resolved) => resolved,
-        // A target that cannot be safely resolved (pops past the package root, carries a NUL
-        // byte, or a drive/UNC prefix) has no legitimate resolution. This value only ever
-        // feeds an in-memory `ZipArchive::by_name` lookup (`extraction/pptx/container.rs`),
-        // and no ZIP archive can contain an entry with an empty name, so returning an empty
-        // string is a safe sentinel: the lookup is guaranteed to miss rather than resolve to
-        // something unintended.
-        Err(_) => String::new(),
-    }
+    // A target that cannot be safely resolved (pops past the package root, carries a NUL
+    // byte, or a drive/UNC prefix) has no legitimate resolution. This value only ever
+    // feeds an in-memory `ZipArchive::by_name` lookup (`extraction/pptx/container.rs`),
+    // and no ZIP archive can contain an entry with an empty name, so returning an empty
+    // string is a safe sentinel: the lookup is guaranteed to miss rather than resolve to
+    // something unintended. ~keep
+    crate::extractors::security::resolve_container_entry(base, image_target).unwrap_or_default()
 }
 
 #[cfg(test)]
