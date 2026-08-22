@@ -712,7 +712,20 @@ fn parse_xref_stream<R: Read + Seek>(reader: &mut R, offset: u64) -> Result<Cros
     let file_len = reader.seek(SeekFrom::End(0))?;
     reader.seek(SeekFrom::Start(offset))?;
 
-    let remaining = (file_len - offset) as usize;
+    // `offset` comes from `startxref` or a `/Prev` pointer and is never
+    // validated against the file length before reaching here (a corrected
+    // offset from `find_actual_xref_offset` can also fall through unchanged
+    // when nothing is found nearby). A bare `file_len - offset` underflows a
+    // u64 whenever `offset > file_len`: debug builds panic on the subtraction,
+    // release builds wrap to a huge value that the `.min(256 * 1024)` below
+    // happens to clamp back down — so this guard only changes debug/fuzz
+    // behavior (from a panic to a clean error); release was already
+    // non-panicking, just less informative. ~keep
+    let remaining = file_len.checked_sub(offset).ok_or_else(|| {
+        Error::InvalidPdf(format!(
+            "xref stream offset {offset} is past end of file ({file_len} bytes)"
+        ))
+    })? as usize;
     let initial_read = remaining.min(256 * 1024);
     let mut content = vec![0u8; initial_read];
     let bytes_read = reader.read(&mut content)?;
@@ -788,15 +801,36 @@ fn parse_xref_stream<R: Read + Seek>(reader: &mut R, offset: u64) -> Result<Cros
         return Err(Error::InvalidPdf("invalid /W array length".to_string()));
     }
 
-    let w1 = w_array[0]
+    // Per the PDF spec (§7.5.8.2), each /W field is a byte count for a single
+    // xref-stream field and never needs to exceed 8 (a u64 fits in 8 bytes).
+    // Trusting an out-of-range value (in particular a negative one, which
+    // `as usize` would turn into a huge value) before this check let a hostile
+    // `/W` element drive `entry_size` and the subsequent slicing arithmetic
+    // clean off a cliff — see the regression tests in
+    // `tests/xref_bounds_regression.rs`. ~keep
+    const MAX_XREF_FIELD_WIDTH: i64 = 8;
+
+    let w1_raw = w_array[0]
         .as_integer()
-        .ok_or_else(|| Error::InvalidPdf("invalid /W[0]".to_string()))? as usize;
-    let w2 = w_array[1]
+        .ok_or_else(|| Error::InvalidPdf("invalid /W[0]".to_string()))?;
+    let w2_raw = w_array[1]
         .as_integer()
-        .ok_or_else(|| Error::InvalidPdf("invalid /W[1]".to_string()))? as usize;
-    let w3 = w_array[2]
+        .ok_or_else(|| Error::InvalidPdf("invalid /W[1]".to_string()))?;
+    let w3_raw = w_array[2]
         .as_integer()
-        .ok_or_else(|| Error::InvalidPdf("invalid /W[2]".to_string()))? as usize;
+        .ok_or_else(|| Error::InvalidPdf("invalid /W[2]".to_string()))?;
+
+    for (index, width) in [w1_raw, w2_raw, w3_raw].into_iter().enumerate() {
+        if !(0..=MAX_XREF_FIELD_WIDTH).contains(&width) {
+            return Err(Error::InvalidPdf(format!(
+                "invalid /W[{index}] field width {width}: must be between 0 and {MAX_XREF_FIELD_WIDTH}"
+            )));
+        }
+    }
+
+    let w1 = w1_raw as usize;
+    let w2 = w2_raw as usize;
+    let w3 = w3_raw as usize;
 
     let entry_size = w1 + w2 + w3;
     if entry_size == 0 {

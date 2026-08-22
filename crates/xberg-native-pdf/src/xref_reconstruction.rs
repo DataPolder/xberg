@@ -695,12 +695,22 @@ pub fn search_nearby_for_object<R: Read + Seek>(reader: &mut R, obj_id: u32, app
         "xref offset is wrong; searching nearby for object"
     );
 
+    // `approx_offset` comes from an xref entry offset, which under a
+    // maliciously wide `/W` (e.g. `[1 8 2]`) can be any u64 value up to
+    // `u64::MAX`. `start` was already guarded with `saturating_sub`; `end` was
+    // not, so `approx_offset + search_range` could overflow. In debug builds
+    // that panics; in release, wrapping addition/subtraction is modular, so
+    // `end.wrapping_sub(start)` still equals `2 * search_range` as long as
+    // `start` didn't itself saturate — the two wraps cancel and release never
+    // misbehaves. Using `saturating_add`/`saturating_sub` here makes that
+    // safety explicit instead of relying on wraparound arithmetic to cancel
+    // out correctly. ~keep
     let search_range = 1024u64;
     let start = approx_offset.saturating_sub(search_range);
-    let end = approx_offset + search_range;
+    let end = approx_offset.saturating_add(search_range);
 
     reader.seek(SeekFrom::Start(start))?;
-    let mut buffer = vec![0u8; (end - start) as usize];
+    let mut buffer = vec![0u8; end.saturating_sub(start) as usize];
     let bytes_read = reader.read(&mut buffer)?;
     let buffer = &buffer[..bytes_read];
 
