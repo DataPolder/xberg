@@ -287,15 +287,27 @@ pub struct LlmConfig {
     #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
     pub credential_provider: Option<Box<CredentialProviderConfig>>,
 
-    /// Maximum number of in-flight VLM requests spawned by one extraction operation.
+    /// Maximum number of simultaneously in-flight requests to the LLM provider this
+    /// config resolves to.
     ///
-    /// VLM OCR and image captioning use this value to bound their asynchronous
-    /// request fan-out independently of [`super::ConcurrencyConfig::max_threads`].
-    /// Concurrent document extractions each receive their own allowance; combine
-    /// this with [`super::ExtractionConfig::max_concurrent_extractions`] or a
-    /// deployment-level worker limit when aggregate provider concurrency must also
-    /// be bounded. When `None`, those features retain the existing behavior and use
-    /// the extraction thread budget. Values below 1 are clamped to 1.
+    /// This is a real, global bound on *provider* concurrency, not a per-extraction
+    /// allowance: `xberg::llm::client::create_client` shares one process-wide client
+    /// instance per distinct resolved config, so every concurrent extraction that
+    /// resolves to the same config shares the one in-flight-request limit this value
+    /// configures, instead of each minting its own (GH#1465). `None` means unlimited.
+    ///
+    /// PDF and image OCR batch sizing are **not** derived from this field, even when the
+    /// configured OCR backend or `vlm_fallback` policy can reach a VLM — those call sites
+    /// mix CPU-bound raster/OCR work with, at most, occasional remote requests, so they
+    /// size their batches from the general thread budget
+    /// ([`super::ConcurrencyConfig::max_threads`]) unconditionally (GH#1465). Captioning is
+    /// the one feature that *additionally* uses this value to bound its own
+    /// per-extraction async request fan-out (issuing only VLM requests, with no CPU
+    /// batching to protect), on top of the global provider-side limit described above;
+    /// that per-extraction bound clamps a value below 1 up to 1. The global provider-side
+    /// limit does not clamp: `Some(0)` reaches liter-llm as-is, and liter-llm rejects it
+    /// when building the client (zero permitted in-flight requests is never useful), so it
+    /// surfaces as a `create_client` error rather than a silent clamp to 1.
     ///
     /// This field is intentionally last to preserve positional constructor
     /// compatibility in generated language bindings.
