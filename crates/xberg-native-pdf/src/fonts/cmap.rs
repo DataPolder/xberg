@@ -902,6 +902,29 @@ fn parse_codespacerange_line_width(line: &str) -> u8 {
     max_width
 }
 
+/// Returns `true` if every byte of `s` is an ASCII hex digit (`0-9`, `a-f`, `A-F`),
+/// and `s` is non-empty.
+///
+/// PDF ToUnicode CMap hex strings (`<...>`) are defined to contain only ASCII
+/// hex digits (Adobe CMap & CIDFont Files Spec §7, ISO 32000-1 §9.10.3). The
+/// capture regexes used throughout this module (`<([^>]*)>`) match any byte
+/// sequence between angle brackets, so a raw stream containing invalid UTF-8
+/// — decoded upstream via `String::from_utf8_lossy`, which substitutes each
+/// invalid byte sequence with the 3-byte U+FFFD replacement character — can
+/// hand a capture that is not what it looks like: a length check such as
+/// `dst_hex.len() > 8` counts BYTES, not hex digits, so a captured string
+/// that mixes ASCII bytes with one U+FFFD can satisfy that check while the
+/// `step_by(4)` loop it guards then slices `&dst_hex[i..i+4]` at an offset
+/// landing inside the middle of the replacement character, panicking with
+/// "byte index N is not a char boundary". Validating ASCII-hex-only at the
+/// capture boundary, before any length check or slicing, guarantees every
+/// subsequent byte offset is also a char boundary (every ASCII byte is one
+/// char), and rejects the corrupted capture the same way any other malformed
+/// hex is already rejected. ~keep
+fn is_ascii_hex_digits(s: &str) -> bool {
+    !s.is_empty() && s.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
 /// Parse a bfchar line, returning all `<src> <dst>` pairs found on the line.
 ///
 /// Example: `<0041> <0041>` maps character code 0x41 to Unicode U+0041.
@@ -926,6 +949,13 @@ fn parse_bfchar_line(line: &str) -> Vec<(u32, String)> {
                 escape
             } else {
                 let dst_hex = dst_str.replace(char::is_whitespace, "");
+                // Reject a corrupted capture (e.g. a lossy-decoded U+FFFD from
+                // invalid UTF-8 in the raw stream) before any length check or
+                // byte-index slice below can misread its byte count as a hex
+                // digit count. See `is_ascii_hex_digits`. ~keep
+                if !is_ascii_hex_digits(&dst_hex) {
+                    return None;
+                }
 
                 if dst_hex.len() <= 4 {
                     let dst_code = u32::from_str_radix(&dst_hex, 16).ok()?;
@@ -1007,11 +1037,16 @@ fn parse_bfrange_line(line: &str) -> Option<Vec<(u32, String)>> {
         let array_str = &caps[3];
 
         static RE_HEX: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| Regex::new(r"<([^>]*)>").unwrap());
+        // Drop any array entry that is not pure ASCII hex (e.g. a lossy-decoded
+        // U+FFFD from invalid UTF-8 in the raw stream) before it can reach the
+        // byte-index slices below. See `is_ascii_hex_digits`. A dropped entry
+        // shrinks `dst_hexes` below `range_size`, which the existing
+        // size-mismatch warning already surfaces. ~keep
         let dst_hexes: Vec<String> = RE_HEX
             .captures_iter(array_str)
             .filter_map(|cap| {
                 let s = cap.get(1).unwrap().as_str().trim().replace(char::is_whitespace, "");
-                if !s.is_empty() { Some(s) } else { None }
+                if is_ascii_hex_digits(&s) { Some(s) } else { None }
             })
             .collect();
 
