@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "crates/xberg/**"
+      - "crates/xberg-native-pdf/**"
       - "crates/xberg-ffi/**"
       - "crates/xberg-dart/**"
       - "crates/xberg-swift/**"
@@ -17,6 +18,7 @@ on:
     branches: [main]
     paths:
       - "crates/xberg/**"
+      - "crates/xberg-native-pdf/**"
       - "crates/xberg-ffi/**"
       - "crates/xberg-dart/**"
       - "crates/xberg-swift/**"

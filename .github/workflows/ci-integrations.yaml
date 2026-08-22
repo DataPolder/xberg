@@ -6,6 +6,7 @@ on:
     paths:
       - "integrations/**"
       - "crates/xberg/**"
+      - "crates/xberg-native-pdf/**"
       - "crates/xberg-py/**"
       - "crates/xberg-node/**"
       - "crates/xberg-ffi/**"
@@ -29,6 +30,7 @@ on:
     paths:
       - "integrations/**"
       - "crates/xberg/**"
+      - "crates/xberg-native-pdf/**"
       - "crates/xberg-py/**"
       - "crates/xberg-node/**"
       - "crates/xberg-ffi/**"

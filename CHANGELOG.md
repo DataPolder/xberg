@@ -9,6 +9,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING.** The PDF backend is selected with `"native"` instead of `"pdf_oxide"`, and the Rust
+  enum variant is `PdfBackend::Native`. This affects `pdf_options.backend` in a config file, the
+  `--pdf-backend` CLI flag, and the equivalent field in every binding. There is deliberately no
+  back-compatibility alias: an accepted old spelling would keep it alive in user configs
+  indefinitely, so the old value is rejected with an error naming the valid ones. A config
+  carrying `backend = "pdf_oxide"` must be updated; the default is unchanged, so a config that
+  never set the field is unaffected.
+- The PDF engine is now a workspace member, `crates/xberg-native-pdf`, published as
+  `xberg-native-pdf`. It was previously a separate repository consumed from crates.io as
+  `xberg-pdf-oxide`, which is yanked and will not receive further releases. The engine's own
+  history and its upstream provenance are recorded in `ATTRIBUTIONS.md` and in the crate's
+  `CHANGELOG.md`; behaviour is unchanged by the move itself.
+- The engine's `tracing` target root moves with the crate name and is now exported as
+  `xberg_native_pdf::LOG_TARGET_ROOT`. Anything filtering on the old prefix must switch. Both
+  in-tree consumers — the render-warning capture and the CLI's quiet-directive list — derive the
+  prefix from that constant rather than spelling it, so the coupling is compiler-checked instead
+  of being a literal that can silently stop matching (GH#697).
+- `security_limits.max_pages` is enforced for PPTX, ODP, Keynote and multi-frame TIFF, not only
+  PDF. The cost argument behind the limit is format-independent: a 4,000-slide deck carries the
+  same per-page OCR and layout cost a 4,000-page PDF does. Formats whose page count is a layout
+  outcome rather than a stored value — DOCX, ODT — are still not covered, and the field's own
+  documentation now names both sets rather than implying a universal guarantee (GH#1451).
+- `create_client_with_credential_provider` returns a `ManagedClient`, and
+  `LlmConfig.max_concurrency = Some(0)` is now an error at client construction rather than being
+  silently clamped to 1.
+- Dependency requirements advanced by `cargo upgrade --incompatible`: jsonschema 0.49 to 0.50,
+  crawlberg 1.3.0 to 1.3.2, liter-llm 1.17.0 to 1.17.3, unhwp 0.9.0 to 0.9.1, cc 1.4.3 to 1.4.4.
+
+### Fixed
+
+- Docker image builds. Every image had failed to build since `crates/xberg-pdfium-render` became a
+  workspace member: the Dockerfiles gained a `COPY` for it but `.dockerignore`, which excludes
+  everything and re-includes an allowlist, did not, so buildx aborted with
+  `"/crates/xberg-pdfium-render": not found` before compiling anything. Nothing caught it because
+  the Docker workflow triggers only on paths that commit did not touch.
+- VLM request concurrency is bounded in the LLM client rather than at the OCR call sites. The
+  previous limit was selected whenever a VLM backend or fallback was configured and then used as
+  the page batch size, so under `VlmFallbackPolicy::OnLowQuality` — where classical OCR runs on
+  every page — raising a remote limit multiplied concurrent Tesseract jobs and the raster memory
+  budget with them. The bound is now global across extractions instead of per-extraction (GH#1465).
+- A CLI logging test asserted that a `target=warn` directive suppressed WARN events. It permits
+  them; the directive quiets a noisy crate down to warnings rather than silencing them. The test
+  had been failing on `main`, and now asserts the behaviour that exists.
+
+### Added
+
+- `task verify:feature-parity` checks that each per-target Cargo feature aggregate still carries
+  every code-bearing feature its superset does. `windows-target` is hand-maintained, the only
+  Windows CI job proves it compiles rather than that it is complete, and nothing correlated it with
+  `full` — which is how GH#1443 shipped nine features compiled out of every Windows artifact.
+- `task verify:docker-crates` additionally checks that every path a Dockerfile `COPY`s survives
+  `.dockerignore`, and that no allowlist entry names a crate that no longer exists. The existing
+  check knew only about workspace membership, so it reported full coverage throughout the outage
+  above.
+- End-to-end coverage for the `.doc` field-instruction fix against a real Word binary. The nine
+  existing tests all ran on synthetic strings and would have passed even if the parser upstream
+  never delivered field bytes.
+
+
 ## [1.1.0] - 2026-08-21
 
 ### Added

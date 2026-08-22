@@ -181,6 +181,7 @@ jobs:
           cargo test --locked -p xberg-candle-ocr --doc
           cargo test --locked -p xberg-libheif --doc
           cargo test --locked -p xberg-libwpd --doc
+          cargo test --locked -p xberg-native-pdf --doc
           # Refuses to build without an inference backend selected.
           cargo test --locked -p xberg-paddle-ocr --features ort --doc
         shell: bash
