@@ -270,10 +270,10 @@ tasks:
     cmds:
       - python3 scripts/ci/check-feature-parity.py crates/xberg/Cargo.toml
 
-  verify:docker-context:
-    desc: "Check every path a Dockerfile COPYs survives .dockerignore"
+  verify:docker-crates:
+    desc: "Check every workspace member is COPYd, real, and survives .dockerignore"
     cmds:
-      - python3 scripts/ci/check-docker-context.py
+      - bash scripts/ci/docker/check-dockerfile-crate-coverage.sh
 
   docs:verify:changelog:
     desc: "Check the docs-site changelog carries every release section from CHANGELOG.md"
