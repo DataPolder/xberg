@@ -265,6 +265,11 @@ tasks:
     cmds:
       - python3 scripts/ci/check-ffi-format-features.py alef.toml
 
+  verify:feature-parity:
+    desc: "Check per-target feature aggregates still match `full` (GH#1443)"
+    cmds:
+      - python3 scripts/ci/check-feature-parity.py crates/xberg/Cargo.toml
+
   docs:verify:changelog:
     desc: "Check the docs-site changelog carries every release section from CHANGELOG.md"
     cmds:
