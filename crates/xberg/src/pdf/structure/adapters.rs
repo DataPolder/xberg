@@ -491,70 +491,10 @@ pub(crate) fn ocr_text_to_paragraphs(text: &str) -> Vec<types::PdfParagraph> {
         .collect()
 }
 
-/// Fraction of a page's pixel area that `Picture`-class layout hints must cover, in
-/// total, for the page to be treated as a drawing page (see [`page_is_drawing_page`]).
-///
-/// The ordinance's site-plan page is expected to be dominated by drawing content --
-/// on the order of half its area or more -- while an inset figure on an ordinary text
-/// page covers a small fraction of it. This threshold is a judgment call, not a value
-/// measured against the fixture's actual layout-detection output (unavailable without
-/// running the pipeline): treat it as a starting point to retune once real numbers are
-/// in hand, not as a calibrated constant.
-#[cfg(all(feature = "ocr", feature = "layout-detection"))]
-const DRAWING_PAGE_PICTURE_AREA_RATIO: f32 = 0.5;
-
-/// True when `Picture`-class hints together cover at least
-/// [`DRAWING_PAGE_PICTURE_AREA_RATIO`] of the page's pixel area: the page is essentially
-/// one drawing with a title block, not a text page with an inset figure.
-///
-/// Sums every `Picture` hint's area rather than taking the largest single one, so a
-/// detection model that fragments one drawing into several boxes (e.g. one per
-/// unoccluded region) still trips the threshold; overlapping boxes double-count their
-/// overlap, which only makes the predicate fire *more* readily, never less.
-///
-/// Deliberately page-level and geometry-only -- it never inspects paragraph text -- so it
-/// cannot repeat #771's mistake of readmitting dense annotation by its *shape* (short,
-/// ALL-CAPS). A dense survey-plat page also satisfies this predicate (its drawing covers
-/// most of the page too), but that page's paragraphs are dropped wholesale by the
-/// post-OCR quality gate (`accept_or_reject_ocr_page`, `extractors::pdf::ocr`)
-/// regardless of layer classification, so this predicate does not have to exclude it.
-#[cfg(all(feature = "ocr", feature = "layout-detection"))]
-fn page_is_drawing_page(hints: &[types::LayoutHint], page_width_px: f32, page_height_px: f32) -> bool {
-    let page_area = page_width_px * page_height_px;
-    if !(page_area.is_finite() && page_area > 0.0) {
-        return false;
-    }
-    let total_picture_area: f32 = hints
-        .iter()
-        .filter(|hint| hint.class_name == types::LayoutHintClass::Picture)
-        .map(|hint| (hint.right - hint.left).max(0.0) * (hint.top - hint.bottom).max(0.0))
-        .sum();
-    total_picture_area / page_area >= DRAWING_PAGE_PICTURE_AREA_RATIO
-}
-
-/// On a [`page_is_drawing_page`] page, undo the furniture suppression
-/// `layout_classify::apply_hint_to_paragraph` applies to every `Picture`-hinted line:
-/// on such a page the drawing IS the content, so text placed inside or over it (a
-/// title-block label) is not furniture framing unrelated body text.
-///
-/// Restricted to lines whose classification came from a `Picture` hint specifically
-/// (`layout_class`) -- a `PageHeader`/`PageFooter` hint's own furniture marking is left
-/// untouched, since that classification is about position on the page, not about
-/// overlapping a drawing, and stays correct on a drawing page too.
-#[cfg(all(feature = "ocr", feature = "layout-detection"))]
-fn restore_drawing_page_labels(lines: &mut [types::PdfParagraph]) {
-    for line in lines.iter_mut() {
-        if line.is_page_furniture && line.layout_class == Some(types::LayoutHintClass::Picture) {
-            line.is_page_furniture = false;
-        }
-    }
-}
-
 #[cfg(all(feature = "ocr", feature = "layout-detection"))]
 pub(crate) fn ocr_doc_to_layout_paragraphs(
     doc: &crate::types::internal::InternalDocument,
     page_height_px: u32,
-    page_width_px: u32,
     hints: &[types::LayoutHint],
     min_confidence: f32,
     min_containment: f32,
@@ -562,7 +502,6 @@ pub(crate) fn ocr_doc_to_layout_paragraphs(
 ) -> Vec<types::PdfParagraph> {
     use crate::types::internal::ElementKind;
     let page_height = page_height_px as f32;
-    let is_drawing_page = page_is_drawing_page(hints, page_width_px as f32, page_height);
     let mut all_lines = Vec::new();
     let mut all_hint_indices = Vec::new();
     let mut element_indices = Vec::new();
@@ -596,9 +535,6 @@ pub(crate) fn ocr_doc_to_layout_paragraphs(
         let mut hint_indices = compatible_hint_indices(&lines, hints, selected, min_containment);
         if promote_logo_title {
             promote_second_line_to_title(&mut lines, &mut hint_indices);
-        }
-        if is_drawing_page {
-            restore_drawing_page_labels(&mut lines);
         }
         element_indices.extend(std::iter::repeat_n(element_index, lines.len()));
         block_ids.extend(std::iter::repeat_n(
@@ -2247,7 +2183,7 @@ mod tests {
     fn test_layout_route_also_resolves_font_size_as_a_block_median() {
         let doc = quad_fragment_document(Some("block_1_1"), &[32, 36, 32, 36, 32, 32], None);
 
-        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, 1000, &[], 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &[], 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
         let font_sizes = ocr_segment_font_sizes(paragraphs);
 
         assert_eq!(
@@ -2669,8 +2605,7 @@ mod tests {
             right: 500.0,
             top: 900.0,
         }];
-        let paragraphs =
-            ocr_doc_to_layout_paragraphs(&doc, 1000, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 2);
         assert_eq!(paragraphs[0].text, "Document title");
@@ -2806,24 +2741,14 @@ mod tests {
             ("Second", 100.0, 120.0, 500.0, 140.0),
         ]);
         set_hocr_block_ids(&mut same_block, &[Some("block_1_1"), Some("block_1_1")]);
-        let merged =
-            ocr_doc_to_layout_paragraphs(&same_block, 1000, 1000, &[], 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
+        let merged = ocr_doc_to_layout_paragraphs(&same_block, 1000, &[], 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].text, "First\nSecond");
 
         let mut different_blocks = same_block.clone();
         set_hocr_block_ids(&mut different_blocks, &[Some("block_1_1"), Some("block_1_2")]);
         assert_eq!(
-            ocr_doc_to_layout_paragraphs(
-                &different_blocks,
-                1000,
-                1000,
-                &[],
-                0.5,
-                0.2,
-                OcrFontSizeScale::uniform(1.0)
-            )
-            .len(),
+            ocr_doc_to_layout_paragraphs(&different_blocks, 1000, &[], 0.5, 0.2, OcrFontSizeScale::uniform(1.0)).len(),
             2
         );
 
@@ -2832,7 +2757,7 @@ mod tests {
             ("Second", 100.0, 120.0, 500.0, 140.0),
         ]);
         assert_eq!(
-            ocr_doc_to_layout_paragraphs(&no_blocks, 1000, 1000, &[], 0.5, 0.2, OcrFontSizeScale::uniform(1.0)).len(),
+            ocr_doc_to_layout_paragraphs(&no_blocks, 1000, &[], 0.5, 0.2, OcrFontSizeScale::uniform(1.0)).len(),
             2
         );
 
@@ -2848,16 +2773,7 @@ mod tests {
         ]);
         set_hocr_block_ids(&mut long_paragraphs, &[Some("block_1_1"), Some("block_1_1")]);
         assert_eq!(
-            ocr_doc_to_layout_paragraphs(
-                &long_paragraphs,
-                1000,
-                1000,
-                &[],
-                0.5,
-                0.2,
-                OcrFontSizeScale::uniform(1.0)
-            )
-            .len(),
+            ocr_doc_to_layout_paragraphs(&long_paragraphs, 1000, &[], 0.5, 0.2, OcrFontSizeScale::uniform(1.0)).len(),
             2
         );
     }
@@ -2871,8 +2787,7 @@ mod tests {
         ]);
         let hints = [layout_test_hint(types::LayoutHintClass::Text, 860.0, 900.0)];
 
-        let paragraphs =
-            ocr_doc_to_layout_paragraphs(&doc, 1000, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 1);
         assert_eq!(
@@ -2895,8 +2810,7 @@ mod tests {
             layout_test_hint(types::LayoutHintClass::SectionHeader, 860.0, 880.0),
         ];
 
-        let paragraphs =
-            ocr_doc_to_layout_paragraphs(&doc, 1000, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 3);
         assert_eq!(paragraphs[0].text, "Body before");
@@ -2931,8 +2845,7 @@ mod tests {
             },
         ];
 
-        let paragraphs =
-            ocr_doc_to_layout_paragraphs(&doc, 1000, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 2);
         assert_eq!(paragraphs[0].text, "Left column");
@@ -2948,8 +2861,7 @@ mod tests {
         ]);
         let hints = [layout_test_hint(types::LayoutHintClass::Text, 680.0, 900.0)];
 
-        let paragraphs =
-            ocr_doc_to_layout_paragraphs(&doc, 1000, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 2);
         assert_eq!(paragraphs[0].text, "First paragraph");
@@ -3007,8 +2919,7 @@ mod tests {
             top: 920.0,
         }];
 
-        let paragraphs =
-            ocr_doc_to_layout_paragraphs(&doc, 1000, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 3);
         assert_eq!(paragraphs[0].text, "IDRH");
@@ -3025,7 +2936,7 @@ mod tests {
     fn test_logo_title_fallback_requires_following_prose() {
         let doc = logo_title_test_document("IDRH\nNon-text-searchable PDF", None);
 
-        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, 1000, &[], 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &[], 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 1);
         assert_eq!(paragraphs[0].text, "IDRH\nNon-text-searchable PDF");
@@ -3044,8 +2955,7 @@ mod tests {
         ] {
             let doc = logo_title_test_document(first_block, Some(prose));
 
-            let paragraphs =
-                ocr_doc_to_layout_paragraphs(&doc, 1000, 1000, &[], 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
+            let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &[], 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
             assert_eq!(paragraphs[0].text, first_block);
             assert_eq!(paragraphs[0].heading_level, None);
@@ -3066,8 +2976,7 @@ mod tests {
             top: 750.0,
         }];
 
-        let paragraphs =
-            ocr_doc_to_layout_paragraphs(&doc, 1000, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs[0].text, "IDRH\nNon-text-searchable PDF");
         assert_eq!(paragraphs[0].heading_level, None);
@@ -3087,8 +2996,7 @@ mod tests {
             top: 860.0,
         }];
 
-        let paragraphs =
-            ocr_doc_to_layout_paragraphs(&doc, 1000, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs[0].text, "IDRH");
         assert_eq!(paragraphs[0].heading_level, None);
@@ -3103,8 +3011,7 @@ mod tests {
         let doc = layout_test_document("A long document\nsubtitle line\nBody text", 3);
         let hints = [layout_test_hint(types::LayoutHintClass::Title, 860.0, 900.0)];
 
-        let paragraphs =
-            ocr_doc_to_layout_paragraphs(&doc, 1000, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 2);
         assert_eq!(paragraphs[0].text, "A long document\nsubtitle line");
@@ -3119,8 +3026,7 @@ mod tests {
         let doc = layout_test_document("fn main() {\nprintln!(\"hello\");\nBody text", 3);
         let hints = [layout_test_hint(types::LayoutHintClass::Code, 860.0, 900.0)];
 
-        let paragraphs =
-            ocr_doc_to_layout_paragraphs(&doc, 1000, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 2);
         assert_eq!(paragraphs[0].text, "fn main() {\nprintln!(\"hello\");");
@@ -3136,8 +3042,7 @@ mod tests {
         let doc = layout_test_document(&format!("Document title\n{prose}"), 2);
         let hints = [layout_test_hint(types::LayoutHintClass::Title, 860.0, 900.0)];
 
-        let paragraphs =
-            ocr_doc_to_layout_paragraphs(&doc, 1000, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 2);
         assert_eq!(paragraphs[0].text, "Document title");
@@ -3153,51 +3058,13 @@ mod tests {
         let doc = layout_test_document(&format!("fn main() {{\n{prose}"), 2);
         let hints = [layout_test_hint(types::LayoutHintClass::Code, 860.0, 900.0)];
 
-        let paragraphs =
-            ocr_doc_to_layout_paragraphs(&doc, 1000, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 2);
         assert_eq!(paragraphs[0].text, "fn main() {");
         assert!(paragraphs[0].is_code_block);
         assert_eq!(paragraphs[1].text, prose);
         assert!(!paragraphs[1].is_code_block);
-    }
-
-    /// GH#793: a `Picture` hint's bounding box commonly clips a fraction of an
-    /// adjacent paragraph -- a figure caption, or (as here) a long centered
-    /// title/author/affiliation block sitting just above or overlapping a detected
-    /// picture region. Before the `MAX_FURNITURE_HINT_TEXT_CHARS` guard in
-    /// `matches_hint_text`, `apply_hint_to_paragraph`'s `Picture` arm suppressed
-    /// *any* matched paragraph unconditionally, regardless of length, silently
-    /// discarding real body content. Exercised through `ocr_doc_to_layout_paragraphs`
-    /// (not `apply_hint_to_paragraph` directly) so a later stage -- the
-    /// element/block regrouping this function also runs -- cannot quietly re-apply
-    /// or paper over a broken guard: the assertion is on what this function hands
-    /// back to the caller, the same value `assemble_ocr_page_paragraphs` forwards to
-    /// rendering.
-    #[cfg(feature = "layout-detection")]
-    #[test]
-    fn test_picture_hint_does_not_suppress_long_prose_paragraph() {
-        let author_block = "Christoph Auer Maksym Lysak Ahmed Nassar Michele Dolfi Nikolaos Livathinos Panos \
-                             Vagenas Cesar Berrospi Ramis Matteo Omenetti Fabian Lindlbauer Kasper Dinkla Lokesh \
-                             Mishra Yusik Kim Shubham Gupta Rafael Teixeira de Lima Valery Weber Lucas Morin \
-                             Ingmar Meijer Viktor Kuropiatnyk Peter W. J. Staar";
-        assert!(
-            author_block.chars().count() > 200,
-            "fixture must exceed the furniture-suppression length bound"
-        );
-        let doc = layout_line_document(&[(author_block, 100.0, 100.0, 500.0, 120.0)]);
-        let hints = [layout_test_hint(types::LayoutHintClass::Picture, 860.0, 900.0)];
-
-        let paragraphs =
-            ocr_doc_to_layout_paragraphs(&doc, 1000, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
-
-        assert_eq!(paragraphs.len(), 1);
-        assert_eq!(paragraphs[0].text, author_block);
-        assert!(
-            !paragraphs[0].is_page_furniture,
-            "a long author/title block overlapping a Picture hint must not be discarded as furniture"
-        );
     }
 
     /// GH#793 counterpart for `PageHeader`: a running-header detection box can clip
@@ -3216,8 +3083,7 @@ mod tests {
         let doc = layout_line_document(&[(title_block, 100.0, 100.0, 500.0, 120.0)]);
         let hints = [layout_test_hint(types::LayoutHintClass::PageHeader, 860.0, 900.0)];
 
-        let paragraphs =
-            ocr_doc_to_layout_paragraphs(&doc, 1000, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 1);
         assert_eq!(paragraphs[0].text, title_block);
@@ -3237,8 +3103,7 @@ mod tests {
         let doc = layout_line_document(&[(running_header, 100.0, 100.0, 500.0, 120.0)]);
         let hints = [layout_test_hint(types::LayoutHintClass::PageHeader, 860.0, 900.0)];
 
-        let paragraphs =
-            ocr_doc_to_layout_paragraphs(&doc, 1000, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 1);
         assert!(
@@ -3256,8 +3121,7 @@ mod tests {
         );
         let hints = [layout_test_hint(types::LayoutHintClass::ListItem, 840.0, 900.0)];
 
-        let paragraphs =
-            ocr_doc_to_layout_paragraphs(&doc, 1000, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 2);
         assert_eq!(
@@ -3273,8 +3137,7 @@ mod tests {
     fn test_title_split_trims_boundary_blank_before_assembled_body() {
         let doc = layout_test_document("Document title\n\nBody text", 3);
         let hints = [layout_test_hint(types::LayoutHintClass::Title, 880.0, 900.0)];
-        let paragraphs =
-            ocr_doc_to_layout_paragraphs(&doc, 1000, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 2);
         assert_eq!(paragraphs[0].text, "Document title");
@@ -3309,90 +3172,14 @@ mod tests {
         let doc = layout_test_document("Detected picture region", 1);
         let hints = [layout_test_hint(types::LayoutHintClass::Picture, 880.0, 900.0)];
 
-        let paragraphs =
-            ocr_doc_to_layout_paragraphs(&doc, 1000, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
+        let paragraphs = ocr_doc_to_layout_paragraphs(&doc, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
 
         assert_eq!(paragraphs.len(), 1);
         assert_eq!(paragraphs[0].layout_class, Some(types::LayoutHintClass::Picture));
-        assert!(paragraphs[0].is_page_furniture);
-    }
-
-    /// A `Picture` hint spanning most of the page area marks the page as a drawing page
-    /// (site plan, exhibit, etc.). Text placed inside that region -- a title-block label
-    /// like "EXHIBIT B-1" -- is the page's real content, not furniture around it, so it
-    /// must survive as body text instead of being demoted to a furniture layer that the
-    /// markdown renderer never emits (`rendering::common::is_body_element`).
-    #[cfg(feature = "layout-detection")]
-    #[test]
-    fn test_drawing_page_picture_hint_does_not_suppress_title_block_text() {
-        let doc = layout_test_document("EXHIBIT B-1", 1);
-        let hints = [types::LayoutHint {
-            class_name: types::LayoutHintClass::Picture,
-            confidence: 0.9,
-            left: 0.0,
-            bottom: 0.0,
-            right: 1000.0,
-            top: 1000.0,
-        }];
-
-        let paragraphs =
-            ocr_doc_to_layout_paragraphs(&doc, 1000, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
-
-        assert_eq!(paragraphs.len(), 1);
-        assert_eq!(paragraphs[0].layout_class, Some(types::LayoutHintClass::Picture));
-        assert!(
-            !paragraphs[0].is_page_furniture,
-            "title-block text on a whole-page drawing must not be demoted to furniture"
-        );
-    }
-
-    /// The same whole-page-drawing carve-out must not widen into "any Picture hint is
-    /// safe": a `Picture` hint covering only a small fraction of the page (an inset
-    /// figure on an ordinary text page) must keep suppressing overlapping text as
-    /// furniture, exactly as `test_picture_uses_canonical_match_identity` above already
-    /// pins for the even-smaller default fixture hint.
-    #[cfg(feature = "layout-detection")]
-    #[test]
-    fn test_small_inset_picture_hint_still_suppresses_text() {
-        let doc = layout_test_document("Figure caption region", 1);
-        let hints = [types::LayoutHint {
-            class_name: types::LayoutHintClass::Picture,
-            confidence: 0.9,
-            left: 0.0,
-            bottom: 700.0,
-            right: 1000.0,
-            top: 1000.0,
-        }];
-
-        let paragraphs =
-            ocr_doc_to_layout_paragraphs(&doc, 1000, 1000, &hints, 0.5, 0.2, OcrFontSizeScale::uniform(1.0));
-
-        assert_eq!(paragraphs.len(), 1);
-        assert!(paragraphs[0].is_page_furniture);
-    }
-
-    /// Direct unit coverage of the page-level drawing-page predicate: the threshold is a
-    /// fraction of page pixel area ([`DRAWING_PAGE_PICTURE_AREA_RATIO`]), not an absolute
-    /// size, so it must flip based on the hint's share of the page, not its raw extent.
-    #[cfg(feature = "layout-detection")]
-    #[test]
-    fn test_page_is_drawing_page_uses_area_ratio_not_absolute_size() {
-        let dominant = types::LayoutHint {
-            class_name: types::LayoutHintClass::Picture,
-            confidence: 0.9,
-            left: 0.0,
-            bottom: 0.0,
-            right: 1000.0,
-            top: 600.0,
-        };
-        assert!(page_is_drawing_page(std::slice::from_ref(&dominant), 1000.0, 1000.0));
-
-        let inset = types::LayoutHint {
-            right: 400.0,
-            top: 300.0,
-            ..dominant
-        };
-        assert!(!page_is_drawing_page(&[inset], 1000.0, 1000.0));
+        // The hint still records its class on the paragraph -- that identity is what this
+        // test is named for. What it must NOT do any more is suppress the text: figure
+        // content is data, not page furniture (GH#793).
+        assert!(!paragraphs[0].is_page_furniture);
     }
 
     #[cfg(feature = "layout-detection")]

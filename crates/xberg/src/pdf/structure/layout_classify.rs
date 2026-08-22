@@ -526,10 +526,24 @@ pub(super) fn apply_hint_to_paragraph(para: &mut PdfParagraph, hint: &LayoutHint
         // char, `MAX_FURNITURE_HINT_TEXT_CHARS`) paragraph is enough to mark it
         // furniture unconditionally. GH#793 candidate site: traced separately from the
         // header/footer arm so the two can be told apart.
-        LayoutHintClass::Picture if para.heading_level.is_none() => {
-            para.is_page_furniture = true;
-            trace_furniture_tagged(hint, &para_text);
-        }
+        // GH#793: a `Picture` hint does NOT make its text page furniture. Furniture is
+        // content that FRAMES a page -- a running header, a footer, a watermark -- and is
+        // safe to drop because it repeats elsewhere. Text inside a figure is the opposite:
+        // it is the figure's own data, and it appears exactly once.
+        //
+        // Measured on nougat_009 with both routes instrumented: every one of the 12
+        // furniture taggings on that document came from this arm, none from
+        // PageHeader/PageFooter. They suppressed 8 paragraphs / 27 words -- `How it
+        // worked`, `35.20%`, `$263`, `increase in aided` -- each of which IS in the ground
+        // truth. Paragraph conversion itself lost nothing (525 words in, 525 out on both
+        // routes); the entire 161-byte deficit against the non-layout route, and GT recall
+        // of 44/77 against 46/77, came from this one arm plus the render-time body filter.
+        //
+        // The arm also had no confidence floor, while PageHeader/PageFooter require
+        // `>= 0.8`. The suppressing hints here measured 0.769 to 0.837, so a floor would
+        // have recovered some and kept discarding the rest. `is_page_furniture` now belongs
+        // only to the two classes whose name means what it says.
+        LayoutHintClass::Picture => {}
         LayoutHintClass::Text | LayoutHintClass::Caption | LayoutHintClass::Footnote
             if !debug.no_demote
                 && para.heading_level.is_some()
@@ -1576,13 +1590,17 @@ mod tests {
         );
     }
 
+    /// GH#793: a figure label is the figure's own data and appears once, so a `Picture`
+    /// hint must leave it in the document. This asserted the opposite until nougat_009 was
+    /// measured: that page's `Picture` hints suppressed 27 words of chart labels -- `How it
+    /// worked`, `35.20%`, `$263` -- every one of them present in the ground truth.
     #[test]
-    fn test_picture_hint_applies_to_non_heading_paragraph() {
+    fn test_picture_hint_does_not_make_a_figure_label_furniture() {
         let mut para = make_para(12.0, 400.0, 100.0, 16.0);
         para.text = "Figure 1: schematic".to_string();
         let hint = make_hint(LayoutHintClass::Picture, 0.85, 0.0, 390.0, 200.0, 420.0);
         apply_hint_to_paragraph(&mut para, &hint, None);
-        assert!(para.is_page_furniture, "figure label must become furniture");
+        assert!(!para.is_page_furniture, "figure text is content, not page furniture");
         assert_eq!(para.heading_level, None, "non-heading para must stay non-heading");
     }
 
