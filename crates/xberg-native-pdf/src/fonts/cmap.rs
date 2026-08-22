@@ -1016,7 +1016,17 @@ fn parse_bfrange_line(line: &str) -> Option<Vec<(u32, String)>> {
             .collect();
 
         let mut result = Vec::new();
-        let range_size = (end - start + 1) as usize;
+
+        // `start`/`end` are attacker-controlled hex from the font's ToUnicode stream, so a
+        // reversed range (`<0100> <0000>`) or `end == u32::MAX` makes the naive
+        // `(end - start + 1)` overflow: a panic under `overflow-checks` (debug and test), a
+        // silent wrap to a bogus count in release, which this crate's profile does not
+        // enable. The sequential branch and `parse_notdefrange_line` clamp with
+        // `end.saturating_sub(start).min(10000)`; here `range_size` is an entry COUNT rather
+        // than a 0-based loop offset, hence the `saturating_add(1)`, and their `.min(10000)`
+        // is unnecessary because this value only bounds a `.take()` over `dst_hexes` (already
+        // sized by the literal array in the stream) instead of driving iteration. ~keep
+        let range_size = end.saturating_sub(start).saturating_add(1) as usize;
 
         // SPEC VALIDATION: PDF Spec ISO 32000-1:2008, Section 9.10.3
         // The array must have exactly (end - start + 1) entries.
