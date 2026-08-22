@@ -104,7 +104,7 @@ parking_lot = "0.12.5"
 # target (`module_path!()`, rooted at `[lib] name`) matches the crate you are reading. An alias
 # hiding a different lib name is what cost twelve days of dropped font warnings in GH#697.
 # Path dependency inside the workspace; needs no [patch.crates-io] entry.
-xberg-native-pdf = { path = "./crates/xberg-native-pdf", version = "1.0.0" }
+xberg-native-pdf = { path = "./crates/xberg-native-pdf", version = "1.1.0" }
 # Our fork of pdfium-render. `package =` keeps the extern crate name `pdfium_render`
 # (matches the `[lib] name = "pdfium_render"` in crates/xberg-pdfium-render/Cargo.toml),
 # so any `use pdfium_render::...` call site is unaffected. Path dependency inside the

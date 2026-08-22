@@ -1,9 +1,6 @@
 [package]
 name = "xberg-native-pdf"
-# First publish under the new name starts at 1.0.0 rather than inheriting the workspace's
-# 1.1.0. Once it is on crates.io this should move to `version.workspace = true` so it rides
-# the normal version sync -- see `task version:sync`. ~keep
-version = "1.0.0"
+version.workspace = true
 rust-version.workspace = true
 edition.workspace = true
 # Upstream authorship is retained deliberately -- see ATTRIBUTIONS.md and LICENSE. ~keep
