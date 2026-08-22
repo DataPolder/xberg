@@ -15,6 +15,10 @@ die() { log "$*"; exit 1; }
 
 STAGED_DIR="${1:?usage: $0 <staged-platform-dir-containing-.node-and-.so-files>}"
 [ -d "$STAGED_DIR" ] || die "staged platform directory not found: $STAGED_DIR"
+# `docker -v` rejects a relative source as a volume NAME ("includes invalid
+# characters for a local volume name"), so this must be absolute before the
+# mount below. Matches smoke-test-musl-python-wheel.sh, which already does it. ~keep
+STAGED_DIR="$(cd "$STAGED_DIR" && pwd)"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 FIXTURE="$REPO_ROOT/scripts/ci/fixtures/musl-python-smoke.pdf"
