@@ -1214,7 +1214,7 @@ impl InternalDocumentExtractor for DocxExtractor {
                         while end > start && !text.is_char_boundary(end) {
                             end -= 1;
                         }
-                        text[start..end].trim().to_string()
+                        crate::extraction::docx::parser::trim_blank_lines(&text[start..end]).to_string()
                     } else {
                         String::new()
                     };

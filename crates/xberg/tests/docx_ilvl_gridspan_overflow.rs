@@ -216,34 +216,23 @@ fn test_ilvl_huge_value_does_not_panic_and_clamps() {
         .unwrap_or_else(|_| panic!("extraction panicked on w:ilvl=\"10000000000\""))
         .expect("extraction must succeed for an oversized (clamped) w:ilvl");
 
-    // ~keep: this asserts the FLAT "- Item", not a 16-space indent, and that is
-    // deliberate. A list whose first item is already at a non-zero w:ilvl loses all
-    // its indentation in build_internal_document (extractors/docx.rs:169-180 opens
-    // exactly one list regardless of nlvl) -- a separate, pre-existing defect that
-    // has its own task. Asserting the indent here would be asserting a behaviour
-    // this crate has never had. What this test does gate is that an oversized ilvl
-    // reaches the renderer as a bounded value instead of panicking or asking for
-    // ~20 GB; the depth itself is gated by the clamp_numbering_level unit tests.
+    // The indent is the clamp's observable output: 8 levels x 2 spaces. An unclamped
+    // "10000000000" would either panic or ask for ~20 GB before reaching this point.
     assert_eq!(
         first_page_content(&result),
-        "- Item",
-        "an oversized w:ilvl must still extract its text as a list item"
+        "                - Item",
+        "an oversized w:ilvl must clamp to the 8-level indent, not panic or over-allocate"
     );
 }
 
-/// At-the-cap boundary, end to end: `w:ilvl="8"` must survive extraction as a list
-/// item rather than being rejected outright by the clamp.
-///
-/// ~keep: it cannot assert the 8-level indent, for the reason given on
-/// `test_ilvl_huge_value_does_not_panic_and_clamps` -- a list starting at a non-zero
-/// level renders flat today. The "cap is not too tight" property is gated instead by
-/// `clamp_numbering_level`'s own unit tests in `extraction::docx::parser`.
+/// At-the-cap boundary, end to end: `w:ilvl="8"` must survive extraction with its full
+/// 8-level indent rather than being clamped down or rejected by the cap.
 #[test]
 fn test_ilvl_at_cap_boundary_is_not_truncated() {
     let at_cap = extract_list_markdown("8");
     assert_eq!(
-        at_cap, "- Item",
-        "w:ilvl=\"8\" (the documented ceiling) must still extract as a list item"
+        at_cap, "                - Item",
+        "w:ilvl=\"8\" (the documented ceiling) must keep all 8 levels of indentation"
     );
 }
 
@@ -252,14 +241,17 @@ fn test_ilvl_at_cap_boundary_is_not_truncated() {
 fn test_ilvl_one_past_cap_clamps_to_cap() {
     let one_past = extract_list_markdown("9");
     let at_cap = extract_list_markdown("8");
-    // ~keep: measured 2026-08-22 -- this comparison is currently VACUOUS, because a
-    // list starting at any non-zero level renders flat, so 8 and 9 are equal whether
-    // or not the clamp exists. It is kept because it becomes a real gate the moment
-    // the non-zero-start indentation defect is fixed. Do not cite it as evidence the
-    // clamp works; `clamp_numbering_level`'s unit tests are that evidence.
+    // Not vacuous: with the clamp removed these differ (9 levels = 18 spaces vs 8
+    // levels = 16), so this comparison genuinely gates the cap end to end. It was
+    // vacuous until the leading-blank-line trim stopped flattening a list whose first
+    // item is also the document's first line -- both sides rendered "- Item" then.
     assert_eq!(
         one_past, at_cap,
         "w:ilvl=\"9\" must clamp down to the same rendering as w:ilvl=\"8\""
+    );
+    assert_eq!(
+        at_cap, "                - Item",
+        "the clamped rendering is the 8-level indent"
     );
 }
 

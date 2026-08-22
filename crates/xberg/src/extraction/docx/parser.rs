@@ -588,12 +588,9 @@ impl Document {
             }
         }
 
-        let trimmed_end = output.trim_end().len();
-        output.truncate(trimmed_end);
-        let trimmed_start = output.len() - output.trim_start().len();
-        if trimmed_start > 0 {
-            output.drain(..trimmed_start);
-        }
+        let (content_start, content_end) = blank_line_trim_range(&output);
+        output.truncate(content_end);
+        output.drain(..content_start);
         output
     }
 
@@ -1388,6 +1385,33 @@ const MAX_LIST_NESTING_LEVEL: i64 = 8;
 /// failure" extraction-safety rule instead of discarding an otherwise-good paragraph.
 fn clamp_numbering_level(level: i64) -> i64 {
     level.clamp(0, MAX_LIST_NESTING_LEVEL)
+}
+
+/// Byte range of `text` with its leading and trailing blank lines removed, keeping the
+/// indentation of the first content line intact.
+///
+/// `Paragraph::to_markdown` encodes list nesting depth as leading spaces
+/// (`"  ".repeat(level)`), so the blanket `trim_start` this replaced silently flattened
+/// any list whose first item was also the document's first line: a list starting at
+/// `w:ilvl="8"` rendered with zero indentation while the same list preceded by one
+/// ordinary paragraph rendered with all sixteen spaces.
+pub(crate) fn blank_line_trim_range(text: &str) -> (usize, usize) {
+    let end = text.trim_end().len();
+    let head = &text[..end];
+    let start = head
+        .char_indices()
+        .find(|(_, character)| !character.is_whitespace())
+        .map_or(end, |(index, _)| {
+            head[..index].rfind('\n').map_or(0, |newline| newline + 1)
+        });
+    (start, end)
+}
+
+/// `text` with its leading and trailing blank lines removed, preserving the first
+/// content line's indentation. See [`blank_line_trim_range`].
+pub(crate) fn trim_blank_lines(text: &str) -> &str {
+    let (start, end) = blank_line_trim_range(text);
+    &text[start..end]
 }
 
 /// Apply paragraph-level properties from a `<w:pStyle>`, `<w:ilvl>`, or `<w:numId>` element.
