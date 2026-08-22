@@ -526,6 +526,7 @@ impl OcrBackend for GlmOcrBackend {
             Cow::Borrowed("text/markdown"),
             image_bytes,
             config,
+            "candle-glm-ocr",
         );
         #[cfg(feature = "layout-detection")]
         merge_table_bounding_boxes(&mut document.tables, &table_bboxes);
@@ -1182,6 +1183,7 @@ mod tests {
             std::borrow::Cow::Borrowed("text/markdown"),
             &[],
             &config,
+            "candle-glm-ocr",
         );
         merge_table_bounding_boxes(&mut doc.tables, &table_bboxes);
 

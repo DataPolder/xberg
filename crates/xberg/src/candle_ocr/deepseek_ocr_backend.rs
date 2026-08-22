@@ -224,6 +224,7 @@ impl OcrBackend for DeepseekOcrBackend {
             Cow::Borrowed("text/markdown"),
             image_bytes,
             config,
+            "candle-deepseek-ocr",
         ))
     }
 

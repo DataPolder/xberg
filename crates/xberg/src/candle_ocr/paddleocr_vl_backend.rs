@@ -330,6 +330,7 @@ impl OcrBackend for PaddleOcrVlBackend {
             Cow::Borrowed("text/markdown"),
             image_bytes,
             config,
+            "candle-paddleocr-vl",
         ))
     }
 

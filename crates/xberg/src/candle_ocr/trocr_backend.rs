@@ -291,6 +291,7 @@ impl OcrBackend for TrocrBackend {
             Cow::Borrowed("text/plain"),
             image_bytes,
             config,
+            "candle-trocr",
         ))
     }
 
