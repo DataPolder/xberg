@@ -149,7 +149,14 @@ mod tests {
             f.write_all(b"content").unwrap();
             let config = ExtractionConfig::default();
             let result = extract_file(&file_path, None, &config).await;
-            assert!(result.is_ok() || result.is_err());
+
+            // A 204-byte filename is well under every common filesystem's 255-byte
+            // component limit, so `File::create` above already succeeded; nothing in
+            // `detect_or_validate`/`extract_file` imposes a length limit of its own, so
+            // this must extract exactly like any other `.txt` file.
+            let result = result.expect("a 204-byte filename is under every common filesystem limit");
+            assert_text_content(&result.content, "content");
+            assert_eq!(result.mime_type, "text/plain");
         }
     }
 
@@ -213,7 +220,21 @@ mod tests {
         let config = ExtractionConfig::default();
         let result = extract_file(&file_path, None, &config).await;
 
-        assert!(result.is_ok() || result.is_err());
+        // Despite the test's name, `detect_mime_type` (crates/xberg/src/core/mime.rs) has
+        // no content-sniffing fallback for an extensionless path: with no `extension`, it
+        // skips straight past `mime_guess` (which also needs an extension) to the final
+        // `Err(Validation)` naming the path. This must always fail, not "gracefully do
+        // either" -- content sniffing is a real behavior this crate does not have here.
+        let error = result.expect_err("an extensionless path has no extension to sniff a MIME type from");
+        use crate::XbergError;
+        assert!(
+            matches!(error, XbergError::Validation { .. }),
+            "expected a Validation error, got: {error:?}"
+        );
+        assert!(
+            error.to_string().contains("Could not determine MIME type"),
+            "error must name the MIME-determination failure, got: {error}"
+        );
     }
 
     #[tokio::test]
@@ -225,7 +246,22 @@ mod tests {
         let config = ExtractionConfig::default();
         let result = extract_file(&file_path, Some("application/pdf"), &config).await;
 
-        assert!(result.is_err() || result.is_ok());
+        // `Some("application/pdf")` skips detection entirely (`detect_or_validate` only
+        // validates a caller-supplied MIME, it never sniffs against it), so the PDF
+        // extractor runs directly on ten bytes of plain text with no `%PDF` header;
+        // `NativeDocument::open_bytes_with_passwords` (crates/xberg/src/pdf/native/mod.rs)
+        // wraps `xberg_native_pdf`'s parse failure as `XbergError::Parsing`. See
+        // `security_validation.rs::assert_rejected_as_invalid_pdf` for the same contract.
+        let error = result.expect_err("plain text has no PDF structure, extraction must fail");
+        use crate::XbergError;
+        assert!(
+            matches!(error, XbergError::Parsing { .. }),
+            "expected a Parsing error, got: {error:?}"
+        );
+        assert!(
+            error.to_string().contains("xberg_native_pdf"),
+            "error must name the failing parser, got: {error}"
+        );
     }
 
     #[tokio::test]

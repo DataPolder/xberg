@@ -21082,7 +21082,19 @@ mod tests {
     #[test]
     fn test_from_bytes_invalid_data() {
         let result = PdfDocument::from_bytes(b"not a pdf".to_vec());
-        assert!(result.is_err() || result.is_ok());
+
+        // `parse_header` (lenient mode) never fails on missing `%PDF-` -- it defaults to
+        // version 1.4 (line ~19772) -- so the actual rejection happens one step later:
+        // `find_xref_offset` (crates/xberg-native-pdf/src/xref.rs) finds no `startxref`
+        // keyword anywhere in the 9-byte input and returns `Error::InvalidXref`.
+        // `open_from_reader` then tries `reconstruct_xref` as a fallback, which also
+        // fails (`RE_OBJ_PATTERN` matches no `N G obj` header at all), so it re-returns
+        // the *original* `InvalidXref` error rather than the reconstruction one.
+        let error = result.expect_err("9 bytes with no PDF structure at all must be rejected");
+        assert!(
+            matches!(error, Error::InvalidXref),
+            "expected Error::InvalidXref, got: {error:?}"
+        );
     }
 
     #[test]
