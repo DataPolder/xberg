@@ -1331,18 +1331,26 @@ mod tests {
         );
     }
 
-    /// Regression for the "declared size bounds nothing" defect: `zip` 2.4.2's decompressing
-    /// `Read` impl has no `Take` on the decompressed side, so `extract_zip_text_content` used to
-    /// call `file.read_to_end()` completely unbounded and only measure the result afterwards.
-    /// Against the unfixed code this member is fully decompressed (200_000 bytes) before the
-    /// aggregate `total_content_size` check fires, producing an error that reports the full
-    /// decompressed total and never names the offending member (the aggregate check has no
-    /// per-member identity once several members have been summed). Against the fixed code the
-    /// read is capped at `max_content_size`, so the *member-scoped* error fires first and names
-    /// the member. `--features archives` (the `#[cfg(test)]` module here compiles only under
-    /// that feature, since `zip`/`tar`/`sevenz-rust2` are optional deps gated by it).
+    /// Covers per-member rejection and error naming for an oversized ZIP member's text
+    /// content -- NOT memory-boundedness. `extract_zip_text_content` takes `bytes: &[u8]` and
+    /// builds a concrete `zip::read::ZipFile` reader internally; there is no seam here to
+    /// substitute a counting/instrumented `Read` for it, so the actual property the `.take()`
+    /// exists for (the reader is never asked for more than `cap + 1` bytes) cannot be observed
+    /// from this test. It is covered by inspection only. What this test does prove: a member
+    /// whose decompressed content dwarfs `max_content_size` is rejected by a *member-scoped*
+    /// error that names the member, rather than surfacing only from the aggregate
+    /// `total_content_size` check (which, once several members have been summed, can no longer
+    /// report which one was responsible).
+    ///
+    /// Neutralisation that must break this test: replace `.take(cap.saturating_add(1))` with
+    /// `.take(u64::MAX)` in `extract_zip_text_content`. That neutralisation does NOT break this test on its
+    /// own -- the post-read `raw.len() as u64 > cap` check a few lines below still fires and
+    /// still names "huge.txt", so the assertion still passes. Only removing that length check
+    /// too (or renaming the error's member field) would fail it, which is exactly the point:
+    /// this test cannot distinguish a bounded reader from an unbounded one.
+    /// `--features archives`.
     #[test]
-    fn test_zip_text_member_exceeding_content_cap_is_rejected_by_member_not_only_aggregate() {
+    fn test_zip_text_content_names_offending_member_when_it_exceeds_content_cap() {
         let mut cursor = Cursor::new(Vec::new());
         {
             let mut zip = ZipWriter::new(&mut cursor);
@@ -1365,17 +1373,21 @@ mod tests {
         let message = error.to_string();
         assert!(
             message.contains("huge.txt"),
-            "the read must be capped per-member (surfacing an error that names the member) \
-             instead of decompressing it fully and only detecting the overage in the aggregate \
-             total, whose error never names a member: {message}"
+            "the rejection must name the offending member instead of only reporting an \
+             aggregate total that cannot identify one: {message}"
         );
     }
 
-    /// Same defect, different call: `extract_zip_file_bytes` also called `read_to_end()` with
-    /// only a `Vec::with_capacity` hint (`size().min(max_archive_size)`) bounding nothing.
+    /// Same defect family, different call: `extract_zip_file_bytes`. See the doc comment on
+    /// `test_zip_text_content_names_offending_member_when_it_exceeds_content_cap` for why this
+    /// covers per-member rejection and naming, not memory-boundedness.
+    ///
+    /// Neutralisation that must break this test: replace `.take(cap.saturating_add(1))` with
+    /// `.take(u64::MAX)` in `extract_zip_file_bytes` -- and, as above, that alone does not break it, since the
+    /// `content.len() as u64 > cap` check still fires and still names "huge.bin".
     /// `--features archives`.
     #[test]
-    fn test_zip_file_bytes_member_exceeding_archive_cap_is_rejected_by_member_not_only_aggregate() {
+    fn test_zip_file_bytes_names_offending_member_when_it_exceeds_archive_cap() {
         let mut cursor = Cursor::new(Vec::new());
         {
             let mut zip = ZipWriter::new(&mut cursor);
@@ -1396,16 +1408,23 @@ mod tests {
         let message = error.to_string();
         assert!(
             message.contains("huge.bin"),
-            "the read must be capped per-member instead of decompressing it fully and only \
-             detecting the overage in the aggregate total, whose error never names a member: {message}"
+            "the rejection must name the offending member instead of only reporting an \
+             aggregate total that cannot identify one: {message}"
         );
     }
 
-    /// TAR analogue of the ZIP text-content regression: `entry.size()` was used only as a
-    /// `Vec::with_capacity` hint, never as an actual bound, so a header declaring a large member
-    /// was read into memory in full before `total_content_size` caught it. `--features archives`.
+    /// TAR analogue of `test_zip_text_content_names_offending_member_when_it_exceeds_content_cap`.
+    /// Same limitation applies: `extract_tar_text_content` takes `bytes: &[u8]` and builds a
+    /// concrete `tar::Entry` reader internally, with no seam to inject a counting `Read`, so
+    /// this covers per-member rejection and error naming only -- memory-boundedness rests on
+    /// inspection.
+    ///
+    /// Neutralisation that must break this test: replace `.take(cap.saturating_add(1))` with
+    /// `.take(u64::MAX)` in `extract_tar_text_content`. As with ZIP, that alone does not break it: the
+    /// `raw.len() as u64 > cap` check still fires and still names "huge.txt".
+    /// `--features archives`.
     #[test]
-    fn test_tar_text_member_exceeding_content_cap_is_rejected_by_member_not_only_aggregate() {
+    fn test_tar_text_content_names_offending_member_when_it_exceeds_content_cap() {
         let mut cursor = Cursor::new(Vec::new());
         {
             let mut tar = TarBuilder::new(&mut cursor);
@@ -1429,14 +1448,19 @@ mod tests {
         let message = error.to_string();
         assert!(
             message.contains("huge.txt"),
-            "the read must be capped per-member instead of reading it fully and only detecting \
-             the overage in the aggregate total, whose error never names a member: {message}"
+            "the rejection must name the offending member instead of only reporting an \
+             aggregate total that cannot identify one: {message}"
         );
     }
 
-    /// TAR analogue of the ZIP file-bytes regression. `--features archives`.
+    /// TAR analogue of `test_zip_file_bytes_names_offending_member_when_it_exceeds_archive_cap`.
+    ///
+    /// Neutralisation that must break this test: replace `.take(cap.saturating_add(1))` with
+    /// `.take(u64::MAX)` in `extract_tar_file_bytes`. As above, that alone does not break it: the
+    /// `content.len() as u64 > cap` check still fires and still names "huge.bin".
+    /// `--features archives`.
     #[test]
-    fn test_tar_file_bytes_member_exceeding_archive_cap_is_rejected_by_member_not_only_aggregate() {
+    fn test_tar_file_bytes_names_offending_member_when_it_exceeds_archive_cap() {
         let mut cursor = Cursor::new(Vec::new());
         {
             let mut tar = TarBuilder::new(&mut cursor);
@@ -1460,8 +1484,8 @@ mod tests {
         let message = error.to_string();
         assert!(
             message.contains("huge.bin"),
-            "the read must be capped per-member instead of reading it fully and only detecting \
-             the overage in the aggregate total, whose error never names a member: {message}"
+            "the rejection must name the offending member instead of only reporting an \
+             aggregate total that cannot identify one: {message}"
         );
     }
 

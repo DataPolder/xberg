@@ -241,18 +241,26 @@ mod tests {
     use super::*;
     use sevenz_rust2::{ArchiveEntry as SevenzEntry, ArchiveWriter};
 
-    /// Regression for "the read is bounded by nothing an attacker doesn't choose": unlike
-    /// ZIP/TAR, sevenz-rust2 does apply a per-entry cap on the decompressed side
-    /// (`reader.rs:1662`), but that cap is the archive's own declared `file.size` -- a field
-    /// the archive's author controls, not a limit we impose. Against the unfixed code this
-    /// 200,000-byte member is fully materialised into memory and only measured against
-    /// `max_content_size` in the *aggregate* check after the closure returns, producing an
-    /// error that reports the aggregate total and never names the offending member (once the
-    /// aggregate has summed several members it no longer has per-member identity to report).
-    /// Against the fixed code the read is capped at `max_content_size` inside the closure, so
-    /// the member-scoped error fires first and names the member. `--features archives`.
+    /// Covers per-member rejection and error naming for an oversized 7z member's text
+    /// content -- NOT memory-boundedness. `extract_7z_text_content` takes `bytes: &[u8]` and
+    /// `for_each_entries` hands the closure a concrete sevenz-rust2 block reader; there is no
+    /// seam here to substitute a counting/instrumented `Read` for it, so the actual property
+    /// the `.take()` exists for (the reader is never asked for more than `cap + 1` bytes)
+    /// cannot be observed from this test. It is covered by inspection only. What this test does
+    /// prove: a member whose decoded content dwarfs `max_content_size` is rejected by a
+    /// *member-scoped* error that names the member, rather than surfacing only from the
+    /// aggregate `total_content_size` check (which, once several members have been summed, can
+    /// no longer report which one was responsible).
+    ///
+    /// Neutralisation that must break this test: replace `.take(cap.saturating_add(1))` with
+    /// `.take(u64::MAX)` in `extract_7z_text_content`. That neutralisation does NOT break this test on its
+    /// own -- the post-read `content.len() as u64 > cap` check a few lines below still fires
+    /// and still names "huge.txt", so the assertion still passes. Only removing that length
+    /// check too (or renaming the error's member field) would fail it, which is exactly the
+    /// point: this test cannot distinguish a bounded reader from an unbounded one.
+    /// `--features archives`.
     #[test]
-    fn test_7z_text_member_exceeding_content_cap_is_rejected_by_member_not_only_aggregate() {
+    fn test_7z_text_content_names_offending_member_when_it_exceeds_content_cap() {
         let cursor = {
             let cursor = Cursor::new(Vec::new());
             let mut sz = ArchiveWriter::new(cursor).unwrap();
@@ -275,16 +283,21 @@ mod tests {
         let message = error.to_string();
         assert!(
             message.contains("huge.txt"),
-            "the read must be capped per-member (surfacing an error that names the member) \
-             instead of decoding it fully and only detecting the overage in the aggregate \
-             total, whose error never names a member: {message}"
+            "the rejection must name the offending member instead of only reporting an \
+             aggregate total that cannot identify one: {message}"
         );
     }
 
-    /// Same defect, different call: `extract_7z_file_bytes` also called `read_to_end()` on
-    /// the block reader with no cap of its own. `--features archives`.
+    /// Same defect family, different call: `extract_7z_file_bytes`. See the doc comment on
+    /// `test_7z_text_content_names_offending_member_when_it_exceeds_content_cap` for why this
+    /// covers per-member rejection and naming, not memory-boundedness.
+    ///
+    /// Neutralisation that must break this test: replace `.take(cap.saturating_add(1))` with
+    /// `.take(u64::MAX)` in `extract_7z_file_bytes` -- and, as above, that alone does not break it, since
+    /// the `content.len() as u64 > cap` check still fires and still names "huge.bin".
+    /// `--features archives`.
     #[test]
-    fn test_7z_file_bytes_member_exceeding_archive_cap_is_rejected_by_member_not_only_aggregate() {
+    fn test_7z_file_bytes_names_offending_member_when_it_exceeds_archive_cap() {
         let cursor = {
             let cursor = Cursor::new(Vec::new());
             let mut sz = ArchiveWriter::new(cursor).unwrap();
@@ -307,8 +320,8 @@ mod tests {
         let message = error.to_string();
         assert!(
             message.contains("huge.bin"),
-            "the read must be capped per-member instead of decoding it fully and only \
-             detecting the overage in the aggregate total, whose error never names a member: {message}"
+            "the rejection must name the offending member instead of only reporting an \
+             aggregate total that cannot identify one: {message}"
         );
     }
 }
