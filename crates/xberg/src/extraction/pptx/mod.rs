@@ -2018,6 +2018,83 @@ pub(crate) mod tests {
         );
     }
 
+    /// A crafted `<a:pPr lvl="4294967294">` must not turn `add_list_item`'s
+    /// per-level `"  "` indent loop into ~4.29 billion pushes. Against the unfixed
+    /// parser (`lvl_attr.parse::<u32>().unwrap_or(0) + 1` with no upper bound) this
+    /// scenario does not fail an assertion -- the process hangs or is OOM-killed
+    /// building several GB of indentation before any `assert_eq!` runs. The fixed
+    /// parser must instead come back immediately with the level clamped to
+    /// `MAX_LIST_NESTING_LEVEL` (8), i.e. 8 two-space indents.
+    #[test]
+    fn test_pptx_list_level_bomb_is_clamped_not_allocated() {
+        let slide_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+       xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+    <p:cSld><p:spTree>
+        <p:sp><p:txBody>
+            <a:p><a:r><a:t>Intro</a:t></a:r></a:p>
+            <a:p><a:pPr lvl="4294967294"><a:buChar char="•"/></a:pPr><a:r><a:t>Bomb</a:t></a:r></a:p>
+        </p:txBody></p:sp>
+    </p:spTree></p:cSld>
+</p:sld>"#;
+
+        let pptx = build_single_slide_pptx(slide_xml, None, &[]);
+        let result = extract_pptx_from_bytes(
+            &pptx,
+            &PptxExtractionOptions {
+                extract_images: false,
+                ..Default::default()
+            },
+            &mut Vec::new(),
+        )
+        .expect("extraction must succeed for an out-of-range (clamped) list level");
+
+        // Match the WHOLE line, not a substring: `contains` is satisfied by any
+        // indent at least this deep, so it passes even with the clamp widened to
+        // 50_000 and cannot detect over-indentation -- the exact thing the clamp
+        // is here to bound.
+        let expected_line = format!("{}- Bomb", "  ".repeat(8));
+        assert!(
+            result.content.lines().any(|line| line == expected_line),
+            "lvl=4294967294 must clamp to exactly 8 levels of indentation, got: {:?}",
+            result.content
+        );
+    }
+
+    /// Positive control: a normal `lvl="2"` list item (well within the clamp) must
+    /// render with exactly the same two-space-per-level indentation as before this
+    /// fix -- the guard against a cap set too tight.
+    #[test]
+    fn test_pptx_list_level_two_positive_control_unchanged() {
+        let slide_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+       xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+    <p:cSld><p:spTree>
+        <p:sp><p:txBody>
+            <a:p><a:r><a:t>Intro</a:t></a:r></a:p>
+            <a:p><a:pPr lvl="2"><a:buChar char="•"/></a:pPr><a:r><a:t>Nested</a:t></a:r></a:p>
+        </p:txBody></p:sp>
+    </p:spTree></p:cSld>
+</p:sld>"#;
+
+        let pptx = build_single_slide_pptx(slide_xml, None, &[]);
+        let result = extract_pptx_from_bytes(
+            &pptx,
+            &PptxExtractionOptions {
+                extract_images: false,
+                ..Default::default()
+            },
+            &mut Vec::new(),
+        )
+        .expect("extraction must succeed for a normal lvl=2 list item");
+
+        assert!(
+            result.content.lines().any(|line| line == "    - Nested"),
+            "lvl=2 must render with exactly 2 two-space indents, got: {:?}",
+            result.content
+        );
+    }
+
     /// #47: OMML math wrapped in `mc:AlternateContent`/`mc:Choice`/`a14:m` must be
     /// converted to LaTeX via the shared `docx::math` OMML converter, not dropped,
     /// and the `mc:Fallback` text must not also appear (Choice content wins).
