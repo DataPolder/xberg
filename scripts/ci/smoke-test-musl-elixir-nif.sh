@@ -18,6 +18,10 @@ die() { log "$*"; exit 1; }
 
 NIF_SO="${1:?usage: $0 <path-to-libxberg_nif.so>}"
 [ -f "$NIF_SO" ] || die "NIF shared library not found: $NIF_SO"
+# `docker -v` rejects a relative source as a volume NAME ("includes invalid
+# characters for a local volume name"), so the caller's path must be absolute
+# here even though every other mount below is already rooted at REPO_ROOT. ~keep
+NIF_SO="$(cd "$(dirname "$NIF_SO")" && pwd)/$(basename "$NIF_SO")"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 FIXTURE="$REPO_ROOT/scripts/ci/fixtures/musl-python-smoke.pdf"
