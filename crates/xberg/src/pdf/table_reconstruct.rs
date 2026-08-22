@@ -191,20 +191,48 @@ pub(crate) fn post_process_table(
     layout_guided: bool,
     allow_single_column: bool,
 ) -> Option<Vec<Vec<String>>> {
-    let min_columns = if allow_single_column {
+    let min_columns = min_columns_for(layout_guided, allow_single_column);
+    post_process_table_inner(table, min_columns, layout_guided, None)
+}
+
+/// Like [`post_process_table`], but also keeps `column_positions` — the column
+/// x-positions [`crate::table_core::reconstruct_table_with_columns`] returned alongside
+/// the grid — in lockstep with any column this cleanup removes.
+///
+/// `merge_header_only_column` and `prune_spurious_interior_column` both drop a column
+/// from the table (a header-only track with no supporting data, or a single stray
+/// footer word). Without this, a caller that hands `column_positions` to a
+/// column-index-keyed consumer *after* post-processing — e.g.
+/// `is_well_formed_borderless_table`'s straddled-boundary check — keeps testing a
+/// boundary for a column that no longer exists in the cleaned grid. That boundary
+/// reads as clean whitespace (nothing was ever assigned to the column that got
+/// dropped), which dilutes the straddle ratio and can let a borderless candidate pass
+/// a gate it should have failed (xberg-io/xberg#863).
+pub(crate) fn post_process_table_with_columns(
+    table: Vec<Vec<String>>,
+    layout_guided: bool,
+    allow_single_column: bool,
+    column_positions: &mut Vec<u32>,
+) -> Option<Vec<Vec<String>>> {
+    let min_columns = min_columns_for(layout_guided, allow_single_column);
+    post_process_table_inner(table, min_columns, layout_guided, Some(column_positions))
+}
+
+fn min_columns_for(layout_guided: bool, allow_single_column: bool) -> usize {
+    if allow_single_column {
         1
     } else if layout_guided {
         2
     } else {
         3
-    };
-    post_process_table_inner(table, min_columns, layout_guided)
+    }
 }
 
 fn post_process_table_inner(
     mut table: Vec<Vec<String>>,
     min_columns: usize,
     layout_guided: bool,
+    mut column_positions: Option<&mut Vec<u32>>,
 ) -> Option<Vec<Vec<String>>> {
     table.retain(|row| row.iter().any(|cell| !cell.trim().is_empty()));
     if table.is_empty() {
@@ -388,7 +416,7 @@ fn post_process_table_inner(
             .all(|row| row.get(col).is_none_or(|cell| cell.trim().is_empty()));
 
         if data_empty {
-            merge_header_only_column(&mut processed, col, header_text);
+            merge_header_only_column(&mut processed, col, header_text, column_positions.as_deref_mut());
         } else {
             col += 1;
         }
@@ -416,7 +444,7 @@ fn post_process_table_inner(
         return None;
     }
 
-    prune_spurious_interior_column(&mut processed, layout_guided);
+    prune_spurious_interior_column(&mut processed, layout_guided, column_positions.as_deref_mut());
 
     let data_row_count = processed.len() - 1;
     if data_row_count > 0 {
@@ -827,7 +855,11 @@ fn row_shapes_match(left: &[String], right: &[String]) -> bool {
 /// Remove one empty-header interior track that only catches a stray word in a
 /// large, otherwise dense layout-guided table. Such tracks arise when a footer
 /// word has an x-position that does not occur in the table body.
-fn prune_spurious_interior_column(table: &mut [Vec<String>], layout_guided: bool) -> bool {
+fn prune_spurious_interior_column(
+    table: &mut [Vec<String>],
+    layout_guided: bool,
+    column_positions: Option<&mut Vec<u32>>,
+) -> bool {
     let Some(header) = table.first() else {
         return false;
     };
@@ -871,6 +903,7 @@ fn prune_spurious_interior_column(table: &mut [Vec<String>], layout_guided: bool
     }
 
     merge_interior_column(table, *column);
+    drop_column_position(column_positions, *column);
     true
 }
 
@@ -1655,7 +1688,12 @@ fn looks_like_declaration_head(head: &str) -> bool {
     identifiers >= 2
 }
 
-fn merge_header_only_column(table: &mut [Vec<String>], col: usize, header_text: String) {
+fn merge_header_only_column(
+    table: &mut [Vec<String>],
+    col: usize,
+    header_text: String,
+    column_positions: Option<&mut Vec<u32>>,
+) {
     if table.is_empty() || table[0].is_empty() {
         return;
     }
@@ -1665,6 +1703,7 @@ fn merge_header_only_column(table: &mut [Vec<String>], col: usize, header_text: 
         for row in table.iter_mut() {
             row.remove(col);
         }
+        drop_column_position(column_positions, col);
         return;
     }
 
@@ -1682,6 +1721,7 @@ fn merge_header_only_column(table: &mut [Vec<String>], col: usize, header_text: 
                 for row in table.iter_mut() {
                     row.remove(col);
                 }
+                drop_column_position(column_positions, col);
                 return;
             }
         }
@@ -1698,12 +1738,26 @@ fn merge_header_only_column(table: &mut [Vec<String>], col: usize, header_text: 
             for row in table.iter_mut() {
                 row.remove(col);
             }
+            drop_column_position(column_positions, col);
             return;
         }
     }
 
     for row in table.iter_mut() {
         row.remove(col);
+    }
+    drop_column_position(column_positions, col);
+}
+
+/// Remove the column-position entry for a column that just got dropped from the table
+/// grid, keeping the two in lockstep for callers that index `column_positions` by
+/// column after post-processing (xberg-io/xberg#863). A no-op when the caller isn't
+/// tracking positions, or `col` is already out of bounds.
+fn drop_column_position(column_positions: Option<&mut Vec<u32>>, col: usize) {
+    if let Some(positions) = column_positions
+        && col < positions.len()
+    {
+        positions.remove(col);
     }
 }
 
@@ -1942,7 +1996,7 @@ mod tests {
             "end".into(),
         ];
 
-        assert!(prune_spurious_interior_column(&mut table, true));
+        assert!(prune_spurious_interior_column(&mut table, true, None));
         assert_eq!(table[0].len(), 6);
         assert!(
             table
@@ -1962,7 +2016,7 @@ mod tests {
         }
         table.last_mut().expect("data row")[3] = "Y".into();
 
-        assert!(!prune_spurious_interior_column(&mut table, true));
+        assert!(!prune_spurious_interior_column(&mut table, true, None));
         assert_eq!(table[0].len(), 7);
         assert_eq!(table[0][3], "Optional flag");
     }
@@ -1985,7 +2039,7 @@ mod tests {
             "end".into(),
         ];
 
-        assert!(!prune_spurious_interior_column(&mut table, true));
+        assert!(!prune_spurious_interior_column(&mut table, true, None));
         assert_eq!(table[0].len(), 7);
         assert_eq!(table[middle][3], "sustained");
     }
@@ -2000,7 +2054,7 @@ mod tests {
             }
         }
 
-        assert!(!prune_spurious_interior_column(&mut table, true));
+        assert!(!prune_spurious_interior_column(&mut table, true, None));
         assert_eq!(table[0].len(), 8);
     }
 

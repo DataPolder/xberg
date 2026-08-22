@@ -1410,7 +1410,7 @@ fn reconstruct_region_table_with_column_gap(
     horizontal_rules: usize,
 ) -> std::result::Result<Table, HeuristicTableRejection> {
     use crate::pdf::table_reconstruct::{
-        is_well_formed_borderless_table, looks_like_code_listing, post_process_table, table_to_markdown,
+        is_well_formed_borderless_table, looks_like_code_listing, post_process_table_with_columns, table_to_markdown,
     };
 
     // Take the column positions from the same call that built the grid. `reconstruct_table`
@@ -1436,8 +1436,13 @@ fn reconstruct_region_table_with_column_gap(
         "heuristic table reconstructed grid"
     );
 
-    let mut cleaned =
-        post_process_table(grid, true, allow_single_column).ok_or(HeuristicTableRejection::PostProcessing)?;
+    // Use the `column_positions`-tracking variant: `post_process_table` alone can drop a
+    // column (an empty-data header-only track, or a spurious footer-only interior track)
+    // without telling `column_positions`, leaving a stale boundary for
+    // `is_well_formed_borderless_table` below to test against a column that no longer
+    // exists (#863).
+    let mut cleaned = post_process_table_with_columns(grid, true, allow_single_column, &mut column_positions)
+        .ok_or(HeuristicTableRejection::PostProcessing)?;
     repair_heuristic_header_delimiters(&mut cleaned);
     if cleaned.len() <= 1 {
         return Err(HeuristicTableRejection::TooFewRows);
@@ -3200,6 +3205,42 @@ mod tests {
 
         assert!(!repair_split_numeric_track(&mut grid, &words, &mut vec![20, 100, 104]));
         assert!(grid.iter().all(|row| row.len() == 3));
+    }
+
+    /// `post_process_table`'s `merge_header_only_column` drops a column whose header has
+    /// text but whose data is empty on every row (here: "Extra", the third of three
+    /// detected columns). `is_well_formed_borderless_table`'s straddled-boundary check
+    /// must not go on testing that dropped column's boundary afterwards: nothing was
+    /// ever placed there, so it reads as clean whitespace and dilutes the ratio.
+    ///
+    /// The surviving "Name"/"Value" boundary is straddled by a wide word on 5 of 6 data
+    /// rows (5/7 ≈ 0.71, above the 0.60 `MAX_STRADDLED_BOUNDARY_RATIO`), which alone
+    /// should reject this as prose, not a real table. Testing the stale "Value"/"Extra"
+    /// boundary too (never straddled, since "Extra" has no data) halves the ratio to
+    /// 5/14 ≈ 0.36 — under the threshold — so the unfixed code wrongly accepts it
+    /// (xberg-io/xberg#863).
+    #[test]
+    fn stale_column_position_after_header_only_column_merge_does_not_mask_prose() {
+        let mut region = vec![
+            make_word("Name", 0, 0, 30),
+            make_word("Value", 150, 0, 30),
+            make_word("Extra", 300, 0, 30),
+        ];
+        // 5 rows where one wide word starts in the "Name" column and runs past the
+        // "Value" boundary — the straddle a real column gap would never allow.
+        for row in 0..5 {
+            region.push(make_word("P", 0, 40 + row * 40, 200));
+        }
+        // 1 clean row that anchors "Value" as a real, narrow, non-straddled column.
+        region.push(make_word("P", 0, 240, 30));
+        region.push(make_word("42", 150, 240, 30));
+
+        let result = reconstruct_region_table_with_column_gap(&region, 792.0, 1, false, 30, 0);
+
+        assert!(
+            matches!(result, Err(HeuristicTableRejection::NotWellFormed)),
+            "expected the straddled 'Name'/'Value' boundary alone to reject this as prose, got {result:?}"
+        );
     }
 
     #[test]
