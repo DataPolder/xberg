@@ -103,11 +103,62 @@ fn test_archive_path_traversal_zip() {
 
 #[test]
 fn test_archive_path_traversal_tar() {
-    let mut header = tar::Header::new_gnu();
+    // `tar::Header::set_path` (and the `tar` crate generally) refuses to *set* a
+    // traversing path -- that only proves the `tar` crate's own writer is defensive, not
+    // that xberg's TAR reader (`extract_tar_metadata` in
+    // crates/xberg/src/extraction/archive/tar.rs) does anything sane with a header that
+    // already carries one. A real hostile TAR file is not produced by `tar::Header::set_path`
+    // in the first place, so a faithful test has to build the header the same way an
+    // attacker would: write the raw bytes into the fixed-width name field directly,
+    // bypassing the path validation entirely. `GnuHeader::name` is a public `[u8; 100]`
+    // field for exactly this kind of low-level construction, and `Builder::append` writes
+    // whatever header it is given without re-validating the path.
+    let mut cursor = std::io::Cursor::new(Vec::new());
+    {
+        let mut builder = tar::Builder::new(&mut cursor);
 
-    let result = header.set_path("../../etc/shadow");
+        let data = b"malicious content";
+        let mut header = tar::Header::new_gnu();
+        let name = b"../../etc/shadow";
+        {
+            let gnu = header.as_gnu_mut().expect("a GNU header always has a GNU view");
+            gnu.name[..name.len()].copy_from_slice(name);
+        }
+        header.set_entry_type(tar::EntryType::Regular);
+        header.set_mode(0o644);
+        header.set_size(data.len() as u64);
+        header.set_cksum();
 
-    assert!(result.is_err(), "TAR library should reject path traversal attempts");
+        builder
+            .append(&header, &data[..])
+            .expect("Builder::append does not validate the path");
+        builder.finish().expect("Operation failed");
+    }
+
+    let bytes = cursor.into_inner();
+    let config = ExtractionConfig::default();
+
+    let result = extract_bytes_document_blocking(&bytes, "application/x-tar", &config);
+
+    // Mirrors `test_archive_path_traversal_zip` above: `extract_tar_metadata` calls
+    // `entry.path()` and copies the result verbatim into `file_list` with no traversal
+    // check, and `TarExtractor` never writes an extracted entry to the filesystem using
+    // that name, so there is no root to escape here either.
+    let extracted = result.expect("a traversing TAR entry name is not itself invalid TAR structure");
+    let archive_meta = match extracted.metadata.format.as_ref() {
+        Some(xberg::FormatMetadata::Archive(m)) => m,
+        other => panic!("expected Archive format metadata, got: {other:?}"),
+    };
+    assert_eq!(
+        archive_meta.file_list,
+        vec!["../../etc/shadow".to_string()],
+        "the raw entry name must survive into metadata unmodified: xberg's TAR reader \
+         performs no sanitization (and, as with ZIP, none is required today because \
+         nothing is written to disk from this name -- see `ArchiveEntry::path`'s docs in \
+         crates/xberg/src/extraction/archive/mod.rs for the hazard this leaves for a \
+         future caller that DOES write to disk, and `ArchiveEntry::confined_path` for the \
+         safe accessor such a caller must use instead)"
+    );
 }
 
 #[test]

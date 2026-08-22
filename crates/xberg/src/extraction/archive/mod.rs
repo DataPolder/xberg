@@ -39,12 +39,80 @@ pub struct ArchiveMetadata {
 #[cfg_attr(alef, alef(skip))]
 #[derive(Debug, Clone)]
 pub struct ArchiveEntry {
-    /// File path within the archive
+    /// File path within the archive, copied **verbatim** from the archive's own entry
+    /// name (`zip::read::ZipFile::name()`, `tar::Entry::path()`, ...).
+    ///
+    /// This value is untrusted and unnormalised: a hostile or malformed archive can make
+    /// it an absolute path (`/etc/passwd`), a traversing relative path
+    /// (`../../etc/passwd`), or a Windows drive-letter/UNC form. Nothing in this module
+    /// rejects or rewrites those forms, because nothing here writes archive contents to a
+    /// real filesystem path built from this string -- it is only ever used as an opaque
+    /// map key (`extract_zip_text_content`/`extract_zip_file_bytes` and their TAR
+    /// equivalents) or surfaced as informational metadata.
+    ///
+    /// A future caller that *does* want to write an entry to disk (a CLI "extract to
+    /// directory" feature, an FFI binding, ...) must never join this value onto a real
+    /// path directly. Use [`ArchiveEntry::confined_path`] instead, which returns a
+    /// normalised path guaranteed not to escape the archive root, or `None` when the raw
+    /// name cannot be confined at all.
     pub path: String,
     /// File size in bytes
     pub size: u64,
     /// Whether this is a directory
     pub is_dir: bool,
+}
+
+impl ArchiveEntry {
+    /// Returns [`Self::path`] normalised and confined to the archive root, or `None` when
+    /// it cannot be confined safely.
+    ///
+    /// This is the safe counterpart to the raw `path` field: it rejects (via `None`)
+    /// exactly the cases that make `path` unsafe to use as a filesystem write target --
+    /// a `..` that pops past the root, a NUL byte, and a Windows drive letter or UNC
+    /// prefix -- and otherwise returns a `/`-joined, root-relative path with `.` and
+    /// empty segments removed.
+    ///
+    /// Backslashes are normalised to `/` first, since a hostile archive can store a
+    /// backslash-separated name that native path handling would treat as a single opaque
+    /// segment on Unix rather than as traversal components.
+    ///
+    /// This function does not decide *what* to do with an unconfined entry (skip it, warn,
+    /// abort the whole archive, ...); that policy belongs to the caller that would
+    /// otherwise write the entry somewhere.
+    pub fn confined_path(&self) -> Option<String> {
+        if self.path.contains('\0') {
+            return None;
+        }
+
+        let normalized = self.path.replace('\\', "/");
+        if has_drive_or_unc_prefix(&normalized) {
+            return None;
+        }
+
+        let mut stack: Vec<&str> = Vec::new();
+        for segment in normalized.split('/') {
+            match segment {
+                "" | "." => {}
+                ".." => {
+                    stack.pop()?;
+                }
+                other => stack.push(other),
+            }
+        }
+
+        if stack.is_empty() {
+            return None;
+        }
+
+        Some(stack.join("/"))
+    }
+}
+
+/// `true` when `path` begins with a Windows drive letter (`C:`) or a UNC prefix (`//`,
+/// which is what a backslash-normalised `\\server\share` becomes).
+fn has_drive_or_unc_prefix(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    path.starts_with("//") || (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
 }
 
 /// Common text file extensions that should be extracted from archives.
@@ -144,6 +212,64 @@ mod tests {
 
     fn default_limits() -> SecurityLimits {
         SecurityLimits::default()
+    }
+
+    fn entry(path: &str) -> ArchiveEntry {
+        ArchiveEntry {
+            path: path.to_string(),
+            size: 0,
+            is_dir: false,
+        }
+    }
+
+    #[test]
+    fn test_confined_path_returns_normalised_relative_path_unchanged() {
+        assert_eq!(entry("folder/document.pdf").confined_path(), Some("folder/document.pdf".to_string()));
+    }
+
+    #[test]
+    fn test_confined_path_rejects_traversal_past_the_root() {
+        assert_eq!(entry("../../etc/passwd").confined_path(), None);
+    }
+
+    #[test]
+    fn test_confined_path_allows_in_bounds_traversal_that_stays_inside_root() {
+        // `a/../b` never leaves the root it started in, so it is confined even though it
+        // contains a `..` component.
+        assert_eq!(entry("a/../b/file.txt").confined_path(), Some("b/file.txt".to_string()));
+    }
+
+    #[test]
+    fn test_confined_path_strips_leading_slash_from_absolute_unix_path() {
+        // A leading `/` is treated the same as any other empty segment here (unlike the
+        // OOXML/EPUB `resolve_container_entry`, an archive entry has no "container root"
+        // concept to redirect to): stripping it still leaves a normal relative path.
+        assert_eq!(entry("/tmp/malicious.txt").confined_path(), Some("tmp/malicious.txt".to_string()));
+    }
+
+    #[test]
+    fn test_confined_path_rejects_windows_drive_prefix() {
+        assert_eq!(entry("C:/Windows/System32/evil.dll").confined_path(), None);
+    }
+
+    #[test]
+    fn test_confined_path_rejects_unc_prefix() {
+        assert_eq!(entry("\\\\server\\share\\evil.dll").confined_path(), None);
+    }
+
+    #[test]
+    fn test_confined_path_rejects_nul_byte() {
+        assert_eq!(entry("evil\0.txt").confined_path(), None);
+    }
+
+    #[test]
+    fn test_confined_path_rejects_bare_parent_dir() {
+        assert_eq!(entry("..").confined_path(), None);
+    }
+
+    #[test]
+    fn test_confined_path_rejects_path_made_only_of_dot_segments() {
+        assert_eq!(entry("./.").confined_path(), None);
     }
 
     /// Regression for #113: real text members with extensions absent from the
