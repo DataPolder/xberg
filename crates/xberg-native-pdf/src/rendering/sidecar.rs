@@ -1517,7 +1517,13 @@ pub(crate) fn initial_colour_for_space(
             // /Range entry clamps. We assume 0.0 is in-range (the
             // common case); a custom /Range that excludes 0 is rare
             // and the rasteriser will clamp downstream anyway. ~keep
-            let components = vec![0.0_f32; n.max(1) as usize];
+            //
+            // `/N` is document-declared and otherwise unbounded (`as_integer`
+            // returns an i64): `project_iccbased_to_rgb` in page_renderer.rs
+            // already clamps it to `0..=255` before trusting it
+            // (`n.clamp(0, 255) as u8`) rather than letting a single `/N
+            // 999999999999` dictionary entry size a `Vec<f32>` allocation. ~keep
+            let components = vec![0.0_f32; n.clamp(1, 255) as usize];
             let cmyk = if n == 4 { Some((0.0, 0.0, 0.0, 0.0)) } else { None };
             InitialColour {
                 components,
@@ -1695,6 +1701,38 @@ mod tests {
         ] {
             assert_eq!(class.process_dispatch(), ProcessBlendDispatch::UseRequested);
         }
+    }
+
+    /// `/N` on an `ICCBased` colour-space dictionary is document-declared
+    /// and otherwise unbounded; `initial_colour_for_space` used to size a
+    /// `Vec<f32>` directly from it (`vec![0.0_f32; n.max(1) as usize]`).
+    ///
+    /// Before the fix: a declared `/N i64::MAX` allocates
+    /// `i64::MAX * size_of::<f32>()` bytes, which panics with "capacity
+    /// overflow" (the byte count exceeds `isize::MAX`) instead of being
+    /// rejected as malformed input. After the fix, `/N` is clamped to
+    /// `1..=255` before it ever reaches the allocation.
+    #[test]
+    fn iccbased_initial_colour_clamps_huge_declared_n() {
+        let doc = crate::rendering::resolution::test_support::fixture_doc();
+
+        let mut icc_dict = HashMap::new();
+        icc_dict.insert("N".to_string(), Object::Integer(i64::MAX));
+        let resolved_space = Object::Array(vec![Object::Name("ICCBased".to_string()), Object::Dictionary(icc_dict)]);
+
+        let initial = initial_colour_for_space(
+            "ICCBased",
+            Some(&resolved_space),
+            &doc,
+            crate::color::RenderingIntent::default(),
+            None,
+        );
+
+        assert!(
+            initial.components.len() <= 255,
+            "declared /N must be clamped rather than trusted directly: got {} components",
+            initial.components.len()
+        );
     }
 
     #[test]

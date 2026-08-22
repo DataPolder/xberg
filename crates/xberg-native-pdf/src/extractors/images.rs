@@ -494,8 +494,27 @@ impl PdfImage {
                     // constructed images; it unpacks with the ISO 32000-1
                     // §8.9.5.2 Table 90 default semantics: sample bit 0 ->
                     // component 0.0 (black), bit 1 -> component 1.0 (white). ~keep
+                    // `/Width` and `/Height` are document-declared and
+                    // untrusted, so the output buffer size is checked before
+                    // allocating — the same 256 MiB cap
+                    // `expand_indexed_to_rgb_with_transform` and
+                    // `samples_to_decoded_bytes` use elsewhere in this file. ~keep
+                    const MAX_GRAYSCALE_OUTPUT_BYTES: usize = 256 * 1024 * 1024;
+                    let output_bytes = (self.width as usize).checked_mul(self.height as usize).ok_or_else(|| {
+                        Error::Decode(format!(
+                            "1-bit DeviceGray image output size overflow: {} x {} exceeds usize",
+                            self.width, self.height
+                        ))
+                    })?;
+                    if output_bytes > MAX_GRAYSCALE_OUTPUT_BYTES {
+                        return Err(Error::Decode(format!(
+                            "1-bit DeviceGray image decode would produce {output_bytes} bytes, exceeds guard \
+                             limit of {MAX_GRAYSCALE_OUTPUT_BYTES} bytes (width={}, height={})",
+                            self.width, self.height
+                        )));
+                    }
                     let row_bytes = (self.width as usize).div_ceil(8);
-                    let mut grayscale = Vec::with_capacity(self.width as usize * self.height as usize);
+                    let mut grayscale = Vec::with_capacity(output_bytes);
                     for row in 0..self.height as usize {
                         let row_start = row * row_bytes;
                         for col in 0..self.width as usize {
@@ -3996,6 +4015,43 @@ mod non_ccitt_1bpc_devicegray_tests {
         assert_eq!(white + black, 24);
         assert_eq!(white, 22, "polarity inverted: majority is now white");
         assert_eq!(black, 2, "the notch is now the black pixels");
+    }
+
+    /// `/Width` and `/Height` are document-declared; the 1-bit `/DeviceGray`
+    /// unpacking branch used to allocate `Vec::with_capacity(width * height)`
+    /// with no overflow check or size cap. `u32::MAX x u32::MAX` doesn't
+    /// overflow the `usize` multiplication on a 64-bit target (the product
+    /// is still well under `usize::MAX`), so it reached
+    /// `Vec::with_capacity` with a byte count exceeding `isize::MAX`.
+    ///
+    /// Before the fix: this panics with "capacity overflow" (raised by
+    /// `Vec`'s internal allocation-size check) instead of returning a
+    /// recoverable `Error`. After the fix, the checked-multiply + 256 MiB
+    /// cap rejects the request up front and returns `Err`.
+    #[test]
+    fn huge_declared_dimensions_are_rejected_without_allocating() {
+        let img = PdfImage::new(
+            u32::MAX,
+            u32::MAX,
+            ColorSpace::DeviceGray,
+            1,
+            ImageData::Raw {
+                pixels: Vec::new(),
+                format: PixelFormat::Grayscale,
+            },
+        );
+
+        let result = img.to_dynamic_image();
+
+        assert!(
+            result.is_err(),
+            "huge declared /Width x /Height must be rejected, not allocated"
+        );
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("overflow") || err.contains("exceeds"),
+            "expected an overflow/limit error, got: {err}"
+        );
     }
 }
 

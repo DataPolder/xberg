@@ -274,17 +274,30 @@ impl XfaParser {
 
     /// Parse a complete XDP document.
     fn parse_xdp(&mut self, xml: &str) -> Result<()> {
+        const TEMPLATE_CLOSE_TAG: &str = "</template>";
+        const DATASETS_CLOSE_TAG: &str = "</xfa:datasets>";
+
+        // The closing-tag search MUST start at `xml[start..]`, not `xml[..]`.
+        // A raw substring search over the whole document can find a stray
+        // occurrence of the literal closing tag (e.g. inside preceding text,
+        // a comment, or another packet) that appears *before* the opening
+        // tag this block is for, giving `end < start`. Slicing
+        // `xml[start..end + tag.len()]` then panics with "slice index starts
+        // at N but ends at M" instead of a recoverable parse error. Searching
+        // within `xml[start..]` guarantees any match is at or after `start`. ~keep
         if let Some(template_start) = xml.find("<template")
-            && let Some(template_end) = xml.find("</template>")
+            && let Some(template_end_rel) = xml[template_start..].find(TEMPLATE_CLOSE_TAG)
         {
-            let template_xml = &xml[template_start..template_end + 11];
+            let template_end = template_start + template_end_rel + TEMPLATE_CLOSE_TAG.len();
+            let template_xml = &xml[template_start..template_end];
             self.parse_template(template_xml)?;
         }
 
         if let Some(data_start) = xml.find("<xfa:datasets")
-            && let Some(data_end) = xml.find("</xfa:datasets>")
+            && let Some(data_end_rel) = xml[data_start..].find(DATASETS_CLOSE_TAG)
         {
-            let datasets_xml = &xml[data_start..data_end + 15];
+            let data_end = data_start + data_end_rel + DATASETS_CLOSE_TAG.len();
+            let datasets_xml = &xml[data_start..data_end];
             self.form.datasets_xml = Some(datasets_xml.to_string());
             self.parse_datasets(datasets_xml)?;
         }
@@ -662,6 +675,40 @@ mod tests {
         assert_eq!(form.fields[0].width, Some(200.0));
         assert_eq!(form.fields[0].height, Some(20.0));
         assert_eq!(form.fields[1].name, "lastName");
+    }
+
+    /// A stray `</xfa:datasets>` literal appearing *before* the real
+    /// `<xfa:datasets` opening tag (e.g. injected text, a comment, or a
+    /// malformed prior packet) used to make `parse_xdp` slice
+    /// `xml[data_start..data_end + 15]` with `data_end < data_start`.
+    ///
+    /// Before the fix: `XfaParser::parse` panics with
+    /// "slice index starts at 16 but ends at 15" instead of returning a
+    /// `Result`. After the fix, the closing-tag search is scoped to
+    /// `xml[data_start..]`, so it can never find a match before
+    /// `data_start` and the call returns `Ok` (with the datasets packet
+    /// parsed from the *real* tag pair).
+    #[test]
+    fn parse_does_not_panic_on_closing_tag_before_opening_tag() {
+        let malformed = "</xfa:datasets>x<xfa:datasets>hello</xfa:datasets>";
+
+        let mut parser = XfaParser::new();
+        let result = parser.parse(malformed.as_bytes());
+
+        assert!(result.is_ok(), "malformed XFA data must not panic: {result:?}");
+    }
+
+    /// Same defect, for the `<template>`/`</template>` pair: a stray
+    /// `</template>` literal before the real `<template>` tag must not
+    /// panic `parse_xdp`'s slicing.
+    #[test]
+    fn parse_does_not_panic_on_template_closing_tag_before_opening_tag() {
+        let malformed = "<xfa:datasets/></template>x<template>hi</template>";
+
+        let mut parser = XfaParser::new();
+        let result = parser.parse(malformed.as_bytes());
+
+        assert!(result.is_ok(), "malformed XFA data must not panic: {result:?}");
     }
 
     #[test]

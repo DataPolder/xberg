@@ -208,19 +208,24 @@ impl XmpExtractor {
 
     /// Parse XMP XML content.
     pub fn parse_xmp(xml: &str) -> Result<Option<XmpMetadata>> {
-        let start = xml.find("<x:xmpmeta").or_else(|| xml.find("<rdf:RDF"));
-        let end = xml.rfind("</x:xmpmeta>").or_else(|| xml.rfind("</rdf:RDF>"));
-
-        let xmp_content = match (start, end) {
-            (Some(s), Some(e)) => {
-                let end_adjusted = if xml[e..].starts_with("</x:xmpmeta") {
-                    e + "</x:xmpmeta>".len()
-                } else {
-                    e + "</rdf:RDF>".len()
-                };
-                &xml[s..end_adjusted]
-            }
-            _ => return Ok(None),
+        // Prefer the `<x:xmpmeta>` wrapper, falling back to a bare
+        // `<rdf:RDF>` root — but always search for a tag's closing marker
+        // starting at THAT tag's own opening position, never independently
+        // across both tag kinds. The previous code picked the start via a
+        // forward `find` across both kinds and the end via a backward
+        // `rfind` across both kinds; a stray closing-tag literal earlier in
+        // the stream (of the *other* kind — e.g. leftover text mentioning
+        // `</x:xmpmeta>` while the real content is a bare `<rdf:RDF>`)
+        // could resolve to `end < start` and panic slicing
+        // `xml[s..end_adjusted]` with "slice index starts at N but ends at
+        // M". Scoping the closing search to `xml[open..]` makes that
+        // impossible: any match found is guaranteed to be at or after
+        // `open`. ~keep
+        let xmp_content = match Self::find_wrapped_section(xml, "<x:xmpmeta", "</x:xmpmeta>")
+            .or_else(|| Self::find_wrapped_section(xml, "<rdf:RDF", "</rdf:RDF>"))
+        {
+            Some(content) => content,
+            None => return Ok(None),
         };
 
         let mut metadata = XmpMetadata::new();
@@ -320,6 +325,16 @@ impl XmpExtractor {
 
         Ok(Some(metadata))
     }
+
+    /// Find the first `open .. close` wrapped section in `xml`, scoping the
+    /// closing-tag search to start at `open`'s own match position so a
+    /// result can never resolve to an end index before the start. See the
+    /// call site in [`Self::parse_xmp`] for why this matters.
+    fn find_wrapped_section<'a>(xml: &'a str, open: &str, close: &str) -> Option<&'a str> {
+        let start = xml.find(open)?;
+        let end_rel = xml[start..].find(close)?;
+        Some(&xml[start..start + end_rel + close.len()])
+    }
 }
 
 #[cfg(test)]
@@ -361,6 +376,26 @@ mod tests {
         assert_eq!(metadata.xmp_creator_tool, Some("native_pdf".to_string()));
         assert_eq!(metadata.xmp_create_date, Some("2024-01-15T10:30:00Z".to_string()));
         assert_eq!(metadata.pdf_producer, Some("native_pdf 0.3.0".to_string()));
+    }
+
+    /// A stray `</x:xmpmeta>` literal appearing *before* the real content —
+    /// which here uses a bare `<rdf:RDF>` root with no `<x:xmpmeta>` wrapper
+    /// at all — used to make `parse_xmp` compute `start` (from a forward
+    /// `find` across both tag kinds) and `end` (from a backward `rfind`
+    /// across both tag kinds) inconsistently, giving `end < start`.
+    ///
+    /// Before the fix: `parse_xmp` panics with
+    /// "slice index starts at 13 but ends at 12" instead of returning a
+    /// `Result`. After the fix, the closing-tag search is scoped to start
+    /// at the matched opening tag, so it returns `Ok` and recovers the real
+    /// `<rdf:RDF>...</rdf:RDF>` content.
+    #[test]
+    fn parse_xmp_does_not_panic_on_closing_tag_before_real_content() {
+        let malformed = "</x:xmpmeta>x<rdf:RDF>hello</rdf:RDF>";
+
+        let result = XmpExtractor::parse_xmp(malformed);
+
+        assert!(result.is_ok(), "malformed XMP data must not panic: {result:?}");
     }
 
     #[test]

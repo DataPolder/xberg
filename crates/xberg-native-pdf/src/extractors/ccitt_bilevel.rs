@@ -364,10 +364,38 @@ fn invert_bilevel_pixels(data: &mut [u8]) {
 /// # Returns
 ///
 /// A vector of 8-bit grayscale pixels suitable for image processing and OCR.
+/// Returns an empty vector when `width` x `height` would exceed the output
+/// size guard (see below) — the caller (`to_dynamic_image`) already treats a
+/// length mismatch against the declared dimensions as `Error::Decode`
+/// ("Invalid image dimensions"), so this keeps the public signature
+/// unchanged while refusing the allocation.
 pub fn bilevel_to_grayscale(bilevel_data: &[u8], width: u32, height: u32) -> Vec<u8> {
     let width = width as usize;
     let height = height as usize;
-    let mut grayscale = Vec::with_capacity(width * height);
+
+    // `width`/`height` come from a PDF's /Width and /Height (or CCITT
+    // /Columns and /Rows), which a hostile file controls: a declared
+    // 100 000 x 100 000 image would demand a ~10 GB allocation here (one
+    // byte per pixel, expanded from 1-bit-packed input). Cap it the same
+    // way the other image expanders in this crate do (see
+    // MAX_UNPACKED_OUTPUT_BYTES / MAX_INDEXED_OUTPUT_BYTES in
+    // extractors/images.rs). ~keep
+    const MAX_GRAYSCALE_OUTPUT_BYTES: usize = 256 * 1024 * 1024;
+    let Some(output_bytes) = width.checked_mul(height) else {
+        tracing::warn!(
+            "CCITT bilevel-to-grayscale size overflow: {width} x {height} exceeds usize; refusing to expand"
+        );
+        return Vec::new();
+    };
+    if output_bytes > MAX_GRAYSCALE_OUTPUT_BYTES {
+        tracing::warn!(
+            "Refusing to expand a {output_bytes}-byte CCITT grayscale buffer (cap {MAX_GRAYSCALE_OUTPUT_BYTES}); \
+             width={width}, height={height}"
+        );
+        return Vec::new();
+    }
+
+    let mut grayscale = Vec::with_capacity(output_bytes);
 
     for row_idx in 0..height {
         // Each row in bilevel data is padded to byte boundary ~keep
@@ -412,6 +440,26 @@ mod tests {
         assert_eq!(grayscale[0], 0x00);
         assert_eq!(grayscale[1], 0xFF);
         assert_eq!(grayscale[4], 0xFF);
+    }
+
+    /// `width`/`height` come straight from a PDF's /Width and /Height (or
+    /// CCITT /Columns and /Rows); `bilevel_to_grayscale` used to allocate
+    /// `Vec::with_capacity(width * height)` with no size cap. `u32::MAX x
+    /// u32::MAX` doesn't overflow the `usize` multiplication on a 64-bit
+    /// target, so it reached `Vec::with_capacity` with a byte count
+    /// exceeding `isize::MAX`.
+    ///
+    /// Before the fix: this panics with "capacity overflow" (raised by
+    /// `Vec`'s internal allocation-size check) instead of returning a
+    /// bounded, empty result. After the fix, the checked-multiply + 256 MiB
+    /// cap returns an empty `Vec` instead of allocating.
+    #[test]
+    fn huge_declared_dimensions_do_not_allocate() {
+        let grayscale = bilevel_to_grayscale(&[], u32::MAX, u32::MAX);
+        assert!(
+            grayscale.is_empty(),
+            "huge declared width x height must not be allocated"
+        );
     }
 
     #[test]
