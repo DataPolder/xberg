@@ -38,6 +38,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   silently clamped to 1.
 - Dependency requirements advanced by `cargo upgrade --incompatible`: jsonschema 0.49 to 0.50,
   crawlberg 1.3.0 to 1.3.2, liter-llm 1.17.0 to 1.17.3, unhwp 0.9.0 to 0.9.1, cc 1.4.3 to 1.4.4.
+- Container-relative path resolution for DOCX, PPTX and EPUB is one shared implementation rather
+  than several partial ones. It is boundary-relative, not `..`-phobic: a `..` that leaves and
+  returns without crossing the container root resolves normally, and only a `..` that pops past
+  the root is rejected, alongside NUL bytes and drive-letter/UNC prefixes. One user-visible
+  consequence: a DOCX relationship targeting `../media/image1.png` — the ordinary OPC shape for an
+  image stored at the package root — now resolves instead of being silently dropped, so such
+  images are extracted where before they went missing. Percent-decoding stays with the caller,
+  because decoding after resolution would let an encoded `../` slip past a check that already ran.
 
 ### Fixed
 
@@ -54,6 +62,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A CLI logging test asserted that a `target=warn` directive suppressed WARN events. It permits
   them; the directive quiets a noisy crate down to warnings rather than silencing them. The test
   had been failing on `main`, and now asserts the behaviour that exists.
+- A crafted `.pptx` could panic the calling thread. A slide relationship's `Target` is a verbatim,
+  unfiltered XML attribute, and image-path resolution checked only that it began with the two
+  bytes `..` before slicing at byte offset 3. `Target=".."` sliced out of bounds and `Target="..é"`
+  sliced inside a multi-byte character; both abort a direct embedder, which has no panic-catching
+  boundary on this path. Malformed relationships are now rejected as errors rather than resolved.
+- Image URIs are confined to their base directory in two cases that previously escaped it. A base
+  directory that was empty — which is what `Path::parent()` yields for a bare filename — made the
+  containment check pass vacuously, so `../x` resolved to `x`; and a symlink inside the base
+  directory pointing outside it was followed, because the check ran on the path as written rather
+  than on what it resolved to.
+- `layout_wastes_plain_output` is excluded from the generated bindings. alef cannot express it in
+  WebAssembly, so a full regen emitted an unconditional `compile_error!` into `crates/xberg-wasm`
+  and a Swift binding that read a `String` as a tuple struct, which is why
+  `cargo clippy --workspace` has been failing on `main`. The exclusion is on the Rust source; the
+  two generated crates clear on the next regen.
 
 ### Added
 
@@ -69,6 +92,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   existing tests all ran on synthetic strings and would have passed even if the parser upstream
   never delivered field bytes.
 
+### Removed
+
+- The unused batch and object-pooling stacks: `BatchProcessor`, `batch_optimizations`,
+  `utils::pool` and `utils::pool_sizing`. Batch extraction is, and remains, implemented in the
+  extraction engine; these were a second implementation that no code path reached and that the
+  FFI surface already excluded. The pooling code was gated behind a feature nothing enabled, and
+  its documented throughput benefit had never been measured because it was never wired to a
+  caller. `utils` is a public module, so the two `utils::` paths were public API.
+- The PDF writer and editor stacks from `xberg-native-pdf`, together with the XFA converter and
+  the PDF builder API. The engine is consumed only as a reader and nothing first-party wrote PDFs
+  through it. The read-only XFA analysis it contained is retained. Tests that had built their
+  fixtures by writing a PDF now use committed fixture bytes instead.
 
 ## [1.1.0] - 2026-08-21
 
